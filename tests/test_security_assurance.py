@@ -59,7 +59,7 @@ def test_sigstore_verifier_applies_identity_and_checks_artifact(
         def production() -> "Verifier":
             return Verifier()
 
-        def verify(self, data: bytes, _bundle: object, _policy: object) -> None:
+        def verify_artifact(self, data: bytes, _bundle: object, _policy: object) -> None:
             if data != b"artifact":
                 raise ValueError("signature does not match")
 
@@ -139,6 +139,25 @@ def test_missing_or_failed_coverage_is_not_clean_or_passing() -> None:
     assert report.risk_level == "unknown"
 
 
+def test_per_scanner_coverage_requires_every_state_to_be_complete() -> None:
+    claim = CompletenessClaim(scope="test", surfaces_scanned=["model"])
+    bom = AIBOM(metadata=AIBOMMetadata(completeness=claim))
+    bom.add_component(ModelComponent(bom_ref="model:p", name="p"))
+    # Mirror a claim from the newer schema without coupling this PR to it.
+    object.__setattr__(
+        bom.metadata.completeness, "scanner_status", {"model": "complete", "mcp": "unknown"}
+    )
+    passed, report = RiskScorer().passes_gate(bom)
+    assert not passed
+    assert report.coverage_status == "partial"
+    object.__setattr__(
+        bom.metadata.completeness, "scanner_status", {"model": "complete", "mcp": "complete"}
+    )
+    passed, report = RiskScorer().passes_gate(bom)
+    assert passed
+    assert report.coverage_status == "reported"
+
+
 def test_removing_tool_hash_is_assurance_regression() -> None:
     old, new = AIBOM(), AIBOM()
     old.add_component(ToolComponent(bom_ref="tool:a", name="a", definition_hash="sha256:aaa"))
@@ -147,3 +166,8 @@ def test_removing_tool_hash_is_assurance_regression() -> None:
     assert diff.has_changes
     assert diff.components_modified[0].severity == "high"
     assert "assurance regressed" in diff.components_modified[0].details[0]
+
+
+def test_installed_sigstore_exposes_supported_api() -> None:
+    verify = pytest.importorskip("sigstore.verify")
+    assert callable(verify.Verifier.verify_artifact)

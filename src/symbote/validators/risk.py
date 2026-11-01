@@ -83,9 +83,15 @@ class RiskScorer:
         coverage = bom.metadata.completeness
         if coverage is not None and (coverage.scan_failures or coverage.surfaces_excluded):
             report.coverage_status = "partial"
-        elif coverage is not None and coverage.surfaces_scanned and bom.components:
-            # This reflects reported collection, not independent verification of completeness.
-            report.coverage_status = "reported"
+        elif coverage is not None:
+            # Legacy claims lack per-scanner status. They cannot establish that
+            # omitted or unselected surfaces were assessed.
+            statuses = getattr(coverage, "scanner_status", None)
+            if statuses and any(state != "complete" for state in statuses.values()):
+                report.coverage_status = "partial"
+            elif statuses and coverage.surfaces_scanned and bom.components:
+                # Reported collection is not independent proof of completeness.
+                report.coverage_status = "reported"
         components_with_risks: set[str] = set()
         category_scores: dict[str, float] = {}
 

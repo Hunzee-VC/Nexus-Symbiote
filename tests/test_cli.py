@@ -305,12 +305,13 @@ class TestVersionAndHelp:
 class TestRiskFixture:
     """Risk command tests against pre-built fixture BOMs for deterministic coverage."""
 
-    def test_risk_clean_bom_passes(self, tmp_path):
+    def test_risk_legacy_coverage_is_unknown(self, tmp_path):
         bom_path = _make_fixture_bom(tmp_path, with_risks=False)
         runner = CliRunner()
         result = runner.invoke(main, ["risk", str(bom_path)])
-        assert result.exit_code == 0
-        assert "PASSED" in result.output
+        assert result.exit_code == 1
+        assert "unknown" in result.output.lower()
+        assert "FAILED" in result.output
 
     def test_risk_risky_bom_fails_gate(self, tmp_path):
         bom_path = _make_fixture_bom(tmp_path, with_risks=True)

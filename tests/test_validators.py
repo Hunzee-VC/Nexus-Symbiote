@@ -224,7 +224,7 @@ class TestRiskScorer:
         scorer = RiskScorer()
         report = scorer.score(bom)
         assert report.overall_score == 0.0
-        assert report.risk_level == "clean"
+        assert report.risk_level == "unknown"
 
     def test_risky_bom_high_score(self):
         bom = _risky_bom()
@@ -238,7 +238,8 @@ class TestRiskScorer:
         bom = _full_bom()
         scorer = RiskScorer(fail_threshold=50.0)
         passed, report = scorer.passes_gate(bom)
-        assert passed
+        assert not passed
+        assert report.coverage_status == "unknown"
 
     def test_fails_gate(self):
         bom = _risky_bom()
