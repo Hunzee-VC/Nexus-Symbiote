@@ -12,9 +12,11 @@ import os
 import re
 import stat
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Literal
 
 import rfc8785
+from packaging.requirements import InvalidRequirement, Requirement
+from packaging.version import InvalidVersion, Version
 
 
 def canonical_json(data: Any) -> str:
@@ -155,31 +157,85 @@ def hash_bytes(data: bytes, algorithm: str = "sha256") -> str:
     return f"{algorithm}:{h.hexdigest()}"
 
 
-_RANGE_PREFIX = re.compile(r"^[~^>=<!]+")
-_VERSION_PATTERN = re.compile(
-    r"(?:^|[/@:])(\d+\.\d+(?:\.\d+)?(?:[-+][a-zA-Z0-9.]+)?)(?:$|[/?#,;\s])"
+_NPM_NAME = r"(?:@[A-Za-z0-9][A-Za-z0-9._-]*/)?[A-Za-z0-9][A-Za-z0-9._-]*"
+_NUMERIC = r"(?:0|[1-9][0-9]*)"
+_PRERELEASE = rf"(?:{_NUMERIC}|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
+_SEMVER = re.compile(
+    rf"{_NUMERIC}\.{_NUMERIC}\.{_NUMERIC}"
+    rf"(?:-{_PRERELEASE}(?:\.{_PRERELEASE})*)?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
 )
+_NPM_PIN = re.compile(rf"({_NPM_NAME})@(.+)")
+_OCI_NAME = r"(?:[A-Za-z0-9][A-Za-z0-9.-]*(?::[0-9]+)?/)?[a-z0-9][a-z0-9._/-]*"
+_OCI_DIGEST = re.compile(rf"{_OCI_NAME}@sha256:([0-9a-fA-F]{{64}})")
+_OCI_TAG = re.compile(rf"{_OCI_NAME}:([A-Za-z0-9_][A-Za-z0-9_.-]{{0,127}})")
 
 
-def extract_version_pin(reference: str) -> str | None:
-    """Extract a pinned version from a package reference or URL.
+def _python_version_pin(reference: str) -> str | None:
+    try:
+        requirement = Requirement(
+            "package" + reference if reference.startswith("==") else reference
+        )
+    except InvalidRequirement:
+        return None
+    constraints = list(requirement.specifier)
+    if requirement.url or requirement.marker or len(constraints) != 1:
+        return None
+    constraint = constraints[0]
+    if constraint.operator not in {"==", "==="} or "*" in constraint.version:
+        return None
+    try:
+        version = Version(constraint.version)
+    except InvalidVersion:
+        return None
+    if not constraint.contains(version, prereleases=True):
+        return None
+    return constraint.version
 
-    Returns None for range specifiers (^, ~, >=, etc.) and floating/latest.
-    Returns the version only for exact pins (@1.2.3, ==1.2.3, bare 1.2.3).
-    """
-    stripped = reference.strip()
-    immutable = re.search(r"@sha256:([0-9a-fA-F]{64})$", stripped)
+
+def _oci_version_pin(reference: str) -> str | None:
+    immutable = _OCI_DIGEST.fullmatch(reference)
     if immutable:
         return "sha256:" + immutable.group(1).lower()
-    if stripped in ("*", "latest") or stripped.endswith("@latest") or stripped.endswith(":latest"):
+    tagged = _OCI_TAG.fullmatch(reference)
+    if tagged is None:
         return None
-    if _RANGE_PREFIX.match(stripped):
-        prefix = _RANGE_PREFIX.match(stripped)
-        if prefix and prefix.group(0) not in ("==",):
-            return None
-        if prefix and prefix.group(0) == "==":
-            rest = stripped[prefix.end() :]
-            m = re.match(r"(\d+\.\d+(?:\.\d+)?(?:[-+][a-zA-Z0-9.]+)?)", rest)
-            return m.group(1) if m else None
-    m = _VERSION_PATTERN.search(stripped)
-    return m.group(1) if m else None
+    version = tagged.group(1)
+    if _SEMVER.fullmatch(version):
+        return version
+    try:
+        Version(version)
+    except InvalidVersion:
+        return None
+    return version
+
+
+def extract_version_pin(
+    reference: str, *, ecosystem: Literal["python", "npm", "oci"] | None = None
+) -> str | None:
+    """Extract an exact declared version, never artifact authenticity.
+
+    Python requires one finite PEP 440 equality specifier. npm requires a full
+    SemVer; OCI accepts a version tag or a complete SHA-256 content digest.
+    Mixed constraints, wildcard/range expressions, URLs and markers stay unknown.
+    Supplying the launcher's ecosystem prevents ambiguous bare strings from
+    being treated as package pins. Bare SemVer remains a compatibility input.
+    """
+    value = reference.strip()
+    if not value or len(value) > 2048 or any(c in value for c in "\r\n\x00"):
+        return None
+    if ecosystem == "python" or (ecosystem is None and "==" in value):
+        return _python_version_pin(value)
+    if any(c.isspace() or c in "|,;" for c in value) or "://" in value:
+        return None
+    if ecosystem in {None, "oci"}:
+        version = _oci_version_pin(value)
+        if version is not None:
+            return version
+    if ecosystem in {None, "npm"}:
+        package = _NPM_PIN.fullmatch(value)
+        if package and _SEMVER.fullmatch(package.group(2)):
+            return package.group(2)
+    if ecosystem is None and _SEMVER.fullmatch(value):
+        return value
+    return None

@@ -1071,6 +1071,7 @@ packaging==26.3 \
     # via
     #   build
     #   hatchling
+    #   nexus-symbiote
     #   pytest
     #   twine
 pathspec==1.1.1 \

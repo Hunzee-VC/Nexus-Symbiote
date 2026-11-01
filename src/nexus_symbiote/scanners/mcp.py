@@ -20,6 +20,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from packaging.requirements import InvalidRequirement, Requirement
+from packaging.version import InvalidVersion, Version
+
 from nexus_symbiote.core.enums import (
     CapabilityClass,
     RiskSeverity,
@@ -155,7 +158,12 @@ class MCPScanner(Scanner):
         version_pinned: bool | None = None
         version = None
         if package_ref:
-            version = extract_version_pin(package_ref)
+            if command in {"uvx", "pipx"}:
+                version = extract_version_pin(package_ref, ecosystem="python")
+            elif command == "docker":
+                version = extract_version_pin(package_ref, ecosystem="oci")
+            else:
+                version = extract_version_pin(package_ref, ecosystem="npm")
             version_pinned = version is not None
 
         risks: list[RiskAssessment] = []
@@ -228,16 +236,26 @@ class MCPScanner(Scanner):
         return "stdio"
 
     def _extract_package_ref(self, command: str, args: list[str]) -> str | None:
-        if command in ("npx", "bunx", "uvx", "pipx"):
-            for arg in args:
+        if command in {"uvx", "pipx", "npx", "bunx"}:
+            values = args[1:] if command == "pipx" and args[:1] == ["run"] else args
+            for index, arg in enumerate(values):
                 if arg in {"-y", "--yes", "--no", "-n"}:
                     continue
-                # Unknown flag grammars may consume a credential as their next
-                # argument. Do not infer a package/version from that position.
+                if (command == "uvx" and arg == "--from") or (
+                    command == "pipx" and arg == "--spec"
+                ):
+                    return (
+                        self._python_package_ref(command, values[index + 1])
+                        if index + 1 < len(values)
+                        else None
+                    )
+                # Unknown options may consume a secret in the next position.
                 if arg.startswith("-"):
                     return None
-                pattern = r"(?:@[A-Za-z][\w.-]*/[A-Za-z][\w.-]*|[A-Za-z][\w.-]*)(?:@[\w.+-]+)?"
-                return arg if re.fullmatch(pattern, arg) else None
+                if command in {"uvx", "pipx"}:
+                    return self._python_package_ref(command, arg)
+                pattern = r"(?:@[A-Za-z0-9][\w.-]*/[A-Za-z0-9][\w.-]*|[A-Za-z0-9][\w.-]*)(?:@.+)?"
+                return arg if len(arg) <= 2048 and re.fullmatch(pattern, arg, re.ASCII) else None
         if command == "docker" and args and args[0] == "run":
             for arg in args[1:]:
                 if arg in {"--rm", "-i", "-t", "-it", "-d", "--detach"}:
@@ -246,10 +264,28 @@ class MCPScanner(Scanner):
                     return None
                 return (
                     arg
-                    if re.fullmatch(r"[A-Za-z][\w./:-]*(?:@sha256:[a-fA-F0-9]{64})?", arg)
+                    if re.fullmatch(r"[A-Za-z0-9][\w./:-]*(?:@sha256:[a-fA-F0-9]{64})?", arg)
                     else None
                 )
         return None
+
+    @staticmethod
+    def _python_package_ref(command: str, value: str) -> str | None:
+        if len(value) > 2048 or any(c in value for c in "\r\n\x00"):
+            return None
+        try:
+            requirement = Requirement(value)
+        except InvalidRequirement:
+            return None
+        # uvx supports package@version shorthand; pipx follows PEP 508 URLs.
+        if command == "uvx" and requirement.url and not requirement.marker:
+            try:
+                Version(requirement.url)
+            except InvalidVersion:
+                pass
+            else:
+                return requirement.name + "==" + requirement.url
+        return value
 
     def _extract_tools(
         self,
