@@ -54,9 +54,15 @@ model-signing v1 subjects.
 `{"mediaType", "body": <parsed JSON>}` — A2A agent cards (minus `signatures`), MCP registry `server.json`
 records, OpenAPI documents, policy JSON.
 
-### 3.8 `resolution/v1`, `grant/v1`, `approval/v1`, `leaf/v1`
+### 3.8 `resolution/v1`, `grant/v1`, `approval/v1`, `leaf/v1`, `entity/v1`
 Canonical entity bodies (companion JSON form of the entity with `id`, emission timestamps and derived
 digests removed), used for Merkle leaves and attestation subjects.
+`entity/v1` is the drift-attribution digest for entity kinds without an intrinsic identity digest or a
+dedicated kind above: payload `{"kind": <entity kind>, "body": <diff body>}`, where the diff body also drops
+`provenance`, `foreign`, `tags` and per-`Claim` collection metadata (`method`, `evidence`, `locator`,
+`collector`, `observedAt`, `confidence`, `assurance`) — a claim's `value`, `state` and `unknownReason` stay —
+so re-collection or an assurance upgrade never reads as drift. Used in `DeltaEvent.before/after`; never a
+Merkle leaf.
 
 ### 3.9 `agent/v1`
 `{"name", "version", "framework": <name@version|null>, "instructions": [<digest>...] (in precedence order), "tools": [<tool digest>...] sorted, "models": [<model identity digest>...] sorted, "policyBundle": <digest|null>}`.
