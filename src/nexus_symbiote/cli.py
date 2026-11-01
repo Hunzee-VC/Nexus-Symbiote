@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import click
 from rich.console import Console
@@ -20,6 +21,9 @@ from nexus_symbiote import __version__
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import AssuranceLevel
 from nexus_symbiote.core.models import AIBOMMetadata, CompletenessClaim
+
+if TYPE_CHECKING:
+    from nexus_symbiote.live import LiveVerifyReport
 
 console = Console(stderr=True)
 err_console = Console(stderr=True)
@@ -57,6 +61,90 @@ def _get_scanners() -> dict[str, type]:
 @click.version_option(version=__version__, prog_name="nexus-symbiote")
 def main() -> None:
     """Nexus SymBiote — Agent Bill of Materials for AI supply chain security."""
+
+
+def _collect_aibom(root: Path, selected: tuple[str, ...] | None = None) -> AIBOM:
+    """Run scanners over root and return the assembled AIBOM with completeness metadata."""
+    aibom = AIBOM(metadata=AIBOMMetadata(authors=[]))
+    all_scanners = _get_scanners()
+
+    if selected:
+        chosen = selected
+    else:
+        from nexus_symbiote.policy import load_policy
+
+        try:
+            policy = load_policy(root)
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from exc
+        chosen = tuple(policy.scan.scanners) if policy else tuple(all_scanners.keys())
+
+    surfaces_scanned: list[str] = []
+    surfaces_excluded: list[str] = []
+    scan_failures: list[str] = []
+    scanner_status: dict[str, str] = dict.fromkeys(all_scanners, "unknown")
+
+    for name in chosen:
+        if name not in all_scanners:
+            scan_failures.append(f"Unknown scanner: {name}")
+            scanner_status[name] = "failed"
+            continue
+
+        scanner_cls = all_scanners[name]
+        scanner = scanner_cls()
+
+        try:
+            result = scanner.scan(root)
+            for comp in result.components:
+                aibom.add_component(comp)
+            surfaces_scanned.extend(result.surfaces_scanned)
+            surfaces_excluded.extend(result.surfaces_excluded)
+            scan_failures.extend(result.scan_failures)
+            scanner_status[name] = (
+                "failed"
+                if result.scan_failures
+                else "partial"
+                if result.surfaces_excluded
+                else "complete"
+            )
+        except Exception as e:
+            err_console.print(f"  [red]Scanner '{name}' failed:[/] {e}")
+            scan_failures.append(f"{name}: {e}")
+            scanner_status[name] = "failed"
+
+    aibom.metadata.completeness = CompletenessClaim(
+        scope="local-static-project",
+        surfaces_scanned=surfaces_scanned,
+        surfaces_excluded=surfaces_excluded,
+        scan_failures=scan_failures,
+        scanner_status=scanner_status,
+        assurance_level=AssuranceLevel.OBSERVED,
+    )
+
+    return aibom
+
+
+def _load_mcp_configs(root: Path) -> dict[str, dict[str, Any]]:
+    """Read the project's MCP server configs, returning name -> raw server config."""
+    from nexus_symbiote.scanners.mcp import MCP_CONFIG_FILES
+
+    configs: dict[str, dict[str, Any]] = {}
+    for config_name in MCP_CONFIG_FILES:
+        path = root / config_name
+        if not path.exists():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        servers = data.get("mcpServers", data.get("servers", {}))
+        if isinstance(servers, dict):
+            for name, cfg in servers.items():
+                if isinstance(cfg, dict):
+                    configs[name] = cfg
+    return configs
 
 
 @main.command()
@@ -447,6 +535,197 @@ def init(force: bool, path: str) -> None:
     target.write_text(DEFAULT_POLICY_YAML, encoding="utf-8")
     console.print(f"[bold green]Created[/] {target}")
     console.print("  Edit this file to customize scan, risk, and validation policies.")
+
+
+@main.command("verify-live")
+@click.argument("aibom_path", type=click.Path(exists=True))
+@click.option(
+    "--project",
+    type=click.Path(exists=True),
+    default=".",
+    help="Project root containing the MCP configs to launch",
+)
+@click.option("--json-output", is_flag=True, help="Output as JSON")
+@click.option(
+    "--record",
+    is_flag=True,
+    help="Write live-observed tool fingerprints into the BOM for approval. "
+    "Use once after human review; subsequent runs verify against them.",
+)
+def verify_live(aibom_path: str, project: str, json_output: bool, record: bool) -> None:
+    """Connect to running MCP servers and detect rug-pull drift.
+
+    Launches each configured MCP server, lists its live tool definitions,
+    recomputes canonical fingerprints, and compares them against the approved
+    BOM. A changed or new tool definition is a rug-pull: the server altered
+    its behavior after approval.
+
+    Static scans often cannot enumerate tools (they exist only at runtime).
+    Run once with --record after human review to capture the approved
+    definitions; every later run verifies against them.
+    """
+    from nexus_symbiote.live import verify_mcp_servers
+
+    bom = AIBOM.load(Path(aibom_path))
+    root = Path(project).resolve()
+
+    console.print(f"[bold]Live verification[/] against {root}")
+    config_lookup = _load_mcp_configs(root)
+    report = verify_mcp_servers(bom, config_lookup)
+
+    if record:
+        recorded = _record_live_tools(bom, report)
+        if recorded:
+            Path(aibom_path).write_text(bom.to_json(), encoding="utf-8")
+            console.print(
+                f"[bold green]Recorded[/] {recorded} live tool definition(s) "
+                f"into {aibom_path} — review the diff before committing."
+            )
+
+    if json_output:
+        click.echo(json.dumps(report.to_dict(), indent=2))
+    else:
+        for result in report.results:
+            if not result.reachable:
+                console.print(f"  [yellow]unreachable[/] {result.server_name}: {result.error}")
+                continue
+            for finding in result.tool_findings:
+                if finding.status == "match":
+                    console.print(f"  [green]match[/]    {result.server_name}/{finding.name}")
+                elif finding.status == "changed":
+                    console.print(
+                        f"  [red]CHANGED[/]  {result.server_name}/{finding.name} — "
+                        "tool definition differs from the approved BOM (rug-pull)"
+                    )
+                elif finding.status == "new":
+                    console.print(
+                        f"  [red]NEW[/]      {result.server_name}/{finding.name} — "
+                        "tool not present in the approved BOM"
+                    )
+                elif finding.status == "missing":
+                    console.print(f"  [yellow]missing[/]  {result.server_name}/{finding.name}")
+
+    if report.has_drift:
+        console.print("\n[bold red]Rug-pull drift detected.[/]")
+        if not record:
+            sys.exit(1)
+
+
+def _record_live_tools(bom: AIBOM, report: LiveVerifyReport) -> int:
+    """Write live-observed tool definitions into the BOM. Returns count recorded."""
+    from nexus_symbiote.core.enums import TrustTier
+    from nexus_symbiote.core.models import MCPServerComponent, ToolComponent
+
+    recorded = 0
+    for result in report.results:
+        if not result.reachable:
+            continue
+        for finding in result.tool_findings:
+            if finding.status not in ("new", "changed"):
+                continue
+            bom_ref = f"tool:{result.server_name}/{finding.name}"
+            existing = next((c for c in bom.components if c.bom_ref == bom_ref), None)
+            if isinstance(existing, ToolComponent):
+                existing.definition_hash = finding.definition_hash
+                existing.definition_hash_version = "rfc8785-jcs-v1"
+                recorded += 1
+            else:
+                bom.add_component(
+                    ToolComponent(
+                        bom_ref=bom_ref,
+                        name=finding.name,
+                        mcp_server_ref=f"mcp-server:{result.server_name}",
+                        definition_hash=finding.definition_hash,
+                        definition_hash_version="rfc8785-jcs-v1",
+                        trust_tier=TrustTier.THIRD_PARTY_UNSIGNED,
+                        source_path=f"live:{result.server_name}",
+                    )
+                )
+                recorded += 1
+
+        for comp in bom.components:
+            if isinstance(comp, MCPServerComponent) and comp.name == result.server_name:
+                if result.live_schema_hash:
+                    comp.schema_hash = result.live_schema_hash
+                break
+
+    return recorded
+
+
+@main.command()
+@click.argument("project_path", type=click.Path(exists=True), default=".")
+@click.option(
+    "-o",
+    "--baseline-path",
+    type=click.Path(),
+    default=".symbiote-baseline.json",
+    help="Where to write the baseline",
+)
+def baseline(project_path: str, baseline_path: str) -> None:
+    """Create a signed-drift baseline from the current project state.
+
+    The baseline is the approved snapshot. `symbiote diff baseline current`
+    in CI then fails on trust downgrades, tool mutations, or pin removals.
+    """
+    root = Path(project_path).resolve()
+    console.print(f"[bold]Creating baseline[/] from {root}")
+
+    aibom = _collect_aibom(root)
+    target = Path(baseline_path)
+    target.write_text(aibom.to_json(), encoding="utf-8")
+
+    console.print(f"[bold green]Baseline written[/] {target}")
+    console.print("  Commit this file; diff against it in CI to gate drift.")
+
+
+@main.command()
+@click.argument("aibom_path", type=click.Path(exists=True))
+@click.option("-o", "--output", type=click.Path(), help="Output file path")
+def vex(aibom_path: str, output: str | None) -> None:
+    """Generate a CycloneDX VEX document from AIBOM risk findings.
+
+    Statements are keyed to artifact digests and adaptation events (fine-tune,
+    LoRA, quantization), so a finding tracks the exact weight revision it
+    was observed on.
+    """
+    from nexus_symbiote.generators.vex import VEXGenerator
+
+    bom = AIBOM.load(Path(aibom_path))
+    vex_doc = VEXGenerator().generate_json(bom)
+
+    if output:
+        Path(output).write_text(vex_doc, encoding="utf-8")
+        console.print(f"[bold green]VEX written[/] {output}")
+    else:
+        click.echo(vex_doc)
+
+
+@main.command()
+@click.argument("aibom_path", type=click.Path(exists=True))
+@click.option("-o", "--output", type=click.Path(), help="Output file path")
+def advisories(aibom_path: str, output: str | None) -> None:
+    """Query OSV.dev for known vulnerabilities in discovered registry packages.
+
+    Network use is explicit: this command contacts api.osv.dev. Static `scan`
+    never does.
+    """
+    from nexus_symbiote.advisories import fetch_advisories
+
+    bom = AIBOM.load(Path(aibom_path))
+    report = fetch_advisories(bom)
+
+    if output:
+        Path(output).write_text(json.dumps(report.to_dict(), indent=2), encoding="utf-8")
+        console.print(f"[bold green]Advisory report written[/] {output}")
+    else:
+        click.echo(json.dumps(report.to_dict(), indent=2))
+
+    for adv in report.advisories:
+        cves = ", ".join(adv.aliases) if adv.aliases else "no CVE aliases"
+        console.print(f"  [red]{adv.advisory_id}[/] {adv.component_name}@{adv.version} ({cves})")
+    if report.errors:
+        for err in report.errors:
+            console.print(f"  [yellow]lookup error:[/] {err}")
 
 
 if __name__ == "__main__":

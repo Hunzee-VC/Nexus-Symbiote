@@ -15,6 +15,7 @@ from nexus_symbiote.core.enums import (
     SerializationSafety,
     TrustTier,
 )
+from nexus_symbiote.core.hashing import safetensors_fingerprint
 from nexus_symbiote.core.models import ModelComponent, RiskAssessment
 from nexus_symbiote.scanners.base import Scanner, ScanResult, hash_regular_file
 
@@ -104,6 +105,12 @@ class ModelScanner(Scanner):
             # A signature filename and serialization format do not establish trust.
             trust_tier = TrustTier.UNKNOWN
 
+            component_hashes: dict[str, str] = {}
+            if fmt_key == "safetensors":
+                component_hashes.update(safetensors_fingerprint(path) or {})
+            if weight_hash:
+                component_hashes["sha256"] = weight_hash
+
             model_type = self._infer_model_type(config, path)
             derivation = config.get("peft_type") if config else None
             quant = (
@@ -131,11 +138,13 @@ class ModelScanner(Scanner):
                 trust_remote_code=trust_remote_code,
                 tokenizer_hash=tokenizer_hash,
                 chat_template_hash=chat_template_hash,
-                hashes={"sha256": weight_hash} if weight_hash else {},
+                hashes=component_hashes,
                 source_path=str(path),
                 trust_tier=trust_tier,
                 risks=risks,
             )
+            comp.tensor_inventory_hash = comp.hashes.get("tensor_inventory_sha256")
+            comp.safetensors_header_hash = comp.hashes.get("safetensors_header_sha256")
             components.append(comp)
 
         return components

@@ -23,6 +23,7 @@ from nexus_symbiote.core.models import (
     RegistryEntryComponent,
     SkillPackageComponent,
     ToolComponent,
+    VerifiedExtensionComponent,
 )
 from nexus_symbiote.generators.base import Generator
 
@@ -31,6 +32,7 @@ COMPONENT_TYPE_MAP: dict[ComponentType, str] = {
     ComponentType.MODEL: "machine-learning-model",
     ComponentType.TOOL: "library",
     ComponentType.MCP_SERVER: "application",
+    ComponentType.MCP_CLIENT: "application",
     ComponentType.PROMPT_TEMPLATE: "data",
     ComponentType.GUARDRAIL_POLICY: "library",
     ComponentType.MEMORY_STORE: "data",
@@ -38,6 +40,10 @@ COMPONENT_TYPE_MAP: dict[ComponentType, str] = {
     ComponentType.DATA_SOURCE: "data",
     ComponentType.REGISTRY_ENTRY: "platform",
     ComponentType.SKILL_PACKAGE: "library",
+    ComponentType.A2A_CLIENT: "application",
+    ComponentType.A2A_SERVER: "application",
+    ComponentType.IDE_AGENT: "application",
+    ComponentType.VERIFIED_EXTENSION: "library",
 }
 
 
@@ -141,6 +147,12 @@ class CycloneDXGenerator(Generator):
                 _add("modelRef", ref)
             for ref in comp.tool_refs:
                 _add("toolRef", ref)
+        elif isinstance(comp, VerifiedExtensionComponent):
+            _add("extensionType", comp.extension_type)
+            _add("publisher", comp.publisher)
+            _add("publisherVerified", comp.publisher_verified)
+            _add("attestationStatus", comp.attestation_status)
+            _add("signingIdentity", comp.signing_identity)
         elif isinstance(comp, ModelComponent):
             _add("modelType", comp.model_type)
             _add("provider", comp.provider)

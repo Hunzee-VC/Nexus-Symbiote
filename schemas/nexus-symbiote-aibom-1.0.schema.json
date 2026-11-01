@@ -4,7 +4,10 @@
   "title": "Nexus SymBiote AgentBOM Schema",
   "description": "JSON Schema for Nexus SymBiote Agent Bill of Materials (AIBOM) documents. Extends CycloneDX 1.7 and SPDX 3.0 with agent-native component types.",
   "type": "object",
-  "required": ["metadata", "components"],
+  "required": [
+    "metadata",
+    "components"
+  ],
   "properties": {
     "metadata": {
       "$ref": "#/$defs/AIBOMMetadata"
@@ -27,7 +30,9 @@
   "$defs": {
     "AIBOMMetadata": {
       "type": "object",
-      "required": ["spec_version"],
+      "required": [
+        "spec_version"
+      ],
       "properties": {
         "spec_version": {
           "type": "string",
@@ -56,7 +61,9 @@
         },
         "authors": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "completeness": {
           "$ref": "#/$defs/CompletenessClaim"
@@ -65,25 +72,44 @@
     },
     "CompletenessClaim": {
       "type": "object",
-      "required": ["scope"],
+      "required": [
+        "scope"
+      ],
       "properties": {
-        "scope": { "type": "string" },
+        "scope": {
+          "type": "string"
+        },
         "surfaces_scanned": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "surfaces_excluded": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "scan_failures": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "scanner_status": {
           "type": "object",
           "description": "Scanner outcomes in the local static collection scope.",
-          "additionalProperties": { "type": "string", "enum": ["complete", "partial", "failed", "unknown", "not-applicable"] }
+          "additionalProperties": {
+            "type": "string",
+            "enum": [
+              "complete",
+              "partial",
+              "failed",
+              "unknown",
+              "not-applicable"
+            ]
+          }
         },
         "timestamp": {
           "type": "string",
@@ -96,25 +122,50 @@
     },
     "DependencyEdge": {
       "type": "object",
-      "required": ["source_ref", "target_ref", "relationship"],
+      "required": [
+        "source_ref",
+        "target_ref",
+        "relationship"
+      ],
       "properties": {
-        "source_ref": { "type": "string" },
-        "target_ref": { "type": "string" },
+        "source_ref": {
+          "type": "string"
+        },
+        "target_ref": {
+          "type": "string"
+        },
         "relationship": {
           "type": "string",
           "enum": [
-            "invokes", "delegates-to", "retrieves-from", "acts-as-identity",
-            "registered-as", "approved-under", "observed-using", "trained-on",
-            "fine-tuned-from", "quantized-from", "merged-from", "depends-on"
+            "invokes",
+            "delegates-to",
+            "retrieves-from",
+            "acts-as-identity",
+            "registered-as",
+            "approved-under",
+            "observed-using",
+            "trained-on",
+            "fine-tuned-from",
+            "quantized-from",
+            "merged-from",
+            "depends-on"
           ]
         },
-        "assurance_level": { "type": "string" },
-        "conditions": { "type": "string" }
+        "assurance_level": {
+          "type": "string"
+        },
+        "conditions": {
+          "type": "string"
+        }
       }
     },
     "Component": {
       "type": "object",
-      "required": ["bom_ref", "component_type", "name"],
+      "required": [
+        "bom_ref",
+        "component_type",
+        "name"
+      ],
       "properties": {
         "bom_ref": {
           "type": "string",
@@ -123,13 +174,23 @@
         "component_type": {
           "$ref": "#/$defs/ComponentType"
         },
-        "name": { "type": "string" },
-        "version": { "type": "string" },
-        "supplier": { "type": "string" },
-        "description": { "type": "string" },
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "supplier": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
         "hashes": {
           "type": "object",
-          "additionalProperties": { "type": "string" }
+          "additionalProperties": {
+            "type": "string"
+          }
         },
         "trust_tier": {
           "$ref": "#/$defs/TrustTier"
@@ -137,7 +198,9 @@
         "assurance_level": {
           "$ref": "#/$defs/AssuranceLevel"
         },
-        "source_path": { "type": "string" },
+        "source_path": {
+          "type": "string"
+        },
         "properties": {
           "type": "object",
           "additionalProperties": true
@@ -151,62 +214,202 @@
       },
       "allOf": [
         {
-          "if": { "properties": { "component_type": { "const": "agent" } } },
-          "then": { "$ref": "#/$defs/AgentProperties" }
+          "if": {
+            "properties": {
+              "component_type": {
+                "const": "agent"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/AgentProperties"
+          }
         },
         {
-          "if": { "properties": { "component_type": { "const": "mcp-server" } } },
-          "then": { "$ref": "#/$defs/MCPServerProperties" }
+          "if": {
+            "properties": {
+              "component_type": {
+                "const": "mcp-server"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/MCPServerProperties"
+          }
         },
         {
-          "if": { "properties": { "component_type": { "const": "tool" } } },
-          "then": { "$ref": "#/$defs/ToolProperties" }
+          "if": {
+            "properties": {
+              "component_type": {
+                "const": "tool"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/ToolProperties"
+          }
         },
         {
-          "if": { "properties": { "component_type": { "const": "model" } } },
-          "then": { "$ref": "#/$defs/ModelProperties" }
+          "if": {
+            "properties": {
+              "component_type": {
+                "const": "model"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/ModelProperties"
+          }
         },
         {
-          "if": { "properties": { "component_type": { "const": "prompt-template" } } },
-          "then": { "$ref": "#/$defs/PromptProperties" }
+          "if": {
+            "properties": {
+              "component_type": {
+                "const": "prompt-template"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/PromptProperties"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "component_type": {
+                "const": "mcp-client"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/MCPClientProperties"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "component_type": {
+                "const": "a2a-client"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/A2AClientProperties"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "component_type": {
+                "const": "a2a-server"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/A2AServerProperties"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "component_type": {
+                "const": "ide-agent"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/IDEAgentProperties"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "component_type": {
+                "const": "verified-extension"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/VerifiedExtensionProperties"
+          }
         }
       ]
     },
     "ComponentType": {
       "type": "string",
       "enum": [
-        "agent", "mcp-server", "tool", "model", "prompt-template",
-        "guardrail-policy", "memory-store", "rag-source", "data-source",
-        "registry-entry", "skill-package"
+        "a2a-client",
+        "a2a-server",
+        "agent",
+        "data-source",
+        "guardrail-policy",
+        "ide-agent",
+        "mcp-client",
+        "mcp-server",
+        "memory-store",
+        "model",
+        "prompt-template",
+        "rag-source",
+        "registry-entry",
+        "skill-package",
+        "tool",
+        "verified-extension"
       ]
     },
     "TrustTier": {
       "type": "string",
       "enum": [
-        "internal-verified", "internal-unverified",
-        "third-party-signed", "third-party-unsigned",
-        "untrusted-public", "unknown"
+        "internal-verified",
+        "internal-unverified",
+        "third-party-signed",
+        "third-party-unsigned",
+        "untrusted-public",
+        "unknown"
       ]
     },
     "AssuranceLevel": {
       "type": "string",
-      "enum": ["declared", "observed", "verified"]
+      "enum": [
+        "declared",
+        "observed",
+        "verified"
+      ]
     },
     "RiskSeverity": {
       "type": "string",
-      "enum": ["critical", "high", "medium", "low", "info"]
+      "enum": [
+        "critical",
+        "high",
+        "medium",
+        "low",
+        "info"
+      ]
     },
     "RiskAssessment": {
       "type": "object",
-      "required": ["severity", "category", "detail"],
+      "required": [
+        "severity",
+        "category",
+        "detail"
+      ],
       "properties": {
-        "severity": { "$ref": "#/$defs/RiskSeverity" },
-        "category": { "type": "string" },
-        "detail": { "type": "string" },
-        "recommendation": { "type": "string" },
+        "severity": {
+          "$ref": "#/$defs/RiskSeverity"
+        },
+        "category": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "recommendation": {
+          "type": "string"
+        },
         "references": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         }
       }
     },
@@ -217,23 +420,64 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["read", "write", "execute", "network", "filesystem", "payment", "credentials", "destructive"]
+            "enum": [
+              "read",
+              "write",
+              "execute",
+              "network",
+              "filesystem",
+              "payment",
+              "credentials",
+              "destructive"
+            ]
           }
         },
-        "oauth_scopes": { "type": "array", "items": { "type": "string" } },
-        "egress_domains": { "type": "array", "items": { "type": "string" } },
-        "filesystem_paths": { "type": "array", "items": { "type": "string" } },
+        "oauth_scopes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "egress_domains": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "filesystem_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "side_effect_profile": {
           "type": "string",
-          "enum": ["read-only", "state-modifying", "destructive", "financial-transaction", "unknown"]
+          "enum": [
+            "read-only",
+            "state-modifying",
+            "destructive",
+            "financial-transaction",
+            "unknown"
+          ]
         },
         "execution_isolation": {
           "type": "string",
-          "enum": ["none", "process", "container", "wasm", "microvm", "gvisor"]
+          "enum": [
+            "none",
+            "process",
+            "container",
+            "wasm",
+            "microvm",
+            "gvisor"
+          ]
         },
         "human_in_the_loop": {
           "type": "string",
-          "enum": ["required", "conditional", "none"]
+          "enum": [
+            "required",
+            "conditional",
+            "none"
+          ]
         }
       }
     },
@@ -242,20 +486,64 @@
       "properties": {
         "autonomy_level": {
           "type": "string",
-          "enum": ["L0-chatbot", "L1-copilot", "L2-agent", "L3-autonomous", "L4-fully-autonomous"]
+          "enum": [
+            "L0-chatbot",
+            "L1-copilot",
+            "L2-agent",
+            "L3-autonomous",
+            "L4-fully-autonomous"
+          ]
         },
-        "framework": { "type": "string" },
-        "model_refs": { "type": "array", "items": { "type": "string" } },
-        "tool_refs": { "type": "array", "items": { "type": "string" } },
-        "memory_refs": { "type": "array", "items": { "type": "string" } },
-        "prompt_refs": { "type": "array", "items": { "type": "string" } },
-        "guardrail_refs": { "type": "array", "items": { "type": "string" } },
-        "sub_agent_refs": { "type": "array", "items": { "type": "string" } },
-        "capabilities": { "$ref": "#/$defs/CapabilityDeclaration" },
-        "deployment_profile": { "$ref": "#/$defs/DeploymentProfile" },
+        "framework": {
+          "type": "string"
+        },
+        "model_refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "tool_refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "memory_refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "prompt_refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "guardrail_refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "sub_agent_refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "capabilities": {
+          "$ref": "#/$defs/CapabilityDeclaration"
+        },
+        "deployment_profile": {
+          "$ref": "#/$defs/DeploymentProfile"
+        },
         "authorizations": {
           "type": "array",
-          "items": { "$ref": "#/$defs/AuthorizationRecord" }
+          "items": {
+            "$ref": "#/$defs/AuthorizationRecord"
+          }
         }
       }
     },
@@ -558,71 +846,306 @@
     },
     "AuthorizationRecord": {
       "type": "object",
-      "required": ["principal", "action"],
+      "required": [
+        "principal",
+        "action"
+      ],
       "properties": {
-        "principal": { "type": "string" },
-        "delegating_principal": { "type": "string" },
-        "action": { "type": "string" },
-        "resource_scope": { "type": "string" },
-        "conditions": { "type": "array", "items": { "type": "string" } },
-        "approval_required": { "type": "boolean" },
-        "expires_at": { "type": "string", "format": "date-time" },
-        "policy_reference": { "type": "string" }
+        "principal": {
+          "type": "string"
+        },
+        "delegating_principal": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string"
+        },
+        "resource_scope": {
+          "type": "string"
+        },
+        "conditions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "approval_required": {
+          "type": "boolean"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "policy_reference": {
+          "type": "string"
+        }
       }
     },
     "MCPServerProperties": {
       "type": "object",
       "properties": {
-        "transport": { "type": "string", "enum": ["stdio", "sse", "streamable-http"] },
-        "command": { "type": "string" },
-        "args": { "type": "array", "items": { "type": "string" } },
-        "env": { "type": "object", "additionalProperties": { "type": "string" } },
-        "endpoint_url": { "type": "string" },
-        "tool_count": { "type": "integer" },
-        "tool_refs": { "type": "array", "items": { "type": "string" } },
-        "version_pinned": { "type": "boolean" },
-        "schema_hash": { "type": "string" }
+        "transport": {
+          "type": "string",
+          "enum": [
+            "stdio",
+            "sse",
+            "streamable-http"
+          ]
+        },
+        "command": {
+          "type": "string"
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "endpoint_url": {
+          "type": "string"
+        },
+        "tool_count": {
+          "type": "integer"
+        },
+        "tool_refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "version_pinned": {
+          "type": ["boolean", "null"],
+          "description": "True when pinned to an exact version; null when there is no package reference to pin."
+        },
+        "schema_hash": {
+          "type": "string"
+        }
       }
     },
     "ToolProperties": {
       "type": "object",
       "properties": {
-        "mcp_server_ref": { "type": "string" },
-        "input_schema": { "type": "object" },
-        "description_text": { "type": "string" },
-        "definition_hash": { "type": "string" },
-        "definition_hash_version": { "type": ["string", "null"] },
-        "capabilities": { "$ref": "#/$defs/CapabilityDeclaration" },
-        "annotations": { "type": "object" }
+        "mcp_server_ref": {
+          "type": "string"
+        },
+        "input_schema": {
+          "type": "object"
+        },
+        "description_text": {
+          "type": "string"
+        },
+        "definition_hash": {
+          "type": "string"
+        },
+        "definition_hash_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "capabilities": {
+          "$ref": "#/$defs/CapabilityDeclaration"
+        },
+        "annotations": {
+          "type": "object"
+        }
       }
     },
     "ModelProperties": {
       "type": "object",
       "properties": {
-        "model_type": { "type": "string" },
-        "provider": { "type": "string" },
-        "endpoint": { "type": "string" },
-        "serialization_format": { "type": "string" },
+        "model_type": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "endpoint": {
+          "type": "string"
+        },
+        "serialization_format": {
+          "type": "string"
+        },
         "serialization_safety": {
           "type": "string",
-          "enum": ["safe", "unsafe-code-execution", "unsafe-template-injection", "unknown"]
+          "enum": [
+            "safe",
+            "unsafe-code-execution",
+            "unsafe-template-injection",
+            "unknown"
+          ]
         },
-        "signing_status": { "type": "string" },
-        "signing_identity": { "type": "string" },
-        "derivation_type": { "type": "string" },
-        "quantization_method": { "type": "string" },
-        "tokenizer_hash": { "type": "string" },
-        "chat_template_hash": { "type": "string" },
-        "trust_remote_code": { "type": "boolean" }
+        "signing_status": {
+          "type": "string"
+        },
+        "signing_identity": {
+          "type": "string"
+        },
+        "derivation_type": {
+          "type": "string"
+        },
+        "quantization_method": {
+          "type": "string"
+        },
+        "tokenizer_hash": {
+          "type": "string"
+        },
+        "chat_template_hash": {
+          "type": "string"
+        },
+        "trust_remote_code": {
+          "type": "boolean"
+        }
       }
     },
     "PromptProperties": {
       "type": "object",
       "properties": {
-        "prompt_type": { "type": "string" },
-        "content_hash": { "type": "string" },
-        "variable_schema": { "type": "object" },
-        "modification_authority": { "type": "string" }
+        "prompt_type": {
+          "type": "string"
+        },
+        "content_hash": {
+          "type": "string"
+        },
+        "variable_schema": {
+          "type": "object"
+        },
+        "modification_authority": {
+          "type": "string"
+        }
+      }
+    },
+    "MCPClientProperties": {
+      "type": "object",
+      "properties": {
+        "host_application": {
+          "type": "string"
+        },
+        "server_refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "config_path": {
+          "type": "string"
+        }
+      }
+    },
+    "A2AClientProperties": {
+      "type": "object",
+      "properties": {
+        "agent_card_url": {
+          "type": "string"
+        },
+        "supported_protocols": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "authentication_methods": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "capabilities": {
+          "$ref": "#/$defs/CapabilityDeclaration"
+        }
+      }
+    },
+    "A2AServerProperties": {
+      "type": "object",
+      "properties": {
+        "agent_card_path": {
+          "type": "string"
+        },
+        "endpoint_url": {
+          "type": "string"
+        },
+        "supported_protocols": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "skills_declared": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "authentication_required": {
+          "type": "boolean"
+        },
+        "capabilities": {
+          "$ref": "#/$defs/CapabilityDeclaration"
+        }
+      }
+    },
+    "IDEAgentProperties": {
+      "type": "object",
+      "properties": {
+        "ide_type": {
+          "type": "string"
+        },
+        "config_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "mcp_server_refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "prompt_refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "permission_mode": {
+          "type": "string"
+        }
+      }
+    },
+    "VerifiedExtensionProperties": {
+      "type": "object",
+      "properties": {
+        "extension_type": {
+          "type": "string"
+        },
+        "publisher": {
+          "type": "string"
+        },
+        "publisher_verified": {
+          "type": "boolean"
+        },
+        "attestation_status": {
+          "type": "string"
+        },
+        "signing_identity": {
+          "type": "string"
+        },
+        "marketplace_url": {
+          "type": "string"
+        },
+        "install_count": {
+          "type": "integer"
+        },
+        "capabilities": {
+          "$ref": "#/$defs/CapabilityDeclaration"
+        }
       }
     }
   }

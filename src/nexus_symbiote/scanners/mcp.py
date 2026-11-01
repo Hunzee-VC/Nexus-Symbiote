@@ -13,6 +13,7 @@ and detects unpinned versions, missing transport security, and rug-pull risk.
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 from pathlib import Path
 from typing import Any
@@ -100,8 +101,8 @@ class MCPScanner(Scanner):
         endpoint_url = config.get("url") or config.get("endpoint")
 
         package_ref = self._extract_package_ref(command, args)
-        version_pinned = False
         version = None
+        version_pinned: bool | None = None
         if package_ref:
             version = extract_version_pin(package_ref)
             version_pinned = version is not None
@@ -154,6 +155,14 @@ class MCPScanner(Scanner):
         )
 
         tools = self._extract_tools(name, config)
+
+        if tools and not server_comp.schema_hash:
+            digest = hashlib.sha256(
+                "".join(sorted(t.definition_hash or "" for t in tools)).encode("utf-8")
+            ).hexdigest()
+            server_comp.schema_hash = f"sha256:{digest}"
+            server_comp.tool_count = len(tools)
+
         return server_comp, tools
 
     @staticmethod

@@ -205,12 +205,45 @@ class TestIntegrityValidator:
             MCPServerComponent(
                 bom_ref="mcp:test",
                 name="test-server",
+                command="npx",
                 version_pinned=False,
             )
         )
         iv = IntegrityValidator()
         report = iv.validate(bom)
         assert any(i.category == "unpinned_version" for i in report.issues)
+
+    def test_url_mcp_not_flagged_as_unpinned_package(self):
+        bom = AIBOM()
+        bom.add_component(
+            MCPServerComponent(
+                bom_ref="mcp:remote",
+                name="remote-server",
+                endpoint_url="https://example.com/mcp",
+                version_pinned=None,
+            )
+        )
+        iv = IntegrityValidator()
+        report = iv.validate(bom)
+        assert not any(i.category == "unpinned_version" for i in report.issues)
+        assert any(i.category == "unpinned_remote_server" for i in report.issues)
+
+    def test_url_mcp_with_schema_hash_not_flagged(self):
+        bom = AIBOM()
+        bom.add_component(
+            MCPServerComponent(
+                bom_ref="mcp:remote",
+                name="remote-server",
+                endpoint_url="https://example.com/mcp",
+                version_pinned=None,
+                schema_hash="sha256:abc",
+            )
+        )
+        iv = IntegrityValidator()
+        report = iv.validate(bom)
+        assert not any(
+            i.category in ("unpinned_version", "unpinned_remote_server") for i in report.issues
+        )
 
     def test_report_to_dict(self):
         bom = _full_bom()

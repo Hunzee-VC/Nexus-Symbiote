@@ -126,7 +126,11 @@ class MCPServerComponent(ComponentBase):
     tool_count: int = 0
     tool_refs: list[str] = Field(default_factory=list)
     registry_source: str | None = None
-    version_pinned: bool = False
+    version_pinned: bool | None = Field(
+        default=None,
+        description="True when pinned to an exact version; None when there is no "
+        "package reference to pin (not applicable, not a finding)",
+    )
     schema_hash: str | None = Field(
         default=None,
         description="Hash of the aggregate tool definitions served by this MCP server",
@@ -192,6 +196,12 @@ class ModelComponent(ComponentBase):
     quantization_method: str | None = None
     tokenizer_hash: str | None = None
     chat_template_hash: str | None = None
+    tensor_inventory_hash: str | None = Field(
+        default=None,
+        description="Digest of the sorted tensor inventory; detects single-tensor tampering "
+        "that a whole-file hash cannot distinguish",
+    )
+    safetensors_header_hash: str | None = None
     trust_remote_code: bool | None = Field(
         default=None, description="Declared configuration only; the runtime value may differ"
     )

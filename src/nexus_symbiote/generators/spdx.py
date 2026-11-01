@@ -15,8 +15,10 @@ from nexus_symbiote.core.models import (
     AgentComponent,
     AnyComponent,
     ModelComponent,
+    PromptComponent,
     RAGSourceComponent,
     ToolComponent,
+    VerifiedExtensionComponent,
 )
 from nexus_symbiote.generators.base import Generator
 
@@ -25,6 +27,7 @@ SPDX_TYPE_MAP: dict[ComponentType, str] = {
     ComponentType.MODEL: "ai_AIPackage",
     ComponentType.TOOL: "software_Package",
     ComponentType.MCP_SERVER: "software_Package",
+    ComponentType.MCP_CLIENT: "software_Package",
     ComponentType.PROMPT_TEMPLATE: "software_Snippet",
     ComponentType.GUARDRAIL_POLICY: "software_Package",
     ComponentType.MEMORY_STORE: "dataset_Dataset",
@@ -32,6 +35,22 @@ SPDX_TYPE_MAP: dict[ComponentType, str] = {
     ComponentType.DATA_SOURCE: "dataset_Dataset",
     ComponentType.REGISTRY_ENTRY: "software_Package",
     ComponentType.SKILL_PACKAGE: "software_Package",
+    ComponentType.A2A_CLIENT: "ai_AIPackage",
+    ComponentType.A2A_SERVER: "ai_AIPackage",
+    ComponentType.IDE_AGENT: "ai_AIPackage",
+    ComponentType.VERIFIED_EXTENSION: "software_Package",
+}
+
+# Forward mapping to SPDX 3.1's AI Agent/Prompt/RAG elements (RC1, not yet GA).
+# Recorded as extension properties so consumers can upgrade losslessly when
+# 3.1 ships without SymBiote re-emitting every BOM.
+SPDX_31_FORWARD_MAP: dict[ComponentType, str] = {
+    ComponentType.AGENT: "ai_AIAgent",
+    ComponentType.A2A_CLIENT: "ai_AIAgent",
+    ComponentType.A2A_SERVER: "ai_AIAgent",
+    ComponentType.IDE_AGENT: "ai_AIAgent",
+    ComponentType.PROMPT_TEMPLATE: "ai_AIPrompt",
+    ComponentType.RAG_SOURCE: "ai_AIRAG",
 }
 
 
@@ -127,6 +146,14 @@ class SPDXGenerator(Generator):
             props["nexus-symbiote:autonomyLevel"] = comp.autonomy_level.value
             if comp.framework:
                 props["nexus-symbiote:framework"] = comp.framework
+        elif isinstance(comp, VerifiedExtensionComponent):
+            if comp.attestation_status:
+                props["nexus-symbiote:attestationStatus"] = comp.attestation_status
+        elif isinstance(comp, PromptComponent):
+            if comp.prompt_type:
+                props["nexus-symbiote:promptType"] = comp.prompt_type
+            if comp.content_hash:
+                props["nexus-symbiote:contentHash"] = comp.content_hash
         elif isinstance(comp, ModelComponent):
             if comp.serialization_format:
                 props["nexus-symbiote:serializationFormat"] = comp.serialization_format
@@ -138,6 +165,10 @@ class SPDXGenerator(Generator):
         elif isinstance(comp, RAGSourceComponent):
             if comp.corpus_type:
                 props["nexus-symbiote:corpusType"] = comp.corpus_type
+
+        forward = SPDX_31_FORWARD_MAP.get(comp.component_type)
+        if forward:
+            props["symbiote:spdx31Element"] = forward
 
         return [
             {

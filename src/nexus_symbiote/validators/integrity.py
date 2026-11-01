@@ -10,6 +10,9 @@ from nexus_symbiote.core.enums import ComponentType, SerializationSafety
 from nexus_symbiote.core.hashing import hash_tool_definition
 from nexus_symbiote.utils.confined import hash_confined_file
 
+# Digests derived from parsed artifact structure rather than raw file bytes.
+DERIVED_DIGEST_KEYS = {"tensor_inventory_sha256", "safetensors_header_sha256", "tensor_count"}
+
 
 @dataclass
 class IntegrityIssue:
@@ -66,6 +69,7 @@ class IntegrityValidator:
                 self._check_mcp_version_pin(comp, report)
 
             self._check_file_hash(comp, project_root, report)
+            self._check_tensor_inventory(comp, project_root, report)
 
         return report
 
@@ -212,7 +216,17 @@ class IntegrityValidator:
                 report.is_valid = False
 
     def _check_mcp_version_pin(self, comp, report: IntegrityReport) -> None:  # type: ignore[no-untyped-def]
-        if hasattr(comp, "version_pinned") and not comp.version_pinned:
+        """Flag unpinned packages only where a package reference exists.
+
+        URL-based (remote) MCP servers have no installable package; pinning
+        for them means a recorded schema hash, which is checked separately.
+        """
+        if not hasattr(comp, "version_pinned"):
+            return
+
+        # False means a package reference exists but floats; None means there
+        # is no package to pin (bare command or remote server).
+        if comp.version_pinned is False:
             report.issues.append(
                 IntegrityIssue(
                     component_ref=comp.bom_ref,
@@ -220,6 +234,19 @@ class IntegrityValidator:
                     detail=(
                         f"MCP server '{comp.name}' uses an unpinned package "
                         "— vulnerable to supply chain attacks."
+                    ),
+                    severity="warning",
+                )
+            )
+
+        if not getattr(comp, "command", None) and not getattr(comp, "schema_hash", None):
+            report.issues.append(
+                IntegrityIssue(
+                    component_ref=comp.bom_ref,
+                    category="unpinned_remote_server",
+                    detail=(
+                        f"Remote MCP server '{comp.name}' has no recorded "
+                        "tool schema hash — rug-pull detection is disabled."
                     ),
                     severity="warning",
                 )
@@ -248,6 +275,10 @@ class IntegrityValidator:
             return
 
         for algo, declared_hash in comp.hashes.items():
+            # Derived digests (tensor inventory, header) are verified against
+            # the live safetensors structure, not as whole-file content hashes.
+            if algo in DERIVED_DIGEST_KEYS:
+                continue
             try:
                 if not comp.source_path:
                     raise OSError("missing source path")
@@ -276,3 +307,45 @@ class IntegrityValidator:
                 )
                 report.hashes_failed += 1
                 report.is_valid = False
+
+    def _check_tensor_inventory(  # type: ignore[no-untyped-def]
+        self, comp, project_root: Path | None, report: IntegrityReport
+    ) -> None:
+        """Recompute safetensors per-tensor fingerprints and compare to the BOM.
+
+        This is the defense that whole-file hashes cannot provide: a single
+        poisoned tensor or swapped adapter layer changes the inventory digest
+        even when a legitimately re-published file has a fresh whole-file hash.
+        """
+        if not project_root or not comp.source_path:
+            return
+        try:
+            from nexus_symbiote.core.hashing import safetensors_fingerprint
+
+            live = safetensors_fingerprint(project_root / comp.source_path)
+        except OSError:
+            return
+        if not live:
+            return
+
+        declared = {k: v for k, v in comp.hashes.items() if k in DERIVED_DIGEST_KEYS}
+        if not declared:
+            return
+
+        if live.get("tensor_inventory_sha256") != declared.get("tensor_inventory_sha256"):
+            report.issues.append(
+                IntegrityIssue(
+                    component_ref=comp.bom_ref,
+                    category="tensor_inventory_mismatch",
+                    detail=(
+                        f"Model '{comp.name}' tensor inventory changed since the BOM "
+                        "was recorded — possible single-tensor tampering or an "
+                        "undeclared adapter swap."
+                    ),
+                    severity="error",
+                )
+            )
+            report.hashes_failed += 1
+            report.is_valid = False
+        else:
+            report.hashes_verified += 1

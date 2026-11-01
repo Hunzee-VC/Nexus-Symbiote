@@ -61,6 +61,21 @@ nexus-symbiote validate aibom.json --project /path/to/project
 nexus-symbiote risk aibom.json
 nexus-symbiote diff old-aibom.json new-aibom.json
 nexus-symbiote summary aibom.json
+
+# Create an approved baseline for drift gating in CI
+nexus-symbiote baseline . -o .nexus-symbiote-baseline.json
+
+# Connect to running MCP servers and detect rug-pull drift
+nexus-symbiote verify-live aibom.json --project .
+
+# First run: record live tool fingerprints after human review
+nexus-symbiote verify-live aibom.json --project . --record
+
+# Generate CycloneDX VEX statements keyed to model digests and adaptation events
+nexus-symbiote vex aibom.json -o vex.json
+
+# Query OSV.dev for known vulnerabilities in discovered packages (network)
+nexus-symbiote advisories aibom.json -o advisories.json
 ```
 
 ## What It Scans / Imports
@@ -76,7 +91,7 @@ nexus-symbiote summary aibom.json
 
 ## Component Types
 
-Nexus SymBiote defines agent-native component categories. CycloneDX and SPDX mappings are projections that require validation against official schemas:
+Nexus SymBiote defines 16 agent-native component categories. CycloneDX and SPDX mappings are projections that require validation against official schemas:
 
 - **Agent**, **MCP Server**, **MCP Client**, **Tool**, **Model**, **Prompt Template**, **Guardrail Policy**, **Memory Store**, **RAG Source**, **Data Source**, **Registry Entry**, **Skill Package**, **A2A Client/Server**, **IDE Agent**, **Verified Extension**
 
@@ -109,7 +124,11 @@ jobs:
           sarif-upload: 'true'
 ```
 
-The current action is experimental: it installs an unpinned package and does not fail the job on validation errors. Do not rely on it as a security gate until these issues are resolved. Review the workflow's permissions and artifact contents before using it.
+The current action is experimental: it installs the checked-out revision of the
+action itself (pinned by the `uses:` ref) rather than a published, attested
+package, and its failure semantics have not been audited against every input
+combination. Review the workflow's permissions and artifact contents before
+using it as a gate.
 
 ### Manual CI
 
@@ -123,8 +142,14 @@ The current action is experimental: it installs an unpinned package and does not
 - name: Risk gate
   run: nexus-symbiote risk aibom.json --threshold 50.0
 
-- name: Drift detection
-  run: nexus-symbiote diff aibom-baseline.json <(nexus-symbiote scan . 2>/dev/null) --json-output
+- name: Drift detection against committed baseline
+  run: |
+    nexus-symbiote scan . -o current.json
+    nexus-symbiote diff .nexus-symbiote-baseline.json current.json --json-output > drift.json
+    python -c "import json,sys; d=json.load(open('drift.json')); sys.exit(1 if d.get('security_alerts') or d.get('total_changes',0)>0 else 0)"
+
+- name: Rug-pull detection (runtime)
+  run: nexus-symbiote verify-live aibom.json --project .
 ```
 
 ### Pre-commit Hook
@@ -176,6 +201,54 @@ The `nexus-symbiote diff` command compares two AIBOM snapshots and detects:
 - Serialization safety changes
 - Signing status regressions
 
+## Rug-Pull Detection
+
+SymBiote records a canonical fingerprint (RFC 8785 JCS) of every tool
+definition it observes. Two enforcement modes are available:
+
+1. **Snapshot diffing** — `symbiote diff baseline.json current.json` flags any
+   tool whose definition hash changed between two scans.
+2. **Live verification** — `symbiote verify-live` launches each configured MCP
+   server, lists its live tool definitions, recomputes fingerprints, and
+   compares them against the approved BOM. This is the only mode that catches
+   a server that changed behavior after approval without touching the project
+   files (e.g., a remote server, or `npx` fetching a newer major version at
+   runtime). Run once with `--record` after human review to capture approved
+   definitions; subsequent runs verify against them.
+
+For remote MCP servers, `schema_hash` is recorded in the BOM and verified
+against the live aggregate hash on each `verify-live` run.
+
+## Model Supply-Chain Integrity
+
+Whole-file hashes cannot distinguish a legitimate reload from a poisoned
+single tensor. SymBiote records two additional per-model digests for
+safetensors artifacts:
+
+- **`tensor_inventory_sha256`** — digest over the sorted tensor inventory
+  (name, dtype, shape, byte offsets). Adding a backdoor tensor or swapping an
+  adapter layer changes this even when a whole-file hash is fresh.
+- **`safetensors_header_sha256`** — digest over the parsed safetensors header
+  itself.
+
+`symbiote validate --project` recomputes both and flags
+`tensor_inventory_mismatch` on drift.
+
+## Model VEX
+
+`symbiote vex` emits a CycloneDX 1.7 VEX document where each finding is keyed
+to the exact artifact digests it was observed on — including weight digest,
+tensor inventory digest, derivation type (fine-tune, LoRA, quantization), and
+base model reference. A model finding tracks the weight revision it applies
+to, not a version string.
+
+## OSV Advisory Lookups
+
+`symbiote advisories` queries [OSV.dev](https://osv.dev) for the registry
+packages discovered by the static scan, and maps known vulnerabilities back to
+their AIBOM components. This is the only command that contacts the network;
+`scan` never does.
+
 ## Output Formats
 
 - **Native JSON** — Full Nexus SymBiote schema with all agent-native fields
@@ -188,12 +261,14 @@ The `nexus-symbiote diff` command compares two AIBOM snapshots and detects:
 ```
 src/nexus_symbiote/
   core/        — Pydantic v2 domain models, enums, AIBOM container, canonicalization
-  scanners/    — Local scanners + ShadowScanImporter (primary discovery)
-  generators/  — native, CycloneDX 1.7, SPDX 3.0, SARIF
-  validators/  — Completeness, integrity, risk scoring
-  diff/        — AIBOM comparison with security alerts
-  utils/       — Confined hashing, crypto helpers
-  cli.py       — Click CLI (scan, import-shadowscan, validate, risk, diff, …)
+  scanners/    — Component discovery (MCP, model, prompt, RAG, registry, A2A, IDE agents) + ShadowScanImporter (primary discovery)
+  generators/  — Output formats (native, CycloneDX 1.7, SPDX 3.0, SARIF 2.1.0, VEX)
+  validators/  — Completeness, integrity, and risk scoring
+  diff/        — AIBOM version comparison with security alerts
+  live/        — Live MCP server verification (runtime rug-pull detection)
+  advisories.py — OSV.dev advisory lookups for discovered registry packages
+  utils/       — Confined hashing, Sigstore verification, file hash utilities
+  cli.py       — Click CLI entrypoint
 ```
 
 ## Development

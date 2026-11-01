@@ -10,10 +10,13 @@ Generated inventories may contain sensitive paths, endpoint details, prompts, to
 
 Do not execute discovered MCP servers, model code, hooks or other artifacts simply to inventory them. Scan untrusted projects in a disposable, least-privilege environment without production credentials or unnecessary network access.
 
+The `verify-live` command is a deliberate, scoped exception: it launches the MCP servers already configured in the project's own config files, speaks only the read-only `tools/list` protocol method, never executes a tool, injects no arguments beyond those the user's config already specifies, and always terminates the process. It is intended for pre-deployment review of your own project, not for arbitrary untrusted repositories. A server's response to `tools/list` is a claim about its tools, not proof of its runtime behavior.
+
 ## Trust boundaries
 
 - Project files and imported BOMs cross into the parser and must not escape the intended filesystem scope or exhaust resources.
 - Model, registry and signature metadata are assertions until their source and subject are verified under an explicit trust policy.
+- The `advisories` command is the only networked surface; it posts package name and version to OSV.dev. `scan` and `verify-live` make no network requests of their own (launched MCP servers may).
 - The generated BOM and findings are inputs to a decision; they do not provide runtime isolation, authorization or enforcement.
 - CI and artifact publishing have separate trust boundaries. Never expose release credentials to workflows processing untrusted repository content.
 
