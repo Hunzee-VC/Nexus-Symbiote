@@ -418,3 +418,28 @@ def test_freshness_checks_every_trust_entry(tmp_path):
     for entry in [original.replace(expires=None), original.replace(serial=2)]:
         with pytest.raises(ValueError):
             sign_gateway_bundle(plus(entry), BINDING, signer)
+
+
+def test_dispatch_rejects_cached_trust_at_operator_deadline(tmp_path):
+    signer, gateway = [generate_signing_key("ed25519") for _ in range(2)]
+    bundle = sign_gateway_bundle(fixture_bom(), BINDING, signer)
+    calls = []
+    for seconds, expected in [(29, "allow"), (30, "deny")]:
+        signed, _ = dispatch_call(
+            bundle,
+            intent("dev", f"fresh-{seconds}"),
+            RAW2,
+            {"repo": "dev"},
+            resolve_resource=lambda a: a["repo"],
+            invoke=calls.append,
+            bundle_keys=ring(signer),
+            receipt_key=gateway,
+            state_db=tmp_path / "cache.sqlite",
+            now=NOW + timedelta(seconds=seconds),
+            max_trust_age=timedelta(seconds=30),
+        )
+        decision = verify_receipt(signed, ring(gateway))
+        assert decision.decision == expected
+        if expected == "deny":
+            assert decision.reason == "stale-or-invalid-policy"
+    assert calls == [{"repo": "dev"}]

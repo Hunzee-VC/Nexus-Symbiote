@@ -1,6 +1,6 @@
 """Offline gateway policy issuance, approval and decision exercises."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -10,6 +10,7 @@ from symbiote.attest.dsse import Envelope, KeyRing, load_private_key, load_publi
 from symbiote.cli import exit_codes
 from symbiote.digest.jcs import parse_json_strict
 from symbiote.enforce.admission import (
+    DEFAULT_MAX_TRUST_AGE,
     Binding,
     CallIntent,
     admit_call,
@@ -63,6 +64,15 @@ def decide(
     state: Annotated[Path, typer.Option("--state")],
     approval: Annotated[Path | None, typer.Option("--approval")] = None,
     approval_key: Annotated[Path | None, typer.Option("--approval-key")] = None,
+    max_trust_age_seconds: Annotated[
+        int,
+        typer.Option(
+            "--max-trust-age-seconds",
+            min=1,
+            max=86400,
+            help="Maximum age of the oldest signed trust decision.",
+        ),
+    ] = int(DEFAULT_MAX_TRUST_AGE.total_seconds()),
 ) -> None:
     """Evaluate a trusted adapter's request; print the signed decision and return nonzero on denial."""
     signing = load_private_key(receipt_key)
@@ -73,6 +83,7 @@ def decide(
         bundle_keys=KeyRing.from_public_keys([load_public_key(policy_key)]),
         receipt_key=signing,
         state_db=state,
+        max_trust_age=timedelta(seconds=max_trust_age_seconds),
         approval=Envelope.model_validate(_json(approval)) if approval else None,
         approval_keys=KeyRing.from_public_keys([load_public_key(approval_key)]) if approval_key else None,
     )
