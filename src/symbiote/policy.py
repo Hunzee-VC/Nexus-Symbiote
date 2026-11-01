@@ -92,7 +92,7 @@ DEFAULT_POLICY_YAML = """\
 version: "1.0"
 
 scan:
-  scanners: ["mcp", "model", "prompt", "rag", "registry"]
+  scanners: ["mcp", "model", "prompt", "rag", "registry", "a2a", "ide_agents"]
   exclude_paths: ["node_modules", ".git", "__pycache__", ".venv"]
 
 risk:

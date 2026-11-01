@@ -58,18 +58,21 @@ symbiote summary aibom.json
 
 | Scanner | Discovers | Config Files |
 |---------|-----------|--------------|
-| **MCP** | MCP servers, tool definitions, schema hashes | `.mcp.json`, `mcp.json`, `claude_desktop_config.json` |
+| **MCP** | MCP servers, MCP clients, tool definitions, schema hashes | `.mcp.json`, `mcp.json`, `claude_desktop_config.json`, `.cursor/mcp.json` |
 | **Model** | Weight files, serialization safety, signing status | `.safetensors`, `.pt`, `.pkl`, `.gguf`, `config.json` |
 | **Prompt** | System prompts, instruction files, skill packages | `CLAUDE.md`, `.cursorrules`, `.claude/skills/` |
 | **RAG** | Vector stores, embedding configs, data sources | `rag_config.json`, `.env`, Python imports |
 | **Registry** | AI package dependencies, version pinning | `package.json`, `requirements.txt`, `Dockerfile` |
+| **A2A** | A2A agent cards, client/server configs, SDK usage | `.well-known/agent.json`, `agent.json`, `a2a.json` |
+| **IDE Agents** | IDE coding agent configs, permissions, extensions | `.claude/`, `.cursor/`, `.codex/`, `.windsurf/`, `.cline/` |
 
 ## Component Types
 
-SymBiote defines 11 component categories for its internal model. CycloneDX and SPDX already represent many AI and software supply-chain concepts; their mappings to agent-specific semantics require careful validation:
+SymBiote defines 16 component categories for its internal model. CycloneDX and SPDX already represent many AI and software supply-chain concepts; their mappings to agent-specific semantics require careful validation:
 
 - **Agent** — An autonomous AI agent deployment with autonomy level (L0–L4)
 - **MCP Server** — Tool provider with transport, version pinning, schema hash
+- **MCP Client** — An MCP client instance connecting to servers from an IDE or agent host
 - **Tool** — Individual tool definition with a definition fingerprint (cross-implementation JCS conformance is not yet established)
 - **Model** — Weight file with serialization safety and signing status
 - **Prompt Template** — System prompt or instruction file with content hash
@@ -79,6 +82,10 @@ SymBiote defines 11 component categories for its internal model. CycloneDX and S
 - **Data Source** — Training or fine-tuning dataset
 - **Registry Entry** — Package registry trust and attestation
 - **Skill Package** — Plugin or extension with capability declaration
+- **A2A Client** — An A2A protocol client that discovers and invokes remote agents
+- **A2A Server** — An A2A protocol server exposing agent capabilities via agent cards
+- **IDE Agent** — IDE coding agent configuration (Claude Code, Codex, Cursor, Windsurf, Cline, Copilot)
+- **Verified Extension** — An AI agent extension with verification/attestation status
 
 ## Trust Tiers
 
@@ -168,7 +175,7 @@ symbiote init
 version: "1.0"
 
 scan:
-  scanners: ["mcp", "model", "prompt", "rag", "registry"]
+  scanners: ["mcp", "model", "prompt", "rag", "registry", "a2a", "ide_agents"]
 
 risk:
   fail_threshold: 50.0
@@ -204,7 +211,7 @@ The `symbiote diff` command compares two AIBOM snapshots and detects:
 ```
 src/symbiote/
   core/        — Pydantic v2 domain models, enums, AIBOM container, canonicalization
-  scanners/    — Component discovery (MCP, model, prompt, RAG, registry)
+  scanners/    — Component discovery (MCP, model, prompt, RAG, registry, A2A, IDE agents)
   generators/  — Output format generators (native, CycloneDX 1.7, SPDX 3.0, SARIF 2.1.0)
   validators/  — Completeness, integrity, and risk scoring
   diff/        — AIBOM version comparison with security alerts
