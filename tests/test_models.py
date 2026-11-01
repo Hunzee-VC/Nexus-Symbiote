@@ -222,7 +222,7 @@ class TestAIBOM:
         assert len(bom.components) == 1
         assert bom.get_component("tool:test") is not None
 
-    def test_add_component_replaces_existing(self):
+    def test_replace_component_is_explicit(self):
         bom = AIBOM()
         v1 = ToolComponent(bom_ref="tool:test", name="test-v1")
         v2 = ToolComponent(bom_ref="tool:test", name="test-v2")

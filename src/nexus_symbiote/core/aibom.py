@@ -6,9 +6,9 @@ import json
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from nexus_symbiote import __version__
 from nexus_symbiote.core.enums import ComponentType
@@ -23,19 +23,41 @@ class DependencyEdge(BaseModel):
 
     source_ref: str
     target_ref: str
-    relationship: str = Field(
+    relationship: Literal[
+        "invokes",
+        "delegates-to",
+        "retrieves-from",
+        "acts-as-identity",
+        "registered-as",
+        "approved-under",
+        "observed-using",
+        "trained-on",
+        "fine-tuned-from",
+        "quantized-from",
+        "merged-from",
+        "depends-on",
+        "configured-with",
+        "provides-tool",
+        "uses-model",
+        "reads-instructions",
+        "loads-skill",
+        "uses-memory",
+        "uses-guardrail",
+    ] = Field(
         description=(
             "invokes, delegates-to, retrieves-from, acts-as-identity, "
             "registered-as, approved-under, observed-using, trained-on, "
             "fine-tuned-from, quantized-from, merged-from, depends-on"
         )
     )
-    assurance_level: str | None = None
+    assurance_level: Literal["declared", "observed", "verified"] | None = None
     conditions: str | None = None
 
 
 class AIBOM(BaseModel):
     """Agent Bill of Materials — the complete supply chain inventory."""
+
+    model_config = ConfigDict(extra="forbid")
 
     metadata: AIBOMMetadata = Field(default_factory=AIBOMMetadata)
     components: list[AnyComponent] = Field(default_factory=list)
@@ -85,9 +107,10 @@ class AIBOM(BaseModel):
         return results
 
     def finalize(self) -> None:
-        now = datetime.now(UTC)
-        self.metadata.timestamp = now
-        self.metadata.tool_version = __version__
+        if self.metadata.timestamp is None:
+            self.metadata.timestamp = datetime.now(UTC)
+        if self.metadata.tool_version is None:
+            self.metadata.tool_version = __version__
         if self.metadata.serial_number is None:
             self.metadata.serial_number = f"urn:uuid:{uuid.uuid4()}"
 
@@ -103,8 +126,18 @@ class AIBOM(BaseModel):
 
     @classmethod
     def load(cls, path: Path) -> AIBOM:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        from nexus_symbiote.core.hashing import parse_json_strict
+
+        limit = 16 * 1024 * 1024
+        with path.open("rb") as stream:
+            raw = stream.read(limit + 1)
+        data = parse_json_strict(raw.decode("utf-8"), max_bytes=limit)
         return cls.model_validate(data)
+
+    def graph_issues(self) -> list[str]:
+        from nexus_symbiote.graph import validate_graph
+
+        return validate_graph(self)
 
     def summary(self) -> dict[str, Any]:
         type_counts: dict[str, int] = {}

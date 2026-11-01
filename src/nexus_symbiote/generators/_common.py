@@ -1,0 +1,152 @@
+"""Shared export identity, extension preservation, and loss reporting."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import uuid
+from datetime import UTC, datetime
+from typing import Annotated, Any, get_args, get_origin
+
+from nexus_symbiote import __version__
+from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote.core.models import AnyComponent
+
+NAMESPACE = uuid.UUID("ccaa2a43-8ba9-58e6-8f22-f8793a2039d5")
+HASH_ALGORITHMS = {
+    "md5": ("MD5", 32),
+    "sha1": ("SHA-1", 40),
+    "sha256": ("SHA-256", 64),
+    "sha384": ("SHA-384", 96),
+    "sha512": ("SHA-512", 128),
+    "sha3256": ("SHA3-256", 64),
+    "sha3384": ("SHA3-384", 96),
+    "sha3512": ("SHA3-512", 128),
+}
+
+
+def json_text(value: Any) -> str:
+    """Deterministic UTF-8 JSON representation; not a claim of RFC 8785 canonicalization."""
+    return json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+    )
+
+
+def content_digest(value: Any) -> str:
+    return "sha256:" + hashlib.sha256(json_text(value).encode("utf-8")).hexdigest()
+
+
+def prepare(bom: AIBOM) -> AIBOM:
+    """Fill missing export metadata once; never reset an existing observation timestamp."""
+    if bom.metadata.timestamp is None:
+        bom.metadata.timestamp = datetime.now(UTC)
+    if bom.metadata.timestamp.tzinfo is None:
+        raise ValueError("export timestamps must include a timezone")
+    if bom.metadata.tool_version is None:
+        bom.metadata.tool_version = __version__
+    if bom.metadata.serial_number is None:
+        body = native_document(bom)
+        bom.metadata.serial_number = "urn:uuid:" + str(uuid.uuid5(NAMESPACE, content_digest(body)))
+    ids = [c.bom_ref for c in bom.components]
+    if len(ids) != len(set(ids)):
+        raise ValueError("duplicate component references")
+    known = set(ids)
+    for edge in bom.dependencies:
+        if edge.source_ref not in known or edge.target_ref not in known:
+            raise ValueError("dependency references an unknown component")
+    return bom
+
+
+def native_document(bom: AIBOM) -> dict[str, Any]:
+    document = bom.model_dump(mode="json", exclude_none=True)
+    document["components"] = sorted(document["components"], key=lambda c: c["bom_ref"])
+    document["dependencies"] = sorted(document["dependencies"], key=json_text)
+    return document
+
+
+def loss_report(bom: AIBOM, target: str) -> dict[str, Any]:
+    preserves_native = target.startswith(("cyclonedx-", "spdx-"))
+    return {
+        "profile": "nexus-symbiote-export/v1",
+        "target": target,
+        "sourceDigest": content_digest(native_document(bom)),
+        "nativeSemanticsComplete": False,
+        "extensionRoundTripComplete": preserves_native,
+        "admissionAuthority": False,
+        "normalizations": ["component and dependency collections sorted for deterministic output"],
+        "items": [
+            {
+                "path": "/",
+                "reason": "agent authority, assurance, and coverage require the Nexus SymBiote extension"
+                if preserves_native
+                else "finding projection omits the complete source inventory",
+                "preservedIn": "nexus-symbiote:document" if preserves_native else None,
+                "severity": "info" if preserves_native else "warning",
+            }
+        ],
+    }
+
+
+def document_properties(bom: AIBOM, target: str) -> list[dict[str, str]]:
+    document = native_document(bom)
+    return [
+        {"name": "nexus-symbiote:document", "value": json_text(document)},
+        {"name": "nexus-symbiote:documentDigest", "value": content_digest(document)},
+        {"name": "nexus-symbiote:lossReport", "value": json_text(loss_report(bom, target))},
+    ]
+
+
+def component_property(comp: AnyComponent) -> dict[str, str]:
+    return {
+        "name": "nexus-symbiote:component",
+        "value": json_text(comp.model_dump(mode="json", exclude_none=True)),
+    }
+
+
+def claim_properties(comp: AnyComponent) -> list[dict[str, str]]:
+    return [
+        {"name": "agentbom:kind", "value": comp.component_type.value},
+        {"name": "agentbom:claimsVerifiedByExporter", "value": "false"},
+    ]
+
+
+def normalize_hash(algorithm: str, value: str) -> tuple[str, str]:
+    key = algorithm.lower().replace("-", "").replace("_", "")
+    if key not in HASH_ALGORITHMS:
+        raise ValueError(f"unsupported hash algorithm: {algorithm}")
+    name, length = HASH_ALGORITHMS[key]
+    if ":" in value:
+        prefix, value = value.split(":", 1)
+        if prefix.lower().replace("-", "").replace("_", "") != key:
+            raise ValueError("hash prefix disagrees with algorithm")
+    if len(value) != length or any(ch not in "0123456789abcdefABCDEF" for ch in value):
+        raise ValueError(f"invalid {name} digest")
+    return name, value.lower()
+
+
+def recover_document(properties: list[dict[str, str]]) -> AIBOM:
+    """Recover the native representation and check its digest, without authenticating its producer."""
+    required = {
+        "nexus-symbiote:document",
+        "nexus-symbiote:documentDigest",
+        "nexus-symbiote:lossReport",
+    }
+    native_properties = [p for p in properties if p["name"] in required]
+    props = {p["name"]: p["value"] for p in native_properties}
+    if len(props) != len(native_properties):
+        raise ValueError("duplicate native document property names")
+    document = json.loads(props["nexus-symbiote:document"])
+    if props["nexus-symbiote:documentDigest"] != content_digest(document):
+        raise ValueError("embedded native document digest mismatch")
+    # Older native-model versions use an untagged union, which can reinterpret a prompt as an agent.
+    union: Any = AnyComponent
+    if get_origin(union) is Annotated:
+        union = get_args(union)[0]
+    models = {
+        model.model_fields["component_type"].default.value: model for model in get_args(union)
+    }
+    document["components"] = [
+        models[component["component_type"]].model_validate(component)
+        for component in document["components"]
+    ]
+    return AIBOM.model_validate(document)

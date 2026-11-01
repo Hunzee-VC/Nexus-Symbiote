@@ -16,6 +16,7 @@ from nexus_symbiote.core.models import (
     ToolComponent,
 )
 from nexus_symbiote.diff.differ import AIBOMDiffer
+from nexus_symbiote.scanner_catalog import BUILTIN_SCANNER_NAMES
 from nexus_symbiote.scanners.model import ModelScanner
 from nexus_symbiote.utils.crypto import verify_sigstore_bundle
 from nexus_symbiote.validators.integrity import IntegrityValidator
@@ -177,7 +178,7 @@ def test_per_scanner_coverage_requires_every_state_to_be_complete() -> None:
     object.__setattr__(
         bom.metadata.completeness,
         "scanner_status",
-        dict.fromkeys(("mcp", "model", "prompt", "rag", "registry"), "complete"),
+        dict.fromkeys(BUILTIN_SCANNER_NAMES, "complete"),
     )
     passed, report = RiskScorer().passes_gate(bom)
     assert passed

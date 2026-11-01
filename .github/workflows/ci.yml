@@ -1,45 +1,130 @@
 name: CI
-
 on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
-
+  workflow_dispatch:
 permissions:
   contents: read
-
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: "3.12"
-      - run: pip install ruff
-      - run: ruff check src/ tests/
-      - run: ruff format --check src/ tests/
-
-  typecheck:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: "3.12"
-      - run: pip install -e ".[dev,all]" types-PyYAML
-      - run: mypy src/nexus_symbiote/
-
   test:
+    name: Tests Python ${{ matrix.python }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python: ["3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          python-version: ${{ matrix.python-version }}
-      - run: pip install -e ".[dev,all]"
-      - run: pytest --cov=nexus_symbiote --cov-report=term-missing
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install locked full test environment
+        run: |
+          python -m pip install --require-hashes -r requirements-ci.lock
+          python -m pip install --no-deps --no-build-isolation -e .
+      - name: Run full test suite with bounded diagnostics
+        env:
+          PYTEST_LOG: ${{ runner.temp }}/pytest-python-${{ matrix.python }}.log
+        run: |
+          set -o pipefail
+          timeout --signal=INT --kill-after=30s 12m \
+            bash --noprofile --norc -e -o pipefail -c '
+              python -m pytest -vv -o faulthandler_timeout=120 --durations=20 \
+                2>&1 | tee "$PYTEST_LOG"
+            '
+      - name: Preserve test diagnostics
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: pytest-log-python-${{ matrix.python }}
+          path: ${{ runner.temp }}/pytest-python-${{ matrix.python }}.log
+          if-no-files-found: error
+          retention-days: 7
+  coverage:
+    name: Coverage Python 3.12
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      COVERAGE_CORE: sysmon
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Install locked full test environment
+        run: |
+          python -m pip install --require-hashes -r requirements-ci.lock
+          python -m pip install --no-deps --no-build-isolation -e .
+      - name: Run full coverage suite with bounded diagnostics
+        env:
+          PYTEST_LOG: ${{ runner.temp }}/pytest-coverage-python-3.12.log
+        run: |
+          set -o pipefail
+          timeout --signal=INT --kill-after=30s 25m \
+            bash --noprofile --norc -e -o pipefail -c '
+              python -m pytest -vv -o faulthandler_timeout=120 --durations=20 \
+                --cov=nexus_symbiote --cov-report=term-missing \
+                2>&1 | tee "$PYTEST_LOG"
+            '
+      - name: Preserve coverage diagnostics
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: pytest-log-coverage-python-3.12
+          path: ${{ runner.temp }}/pytest-coverage-python-3.12.log
+          if-no-files-found: error
+          retention-days: 7
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Install locked quality environment
+        run: |
+          python -m pip install --require-hashes -r requirements-ci.lock
+          python -m pip install --no-deps --no-build-isolation -e .
+      - run: ruff check src tests scripts
+      - run: ruff format --check src tests scripts
+      - run: mypy src/nexus_symbiote
+      - run: python scripts/check_workflows.py
+  distribution:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Install locked build environment
+        run: |
+          python -m pip install --require-hashes -r requirements-ci.lock
+          python -m pip install --no-deps --no-build-isolation -e .
+      - run: python -m build
+      - run: python -m twine check dist/*
+      - name: Install and exercise built wheel outside source tree
+        run: |
+          python -m venv "$RUNNER_TEMP/wheel-smoke"
+          "$RUNNER_TEMP/wheel-smoke/bin/python" -m pip install dist/*.whl
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/wheel-smoke/bin/python" -m nexus_symbiote --version
+          mkdir "$RUNNER_TEMP/wheel-fixture"
+          "$RUNNER_TEMP/wheel-smoke/bin/python" -m nexus_symbiote scan "$RUNNER_TEMP/wheel-fixture" --report-only -f json -o wheel-agentbom.json
+          "$RUNNER_TEMP/wheel-smoke/bin/python" -m nexus_symbiote scan "$RUNNER_TEMP/wheel-fixture" --report-only -f cyclonedx -o wheel-agentbom.cdx.json
+          "$RUNNER_TEMP/wheel-smoke/bin/python" -m nexus_symbiote scan "$RUNNER_TEMP/wheel-fixture" --report-only -f spdx -o wheel-agentbom.spdx.json
+          "$RUNNER_TEMP/wheel-smoke/bin/python" -c 'import json; d=json.load(open("wheel-agentbom.json")); assert "components" in d'

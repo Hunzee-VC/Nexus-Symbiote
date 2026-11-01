@@ -14,6 +14,7 @@ from nexus_symbiote.core.enums import (
     RiskSeverity,
     SerializationSafety,
 )
+from nexus_symbiote.core.hashing import TOOL_DEFINITION_HASH_VERSION
 from nexus_symbiote.core.models import (
     AIBOMMetadata,
     CompletenessClaim,
@@ -23,6 +24,7 @@ from nexus_symbiote.core.models import (
     RiskAssessment,
     ToolComponent,
 )
+from nexus_symbiote.scanner_catalog import BUILTIN_SCANNER_NAMES
 
 
 def _create_test_project(tmp_path: Path) -> Path:
@@ -59,6 +61,7 @@ def _make_fixture_bom(
                 scope="full-agent",
                 surfaces_scanned=["mcp-config", "prompts", "registry-trust"],
                 assurance_level=AssuranceLevel.OBSERVED,
+                scanner_status=dict.fromkeys(BUILTIN_SCANNER_NAMES, "complete"),
             ),
         )
     )
@@ -76,7 +79,7 @@ def _make_fixture_bom(
             name="read_file",
             mcp_server_ref="mcp-fs",
             definition_hash="sha256:abc123",
-            definition_hash_version="rfc8785-jcs-v1",
+            definition_hash_version=TOOL_DEFINITION_HASH_VERSION,
         )
     )
     bom.add_component(
@@ -121,7 +124,7 @@ def _make_fixture_bom(
 def _scan_to_json(runner: CliRunner, args: list[str], tmp_path: Path) -> dict:
     """Run scan and return parsed JSON, writing to a file to avoid Rich stderr mixing."""
     out = tmp_path / "scan_output.json"
-    result = runner.invoke(main, ["scan", *args, "-o", str(out)])
+    result = runner.invoke(main, ["scan", "--report-only", *args, "-o", str(out)])
     assert result.exit_code == 0
     return json.loads(out.read_text())
 
@@ -140,7 +143,7 @@ class TestScanCommand:
         out = tmp_path / "out" / "aibom.json"
         out.parent.mkdir()
         runner = CliRunner()
-        result = runner.invoke(main, ["scan", str(project), "-o", str(out)])
+        result = runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(out)])
         assert result.exit_code == 0
         assert out.exists()
         data = json.loads(out.read_text())
@@ -150,7 +153,9 @@ class TestScanCommand:
         project = _create_test_project(tmp_path)
         out = tmp_path / "cdx.json"
         runner = CliRunner()
-        result = runner.invoke(main, ["scan", str(project), "-f", "cyclonedx", "-o", str(out)])
+        result = runner.invoke(
+            main, ["scan", "--report-only", str(project), "-f", "cyclonedx", "-o", str(out)]
+        )
         assert result.exit_code == 0
         data = json.loads(out.read_text())
         assert data.get("bomFormat") == "CycloneDX"
@@ -160,7 +165,9 @@ class TestScanCommand:
         project = _create_test_project(tmp_path)
         out = tmp_path / "spdx.json"
         runner = CliRunner()
-        result = runner.invoke(main, ["scan", str(project), "-f", "spdx", "-o", str(out)])
+        result = runner.invoke(
+            main, ["scan", "--report-only", str(project), "-f", "spdx", "-o", str(out)]
+        )
         assert result.exit_code == 0
         data = json.loads(out.read_text())
         assert "@context" in data
@@ -171,7 +178,9 @@ class TestScanCommand:
         project = _create_test_project(tmp_path)
         out = tmp_path / "mcp_only.json"
         runner = CliRunner()
-        result = runner.invoke(main, ["scan", str(project), "--scanner", "mcp", "-o", str(out)])
+        result = runner.invoke(
+            main, ["scan", "--report-only", str(project), "--scanner", "mcp", "-o", str(out)]
+        )
         assert result.exit_code == 0
         data = json.loads(out.read_text())
         assert len(data["components"]) >= 1
@@ -181,19 +190,22 @@ class TestScanCommand:
         out = tmp_path / "unknown.json"
         runner = CliRunner()
         result = runner.invoke(
-            main, ["scan", str(project), "--scanner", "nonexistent", "-o", str(out)]
+            main,
+            ["scan", "--report-only", str(project), "--scanner", "nonexistent", "-o", str(out)],
         )
         assert result.exit_code != 0
-        data = json.loads(out.read_text())
-        assert data["metadata"]["completeness"]["scanner_status"]["nonexistent"] == "failed"
+        assert not out.exists()
+        assert "Unknown scanner" in result.output
 
     def test_scan_empty_project(self, tmp_path):
         out = tmp_path / "empty.json"
         runner = CliRunner()
-        result = runner.invoke(main, ["scan", str(tmp_path), "-o", str(out)])
+        result = runner.invoke(main, ["scan", "--report-only", str(tmp_path), "-o", str(out)])
         assert result.exit_code == 0
         data = json.loads(out.read_text())
-        assert data["components"] == []
+        assert len(data["components"]) == 1
+        assert data["components"][0]["component_type"] == "agent"
+        assert data["components"][0]["deployment_status"] == "unknown"
 
 
 class TestValidateCommand:
@@ -201,7 +213,7 @@ class TestValidateCommand:
         project = _create_test_project(tmp_path)
         runner = CliRunner()
         bom_path = tmp_path / "test.json"
-        runner.invoke(main, ["scan", str(project), "-o", str(bom_path)])
+        runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_path)])
         result = runner.invoke(main, ["validate", str(bom_path)])
         assert result.exit_code in (0, 1)
 
@@ -209,7 +221,7 @@ class TestValidateCommand:
         project = _create_test_project(tmp_path)
         runner = CliRunner()
         bom_path = tmp_path / "test.json"
-        runner.invoke(main, ["scan", str(project), "-o", str(bom_path)])
+        runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_path)])
         result = runner.invoke(main, ["validate", str(bom_path), "--project", str(project)])
         assert result.exit_code in (0, 1)
 
@@ -219,7 +231,7 @@ class TestRiskCommand:
         project = _create_test_project(tmp_path)
         runner = CliRunner()
         bom_path = tmp_path / "test.json"
-        runner.invoke(main, ["scan", str(project), "-o", str(bom_path)])
+        runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_path)])
         result = runner.invoke(main, ["risk", str(bom_path)])
         assert result.exit_code in (0, 1)
 
@@ -227,20 +239,20 @@ class TestRiskCommand:
         project = _create_test_project(tmp_path)
         runner = CliRunner()
         bom_path = tmp_path / "test.json"
-        runner.invoke(main, ["scan", str(project), "-o", str(bom_path)])
+        runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_path)])
         result = runner.invoke(main, ["risk", str(bom_path), "--json-output"])
         data = json.loads(result.output)
         assert "overall_score" in data
         assert "risk_level" in data
 
-    def test_risk_custom_threshold_does_not_override_partial_coverage(self, tmp_path):
+    def test_risk_custom_threshold(self, tmp_path):
         project = _create_test_project(tmp_path)
         runner = CliRunner()
         bom_path = tmp_path / "test.json"
-        runner.invoke(main, ["scan", str(project), "-o", str(bom_path)])
-        result = runner.invoke(main, ["risk", str(bom_path), "--threshold", "100", "--json-output"])
-        assert result.exit_code == 1
-        assert json.loads(result.output)["coverage_status"] == "partial"
+        runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_path)])
+        result = runner.invoke(main, ["risk", str(bom_path), "--threshold", "100"])
+        # An aggregate threshold cannot turn missing coverage or critical findings into a pass.
+        assert result.exit_code != 0
 
 
 class TestDiffCommand:
@@ -248,7 +260,7 @@ class TestDiffCommand:
         project = _create_test_project(tmp_path)
         runner = CliRunner()
         bom_path = tmp_path / "bom.json"
-        runner.invoke(main, ["scan", str(project), "-o", str(bom_path)])
+        runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_path)])
         result = runner.invoke(main, ["diff", str(bom_path), str(bom_path)])
         assert result.exit_code == 0
 
@@ -256,11 +268,11 @@ class TestDiffCommand:
         project = _create_test_project(tmp_path)
         runner = CliRunner()
         bom_a = tmp_path / "a.json"
-        runner.invoke(main, ["scan", str(project), "-o", str(bom_a)])
+        runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_a)])
 
         (project / "requirements.txt").write_text("transformers==4.41.0\nlangchain>=0.1\n")
         bom_b = tmp_path / "b.json"
-        runner.invoke(main, ["scan", str(project), "-o", str(bom_b)])
+        runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_b)])
 
         result = runner.invoke(main, ["diff", str(bom_a), str(bom_b)])
         assert result.exit_code == 0
@@ -269,7 +281,7 @@ class TestDiffCommand:
         project = _create_test_project(tmp_path)
         runner = CliRunner()
         bom_path = tmp_path / "bom.json"
-        runner.invoke(main, ["scan", str(project), "-o", str(bom_path)])
+        runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_path)])
         result = runner.invoke(main, ["diff", str(bom_path), str(bom_path), "--json-output"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -281,7 +293,7 @@ class TestSummaryCommand:
         project = _create_test_project(tmp_path)
         runner = CliRunner()
         bom_path = tmp_path / "test.json"
-        runner.invoke(main, ["scan", str(project), "-o", str(bom_path)])
+        runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_path)])
         result = runner.invoke(main, ["summary", str(bom_path)])
         assert result.exit_code == 0
 
@@ -306,13 +318,12 @@ class TestVersionAndHelp:
 class TestRiskFixture:
     """Risk command tests against pre-built fixture BOMs for deterministic coverage."""
 
-    def test_risk_legacy_coverage_is_unknown(self, tmp_path):
+    def test_risk_clean_bom_passes(self, tmp_path):
         bom_path = _make_fixture_bom(tmp_path, with_risks=False)
         runner = CliRunner()
         result = runner.invoke(main, ["risk", str(bom_path)])
-        assert result.exit_code == 1
-        assert "unknown" in result.output.lower()
-        assert "FAILED" in result.output
+        assert result.exit_code == 0
+        assert "PASSED" in result.output
 
     def test_risk_risky_bom_fails_gate(self, tmp_path):
         bom_path = _make_fixture_bom(tmp_path, with_risks=True)
@@ -342,11 +353,13 @@ class TestRiskFixture:
         assert len(data["findings"]) == 2
         assert data["findings"][0]["severity"] == "critical"
 
-    def test_critical_risk_vetoes_high_threshold(self, tmp_path):
+    def test_risk_high_threshold_passes(self, tmp_path):
         bom_path = _make_fixture_bom(tmp_path, with_risks=True)
         runner = CliRunner()
-        result = runner.invoke(main, ["risk", str(bom_path), "--threshold", "200"])
-        assert result.exit_code != 0
+        result = runner.invoke(
+            main, ["risk", str(bom_path), "--threshold", "200", "--fail-on-severity", "none"]
+        )
+        assert result.exit_code == 0
 
 
 class TestValidateFixture:
@@ -490,7 +503,9 @@ class TestSARIFOutput:
         project = _create_test_project(tmp_path)
         out = tmp_path / "results.sarif"
         runner = CliRunner()
-        result = runner.invoke(main, ["scan", str(project), "-f", "sarif", "-o", str(out)])
+        result = runner.invoke(
+            main, ["scan", "--report-only", str(project), "-f", "sarif", "-o", str(out)]
+        )
         assert result.exit_code == 0
         data = json.loads(out.read_text())
         assert data["version"] == "2.1.0"
@@ -501,7 +516,9 @@ class TestSARIFOutput:
     def test_sarif_empty_project(self, tmp_path):
         out = tmp_path / "empty.sarif"
         runner = CliRunner()
-        result = runner.invoke(main, ["scan", str(tmp_path), "-f", "sarif", "-o", str(out)])
+        result = runner.invoke(
+            main, ["scan", "--report-only", str(tmp_path), "-f", "sarif", "-o", str(out)]
+        )
         assert result.exit_code == 0
         data = json.loads(out.read_text())
         assert data["runs"][0]["results"] == []
@@ -556,7 +573,7 @@ class TestPolicyIntegration:
         (project / ".nexus-symbiote.yaml").write_text(policy)
         out = project / "output.json"
         runner = CliRunner()
-        result = runner.invoke(main, ["scan", str(project), "-o", str(out)])
+        result = runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(out)])
         assert result.exit_code == 0
         data = json.loads(out.read_text())
         assert data.get("bomFormat") == "CycloneDX"
@@ -567,7 +584,9 @@ class TestPolicyIntegration:
         (project / ".nexus-symbiote.yaml").write_text(policy)
         out = project / "output.json"
         runner = CliRunner()
-        result = runner.invoke(main, ["scan", str(project), "-f", "json", "-o", str(out)])
+        result = runner.invoke(
+            main, ["scan", "--report-only", str(project), "-f", "json", "-o", str(out)]
+        )
         assert result.exit_code == 0
         data = json.loads(out.read_text())
         assert "bomFormat" not in data

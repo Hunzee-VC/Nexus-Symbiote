@@ -56,7 +56,13 @@ class TestModelScanner:
     def test_scan_safetensors(self, tmp_path):
         model_dir = tmp_path / "my_model"
         model_dir.mkdir()
-        (model_dir / "model.safetensors").write_bytes(b"\x00" * 100)
+        header = json.dumps(
+            {"weight": {"dtype": "U8", "shape": [4], "data_offsets": [0, 4]}}
+        ).encode()
+        header += b" " * (-len(header) % 8)
+        (model_dir / "model.safetensors").write_bytes(
+            len(header).to_bytes(8, "little") + header + b"abcd"
+        )
         (model_dir / "config.json").write_text('{"model_type": "llama"}')
 
         scanner = ModelScanner()
