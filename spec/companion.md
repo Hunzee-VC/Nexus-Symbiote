@@ -41,6 +41,19 @@ resolution, signature facts) are `security-relevant`; under `--strict` any `secu
 `preserved_in = dropped` fails the export (exit code 8). `symbiote convert --loss-report` prints the table and
 writes `<out>.loss.json`. Round trip is tested on the model digest, not on bytes.
 
+### Portable grant records
+
+Each CycloneDX metadata property named `agentbom:authz:grant-record` contains one canonical JSON
+grant, including its subject, full scope, conditions, delegation, validity, policy and enforcement
+point. SPDX carries the same records in the document SBOM's `extension_CdxPropertiesExtension`.
+Use the full record to reconstruct a grant. Per-subject summary fields support search and discovery.
+
+Both projections mark authorization use as `requires-externally-authenticated-companion`. Consumers
+making a privileged decision must resolve the companion, match its bytes to the digest, authenticate
+the snapshot signer against local issuer and identity policy, and check the approved subject, scope
+and freshness. A missing companion, digest mismatch, unsupported constraint or untrusted signature
+must prevent authorization. Schema validation and loss-report status do not authenticate an approval.
+
 ## 5. Embedded records (self-contained CycloneDX)
 With `--embed-records` (default for Standard+), every structured record without a native CycloneDX home is
 also carried inside the CycloneDX document as `declarations.evidence[].data[].contents.attachment`

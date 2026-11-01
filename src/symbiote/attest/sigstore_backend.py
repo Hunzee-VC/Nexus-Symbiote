@@ -73,7 +73,7 @@ class _RegexIdentity:
     """Sigstore ``VerificationPolicy`` matching the certificate's SAN against an anchored regular expression."""
 
     def __init__(self, pattern: str, issuer: str) -> None:
-        self._re = re.compile(pattern if pattern.startswith("^") else f"^(?:{pattern})$")
+        self._re = re.compile(pattern)
         self._issuer = sp.OIDCIssuerV2(issuer)
 
     def verify(self, cert: Any) -> None:
@@ -89,7 +89,7 @@ class _RegexIdentity:
         values += sans.get_values_for_type(x509.UniformResourceIdentifier)
         for other in sans.get_values_for_type(x509.OtherName):
             values.append(other.value.decode("utf-8", "replace"))
-        if not any(self._re.match(v) for v in values):
+        if not any(self._re.fullmatch(v) for v in values):
             raise sp.VerificationError(f"no SAN matches {self._re.pattern!r} (saw {values})")
 
 

@@ -8,6 +8,7 @@ new digest is the rug-pull signal); refuse a server whose identity differs; enfo
 
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -17,22 +18,20 @@ from pydantic import Field
 from symbiote.digest.tooldef import tooldef_digest, toolset_digest
 from symbiote.model.base import SymbioteModel
 from symbiote.model.document import AgentBOM
-from symbiote.model.entities import TrustStatus
+from symbiote.model.entities import Grant, ToolDefinition, TrustStatus
 from symbiote.model.enums import ApprovalGate, TrustState, TrustSubjectKind
 
 GAB_VERSION = "1"
 
 
 def _iso(dt: datetime | None) -> str | None:
-    return (
-        None if dt is None else dt.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-    )
+    return None if dt is None else dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 def gab_from_document(
     bom: AgentBOM,
     *,
-    trust_status: Iterable[TrustStatus] = (),
+    trust_status: Iterable[TrustStatus] | None = None,
     attestations: Iterable[str] = (),
     max_staleness: str = "PT24H",
     fail_closed_on_expired_trust_status: bool = True,
@@ -40,10 +39,12 @@ def gab_from_document(
 ) -> dict[str, Any]:
     """Build the GAB JSON from a finalised (ideally approved) document."""
     agent = bom.root_agent
-    tools_by_server: dict[str, list] = {}
+    tools_by_server: dict[str, list[ToolDefinition]] = {}
     for tool in bom.tools:
         tools_by_server.setdefault(tool.server_ref, []).append(tool)
-    gates = {g.subject_ref: g.approval_gate for g in bom.grants if g.layer.value == "declared"}
+    grants: dict[str, list[Grant]] = defaultdict(list)
+    for grant in bom.grants:
+        grants[grant.subject_ref].append(grant)
     servers: dict[str, Any] = {}
     for srv in sorted(bom.tool_servers, key=lambda s: s.id):
         tool_entries: dict[str, Any] = {}
@@ -52,19 +53,29 @@ def gab_from_document(
             if not tool.digest.ok or tool.digest.value is None:
                 denied.append(tool.tool_name)  # undigestable tools cannot be pinned, so they cannot be served
                 continue
-            gate = gates.get(tool.id, tool.approval_gate)
-            if gate is ApprovalGate.UNKNOWN:
-                gate = ApprovalGate.REQUIRED  # fail closed on unknown gates
+            rules = sorted(grants[tool.id] + grants[srv.id], key=lambda g: g.id)
+            # Legacy consumers can represent only an unconditional gate.
+            # A scoped grant must never widen the legacy projection.
+            gate = tool.approval_gate
+            if rules or gate is ApprovalGate.UNKNOWN:
+                gate = ApprovalGate.REQUIRED
             tool_entries[tool.tool_name] = {
+                "id": tool.id,
                 "digest": tool.digest.value,
+                "toolGate": tool.approval_gate.value,
+                "requiredScopes": tool.required_scopes.value if tool.required_scopes else None,
+                "grants": [g.to_json_dict() for g in rules],
                 "fullDigest": tool.full_digest.value if tool.full_digest and tool.full_digest.ok else None,
                 "gate": gate.value,
                 "capabilities": sorted(c.value for c in tool.capabilities),
                 "sideEffectClass": tool.side_effect_class.value,
             }
         signer = None
+        publisher = None
         if srv.registry_resolution_ref:
             res = next((r for r in bom.resolutions if r.id == srv.registry_resolution_ref), None)
+            if res and res.publisher:
+                publisher = res.publisher.identity
             if res and res.signer:
                 signer = {
                     "status": res.signer.status.value,
@@ -84,6 +95,7 @@ def gab_from_document(
                 if srv.instructions_digest and srv.instructions_digest.value
                 else None,
                 "signer": signer,
+                "publisher": publisher,
             },
             "toolset": srv.toolset_digest.value if srv.toolset_digest and srv.toolset_digest.value else None,
             "tools": tool_entries,
@@ -109,8 +121,16 @@ def gab_from_document(
         else:
             models[m.id] = {"kind": m.model_kind.value, "identity": "unknown"}
     instructions = {i.id: i.digest for i in sorted(bom.instructions, key=lambda i: i.id)}
-    ts = list(trust_status)
+    # Explicit overrides augment embedded restrictions; an empty override must not erase a revocation.
+    ts = list(bom.trust_status)
+    if trust_status is not None:
+        ts.extend(t for t in trust_status if t not in ts)
     trust = {
+        "allowlistedPublishers": sorted(
+            t.subject_key
+            for t in ts
+            if t.subject_kind is TrustSubjectKind.PUBLISHER_IDENTITY and t.status is TrustState.ALLOWLISTED
+        ),
         "serial": max((t.serial for t in ts), default=0),
         "expires": _iso(min((t.expires for t in ts if t.expires), default=None)),
         "revoked": sorted(
@@ -142,6 +162,15 @@ def gab_from_document(
             "requireAnnotationsForDestructive": require_annotations_for_destructive,
         },
         "servers": servers,
+        "credentials": {
+            c.id: {
+                "subject": c.subject_ref,
+                "identity": c.identity_ref,
+                "kind": c.credential_kind.value,
+                "scopes": c.scopes_granted.value if c.scopes_granted else None,
+            }
+            for c in sorted(bom.credential_bindings, key=lambda c: c.id)
+        },
         "models": models,
         "instructions": instructions,
         "trustStatus": trust,
@@ -158,6 +187,8 @@ def export_allowlist(
     if fmt == "opa-data":
         return {"symbiote": {"allowlist": gab}}
     if fmt == "mcp-gateway-generic":
+        if any(entry["grants"] for srv in gab["servers"].values() for entry in srv["tools"].values()):
+            raise ValueError("generic export cannot preserve authorization grants; use GAB or OPA data")
         return [
             {"server": sid, "tool": name, "digest": entry["digest"], "gate": entry["gate"]}
             for sid, srv in gab["servers"].items()
@@ -185,6 +216,8 @@ def check_served_tool(
     snap = gab.get("snapshot", {})
     if snap.get("notAfter") and datetime.fromisoformat(snap["notAfter"].replace("Z", "+00:00")) <= now:
         return Decision(action="block", reason="snapshot-expired", server=server_id, signals=["SYM-SNAP-002"])
+    if snap.get("notBefore") and datetime.fromisoformat(snap["notBefore"].replace("Z", "+00:00")) > now:
+        return Decision(action="block", reason="snapshot-not-yet-valid", server=server_id)
     ts = gab.get("trustStatus", {})
     if (
         ts.get("expires")
@@ -197,6 +230,14 @@ def check_served_tool(
     server = gab.get("servers", {}).get(server_id)
     if server is None:
         return Decision(action="block", reason="server-not-allowlisted", server=server_id)
+    identity = server.get("identity", {})
+    publishers = {p for p in (identity.get("publisher"), (identity.get("signer") or {}).get("identity")) if p}
+
+    blocked = set(ts.get("revoked", [])) | set(ts.get("quarantined", []))
+    if {server_id, identity.get("digest"), (identity.get("package") or {}).get("digest")} & blocked:
+        return Decision(action="block", reason="server-revoked-or-quarantined", server=server_id)
+    if publishers.intersection(set(ts.get("revokedPublishers", [])) | blocked):
+        return Decision(action="block", reason="publisher-revoked-or-quarantined", server=server_id)
     name = str(raw_tool.get("name", ""))
     result = tooldef_digest(raw_tool)
     if not result.ok or result.value is None:
@@ -260,6 +301,8 @@ def check_served_toolset(
     now: datetime | None = None,
 ) -> list[Decision]:
     """Check every served tool and the whole set (an approved tool that disappeared is also a finding)."""
+    if server_id not in gab.get("servers", {}):
+        return [Decision(action="block", reason="server-not-allowlisted", server=server_id)]
     tools = list(raw_tools)
     decisions = [check_served_tool(gab, server_id, t, now=now) for t in tools]
     server = gab.get("servers", {}).get(server_id, {})

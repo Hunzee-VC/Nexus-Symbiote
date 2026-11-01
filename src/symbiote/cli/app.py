@@ -12,6 +12,7 @@ from rich.console import Console
 
 from symbiote import __version__
 from symbiote.cli import exit_codes
+from symbiote.cli.admission import app as admission_app
 
 app = typer.Typer(
     name="symbiote",
@@ -27,6 +28,7 @@ attest_app = typer.Typer(help="Build and sign in-toto statements (DSSE).")
 allowlist_app = typer.Typer(help="Enforcement exports for tool gateways and policy engines.")
 app.add_typer(schema_app, name="schema")
 app.add_typer(allowlist_app, name="allowlist")
+app.add_typer(admission_app, name="admission")
 app.add_typer(digest_app, name="digest")
 app.add_typer(merkle_app, name="merkle")
 app.add_typer(attest_app, name="attest")
@@ -655,7 +657,7 @@ def allowlist_check(
     ],
     as_json: JsonFlag = False,
 ) -> None:
-    """Reference enforcement: decide allow/block/drop for served tools against a GAB."""
+    """Compare served descriptors to GAB pins. Use admission decide for call authorization."""
     from symbiote.enforce import check_served_toolset
 
     bundle = json.loads(gab.read_text(encoding="utf-8"))
@@ -913,3 +915,31 @@ def main() -> None:
 
 if __name__ == "__main__":  # pragma: no cover
     main()
+
+
+@app.command("import-legacy")
+def import_legacy_inventory(
+    source: Path,
+    output: Annotated[Path, typer.Option("--output", "-o")],
+    agent: Annotated[
+        str | None, typer.Option("--agent", help="Root agent bom_ref in a multi-agent inventory.")
+    ] = None,
+) -> None:
+    """Convert a native 1.0 inventory to a declared companion with embedded mapping losses."""
+    from symbiote.confined import open_scoped_file, write_scan_output
+    from symbiote.export.companion import companion_bytes
+    from symbiote.imp.legacy import import_legacy
+
+    try:
+        limit = 32 * 1024 * 1024
+        source = source.absolute()
+        with open_scoped_file(Path(source.anchor), source) as stream:
+            raw = stream.read(limit + 1)
+        if len(raw) > limit:
+            raise ValueError("legacy input exceeds 32 MiB")
+        if source == output.absolute():
+            raise ValueError("source and output must differ")
+        write_scan_output(output, companion_bytes(import_legacy(raw, root_ref=agent)))
+    except (ValueError, OSError) as exc:
+        typer.echo(f"Legacy import failed: {exc}", err=True)
+        raise typer.Exit(1) from None

@@ -205,7 +205,7 @@ def import_k8s_aibom(
             raise K8sAibomError(f"invalid SHA-256 for model {bom_ref}")
         locator = f"cdx:{bom_ref}"
         # A display name can cover many weight revisions, endpoints and BOM subjects.
-        source_ref = bom_ref
+        source_ref: str | list[str] = bom_ref
         props_by_name = dict(props)
         meta = document.get("metadata", {}).get("component") or {}
         workload_ref = meta.get("bom-ref")

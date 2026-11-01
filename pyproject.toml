@@ -40,7 +40,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-sign = ["sigstore>=3.6", "in-toto-attestation>=0.9"]
+sign = ["sigstore>=4.5.1,<5", "in-toto-attestation>=0.9"]
 models = ["model-signing>=1.0", "pyopenssl>=24"]
 mcp = ["mcp>=1.9"]
 all = ["symbiote[sign,models,mcp]"]
