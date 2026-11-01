@@ -68,6 +68,8 @@ The policy maps exact server BOM references to `{"command":"/operator/approved-l
 
 For explicitly authorized HTTPS observations, use `discover-mcp ENDPOINT --allowed-origin HTTPS_ORIGIN`. Both commands enumerate served descriptors without calling tools. Review and authenticate their observations separately before using them as approval evidence.
 
+The MCP scanner also inventories Python SDK source declarations in application files. It recognizes module-level `FastMCP` and `MCPServer` constructors imported directly from the SDK, including import aliases, and literal `@server.tool()` names. Each tool links to its server, source line and source digest. Its effective input schema, runtime registration and descriptor hash require separate evidence. Dynamic tool names, ambiguous bindings and low-level listing callbacks appear in collection gaps. Collection examines at most 50 Python files, with a 256 KiB limit per file. Nested test, build and distribution directories fall outside the application-source search.
+
 MCP server and tool references are scoped to the relative configuration path and declared name. The same server name in two hosts remains two inventory entries, with separate client links. Existing snapshots using name-only references require review and recollection before comparison or approval.
 
 | Surface | Evidence and limitation |
