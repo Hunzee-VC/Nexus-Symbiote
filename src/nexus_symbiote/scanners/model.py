@@ -60,6 +60,12 @@ MODEL_EXTENSIONS = {
     ".joblib": ("joblib", "scikit-learn"),
     ".gguf": ("gguf", "llama.cpp"),
     ".ggml": ("ggml", "llama.cpp-legacy"),
+    ".ckpt": ("ckpt", "checkpoint"),
+    ".h5": ("h5", "keras"),
+    ".hdf5": ("hdf5", "keras"),
+    ".keras": ("keras", "keras"),
+    ".pb": ("pb", "tensorflow"),
+    ".pdparams": ("pdparams", "paddle"),
 }
 
 MODEL_CONFIG_FILES = [
@@ -278,6 +284,20 @@ class ModelScanner(Scanner):
                     detail=f"Model '{path.name}' uses GGUF; chat template metadata vulnerable to Jinja2 SSTI (CVE-2024-34359).",
                     recommendation="Validate chat template content. Use llama-cpp-python >= 0.2.72.",
                     references=["https://nvd.nist.gov/vuln/detail/CVE-2024-34359"],
+                )
+            )
+
+        if safety == SerializationSafety.UNKNOWN:
+            # Fail closed: an unrecognized format is not evidence of safety.
+            risks.append(
+                RiskAssessment(
+                    severity=RiskSeverity.HIGH,
+                    category="serialization_format",
+                    detail=(
+                        f"Model '{path.name}' uses an unrecognized serialization "
+                        f"format ('{fmt_key}'); its safety cannot be established."
+                    ),
+                    recommendation="Confirm the format does not execute code on load, or convert to SafeTensors.",
                 )
             )
 

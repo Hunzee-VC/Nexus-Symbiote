@@ -47,9 +47,13 @@ def hash_tool_definition(
         "name": name,
         "description": description,
     }
-    if input_schema is not None:
+    # Empty and absent schema/annotations MUST canonicalize identically, so the
+    # scanner (which passes {}) and the validator (which passes None) produce
+    # the same fingerprint for an unchanged tool. Without this normalization an
+    # annotation-less tool failed its own integrity check as a false rug-pull.
+    if input_schema:
         definition["inputSchema"] = input_schema
-    if annotations is not None:
+    if annotations:
         definition["annotations"] = annotations
     return hash_canonical(definition)
 

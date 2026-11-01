@@ -65,6 +65,14 @@ SERIALIZATION_FORMAT_SAFETY: dict[str, SerializationSafety] = {
     "joblib": SerializationSafety.UNSAFE_CODE_EXECUTION,
     "gguf": SerializationSafety.UNSAFE_TEMPLATE_INJECTION,
     "ggml": SerializationSafety.SAFE,
+    # Common checkpoint formats that execute code on load (pickle/Lambda/graph
+    # ops). Omitting these let a malicious weight pass undiscovered as "safe".
+    "ckpt": SerializationSafety.UNSAFE_CODE_EXECUTION,
+    "h5": SerializationSafety.UNSAFE_CODE_EXECUTION,
+    "hdf5": SerializationSafety.UNSAFE_CODE_EXECUTION,
+    "keras": SerializationSafety.UNSAFE_CODE_EXECUTION,
+    "pb": SerializationSafety.UNSAFE_CODE_EXECUTION,
+    "pdparams": SerializationSafety.UNSAFE_CODE_EXECUTION,
 }
 
 

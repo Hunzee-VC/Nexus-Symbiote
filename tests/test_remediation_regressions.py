@@ -20,7 +20,9 @@ from nexus_symbiote.core.models import (
 from nexus_symbiote.diff.differ import AIBOMDiffer
 from nexus_symbiote.generators.sarif import SARIFGenerator
 from nexus_symbiote.scanners.base import safe_rglob
+from nexus_symbiote.scanners.mcp import MCPScanner
 from nexus_symbiote.scanners.model import ModelScanner
+from nexus_symbiote.validators.integrity import IntegrityValidator
 
 
 @pytest.mark.parametrize(
@@ -144,3 +146,38 @@ def test_verify_fails_closed_without_a_valid_bundle(tmp_path) -> None:
         ],
     )
     assert result.exit_code == 1
+
+
+def test_annotationless_tool_passes_its_own_integrity_check(tmp_path) -> None:
+    # Workflow finding: scanner hashed annotations={} while validator dropped
+    # them, so an unchanged annotation-less tool failed as a false rug-pull.
+    import json
+
+    (tmp_path / ".mcp.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "s": {"command": "x", "tools": [{"name": "read_file", "description": "r"}]}
+                }
+            }
+        )
+    )
+    scan = MCPScanner().scan(tmp_path)
+    bom = AIBOM(metadata=AIBOMMetadata(authors=[]))
+    for comp in scan.components:
+        bom.add_component(comp)
+    report = IntegrityValidator().validate(bom, tmp_path)
+    assert not [i for i in report.issues if i.category == "hash_mismatch"]
+    assert report.is_valid
+
+
+def test_ckpt_weight_is_discovered_and_flagged(tmp_path) -> None:
+    # Workflow finding: common code-exec checkpoint formats were not discovered,
+    # so a malicious weight passed as a clean supply chain.
+    weights = tmp_path / "weights"
+    weights.mkdir()
+    (weights / "model.ckpt").write_bytes(b"\x80\x04 pickle payload")
+    result = ModelScanner().scan(tmp_path)
+    assert result.components, "the .ckpt weight must be discovered"
+    cats = {r.category for c in result.components for r in c.risks}
+    assert "serialization_format" in cats
