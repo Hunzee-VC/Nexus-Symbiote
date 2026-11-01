@@ -1,20 +1,20 @@
 # SymBiote
 
-**Agent Bill of Materials (AIBOM)** for production AI agent supply chain security.
+**Agent Bill of Materials (AIBOM)** for exploring AI agent supply chains.
 
-SymBiote scans your AI agent project and generates a comprehensive inventory of every component in the supply chain — MCP servers, tools, models, prompts, RAG sources, registries, and skills — with integrity hashes, trust classification, and risk scoring. Output formats include native JSON, CycloneDX 1.7, and SPDX 3.0.
+> **Alpha:** SymBiote is under active development. Do not use its output as the sole basis for production deployment, authorization, compliance, or a claim that an agent is safe. See [SECURITY.md](SECURITY.md).
+
+SymBiote inspects supported local project files and produces an inventory of detected components, such as configured MCP servers, model files, instructions and RAG-related configuration. It can also generate risk findings and proposed CycloneDX, SPDX and SARIF output. Static discovery does not establish what is running, effective permissions, registry membership, or complete coverage.
 
 ## Why
 
 Production AI agents assemble capabilities from dozens of sources: MCP servers installed via `npx`, model weights from Hugging Face, system prompts in version control, vector stores for RAG, and packages from npm/PyPI. A single poisoned tool definition or unsigned model weight can compromise the entire system.
 
-SymBiote provides the missing visibility. It answers: *What exactly is running in my agent, where did it come from, and should I trust it?*
+SymBiote helps teams investigate what is declared in supported project files and where additional evidence is needed. A detection, digest or signature file alone does not establish runtime identity, provenance, completeness or safety.
 
 ## Install
 
-```bash
-pip install symbote
-```
+Install from a reviewed checkout of this repository. Verify published distributions independently before installing them; this README does not assert that a package on a public index corresponds to this source.
 
 For development:
 ```bash
@@ -66,11 +66,11 @@ symbote summary aibom.json
 
 ## Component Types
 
-SymBiote defines 11 agent-native component types that neither CycloneDX nor SPDX provide:
+SymBiote defines 11 component categories for its internal model. CycloneDX and SPDX already represent many AI and software supply-chain concepts; their mappings to agent-specific semantics require careful validation:
 
 - **Agent** — An autonomous AI agent deployment with autonomy level (L0–L4)
 - **MCP Server** — Tool provider with transport, version pinning, schema hash
-- **Tool** — Individual tool definition with JCS-canonical definition hash
+- **Tool** — Individual tool definition with a definition fingerprint (cross-implementation JCS conformance is not yet established)
 - **Model** — Weight file with serialization safety and signing status
 - **Prompt Template** — System prompt or instruction file with content hash
 - **Guardrail Policy** — Safety classifier or output validator
@@ -82,13 +82,13 @@ SymBiote defines 11 agent-native component types that neither CycloneDX nor SPDX
 
 ## Trust Tiers
 
-Every component is classified into a trust tier:
+The schema can represent the following trust tiers. Treat values as claims unless supporting evidence has been independently verified under an explicit trust policy:
 
 | Tier | Meaning |
 |------|---------|
 | `internal-verified` | Owned and signed by your organization |
 | `internal-unverified` | Owned but not cryptographically verified |
-| `third-party-signed` | External with Sigstore/PGP signature |
+| `third-party-signed` | Intended to represent an external component with verified signing evidence |
 | `third-party-unsigned` | External without signature |
 | `untrusted-public` | Public source with no attestation |
 | `unknown` | Trust status not determined |
@@ -104,7 +104,7 @@ SymBiote assesses risks across categories:
 - **trust_remote_code** — Arbitrary code execution from model repos (critical)
 - **Data integrity** — Unencrypted RAG sources (high)
 
-The `symbote risk` command scores all findings and applies a pass/fail gate for CI integration.
+The current risk score is a sum of finding weights; a single critical finding can fall below the default threshold. It is not a sufficient production gate. Review individual findings and coverage, and enforce independently defined severity and evidence policies.
 
 ## CI/CD Integration
 
@@ -125,7 +125,7 @@ jobs:
           sarif-upload: 'true'
 ```
 
-The action scans your project, runs validation and risk scoring, uploads SARIF findings to the GitHub Security tab, and saves the AIBOM as a build artifact.
+The current action is experimental: it installs an unpinned package and does not fail the job on validation errors. Do not rely on it as a security gate until these issues are resolved. Review the workflow's permissions and artifact contents before using it.
 
 ### Manual CI
 
@@ -169,7 +169,6 @@ version: "1.0"
 
 scan:
   scanners: ["mcp", "model", "prompt", "rag", "registry"]
-  exclude_paths: ["node_modules", ".git", "__pycache__"]
 
 risk:
   fail_threshold: 50.0
@@ -180,7 +179,7 @@ output:
   default_format: "json"
 ```
 
-Policy files are discovered by searching the project directory and its parents, so a monorepo can have one policy at the root.
+Policy files are discovered by searching the project directory and its parents. Not every field in the policy schema is enforced by every command; verify behavior against the implementation before relying on it.
 
 ## AIBOM Diff
 
@@ -196,15 +195,15 @@ The `symbote diff` command compares two AIBOM snapshots and detects:
 ## Output Formats
 
 - **Native JSON** — Full SymBiote schema with all agent-native fields
-- **CycloneDX 1.7** — Standard SBOM with `symbote:` property extensions
-- **SPDX 3.0** — JSON-LD with AI/Dataset profiles and `symbote:` extensions
+- **CycloneDX 1.7** — Experimental projection with `symbote:` properties; validate generated documents against the official schema before use.
+- **SPDX 3.0** — Experimental JSON-LD projection; standards and profile conformance have not been established.
 - **SARIF 2.1.0** — GitHub Security tab integration for risk findings
 
 ## Architecture
 
 ```
 src/symbote/
-  core/        — Pydantic v2 domain models, enums, AIBOM container, RFC 8785 JCS hashing
+  core/        — Pydantic v2 domain models, enums, AIBOM container, canonicalization
   scanners/    — Component discovery (MCP, model, prompt, RAG, registry)
   generators/  — Output format generators (native, CycloneDX 1.7, SPDX 3.0, SARIF 2.1.0)
   validators/  — Completeness, integrity, and risk scoring
