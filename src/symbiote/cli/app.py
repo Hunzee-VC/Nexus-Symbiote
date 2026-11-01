@@ -12,7 +12,6 @@ from rich.console import Console
 
 from symbiote import __version__
 from symbiote.cli import exit_codes
-from symbiote.cli.incident import incident_app
 
 app = typer.Typer(
     name="symbiote",
@@ -26,7 +25,6 @@ digest_app = typer.Typer(help="Compute digests exactly as the BOM does (spec/dig
 merkle_app = typer.Typer(help="Merkle commitment: verify documents and produce inclusion proofs.")
 attest_app = typer.Typer(help="Build and sign in-toto statements (DSSE).")
 allowlist_app = typer.Typer(help="Enforcement exports for tool gateways and policy engines.")
-app.add_typer(incident_app, name="incident")
 app.add_typer(schema_app, name="schema")
 app.add_typer(allowlist_app, name="allowlist")
 app.add_typer(digest_app, name="digest")
