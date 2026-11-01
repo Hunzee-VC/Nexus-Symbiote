@@ -6,8 +6,8 @@ import json
 
 import pytest
 
-from symbote.core.aibom import AIBOM, DependencyEdge
-from symbote.core.enums import (
+from symbiote.core.aibom import AIBOM, DependencyEdge
+from symbiote.core.enums import (
     SERIALIZATION_FORMAT_SAFETY,
     AutonomyLevel,
     CapabilityClass,
@@ -16,14 +16,14 @@ from symbote.core.enums import (
     SerializationSafety,
     TrustTier,
 )
-from symbote.core.hashing import (
+from symbiote.core.hashing import (
     canonical_json,
     extract_version_pin,
     hash_bytes,
     hash_canonical,
     hash_tool_definition,
 )
-from symbote.core.models import (
+from symbiote.core.models import (
     AgentComponent,
     AIBOMMetadata,
     AuthorizationRecord,
@@ -132,7 +132,7 @@ class TestModels:
     def test_metadata_defaults(self):
         meta = AIBOMMetadata()
         assert meta.spec_version == "1.0.0"
-        assert meta.tool_name == "symbote"
+        assert meta.tool_name == "symbiote"
 
     def test_model_roundtrip(self):
         agent = AgentComponent(
@@ -274,7 +274,7 @@ class TestAIBOM:
         bom.add_component(ToolComponent(bom_ref="tool:x", name="x"))
         json_str = bom.to_json()
         data = json.loads(json_str)
-        assert data["metadata"]["tool_name"] == "symbote"
+        assert data["metadata"]["tool_name"] == "symbiote"
         assert len(data["components"]) == 1
 
     def test_save_and_load(self, tmp_path):

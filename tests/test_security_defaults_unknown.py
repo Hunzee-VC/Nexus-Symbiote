@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from symbote.core.enums import ExecutionIsolation, HumanInTheLoop
-from symbote.core.models import (
+from symbiote.core.enums import ExecutionIsolation, HumanInTheLoop
+from symbiote.core.models import (
     AgentComponent,
     AuthorizationRecord,
     CapabilityDeclaration,
@@ -13,7 +13,7 @@ from symbote.core.models import (
     ModelComponent,
     RegistryEntryComponent,
 )
-from symbote.scanners.model import ModelScanner
+from symbiote.scanners.model import ModelScanner
 
 
 def test_missing_security_configuration_is_unknown():

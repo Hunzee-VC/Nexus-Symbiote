@@ -1,10 +1,10 @@
 import pytest
 from click.testing import CliRunner
 
-from symbote.cli import SCANNER_REGISTRY, main
-from symbote.core.aibom import AIBOM
-from symbote.core.models import CompletenessClaim, ToolComponent
-from symbote.validators.completeness import CompletenessValidator
+from symbiote.cli import SCANNER_REGISTRY, main
+from symbiote.core.aibom import AIBOM
+from symbiote.core.models import CompletenessClaim, ToolComponent
+from symbiote.validators.completeness import CompletenessValidator
 
 
 def test_failed_collector_produces_partial_output_and_nonzero(tmp_path, monkeypatch):
@@ -50,7 +50,7 @@ def test_component_collision_is_rejected_on_add_and_import():
 
 def test_policy_with_typo_or_invalid_yaml_does_not_fall_back(tmp_path):
     output = tmp_path / "bom.json"
-    (tmp_path / ".symbote.yaml").write_text("scan:\n  scaners: [mcp]\n")
+    (tmp_path / ".symbiote.yaml").write_text("scan:\n  scaners: [mcp]\n")
     result = CliRunner().invoke(main, ["scan", str(tmp_path), "-o", str(output)])
     assert result.exit_code != 0
     assert not output.exists()

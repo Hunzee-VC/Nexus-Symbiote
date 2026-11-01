@@ -27,31 +27,31 @@ pip install -e ".[dev]"
 
 ```bash
 # Initialize a policy config
-symbote init
+symbiote init
 
 # Scan a project and generate an AIBOM
-symbote scan /path/to/agent-project -o aibom.json
+symbiote scan /path/to/agent-project -o aibom.json
 
 # Generate CycloneDX 1.7 output
-symbote scan . -f cyclonedx -o aibom.cdx.json
+symbiote scan . -f cyclonedx -o aibom.cdx.json
 
 # Generate SPDX 3.0 output
-symbote scan . -f spdx -o aibom.spdx.json
+symbiote scan . -f spdx -o aibom.spdx.json
 
 # Generate SARIF for GitHub Security tab
-symbote scan . -f sarif -o results.sarif
+symbiote scan . -f sarif -o results.sarif
 
 # Validate an existing AIBOM
-symbote validate aibom.json --project /path/to/project
+symbiote validate aibom.json --project /path/to/project
 
 # Score supply chain risks
-symbote risk aibom.json
+symbiote risk aibom.json
 
 # Compare two AIBOM snapshots
-symbote diff old-aibom.json new-aibom.json
+symbiote diff old-aibom.json new-aibom.json
 
 # Print a summary
-symbote summary aibom.json
+symbiote summary aibom.json
 ```
 
 ## What It Scans
@@ -131,16 +131,16 @@ The current action is experimental: it installs an unpinned package and does not
 
 ```yaml
 - name: Generate AIBOM
-  run: symbote scan . -o aibom.json
+  run: symbiote scan . -o aibom.json
 
 - name: SARIF for Security tab
-  run: symbote scan . -f sarif -o results.sarif
+  run: symbiote scan . -f sarif -o results.sarif
 
 - name: Risk gate
-  run: symbote risk aibom.json --threshold 50.0
+  run: symbiote risk aibom.json --threshold 50.0
 
 - name: Drift detection
-  run: symbote diff aibom-baseline.json <(symbote scan . 2>/dev/null) --json-output
+  run: symbiote diff aibom-baseline.json <(symbiote scan . 2>/dev/null) --json-output
 ```
 
 ### Pre-commit Hook
@@ -151,20 +151,20 @@ repos:
   - repo: https://github.com/aisecnomad/SymBiote
     rev: main
     hooks:
-      - id: symbote-scan
-      - id: symbote-risk
+      - id: symbiote-scan
+      - id: symbiote-risk
 ```
 
 ## Policy Configuration
 
-Create a `.symbote.yaml` to customize scan behavior, risk thresholds, and output format:
+Create a `.symbiote.yaml` to customize scan behavior, risk thresholds, and output format:
 
 ```bash
-symbote init
+symbiote init
 ```
 
 ```yaml
-# .symbote.yaml
+# .symbiote.yaml
 version: "1.0"
 
 scan:
@@ -183,7 +183,7 @@ Policy files are discovered by searching the project directory and its parents. 
 
 ## AIBOM Diff
 
-The `symbote diff` command compares two AIBOM snapshots and detects:
+The `symbiote diff` command compares two AIBOM snapshots and detects:
 
 - New/removed components in the supply chain
 - Trust tier downgrades
@@ -195,14 +195,14 @@ The `symbote diff` command compares two AIBOM snapshots and detects:
 ## Output Formats
 
 - **Native JSON** — Full SymBiote schema with all agent-native fields
-- **CycloneDX 1.7** — Experimental projection with `symbote:` properties; validate generated documents against the official schema before use.
+- **CycloneDX 1.7** — Experimental projection with `symbiote:` properties; validate generated documents against the official schema before use.
 - **SPDX 3.0** — Experimental JSON-LD projection; standards and profile conformance have not been established.
 - **SARIF 2.1.0** — GitHub Security tab integration for risk findings
 
 ## Architecture
 
 ```
-src/symbote/
+src/symbiote/
   core/        — Pydantic v2 domain models, enums, AIBOM container, canonicalization
   scanners/    — Component discovery (MCP, model, prompt, RAG, registry)
   generators/  — Output format generators (native, CycloneDX 1.7, SPDX 3.0, SARIF 2.1.0)
@@ -229,7 +229,7 @@ See [`schemas/examples/minimal-aibom.json`](schemas/examples/minimal-aibom.json)
 
 ## JSON Schema
 
-The AIBOM schema is defined in [`schemas/symbote-aibom-1.0.schema.json`](schemas/symbote-aibom-1.0.schema.json).
+The AIBOM schema is defined in [`schemas/symbiote-aibom-1.0.schema.json`](schemas/symbiote-aibom-1.0.schema.json).
 
 ## License
 

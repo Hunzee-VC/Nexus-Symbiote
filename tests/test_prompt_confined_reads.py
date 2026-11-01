@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from symbote.scanners.prompt import PromptScanner
+from symbiote.scanners.prompt import PromptScanner
 
 
 def test_prompt_symlink_reports_failure_without_hashing_external_content(tmp_path: Path) -> None:

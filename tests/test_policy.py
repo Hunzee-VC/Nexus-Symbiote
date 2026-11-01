@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from symbote.policy import Policy, default_policy, load_policy
+from symbiote.policy import Policy, default_policy, load_policy
 
 
 class TestDefaultPolicy:
@@ -31,7 +31,7 @@ class TestLoadPolicy:
         content = (
             'version: "1.0"\nscan:\n  scanners: ["mcp", "prompt"]\nrisk:\n  fail_threshold: 75.0\n'
         )
-        (tmp_path / ".symbote.yaml").write_text(content)
+        (tmp_path / ".symbiote.yaml").write_text(content)
         policy = load_policy(tmp_path)
         assert policy is not None
         assert policy.scan.scanners == ["mcp", "prompt"]
@@ -39,7 +39,7 @@ class TestLoadPolicy:
 
     def test_load_yml_extension(self, tmp_path: Path) -> None:
         content = 'version: "1.0"\nrisk:\n  fail_threshold: 30.0\n'
-        (tmp_path / ".symbote.yml").write_text(content)
+        (tmp_path / ".symbiote.yml").write_text(content)
         policy = load_policy(tmp_path)
         assert policy is not None
         assert policy.risk.fail_threshold == 30.0
@@ -48,18 +48,18 @@ class TestLoadPolicy:
         assert load_policy(tmp_path) is None
 
     def test_load_invalid_yaml_returns_none(self, tmp_path: Path) -> None:
-        (tmp_path / ".symbote.yaml").write_text("{{invalid yaml:::")
+        (tmp_path / ".symbiote.yaml").write_text("{{invalid yaml:::")
         with pytest.raises(ValueError):
             load_policy(tmp_path)
 
     def test_load_empty_file_returns_none(self, tmp_path: Path) -> None:
-        (tmp_path / ".symbote.yaml").write_text("")
+        (tmp_path / ".symbiote.yaml").write_text("")
         with pytest.raises(ValueError):
             load_policy(tmp_path)
 
     def test_load_searches_parent_dirs(self, tmp_path: Path) -> None:
         content = 'version: "2.0"\n'
-        (tmp_path / ".symbote.yaml").write_text(content)
+        (tmp_path / ".symbiote.yaml").write_text(content)
         subdir = tmp_path / "subproject" / "src"
         subdir.mkdir(parents=True)
         policy = load_policy(subdir)
@@ -67,7 +67,7 @@ class TestLoadPolicy:
         assert policy.version == "2.0"
 
     def test_defaults_for_missing_sections(self, tmp_path: Path) -> None:
-        (tmp_path / ".symbote.yaml").write_text('version: "1.0"\n')
+        (tmp_path / ".symbiote.yaml").write_text('version: "1.0"\n')
         policy = load_policy(tmp_path)
         assert policy is not None
         assert len(policy.scan.scanners) == 5
@@ -82,7 +82,7 @@ class TestPolicyModel:
         assert policy.scan.scanners == ["mcp", "model", "prompt", "rag", "registry"]
 
     def test_custom_risk_config(self) -> None:
-        from symbote.policy import RiskPolicy
+        from symbiote.policy import RiskPolicy
 
         risk = RiskPolicy(fail_threshold=80.0, ignore_categories=["signing_status"])
         assert risk.fail_threshold == 80.0

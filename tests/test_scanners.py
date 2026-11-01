@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 
-from symbote.core.enums import ComponentType, RiskSeverity, SerializationSafety
-from symbote.scanners.mcp import MCPScanner
-from symbote.scanners.model import ModelScanner
-from symbote.scanners.prompt import PromptScanner
-from symbote.scanners.rag import RAGScanner
-from symbote.scanners.registry import RegistryScanner
+from symbiote.core.enums import ComponentType, RiskSeverity, SerializationSafety
+from symbiote.scanners.mcp import MCPScanner
+from symbiote.scanners.model import ModelScanner
+from symbiote.scanners.prompt import PromptScanner
+from symbiote.scanners.rag import RAGScanner
+from symbiote.scanners.registry import RegistryScanner
 
 
 class TestMCPScanner:
@@ -366,7 +366,7 @@ class TestMCPScannerAdvanced:
         result = scanner.scan(tmp_path)
         tools = [c for c in result.components if c.component_type == ComponentType.TOOL]
         assert len(tools) == 2
-        from symbote.core.enums import CapabilityClass
+        from symbiote.core.enums import CapabilityClass
 
         fetch = next(t for t in tools if t.name == "fetch_url")
         assert CapabilityClass.NETWORK in fetch.capabilities.capabilities
