@@ -15,9 +15,8 @@ from symbote.core.enums import (
     SerializationSafety,
     TrustTier,
 )
-from symbote.core.hashing import hash_file
 from symbote.core.models import ModelComponent, RiskAssessment
-from symbote.scanners.base import Scanner, ScanResult
+from symbote.scanners.base import Scanner, ScanResult, hash_regular_file
 
 MODEL_EXTENSIONS = {
     ".safetensors": ("safetensors", "safe-tensors"),
@@ -49,8 +48,6 @@ SIGNING_FILES = [
     "model.intoto.jsonl",
 ]
 
-MAX_HASH_SIZE = 5 * 1024 * 1024 * 1024
-
 
 class ModelScanner(Scanner):
     name = "model"
@@ -65,7 +62,7 @@ class ModelScanner(Scanner):
 
         for model_dir in model_dirs:
             result.surfaces_scanned.append(str(model_dir))
-            comps = self._scan_model_directory(model_dir)
+            comps = self._scan_model_directory(model_dir, result)
             result.components.extend(comps)
 
         return result
@@ -79,18 +76,16 @@ class ModelScanner(Scanner):
                 dirs.add(f.parent)
         return sorted(dirs)
 
-    def _scan_model_directory(self, model_dir: Path) -> list[ModelComponent]:
+    def _scan_model_directory(self, model_dir: Path, result: ScanResult) -> list[ModelComponent]:
         components: list[ModelComponent] = []
         model_name = model_dir.name
 
-        config = self._read_model_config(model_dir)
+        config = self._read_model_config(model_dir, result)
         signing_status, signing_identity = self._check_signing(model_dir)
-        tokenizer_hash = self._hash_tokenizer(model_dir)
-        chat_template_hash = self._hash_chat_template(model_dir, config)
+        tokenizer_hash = self._hash_tokenizer(model_dir, result)
+        chat_template_hash = self._hash_chat_template(model_dir, config, result)
 
         for path in sorted(model_dir.iterdir()):
-            if not path.is_file():
-                continue
             ext = path.suffix.lower()
             if ext not in MODEL_EXTENSIONS:
                 continue
@@ -99,11 +94,10 @@ class ModelScanner(Scanner):
             safety = SERIALIZATION_FORMAT_SAFETY.get(fmt_key, SerializationSafety.UNKNOWN)
 
             weight_hash = None
-            if path.stat().st_size <= MAX_HASH_SIZE:
-                try:
-                    weight_hash = hash_file(path)
-                except OSError:
-                    pass
+            try:
+                weight_hash = hash_regular_file(path)
+            except OSError:
+                result.scan_failures.append(f"Failed to hash {path}")
 
             risks = self._assess_model_risks(path, fmt_key, safety, signing_status, config)
 
@@ -146,13 +140,14 @@ class ModelScanner(Scanner):
 
         return components
 
-    def _read_model_config(self, model_dir: Path) -> dict[str, Any] | None:
+    def _read_model_config(self, model_dir: Path, result: ScanResult) -> dict[str, Any] | None:
         for cfg_name in MODEL_CONFIG_FILES:
             cfg_path = model_dir / cfg_name
-            if cfg_path.exists():
+            if cfg_path.exists() or cfg_path.is_symlink():
                 data = self._safe_read_json(cfg_path)
                 if isinstance(data, dict):
                     return data
+                result.scan_failures.append(f"Failed to parse {cfg_path}")
         return None
 
     def _check_signing(self, model_dir: Path) -> tuple[str, str | None]:
@@ -164,17 +159,19 @@ class ModelScanner(Scanner):
         # Search is directory-local; it cannot prove that no signature exists.
         return "signature-not-found", None
 
-    def _hash_tokenizer(self, model_dir: Path) -> str | None:
+    def _hash_tokenizer(self, model_dir: Path, result: ScanResult) -> str | None:
         for name in ("tokenizer.json", "tokenizer.model", "spiece.model"):
             path = model_dir / name
-            if path.exists():
+            if path.exists() or path.is_symlink():
                 try:
-                    return hash_file(path)
+                    return hash_regular_file(path)
                 except OSError:
-                    pass
+                    result.scan_failures.append(f"Failed to hash {path}")
         return None
 
-    def _hash_chat_template(self, model_dir: Path, config: dict[str, Any] | None) -> str | None:
+    def _hash_chat_template(
+        self, model_dir: Path, config: dict[str, Any] | None, result: ScanResult
+    ) -> str | None:
         if config and "chat_template" in config:
             from symbote.core.hashing import hash_bytes
 
@@ -182,11 +179,11 @@ class ModelScanner(Scanner):
             if isinstance(template, str):
                 return hash_bytes(template.encode("utf-8"))
         jinja_path = model_dir / "chat_template.jinja2"
-        if jinja_path.exists():
+        if jinja_path.exists() or jinja_path.is_symlink():
             try:
-                return hash_file(jinja_path)
+                return hash_regular_file(jinja_path)
             except OSError:
-                pass
+                result.scan_failures.append(f"Failed to hash {jinja_path}")
         return None
 
     def _infer_model_type(self, config: dict[str, Any] | None, path: Path) -> str:

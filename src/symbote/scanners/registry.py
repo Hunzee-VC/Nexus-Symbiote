@@ -14,7 +14,7 @@ from pathlib import Path
 
 from symbote.core.enums import RiskSeverity, TrustTier
 from symbote.core.models import RegistryEntryComponent, RiskAssessment
-from symbote.scanners.base import Scanner, ScanResult
+from symbote.scanners.base import Scanner, ScanResult, read_regular_text
 
 AI_PACKAGE_PATTERNS = [
     re.compile(r"(?:^|/)@modelcontextprotocol/", re.I),
@@ -41,7 +41,7 @@ class RegistryScanner(Scanner):
         docker_comps = self._scan_docker(project_root, result)
         result.components.extend(docker_comps)
 
-        if not result.components:
+        if not result.components and not result.scan_failures:
             result.surfaces_excluded.append("registry (no AI-related dependencies found)")
 
         return result
@@ -49,12 +49,13 @@ class RegistryScanner(Scanner):
     def _scan_npm(self, root: Path, result: ScanResult) -> list[RegistryEntryComponent]:
         components: list[RegistryEntryComponent] = []
         pkg_path = root / "package.json"
-        if not pkg_path.exists():
+        if not pkg_path.exists() and not pkg_path.is_symlink():
             return components
 
         result.surfaces_scanned.append(str(pkg_path))
         data = self._safe_read_json(pkg_path)
         if not isinstance(data, dict):
+            result.scan_failures.append(f"Failed to parse {pkg_path}")
             return components
 
         all_deps: dict[str, str] = {}
@@ -99,12 +100,12 @@ class RegistryScanner(Scanner):
 
         for req_file in ["requirements.txt", "requirements-dev.txt", "requirements-ml.txt"]:
             req_path = root / req_file
-            if not req_path.exists():
+            if not req_path.exists() and not req_path.is_symlink():
                 continue
             result.surfaces_scanned.append(str(req_path))
             try:
-                lines = req_path.read_text(encoding="utf-8").splitlines()
-            except OSError:
+                lines = read_regular_text(req_path).splitlines()
+            except (OSError, UnicodeError):
                 result.scan_failures.append(f"Failed to read {req_path}")
                 continue
 
@@ -147,10 +148,10 @@ class RegistryScanner(Scanner):
                 )
 
         pyproject = root / "pyproject.toml"
-        if pyproject.exists():
+        if pyproject.exists() or pyproject.is_symlink():
             result.surfaces_scanned.append(str(pyproject))
             try:
-                content = pyproject.read_text(encoding="utf-8")
+                content = read_regular_text(pyproject)
                 deps_section = re.findall(r'^\s*"?([a-zA-Z0-9_.-]+)"?\s*[><=!~]', content, re.M)
                 for pkg_name in deps_section:
                     if self._is_ai_package(pkg_name):
@@ -164,8 +165,8 @@ class RegistryScanner(Scanner):
                                     trust_tier=TrustTier.THIRD_PARTY_UNSIGNED,
                                 )
                             )
-            except OSError:
-                pass
+            except (OSError, UnicodeError):
+                result.scan_failures.append(f"Failed to read {pyproject}")
 
         return components
 
@@ -179,12 +180,13 @@ class RegistryScanner(Scanner):
             "docker-compose.yaml",
         ]:
             path = root / dockerfile_name
-            if not path.exists():
+            if not path.exists() and not path.is_symlink():
                 continue
             result.surfaces_scanned.append(str(path))
             try:
-                content = path.read_text(encoding="utf-8")
-            except OSError:
+                content = read_regular_text(path)
+            except (OSError, UnicodeError):
+                result.scan_failures.append(f"Failed to read {path}")
                 continue
 
             from_images = re.findall(r"(?:FROM|image:\s*)\s*([^\s]+)", content)
