@@ -64,9 +64,21 @@ symbiote validate agentbom.json
 # Recompute the salted Merkle root of a (possibly redacted) document
 symbiote merkle verify agentbom.json
 
-# Sign the snapshot as an in-toto statement (DSSE, ECDSA P-256 or Ed25519) and verify the binding
-symbiote attest snapshot agentbom.json --key key.pem -o snapshot.dsse.json
-symbiote verify snapshot.dsse.json --public-key key.pub --companion agentbom.json
+# Policy, conformance and completeness over the companion document (SARIF for code scanning)
+symbiote policy check out/agentbom.json --sarif out/agentbom.sarif
+symbiote conformance out/agentbom.json --level standard
+symbiote score out/agentbom.json
+
+# The diff is the finding: compare any two snapshots (declared vs observed, approved vs deployed)
+symbiote diff approved/agentbom.json observed/agentbom.json --fail-on-change tool-definition-changed
+
+# Sign the snapshot as an in-toto statement (DSSE key-based or Sigstore keyless) and verify the binding
+symbiote attest snapshot out/agentbom.json --key key.pem -o snapshot.dsse.json
+symbiote verify snapshot.dsse.json --public-key key.pub --companion out/agentbom.json --store .symbiote/store
+
+# Export the Gateway Allowlist Bundle a tool gateway enforces, and check served tools against it
+symbiote allowlist export out/agentbom.json --format gab -o gab.json
+symbiote allowlist check gab.json server:claude-code-github served-tools.json
 ```
 
 ```python
@@ -89,10 +101,10 @@ from symbiote.snapshot import finalize, new_document, redact_entities, verify_do
 | SPDX 3.0.1 JSON-LD exporter (native classes + typed extensions + `CdxPropertiesExtension` mirror, validated against the official schema and round-tripped through spdx-python-model) | ✅ exporter · 🚧 importer |
 | Collectors: MCP client configs (Claude Code, Claude Desktop, Cursor, VS Code, Windsurf, Codex, Gemini CLI) | ✅ |
 | Collectors: skills, instructions, frameworks, models, A2A cards, registry, live `tools/list`, OTel traces, k8s-aibom import | 🚧 WP9 / WP10 |
-| Policy checks (`SYM-*`), computed flags, conformance levels, completeness score, SARIF | 🚧 WP12 |
-| Snapshot diff and deltas, anti-rollback state | 🚧 WP5 |
+| Policy checks (`SYM-*`), computed flags (lethal trifecta, unpinned tools, floating aliases, unsafe serialization…), conformance levels, completeness score, SARIF | ✅ |
+| Snapshot diff and typed deltas; chain store with monotone serials, prev links and anti-rollback | ✅ |
 | Sigstore keyless signing with identity-constraint policies; Gateway Allowlist Bundle + reference served-tool check | ✅ |
-| Trust-status lists, incident index | 🚧 WP11 / WP13 |
+| Trust-status lists (CLI), incident index, CycloneDX/SPDX importers, live MCP and OTel collectors | 🚧 |
 | `symbiote scan .` zero-config: companion + CycloneDX 1.7 + SPDX 3.0.1 from a repository | ✅ (coverage grows with each collector) |
 
 Progress and ownership: [`docs/development/work-packages.md`](docs/development/work-packages.md).

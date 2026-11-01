@@ -83,8 +83,22 @@ The statement is in-toto v1 with predicate type
 `https://aisecnomad.github.io/symbiote/attestation/agentbom-snapshot/v1`; its subject is the Merkle root, so any
 change to any entity invalidates it, while a redacted copy of the document still verifies.
 
-## What comes next
+## Scan a repository end to end
 
-`symbiote scan .` (zero-config collection from MCP client configs, skills, instruction files, framework
-configs, models and SBOMs), CycloneDX 1.7 and SPDX 3.0.1 export, policy checks and conformance levels are being
-built in parallel work packages — see the status table in the README.
+```bash
+symbiote scan examples/triage-agent -o out/ --store .symbiote/store
+```
+
+writes `out/agentbom.json` (companion), `out/agentbom.cdx.json` (CycloneDX 1.7), `out/agentbom.spdx.json`
+(SPDX 3.0.1) and the loss reports, runs the built-in policy checks (derived flags and findings are recorded in
+the document), and allocates the snapshot serial from the chain store so a later rollback is detected. Then:
+
+```bash
+symbiote policy check out/agentbom.json --sarif out/agentbom.sarif   # exit 1 on findings at or above --fail-on
+symbiote conformance out/agentbom.json --level standard                # pass / fail / unknown per requirement
+symbiote score out/agentbom.json                                       # completeness, never a trust score
+symbiote diff out/agentbom.json later/agentbom.json --fail-on-change tool-definition-changed
+```
+
+Coverage is honest: surfaces no collector examined are reported `not-attempted`, and conformance treats them
+as unknown rather than as clean.
