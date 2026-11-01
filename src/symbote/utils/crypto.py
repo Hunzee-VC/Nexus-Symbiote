@@ -86,6 +86,12 @@ def verify_sigstore_bundle(
     indicating whether the bundle's signature is valid and the signing identity
     matches expectations.
     """
+    if not expected_identity or not expected_issuer:
+        return VerificationResult(
+            verified=False,
+            error="A trusted signer identity and OIDC issuer are required for verification.",
+        )
+
     try:
         from sigstore.models import Bundle
         from sigstore.verify import Verifier
@@ -112,28 +118,20 @@ def verify_sigstore_bundle(
             error=f"Failed to initialize Sigstore verifier: {e}",
         )
 
-    identity_policy = sigstore_policy.UnsafeNoOp()
-    if expected_identity and expected_issuer:
-        identity_policy = sigstore_policy.Identity(  # type: ignore[assignment]
-            identity=expected_identity,
-            issuer=expected_issuer,
-        )
+    identity_policy = sigstore_policy.Identity(
+        identity=expected_identity,
+        issuer=expected_issuer,
+    )
 
     try:
         artifact_data = artifact_path.read_bytes()
-        result = verifier.verify(artifact_data, bundle, identity_policy)  # type: ignore[attr-defined]
-        signer_identity = None
-        signer_issuer = None
-        if hasattr(result, "certificate") and result.certificate:
-            cert = result.certificate
-            if hasattr(cert, "san") and cert.san:
-                signer_identity = str(cert.san)
-            if hasattr(cert, "issuer"):
-                signer_issuer = str(cert.issuer)
+        # In sigstore-python 3.x verify_artifact returns None on success and
+        # raises on verification failure. Identity policy binds both fields.
+        verifier.verify_artifact(artifact_data, bundle, identity_policy)
         return VerificationResult(
             verified=True,
-            identity=signer_identity,
-            issuer=signer_issuer,
+            identity=expected_identity,
+            issuer=expected_issuer,
             details={"bundle_path": str(bundle_path)},
         )
     except Exception as e:

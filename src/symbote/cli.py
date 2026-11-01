@@ -225,7 +225,7 @@ def risk(aibom_path: str, threshold: float | None, json_output: bool) -> None:
         "moderate": "yellow",
         "clean": "green",
     }
-    color = level_colors[report.risk_level]
+    color = level_colors.get(report.risk_level, "yellow")
     score = report.overall_score
     level = report.risk_level
     console.print(f"[bold]Risk Score:[/] [{color}]{score:.1f}[/] ({level})")
