@@ -282,6 +282,75 @@ def import_shadowscan(report_path: str, output: str, output_format: str) -> None
         raise click.ClickException("ShadowScan source report is incomplete; the BOM is partial")
 
 
+@main.command("verify-artifact")
+@click.argument("artifact_path")
+@click.option(
+    "--project",
+    required=True,
+    type=click.Path(exists=True, file_okay=False),
+    help="Trusted project root",
+)
+@click.option(
+    "--sha256", "expected_digest", required=True, help="Expected sha256:<hex> from a trusted source"
+)
+@click.option(
+    "--bundle", type=click.Path(exists=True, dir_okay=False), help="Optional Sigstore bundle"
+)
+@click.option("--signer-identity", help="Expected Sigstore signing identity")
+@click.option("--issuer", help="Expected Sigstore OIDC issuer")
+def verify_artifact(
+    artifact_path: str,
+    project: str,
+    expected_digest: str,
+    bundle: str | None,
+    signer_identity: str | None,
+    issuer: str | None,
+) -> None:
+    """Verify a local artifact's digest and optionally its Sigstore bundle."""
+    import hmac
+    import re
+
+    from nexus_symbiote.scanners.base import read_regular_text
+    from nexus_symbiote.utils.confined import hash_confined_file
+    from nexus_symbiote.utils.crypto import verify_sigstore_digest
+
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", expected_digest):
+        raise click.ClickException(
+            "Expected SHA-256 must be sha256:<64 lowercase hexadecimal characters>"
+        )
+    if bool(bundle) != bool(signer_identity and issuer) or (
+        not bundle and (signer_identity or issuer)
+    ):
+        raise click.ClickException("Bundle verification requires both signer identity and issuer")
+    try:
+        digest = hash_confined_file(Path(project), artifact_path)
+    except OSError as exc:
+        raise click.ClickException(
+            "Cannot safely hash the artifact within the project root"
+        ) from exc
+    if not hmac.compare_digest(digest, expected_digest):
+        raise click.ClickException("Artifact digest mismatch")
+    if bundle:
+        try:
+            bundle_bytes = read_regular_text(Path(bundle)).encode("utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise click.ClickException("Cannot safely read the Sigstore bundle") from exc
+        if signer_identity is None or issuer is None:
+            raise click.ClickException(
+                "Bundle verification requires both signer identity and issuer"
+            )
+        verified = verify_sigstore_digest(digest, bundle_bytes, signer_identity, issuer)
+        if not verified.verified:
+            raise click.ClickException("Sigstore signature or signer policy verification failed")
+        click.echo(
+            "Artifact digest and Sigstore signer policy verified. This does not establish artifact safety or a deployment binding."
+        )
+    else:
+        click.echo(
+            "Artifact bytes match the expected digest. Signer, artifact safety, and deployment binding were not verified."
+        )
+
+
 @main.command("verify-discovery")
 @click.argument("aibom_path", type=click.Path(exists=True))
 @click.argument("report_path", type=click.Path(exists=True))

@@ -9,6 +9,7 @@ shadowscan code /path/to/repository --format json -o shadowscan.json
 nexus-symbiote import-shadowscan shadowscan.json -o agentbom.json
 nexus-symbiote import-shadowscan shadowscan.json --format cyclonedx -o agentbom.cdx.json
 nexus-symbiote verify-discovery agentbom.json shadowscan.json
+nexus-symbiote verify-artifact model.safetensors --project /path/to/repository --sha256 "$TRUSTED_SHA256"
 nexus-symbiote validate agentbom.json --project /path/to/repository
 ```
 
@@ -20,6 +21,11 @@ separate operation; this importer does not perform it. Do not infer production
 activity, effective access or authorization from a finding or inventory mismatch.
 `verify-discovery` compares exact report bytes with the native BOM's recorded
 digest. It does not authenticate either the BOM or the report.
+`verify-artifact` hashes a selected local artifact within the project root against
+an operator-supplied expected digest. To verify a Sigstore bundle as well, pass
+`--bundle`, `--signer-identity`, and `--issuer`. The expected digest and signer
+policy must come from a trusted source. This verifies the selected artifact, not
+its association with a discovery finding, deployment, or safety.
 
 The importer maps native `agent`, `mcp-server` and `local-model` findings. It
 also accepts ShadowScan's CycloneDX 1.6/1.7 components and services, marking the

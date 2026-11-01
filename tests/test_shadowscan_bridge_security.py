@@ -129,6 +129,58 @@ def test_verify_discovery_rejects_missing_digest(tmp_path):
     assert result.exit_code != 0 and "valid ShadowScan report digest" in result.output
 
 
+def test_verify_artifact_checks_confined_bytes(tmp_path):
+    artifact = tmp_path / "model.bin"
+    artifact.write_bytes(b"test artifact")
+    digest = "sha256:" + hashlib.sha256(artifact.read_bytes()).hexdigest()
+    runner = CliRunner()
+    result = runner.invoke(
+        main, ["verify-artifact", "model.bin", "--project", str(tmp_path), "--sha256", digest]
+    )
+    assert result.exit_code == 0
+    assert "Signer, artifact safety, and deployment binding were not verified" in result.output
+    artifact.write_bytes(b"changed")
+    result = runner.invoke(
+        main, ["verify-artifact", "model.bin", "--project", str(tmp_path), "--sha256", digest]
+    )
+    assert result.exit_code != 0 and "digest mismatch" in result.output
+    result = runner.invoke(
+        main, ["verify-artifact", "../outside", "--project", str(tmp_path), "--sha256", digest]
+    )
+    assert result.exit_code != 0
+
+
+def test_verify_artifact_signature_policy_is_required(tmp_path, monkeypatch):
+    from nexus_symbiote.utils.crypto import VerificationResult
+
+    artifact, bundle = tmp_path / "model.bin", tmp_path / "bundle.json"
+    artifact.write_bytes(b"artifact")
+    bundle.write_text("{}")
+    digest = "sha256:" + hashlib.sha256(artifact.read_bytes()).hexdigest()
+    args = [
+        "verify-artifact",
+        "model.bin",
+        "--project",
+        str(tmp_path),
+        "--sha256",
+        digest,
+        "--bundle",
+        str(bundle),
+    ]
+    runner = CliRunner()
+    assert runner.invoke(main, args).exit_code != 0
+    calls = []
+
+    def verify(actual_digest, content, identity, issuer):
+        calls.append((actual_digest, content, identity, issuer))
+        return VerificationResult(True)
+
+    monkeypatch.setattr("nexus_symbiote.utils.crypto.verify_sigstore_digest", verify)
+    result = runner.invoke(main, args + ["--signer-identity", "signer", "--issuer", "issuer"])
+    assert result.exit_code == 0 and calls == [(digest, b"{}", "signer", "issuer")]
+    assert "does not establish artifact safety" in result.output
+
+
 @pytest.mark.parametrize("fmt", ["spdx", "sarif"])
 def test_lossy_outputs_fail_closed(tmp_path, fmt):
     path, out = tmp_path / "report.json", tmp_path / "bom.json"
