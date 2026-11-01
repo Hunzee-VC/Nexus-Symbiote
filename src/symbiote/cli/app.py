@@ -12,6 +12,7 @@ from rich.console import Console
 
 from symbiote import __version__
 from symbiote.cli import exit_codes
+from symbiote.cli.admission import app as admission_app
 
 app = typer.Typer(
     name="symbiote",
@@ -27,6 +28,7 @@ attest_app = typer.Typer(help="Build and sign in-toto statements (DSSE).")
 allowlist_app = typer.Typer(help="Enforcement exports for tool gateways and policy engines.")
 app.add_typer(schema_app, name="schema")
 app.add_typer(allowlist_app, name="allowlist")
+app.add_typer(admission_app, name="admission")
 app.add_typer(digest_app, name="digest")
 app.add_typer(merkle_app, name="merkle")
 app.add_typer(attest_app, name="attest")
@@ -655,7 +657,7 @@ def allowlist_check(
     ],
     as_json: JsonFlag = False,
 ) -> None:
-    """Reference enforcement: decide allow/block/drop for served tools against a GAB."""
+    """Compare served descriptors to GAB pins. Use admission decide for call authorization."""
     from symbiote.enforce import check_served_toolset
 
     bundle = json.loads(gab.read_text(encoding="utf-8"))
