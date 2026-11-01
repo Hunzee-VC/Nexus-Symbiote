@@ -11,8 +11,10 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
+from pydantic import ValidationError
 from rich.console import Console
 from rich.table import Table
 
@@ -20,6 +22,9 @@ from nexus_symbiote import __version__
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import AssuranceLevel
 from nexus_symbiote.core.models import AIBOMMetadata, CompletenessClaim
+
+if TYPE_CHECKING:
+    from nexus_symbiote.policy import Policy
 
 console = Console(stderr=True)
 err_console = Console(stderr=True)
@@ -70,6 +75,28 @@ def _render_output(aibom: AIBOM, output_format: str) -> str:
     return aibom.to_json()
 
 
+def _resolve_policy(policy_path: str | None) -> Policy | None:
+    """Load policy from a TRUSTED location — an explicit --policy file, else a
+    search upward from the current working directory — never from the scanned
+    project or the BOM's own directory, which may be attacker-controlled (NS-06)."""
+    from nexus_symbiote.policy import load_policy, load_policy_file
+
+    try:
+        if policy_path:
+            return load_policy_file(Path(policy_path))
+        return load_policy(Path.cwd())
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
+def _load_bom(aibom_path: str) -> AIBOM:
+    """Load a native AIBOM, turning malformed/oversized input into a clean error (NS-16)."""
+    try:
+        return AIBOM.load(Path(aibom_path))
+    except (ValueError, OSError, ValidationError) as exc:
+        raise click.ClickException(f"{aibom_path}: not a valid AIBOM — {exc}") from exc
+
+
 @click.group()
 @click.version_option(version=__version__, prog_name="nexus-symbiote")
 def main() -> None:
@@ -91,13 +118,21 @@ def main() -> None:
     "--scanner",
     "scanners",
     multiple=True,
-    help="Specific scanners to run (default: all, or from .nexus-symbiote.yaml). Prefer 'shadowscan' for primary discovery.",
+    help="Specific scanners to run (default: all, or from policy). Prefer 'shadowscan' for primary discovery.",
+)
+@click.option(
+    "--policy",
+    "policy_path",
+    type=click.Path(),
+    default=None,
+    help="Policy file (trusted). Default: search upward from the current directory.",
 )
 def scan(
     project_path: str,
     output: str | None,
     output_format: str | None,
     scanners: tuple[str, ...],
+    policy_path: str | None,
 ) -> None:
     """Scan a project and generate an AIBOM.
 
@@ -109,10 +144,14 @@ def scan(
         err_console.print(f"[red]Error:[/] '{project_path}' is not a directory")
         sys.exit(1)
 
-    from nexus_symbiote.policy import load_policy
+    # Scan configuration (which scanners run, output format) may come from the
+    # project; it cannot weaken a gate (fewer scanners => partial coverage =>
+    # gate fails). Gating policy (risk/validate) is loaded from a trusted
+    # location instead — see _resolve_policy. (NS-06)
+    from nexus_symbiote.policy import load_policy, load_policy_file
 
     try:
-        policy = load_policy(root)
+        policy = load_policy_file(Path(policy_path)) if policy_path else load_policy(root)
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
 
@@ -134,7 +173,9 @@ def scan(
     surfaces_scanned: list[str] = []
     surfaces_excluded: list[str] = []
     scan_failures: list[str] = []
-    scanner_status: dict[str, str] = dict.fromkeys(all_scanners, "unknown")
+    # Only scanners that actually run get a status; a scanner that ran and found
+    # nothing is 'complete' coverage of an absent surface, not 'partial' (NS-02).
+    scanner_status: dict[str, str] = {}
 
     for name in selected:
         if name not in all_scanners:
@@ -153,13 +194,7 @@ def scan(
             surfaces_scanned.extend(result.surfaces_scanned)
             surfaces_excluded.extend(result.surfaces_excluded)
             scan_failures.extend(result.scan_failures)
-            scanner_status[name] = (
-                "failed"
-                if result.scan_failures
-                else "partial"
-                if result.surfaces_excluded
-                else "complete"
-            )
+            scanner_status[name] = "failed" if result.scan_failures else "complete"
             console.print(f"    Found [green]{len(result.components)}[/] components")
         except Exception as e:
             err_console.print(f"  [red]Scanner '{name}' failed:[/] {e}")
@@ -234,9 +269,17 @@ def import_shadowscan(report_path: str, output: str, output_format: str) -> None
     type=click.Path(exists=True),
     help="Project root for cross-validation",
 )
-def validate(aibom_path: str, project: str | None) -> None:
+@click.option(
+    "--policy",
+    "policy_path",
+    type=click.Path(),
+    default=None,
+    help="Policy file (trusted); enforces validate.require_* and minimum_assurance_level (NS-06).",
+)
+def validate(aibom_path: str, project: str | None, policy_path: str | None) -> None:
     """Validate an AIBOM for completeness and integrity."""
-    bom = AIBOM.load(Path(aibom_path))
+    bom = _load_bom(aibom_path)
+    policy = _resolve_policy(policy_path)
 
     from nexus_symbiote.validators.completeness import CompletenessValidator
     from nexus_symbiote.validators.integrity import IntegrityValidator
@@ -270,30 +313,63 @@ def validate(aibom_path: str, project: str | None) -> None:
         sev = ii.severity.upper()
         console.print(f"  [{color}]{sev}[/] [{ii.component_ref}] {ii.detail}")
 
-    if not c_report.is_complete or not i_report.is_valid:
+    # Enforce the validate policy (NS-06: these fields were previously parsed but ignored).
+    vpol = policy.validation if policy else None
+    failed = (vpol is None or vpol.require_completeness) and not c_report.is_complete
+    failed = failed or ((vpol is None or vpol.require_integrity) and not i_report.is_valid)
+    if vpol is not None:
+        order = {"declared": 0, "observed": 1, "verified": 2}
+        if order.get(c_report.assurance_level.value, 0) < order.get(
+            vpol.minimum_assurance_level, 0
+        ):
+            failed = True
+            console.print(
+                f"  [red]ERROR[/] [assurance] assurance '{c_report.assurance_level.value}' is "
+                f"below the required minimum '{vpol.minimum_assurance_level}'"
+            )
+    if failed:
         sys.exit(1)
 
 
 @main.command()
 @click.argument("aibom_path", type=click.Path(exists=True))
-@click.option("--threshold", type=float, default=None, help="Fail threshold score")
+@click.option(
+    "--threshold", type=float, default=None, help="Fail threshold score (overrides policy)"
+)
+@click.option(
+    "--policy",
+    "policy_path",
+    type=click.Path(),
+    default=None,
+    help="Policy file (trusted). Default: search upward from the current directory.",
+)
+@click.option(
+    "--allow-partial-coverage",
+    is_flag=True,
+    help="Let the gate pass on risk alone even when collection coverage is incomplete.",
+)
 @click.option("--json-output", is_flag=True, help="Output as JSON")
-def risk(aibom_path: str, threshold: float | None, json_output: bool) -> None:
-    """Score supply-chain risks in an AIBOM."""
-    bom = AIBOM.load(Path(aibom_path))
+def risk(
+    aibom_path: str,
+    threshold: float | None,
+    policy_path: str | None,
+    allow_partial_coverage: bool,
+    json_output: bool,
+) -> None:
+    """Score supply-chain risks in an AIBOM and evaluate the CI gate."""
+    bom = _load_bom(aibom_path)
 
-    from nexus_symbiote.policy import load_policy
     from nexus_symbiote.validators.risk import RiskScorer
 
+    policy = _resolve_policy(policy_path)
     if threshold is None:
-        try:
-            policy = load_policy(Path(aibom_path).parent)
-        except ValueError as exc:
-            raise click.ClickException(str(exc)) from exc
         threshold = policy.risk.fail_threshold if policy else 50.0
-
-    scorer = RiskScorer(fail_threshold=threshold)
-    passed, report = scorer.passes_gate(bom)
+    scorer = RiskScorer(
+        fail_threshold=threshold,
+        warn_threshold=(policy.risk.warn_threshold if policy else 25.0),
+        ignore_categories=(set(policy.risk.ignore_categories) if policy else None),
+    )
+    passed, report = scorer.passes_gate(bom, require_coverage=not allow_partial_coverage)
 
     if json_output:
         click.echo(json.dumps(report.to_dict(), indent=2))
@@ -339,7 +415,9 @@ def risk(aibom_path: str, threshold: float | None, json_output: bool) -> None:
         console.print(table)
 
     gate = "[green]PASSED[/]" if passed else "[red]FAILED[/]"
-    console.print(f"\nGate (threshold={threshold}): {gate}")
+    console.print(f"\nGate (threshold={threshold:g}): {gate}  [dim]{report.gate_reason}[/]")
+    if report.coverage_status != "reported":
+        console.print(f"  [yellow]Coverage:[/] {report.coverage_status}")
 
     if not passed:
         sys.exit(1)
@@ -349,18 +427,17 @@ def risk(aibom_path: str, threshold: float | None, json_output: bool) -> None:
 @click.argument("old_path", type=click.Path(exists=True))
 @click.argument("new_path", type=click.Path(exists=True))
 @click.option("--json-output", is_flag=True, help="Output as JSON")
-def diff(old_path: str, new_path: str, json_output: bool) -> None:
+@click.option(
+    "--fail-on",
+    type=click.Choice(["none", "low", "medium", "high", "critical"]),
+    default="high",
+    help="Exit non-zero when a change at/above this severity is detected "
+    "(default: high; 'none' disables). (NS-03)",
+)
+def diff(old_path: str, new_path: str, json_output: bool, fail_on: str) -> None:
     """Compare two AIBOM snapshots for supply-chain drift."""
-    try:
-        old_bom = AIBOM.load(Path(old_path))
-    except Exception:
-        click.echo(f"Error: {old_path} is not a valid native AIBOM file.", err=True)
-        sys.exit(1)
-    try:
-        new_bom = AIBOM.load(Path(new_path))
-    except Exception:
-        click.echo(f"Error: {new_path} is not a valid native AIBOM file.", err=True)
-        sys.exit(1)
+    old_bom = _load_bom(old_path)
+    new_bom = _load_bom(new_path)
 
     from nexus_symbiote.diff.differ import AIBOMDiffer
 
@@ -394,12 +471,26 @@ def diff(old_path: str, new_path: str, json_output: bool) -> None:
             for c in result.components_modified:
                 console.print(f"  ~ {c.name}: {'; '.join(c.details)}")
 
+    # Drift gate: exit non-zero when a change meets the --fail-on severity (NS-03).
+    if fail_on != "none":
+        order = ["info", "low", "medium", "high", "critical"]
+        severities = [a["severity"] for a in result.security_alerts]
+        severities += [c.severity for c in result.components_modified]
+        severities += [c.severity for c in result.components_added]
+        worst = max((order.index(s) for s in severities if s in order), default=-1)
+        if worst >= order.index(fail_on):
+            if not json_output:
+                console.print(
+                    f"\n[red]Drift gate FAILED[/] (change at or above '{fail_on}' detected)."
+                )
+            sys.exit(1)
+
 
 @main.command()
 @click.argument("aibom_path", type=click.Path(exists=True))
 def summary(aibom_path: str) -> None:
     """Print a summary of an AIBOM."""
-    bom = AIBOM.load(Path(aibom_path))
+    bom = _load_bom(aibom_path)
     s = bom.summary()
 
     console.print("[bold]AIBOM Summary[/]")

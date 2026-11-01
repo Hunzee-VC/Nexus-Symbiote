@@ -71,6 +71,18 @@ def load_policy(project_root: Path) -> Policy | None:
     return None
 
 
+def load_policy_file(path: Path) -> Policy:
+    """Load a policy from an explicit file path (a trusted invocation input).
+
+    Prefer this (or load_policy over a trusted directory) over reading a policy
+    out of a scanned/untrusted tree, which an attacker could use to weaken a
+    gate. (NS-06)
+    """
+    if not path.exists():
+        raise ValueError(f"policy file not found: {path}")
+    return _parse_policy(path)
+
+
 def _parse_policy(path: Path) -> Policy:
     """Parse a configured policy strictly; never fall back to defaults on failure."""
     try:

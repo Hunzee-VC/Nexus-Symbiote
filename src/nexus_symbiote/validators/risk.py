@@ -43,6 +43,7 @@ class RiskReport:
     total_components: int = 0
     components_with_risks: int = 0
     coverage_status: str = "unknown"
+    gate_reason: str = "unknown"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -51,6 +52,7 @@ class RiskReport:
             "total_components": self.total_components,
             "components_with_risks": self.components_with_risks,
             "coverage_status": self.coverage_status,
+            "gate_reason": self.gate_reason,
             "severity_counts": self.severity_counts,
             "category_scores": {k: round(v, 2) for k, v in self.category_scores.items()},
             "findings": [
@@ -76,29 +78,18 @@ class RiskScorer:
         severity_weights: dict[RiskSeverity, float] | None = None,
         fail_threshold: float = 50.0,
         warn_threshold: float = 20.0,
+        ignore_categories: set[str] | None = None,
     ) -> None:
         self.weights = severity_weights or SEVERITY_WEIGHTS
         self.fail_threshold = fail_threshold
         self.warn_threshold = warn_threshold
+        # Categories suppressed by policy (NS-06: risk.ignore_categories is now enforced).
+        self.ignore_categories = {c.lower() for c in (ignore_categories or set())}
 
     def score(self, bom: AIBOM) -> RiskReport:
         report = RiskReport()
         report.total_components = len(bom.components)
-        coverage = bom.metadata.completeness
-        if coverage is not None and (coverage.scan_failures or coverage.surfaces_excluded):
-            report.coverage_status = "partial"
-        elif coverage is not None:
-            # Legacy claims lack per-scanner status. They cannot establish that
-            # omitted or unselected surfaces were assessed.
-            statuses = getattr(coverage, "scanner_status", None)
-            if statuses and (
-                not REQUIRED_SCANNERS.issubset(statuses)
-                or any(state != "complete" for state in statuses.values())
-            ):
-                report.coverage_status = "partial"
-            elif statuses and coverage.surfaces_scanned and bom.components:
-                # Reported collection is not independent proof of completeness.
-                report.coverage_status = "reported"
+        report.coverage_status = self._coverage_status(bom.metadata.completeness)
         components_with_risks: set[str] = set()
         category_scores: dict[str, float] = {}
 
@@ -109,6 +100,8 @@ class RiskScorer:
             components_with_risks.add(comp.bom_ref)
 
             for risk in risks:
+                if risk.category.lower() in self.ignore_categories:
+                    continue
                 sev = risk.severity
                 weight = self.weights.get(sev, 0.0)
 
@@ -150,11 +143,47 @@ class RiskScorer:
             return "moderate"
         return "clean"
 
-    def passes_gate(self, bom: AIBOM) -> tuple[bool, RiskReport]:
+    @staticmethod
+    def _coverage_status(coverage: Any) -> str:
+        """Classify collection coverage.
+
+        A scanner that ran and found nothing is COMPLETE coverage of an absent
+        surface, not partial — so a clean full scan can legitimately reach
+        'reported'. Coverage is 'partial' only when a required scanner is
+        missing or a scanner actually failed, and 'unknown' when no per-scanner
+        status was recorded. This makes the gate reachable while staying
+        fail-closed on real failures. (NS-02)
+        """
+        if coverage is None:
+            return "unknown"
+        if coverage.scan_failures:
+            return "partial"
+        statuses = getattr(coverage, "scanner_status", None) or {}
+        if not statuses:
+            # Legacy/imported claim without per-scanner status: an explicit
+            # exclusion still means coverage is incomplete; otherwise unknown.
+            return "partial" if coverage.surfaces_excluded else "unknown"
+        required_present = REQUIRED_SCANNERS.issubset(statuses)
+        all_complete = all(state == "complete" for state in statuses.values())
+        if not required_present or not all_complete:
+            return "partial"
+        return "reported"
+
+    def passes_gate(self, bom: AIBOM, require_coverage: bool = True) -> tuple[bool, RiskReport]:
+        """Evaluate the CI gate.
+
+        Fails on any critical finding, on overall_score >= fail_threshold, and
+        (unless require_coverage is False) on coverage that is not 'reported'.
+        The distinct reasons are recorded in report.gate_reason so CI can tell
+        'risk too high' apart from 'coverage incomplete'. (NS-02/NS-03)
+        """
         report = self.score(bom)
-        passed = (
-            report.overall_score < self.fail_threshold
-            and not report.severity_counts.get("critical", 0)
-            and report.coverage_status == "reported"
-        )
-        return passed, report
+        reasons: list[str] = []
+        if report.severity_counts.get("critical", 0):
+            reasons.append("critical-findings")
+        if report.overall_score >= self.fail_threshold:
+            reasons.append(f"score>={self.fail_threshold:g}")
+        if require_coverage and report.coverage_status != "reported":
+            reasons.append(f"coverage={report.coverage_status}")
+        report.gate_reason = "; ".join(reasons) if reasons else "pass"
+        return (not reasons), report

@@ -237,10 +237,26 @@ class TestRiskCommand:
         project = _create_test_project(tmp_path)
         runner = CliRunner()
         bom_path = tmp_path / "test.json"
-        runner.invoke(main, ["scan", str(project), "-o", str(bom_path)])
+        # Run only one scanner so required coverage is genuinely incomplete;
+        # a high custom threshold must still not let partial coverage pass.
+        runner.invoke(main, ["scan", str(project), "--scanner", "model", "-o", str(bom_path)])
         result = runner.invoke(main, ["risk", str(bom_path), "--threshold", "100", "--json-output"])
         assert result.exit_code == 1
         assert json.loads(result.output)["coverage_status"] == "partial"
+
+    def test_risk_gate_passes_on_clean_full_scan(self, tmp_path):
+        # Regression for NS-02: a clean full scan must be able to PASS the gate
+        # (coverage 'reported'), not fail unconditionally.
+        project = _create_test_project(tmp_path)
+        runner = CliRunner()
+        bom_path = tmp_path / "test.json"
+        runner.invoke(main, ["scan", str(project), "-o", str(bom_path)])
+        result = runner.invoke(
+            main, ["risk", str(bom_path), "--threshold", "1000", "--json-output"]
+        )
+        data = json.loads(result.output)
+        assert data["coverage_status"] == "reported"
+        assert result.exit_code == 0
 
 
 class TestDiffCommand:
@@ -416,7 +432,8 @@ class TestDiffFixture:
         new_bom.save(new_path)
 
         runner = CliRunner()
-        result = runner.invoke(main, ["diff", str(old_path), str(new_path)])
+        # --fail-on none: this exercises diff OUTPUT, not the drift gate.
+        result = runner.invoke(main, ["diff", str(old_path), str(new_path), "--fail-on", "none"])
         assert result.exit_code == 0
         assert "removed" in result.output.lower()
 
@@ -430,9 +447,28 @@ class TestDiffFixture:
         bom.save(new_path)
 
         runner = CliRunner()
-        result = runner.invoke(main, ["diff", str(old_path), str(new_path)])
+        result = runner.invoke(main, ["diff", str(old_path), str(new_path), "--fail-on", "none"])
         assert result.exit_code == 0
         assert "modified" in result.output.lower() or "Security Alerts" in result.output
+
+    def test_diff_fail_on_gates_critical_rugpull(self, tmp_path):
+        # Regression for NS-03: a critical tool-definition change must fail the
+        # drift gate (non-zero exit) under the default --fail-on.
+        old_path = _make_fixture_bom(tmp_path, filename="old.json")
+        bom = AIBOM.load(old_path)
+        for c in bom.components:
+            if c.bom_ref == "tool-read":
+                c.definition_hash = "sha256:rugpulled"
+        new_path = tmp_path / "rugpull.json"
+        bom.save(new_path)
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["diff", str(old_path), str(new_path)])
+        assert result.exit_code == 1
+        passthrough = runner.invoke(
+            main, ["diff", str(old_path), str(new_path), "--fail-on", "none"]
+        )
+        assert passthrough.exit_code == 0
 
     def test_diff_json_with_security_alert(self, tmp_path):
         old_path = _make_fixture_bom(tmp_path, filename="old.json")

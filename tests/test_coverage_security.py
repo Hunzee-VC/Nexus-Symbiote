@@ -32,9 +32,11 @@ def test_unselected_scanners_remain_unknown(tmp_path):
     )
     assert result.exit_code == 0
     bom = AIBOM.load(output)
-    assert bom.metadata.completeness.scanner_status["model"] == "partial"
-    assert bom.metadata.completeness.surfaces_excluded
-    assert bom.metadata.completeness.scanner_status["mcp"] == "unknown"
+    # Only the selected scanner is recorded; a scanner that ran and found
+    # nothing is complete coverage of an absent surface (NS-02). Unselected
+    # required scanners are simply absent, which keeps the BOM incomplete.
+    assert bom.metadata.completeness.scanner_status["model"] == "complete"
+    assert "mcp" not in bom.metadata.completeness.scanner_status
     assert not CompletenessValidator().validate(bom).is_complete
 
 

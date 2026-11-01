@@ -19,6 +19,8 @@ from nexus_symbiote.core.models import (
     AnyComponent,
 )
 
+_MAX_BOM_BYTES = 64 * 1024 * 1024
+
 
 def _document_timestamp() -> datetime:
     """Return a UTC timestamp, honoring SOURCE_DATE_EPOCH for reproducibility."""
@@ -136,7 +138,14 @@ class AIBOM(BaseModel):
 
     @classmethod
     def load(cls, path: Path) -> AIBOM:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        """Load and validate a native AIBOM, bounding size and surfacing a clean
+        error on malformed input rather than an uncaught traceback. (NS-16)"""
+        try:
+            if path.stat().st_size > _MAX_BOM_BYTES:
+                raise ValueError(f"AIBOM file exceeds {_MAX_BOM_BYTES} bytes; refusing to load")
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"not valid JSON: {exc}") from exc
         return cls.model_validate(data)
 
     def summary(self) -> dict[str, Any]:
