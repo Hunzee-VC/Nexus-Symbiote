@@ -73,6 +73,8 @@ nexus-symbiote summary aibom.json
 | **Prompt** | Local verification | Content hashes, instruction files |
 | **RAG** | Local verification | Vector store / embedding configs |
 | **Registry** | Local verification | Package pins and registry entries |
+| **A2A** | Local verification | A2A agent cards, client/server configs, SDK usage |
+| **IDE Agents** | Local verification | IDE coding agent configs, permissions, extensions |
 
 ## Component Types
 
@@ -152,7 +154,7 @@ nexus-symbiote init
 version: "1.0"
 
 scan:
-  scanners: ["mcp", "model", "prompt", "rag", "registry"]
+  scanners: ["mcp", "model", "prompt", "rag", "registry", "a2a", "ide_agents"]
 
 risk:
   fail_threshold: 50.0
@@ -188,7 +190,7 @@ The `nexus-symbiote diff` command compares two AIBOM snapshots and detects:
 ```
 src/nexus_symbiote/
   core/        — Pydantic v2 domain models, enums, AIBOM container, canonicalization
-  scanners/    — Local scanners + ShadowScanImporter (primary discovery)
+  scanners/    — Local scanners + ShadowScanImporter (primary discovery), A2A, IDE agents
   generators/  — native, CycloneDX 1.7, SPDX 3.0, SARIF
   validators/  — Completeness, integrity, risk scoring
   diff/        — AIBOM comparison with security alerts
