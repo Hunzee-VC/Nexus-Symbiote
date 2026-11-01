@@ -150,6 +150,74 @@ def inspect_model_format(
         return SerializationSafety.UNKNOWN, "Malformed or unsupported SafeTensors structure"
 
 
+@contextmanager
+def _library_path(stream: BinaryIO) -> Iterator[Path]:
+    # The Rust SafeTensors reader takes a filename. Hand it the already-open file.
+    for base in ("/proc/self/fd", "/dev/fd"):
+        alias = Path(base, str(stream.fileno()))
+        if alias.exists():
+            yield alias
+            return
+    # Windows has no descriptor pathname. Parse a private, bounded copy.
+    stream.seek(0)
+    with tempfile.TemporaryDirectory() as tmp:
+        copy = Path(tmp, "weights")
+        total = 0
+        with copy.open("wb") as out:
+            while chunk := stream.read(1024 * 1024):
+                total += len(chunk)
+                if total > MAX_MODEL_BYTES:
+                    raise ValueError("model exceeds scan limit")
+                out.write(chunk)
+        yield copy
+
+
+def _inspect_file(path: Path) -> tuple[str, SerializationSafety, str]:
+    ext_format = MODEL_EXTENSIONS[path.suffix.lower()][0]
+    with _open_regular(path, MAX_MODEL_BYTES) as fd, os.fdopen(fd, "rb", closefd=False) as stream:
+        stat_before = os.fstat(stream.fileno())
+        if stat_before.st_size > MAX_MODEL_BYTES:
+            raise ValueError("model exceeds scan limit")
+        head = stream.read(9)
+        fmt = ext_format
+        safety = SERIALIZATION_FORMAT_SAFETY.get(fmt, SerializationSafety.UNKNOWN)
+        if head.startswith(b"\x80") and len(head) > 1 and head[1] <= 5:
+            fmt, safety = "pickle", SerializationSafety.UNSAFE_CODE_EXECUTION
+        elif head.startswith(b"GGUF"):
+            fmt, safety = "gguf", SerializationSafety.UNSAFE_TEMPLATE_INJECTION
+        elif fmt == "safetensors" or (len(head) == 9 and head[-1:] == b"{"):
+            safety = SerializationSafety.UNKNOWN
+            header_len = int.from_bytes(head[:8], "little")
+            if (
+                len(head) == 9
+                and head[-1:] == b"{"
+                and header_len <= min(stat_before.st_size - 8, 16 * 1024 * 1024)
+            ):
+                with _library_path(stream) as name:
+                    try:
+                        with safe_open(name, framework="numpy") as tensors:
+                            tensors.keys()
+                    except SafetensorError:
+                        pass
+                    else:
+                        fmt, safety = "safetensors", SerializationSafety.SAFE
+        elif safety == SerializationSafety.SAFE:
+            # No format parser for ONNX/GGML here. A filename alone proves nothing.
+            safety = SerializationSafety.UNKNOWN
+        digest = hashlib.sha256()
+        total = 0
+        stream.seek(0)
+        while chunk := stream.read(1024 * 1024):
+            total += len(chunk)
+            if total > MAX_MODEL_BYTES:
+                raise ValueError("model exceeds scan limit")
+            digest.update(chunk)
+        stat_after = os.fstat(stream.fileno())
+        if total != stat_before.st_size or stat_after.st_ctime_ns != stat_before.st_ctime_ns:
+            raise ValueError("model changed while being read")
+    return fmt, safety, "sha256:" + digest.hexdigest()
+
+
 class ModelScanner(Scanner):
     name = "model"
 
@@ -183,7 +251,7 @@ class ModelScanner(Scanner):
 
     def _scan_model_directory(self, model_dir: Path) -> list[ModelComponent]:
         components: list[ModelComponent] = []
-        model_name = model_dir.name
+        model_name = model_dir.relative_to(root).as_posix()
 
         config = self._read_model_config(model_dir)
         tokenizer_hash = self._hash_tokenizer(model_dir)

@@ -86,3 +86,30 @@ def test_imported_complete_status_cannot_hide_excluded_surfaces():
         surfaces_excluded=["prompts (not scanned)"],
     )
     assert not CompletenessValidator().validate(bom).is_complete
+
+
+def test_policy_template_and_required_coverage_match_every_builtin_scanner():
+    import yaml
+
+    from nexus_symbiote.cli import _get_scanners
+    from nexus_symbiote.policy import DEFAULT_POLICY_YAML, default_policy
+    from nexus_symbiote.validators.risk import RiskScorer
+
+    catalog = set(_get_scanners())
+    assert (
+        set(default_policy().scan.scanners)
+        == catalog
+        == set(yaml.safe_load(DEFAULT_POLICY_YAML)["scan"]["scanners"])
+    )
+    for missing in ("shadowscan", "a2a", "ide_agents"):
+        claim = CompletenessClaim(
+            scope="local-static-project",
+            surfaces_scanned=["repo"],
+            scanner_status=dict.fromkeys(catalog - {missing}, "complete"),
+        )
+        bom = AIBOM(components=[ToolComponent(name="t", bom_ref="tool:t")])
+        bom.metadata.completeness = claim
+        assert RiskScorer().passes_gate(bom)[0] is False
+        assert any(
+            missing in issue.description for issue in CompletenessValidator().validate(bom).issues
+        )

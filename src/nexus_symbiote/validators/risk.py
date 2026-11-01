@@ -7,7 +7,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from nexus_symbiote.core.aibom import AIBOM
-from nexus_symbiote.core.enums import RiskSeverity
+from nexus_symbiote.core.enums import RiskSeverity, SerializationSafety
+from nexus_symbiote.core.models import ModelComponent, RiskAssessment
 
 REQUIRED_SCANNERS = frozenset({"mcp", "model", "prompt", "rag", "registry"})
 
@@ -105,7 +106,7 @@ class RiskScorer:
         elif coverage is not None:
             statuses = coverage.scanner_status
             if statuses and (
-                not REQUIRED_SCANNERS.issubset(statuses)
+                not set(DEFAULT_SCANNERS).issubset(statuses)
                 or any(state != "complete" for state in statuses.values())
             ):
                 report.coverage_status = "partial"
@@ -115,7 +116,36 @@ class RiskScorer:
         category_scores: dict[str, float] = {}
 
         for comp in bom.components:
-            risks = getattr(comp, "risks", [])
+            risks = list(getattr(comp, "risks", []))
+            if isinstance(comp, ModelComponent):
+                checks = (
+                    (
+                        comp.serialization_safety == SerializationSafety.UNSAFE_CODE_EXECUTION,
+                        RiskSeverity.CRITICAL,
+                        "serialization_format",
+                        "Unsafe serialization permits code execution.",
+                    ),
+                    (
+                        comp.trust_remote_code is True,
+                        RiskSeverity.CRITICAL,
+                        "code_execution",
+                        "The model configuration enables remote code.",
+                    ),
+                    (
+                        comp.unverified_safetensors,
+                        RiskSeverity.HIGH,
+                        "invalid_safetensors",
+                        "The artifact could not be verified as a SafeTensors file.",
+                    ),
+                )
+                for applies, severity, category, detail in checks:
+                    if applies and not any(
+                        r.category == category and r.severity == severity for r in risks
+                    ):
+                        risks.append(
+                            RiskAssessment(severity=severity, category=category, detail=detail)
+                        )
+
             if not risks:
                 continue
             for risk in risks:

@@ -47,6 +47,8 @@ class ClaimEvidence(InventoryModel):
 class ComponentBase(InventoryModel):
     """Base for every AgentBOM component."""
 
+    model_config = ConfigDict(extra="forbid")
+
     bom_ref: str = Field(description="Unique reference within this BOM")
     component_type: ComponentType
     name: str
@@ -230,6 +232,13 @@ class ModelComponent(ComponentBase):
         default=None, description="Declared configuration only; the runtime value may differ"
     )
     risks: list[RiskAssessment] = Field(default_factory=list)
+
+    @property
+    def unverified_safetensors(self) -> bool:
+        return (
+            self.serialization_format in {"safetensors", "safe-tensors"}
+            and self.serialization_safety == SerializationSafety.UNKNOWN
+        )
 
 
 class PromptComponent(ComponentBase):

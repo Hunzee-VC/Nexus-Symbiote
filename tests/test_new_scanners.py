@@ -243,7 +243,10 @@ class TestMCPClientDetection:
         clients = [c for c in result.components if c.component_type == ComponentType.MCP_CLIENT]
         assert len(clients) == 1
         assert clients[0].host_application == "claude-code"
-        assert "mcp-server:filesystem" in clients[0].server_refs
+        assert any(
+            c.bom_ref in clients[0].server_refs and c.name == "filesystem"
+            for c in result.components
+        )
 
     def test_mcp_client_from_cursor_config(self, tmp_path):
         cursor_dir = tmp_path / ".cursor"

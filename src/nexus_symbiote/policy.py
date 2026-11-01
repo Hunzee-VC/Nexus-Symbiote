@@ -14,6 +14,8 @@ ScannerName = Literal[
 ]
 OutputFormat = Literal["json", "cyclonedx", "spdx", "sarif"]
 
+DEFAULT_SCANNERS = ("shadowscan", "mcp", "model", "prompt", "rag", "registry", "a2a", "ide_agents")
+
 
 class PolicyError(ValueError):
     """An existing policy cannot be interpreted without weakening its meaning."""

@@ -91,6 +91,9 @@ def main() -> None:
     type=click.Path(exists=True, path_type=Path),
     help="Explicit operator signer policy JSON",
 )
+@click.option("--no-project-policy", is_flag=True, help="Ignore the scanned repository’s policy.")
+@click.option("--model-signer", help="Authorized model signer identity.")
+@click.option("--model-issuer", help="Authorized model signer OIDC issuer.")
 def scan(
     project_path: str,
     output: str | None,
@@ -233,7 +236,9 @@ def scan(
         out_data = aibom.to_json()
 
     if output:
-        Path(output).write_text(out_data, encoding="utf-8")
+        from nexus_symbiote.utils.files import write_output_file
+
+        write_output_file(Path(output), out_data)
         console.print(f"[bold green]Saved[/] {output}")
     else:
         click.echo(out_data)
@@ -306,7 +311,9 @@ def import_shadowscan(
     else:
         out_data = aibom.to_json()
 
-    Path(output).write_text(out_data, encoding="utf-8")
+    from nexus_symbiote.utils.files import write_output_file
+
+    write_output_file(Path(output), out_data)
     console.print(f"[bold green]Imported {len(components)} components and saved[/] {output}")
 
     from nexus_symbiote.validators.risk import RiskScorer
