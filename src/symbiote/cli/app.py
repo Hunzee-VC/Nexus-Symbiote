@@ -913,3 +913,31 @@ def main() -> None:
 
 if __name__ == "__main__":  # pragma: no cover
     main()
+
+
+@app.command("import-legacy")
+def import_legacy_inventory(
+    source: Path,
+    output: Annotated[Path, typer.Option("--output", "-o")],
+    agent: Annotated[
+        str | None, typer.Option("--agent", help="Root agent bom_ref in a multi-agent inventory.")
+    ] = None,
+) -> None:
+    """Convert a native 1.0 inventory to a declared companion with embedded mapping losses."""
+    from symbiote.confined import open_scoped_file, write_scan_output
+    from symbiote.export.companion import companion_bytes
+    from symbiote.imp.legacy import import_legacy
+
+    try:
+        limit = 32 * 1024 * 1024
+        source = source.absolute()
+        with open_scoped_file(Path(source.anchor), source) as stream:
+            raw = stream.read(limit + 1)
+        if len(raw) > limit:
+            raise ValueError("legacy input exceeds 32 MiB")
+        if source == output.absolute():
+            raise ValueError("source and output must differ")
+        write_scan_output(output, companion_bytes(import_legacy(raw, root_ref=agent)))
+    except (ValueError, OSError) as exc:
+        typer.echo(f"Legacy import failed: {exc}", err=True)
+        raise typer.Exit(1) from None
