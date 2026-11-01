@@ -1,0 +1,81 @@
+site_name: Symbiote — AgentBOM toolkit
+site_description: Generate, validate, diff, verify, attest and enforce Agent Bills of Materials. Supports and extends CycloneDX 1.7 and SPDX 3.0.1.
+site_url: https://aisecnomad.github.io/symbiote/
+repo_url: https://github.com/aisecnomad/symbiote
+repo_name: aisecnomad/symbiote
+edit_uri: edit/main/docs/
+copyright: MIT License
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - content.code.copy
+    - content.tabs.link
+    - search.suggest
+  palette:
+    - scheme: default
+      primary: deep purple
+      accent: teal
+      toggle:
+        icon: material/weather-night
+        name: Dark mode
+    - scheme: slate
+      primary: deep purple
+      accent: teal
+      toggle:
+        icon: material/weather-sunny
+        name: Light mode
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.details
+
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - Concepts:
+      - The four planes: concepts/four-planes.md
+      - Assurance, claims and unknowns: concepts/assurance.md
+      - Snapshots and the diff: concepts/snapshots.md
+      - Digests and the Merkle commitment: concepts/digests.md
+  - Specification:
+      - Overview: spec/README.md
+      - AgentBOM profile: spec/agentbom-profile.md
+      - Digests: spec/digests.md
+      - CycloneDX 1.7 mapping: spec/cyclonedx-mapping.md
+      - Property taxonomy: spec/taxonomy.md
+      - SPDX 3.0.1 mapping: spec/spdx-mapping.md
+      - Companion document: spec/companion.md
+      - Conformance levels: spec/conformance.md
+      - Policy checks: spec/checks.md
+      - Attestation: spec/attestation.md
+      - Collectors: spec/collectors.md
+      - CLI: spec/cli.md
+      - Divergence register: spec/divergences.md
+      - Versioning: spec/versioning.md
+  - Research:
+      - Overview: research/README.md
+      - Design brief: research/design-brief.md
+  - Development:
+      - Work packages: development/work-packages.md
+      - Contributing: contributing.md
+      - Security policy: security.md
+      - Threat model: threat-model.md
+
+plugins:
+  - search
+
+hooks: []
