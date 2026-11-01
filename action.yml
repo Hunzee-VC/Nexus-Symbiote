@@ -100,7 +100,13 @@ runs:
       env:
         NATIVE_BOM: ${{ steps.scan.outputs.workdir }}/native.json
         SCAN_PATH: ${{ inputs.scan-path }}
-      run: nexus-symbiote validate "$NATIVE_BOM" --project "$SCAN_PATH"
+      run: |
+        set -euo pipefail
+        SCAN_ABS="$(cd "$SCAN_PATH" && pwd)"
+        # Evaluate from a trusted temp dir so a .nexus-symbiote.yaml inside the
+        # (possibly untrusted) workspace cannot weaken the gate (NS-06).
+        cd "${RUNNER_TEMP:-.}"
+        nexus-symbiote validate "$NATIVE_BOM" --project "$SCAN_ABS"
     - name: Risk gate
       id: risk
       if: inputs.risk-check == 'true' && inputs.risk-threshold != '0'
@@ -110,6 +116,9 @@ runs:
         RISK_THRESHOLD: ${{ inputs.risk-threshold }}
       run: |
         set -uo pipefail
+        # Gate from a trusted temp dir, not the workspace (NS-06); threshold is
+        # passed explicitly so it never comes from an in-repo policy.
+        cd "${RUNNER_TEMP:-.}"
         result="$(nexus-symbiote risk "$NATIVE_BOM" --threshold "$RISK_THRESHOLD" --json-output)"
         status=$?
         score="$(printf '%s' "$result" | python -c 'import json,sys; print(json.load(sys.stdin)["overall_score"])')" || exit 1

@@ -42,4 +42,31 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e ".[dev,all]"
-      - run: pytest --cov=nexus_symbiote --cov-report=term-missing
+      - run: pytest --cov=nexus_symbiote --cov-report=term-missing --cov-fail-under=85
+
+  schema:
+    # The published JSON Schema is generated from the Pydantic models; fail if a
+    # model change was committed without regenerating it (NS-07).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[all]"
+      - run: python scripts/generate_schema.py
+      - run: git diff --exit-code -- schemas/
+
+  security:
+    # Dependency vulnerability audit (NS-12). Prune --ignore-vuln as upstream
+    # fixes land; today a clean resolve reports none.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev,all]"
+      # Fails on any known-vulnerable dependency. (The editable self-package is
+      # not on PyPI and is reported as a skip, not a failure.)
+      - run: pip-audit --desc

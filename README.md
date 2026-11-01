@@ -59,8 +59,12 @@ nexus-symbiote scan . -f sarif -o results.sarif
 # Validate, score, and diff
 nexus-symbiote validate aibom.json --project /path/to/project
 nexus-symbiote risk aibom.json
-nexus-symbiote diff old-aibom.json new-aibom.json
+nexus-symbiote diff old-aibom.json new-aibom.json --fail-on high
 nexus-symbiote summary aibom.json
+
+# Cryptographically verify model signatures against an explicit signer policy
+nexus-symbiote verify aibom.json --project /path/to/project \
+  --identity you@example.com --issuer https://accounts.google.com
 ```
 
 ## What It Scans / Imports
@@ -86,7 +90,7 @@ Trust tiers and assurance levels (declared / observed / verified) are claims unt
 
 ## Risk Scoring
 
-Risk findings cover serialization safety, signing status, version pinning, tool definition mutations, trust_remote_code, and ShadowScan heuristic / shadow status. The numeric score is advisory. Any critical finding fails the gate. Review individual findings and coverage; enforce policy separately.
+Risk findings cover serialization safety (including content-sniffed format mismatches), signing status, version pinning, tool definition mutations, trust_remote_code, and ShadowScan heuristic / shadow status. The numeric score is advisory. The gate fails on any critical finding, on a score at or above the fail threshold, and on collection coverage that is not "reported" (pass `--allow-partial-coverage` to gate on risk alone). The specific reason is reported as `gate_reason`.
 
 ## CI/CD Integration
 
@@ -103,13 +107,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: aisecnomad/nexus-symbiote@main
+      - uses: aisecnomad/nexus-symbiote@main # pin to a commit SHA in production
         with:
           risk-threshold: '50'
           sarif-upload: 'true'
 ```
 
-The current action is experimental: it installs an unpinned package and does not fail the job on validation errors. Do not rely on it as a security gate until these issues are resolved. Review the workflow's permissions and artifact contents before using it.
+The action installs this repository's checked-out revision and fails the job on validation errors and on a risk-gate failure. Pin the action to a commit SHA (not `@main`) in production, and review the workflow's permissions and artifact contents. The risk gate is evaluated from a trusted temporary directory and the threshold is passed explicitly, so a `.nexus-symbiote.yaml` placed inside a scanned (untrusted) repository cannot weaken it.
 
 ### Manual CI
 
@@ -163,7 +167,7 @@ output:
   default_format: "json"
 ```
 
-Policy files are discovered by searching the project directory and its parents. Not every field in the policy schema is enforced by every command; verify behavior against the implementation before relying on it.
+The gating commands (`risk`, `validate`) load policy from a **trusted** location — an explicit `--policy` path, or a search upward from your current working directory — never from the scanned project or the BOM's own directory, so an untrusted repository cannot supply its own gate. `scan` reads scan configuration (scanner selection, output format) from the project being scanned. Enforced fields: `risk.fail_threshold`, `risk.warn_threshold`, `risk.ignore_categories`, and `validate.require_completeness` / `require_integrity` / `minimum_assurance_level`. `scan.exclude_paths` is not yet enforced by the scanners.
 
 ## AIBOM Diff
 
