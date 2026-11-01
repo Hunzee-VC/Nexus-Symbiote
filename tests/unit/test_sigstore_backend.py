@@ -53,3 +53,32 @@ def test_yaml_policy(tmp_path) -> None:
     )
     spec = VerifyPolicySpec.from_yaml(p)
     assert spec.staging and spec.identities[0].issuer == "https://accounts.google.com"
+
+
+@pytest.mark.parametrize("pattern", [r"release@example\.com", r"^release@example\.com"])
+def test_regex_identity_matches_the_entire_san(monkeypatch, pattern):
+    from types import SimpleNamespace
+
+    from cryptography import x509
+
+    from symbiote.attest import sigstore_backend as backend
+
+    monkeypatch.setattr(backend.sp, "OIDCIssuerV2", lambda _: SimpleNamespace(verify=lambda cert: None))
+    policy = build_policy(
+        VerifyPolicySpec(
+            identities=[IdentityConstraint(identity="re:" + pattern, issuer="https://issuer.test")]
+        )
+    )
+
+    def certificate(san):
+        return SimpleNamespace(
+            extensions=SimpleNamespace(
+                get_extension_for_class=lambda _: SimpleNamespace(
+                    value=x509.SubjectAlternativeName([x509.RFC822Name(san)])
+                )
+            )
+        )
+
+    policy.verify(certificate("release@example.com"))
+    with pytest.raises(backend.sp.VerificationError):
+        policy.verify(certificate("release@example.com.attacker.test"))

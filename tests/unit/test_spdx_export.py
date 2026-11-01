@@ -7,6 +7,7 @@ import pytest
 
 from symbiote.export.spdx import TERMS, export_spdx, validate_spdx
 from symbiote.model import AgentBOM
+from symbiote.model import enums as E
 from symbiote.scan import scan
 
 EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "triage-agent"
@@ -67,10 +68,19 @@ def test_spdx_example() -> None:
     assert len(_nodes(doc, "software_Package")) >= 5
     assert not loss.security_relevant_dropped
     text = json.dumps(doc)
-    assert (
-        "sk-" not in text
-        and "${"
-        not in text.replace("${GITHUB_PAT}", "")
-        .replace("${SLACK_WEBHOOK_URL}", "")
-        .replace("${input:github-pat}", "")
-    ) or True
+    assert "sk-" not in text and "${" not in text.replace("${GITHUB_PAT}", "").replace(
+        "${SLACK_WEBHOOK_URL}", ""
+    ).replace("${input:github-pat}", "")
+
+
+def test_empty_scoped_query_cannot_prove_runtime_absence(minimal_bom: AgentBOM) -> None:
+    from symbiote.model.entities import SurfaceCoverage
+
+    coverage = minimal_bom.coverage.replace(
+        surfaces={E.Surface.DATA: SurfaceCoverage(status=E.CoverageStatus.QUERIED)}
+    )
+    doc, _ = export_spdx(minimal_bom.replace(coverage=coverage))
+    rel = next(n for n in doc["@graph"] if n.get("spdxId", "").endswith("/rel:surface:data"))
+    assert rel["scope"] == "runtime"
+    assert rel["completeness"] == "noAssertion"
+    assert all("NoAssertionElement" in target for target in rel["to"])
