@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
-from symbiote.core.aibom import AIBOM, DependencyEdge
-from symbiote.core.enums import SerializationSafety
-from symbiote.core.models import (
+from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
+from nexus_symbiote.core.enums import SerializationSafety
+from nexus_symbiote.core.models import (
     AgentComponent,
     GuardrailComponent,
     MCPServerComponent,
@@ -20,8 +18,8 @@ from symbiote.core.models import (
     SkillPackageComponent,
     ToolComponent,
 )
-from symbiote.generators.cyclonedx import CycloneDXGenerator
-from symbiote.generators.spdx import SPDXExportUnavailableError, SPDXGenerator
+from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
+from nexus_symbiote.generators.spdx import SPDXGenerator
 
 
 def _sample_aibom() -> AIBOM:
@@ -94,15 +92,15 @@ class TestCycloneDXGenerator:
         result = gen.generate(_sample_aibom())
         agent_comp = next(c for c in result["components"] if c["name"] == "my-agent")
         prop_names = {p["name"] for p in agent_comp.get("properties", [])}
-        assert "symbiote:componentType" in prop_names
-        assert "symbiote:autonomyLevel" in prop_names
+        assert "nexus-symbiote:componentType" in prop_names
+        assert "nexus-symbiote:autonomyLevel" in prop_names
 
     def test_model_properties(self):
         gen = CycloneDXGenerator()
         result = gen.generate(_sample_aibom())
         model_comp = next(c for c in result["components"] if c["name"] == "gpt-4o")
         props = {p["name"]: p["value"] for p in model_comp.get("properties", [])}
-        assert props.get("symbiote:provider") == "openai"
+        assert props.get("nexus-symbiote:provider") == "openai"
 
     def test_dependency_mapping(self):
         gen = CycloneDXGenerator()
@@ -122,12 +120,55 @@ class TestCycloneDXGenerator:
         result = gen.generate(_sample_aibom())
         tools = result["metadata"]["tools"]["components"]
         assert len(tools) == 1
-        assert tools[0]["name"] == "symbiote"
+        assert tools[0]["name"] == "nexus-symbiote"
 
 
-def test_spdx_export_fails_closed():
-    with pytest.raises(SPDXExportUnavailableError, match="SPDX export is unavailable"):
-        SPDXGenerator().generate(_sample_aibom())
+class TestSPDXGenerator:
+    def test_generate_structure(self):
+        gen = SPDXGenerator()
+        result = gen.generate(_sample_aibom())
+        assert result["@context"] == "https://spdx.org/rdf/3.0.1/spdx-context.jsonld"
+        graph = result["@graph"]
+        doc = graph[0]
+        assert doc["type"] == "SpdxDocument"
+        assert doc["specVersion"] == "3.0.1"
+
+    def test_element_types(self):
+        gen = SPDXGenerator()
+        result = gen.generate(_sample_aibom())
+        elements = result["@graph"][1:]
+        types = {e["name"]: e["type"] for e in elements if "name" in e}
+        assert types.get("gpt-4o") == "ai_AIPackage"
+        assert types.get("read_file") == "software_Package"
+
+    def test_spdx_ids_unique(self):
+        gen = SPDXGenerator()
+        result = gen.generate(_sample_aibom())
+        ids = [e["spdxId"] for e in result["@graph"]]
+        assert len(ids) == len(set(ids))
+
+    def test_extensions_present(self):
+        gen = SPDXGenerator()
+        result = gen.generate(_sample_aibom())
+        elements = [e for e in result["@graph"][1:] if e.get("type") != "Relationship"]
+        for elem in elements:
+            if "extension" in elem:
+                ext = elem["extension"][0]
+                assert ext["specVersion"] == "nexus-symbiote-1.0.0"
+                assert "nexus-symbiote:componentType" in ext["properties"]
+
+    def test_relationship_types(self):
+        gen = SPDXGenerator()
+        result = gen.generate(_sample_aibom())
+        rels = [e for e in result["@graph"] if e.get("type") == "Relationship"]
+        assert len(rels) == 1
+        assert rels[0]["relationshipType"] == "DEPENDS_ON"
+
+    def test_generate_json_valid(self):
+        gen = SPDXGenerator()
+        json_str = gen.generate_json(_sample_aibom())
+        data = json.loads(json_str)
+        assert "@context" in data
 
 
 def _full_component_aibom() -> AIBOM:
@@ -251,11 +292,11 @@ class TestCycloneDXGeneratorFull:
         result = gen.generate(_full_component_aibom())
         model_comp = next(c for c in result["components"] if c["name"] == "gpt-4o")
         props = {p["name"]: p["value"] for p in model_comp.get("properties", [])}
-        assert props["symbiote:modelType"] == "foundation"
-        assert props["symbiote:serializationFormat"] == "safetensors"
-        assert props["symbiote:serializationSafety"] == "safe"
-        assert props["symbiote:signingStatus"] == "sigstore-signed"
-        assert props["symbiote:trustRemoteCode"] == "True"
+        assert props["nexus-symbiote:modelType"] == "foundation"
+        assert props["nexus-symbiote:serializationFormat"] == "safetensors"
+        assert props["nexus-symbiote:serializationSafety"] == "safe"
+        assert props["nexus-symbiote:signingStatus"] == "sigstore-signed"
+        assert props["nexus-symbiote:trustRemoteCode"] == "True"
 
     def test_model_version_and_supplier(self):
         gen = CycloneDXGenerator()
@@ -275,72 +316,72 @@ class TestCycloneDXGeneratorFull:
         result = gen.generate(_full_component_aibom())
         agent_comp = next(c for c in result["components"] if c["name"] == "my-agent")
         props = {p["name"]: p["value"] for p in agent_comp.get("properties", [])}
-        assert "symbiote:modelRef" in props
-        assert "symbiote:toolRef" in props
-        assert props["symbiote:framework"] == "crewai"
+        assert "nexus-symbiote:modelRef" in props
+        assert "nexus-symbiote:toolRef" in props
+        assert props["nexus-symbiote:framework"] == "crewai"
 
     def test_tool_annotation_properties(self):
         gen = CycloneDXGenerator()
         result = gen.generate(_full_component_aibom())
         tool_comp = next(c for c in result["components"] if c["name"] == "read_file")
         props = {p["name"]: p["value"] for p in tool_comp.get("properties", [])}
-        assert "symbiote:annotation.readOnlyHint" in props
+        assert "nexus-symbiote:annotation.readOnlyHint" in props
 
     def test_mcp_properties(self):
         gen = CycloneDXGenerator()
         result = gen.generate(_full_component_aibom())
         mcp_comp = next(c for c in result["components"] if c["name"] == "filesystem")
         props = {p["name"]: p["value"] for p in mcp_comp.get("properties", [])}
-        assert props["symbiote:transport"] == "stdio"
-        assert props["symbiote:toolCount"] == "3"
-        assert props["symbiote:schemaHash"] == "sha256:sch123"
+        assert props["nexus-symbiote:transport"] == "stdio"
+        assert props["nexus-symbiote:toolCount"] == "3"
+        assert props["nexus-symbiote:schemaHash"] == "sha256:sch123"
 
     def test_prompt_properties(self):
         gen = CycloneDXGenerator()
         result = gen.generate(_full_component_aibom())
         p = next(c for c in result["components"] if c["name"] == "system-prompt")
         props = {p["name"]: p["value"] for p in p.get("properties", [])}
-        assert props["symbiote:promptType"] == "system-prompt"
-        assert props["symbiote:contentHash"] == "sha256:ppp"
+        assert props["nexus-symbiote:promptType"] == "system-prompt"
+        assert props["nexus-symbiote:contentHash"] == "sha256:ppp"
 
     def test_guardrail_properties(self):
         gen = CycloneDXGenerator()
         result = gen.generate(_full_component_aibom())
         g = next(c for c in result["components"] if c["name"] == "content-filter")
         props = {p["name"]: p["value"] for p in g.get("properties", [])}
-        assert props["symbiote:guardrailType"] == "output-filter"
+        assert props["nexus-symbiote:guardrailType"] == "output-filter"
 
     def test_memory_properties(self):
         gen = CycloneDXGenerator()
         result = gen.generate(_full_component_aibom())
         m = next(c for c in result["components"] if c["name"] == "conversation-store")
         props = {p["name"]: p["value"] for p in m.get("properties", [])}
-        assert props["symbiote:storeType"] == "conversation"
-        assert props["symbiote:tenantIsolated"] == "True"
-        assert props["symbiote:encryptionAtRest"] == "True"
+        assert props["nexus-symbiote:storeType"] == "conversation"
+        assert props["nexus-symbiote:tenantIsolated"] == "True"
+        assert props["nexus-symbiote:encryptionAtRest"] == "True"
 
     def test_rag_properties(self):
         gen = CycloneDXGenerator()
         result = gen.generate(_full_component_aibom())
         r = next(c for c in result["components"] if c["name"] == "docs-index")
         props = {p["name"]: p["value"] for p in r.get("properties", [])}
-        assert props["symbiote:corpusType"] == "vector-store"
-        assert props["symbiote:embeddingModel"] == "text-embedding-3-small"
+        assert props["nexus-symbiote:corpusType"] == "vector-store"
+        assert props["nexus-symbiote:embeddingModel"] == "text-embedding-3-small"
 
     def test_registry_properties(self):
         gen = CycloneDXGenerator()
         result = gen.generate(_full_component_aibom())
         r = next(c for c in result["components"] if c["name"] == "npm-registry")
         props = {p["name"]: p["value"] for p in r.get("properties", [])}
-        assert props["symbiote:registryType"] == "npm"
-        assert props["symbiote:publisherVerified"] == "True"
+        assert props["nexus-symbiote:registryType"] == "npm"
+        assert props["nexus-symbiote:publisherVerified"] == "True"
 
     def test_skill_properties(self):
         gen = CycloneDXGenerator()
         result = gen.generate(_full_component_aibom())
         s = next(c for c in result["components"] if c["name"] == "deploy-skill")
         props = {p["name"]: p["value"] for p in s.get("properties", [])}
-        assert props["symbiote:skillType"] == "skill"
+        assert props["nexus-symbiote:skillType"] == "skill"
 
     def test_multiple_dependency_types(self):
         gen = CycloneDXGenerator()
@@ -359,3 +400,45 @@ class TestCycloneDXGeneratorFull:
         authors = result["metadata"]["authors"]
         assert len(authors) == 2
         assert authors[0]["name"] == "Alice"
+
+
+class TestSPDXGeneratorFull:
+    def test_all_element_types(self):
+        gen = SPDXGenerator()
+        result = gen.generate(_full_component_aibom())
+        graph = result["@graph"]
+        types = {e.get("name"): e["type"] for e in graph if "name" in e}
+        assert types["my-agent"] == "ai_AIPackage"
+        assert types["conversation-store"] == "dataset_Dataset"
+        assert types["docs-index"] == "dataset_Dataset"
+        assert types["content-filter"] == "software_Package"
+
+    def test_trained_on_relationship(self):
+        gen = SPDXGenerator()
+        result = gen.generate(_full_component_aibom())
+        rels = [e for e in result["@graph"] if e.get("type") == "Relationship"]
+        rel_types = {r["relationshipType"] for r in rels}
+        assert "TRAINED_ON" in rel_types
+        assert "DEPENDS_ON" in rel_types
+
+    def test_model_extensions(self):
+        gen = SPDXGenerator()
+        result = gen.generate(_full_component_aibom())
+        model = next(e for e in result["@graph"] if e.get("name") == "gpt-4o")
+        ext = model["extension"][0]
+        assert ext["properties"]["nexus-symbiote:serializationFormat"] == "safetensors"
+        assert ext["properties"]["nexus-symbiote:signingStatus"] == "sigstore-signed"
+
+    def test_supplier_mapped(self):
+        gen = SPDXGenerator()
+        result = gen.generate(_full_component_aibom())
+        model = next(e for e in result["@graph"] if e.get("name") == "gpt-4o")
+        assert "suppliedBy" in model
+        assert "OpenAI" in model["suppliedBy"]
+
+    def test_hashes_mapped(self):
+        gen = SPDXGenerator()
+        result = gen.generate(_full_component_aibom())
+        model = next(e for e in result["@graph"] if e.get("name") == "gpt-4o")
+        assert "verifiedUsing" in model
+        assert model["verifiedUsing"][0]["type"] == "Hash"

@@ -7,14 +7,14 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from symbiote.cli import main
-from symbiote.core.aibom import AIBOM, DependencyEdge
-from symbiote.core.enums import (
+from nexus_symbiote.cli import main
+from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
+from nexus_symbiote.core.enums import (
     AssuranceLevel,
     RiskSeverity,
     SerializationSafety,
 )
-from symbiote.core.models import (
+from nexus_symbiote.core.models import (
     AIBOMMetadata,
     CompletenessClaim,
     MCPServerComponent,
@@ -293,7 +293,7 @@ class TestVersionAndHelp:
         runner = CliRunner()
         result = runner.invoke(main, ["--version"])
         assert result.exit_code == 0
-        assert "symbiote" in result.output
+        assert "nexus-symbiote" in result.output
 
     def test_help(self):
         runner = CliRunner()
@@ -498,7 +498,7 @@ class TestSARIFOutput:
         assert data["version"] == "2.1.0"
         assert "$schema" in data
         assert len(data["runs"]) == 1
-        assert data["runs"][0]["tool"]["driver"]["name"] == "symbiote"
+        assert data["runs"][0]["tool"]["driver"]["name"] == "nexus-symbiote"
 
     def test_sarif_empty_project(self, tmp_path):
         out = tmp_path / "empty.sarif"
@@ -511,7 +511,7 @@ class TestSARIFOutput:
     def test_sarif_with_risks(self, tmp_path):
         bom_path = _make_fixture_bom(tmp_path, with_risks=True)
         bom = AIBOM.load(bom_path)
-        from symbiote.generators.sarif import SARIFGenerator
+        from nexus_symbiote.generators.sarif import SARIFGenerator
 
         sarif = SARIFGenerator().generate(bom)
         assert len(sarif["runs"][0]["results"]) == 2
@@ -524,26 +524,26 @@ class TestInitCommand:
         runner = CliRunner()
         result = runner.invoke(main, ["init", "--path", str(tmp_path)])
         assert result.exit_code == 0
-        assert (tmp_path / ".symbiote.yaml").exists()
+        assert (tmp_path / ".nexus-symbiote.yaml").exists()
 
     def test_init_refuses_existing(self, tmp_path):
-        (tmp_path / ".symbiote.yaml").write_text("existing")
+        (tmp_path / ".nexus-symbiote.yaml").write_text("existing")
         runner = CliRunner()
         result = runner.invoke(main, ["init", "--path", str(tmp_path)])
         assert result.exit_code != 0
 
     def test_init_force_overwrites(self, tmp_path):
-        (tmp_path / ".symbiote.yaml").write_text("existing")
+        (tmp_path / ".nexus-symbiote.yaml").write_text("existing")
         runner = CliRunner()
         result = runner.invoke(main, ["init", "--path", str(tmp_path), "--force"])
         assert result.exit_code == 0
-        content = (tmp_path / ".symbiote.yaml").read_text()
+        content = (tmp_path / ".nexus-symbiote.yaml").read_text()
         assert "version" in content
 
     def test_init_content_is_parseable(self, tmp_path):
         runner = CliRunner()
         runner.invoke(main, ["init", "--path", str(tmp_path)])
-        from symbiote.policy import load_policy
+        from nexus_symbiote.policy import load_policy
 
         policy = load_policy(tmp_path)
         assert policy is not None
@@ -555,7 +555,7 @@ class TestPolicyIntegration:
     def test_scan_uses_policy_format(self, tmp_path):
         project = _create_test_project(tmp_path)
         policy = 'version: "1.0"\noutput:\n  default_format: "cyclonedx"\n'
-        (project / ".symbiote.yaml").write_text(policy)
+        (project / ".nexus-symbiote.yaml").write_text(policy)
         out = project / "output.json"
         runner = CliRunner()
         result = runner.invoke(main, ["scan", str(project), "-o", str(out)])
@@ -566,7 +566,7 @@ class TestPolicyIntegration:
     def test_scan_cli_overrides_policy(self, tmp_path):
         project = _create_test_project(tmp_path)
         policy = 'version: "1.0"\noutput:\n  default_format: "cyclonedx"\n'
-        (project / ".symbiote.yaml").write_text(policy)
+        (project / ".nexus-symbiote.yaml").write_text(policy)
         out = project / "output.json"
         runner = CliRunner()
         result = runner.invoke(main, ["scan", str(project), "-f", "json", "-o", str(out)])

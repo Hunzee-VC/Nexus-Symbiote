@@ -7,8 +7,8 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from symbiote.cli import main
-from symbiote.core.aibom import AIBOM
+from nexus_symbiote.cli import main
+from nexus_symbiote.core.aibom import AIBOM
 
 
 def _create_full_project(root: Path) -> Path:
@@ -128,7 +128,7 @@ class TestFullPipeline:
         bom = AIBOM.load(bom_path)
         assert len(bom.components) >= 3
         assert bom.metadata.completeness is not None
-        assert bom.metadata.completeness.scope == "local-static-project"
+        assert bom.metadata.completeness.scope == "local-static-project+shadowscan"
 
     def test_validate_against_project(self, tmp_path: Path) -> None:
         """Cross-validate a BOM against the project that produced it."""

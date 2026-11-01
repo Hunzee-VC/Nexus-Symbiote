@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from symbiote.scanners.prompt import PromptScanner, detect_invisible_characters
+from nexus_symbiote.scanners.prompt import PromptScanner, detect_invisible_characters
 
 
 class TestInvisibleCharacterDetection:
