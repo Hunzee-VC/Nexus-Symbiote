@@ -146,8 +146,8 @@ class MCPScanner(Scanner):
         )
 
         package_ref = self._extract_package_ref(command, args)
-        version_pinned = False
         version = None
+        version_pinned: bool | None = None
         if package_ref:
             version = extract_version_pin(package_ref)
             version_pinned = version is not None

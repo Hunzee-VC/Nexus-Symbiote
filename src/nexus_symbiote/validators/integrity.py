@@ -28,6 +28,9 @@ from nexus_symbiote.utils.crypto import (
     verify_sigstore_bundle,
 )
 
+# Digests derived from parsed artifact structure rather than raw file bytes.
+DERIVED_DIGEST_KEYS = {"tensor_inventory_sha256", "safetensors_header_sha256", "tensor_count"}
+
 
 @dataclass
 class IntegrityIssue:
