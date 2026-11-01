@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from symbiote.core.hashing import canonical_json
-from symbiote.generators.cyclonedx import CycloneDXGenerator
+from nexus_symbiote.core.hashing import canonical_json
+from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
 from tests.test_generators import _sample_aibom
 
 
@@ -40,9 +40,9 @@ def test_cyclonedx_strict_validator():
 
 
 def test_legacy_tool_fingerprint_requires_migration():
-    from symbiote.core.aibom import AIBOM
-    from symbiote.core.models import ToolComponent
-    from symbiote.validators.integrity import IntegrityValidator
+    from nexus_symbiote.core.aibom import AIBOM
+    from nexus_symbiote.core.models import ToolComponent
+    from nexus_symbiote.validators.integrity import IntegrityValidator
 
     bom = AIBOM()
     bom.add_component(
@@ -55,9 +55,9 @@ def test_legacy_tool_fingerprint_requires_migration():
 
 
 def test_diff_does_not_compare_legacy_and_new_fingerprints():
-    from symbiote.core.aibom import AIBOM
-    from symbiote.core.models import ToolComponent
-    from symbiote.diff.differ import AIBOMDiffer
+    from nexus_symbiote.core.aibom import AIBOM
+    from nexus_symbiote.core.models import ToolComponent
+    from nexus_symbiote.diff.differ import AIBOMDiffer
 
     old = AIBOM()
     new = AIBOM()

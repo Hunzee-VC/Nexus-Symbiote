@@ -1,10 +1,10 @@
 import pytest
 from click.testing import CliRunner
 
-from symbiote.cli import SCANNER_REGISTRY, main
-from symbiote.core.aibom import AIBOM
-from symbiote.core.models import CompletenessClaim, ToolComponent
-from symbiote.validators.completeness import CompletenessValidator
+from nexus_symbiote.cli import SCANNER_REGISTRY, main
+from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote.core.models import CompletenessClaim, ToolComponent
+from nexus_symbiote.validators.completeness import CompletenessValidator
 
 
 def test_failed_collector_produces_partial_output_and_nonzero(tmp_path, monkeypatch):
@@ -19,7 +19,7 @@ def test_failed_collector_produces_partial_output_and_nonzero(tmp_path, monkeypa
     )
     assert result.exit_code != 0
     bom = AIBOM.load(output)
-    assert bom.metadata.completeness.scope == "local-static-project"
+    assert bom.metadata.completeness.scope == "local-static-project+shadowscan"
     assert bom.metadata.completeness.scanner_status["broken"] == "failed"
     assert bom.metadata.completeness.scan_failures
     assert not CompletenessValidator().validate(bom).is_complete
@@ -50,7 +50,7 @@ def test_component_collision_is_rejected_on_add_and_import():
 
 def test_policy_with_typo_or_invalid_yaml_does_not_fall_back(tmp_path):
     output = tmp_path / "bom.json"
-    (tmp_path / ".symbiote.yaml").write_text("scan:\n  scaners: [mcp]\n")
+    (tmp_path / ".nexus-symbiote.yaml").write_text("scan:\n  scaners: [mcp]\n")
     result = CliRunner().invoke(main, ["scan", str(tmp_path), "-o", str(output)])
     assert result.exit_code != 0
     assert not output.exists()

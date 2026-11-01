@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 
-from symbiote.core.aibom import AIBOM, DependencyEdge
-from symbiote.core.enums import SerializationSafety
-from symbiote.core.models import (
+from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
+from nexus_symbiote.core.enums import SerializationSafety
+from nexus_symbiote.core.models import (
     AgentComponent,
     GuardrailComponent,
     MCPServerComponent,
@@ -18,8 +18,8 @@ from symbiote.core.models import (
     SkillPackageComponent,
     ToolComponent,
 )
-from symbiote.generators.cyclonedx import CycloneDXGenerator
-from symbiote.generators.spdx import SPDXGenerator
+from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
+from nexus_symbiote.generators.spdx import SPDXGenerator
 
 
 def _sample_aibom() -> AIBOM:
@@ -92,15 +92,15 @@ class TestCycloneDXGenerator:
         result = gen.generate(_sample_aibom())
         agent_comp = next(c for c in result["components"] if c["name"] == "my-agent")
         prop_names = {p["name"] for p in agent_comp.get("properties", [])}
-        assert "symbiote:componentType" in prop_names
-        assert "symbiote:autonomyLevel" in prop_names
+        assert "nexus-symbiote:componentType" in prop_names
+        assert "nexus-symbiote:autonomyLevel" in prop_names
 
     def test_model_properties(self):
         gen = CycloneDXGenerator()
         result = gen.generate(_sample_aibom())
         model_comp = next(c for c in result["components"] if c["name"] == "gpt-4o")
         props = {p["name"]: p["value"] for p in model_comp.get("properties", [])}
-        assert props.get("symbiote:provider") == "openai"
+        assert props.get("nexus-symbiote:provider") == "openai"
 
     def test_dependency_mapping(self):
         gen = CycloneDXGenerator()
@@ -120,7 +120,7 @@ class TestCycloneDXGenerator:
         result = gen.generate(_sample_aibom())
         tools = result["metadata"]["tools"]["components"]
         assert len(tools) == 1
-        assert tools[0]["name"] == "symbiote"
+        assert tools[0]["name"] == "nexus-symbiote"
 
 
 class TestSPDXGenerator:
@@ -154,8 +154,8 @@ class TestSPDXGenerator:
         for elem in elements:
             if "extension" in elem:
                 ext = elem["extension"][0]
-                assert ext["specVersion"] == "symbiote-1.0.0"
-                assert "symbiote:componentType" in ext["properties"]
+                assert ext["specVersion"] == "nexus-symbiote-1.0.0"
+                assert "nexus-symbiote:componentType" in ext["properties"]
 
     def test_relationship_types(self):
         gen = SPDXGenerator()
@@ -292,11 +292,11 @@ class TestCycloneDXGeneratorFull:
         result = gen.generate(_full_component_aibom())
         model_comp = next(c for c in result["components"] if c["name"] == "gpt-4o")
         props = {p["name"]: p["value"] for p in model_comp.get("properties", [])}
-        assert props["symbiote:modelType"] == "foundation"
-        assert props["symbiote:serializationFormat"] == "safetensors"
-        assert props["symbiote:serializationSafety"] == "safe"
-        assert props["symbiote:signingStatus"] == "sigstore-signed"
-        assert props["symbiote:trustRemoteCode"] == "True"
+        assert props["nexus-symbiote:modelType"] == "foundation"
+        assert props["nexus-symbiote:serializationFormat"] == "safetensors"
+        assert props["nexus-symbiote:serializationSafety"] == "safe"
+        assert props["nexus-symbiote:signingStatus"] == "sigstore-signed"
+        assert props["nexus-symbiote:trustRemoteCode"] == "True"
 
     def test_model_version_and_supplier(self):
         gen = CycloneDXGenerator()
@@ -316,72 +316,72 @@ class TestCycloneDXGeneratorFull:
         result = gen.generate(_full_component_aibom())
         agent_comp = next(c for c in result["components"] if c["name"] == "my-agent")
         props = {p["name"]: p["value"] for p in agent_comp.get("properties", [])}
-        assert "symbiote:modelRef" in props
-        assert "symbiote:toolRef" in props
-        assert props["symbiote:framework"] == "crewai"
+        assert "nexus-symbiote:modelRef" in props
+        assert "nexus-symbiote:toolRef" in props
+        assert props["nexus-symbiote:framework"] == "crewai"
 
     def test_tool_annotation_properties(self):
         gen = CycloneDXGenerator()
         result = gen.generate(_full_component_aibom())
         tool_comp = next(c for c in result["components"] if c["name"] == "read_file")
         props = {p["name"]: p["value"] for p in tool_comp.get("properties", [])}
-        assert "symbiote:annotation.readOnlyHint" in props
+        assert "nexus-symbiote:annotation.readOnlyHint" in props
 
     def test_mcp_properties(self):
         gen = CycloneDXGenerator()
         result = gen.generate(_full_component_aibom())
         mcp_comp = next(c for c in result["components"] if c["name"] == "filesystem")
         props = {p["name"]: p["value"] for p in mcp_comp.get("properties", [])}
-        assert props["symbiote:transport"] == "stdio"
-        assert props["symbiote:toolCount"] == "3"
-        assert props["symbiote:schemaHash"] == "sha256:sch123"
+        assert props["nexus-symbiote:transport"] == "stdio"
+        assert props["nexus-symbiote:toolCount"] == "3"
+        assert props["nexus-symbiote:schemaHash"] == "sha256:sch123"
 
     def test_prompt_properties(self):
         gen = CycloneDXGenerator()
         result = gen.generate(_full_component_aibom())
         p = next(c for c in result["components"] if c["name"] == "system-prompt")
         props = {p["name"]: p["value"] for p in p.get("properties", [])}
-        assert props["symbiote:promptType"] == "system-prompt"
-        assert props["symbiote:contentHash"] == "sha256:ppp"
+        assert props["nexus-symbiote:promptType"] == "system-prompt"
+        assert props["nexus-symbiote:contentHash"] == "sha256:ppp"
 
     def test_guardrail_properties(self):
         gen = CycloneDXGenerator()
         result = gen.generate(_full_component_aibom())
         g = next(c for c in result["components"] if c["name"] == "content-filter")
         props = {p["name"]: p["value"] for p in g.get("properties", [])}
-        assert props["symbiote:guardrailType"] == "output-filter"
+        assert props["nexus-symbiote:guardrailType"] == "output-filter"
 
     def test_memory_properties(self):
         gen = CycloneDXGenerator()
         result = gen.generate(_full_component_aibom())
         m = next(c for c in result["components"] if c["name"] == "conversation-store")
         props = {p["name"]: p["value"] for p in m.get("properties", [])}
-        assert props["symbiote:storeType"] == "conversation"
-        assert props["symbiote:tenantIsolated"] == "True"
-        assert props["symbiote:encryptionAtRest"] == "True"
+        assert props["nexus-symbiote:storeType"] == "conversation"
+        assert props["nexus-symbiote:tenantIsolated"] == "True"
+        assert props["nexus-symbiote:encryptionAtRest"] == "True"
 
     def test_rag_properties(self):
         gen = CycloneDXGenerator()
         result = gen.generate(_full_component_aibom())
         r = next(c for c in result["components"] if c["name"] == "docs-index")
         props = {p["name"]: p["value"] for p in r.get("properties", [])}
-        assert props["symbiote:corpusType"] == "vector-store"
-        assert props["symbiote:embeddingModel"] == "text-embedding-3-small"
+        assert props["nexus-symbiote:corpusType"] == "vector-store"
+        assert props["nexus-symbiote:embeddingModel"] == "text-embedding-3-small"
 
     def test_registry_properties(self):
         gen = CycloneDXGenerator()
         result = gen.generate(_full_component_aibom())
         r = next(c for c in result["components"] if c["name"] == "npm-registry")
         props = {p["name"]: p["value"] for p in r.get("properties", [])}
-        assert props["symbiote:registryType"] == "npm"
-        assert props["symbiote:publisherVerified"] == "True"
+        assert props["nexus-symbiote:registryType"] == "npm"
+        assert props["nexus-symbiote:publisherVerified"] == "True"
 
     def test_skill_properties(self):
         gen = CycloneDXGenerator()
         result = gen.generate(_full_component_aibom())
         s = next(c for c in result["components"] if c["name"] == "deploy-skill")
         props = {p["name"]: p["value"] for p in s.get("properties", [])}
-        assert props["symbiote:skillType"] == "skill"
+        assert props["nexus-symbiote:skillType"] == "skill"
 
     def test_multiple_dependency_types(self):
         gen = CycloneDXGenerator()
@@ -426,8 +426,8 @@ class TestSPDXGeneratorFull:
         result = gen.generate(_full_component_aibom())
         model = next(e for e in result["@graph"] if e.get("name") == "gpt-4o")
         ext = model["extension"][0]
-        assert ext["properties"]["symbiote:serializationFormat"] == "safetensors"
-        assert ext["properties"]["symbiote:signingStatus"] == "sigstore-signed"
+        assert ext["properties"]["nexus-symbiote:serializationFormat"] == "safetensors"
+        assert ext["properties"]["nexus-symbiote:signingStatus"] == "sigstore-signed"
 
     def test_supplier_mapped(self):
         gen = SPDXGenerator()

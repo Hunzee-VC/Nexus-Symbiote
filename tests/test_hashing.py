@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from symbiote.core.hashing import (
+from nexus_symbiote.core.hashing import (
     canonical_json,
     extract_version_pin,
     hash_bytes,

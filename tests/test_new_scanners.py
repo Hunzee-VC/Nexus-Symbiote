@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 
-from symbiote.core.enums import ComponentType
-from symbiote.scanners.a2a import A2AScanner
-from symbiote.scanners.ide_agents import IDEAgentScanner
-from symbiote.scanners.mcp import MCPScanner
+from nexus_symbiote.core.enums import ComponentType
+from nexus_symbiote.scanners.a2a import A2AScanner
+from nexus_symbiote.scanners.ide_agents import IDEAgentScanner
+from nexus_symbiote.scanners.mcp import MCPScanner
 
 
 class TestA2AScanner:
@@ -276,7 +276,7 @@ class TestMCPClientDetection:
 
 class TestNewComponentTypes:
     def test_new_enums_exist(self):
-        from symbiote.core.enums import ComponentType
+        from nexus_symbiote.core.enums import ComponentType
 
         assert ComponentType.MCP_CLIENT == "mcp-client"
         assert ComponentType.A2A_CLIENT == "a2a-client"
@@ -285,7 +285,7 @@ class TestNewComponentTypes:
         assert ComponentType.VERIFIED_EXTENSION == "verified-extension"
 
     def test_new_models_serializable(self):
-        from symbiote.core.models import (
+        from nexus_symbiote.core.models import (
             A2AClientComponent,
             A2AServerComponent,
             IDEAgentComponent,
@@ -309,8 +309,8 @@ class TestNewComponentTypes:
         assert ext.model_dump()["component_type"] == "verified-extension"
 
     def test_new_components_in_aibom(self):
-        from symbiote.core.aibom import AIBOM
-        from symbiote.core.models import (
+        from nexus_symbiote.core.aibom import AIBOM
+        from nexus_symbiote.core.models import (
             A2AServerComponent,
             IDEAgentComponent,
             MCPClientComponent,
