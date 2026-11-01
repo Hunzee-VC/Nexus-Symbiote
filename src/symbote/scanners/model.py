@@ -117,7 +117,12 @@ class ModelScanner(Scanner):
                 if config
                 else None
             )
-            trust_remote_code = bool(config.get("trust_remote_code")) if config else False
+            # This is a declaration in a local config, not the runtime loader argument.
+            # An absent or non-boolean value cannot establish the effective setting.
+            configured_remote_code = config.get("trust_remote_code") if config else None
+            trust_remote_code = (
+                configured_remote_code if isinstance(configured_remote_code, bool) else None
+            )
 
             comp = ModelComponent(
                 bom_ref=f"model:{model_name}/{path.name}",
@@ -242,7 +247,7 @@ class ModelScanner(Scanner):
                 )
             )
 
-        if config and config.get("trust_remote_code"):
+        if config and config.get("trust_remote_code") is True:
             risks.append(
                 RiskAssessment(
                     severity=RiskSeverity.CRITICAL,

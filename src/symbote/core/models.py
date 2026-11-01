@@ -53,8 +53,12 @@ class CapabilityDeclaration(BaseModel):
     egress_domains: list[str] = Field(default_factory=list)
     filesystem_paths: list[str] = Field(default_factory=list)
     side_effect_profile: SideEffectProfile = SideEffectProfile.UNKNOWN
-    execution_isolation: ExecutionIsolation = ExecutionIsolation.NONE
-    human_in_the_loop: HumanInTheLoop = HumanInTheLoop.NONE
+    execution_isolation: ExecutionIsolation | None = Field(
+        default=None, description="Declared isolation; null or absent means unknown"
+    )
+    human_in_the_loop: HumanInTheLoop | None = Field(
+        default=None, description="Declared human-approval setting; null or absent means unknown"
+    )
 
 
 class AuthorizationRecord(BaseModel):
@@ -65,7 +69,7 @@ class AuthorizationRecord(BaseModel):
     action: str
     resource_scope: str | None = None
     conditions: list[str] = Field(default_factory=list)
-    approval_required: bool = False
+    approval_required: bool | None = None
     expires_at: datetime | None = None
     policy_reference: str | None = None
 
@@ -188,7 +192,9 @@ class ModelComponent(ComponentBase):
     quantization_method: str | None = None
     tokenizer_hash: str | None = None
     chat_template_hash: str | None = None
-    trust_remote_code: bool = False
+    trust_remote_code: bool | None = Field(
+        default=None, description="Declared configuration only; the runtime value may differ"
+    )
     risks: list[RiskAssessment] = Field(default_factory=list)
 
 
@@ -240,8 +246,8 @@ class MemoryStoreComponent(ComponentBase):
         description="Who may write: agent-only, user, system, public",
     )
     retention_policy: str | None = None
-    tenant_isolated: bool = True
-    encryption_at_rest: bool = False
+    tenant_isolated: bool | None = None
+    encryption_at_rest: bool | None = None
     risks: list[RiskAssessment] = Field(default_factory=list)
 
 
@@ -290,7 +296,7 @@ class RegistryEntryComponent(ComponentBase):
     )
     registry_uri: str | None = None
     publisher_identity: str | None = None
-    publisher_verified: bool = False
+    publisher_verified: bool | None = None
     attestation_status: str | None = None
     signing_key_reference: str | None = None
     trust_model: str | None = Field(default=None, description="tofu, pki, sigstore, none")
