@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from symbote.core.aibom import AIBOM, DependencyEdge
 from symbote.core.enums import (
     SERIALIZATION_FORMAT_SAFETY,
@@ -175,8 +177,8 @@ class TestHashing:
         assert result == '{"v":1}'
 
     def test_canonical_json_nan(self):
-        result = canonical_json({"v": float("nan")})
-        assert result == '{"v":null}'
+        with pytest.raises(ValueError):
+            canonical_json({"v": float("nan")})
 
     def test_hash_canonical_deterministic(self):
         h1 = hash_canonical({"b": 1, "a": 2})

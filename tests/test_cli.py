@@ -76,6 +76,7 @@ def _make_fixture_bom(
             name="read_file",
             mcp_server_ref="mcp-fs",
             definition_hash="sha256:abc123",
+            definition_hash_version="rfc8785-jcs-v1",
         )
     )
     bom.add_component(
