@@ -108,23 +108,79 @@ The `symbote risk` command scores all findings and applies a pass/fail gate for 
 
 ## CI/CD Integration
 
-Add SymBiote to your CI pipeline to gate deployments on supply chain risk:
+### GitHub Action
 
 ```yaml
 # .github/workflows/aibom.yml
+name: AI Supply Chain Security
+on: [push, pull_request]
+jobs:
+  aibom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aisecnomad/SymBiote@main
+        with:
+          risk-threshold: '50'
+          sarif-upload: 'true'
+```
+
+The action scans your project, runs validation and risk scoring, uploads SARIF findings to the GitHub Security tab, and saves the AIBOM as a build artifact.
+
+### Manual CI
+
+```yaml
 - name: Generate AIBOM
   run: symbote scan . -o aibom.json
+
+- name: SARIF for Security tab
+  run: symbote scan . -f sarif -o results.sarif
 
 - name: Risk gate
   run: symbote risk aibom.json --threshold 50.0
 
 - name: Drift detection
-  run: |
-    symbote scan . -o aibom-new.json
-    symbote diff aibom-baseline.json aibom-new.json --json-output
+  run: symbote diff aibom-baseline.json <(symbote scan . 2>/dev/null) --json-output
 ```
 
-Use `symbote risk --json-output` for machine-readable results.
+### Pre-commit Hook
+
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/aisecnomad/SymBiote
+    rev: main
+    hooks:
+      - id: symbote-scan
+      - id: symbote-risk
+```
+
+## Policy Configuration
+
+Create a `.symbote.yaml` to customize scan behavior, risk thresholds, and output format:
+
+```bash
+symbote init
+```
+
+```yaml
+# .symbote.yaml
+version: "1.0"
+
+scan:
+  scanners: ["mcp", "model", "prompt", "rag", "registry"]
+  exclude_paths: ["node_modules", ".git", "__pycache__"]
+
+risk:
+  fail_threshold: 50.0
+  warn_threshold: 25.0
+  ignore_categories: []
+
+output:
+  default_format: "json"
+```
+
+Policy files are discovered by searching the project directory and its parents, so a monorepo can have one policy at the root.
 
 ## AIBOM Diff
 
@@ -142,6 +198,7 @@ The `symbote diff` command compares two AIBOM snapshots and detects:
 - **Native JSON** — Full SymBiote schema with all agent-native fields
 - **CycloneDX 1.7** — Standard SBOM with `symbote:` property extensions
 - **SPDX 3.0** — JSON-LD with AI/Dataset profiles and `symbote:` extensions
+- **SARIF 2.1.0** — GitHub Security tab integration for risk findings
 
 ## Architecture
 
@@ -149,7 +206,7 @@ The `symbote diff` command compares two AIBOM snapshots and detects:
 src/symbote/
   core/        — Pydantic v2 domain models, enums, AIBOM container, RFC 8785 JCS hashing
   scanners/    — Component discovery (MCP, model, prompt, RAG, registry)
-  generators/  — Output format generators (native, CycloneDX 1.7, SPDX 3.0)
+  generators/  — Output format generators (native, CycloneDX 1.7, SPDX 3.0, SARIF 2.1.0)
   validators/  — Completeness, integrity, and risk scoring
   diff/        — AIBOM version comparison with security alerts
   utils/       — Sigstore verification, file hash utilities
