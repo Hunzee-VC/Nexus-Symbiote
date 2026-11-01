@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+
+import pytest
+from jsonschema import Draft7Validator, Draft202012Validator
+from referencing import Registry, Resource
 
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.enums import SerializationSafety
@@ -123,6 +128,13 @@ class TestCycloneDXGenerator:
         assert tools[0]["name"] == "nexus-symbiote"
 
 
+def _extension_properties(element):
+    return {
+        prop["extension_cdxPropName"]: prop["extension_cdxPropValue"]
+        for prop in element["extension"][0]["extension_cdxProperty"]
+    }
+
+
 class TestSPDXGenerator:
     def test_generate_structure(self):
         gen = SPDXGenerator()
@@ -131,7 +143,8 @@ class TestSPDXGenerator:
         graph = result["@graph"]
         doc = graph[0]
         assert doc["type"] == "SpdxDocument"
-        assert next(e for e in graph if e["type"] == "CreationInfo")["specVersion"] == "3.0.1"
+        assert graph[1]["specVersion"] == "3.0.1"
+        assert doc["creationInfo"] == graph[1]["@id"]
 
     def test_element_types(self):
         gen = SPDXGenerator()
@@ -144,7 +157,7 @@ class TestSPDXGenerator:
     def test_spdx_ids_unique(self):
         gen = SPDXGenerator()
         result = gen.generate(_sample_aibom())
-        ids = [e.get("spdxId", e.get("@id")) for e in result["@graph"]]
+        ids = [e["spdxId"] for e in result["@graph"] if "spdxId" in e]
         assert len(ids) == len(set(ids))
 
     def test_extensions_present(self):
@@ -153,18 +166,36 @@ class TestSPDXGenerator:
         elements = [e for e in result["@graph"][1:] if e.get("type") != "Relationship"]
         for elem in elements:
             if "extension" in elem:
-                ext = elem["extension"][0]
-                assert ext["type"] == "extension_CdxPropertiesExtension"
-                assert "nexus-symbiote:component" in {
-                    p["extension_cdxPropName"] for p in ext["extension_cdxProperty"]
-                }
+                assert "nexus-symbiote:componentType" in _extension_properties(elem)
 
     def test_relationship_types(self):
         gen = SPDXGenerator()
         result = gen.generate(_sample_aibom())
-        rels = [e for e in result["@graph"] if e.get("type") == "Relationship"]
+        rels = [
+            e
+            for e in result["@graph"]
+            if e.get("type") == "Relationship" and e.get("relationshipType") == "usesTool"
+        ]
         assert len(rels) == 1
         assert rels[0]["relationshipType"] == "usesTool"
+
+    def test_ai_and_dataset_license_profile_requirements(self):
+        from nexus_symbiote.generators.spdx import NO_ASSERTION_LICENSE
+
+        graph = SPDXGenerator().generate(_full_component_aibom())["@graph"]
+        packages = [e for e in graph if e.get("type") in ("ai_AIPackage", "dataset_DatasetPackage")]
+        assert packages
+        for package in packages:
+            for kind in ("hasDeclaredLicense", "hasConcludedLicense"):
+                relations = [
+                    e
+                    for e in graph
+                    if e.get("type") == "Relationship"
+                    and e.get("relationshipType") == kind
+                    and e.get("from") == package["spdxId"]
+                ]
+                assert len(relations) == 1
+                assert relations[0]["to"] == [NO_ASSERTION_LICENSE]
 
     def test_generate_json_valid(self):
         gen = SPDXGenerator()
@@ -389,10 +420,14 @@ class TestCycloneDXGeneratorFull:
         gen = CycloneDXGenerator()
         result = gen.generate(_full_component_aibom())
         deps = result["dependencies"]
-        assert len(deps) == 1
-        assert set(deps[0]["dependsOn"]) == {"model:gpt-4o", "tool:read_file"}
-        recovered = CycloneDXGenerator.recover(result)
-        assert {d.relationship for d in recovered.dependencies} == {"trained-on", "invokes"}
+        assert deps == [{"ref": "agent:main", "dependsOn": ["model:gpt-4o", "tool:read_file"]}]
+        rels = {
+            json.loads(p["value"])["type"]
+            for p in result["metadata"]["properties"]
+            if p["name"] == "nexus-symbiote:dependency:relationship"
+        }
+        assert "trained-on" in rels
+        assert "invokes" in rels
 
     def test_authors_in_metadata(self):
         bom = _full_component_aibom()
@@ -427,20 +462,16 @@ class TestSPDXGeneratorFull:
         gen = SPDXGenerator()
         result = gen.generate(_full_component_aibom())
         model = next(e for e in result["@graph"] if e.get("name") == "gpt-4o")
-        ext = model["extension"][0]
-        component = json.loads(ext["extension_cdxProperty"][0]["extension_cdxPropValue"])
-        assert component["serialization_format"] == "safetensors"
-        assert component["signing_status"] == "sigstore-signed"
+        props = _extension_properties(model)
+        assert props["nexus-symbiote:serializationFormat"] == "safetensors"
+        assert props["nexus-symbiote:signingStatus"] == "sigstore-signed"
 
     def test_supplier_mapped(self):
         gen = SPDXGenerator()
         result = gen.generate(_full_component_aibom())
         model = next(e for e in result["@graph"] if e.get("name") == "gpt-4o")
         assert "suppliedBy" in model
-        assert (
-            next(e for e in result["@graph"] if e.get("spdxId") == model["suppliedBy"])["name"]
-            == "OpenAI"
-        )
+        assert "OpenAI" in model["suppliedBy"]
 
     def test_hashes_mapped(self):
         gen = SPDXGenerator()
@@ -448,3 +479,61 @@ class TestSPDXGeneratorFull:
         model = next(e for e in result["@graph"] if e.get("name") == "gpt-4o")
         assert "verifiedUsing" in model
         assert model["verifiedUsing"][0]["type"] == "Hash"
+
+
+@pytest.mark.parametrize("fixture", ["example", "full", "empty"])
+def test_portable_formats_validate_offline(fixture):
+    directory = Path(__file__).parent
+    bom = {
+        "example": lambda: AIBOM.load(directory.parent / "examples/customer-support-agent.json"),
+        "full": _full_component_aibom,
+        "empty": AIBOM,
+    }[fixture]()
+    schemas = directory / "schemas"
+    cdx_schema = json.loads((schemas / "bom-1.7.schema.json").read_text())
+    registry = Registry()
+    for file in ("jsf-0.82.schema.json", "spdx.schema.json"):
+        sub = json.loads((schemas / file).read_text())
+        registry = registry.with_resource(
+            "http://cyclonedx.org/schema/" + file, Resource.from_contents(sub)
+        )
+    cdx = CycloneDXGenerator().generate(bom)
+    Draft7Validator(
+        cdx_schema, registry=registry, format_checker=Draft7Validator.FORMAT_CHECKER
+    ).validate(cdx)
+    spdx = SPDXGenerator().generate(bom)
+    Draft202012Validator(
+        json.loads((schemas / "spdx-json-schema-3.0.1.json").read_text()),
+        format_checker=Draft202012Validator.FORMAT_CHECKER,
+    ).validate(spdx)
+    identifiers = {n.get("spdxId", n.get("@id")) for n in spdx["@graph"]}
+    # SPDX's predefined no-assertion license is an external vocabulary individual.
+    identifiers.add("https://spdx.org/rdf/3.0.1/terms/Licensing/NoAssertion")
+    for n in spdx["@graph"]:
+        if "spdxId" in n:
+            assert n["creationInfo"] in identifiers
+        for ref in (
+            n.get("element", [])
+            + n.get("rootElement", [])
+            + n.get("to", [])
+            + n.get("createdBy", [])
+        ):
+            assert ref in identifiers
+        if "from" in n:
+            assert n["from"] in identifiers
+        if "suppliedBy" in n:
+            assert n["suppliedBy"] in identifiers
+
+
+@pytest.mark.parametrize("generator", [SPDXGenerator, CycloneDXGenerator])
+def test_rejects_invalid_digest_and_dangling_references(generator):
+    bom = _sample_aibom()
+    bom.components[0].hashes = {"sha256": "sha256:abc"}
+    with pytest.raises(ValueError, match="invalid"):
+        generator().generate(bom)
+    bom.components[0].hashes = {}
+    bom.add_dependency(
+        DependencyEdge(source_ref="agent:main", target_ref="absent", relationship="invokes")
+    )
+    with pytest.raises(ValueError, match="unresolved"):
+        generator().generate(bom)
