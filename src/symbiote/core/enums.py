@@ -6,6 +6,7 @@ from enum import Enum
 class ComponentType(str, Enum):
     AGENT = "agent"
     MCP_SERVER = "mcp-server"
+    MCP_CLIENT = "mcp-client"
     TOOL = "tool"
     MODEL = "model"
     PROMPT_TEMPLATE = "prompt-template"
@@ -15,6 +16,10 @@ class ComponentType(str, Enum):
     DATA_SOURCE = "data-source"
     REGISTRY_ENTRY = "registry-entry"
     SKILL_PACKAGE = "skill-package"
+    A2A_CLIENT = "a2a-client"
+    A2A_SERVER = "a2a-server"
+    IDE_AGENT = "ide-agent"
+    VERIFIED_EXTENSION = "verified-extension"
 
 
 class AssuranceLevel(str, Enum):

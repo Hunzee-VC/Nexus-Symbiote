@@ -316,6 +316,82 @@ class SkillPackageComponent(ComponentBase):
     risks: list[RiskAssessment] = Field(default_factory=list)
 
 
+class MCPClientComponent(ComponentBase):
+    """An MCP client that connects to MCP servers."""
+
+    component_type: ComponentType = ComponentType.MCP_CLIENT
+    host_application: str | None = Field(
+        default=None, description="The IDE or agent host (claude-code, cursor, etc.)"
+    )
+    server_refs: list[str] = Field(
+        default_factory=list, description="bom_ref pointers to connected MCP servers"
+    )
+    config_path: str | None = None
+    risks: list[RiskAssessment] = Field(default_factory=list)
+
+
+class A2AClientComponent(ComponentBase):
+    """An A2A protocol client that discovers and invokes remote agents."""
+
+    component_type: ComponentType = ComponentType.A2A_CLIENT
+    agent_card_url: str | None = Field(
+        default=None, description="URL of the remote agent card"
+    )
+    supported_protocols: list[str] = Field(default_factory=list)
+    authentication_methods: list[str] = Field(default_factory=list)
+    capabilities: CapabilityDeclaration | None = None
+    risks: list[RiskAssessment] = Field(default_factory=list)
+
+
+class A2AServerComponent(ComponentBase):
+    """An A2A protocol server exposing agent capabilities to other agents."""
+
+    component_type: ComponentType = ComponentType.A2A_SERVER
+    agent_card_path: str | None = Field(
+        default=None, description="Path or URL to the agent card JSON"
+    )
+    endpoint_url: str | None = None
+    supported_protocols: list[str] = Field(default_factory=list)
+    skills_declared: list[str] = Field(default_factory=list)
+    authentication_required: bool | None = None
+    capabilities: CapabilityDeclaration | None = None
+    risks: list[RiskAssessment] = Field(default_factory=list)
+
+
+class IDEAgentComponent(ComponentBase):
+    """An IDE coding agent configuration (Claude Code, Codex, Cursor, etc.)."""
+
+    component_type: ComponentType = ComponentType.IDE_AGENT
+    ide_type: str | None = Field(
+        default=None,
+        description="claude-code, codex, cursor, antigravity, xai, windsurf, cline",
+    )
+    config_files: list[str] = Field(default_factory=list)
+    mcp_server_refs: list[str] = Field(default_factory=list)
+    prompt_refs: list[str] = Field(default_factory=list)
+    permission_mode: str | None = None
+    risks: list[RiskAssessment] = Field(default_factory=list)
+
+
+class VerifiedExtensionComponent(ComponentBase):
+    """An AI agent extension with verification/attestation status."""
+
+    component_type: ComponentType = ComponentType.VERIFIED_EXTENSION
+    extension_type: str | None = Field(
+        default=None, description="plugin, skill, connector, integration, action"
+    )
+    publisher: str | None = None
+    publisher_verified: bool = False
+    attestation_status: str | None = Field(
+        default=None, description="verified, unverified, revoked, expired"
+    )
+    signing_identity: str | None = None
+    marketplace_url: str | None = None
+    install_count: int | None = None
+    capabilities: CapabilityDeclaration | None = None
+    risks: list[RiskAssessment] = Field(default_factory=list)
+
+
 class CompletenessClaim(BaseModel):
     """What was actually scanned and what was excluded."""
 
@@ -345,6 +421,7 @@ class AIBOMMetadata(BaseModel):
 AnyComponent = (
     AgentComponent
     | MCPServerComponent
+    | MCPClientComponent
     | ToolComponent
     | ModelComponent
     | PromptComponent
@@ -354,4 +431,8 @@ AnyComponent = (
     | DataSourceComponent
     | RegistryEntryComponent
     | SkillPackageComponent
+    | A2AClientComponent
+    | A2AServerComponent
+    | IDEAgentComponent
+    | VerifiedExtensionComponent
 )
