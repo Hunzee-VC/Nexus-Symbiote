@@ -13,12 +13,14 @@ Discovers configurations for IDE-integrated AI coding agents:
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
 from nexus_symbiote.core.enums import RiskSeverity, TrustTier
 from nexus_symbiote.core.models import IDEAgentComponent, RiskAssessment, VerifiedExtensionComponent
 from nexus_symbiote.scanners.base import Scanner, ScanResult
+from nexus_symbiote.utils.secrets import redact_text
 
 IDE_AGENT_CONFIGS: dict[str, dict[str, Any]] = {
     "claude-code": {
@@ -93,86 +95,81 @@ class IDEAgentScanner(Scanner):
 
     def scan(self, project_root: Path) -> ScanResult:
         result = ScanResult(scanner_name=self.name)
-
-        for ide_type, config in IDE_AGENT_CONFIGS.items():
-            self._scan_ide_agent(project_root, ide_type, config, result)
-
-        self._scan_extensions(project_root, result)
-
-        if not result.components and not result.scan_failures:
-            result.surfaces_excluded.append("ide-agents (no IDE agent configs found)")
-
-        return result
-
-    def _scan_ide_agent(
-        self,
-        root: Path,
-        ide_type: str,
-        config: dict[str, Any],
-        result: ScanResult,
-    ) -> None:
-        found_files: list[str] = []
-        config_files: list[str] = []
-
-        for marker in config["markers"]:
-            marker_path = root / marker
-            if marker_path.exists() and not marker_path.is_symlink():
-                found_files.append(marker)
-                config_files.append(str(marker_path))
-
-        if not found_files:
-            return
-
-        result.surfaces_scanned.extend(config_files)
-
-        mcp_refs: list[str] = []
-        for mcp_cfg in config.get("mcp_config", []):
-            mcp_path = root / mcp_cfg
-            if mcp_path.exists() and not mcp_path.is_symlink():
-                mcp_refs.append(f"mcp-config:{mcp_cfg}")
-
-        risks: list[RiskAssessment] = []
-        permission_mode = None
-
-        settings_data = self._read_ide_settings(root, ide_type)
-        if settings_data:
-            permission_mode = self._extract_permission_mode(settings_data, ide_type)
-
-            if self._has_broad_permissions(settings_data, ide_type):
-                risks.append(
-                    RiskAssessment(
-                        severity=RiskSeverity.MEDIUM,
-                        category="permission_scope",
-                        detail=f"IDE agent '{ide_type}' has broad tool permissions configured.",
-                        recommendation="Review and restrict tool permissions to minimum required.",
+        with self._collection(project_root, result) as files:
+            available = {path.as_posix() for path in files.iter_files()}
+            for ide_type, config in IDE_AGENT_CONFIGS.items():
+                found: list[str] = []
+                for marker in config["markers"]:
+                    evidence = (
+                        marker
+                        if marker in available
+                        else next(
+                            (path for path in sorted(available) if path.startswith(marker + "/")),
+                            None,
+                        )
+                    )
+                    if evidence and files.read_bytes(evidence) is not None:
+                        found.append(marker)
+                        result.surfaces_scanned.append(str(files.root / evidence))
+                if not found:
+                    continue
+                settings = self._read_ide_settings(files.root, ide_type, result, available)
+                mode = self._extract_permission_mode(settings or {}, ide_type, result)
+                risks: list[RiskAssessment] = []
+                if self._has_broad_permissions(settings or {}, ide_type, result):
+                    risks.append(
+                        RiskAssessment(
+                            severity=RiskSeverity.MEDIUM,
+                            category="permission_scope",
+                            detail=f"IDE agent '{ide_type}' declares broad tool permissions.",
+                            recommendation="Review effective permissions and enforce resource-scoped authority.",
+                        )
+                    )
+                layered = (
+                    ide_type == "claude-code" and {"CLAUDE.md", ".claude/CLAUDE.md"}.issubset(found)
+                ) or (ide_type == "cursor" and {".cursorrules", ".cursor/rules"}.issubset(found))
+                if layered:
+                    risks.append(
+                        RiskAssessment(
+                            severity=RiskSeverity.LOW,
+                            category="instruction_layering",
+                            detail=f"IDE agent '{ide_type}' has multiple declared instruction locations.",
+                            recommendation="Document loading order, modification authority and approved digests.",
+                        )
+                    )
+                mcp_configs = []
+                for config_name in config.get("mcp_config", []):
+                    if config_name in available:
+                        data = self._read_mapping(files.root / config_name, result)
+                        if data is not None:
+                            mcp_configs.append(config_name)
+                # Configuration locators are not component references. The MCP
+                # collector binds actual client/server components separately.
+                result.components.append(
+                    IDEAgentComponent(
+                        bom_ref=f"ide-agent:{ide_type}",
+                        name=ide_type,
+                        ide_type=ide_type,
+                        config_files=found,
+                        mcp_server_refs=[],
+                        permission_mode=mode,
+                        source_path=str(files.root / found[0]),
+                        trust_tier=TrustTier.INTERNAL_UNVERIFIED,
+                        risks=risks,
+                        properties={
+                            "collection_mode": "static-project-configuration",
+                            "mcp_config_paths": mcp_configs,
+                        },
                     )
                 )
+            self._scan_extensions(files.root, result, available)
+        if not result.components and not result.scan_failures:
+            result.surfaces_excluded.append("ide-agents (no IDE agent configs found)")
+        return result
 
-        if self._has_instruction_override(root, ide_type):
-            risks.append(
-                RiskAssessment(
-                    severity=RiskSeverity.LOW,
-                    category="instruction_layering",
-                    detail=f"IDE agent '{ide_type}' has multiple instruction files.",
-                    recommendation="Consolidate instructions to avoid conflicting directives.",
-                )
-            )
-
-        result.components.append(
-            IDEAgentComponent(
-                bom_ref=f"ide-agent:{ide_type}",
-                name=ide_type,
-                ide_type=ide_type,
-                config_files=found_files,
-                mcp_server_refs=mcp_refs,
-                permission_mode=permission_mode,
-                source_path=config_files[0] if config_files else None,
-                trust_tier=TrustTier.INTERNAL_UNVERIFIED,
-                risks=risks,
-            )
-        )
-
-    def _read_ide_settings(self, root: Path, ide_type: str) -> dict[str, Any] | None:
+    def _read_ide_settings(
+        self, root: Path, ide_type: str, result: ScanResult, available: set[str]
+    ) -> dict[str, Any] | None:
         settings_paths = {
             "claude-code": [".claude/settings.json", ".claude/settings.local.json"],
             "cursor": [".cursor/settings.json"],
@@ -180,89 +177,118 @@ class IDEAgentScanner(Scanner):
             "cline": [".cline/settings.json"],
             "codex": [".codex/config.json"],
         }
-
-        for path in settings_paths.get(ide_type, []):
-            full_path = root / path
-            if full_path.exists() and not full_path.is_symlink():
-                data = self._safe_read_json(full_path)
-                if isinstance(data, dict):
-                    return data
-        return None
+        merged: dict[str, Any] = {}
+        # Keep evidence from both Claude settings layers. A shallow merge is only
+        # a discovery summary; it is not an implementation of IDE permission rules.
+        for relative in settings_paths.get(ide_type, []):
+            if relative in available:
+                data = self._read_mapping(root / relative, result)
+                if data is not None:
+                    merged.update(data)
+        return merged or None
 
     def _extract_permission_mode(
-        self, settings: dict[str, Any], ide_type: str
+        self, settings: dict[str, Any], ide_type: str, result: ScanResult
     ) -> str | None:
-        if ide_type == "claude-code":
-            perms = settings.get("permissions", {})
-            mode = perms.get("mode") if isinstance(perms, dict) else None
-            return str(mode) if mode is not None else None
-        if ide_type == "cursor":
-            agent = settings.get("agent", {})
-            mode = agent.get("permissionMode") if isinstance(agent, dict) else None
-            return str(mode) if mode is not None else None
-        return None
+        key = "permissions" if ide_type == "claude-code" else "agent"
+        mode_key = "mode" if ide_type == "claude-code" else "permissionMode"
+        values = settings.get(key, {})
+        if not isinstance(values, dict):
+            result.scan_failures.append(f"{ide_type}: invalid permission settings object")
+            return None
+        mode = values.get(mode_key)
+        if mode is None:
+            return None
+        if not isinstance(mode, str):
+            result.scan_failures.append(f"{ide_type}: invalid declared permission mode")
+            return None
+        if mode not in {
+            "default",
+            "plan",
+            "acceptEdits",
+            "bypassPermissions",
+            "dontAsk",
+            "ask",
+            "auto",
+            "read-only",
+            "workspace-write",
+            "full-access",
+            "untrusted",
+            "on-request",
+            "never",
+            "always",
+        }:
+            result.scan_failures.append(f"{ide_type}: unsupported declared permission mode")
+            return None
+        return mode
 
-    def _has_broad_permissions(self, settings: dict[str, Any], ide_type: str) -> bool:
-        if ide_type == "claude-code":
-            allowed = settings.get("permissions", {}).get("allow", [])
-            if isinstance(allowed, list):
-                broad_patterns = ["Bash(*)", "Edit(*)", "Write(*)", "*"]
-                return any(p in allowed for p in broad_patterns)
-        return False
+    def _has_broad_permissions(
+        self, settings: dict[str, Any], ide_type: str, result: ScanResult
+    ) -> bool:
+        if ide_type != "claude-code":
+            return False
+        permissions = settings.get("permissions", {})
+        if not isinstance(permissions, dict):
+            return False
+        allowed = permissions.get("allow", [])
+        if not isinstance(allowed, list) or not all(isinstance(value, str) for value in allowed):
+            result.scan_failures.append(f"{ide_type}: invalid declared permission allow-list")
+            return False
+        return any(value in allowed for value in ("Bash(*)", "Edit(*)", "Write(*)", "*"))
 
-    def _has_instruction_override(self, root: Path, ide_type: str) -> bool:
-        if ide_type == "claude-code":
-            files = ["CLAUDE.md", ".claude/CLAUDE.md"]
-            return sum(1 for f in files if (root / f).exists()) > 1
-        if ide_type == "cursor":
-            files = [".cursorrules", ".cursor/rules"]
-            return sum(1 for f in files if (root / f).exists()) > 1
-        return False
-
-    def _scan_extensions(self, root: Path, result: ScanResult) -> None:
-        """Scan for verified/marketplace extensions used by IDE agents."""
-        extensions_file = root / ".vscode" / "extensions.json"
-        if not extensions_file.exists() or extensions_file.is_symlink():
+    def _scan_extensions(self, root: Path, result: ScanResult, available: set[str]) -> None:
+        relative = ".vscode/extensions.json"
+        if relative not in available:
             return
-
-        result.surfaces_scanned.append(str(extensions_file))
-        data = self._safe_read_json(extensions_file)
-        if not isinstance(data, dict):
+        path = root / relative
+        data = self._read_mapping(path, result)
+        if data is None:
             return
-
-        ai_extension_patterns = [
-            "anthropic", "claude", "copilot", "codeium", "cursor",
-            "tabnine", "codex", "openai", "ai-", "agent",
-        ]
-
+        result.surfaces_scanned.append(str(path))
         recommendations = data.get("recommendations", [])
-        if not isinstance(recommendations, list):
+        if not isinstance(recommendations, list) or len(recommendations) > 1000:
+            result.scan_failures.append("extensions.json: invalid or oversized recommendation list")
             return
-
-        for ext_id in recommendations:
-            if not isinstance(ext_id, str):
+        ai_patterns = (
+            "anthropic",
+            "claude",
+            "copilot",
+            "codeium",
+            "cursor",
+            "tabnine",
+            "codex",
+            "openai",
+            "ai-",
+            "agent",
+        )
+        for extension in recommendations:
+            if not isinstance(extension, str) or not re.fullmatch(
+                r"[a-zA-Z0-9][a-zA-Z0-9-]*\.[a-zA-Z0-9][a-zA-Z0-9._-]*", extension
+            ):
+                result.scan_failures.append("extensions.json: invalid extension identifier")
                 continue
-            ext_lower = ext_id.lower()
-            if any(p in ext_lower for p in ai_extension_patterns):
-                publisher = ext_id.split(".")[0] if "." in ext_id else None
+            if any(pattern in extension.lower() for pattern in ai_patterns):
+                extension = redact_text(extension)
                 result.components.append(
                     VerifiedExtensionComponent(
-                        bom_ref=f"verified-extension:vscode/{ext_id}",
-                        name=ext_id,
+                        bom_ref=f"verified-extension:vscode/{extension}",
+                        name=extension,
                         extension_type="ide-extension",
-                        publisher=publisher,
+                        publisher=extension.split(".", 1)[0],
                         publisher_verified=False,
                         attestation_status="unverified",
-                        source_path=str(extensions_file),
-                        trust_tier=TrustTier.THIRD_PARTY_UNSIGNED,
+                        source_path=str(path),
+                        trust_tier=TrustTier.UNKNOWN,
+                        properties={
+                            "collection_mode": "recommended-extension",
+                            "installation_observed": False,
+                        },
                         risks=[
                             RiskAssessment(
                                 severity=RiskSeverity.LOW,
                                 category="attestation",
-                                detail=f"VS Code AI extension '{ext_id}' attestation not verified.",
-                                recommendation=(
-                                    "Verify extension publisher and review marketplace attestation."
-                                ),
+                                detail=f"Recommended VS Code AI extension '{extension}' has no verified attestation.",
+                                recommendation="Verify installed extension identity, publisher and artifact evidence separately.",
                             )
                         ],
                     )

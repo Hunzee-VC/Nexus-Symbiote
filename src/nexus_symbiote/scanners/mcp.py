@@ -13,7 +13,9 @@ and detects unpinned versions, missing transport security, and rug-pull risk.
 
 from __future__ import annotations
 
+import ast
 import ipaddress
+import re
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -24,7 +26,11 @@ from nexus_symbiote.core.enums import (
     SideEffectProfile,
     TrustTier,
 )
-from nexus_symbiote.core.hashing import extract_version_pin, hash_tool_definition
+from nexus_symbiote.core.hashing import (
+    TOOL_DEFINITION_HASH_VERSION,
+    extract_version_pin,
+    hash_tool_definition,
+)
 from nexus_symbiote.core.models import (
     CapabilityDeclaration,
     MCPClientComponent,
@@ -32,7 +38,8 @@ from nexus_symbiote.core.models import (
     RiskAssessment,
     ToolComponent,
 )
-from nexus_symbiote.scanners.base import Scanner, ScanResult, read_regular_text, sanitized_origin
+from nexus_symbiote.scanners.base import Scanner, ScanResult, sanitized_origin
+from nexus_symbiote.utils.secrets import REDACTED, redact_metadata, redact_text
 
 MCP_CONFIG_FILES = [
     ".mcp.json",
@@ -49,45 +56,74 @@ class MCPScanner(Scanner):
     def scan(self, project_root: Path) -> ScanResult:
         result = ScanResult(scanner_name=self.name)
         found_any = False
-        server_names: list[str] = []
+        clients: dict[str, MCPClientComponent] = {}
 
-        for config_name in MCP_CONFIG_FILES:
-            config_path = project_root / config_name
-            if not config_path.exists():
-                continue
-
-            found_any = True
-            result.surfaces_scanned.append(str(config_path))
-            data = self._safe_read_json(config_path)
-            if data is None:
-                result.scan_failures.append(f"Failed to parse {config_path}")
-                continue
-
-            if not isinstance(data, dict):
-                continue
-            servers = data.get("mcpServers", data.get("servers", {}))
-            if isinstance(servers, dict):
-                for server_name, server_config in servers.items():
-                    mcp_comp, tool_comps = self._parse_server(
-                        server_name, server_config, config_path
-                    )
+        with self._collection(project_root, result) as files:
+            for config_name in MCP_CONFIG_FILES:
+                config_path = files.root / config_name
+                data = files.read_json(config_name, missing_ok=True)
+                if data is None:
+                    continue
+                found_any = True
+                result.surfaces_scanned.append(str(config_path))
+                if not isinstance(data, dict):
+                    result.scan_failures.append(f"{config_name}: expected a configuration object")
+                    continue
+                servers = data.get("mcpServers", data.get("servers", {}))
+                if not isinstance(servers, dict) or len(servers) > 1000:
+                    result.scan_failures.append(f"{config_name}: invalid or oversized server map")
+                    continue
+                server_refs: list[str] = []
+                for server_name, server_config in sorted(servers.items()):
+                    if not isinstance(server_config, dict) or not self._valid_server(server_config):
+                        result.scan_failures.append(f"{config_name}: invalid server configuration")
+                        continue
+                    try:
+                        mcp_comp, tool_comps = self._parse_server(
+                            server_name, server_config, config_path
+                        )
+                    except (TypeError, ValueError, RecursionError):
+                        result.scan_failures.append(f"{config_name}: invalid tool definition")
+                        continue
                     result.components.append(mcp_comp)
                     result.components.extend(tool_comps)
-                    server_names.append(server_name)
+                    server_refs.append(mcp_comp.bom_ref)
+                host = self._detect_host_from_config(config_name)
+                if host:
+                    if host not in clients:
+                        clients[host] = MCPClientComponent(
+                            bom_ref=f"mcp-client:{host}",
+                            name=f"{host} MCP client",
+                            host_application=host,
+                            server_refs=[],
+                            config_path=str(config_path),
+                            source_path=str(config_path),
+                            trust_tier=TrustTier.INTERNAL_UNVERIFIED,
+                            properties={"collection_mode": "static-config", "config_paths": []},
+                        )
+                    client = clients[host]
+                    client.server_refs = sorted({*client.server_refs, *server_refs})
+                    client.properties["config_paths"].append(str(config_path))
+            result.components.extend(clients.values())
+            self._scan_code_mcp_clients(files.root, result)
 
-                host_app = self._detect_host_from_config(config_name)
-                if host_app:
-                    client_comp = self._create_mcp_client(
-                        host_app, config_path, server_names
-                    )
-                    result.components.append(client_comp)
-
-        self._scan_code_mcp_clients(project_root, result)
-
-        if not found_any:
+        if not found_any and not result.scan_failures:
             result.surfaces_excluded.append("mcp-config (no config files found)")
 
         return result
+
+    def _valid_server(self, config: dict[str, Any]) -> bool:
+        return (
+            isinstance(config.get("command", ""), str)
+            and isinstance(config.get("args", []), list)
+            and all(isinstance(arg, str) for arg in config.get("args", []))
+            and isinstance(config.get("env", {}), dict)
+            and all(isinstance(value, str) for value in config.get("env", {}).values())
+            and all(isinstance(config.get(key, ""), str) for key in ("url", "endpoint"))
+            and isinstance(config.get("tools", []), list)
+            and len(config.get("tools", [])) <= 1000
+            and all(isinstance(tool, dict) for tool in config.get("tools", []))
+        )
 
     def _parse_server(
         self,
@@ -100,6 +136,14 @@ class MCPScanner(Scanner):
         env = config.get("env", {})
         transport = self._detect_transport(config)
         endpoint_url = config.get("url") or config.get("endpoint")
+        # Launch arguments are opaque executable inputs. Rather than attempting
+        # to enumerate every application's secret flags, retain positions only.
+        # Environment names remain credential references; values never leave.
+        secrets = [value for value in env.values() if isinstance(value, str) and value]
+        name = redact_text(name, secrets)
+        safe_endpoint = (
+            redact_text(sanitized_origin(endpoint_url), secrets) if endpoint_url else None
+        )
 
         package_ref = self._extract_package_ref(command, args)
         version_pinned = False
@@ -115,7 +159,7 @@ class MCPScanner(Scanner):
                 RiskAssessment(
                     severity=RiskSeverity.HIGH,
                     category="version_pinning",
-                    detail=f"MCP server '{name}' uses an unpinned package reference.",
+                    detail=f"MCP server '{name}' uses an unpinned package reference (arguments omitted).",
                     recommendation="Pin to an exact version and store a hash of the tool schema.",
                 )
             )
@@ -135,7 +179,7 @@ class MCPScanner(Scanner):
                 RiskAssessment(
                     severity=RiskSeverity.HIGH,
                     category="transport_security",
-                    detail=f"MCP server '{name}' endpoint has insecure or invalid transport: {sanitized_origin(endpoint_url)}",
+                    detail=f"MCP server '{name}' endpoint is not HTTPS: {safe_endpoint}",
                     recommendation="Use HTTPS for all remote MCP server connections.",
                 )
             )
@@ -145,65 +189,65 @@ class MCPScanner(Scanner):
             name=name,
             version=version,
             transport=transport,
-            command=Path(command).name if command else None,
-            args=["[redacted]" for _ in args],
+            command=(
+                command
+                if command in {"npx", "bunx", "uvx", "pipx", "docker", "node", "python", "python3"}
+                else ("[redacted-command]" if command else None)
+            ),
+            args=[REDACTED for _ in args],
             env=dict.fromkeys(env, "***"),
-            endpoint_url=sanitized_origin(endpoint_url) if endpoint_url else None,
+            endpoint_url=safe_endpoint,
             version_pinned=version_pinned,
             source_path=str(config_path),
             trust_tier=TrustTier.THIRD_PARTY_UNSIGNED,
             risks=risks,
+            properties={
+                "collection_mode": "static-config",
+                "launch_arguments_redacted": bool(args),
+                "endpoint_credentials_omitted": bool(endpoint_url),
+            },
         )
 
-        tools = self._extract_tools(name, config)
+        tools = self._extract_tools(name, config, secrets)
+        server_comp.tool_count = len(tools)
+        server_comp.tool_refs = [tool.bom_ref for tool in tools]
         return server_comp, tools
-
-    @staticmethod
-    def _secure_endpoint(url: str) -> bool:
-        """HTTPS or an exact HTTP loopback host; userinfo is never accepted."""
-        try:
-            parsed = urlsplit(url)
-            if not parsed.hostname or parsed.username is not None or parsed.password is not None:
-                return False
-            _ = parsed.port  # reject invalid ports
-            if parsed.scheme.lower() == "https":
-                return True
-            if parsed.scheme.lower() != "http":
-                return False
-            host = parsed.hostname.lower()
-            if host == "localhost":
-                return True
-            try:
-                return ipaddress.ip_address(host).is_loopback
-            except ValueError:
-                return False
-        except ValueError:
-            return False
 
     def _detect_transport(self, config: dict[str, Any]) -> str:
         if config.get("url") or config.get("endpoint"):
             url = config.get("url", config.get("endpoint", ""))
-            if "/sse" in url:
+            if "/sse" in urlsplit(url).path:
                 return "sse"
             return "streamable-http"
         return "stdio"
 
     def _extract_package_ref(self, command: str, args: list[str]) -> str | None:
-        if command in ("npx", "bunx"):
+        if command in ("npx", "bunx", "uvx", "pipx"):
             for arg in args:
-                if not arg.startswith("-"):
-                    return arg
-        if command in ("uvx", "pipx"):
-            for arg in args:
-                if not arg.startswith("-"):
-                    return arg
-        if command == "docker":
-            for i, arg in enumerate(args):
-                if arg == "run" and i + 1 < len(args):
-                    return args[-1]
+                if arg in {"-y", "--yes", "--no", "-n"}:
+                    continue
+                # Unknown flag grammars may consume a credential as their next
+                # argument. Do not infer a package/version from that position.
+                if arg.startswith("-"):
+                    return None
+                pattern = r"(?:@[A-Za-z][\w.-]*/[A-Za-z][\w.-]*|[A-Za-z][\w.-]*)(?:@[\w.+-]+)?"
+                return arg if re.fullmatch(pattern, arg) else None
+        if command == "docker" and args and args[0] == "run":
+            for arg in args[1:]:
+                if arg in {"--rm", "-i", "-t", "-it", "-d", "--detach"}:
+                    continue
+                if arg.startswith("-"):
+                    return None
+                return (
+                    arg
+                    if re.fullmatch(r"[A-Za-z][\w./:-]*(?:@sha256:[a-fA-F0-9]{64})?", arg)
+                    else None
+                )
         return None
 
-    def _extract_tools(self, server_name: str, config: dict[str, Any]) -> list[ToolComponent]:
+    def _extract_tools(
+        self, server_name: str, config: dict[str, Any], secrets: list[str] | None = None
+    ) -> list[ToolComponent]:
         tools_config = config.get("tools", [])
         tool_comps = []
 
@@ -214,11 +258,19 @@ class MCPScanner(Scanner):
                     t_desc = tool_def.get("description", "")
                     t_schema = tool_def.get("inputSchema", tool_def.get("input_schema"))
                     t_annotations = tool_def.get("annotations", {})
+                    if (
+                        not isinstance(t_name, str)
+                        or not isinstance(t_desc, str)
+                        or not isinstance(t_annotations, dict)
+                        or (t_schema is not None and not isinstance(t_schema, dict))
+                    ):
+                        raise ValueError("invalid tool fields")
 
                     def_hash = hash_tool_definition(t_name, t_desc, t_schema, t_annotations)
 
                     side_effect = self._classify_side_effects(t_annotations, t_name)
                     caps = self._infer_capabilities(t_name, t_desc, t_annotations)
+                    t_name = redact_text(t_name, secrets or [])
 
                     risks: list[RiskAssessment] = []
                     if side_effect in (
@@ -239,84 +291,120 @@ class MCPScanner(Scanner):
                             bom_ref=f"tool:{server_name}/{t_name}",
                             name=t_name,
                             mcp_server_ref=f"mcp-server:{server_name}",
-                            description_text=t_desc,
-                            input_schema=t_schema,
+                            description_text=redact_text(t_desc, secrets or []),
+                            input_schema=redact_metadata(t_schema, secrets or []),
                             definition_hash=def_hash,
-                            definition_hash_version="rfc8785-jcs-v1",
-                            annotations=t_annotations,
+                            definition_hash_version=TOOL_DEFINITION_HASH_VERSION,
+                            annotations=redact_metadata(t_annotations, secrets or []),
                             capabilities=CapabilityDeclaration(
                                 capabilities=caps,
                                 side_effect_profile=side_effect,
                             ),
                             trust_tier=TrustTier.THIRD_PARTY_UNSIGNED,
                             risks=risks,
+                            properties={
+                                "capability_evidence": "unverified-declaration-and-name-heuristic",
+                                "definition_hash_subject": "original-declared-descriptor",
+                                "descriptor_output_may_be_redacted": True,
+                            },
                         )
                     )
         return tool_comps
 
     @staticmethod
+    def _secure_endpoint(url: str) -> bool:
+        """Classify exact HTTP loopback or HTTPS declarations without connecting."""
+        try:
+            parsed = urlsplit(url)
+            if not parsed.hostname or parsed.username is not None or parsed.password is not None:
+                return False
+            if parsed.port is not None and not 1 <= parsed.port <= 65535:
+                return False
+            if parsed.scheme == "https":
+                return True
+            if parsed.scheme != "http":
+                return False
+            if parsed.hostname.lower() == "localhost":
+                return True
+            try:
+                return ipaddress.ip_address(parsed.hostname).is_loopback
+            except ValueError:
+                return False
+        except ValueError:
+            return False
+
+    @staticmethod
     def _detect_host_from_config(config_name: str) -> str | None:
-        mapping = {
+        return {
             ".mcp.json": "claude-code",
             ".claude/mcp.json": "claude-code",
             "claude_desktop_config.json": "claude-desktop",
             ".cursor/mcp.json": "cursor",
-        }
-        return mapping.get(config_name)
-
-    def _create_mcp_client(
-        self,
-        host_app: str,
-        config_path: Path,
-        server_names: list[str],
-    ) -> MCPClientComponent:
-        return MCPClientComponent(
-            bom_ref=f"mcp-client:{host_app}",
-            name=f"{host_app} MCP client",
-            host_application=host_app,
-            server_refs=[f"mcp-server:{s}" for s in server_names],
-            config_path=str(config_path),
-            source_path=str(config_path),
-            trust_tier=TrustTier.INTERNAL_UNVERIFIED,
-        )
+        }.get(config_name)
 
     def _scan_code_mcp_clients(self, root: Path, result: ScanResult) -> None:
-        """Detect MCP client SDK usage in Python/TypeScript entrypoints."""
-        import re
-
-        patterns = [
-            re.compile(r"from\s+mcp\b.*import.*Client"),
-            re.compile(r"MCPClient\s*\("),
-            re.compile(r"new\s+Client\s*\("),
-            re.compile(r'require\s*\(\s*["\']@modelcontextprotocol/sdk["\']'),
-            re.compile(r"from\s+['\"]@modelcontextprotocol/sdk['\"]"),
-        ]
-
-        for ext in ("*.py", "*.ts", "*.js"):
-            for source in sorted(root.glob(ext))[:10]:
-                if source.is_symlink():
+        assert self._files is not None
+        sources = list(self._files.iter_files())
+        detected: list[str] = []
+        for suffix in (".py", ".ts", ".js"):
+            paths = [path for path in sources if len(path.parts) == 1 and path.suffix == suffix]
+            if len(paths) > 10:
+                result.scan_failures.append(
+                    f"MCP {suffix} references: 10-file collection limit exceeded"
+                )
+            for path in paths[:10]:
+                content = self._files.read_text(path)
+                if content is None:
                     continue
-                try:
-                    content = read_regular_text(source)
-                except (OSError, UnicodeError):
+                result.surfaces_scanned.append(str(root / path))
+                if len(content) > 262_144:
+                    result.scan_failures.append(f"{path}: syntax collection size limit exceeded")
                     continue
-                if any(p.search(content) for p in patterns):
-                    if not any(
-                        getattr(c, "host_application", None) == "sdk"
-                        for c in result.components
-                        if hasattr(c, "host_application")
-                    ):
-                        result.surfaces_scanned.append(str(source))
-                        result.components.append(
-                            MCPClientComponent(
-                                bom_ref="mcp-client:sdk",
-                                name="MCP SDK client (code-detected)",
-                                host_application="sdk",
-                                source_path=str(source),
-                                trust_tier=TrustTier.INTERNAL_UNVERIFIED,
-                            )
+                if suffix == ".py":
+                    try:
+                        tree = ast.parse(content)
+                    except (SyntaxError, ValueError, RecursionError):
+                        result.scan_failures.append(f"{path}: invalid Python syntax")
+                        continue
+                    found = any(
+                        isinstance(node, ast.ImportFrom)
+                        and node.module is not None
+                        and node.module.split(".")[0] == "mcp"
+                        and any("Client" in alias.name for alias in node.names)
+                        for node in ast.walk(tree)
+                    ) or any(
+                        isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Name)
+                        and node.func.id == "MCPClient"
+                        for node in ast.walk(tree)
+                    )
+                else:
+                    # A bounded syntax hint, never a claim that an SDK is installed
+                    # or deployed. Strip comments and require the SDK import path.
+                    content = re.sub(r"/\*.*?\*/|(?m:^\s*//[^\n]*$)", "", content, flags=re.S)
+                    found = bool(
+                        re.search(
+                            r"(?:\bfrom\s*[\"']@modelcontextprotocol/sdk(?:/[^\"']*)?[\"']|"
+                            r"\brequire\s*\(\s*[\"']@modelcontextprotocol/sdk(?:/[^\"']*)?[\"'])",
+                            content,
                         )
-                    break
+                    )
+                if found:
+                    detected.append(str(root / path))
+        if detected:
+            result.components.append(
+                MCPClientComponent(
+                    bom_ref="mcp-client:sdk",
+                    name="MCP SDK client (code-detected)",
+                    host_application="sdk",
+                    source_path=detected[0],
+                    trust_tier=TrustTier.INTERNAL_UNVERIFIED,
+                    properties={
+                        "collection_mode": "static-source-reference",
+                        "source_paths": detected,
+                    },
+                )
+            )
 
     def _classify_side_effects(
         self, annotations: dict[str, Any], tool_name: str

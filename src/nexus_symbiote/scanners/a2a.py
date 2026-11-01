@@ -1,38 +1,36 @@
-"""A2A (Agent-to-Agent) protocol scanner.
-
-Discovers A2A agent cards, client configurations, and server endpoints from:
-  - .well-known/agent.json (standard A2A agent card location)
-  - agent.json / agent-card.json in project root
-  - A2A client configurations in application code and config files
-  - Google A2A SDK usage patterns
-"""
+"""Bounded offline A2A card, client configuration and SDK-reference collection."""
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 from typing import Any
 
 from nexus_symbiote.core.enums import RiskSeverity, TrustTier
-from nexus_symbiote.core.models import (
-    A2AClientComponent,
-    A2AServerComponent,
-    RiskAssessment,
-)
-from nexus_symbiote.scanners.base import Scanner, ScanResult, read_regular_text, sanitized_origin
+from nexus_symbiote.core.models import A2AClientComponent, A2AServerComponent, RiskAssessment
+from nexus_symbiote.scanners.base import Scanner, ScanResult, sanitized_origin
+from nexus_symbiote.utils.secrets import redact_text
 
 AGENT_CARD_FILES = [
     ".well-known/agent.json",
+    ".well-known/agent-card.json",
     "agent.json",
     "agent-card.json",
     "a2a/agent.json",
 ]
+A2A_CONFIG_FILES = ["a2a.json", "a2a.yaml", "a2a.yml", "a2a_config.json"]
 
-A2A_CONFIG_FILES = [
-    "a2a.json",
-    "a2a.yaml",
-    "a2a.yml",
-    "a2a_config.json",
-]
+
+def _strings(value: Any) -> list[str]:
+    if isinstance(value, str):
+        value = [value]
+    if (
+        not isinstance(value, list)
+        or len(value) > 1000
+        or not all(isinstance(item, str) for item in value)
+    ):
+        raise ValueError("invalid string-list declaration")
+    return [redact_text(item) for item in value]
 
 
 class A2AScanner(Scanner):
@@ -40,86 +38,100 @@ class A2AScanner(Scanner):
 
     def scan(self, project_root: Path) -> ScanResult:
         result = ScanResult(scanner_name=self.name)
-
-        self._scan_agent_cards(project_root, result)
-        self._scan_a2a_configs(project_root, result)
-        self._scan_code_patterns(project_root, result)
-
+        with self._collection(project_root, result) as files:
+            for relative in AGENT_CARD_FILES:
+                path = files.root / relative
+                data = self._read_mapping(path, result)
+                if data is None:
+                    continue
+                result.surfaces_scanned.append(str(path))
+                try:
+                    result.components.append(self._parse_agent_card(data, relative, path))
+                except (TypeError, ValueError):
+                    result.scan_failures.append(f"{relative}: invalid A2A card field types")
+            for relative in A2A_CONFIG_FILES:
+                path = files.root / relative
+                data = self._read_mapping(path, result)
+                if data is None:
+                    continue
+                result.surfaces_scanned.append(str(path))
+                clients = data.get("clients", data.get("remoteAgents", []))
+                if not isinstance(clients, list) or len(clients) > 1000:
+                    result.scan_failures.append(f"{relative}: invalid or oversized A2A client list")
+                    continue
+                for client in clients:
+                    try:
+                        if not isinstance(client, dict):
+                            raise ValueError("invalid client")
+                        result.components.append(self._parse_a2a_client(client, path))
+                    except (TypeError, ValueError):
+                        result.scan_failures.append(f"{relative}: invalid A2A client field types")
+            self._scan_code_patterns(files.root, result)
         if not result.components and not result.scan_failures:
             result.surfaces_excluded.append("a2a (no A2A configurations found)")
-
         return result
-
-    def _scan_agent_cards(self, root: Path, result: ScanResult) -> None:
-        for rel_path in AGENT_CARD_FILES:
-            card_path = root / rel_path
-            if not card_path.exists() or card_path.is_symlink():
-                continue
-
-            result.surfaces_scanned.append(str(card_path))
-            data = self._safe_read_json(card_path)
-            if not isinstance(data, dict):
-                result.scan_failures.append(f"Failed to parse agent card {card_path}")
-                continue
-
-            comp = self._parse_agent_card(data, rel_path, card_path)
-            result.components.append(comp)
 
     def _parse_agent_card(
         self, data: dict[str, Any], rel_path: str, card_path: Path
     ) -> A2AServerComponent:
-        name = data.get("name", "unnamed-agent")
-        version = data.get("version")
+        name, version = data.get("name", "unnamed-agent"), data.get("version")
         endpoint = data.get("url") or data.get("endpoint")
-        protocols = data.get("protocols", [])
-        if isinstance(protocols, str):
-            protocols = [protocols]
-
+        if (
+            not isinstance(name, str)
+            or (version is not None and not isinstance(version, str))
+            or (endpoint is not None and not isinstance(endpoint, str))
+        ):
+            raise ValueError("invalid card identity")
+        name = redact_text(name)
+        protocols = _strings(data.get("protocols", []))
+        for field in ("authentication", "security"):
+            if data.get(field) is not None and not isinstance(data[field], (dict, list)):
+                raise ValueError("invalid authentication declaration")
+        declared_skills = data.get("skills", [])
+        if not isinstance(declared_skills, list) or len(declared_skills) > 1000:
+            raise ValueError("invalid skills")
         skills = []
-        for skill in data.get("skills", []):
+        for skill in declared_skills:
             if isinstance(skill, dict):
-                skills.append(skill.get("name", skill.get("id", "unknown")))
-            elif isinstance(skill, str):
-                skills.append(skill)
-
-        auth_required = data.get("authentication") is not None
-
+                skill = skill.get("name", skill.get("id", "unknown"))
+            if not isinstance(skill, str):
+                raise ValueError("invalid skill name")
+            skills.append(redact_text(skill))
+        # This records declarations only; neither a card nor this collector proves
+        # that an endpoint actually enforces authentication.
+        auth_required = bool(data.get("authentication") or data.get("security"))
         risks: list[RiskAssessment] = []
-
-        if endpoint and not endpoint.startswith("https://"):
+        if endpoint and not endpoint.lower().startswith("https://"):
             risks.append(
                 RiskAssessment(
                     severity=RiskSeverity.HIGH,
                     category="transport_security",
-                    detail=f"A2A agent '{name}' exposes endpoint without HTTPS.",
-                    recommendation="Use HTTPS for all A2A agent endpoints.",
+                    detail=f"A2A agent '{name}' declares an endpoint without HTTPS.",
+                    recommendation="Use authenticated HTTPS transport for agent endpoints.",
                 )
             )
-
         if not auth_required:
             risks.append(
                 RiskAssessment(
                     severity=RiskSeverity.MEDIUM,
                     category="authentication",
-                    detail=f"A2A agent '{name}' has no authentication configured.",
-                    recommendation="Require authentication for agent-to-agent communication.",
+                    detail=f"A2A agent '{name}' has no nonempty authentication requirement declared.",
+                    recommendation="Declare and independently verify endpoint authentication requirements.",
                 )
             )
-
         if not skills:
             risks.append(
                 RiskAssessment(
                     severity=RiskSeverity.LOW,
                     category="completeness",
                     detail=f"A2A agent '{name}' declares no skills in its agent card.",
-                    recommendation="Declare skills so consumers can verify capabilities.",
+                    recommendation="Document declared skills and separately verify effective capabilities.",
                 )
             )
-
         return A2AServerComponent(
             bom_ref=f"a2a-server:{name}",
             name=name,
-            version=version,
+            version=redact_text(version) if version else None,
             agent_card_path=rel_path,
             endpoint_url=sanitized_origin(endpoint) if endpoint else None,
             supported_protocols=protocols,
@@ -128,114 +140,109 @@ class A2AScanner(Scanner):
             source_path=str(card_path),
             trust_tier=TrustTier.INTERNAL_UNVERIFIED,
             risks=risks,
+            properties={
+                "collection_mode": "static-agent-card",
+                "authentication_evidence": "declaration-only",
+            },
         )
 
-    def _scan_a2a_configs(self, root: Path, result: ScanResult) -> None:
-        for config_name in A2A_CONFIG_FILES:
-            config_path = root / config_name
-            if not config_path.exists() or config_path.is_symlink():
-                continue
-
-            result.surfaces_scanned.append(str(config_path))
-            data = self._safe_read_json(config_path)
-            if not isinstance(data, dict):
-                result.scan_failures.append(f"Failed to parse {config_path}")
-                continue
-
-            clients = data.get("clients", data.get("remoteAgents", []))
-            if isinstance(clients, list):
-                for client_cfg in clients:
-                    if isinstance(client_cfg, dict):
-                        comp = self._parse_a2a_client(client_cfg, config_path)
-                        result.components.append(comp)
-
-    def _parse_a2a_client(
-        self, config: dict[str, Any], config_path: Path
-    ) -> A2AClientComponent:
+    def _parse_a2a_client(self, config: dict[str, Any], config_path: Path) -> A2AClientComponent:
         name = config.get("name", config.get("agentName", "unnamed-client"))
         card_url = config.get("agentCardUrl", config.get("url", config.get("endpoint")))
         auth_methods = config.get("authMethods", config.get("authentication", []))
-        if isinstance(auth_methods, str):
-            auth_methods = [auth_methods]
-        elif isinstance(auth_methods, dict):
-            auth_methods = list(auth_methods.keys())
-
-        risks: list[RiskAssessment] = []
-
-        if card_url and not card_url.startswith("https://"):
+        if isinstance(auth_methods, dict):
+            auth_methods = list(auth_methods)
+        auth_methods = _strings(auth_methods)
+        if not isinstance(name, str) or (card_url is not None and not isinstance(card_url, str)):
+            raise ValueError("invalid client identity")
+        name = redact_text(name)
+        risks = []
+        if card_url and not card_url.lower().startswith("https://"):
             risks.append(
                 RiskAssessment(
                     severity=RiskSeverity.HIGH,
                     category="transport_security",
-                    detail=f"A2A client '{name}' connects to agent over insecure transport.",
-                    recommendation="Use HTTPS for all A2A agent card URLs.",
+                    detail=f"A2A client '{name}' declares an insecure endpoint transport.",
+                    recommendation="Use authenticated HTTPS for agent card retrieval.",
                 )
             )
-
         if not auth_methods:
             risks.append(
                 RiskAssessment(
                     severity=RiskSeverity.MEDIUM,
                     category="authentication",
-                    detail=f"A2A client '{name}' has no authentication configured.",
-                    recommendation="Configure authentication for remote agent invocation.",
+                    detail=f"A2A client '{name}' has no authentication method declared.",
+                    recommendation="Configure and independently verify remote-agent authentication.",
                 )
             )
-
         return A2AClientComponent(
             bom_ref=f"a2a-client:{name}",
             name=name,
             agent_card_url=sanitized_origin(card_url) if card_url else None,
-            authentication_methods=auth_methods if isinstance(auth_methods, list) else [],
+            authentication_methods=auth_methods,
             source_path=str(config_path),
-            trust_tier=TrustTier.THIRD_PARTY_UNSIGNED,
+            trust_tier=TrustTier.UNKNOWN,
             risks=risks,
+            properties={"collection_mode": "static-config", "remote_agent_contacted": False},
         )
 
     def _scan_code_patterns(self, root: Path, result: ScanResult) -> None:
-        """Detect A2A SDK usage in Python files (shallow scan of top-level .py files)."""
-        import re
-
-        a2a_patterns = [
-            re.compile(r"from\s+a2a\b"),
-            re.compile(r"import\s+a2a\b"),
-            re.compile(r"A2AClient\s*\("),
-            re.compile(r"AgentCard\s*\("),
-            re.compile(r"agent_card_url"),
+        assert self._files is not None
+        sources = [
+            path
+            for path in self._files.iter_files()
+            if path.suffix == ".py"
+            and (len(path.parts) == 1 or (len(path.parts) == 2 and path.parts[0] == "src"))
         ]
-
-        py_files = sorted(root.glob("*.py"))
-        py_files.extend(sorted((root / "src").glob("*.py")) if (root / "src").is_dir() else [])
-
-        for py_file in py_files[:20]:
-            if py_file.is_symlink():
+        if len(sources) > 20:
+            result.scan_failures.append("a2a code references: 20-file collection limit exceeded")
+        for path in sources[:20]:
+            content = self._files.read_text(path)
+            if content is None:
+                continue
+            result.surfaces_scanned.append(str(root / path))
+            if len(content) > 262_144:
+                result.scan_failures.append(f"{path}: syntax collection size limit exceeded")
                 continue
             try:
-                content = read_regular_text(py_file)
-            except (OSError, UnicodeError):
+                tree = ast.parse(content)
+            except (SyntaxError, ValueError, RecursionError):
+                result.scan_failures.append(f"{path}: invalid Python syntax")
                 continue
-
-            if any(p.search(content) for p in a2a_patterns):
-                result.surfaces_scanned.append(str(py_file))
-                if not any(
-                    c.bom_ref.startswith("a2a-") for c in result.components
-                ):
-                    result.components.append(
-                        A2AClientComponent(
-                            bom_ref="a2a-client:code-detected",
-                            name="a2a-client (code-detected)",
-                            source_path=str(py_file),
-                            trust_tier=TrustTier.INTERNAL_UNVERIFIED,
-                            risks=[
-                                RiskAssessment(
-                                    severity=RiskSeverity.INFO,
-                                    category="detection_method",
-                                    detail="A2A usage detected via code pattern matching.",
-                                    recommendation=(
-                                        "Add an a2a.json config for explicit agent card references."
-                                    ),
-                                )
-                            ],
-                        )
+            detected = any(
+                (
+                    isinstance(node, ast.ImportFrom)
+                    and node.module is not None
+                    and node.module.split(".")[0] == "a2a"
+                )
+                or (
+                    isinstance(node, ast.Import)
+                    and any(alias.name.split(".")[0] == "a2a" for alias in node.names)
+                )
+                or (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id in {"A2AClient", "AgentCard"}
+                )
+                for node in ast.walk(tree)
+            )
+            if detected and not any(
+                component.bom_ref.startswith("a2a-") for component in result.components
+            ):
+                result.components.append(
+                    A2AClientComponent(
+                        bom_ref="a2a-client:code-detected",
+                        name="a2a-client (code-detected)",
+                        source_path=str(root / path),
+                        trust_tier=TrustTier.INTERNAL_UNVERIFIED,
+                        properties={"collection_mode": "static-syntax-reference"},
+                        risks=[
+                            RiskAssessment(
+                                severity=RiskSeverity.INFO,
+                                category="detection_method",
+                                detail="A2A SDK reference detected in Python syntax; deployment not verified.",
+                                recommendation="Add explicit client configuration and deployment evidence.",
+                            )
+                        ],
                     )
-                break
+                )

@@ -1,0 +1,36 @@
+{
+  "retrieved": "2026-11-01",
+  "copiedFrom": "https://github.com/aisecnomad/SymBiote/tree/2afcee74ecbe7b71918e0ed977fe604aec4bf4be/src/symbiote/schemas/vendor",
+  "files": [
+    {
+      "file": "cyclonedx/bom-1.7.schema.json",
+      "source": "https://github.com/CycloneDX/specification/blob/1.7.2/schema/bom-1.7.schema.json",
+      "sha256": "813b4dec74a3048bdba393e596649500f92ee5d5f43131a082c3b036b1a67fd5",
+      "license": "Apache-2.0"
+    },
+    {
+      "file": "cyclonedx/jsf-0.82.schema.json",
+      "source": "https://github.com/CycloneDX/specification/blob/1.7.2/schema/jsf-0.82.schema.json",
+      "sha256": "28990ad6f0f6f2211a96414966d25edd84de1c260c399f821715626dc9bd4393",
+      "license": "Apache-2.0"
+    },
+    {
+      "file": "cyclonedx/spdx.schema.json",
+      "source": "https://github.com/CycloneDX/specification/blob/1.7.2/schema/spdx.schema.json",
+      "sha256": "5068cf525ec8997eed1c87d324f86219b7c040e1341faf252e89eb34d0362b2c",
+      "license": "Apache-2.0"
+    },
+    {
+      "file": "spdx/spdx-context-3.0.1.jsonld",
+      "source": "https://spdx.github.io/spdx-spec/v3.0.1/rdf/spdx-context.jsonld",
+      "sha256": "2e54965ca4ca05d6c1ff9100c2e6449ea1cbaf7170d82dd0d4fc5d73511159d6",
+      "license": "Apache-2.0 (generated artifacts); CC-BY-3.0 (specification)"
+    },
+    {
+      "file": "spdx/spdx-json-schema-3.0.1.json",
+      "source": "https://spdx.github.io/spdx-spec/v3.0.1/rdf/schema.json",
+      "sha256": "bf586836b9abc14e54fa2a4f215290e5f39cd0d9e5c45646bc5a9b89b7dc6e1f",
+      "license": "Apache-2.0 (generated artifacts); CC-BY-3.0 (specification)"
+    }
+  ]
+}
