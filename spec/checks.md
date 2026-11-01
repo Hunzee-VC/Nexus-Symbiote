@@ -73,6 +73,38 @@ display titles are refreshed from the official sources.
 | SYM-SUB-001 undeclared sub-agent | high | observed `spawns`/`delegatesTo` edge ∉ declared | ASI10, ASI08 |
 | SYM-REG-001 resolution without log inclusion | low | signer present but no transparency-log inclusion proof | ASI04 |
 
+### 2.1 Extensions from the 2026 source-document review (implemented in `symbiote.policy`)
+
+These checks close gaps identified by the review of the source analysis (WP17, `docs/research/`): the
+Clinejection CI pattern, disabled human-in-the-loop settings, plaintext credentials in client configuration,
+privileged container launches, hidden Unicode in rules files, repository-supplied hooks and skills, and
+scanner indicators from the static model-artefact analysis (WP3). `symbiote policy explain ID` marks them
+`extension: true`.
+
+| ID | Sev | Fires when | Maps to |
+|---|---|---|---|
+| SYM-MCP-007 privileged container | high | a server's container launch uses `--privileged`, host namespaces, a `docker.sock` or host-root mount, added capabilities or root user | ASI05, ASI03 |
+| SYM-MCP-008 project servers auto-enabled | medium | Claude Code `enableAllProjectMcpServers=true` with project-scoped servers (a checkout starts processes without consent) | ASI04, ASI09 |
+| SYM-HITL-001 approval disabled by client settings | high | a client setting removes the human from every call to a server: Claude Code `defaultMode=bypassPermissions`, VS Code `chat.tools.autoApprove`, Gemini `trust`, Codex `approval_policy=never` (per-tool allow rules are excluded) | ASI09, ASI02 |
+| SYM-CRED-001 plaintext credential in configuration | high | a credential binding stored inline in a configuration file (`storage.kind=file`, tag `inline-secret-in-config`) | ASI03; AML.T0098 |
+| SYM-CI-001 AI agent in CI on untrusted input | critical | a GitHub Actions job runs an AI-agent action on an untrusted trigger (`issues`, `issue_comment`, `pull_request_target`, …) while holding a write token, default token permissions, repository secrets or a shared cache | ASI01, ASI04, ASI03; AML.T0051 |
+| SYM-CI-002 publish secret on untrusted trigger | high | a job reachable from untrusted events can read a long-lived publish/release secret (`NPM_TOKEN`, PyPI, VSCE/OVSX, registry) | ASI04, ASI03; AML.T0010 |
+| SYM-INSTR-004 hidden Unicode in instructions | high | an instruction, rules or skill file contains invisible, bidi or tag code points ("Rules File Backdoor") | ASI01, ASI06; AML.T0051 |
+| SYM-INSTR-005 repository-supplied hook | medium | project-scope hook commands run automatically on agent events | ASI05, ASI04 |
+| SYM-SKILL-001 skill metadata invalid | low | SKILL.md name differs from the directory or violates the Agent Skills naming rules | ASI04 |
+| SYM-SKILL-002 skill scripts with shell access | medium | a skill bundles scripts and its `allowed-tools` grant shell execution | ASI05, ASI04 |
+| SYM-MODEL-005 malicious indicators in model artefacts | critical | the models-local collector recorded scanner indicators (dangerous pickle globals, broken-stream evasion, chat-template SSTI gadgets) as `malicious-indicator:*` tags | ASI05; AML.T0010, AML.T0018 |
+| SYM-MODEL-006 weights metadata anomalies | medium | safetensors/GGUF structural anomalies recorded as `format-anomaly:*` tags | ASI04 |
+
+Clarifications applied by the implementation:
+- `SYM-TOOL-001` also fails for a tool server with no observed or approved tool definitions (nothing is pinned).
+- `capabilities(tool)` adds `write` when `readOnlyHint=false` is declared (the tool modifies its environment),
+  in addition to the side-effect-class mapping; observed side effects override declared hints.
+- `SYM-AUTHZ-001` legs may be set by labelled name heuristics for servers that ingest externally authored
+  content, reach sensitive systems or send data out; findings say so, and an unknown leg yields `indeterminate`.
+- A remote tool server with blanket auto-approval counts as an exfiltration leg: every call sends arguments
+  across the trust boundary.
+
 ## 3. Computed flags
 Flags are summaries of the checks above with inputs cited (`agentbom-profile.md §3.16`): `lethal-trifecta`,
 `rule-of-two-violation` (SYM-AUTHZ-001), `unpinned-tool` (SYM-TOOL-001/004), `floating-model-alias`
