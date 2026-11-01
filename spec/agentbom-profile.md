@@ -81,6 +81,7 @@ that are individually contestable are typed `Claim[...]` below.
 | `derived` | `{flags: [Flag], findings: [Finding]}` | ✓ | Computed by policy; inputs cited (§3.16) |
 | `merkle` | `{algorithm: "rfc6962-sha256", root, leaf_count, leaves?: [{kind, id, leaf_hash}]}` | Standard+ | `digests.md §5` |
 | `redactions` | `[Redaction{class, count, applied_by, applied_at, ids?}]` | ✓ (may be empty) | Never silent |
+| `redacted` | `[RedactedEntity{id, kind, class, leaf_hash}]` | ✓ (may be empty) | Placeholders for redacted entities; edges may still reference them |
 | `links` | `{cyclonedx?: {serial_number, version, bom_link, digest}, spdx?: {document_iri, digest}}` | | Bidirectional linkage |
 | `loss_report` | `LossReport` | | Attached after a conversion (`companion.md §4`) |
 | `foreign_properties` | `[{dialect, element_id, name, value}]` | | Verbatim passthrough of imported, unmapped properties |

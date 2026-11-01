@@ -32,6 +32,7 @@ from symbiote.model.entities import (
     Model,
     Policy,
     PromptTemplate,
+    RedactedEntity,
     Redaction,
     RegistryResolution,
     Skill,
@@ -108,6 +109,7 @@ class AgentBOM(SymbioteModel):
     derived: Derived = Field(default_factory=Derived)
     merkle: MerkleCommitment | None = None
     redactions: list[Redaction] = Field(default_factory=list)
+    redacted: list[RedactedEntity] = Field(default_factory=list)
     links: Links = Field(default_factory=Links)
     loss_report: LossReport | None = None
     deltas: list[Delta] = Field(default_factory=list)
@@ -126,6 +128,10 @@ class AgentBOM(SymbioteModel):
                 if eid in ids:
                     raise ValueError(f"duplicate entity id {eid!r} (in {ids[eid]} and {attr})")
                 ids[eid] = attr
+        for red in self.redacted:
+            if red.id in ids:
+                raise ValueError(f"redacted entity {red.id!r} is also present in {ids[red.id]}")
+            ids[red.id] = "redacted"
         if self.subject not in ids:
             raise ValueError(f"subject {self.subject!r} is not among the agents")
         if self.snapshot.agent_ref != self.subject:
@@ -174,6 +180,7 @@ class AgentBOM(SymbioteModel):
             attr: sorted(getattr(self, attr), key=lambda e: e.id) for attr in COLLECTIONS
         }
         changes["edges"] = sorted(self.edges, key=lambda e: e.key)
+        changes["redacted"] = sorted(self.redacted, key=lambda r: r.id)
         return self.model_copy(update=changes)
 
 

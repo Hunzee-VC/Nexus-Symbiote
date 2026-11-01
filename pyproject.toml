@@ -36,10 +36,11 @@ dependencies = [
   "httpx>=0.27",
   "spdx-python-model>=0.0.6",
   "cyclonedx-python-lib>=11.0",
+  "cryptography>=43",
 ]
 
 [project.optional-dependencies]
-sign = ["sigstore>=3.6", "in-toto-attestation>=0.9", "cryptography>=43"]
+sign = ["sigstore>=3.6", "in-toto-attestation>=0.9"]
 models = ["model-signing>=1.0", "pyopenssl>=24"]
 mcp = ["mcp>=1.9"]
 all = ["symbiote[sign,models,mcp]"]

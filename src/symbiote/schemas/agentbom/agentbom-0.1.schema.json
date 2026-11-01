@@ -7060,6 +7060,40 @@
       "title": "Quarantine",
       "type": "object"
     },
+    "RedactedEntity": {
+      "additionalProperties": false,
+      "description": "Placeholder for an entity whose body was redacted; its leaf hash keeps the Merkle root verifiable.",
+      "properties": {
+        "id": {
+          "maxLength": 512,
+          "minLength": 3,
+          "pattern": "^[a-z][a-z0-9-]*:[A-Za-z0-9._~/@+-]+$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "leafHash": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Leafhash",
+          "type": "string"
+        },
+        "redactionClass": {
+          "title": "Redactionclass",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "redactionClass",
+        "leafHash"
+      ],
+      "title": "RedactedEntity",
+      "type": "object"
+    },
     "Redaction": {
       "additionalProperties": false,
       "properties": {
@@ -10202,6 +10236,13 @@
         "$ref": "#/$defs/PromptTemplate"
       },
       "title": "Prompts",
+      "type": "array"
+    },
+    "redacted": {
+      "items": {
+        "$ref": "#/$defs/RedactedEntity"
+      },
+      "title": "Redacted",
       "type": "array"
     },
     "redactions": {

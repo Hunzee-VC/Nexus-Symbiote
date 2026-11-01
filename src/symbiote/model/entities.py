@@ -954,6 +954,15 @@ class Finding(SymbioteModel):
     locator: str | None = None
 
 
+class RedactedEntity(SymbioteModel):
+    """Placeholder for an entity whose body was redacted; its leaf hash keeps the Merkle root verifiable."""
+
+    id: EntityId
+    kind: str
+    redaction_class: str
+    leaf_hash: DigestStr
+
+
 class Redaction(SymbioteModel):
     redaction_class: str
     count: int = Field(ge=1)
