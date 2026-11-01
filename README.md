@@ -65,11 +65,11 @@ nexus-symbiote summary aibom.json
 # Create an approved baseline for drift gating in CI
 nexus-symbiote baseline . -o .nexus-symbiote-baseline.json
 
-# Connect to running MCP servers and detect rug-pull drift
-nexus-symbiote verify-live aibom.json --project .
+# Verify descriptors from independently pinned local MCP launchers
+nexus-symbiote verify-live aibom.json --project . --launch-policy "$TRUSTED_LAUNCH_POLICY"
 
-# First run: record live tool fingerprints after human review
-nexus-symbiote verify-live aibom.json --project . --record
+# Emit a separate candidate inventory for review
+nexus-symbiote verify-live aibom.json --project . --launch-policy "$TRUSTED_LAUNCH_POLICY" --record > candidate.json
 
 # Generate CycloneDX VEX statements keyed to model digests and adaptation events
 nexus-symbiote vex aibom.json -o vex.json
@@ -149,7 +149,7 @@ using it as a gate.
     python -c "import json,sys; d=json.load(open('drift.json')); sys.exit(1 if d.get('security_alerts') or d.get('total_changes',0)>0 else 0)"
 
 - name: Rug-pull detection (runtime)
-  run: nexus-symbiote verify-live aibom.json --project .
+  run: nexus-symbiote verify-live aibom.json --project . --launch-policy "$TRUSTED_LAUNCH_POLICY"
 ```
 
 ### Pre-commit Hook
@@ -208,16 +208,28 @@ definition it observes. Two enforcement modes are available:
 
 1. **Snapshot diffing** — `symbiote diff baseline.json current.json` flags any
    tool whose definition hash changed between two scans.
-2. **Live verification** — `symbiote verify-live` launches each configured MCP
-   server, lists its live tool definitions, recomputes fingerprints, and
-   compares them against the approved BOM. This is the only mode that catches
-   a server that changed behavior after approval without touching the project
-   files (e.g., a remote server, or `npx` fetching a newer major version at
-   runtime). Run once with `--record` after human review to capture approved
-   definitions; subsequent runs verify against them.
+2. **Live verification** — `nexus-symbiote verify-live` compares the observed
+   name, description, input schema and annotations with the approved tool
+   fingerprint. The current transport supports pinned standalone POSIX stdio
+   launchers. An unreachable server, a missing tool, an unsupported descriptor,
+   or an incomplete observation fails the verification gate.
 
-For remote MCP servers, `schema_hash` is recorded in the BOM and verified
-against the live aggregate hash on each `verify-live` run.
+Provision the launch policy outside the scanned checkout through a trusted
+operator channel. Key each launcher by its exact BOM server reference. Obtain
+the SHA-256 digest independently, for example from an approved release.
+
+```json
+{"mcp-server:weather":{"command":"/opt/operator-tools/weather","sha256":"sha256:<64 lowercase hex characters>"}}
+```
+
+The verifier stages the pinned file in a private directory and runs it without
+arguments, with a minimal environment and one deadline across enumeration pages.
+Run it under a disposable, isolated identity with restricted network and file
+access. The pin covers the executable bytes. Its interpreter, linked libraries
+and other host dependencies must also be trusted. `--record` emits a candidate
+native BOM on stdout after complete collection. Review that file before adopting
+it as a baseline. A descriptor match covers only the fields hashed by this
+fingerprint version.
 
 ## Model Supply-Chain Integrity
 

@@ -10,7 +10,7 @@ Generated inventories may contain sensitive paths, endpoint details, prompts, to
 
 Do not execute discovered MCP servers, model code, hooks or other artifacts simply to inventory them. Scan untrusted projects in a disposable, least-privilege environment without production credentials or unnecessary network access.
 
-The `verify-live` command is a deliberate, scoped exception: it launches the MCP servers already configured in the project's own config files, speaks only the read-only `tools/list` protocol method, never executes a tool, injects no arguments beyond those the user's config already specifies, and always terminates the process. It is intended for pre-deployment review of your own project, not for arbitrary untrusted repositories. A server's response to `tools/list` is a claim about its tools, not proof of its runtime behavior.
+The `verify-live` command starts only exact server references and executable digests from an operator-owned launch policy. A checkout cannot supply launcher arguments, environment or working directory. The verifier copies the approved bytes into a private directory, applies a bounded protocol deadline and terminates the process group. Execute approved servers inside an externally isolated worker with a restricted filesystem, resource limits and egress policy. The OS, interpreter and dynamic dependencies remain in the trust boundary. Observed descriptors alone cannot establish runtime behavior or deployment identity.
 
 ## Trust boundaries
 
