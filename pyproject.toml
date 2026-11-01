@@ -67,10 +67,10 @@ dev = [
 nexus-symbiote = "nexus_symbiote.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/aisecnomad/symbiote"
-Repository = "https://github.com/aisecnomad/symbiote"
-Issues = "https://github.com/aisecnomad/symbiote/issues"
-Documentation = "https://github.com/aisecnomad/symbiote/tree/main/docs"
+Homepage = "https://github.com/aisecnomad/Nexus-symbiote"
+Repository = "https://github.com/aisecnomad/Nexus-symbiote"
+Issues = "https://github.com/aisecnomad/Nexus-symbiote/issues"
+Documentation = "https://github.com/aisecnomad/Nexus-symbiote/tree/main/docs"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/nexus_symbiote"]
