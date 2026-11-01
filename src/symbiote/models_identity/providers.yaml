@@ -1,0 +1,266 @@
+# Hosted-model identifier rules (spec/collectors.md: models-hosted; spec/agentbom-profile.md: HostedIdentity).
+#
+# For each provider, `rules` are tried in order and the first full match decides `alias_pinning`:
+#   pinned   - the string names an immutable snapshot (dated ID, fixed dateless ID, version-pinned resource)
+#   floating - the provider may move the string to different weights or behaviour without the caller changing it
+#   unknown  - the string's stability cannot be determined offline (deployment names, previews, opaque ARNs)
+# `claims` decide which provider a bare string belongs to (providers are tried in file order, most specific
+# shapes first) when nothing else (base URL, SDK, env var, LiteLLM
+# prefix) says so. Strings that several providers share (vendor/model, name:tag) are attributed only from
+# context. `known_aliases` are informational (expected resolution as of a date); the BOM never records them as
+# resolved: resolved_ref stays unknown until a live provider query fills it.
+#
+# Sources: per-provider SDK type definitions and API specs fetched on 2026-11-01 (anthropic-sdk-python,
+# openai-python, googleapis protos and python-genai, botocore service-2.json, Azure REST specs, mistralai,
+# cohere, xai-sdk, OpenRouter SDK docs, ollama, huggingface_hub/TGI); see docs/research for the full register.
+version: "2026-11-01"
+providers:
+  - id: google-vertex
+    name: Google Vertex AI (Google publisher models, partner models, endpoints)
+    confidence: medium
+    hosts: [aiplatform.googleapis.com]
+    host_suffixes: [-aiplatform.googleapis.com, .rep.googleapis.com]
+    env: [GOOGLE_GENAI_USE_VERTEXAI, GOOGLE_GENAI_USE_ENTERPRISE, GOOGLE_CLOUD_PROJECT, GOOGLE_CLOUD_LOCATION, CLOUD_ML_REGION, ANTHROPIC_VERTEX_PROJECT_ID]
+    sdks: [google-cloud-aiplatform, "@anthropic-ai/vertex-sdk", langchain-google-vertexai]
+    litellm_prefixes: [vertex_ai, vertex_ai_beta]
+    resolution: GenerateContentResponse.model_version; for endpoints, PredictResponse.deployed_model_id and model_version_id.
+    claims: ['(?:^|/)publishers/[a-z0-9-]+/models/', '^projects/[^/]+/locations/[^/]+/(?:endpoints|models)/', '@(?:20\d{6}|default)$']
+    rules:
+      - {pattern: '^(?:(?:projects/[^/]+/locations/[^/]+/)?publishers/google/models/)?gemini-[a-z0-9.-]*-\d{3}$', pinning: pinned, why: stable Gemini version suffix}
+      - {pattern: '^(?:(?:projects/[^/]+/locations/[^/]+/)?publishers/google/models/)?gemini-[a-z0-9.-]*-latest$', pinning: floating, why: -latest alias}
+      - {pattern: '^(?:(?:projects/[^/]+/locations/[^/]+/)?publishers/google/models/)?gemini-(?:[a-z0-9.-]*-)?(?:preview|exp|experimental)(?:-[a-z0-9-]+)?$', pinning: unknown, why: preview or experimental model}
+      - {pattern: '^(?:(?:projects/[^/]+/locations/[^/]+/)?publishers/google/models/)?gemini-(?:1\.0|1\.5|2\.0)-[a-z0-9-]+$', pinning: floating, why: auto-updated alias of a 1.x/2.0 model}
+      - {pattern: '^(?:(?:projects/[^/]+/locations/[^/]+/)?publishers/google/models/)?gemini-(?:2\.5|[3-9](?:\.\d+)?)-[a-z][a-z0-9-]*$', pinning: pinned, why: stable 2.5+ model ID}
+      - {pattern: '^(?:(?:projects/[^/]+/locations/[^/]+/)?publishers/anthropic/models/)?claude-[a-z0-9-]+@20\d{6}$', pinning: pinned, why: Claude dated snapshot on Vertex (@YYYYMMDD)}
+      - {pattern: '^(?:(?:projects/[^/]+/locations/[^/]+/)?publishers/[a-z0-9-]+/models/)?[a-z0-9.-]+@default$', pinning: floating, why: '@default selects whatever version the publisher marks default'}
+      - {pattern: '^(?:(?:projects/[^/]+/locations/[^/]+/)?publishers/anthropic/models/)?claude-(?:opus|sonnet|haiku|fable|mythos)-(?:4-[6-9]|[5-9](?:-\d)?)$', pinning: pinned, why: fixed dateless Claude ID}
+      - {pattern: '^projects/[^/]+/locations/[^/]+/endpoints/[^/:]+$', pinning: floating, why: an endpoint can be redeployed with a different model version}
+      - {pattern: '^projects/[^/]+/locations/[^/]+/models/[^/@]+@\d+$', pinning: pinned, why: Model Registry version number}
+      - {pattern: '^projects/[^/]+/locations/[^/]+/models/[^/@]+(?:@[A-Za-z][A-Za-z0-9_-]*)?$', pinning: floating, why: Model Registry model without a version number (or a version alias)}
+      - {pattern: '^.+$', pinning: unknown, why: partner or open model without a documented snapshot scheme}
+
+  - id: aws-bedrock
+    name: AWS Bedrock (InvokeModel/Converse and the Messages endpoint)
+    confidence: high
+    hosts: []
+    host_patterns: ['^bedrock-runtime\.[a-z0-9-]+\.amazonaws\.com$', '^bedrock-mantle\.[a-z0-9-]+\.api\.aws$']
+    env: [AWS_BEARER_TOKEN_BEDROCK, ANTHROPIC_BEDROCK_BASE_URL, ANTHROPIC_BEDROCK_MANTLE_BASE_URL, CLAUDE_CODE_USE_BEDROCK, BEDROCK_MODEL_ID]
+    sdks: ["@anthropic-ai/bedrock-sdk", langchain-aws]
+    litellm_prefixes: [bedrock, bedrock_converse]
+    resolution: the Converse response has no model field except trace.promptRouter.invokedModelId; resolve inference profiles and provisioned throughput through the control plane (GetInferenceProfile, GetProvisionedModelThroughput).
+    claims: ['^arn:aws(?:-[a-z-]+)?:(?:bedrock|sagemaker):', '^(?:us|eu|apac|jp|au|us-gov|global)\.[a-z0-9-]+\.[a-z0-9]', '^(?:anthropic|amazon|meta|mistral|cohere|ai21|deepseek|qwen|minimax|moonshot|moonshotai|writer|stability|twelvelabs|luma|nvidia|zai)\.[a-z0-9]']
+    rules:
+      - {pattern: '^arn:aws(?:-[a-z-]+)?:bedrock:[a-z0-9-]+:\d{12}:(?:default-)?prompt-router/[A-Za-z0-9.:-]+$', pinning: floating, why: a prompt router picks a model per request}
+      - {pattern: '^arn:aws(?:-[a-z-]+)?:bedrock:[a-z0-9-]+:\d{12}:provisioned-model/[a-z0-9]{12}$', pinning: floating, why: provisioned throughput can be updated to a different model}
+      - {pattern: '^arn:aws(?:-[a-z-]+)?:bedrock:[a-z0-9-]+:\d{12}:custom-model-deployment/[a-z0-9]{12}$', pinning: floating, why: a custom-model deployment can be updated to another model}
+      - {pattern: '^arn:aws(?:-[a-z-]+)?:bedrock:[a-z0-9-]+:\d{12}:application-inference-profile/[A-Za-z0-9.:-]+$', pinning: unknown, why: application inference profile; the underlying model needs a control-plane lookup}
+      - {pattern: '^(?:arn:aws(?:-[a-z-]+)?:bedrock:[a-z0-9-]+:\d{12}:inference-profile/)?(?:us|eu|apac|jp|au|us-gov|global)\.[a-z0-9-]+\.[a-z0-9.:-]+$', pinning: pinned, why: system-defined cross-region inference profile for one model version}
+      - {pattern: '^arn:aws(?:-[a-z-]+)?:bedrock:[a-z0-9-]+::foundation-model/[a-z0-9-]+\.[a-z0-9.:-]+$', pinning: pinned, why: foundation-model ARN with a versioned model ID}
+      - {pattern: '^arn:aws(?:-[a-z-]+)?:bedrock:[a-z0-9-]+:\d{12}:custom-model/[a-z0-9.:-]+/[a-z0-9]{12}$', pinning: pinned, why: custom model ARN}
+      - {pattern: '^arn:aws(?:-[a-z-]+)?:bedrock:[a-z0-9-]+:\d{12}:imported-model/[a-z0-9]{12}$', pinning: pinned, why: imported model ARN}
+      - {pattern: '^arn:aws(?:-[a-z-]+)?:bedrock:[a-z0-9-]+:\d{12}:prompt/[0-9a-zA-Z]{10}:\d{1,5}$', pinning: pinned, why: prompt management version}
+      - {pattern: '^arn:aws(?:-[a-z-]+)?:bedrock:[a-z0-9-]+:\d{12}:prompt/[0-9a-zA-Z]{10}$', pinning: floating, why: prompt without a version (the draft)}
+      - {pattern: '^arn:aws(?:-[a-z-]+)?:sagemaker:[a-z0-9-]+:\d{12}:endpoint/[A-Za-z0-9-]+$', pinning: floating, why: a SageMaker endpoint can be updated in place}
+      - {pattern: '^(?:anthropic|amazon|meta|mistral|cohere|ai21|deepseek|openai|qwen|google|minimax|moonshot|moonshotai|writer|stability|twelvelabs|luma|nvidia|zai)\.[a-z0-9][a-z0-9.-]*(?::\d+(?::[a-z0-9]+)?)?$', pinning: pinned, why: versioned foundation model ID}
+      - {pattern: '^.+$', pinning: unknown, why: not a Bedrock model identifier shape}
+
+  - id: anthropic
+    name: Anthropic (Claude API; same bare IDs on Claude Platform on AWS and Microsoft Foundry)
+    confidence: high
+    hosts: [api.anthropic.com]
+    env: [ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, ANTHROPIC_BASE_URL, ANTHROPIC_MODEL, ANTHROPIC_SMALL_FAST_MODEL,
+          ANTHROPIC_DEFAULT_OPUS_MODEL, ANTHROPIC_DEFAULT_SONNET_MODEL, ANTHROPIC_DEFAULT_HAIKU_MODEL,
+          ANTHROPIC_DEFAULT_FABLE_MODEL, CLAUDE_CODE_SUBAGENT_MODEL]
+    sdks: [anthropic, "@anthropic-ai/sdk", claude-agent-sdk, "@anthropic-ai/claude-agent-sdk", langchain-anthropic]
+    litellm_prefixes: [anthropic]
+    resolution: GET /v1/models/{id} resolves an alias to its snapshot; the Messages response `model` reports the model that served the request (it differs from the request when a fallback fires).
+    strip_suffixes: ['\[1m\]$', '-fast$', '-\d+k$']
+    claims: ['^claude-']
+    rules:
+      - {pattern: '^claude-[a-z0-9-]+-20\d{6}$', pinning: pinned, why: dated snapshot ID (YYYYMMDD)}
+      - {pattern: '^claude-[a-z0-9-]+-latest$', pinning: floating, why: legacy -latest alias that moves to the newest snapshot}
+      - {pattern: '^claude-(?:opus-4-[015]|sonnet-4-[05]|haiku-4-5)$', pinning: floating, why: undated alias of a model that also has a dated snapshot ID}
+      - {pattern: '^claude-(?:(?:opus|sonnet|haiku|fable|mythos)-(?:4-[6-9]|[5-9](?:-\d)?)|mythos-preview)$', pinning: pinned, why: fixed dateless ID (Claude Opus 4.6 onward); the bare string is the snapshot}
+      - {pattern: '^claude-[a-z0-9.-]+$', pinning: unknown, why: retired, unreleased or gateway-specific claude-* name}
+    context_rules:
+      claude-code:
+        - {pattern: '^(?:opus|sonnet|haiku|fable|best|default|opusplan)(?:\[1m\])?$', pinning: floating, why: Claude Code tier alias resolved at run time to the newest model the account can use}
+    known_aliases:
+      claude-sonnet-4-5: {resolves_to: claude-sonnet-4-5-20250929, as_of: "2026-10-06"}
+      claude-opus-4-5: {resolves_to: claude-opus-4-5-20251101, as_of: "2026-10-06"}
+      claude-haiku-4-5: {resolves_to: claude-haiku-4-5-20251001, as_of: "2026-10-06"}
+
+  - id: openai
+    name: OpenAI (Chat Completions and Responses)
+    confidence: high
+    hosts: [api.openai.com]
+    env: [OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_ORG_ID, OPENAI_PROJECT_ID, OPENAI_MODEL, OPENAI_DEFAULT_MODEL]
+    sdks: [openai, openai-agents, langchain-openai]
+    litellm_prefixes: [openai, text-completion-openai]
+    resolution: an alias request returns the dated snapshot in the response `model`; Chat Completions also returns `system_fingerprint`, which can change while the snapshot does not (record it as configuration drift).
+    claims: ['^(?:gpt-|chatgpt-|o[1-9](?:$|-)|codex-|computer-use-preview|ft:gpt-|ft:o[1-9]|text-embedding-|dall-e|tts-|whisper-)']
+    rules:
+      - {pattern: '^[a-z0-9][a-z0-9.-]*-latest$', pinning: floating, why: -latest alias}
+      - {pattern: '^ft:[^:\s]+:[^:\s]+:[^:\s]*:[A-Za-z0-9]+(?::ckpt-step-\d+)?$', pinning: pinned, why: fine-tuned model ID (immutable job output)}
+      - {pattern: '^[a-z0-9][a-z0-9.-]*-20\d{2}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$', pinning: pinned, why: dated snapshot (YYYY-MM-DD)}
+      - {pattern: '^(?:gpt-3\.5-turbo(?:-16k)?|gpt-4(?:-32k)?)-(?:0301|0314|0613|1106|0125)$|^gpt-4-(?:1106|0125)-preview$', pinning: pinned, why: legacy MMDD snapshot}
+      - {pattern: '^(?:gpt-[0-9][a-z0-9.]*(?:-[a-z0-9.]+)*|gpt-(?:audio|realtime|image)[a-z0-9.-]*|o[1-9](?:-[a-z0-9]+)*|codex-[a-z0-9.-]+|computer-use-preview)$', pinning: floating, why: undated alias that points at the provider's current snapshot}
+      - {pattern: '^.+$', pinning: unknown, why: model family without a documented snapshot scheme (for example embeddings)}
+
+  - id: google-gemini
+    name: Google Gemini API (generativelanguage.googleapis.com)
+    confidence: medium
+    hosts: [generativelanguage.googleapis.com]
+    env: [GEMINI_API_KEY, GOOGLE_API_KEY, GEMINI_MODEL]
+    sdks: [google-genai, "@google/genai", google-generativeai, langchain-google-genai]
+    litellm_prefixes: [gemini]
+    resolution: GenerateContentResponse.modelVersion reports the version that served the request; models.get returns baseModelId and version.
+    claims: ['^(?:models/)?(?:gemini|gemma|imagen|veo)-', '^tunedModels/']
+    rules:
+      - {pattern: '^(?:models/)?gemini-[a-z0-9.-]*-latest$', pinning: floating, why: -latest alias}
+      - {pattern: '^(?:models/)?(?:gemini|gemma|imagen|veo|text-embedding|embedding)[a-z0-9.-]*-\d{3}$', pinning: pinned, why: stable version suffix (-001, -002)}
+      - {pattern: '^(?:models/)?gemini-(?:[a-z0-9.-]*-)?(?:preview|exp|experimental)(?:-[a-z0-9-]+)?$', pinning: unknown, why: preview or experimental model whose behaviour can change before GA}
+      - {pattern: '^(?:models/)?gemini-(?:1\.0|1\.5|2\.0)-(?:pro|flash|flash-8b|flash-lite|pro-vision)$', pinning: floating, why: auto-updated alias of a 1.x/2.0 model}
+      - {pattern: '^(?:models/)?gemini-(?:2\.5|[3-9](?:\.\d+)?)-[a-z][a-z0-9-]*$', pinning: pinned, why: stable 2.5+ model ID (no auto-update alias)}
+      - {pattern: '^tunedModels/[a-z0-9-]+$', pinning: pinned, why: tuned model resource}
+      - {pattern: '^.+$', pinning: unknown, why: no documented snapshot scheme}
+    context_rules:
+      gemini-cli:
+        - {pattern: '^(?:auto|pro|flash|flash-lite|auto-gemini-[0-9.]+)$', pinning: floating, why: Gemini CLI routing alias}
+
+  - id: azure-openai
+    name: Azure OpenAI / Microsoft Foundry
+    confidence: medium
+    hosts: [models.inference.ai.azure.com]
+    host_suffixes: [.openai.azure.com, .cognitiveservices.azure.com, .services.ai.azure.com, .models.ai.azure.com]
+    env: [AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_AD_TOKEN, OPENAI_API_VERSION, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_DEPLOYMENT_NAME, AZURE_AI_PROJECT_ENDPOINT]
+    sdks: [azure-ai-inference, azure-ai-projects, "@azure/openai"]
+    litellm_prefixes: [azure, azure_ai]
+    resolution: the deployment (not the string in code) decides the model; ARM GET .../deployments/{d} returns properties.model {name, version}, versionUpgradeOption and spilloverDeploymentName.
+    claims: []
+    rules:
+      - {pattern: '^model-router$', pinning: floating, why: Foundry model router picks a model per request}
+      - {pattern: '^.+$', pinning: unknown, why: deployment name; its model and upgrade policy live in the Azure deployment, not in code}
+
+  - id: mistral
+    name: Mistral AI
+    confidence: medium
+    hosts: [api.mistral.ai, api.eu.mistral.ai, api.us.mistral.ai]
+    env: [MISTRAL_API_KEY, MISTRAL_SA_TOKEN_PATH, MISTRAL_MODEL]
+    sdks: [mistralai, "@mistralai/mistralai", langchain-mistralai]
+    litellm_prefixes: [mistral]
+    resolution: GET /v1/models/{id} returns the model card with aliases[] and deprecation data.
+    claims: ['^(?:mistral|codestral|devstral|magistral|ministral|pixtral|voxtral|open-mistral|open-mixtral|open-codestral)[a-z0-9.-]*$', '^ft:[a-z0-9.-]+:[a-z0-9]+:\d{8}:[a-z0-9]+$']
+    rules:
+      - {pattern: '^[a-z][a-z0-9-]*-latest$', pinning: floating, why: -latest alias}
+      - {pattern: '^(?:mistral|codestral|devstral|magistral|ministral|pixtral|voxtral|open-mistral|open-mixtral|open-codestral)[a-z0-9-]*-2[2-9](?:0[1-9]|1[0-2])$', pinning: pinned, why: dated YYMM release}
+      - {pattern: '^ft:[a-z0-9.-]+:[a-z0-9]+:\d{8}:[a-z0-9]+$', pinning: pinned, why: fine-tuned model ID}
+      - {pattern: '^.+$', pinning: unknown, why: no dated suffix}
+
+  - id: cohere
+    name: Cohere
+    confidence: high
+    hosts: [api.cohere.com, api.cohere.ai]
+    env: [CO_API_KEY, COHERE_API_KEY]
+    sdks: [cohere, cohere-ai, langchain-cohere]
+    litellm_prefixes: [cohere, cohere_chat]
+    resolution: no in-band resolution (the v2 chat response has no model field); pin by sending a dated ID.
+    claims: ['^(?:command|c4ai-|aya-|embed-|rerank-|north-)[a-z0-9.-]*$']
+    rules:
+      - {pattern: '^command(?:-light)?-nightly$', pinning: floating, why: nightly retrained model}
+      - {pattern: '^(?:command|c4ai-aya|aya)[a-z0-9-]*-(?:0[1-9]|1[0-2])-20\d{2}$', pinning: pinned, why: dated MM-YYYY release}
+      - {pattern: '^command-r(?:-plus)?$', pinning: floating, why: alias of the current command-r release}
+      - {pattern: '^(?:embed|rerank)-(?:english-|multilingual-)?(?:light-)?v\d+(?:\.\d+)?(?:-(?:pro|fast))?$|^north-[a-z-]+-\d+\.\d+$', pinning: pinned, why: versioned embedding or rerank model}
+      - {pattern: '^.+$', pinning: unknown, why: no dated suffix}
+
+  - id: xai
+    name: xAI Grok
+    confidence: medium
+    hosts: [api.x.ai]
+    env: [XAI_API_KEY]
+    sdks: [xai-sdk]
+    litellm_prefixes: [xai]
+    resolution: the response carries `model` and `system_fingerprint`.
+    claims: ['^grok-']
+    rules:
+      - {pattern: '^grok-[a-z0-9.-]*-latest$', pinning: floating, why: -latest alias}
+      - {pattern: '^grok-[a-z0-9.-]*?-(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])(?:-[a-z]+)*$|^grok-[a-z0-9.-]+-20\d{2}-\d{2}-\d{2}$', pinning: pinned, why: dated MMDD release}
+      - {pattern: '^grok-[a-z0-9.-]+$', pinning: floating, why: undated alias}
+      - {pattern: '^.+$', pinning: unknown, why: no documented scheme}
+
+  - id: deepseek
+    name: DeepSeek API
+    confidence: low
+    hosts: [api.deepseek.com]
+    env: [DEEPSEEK_API_KEY]
+    sdks: []
+    litellm_prefixes: [deepseek]
+    resolution: the response `model` echoes the service alias; weights versions are announced in the changelog only.
+    claims: ['^deepseek-[a-z0-9.-]+$']
+    rules:
+      - {pattern: '^deepseek-(?:chat|reasoner)$', pinning: floating, why: service alias upgraded in place}
+      - {pattern: '^.+$', pinning: unknown, why: no documented snapshot scheme}
+
+  - id: meta-llama
+    name: Meta Llama API
+    confidence: low
+    hosts: [api.llama.com]
+    env: [LLAMA_API_KEY, LLAMA_API_CLIENT_BASE_URL]
+    sdks: [llama-api-client]
+    litellm_prefixes: [meta_llama]
+    resolution: none in-band (the native response has no model field).
+    claims: ['^(?:(?:Cerebras|Groq)-)?Llama-']
+    rules:
+      - {pattern: '^.+$', pinning: unknown, why: no documented snapshot scheme}
+
+  - id: openrouter
+    name: OpenRouter
+    confidence: medium
+    hosts: [openrouter.ai]
+    env: [OPENROUTER_API_KEY]
+    sdks: [openrouter, "@openrouter/sdk", "@openrouter/ai-sdk-provider"]
+    litellm_prefixes: [openrouter]
+    resolution: the response `model` and `provider` reveal the concrete slug and upstream host; GET /api/v1/generation?id= returns provider_name.
+    claims: ['^openrouter/', '^~[a-z0-9-]+/']
+    rules:
+      - {pattern: '^openrouter/[a-z0-9.-]+$', pinning: floating, why: router picks a model per request}
+      - {pattern: '^~[a-z0-9-]+/[a-z0-9.-]+-latest$', pinning: floating, why: -latest family alias}
+      - {pattern: '^[a-z0-9-]+/\*$', pinning: floating, why: wildcard over a vendor's models}
+      - {pattern: '^[a-z0-9-]+/[a-z0-9._-]*?-(?:20\d{6}|20\d{2}-\d{2}-\d{2}|\d{4}|\d{3})(?::[a-z0-9-]+)?$', pinning: pinned, why: dated slug}
+      - {pattern: '^[a-z0-9-]+/[a-z0-9._-]+(?::[a-z0-9-]+)?$', pinning: floating, why: undated slug; the upstream provider can also vary unless the request pins it}
+      - {pattern: '^.+$', pinning: unknown, why: no documented scheme}
+
+  - id: ollama
+    name: Ollama (local daemon or Ollama Cloud)
+    confidence: high
+    hosts: [ollama.com, registry.ollama.ai]
+    local_ports: [11434]
+    env: [OLLAMA_HOST, OLLAMA_API_KEY, OLLAMA_MODEL]
+    sdks: [ollama, langchain-ollama]
+    litellm_prefixes: [ollama, ollama_chat]
+    resolution: /api/tags returns the model digest; record it as resolved_ref and compare on each start.
+    claims: []
+    rules:
+      - {pattern: '^.+@sha256:[0-9a-f]{64}$', pinning: unknown, why: digest suffix is accepted but no longer enforced by Ollama's name parser}
+      - {pattern: '^(?:[^/\s]+/)?(?:[^/\s]+/)?[A-Za-z0-9_][A-Za-z0-9._-]*:(?:[A-Za-z0-9._-]*-)?cloud$', pinning: floating, why: Ollama Cloud model}
+      - {pattern: '^(?:[^/\s]+/)?(?:[^/\s]+/)?[A-Za-z0-9_][A-Za-z0-9._-]*(?::latest)?$', pinning: floating, why: implicit or explicit :latest tag}
+      - {pattern: '^(?:[^/\s]+/)?(?:[^/\s]+/)?[A-Za-z0-9_][A-Za-z0-9._-]*:[A-Za-z0-9_][A-Za-z0-9._-]*$', pinning: floating, why: tags are mutable registry pointers}
+      - {pattern: '^.+$', pinning: unknown, why: not an Ollama model name}
+
+  - id: huggingface
+    name: Hugging Face Inference (Inference Providers router, Inference Endpoints, TGI)
+    confidence: high
+    hosts: [router.huggingface.co, api-inference.huggingface.co, api.endpoints.huggingface.cloud]
+    host_suffixes: [.endpoints.huggingface.cloud]
+    env: [HF_TOKEN, HF_TOKEN_PATH, HF_INFERENCE_ENDPOINT, HUGGINGFACE_API_KEY]
+    sdks: [huggingface_hub, "@huggingface/inference", text-generation]
+    litellm_prefixes: [huggingface]
+    resolution: Inference Endpoints report model.revision; TGI /info returns model_sha; the router does not expose a revision.
+    claims: []
+    rules:
+      - {pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*@[0-9a-f]{40}$', pinning: pinned, why: repository pinned to a commit}
+      - {pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*@[A-Za-z0-9._/-]+$', pinning: floating, why: branch or tag revision}
+      - {pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*:(?:fastest|cheapest|preferred)$', pinning: floating, why: router policy selects the provider per request}
+      - {pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*:[a-z0-9-]+$', pinning: unknown, why: provider-pinned route; the provider's weights revision is not exposed}
+      - {pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$', pinning: floating, why: repository default branch}
+      - {pattern: '^.+$', pinning: unknown, why: not a repository ID}

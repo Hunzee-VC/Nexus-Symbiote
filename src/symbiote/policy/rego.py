@@ -233,6 +233,14 @@ findings contains f if {
 \tmsg := sprintf("Model %v: %v.", [label(m), concat(", ", first(sort(hits), 6))])
 \tf := finding("SYM-MODEL-005", "critical", [m.id], msg)
 }""",
+    "SYM-MODEL-007": """findings contains f if {
+\tsome m in input.models
+\thas_tag(m, "endpoint-override:project")
+\thosted := object.get(m, "hosted", {})
+\torigin := object.get(object.get(hosted, "value", {}), "endpointOrigin", "a host that is not the provider")
+\tmsg := sprintf("Model %v: a file in the repository sends its API traffic, and the key that authenticates it, to %v.", [label(m), origin])
+\tf := finding("SYM-MODEL-007", "high", [m.id], msg)
+}""",
     "SYM-MODEL-006": """findings contains f if {
 \tsome m in input.models
 \thits := tag_values(m, "format-anomaly")
