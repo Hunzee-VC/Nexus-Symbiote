@@ -6,6 +6,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from typing import Any
+
 from symbote.core.models import AnyComponent
 
 
@@ -30,10 +32,11 @@ class Scanner(ABC):
         """Scan a project directory and return discovered components."""
         ...
 
-    def _safe_read_json(self, path: Path) -> dict | list | None:
+    def _safe_read_json(self, path: Path) -> dict[str, Any] | list[Any] | None:
         import json
 
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
+            data: dict[str, Any] | list[Any] = json.loads(path.read_text(encoding="utf-8"))
+            return data
         except (json.JSONDecodeError, OSError):
             return None

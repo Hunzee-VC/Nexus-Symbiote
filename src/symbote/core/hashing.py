@@ -69,7 +69,7 @@ def _serialize_string(value: str) -> str:
     return "".join(result)
 
 
-def _serialize_object(obj: dict) -> str:
+def _serialize_object(obj: dict[str, Any]) -> str:
     sorted_keys = sorted(obj.keys(), key=lambda k: [ord(c) for c in k])
     pairs = []
     for key in sorted_keys:

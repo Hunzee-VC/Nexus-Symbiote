@@ -15,7 +15,7 @@ from symbote.core.aibom import AIBOM
 from symbote.core.enums import AssuranceLevel
 from symbote.core.models import AIBOMMetadata, CompletenessClaim
 
-console = Console()
+console = Console(stderr=True)
 err_console = Console(stderr=True)
 
 SCANNER_REGISTRY: dict[str, type] = {}

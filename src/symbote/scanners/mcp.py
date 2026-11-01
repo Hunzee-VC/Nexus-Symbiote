@@ -58,6 +58,8 @@ class MCPScanner(Scanner):
                 result.scan_failures.append(f"Failed to parse {config_path}")
                 continue
 
+            if not isinstance(data, dict):
+                continue
             servers = data.get("mcpServers", data.get("servers", {}))
             if isinstance(servers, dict):
                 for server_name, server_config in servers.items():
@@ -75,7 +77,7 @@ class MCPScanner(Scanner):
     def _parse_server(
         self,
         name: str,
-        config: dict,
+        config: dict[str, Any],
         config_path: Path,
     ) -> tuple[MCPServerComponent, list[ToolComponent]]:
         command = config.get("command", "")
@@ -141,7 +143,7 @@ class MCPScanner(Scanner):
         tools = self._extract_tools(name, config)
         return server_comp, tools
 
-    def _detect_transport(self, config: dict) -> str:
+    def _detect_transport(self, config: dict[str, Any]) -> str:
         if config.get("url") or config.get("endpoint"):
             url = config.get("url", config.get("endpoint", ""))
             if "/sse" in url:
@@ -149,7 +151,7 @@ class MCPScanner(Scanner):
             return "streamable-http"
         return "stdio"
 
-    def _extract_package_ref(self, command: str, args: list) -> str | None:
+    def _extract_package_ref(self, command: str, args: list[str]) -> str | None:
         if command in ("npx", "bunx"):
             for arg in args:
                 if not arg.startswith("-"):
