@@ -15,7 +15,11 @@ import rfc8785
 
 
 def canonical_json(data: Any) -> str:
-    """Serialize I-JSON to RFC 8785 bytes, rejecting unsupported values."""
+    """Serialize I-JSON to RFC 8785 bytes, rejecting unsupported values.
+
+    Hashes made by releases before this correction may differ. Do not compare
+    old and new fingerprints without re-collecting both snapshots.
+    """
     return rfc8785.dumps(data).decode("utf-8")
 
 

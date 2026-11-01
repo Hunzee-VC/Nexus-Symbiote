@@ -24,6 +24,7 @@ from symbote.core.enums import (
     SideEffectProfile,
     TrustTier,
 )
+from symbote.core.evidence import DeploymentProfile
 
 
 class ComponentBase(BaseModel):
@@ -102,6 +103,10 @@ class AgentComponent(ComponentBase):
     )
     capabilities: CapabilityDeclaration | None = None
     authorizations: list[AuthorizationRecord] = Field(default_factory=list)
+    deployment_profile: DeploymentProfile | None = Field(
+        default=None,
+        description="Optional deployment-scoped authority claims and their evidence provenance",
+    )
     risks: list[RiskAssessment] = Field(default_factory=list)
 
 
@@ -138,6 +143,10 @@ class ToolComponent(ComponentBase):
     definition_hash: str | None = Field(
         default=None,
         description="JCS canonical hash of (name, description, inputSchema, annotations)",
+    )
+    definition_hash_version: str | None = Field(
+        default=None,
+        description="Canonicalization protocol, or unknown for legacy fingerprints",
     )
     capabilities: CapabilityDeclaration | None = None
     annotations: dict[str, Any] = Field(
@@ -308,6 +317,7 @@ class CompletenessClaim(BaseModel):
     surfaces_scanned: list[str] = Field(default_factory=list)
     surfaces_excluded: list[str] = Field(default_factory=list)
     scan_failures: list[str] = Field(default_factory=list)
+    scanner_status: dict[str, str] = Field(default_factory=dict)
     timestamp: datetime | None = None
     assurance_level: AssuranceLevel = AssuranceLevel.DECLARED
 

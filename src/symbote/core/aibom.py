@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from symbote import __version__
 from symbote.core.enums import ComponentType
@@ -41,14 +41,28 @@ class AIBOM(BaseModel):
     components: list[AnyComponent] = Field(default_factory=list)
     dependencies: list[DependencyEdge] = Field(default_factory=list)
 
+    @model_validator(mode="after")
+    def unique_components(self) -> AIBOM:
+        refs = [component.bom_ref for component in self.components]
+        if len(refs) != len(set(refs)):
+            raise ValueError("Duplicate component references in AIBOM")
+        return self
+
+    def replace_component(self, component: AnyComponent) -> None:
+        """Explicitly replace an existing component in an edited snapshot."""
+        for index, existing in enumerate(self.components):
+            if existing.bom_ref == component.bom_ref:
+                self.components[index] = component
+                return
+        raise ValueError(f"No component with reference: {component.bom_ref}")
+
     def add_component(self, component: AnyComponent) -> None:
-        existing = {c.bom_ref for c in self.components}
-        if component.bom_ref in existing:
-            self.components = [
-                c if c.bom_ref != component.bom_ref else component for c in self.components
-            ]
-        else:
-            self.components.append(component)
+        for existing in self.components:
+            if existing.bom_ref == component.bom_ref:
+                if existing == component:
+                    return
+                raise ValueError(f"Duplicate component reference: {component.bom_ref}")
+        self.components.append(component)
 
     def add_dependency(self, edge: DependencyEdge) -> None:
         self.dependencies.append(edge)

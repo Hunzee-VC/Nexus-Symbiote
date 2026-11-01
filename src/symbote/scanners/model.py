@@ -107,11 +107,8 @@ class ModelScanner(Scanner):
 
             risks = self._assess_model_risks(path, fmt_key, safety, signing_status, config)
 
+            # A signature filename and serialization format do not establish trust.
             trust_tier = TrustTier.UNKNOWN
-            if signing_status == "sigstore-signed":
-                trust_tier = TrustTier.THIRD_PARTY_SIGNED
-            elif safety == SerializationSafety.SAFE:
-                trust_tier = TrustTier.THIRD_PARTY_UNSIGNED
 
             model_type = self._infer_model_type(config, path)
             derivation = config.get("peft_type") if config else None
@@ -157,8 +154,10 @@ class ModelScanner(Scanner):
         for sig_file in SIGNING_FILES:
             sig_path = model_dir / sig_file
             if sig_path.exists():
-                return "sigstore-signed", str(sig_path)
-        return "unsigned", None
+                # A filename alone cannot establish format, subject or signer.
+                return "signature-present-unverified", None
+        # Search is directory-local; it cannot prove that no signature exists.
+        return "signature-not-found", None
 
     def _hash_tokenizer(self, model_dir: Path) -> str | None:
         for name in ("tokenizer.json", "tokenizer.model", "spiece.model"):
@@ -230,13 +229,13 @@ class ModelScanner(Scanner):
                 )
             )
 
-        if signing_status == "unsigned":
+        if signing_status in {"unsigned", "signature-not-found", "signature-present-unverified"}:
             risks.append(
                 RiskAssessment(
                     severity=RiskSeverity.HIGH,
                     category="signing_status",
-                    detail=f"Model '{path.name}' has no cryptographic signature.",
-                    recommendation="Sign with OpenSSF Model Signing (Sigstore).",
+                    detail=f"Model '{path.name}' has no verified authorized signature ({signing_status}).",
+                    recommendation="Verify a signature against the model and an explicit signer policy.",
                     references=[
                         "https://openssf.org/blog/2025/04/04/launch-of-model-signing-v1-0-openssf-ai-ml-working-group-secures-the-machine-learning-supply-chain/"
                     ],

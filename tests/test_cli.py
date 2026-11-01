@@ -76,6 +76,7 @@ def _make_fixture_bom(
             name="read_file",
             mcp_server_ref="mcp-fs",
             definition_hash="sha256:abc123",
+            definition_hash_version="rfc8785-jcs-v1",
         )
     )
     bom.add_component(
@@ -182,9 +183,9 @@ class TestScanCommand:
         result = runner.invoke(
             main, ["scan", str(project), "--scanner", "nonexistent", "-o", str(out)]
         )
-        assert result.exit_code == 0
+        assert result.exit_code != 0
         data = json.loads(out.read_text())
-        assert len(data["components"]) == 0
+        assert data["metadata"]["completeness"]["scanner_status"]["nonexistent"] == "failed"
 
     def test_scan_empty_project(self, tmp_path):
         out = tmp_path / "empty.json"
@@ -232,13 +233,14 @@ class TestRiskCommand:
         assert "overall_score" in data
         assert "risk_level" in data
 
-    def test_risk_custom_threshold(self, tmp_path):
+    def test_risk_custom_threshold_does_not_override_partial_coverage(self, tmp_path):
         project = _create_test_project(tmp_path)
         runner = CliRunner()
         bom_path = tmp_path / "test.json"
         runner.invoke(main, ["scan", str(project), "-o", str(bom_path)])
-        result = runner.invoke(main, ["risk", str(bom_path), "--threshold", "100"])
-        assert result.exit_code == 0
+        result = runner.invoke(main, ["risk", str(bom_path), "--threshold", "100", "--json-output"])
+        assert result.exit_code == 1
+        assert json.loads(result.output)["coverage_status"] == "partial"
 
 
 class TestDiffCommand:
@@ -304,12 +306,13 @@ class TestVersionAndHelp:
 class TestRiskFixture:
     """Risk command tests against pre-built fixture BOMs for deterministic coverage."""
 
-    def test_risk_clean_bom_passes(self, tmp_path):
+    def test_risk_legacy_coverage_is_unknown(self, tmp_path):
         bom_path = _make_fixture_bom(tmp_path, with_risks=False)
         runner = CliRunner()
         result = runner.invoke(main, ["risk", str(bom_path)])
-        assert result.exit_code == 0
-        assert "PASSED" in result.output
+        assert result.exit_code == 1
+        assert "unknown" in result.output.lower()
+        assert "FAILED" in result.output
 
     def test_risk_risky_bom_fails_gate(self, tmp_path):
         bom_path = _make_fixture_bom(tmp_path, with_risks=True)
@@ -339,11 +342,11 @@ class TestRiskFixture:
         assert len(data["findings"]) == 2
         assert data["findings"][0]["severity"] == "critical"
 
-    def test_risk_high_threshold_passes(self, tmp_path):
+    def test_critical_risk_vetoes_high_threshold(self, tmp_path):
         bom_path = _make_fixture_bom(tmp_path, with_risks=True)
         runner = CliRunner()
         result = runner.invoke(main, ["risk", str(bom_path), "--threshold", "200"])
-        assert result.exit_code == 0
+        assert result.exit_code != 0
 
 
 class TestValidateFixture:

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from symbote.policy import Policy, default_policy, load_policy
 
 
@@ -47,13 +49,13 @@ class TestLoadPolicy:
 
     def test_load_invalid_yaml_returns_none(self, tmp_path: Path) -> None:
         (tmp_path / ".symbote.yaml").write_text("{{invalid yaml:::")
-        policy = load_policy(tmp_path)
-        assert policy is None
+        with pytest.raises(ValueError):
+            load_policy(tmp_path)
 
     def test_load_empty_file_returns_none(self, tmp_path: Path) -> None:
         (tmp_path / ".symbote.yaml").write_text("")
-        policy = load_policy(tmp_path)
-        assert policy is None
+        with pytest.raises(ValueError):
+            load_policy(tmp_path)
 
     def test_load_searches_parent_dirs(self, tmp_path: Path) -> None:
         content = 'version: "2.0"\n'

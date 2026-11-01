@@ -78,7 +78,10 @@ def scan(
 
     from symbote.policy import load_policy
 
-    policy = load_policy(root)
+    try:
+        policy = load_policy(root)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
 
     if not output_format:
         output_format = policy.output.default_format if policy else "json"
@@ -91,17 +94,19 @@ def scan(
     if scanners:
         selected = scanners
     elif policy:
-        selected = tuple(s for s in policy.scan.scanners if s in all_scanners)
+        selected = tuple(policy.scan.scanners)
     else:
         selected = tuple(all_scanners.keys())
 
     surfaces_scanned: list[str] = []
     surfaces_excluded: list[str] = []
     scan_failures: list[str] = []
+    scanner_status: dict[str, str] = dict.fromkeys(all_scanners, "unknown")
 
     for name in selected:
         if name not in all_scanners:
-            err_console.print(f"[yellow]Warning:[/] Unknown scanner '{name}', skipping")
+            scan_failures.append(f"Unknown scanner: {name}")
+            scanner_status[name] = "failed"
             continue
 
         scanner_cls = all_scanners[name]
@@ -115,16 +120,25 @@ def scan(
             surfaces_scanned.extend(result.surfaces_scanned)
             surfaces_excluded.extend(result.surfaces_excluded)
             scan_failures.extend(result.scan_failures)
+            scanner_status[name] = (
+                "failed"
+                if result.scan_failures
+                else "partial"
+                if result.surfaces_excluded
+                else "complete"
+            )
             console.print(f"    Found [green]{len(result.components)}[/] components")
         except Exception as e:
             err_console.print(f"  [red]Scanner '{name}' failed:[/] {e}")
             scan_failures.append(f"{name}: {e}")
+            scanner_status[name] = "failed"
 
     aibom.metadata.completeness = CompletenessClaim(
-        scope="full-agent",
+        scope="local-static-project",
         surfaces_scanned=surfaces_scanned,
         surfaces_excluded=surfaces_excluded,
         scan_failures=scan_failures,
+        scanner_status=scanner_status,
         assurance_level=AssuranceLevel.OBSERVED,
     )
 
@@ -148,6 +162,9 @@ def scan(
         console.print(f"[bold green]Saved[/] {output}")
     else:
         click.echo(out_data)
+
+    if scan_failures:
+        raise click.ClickException("Collection incomplete; see scan failures in the output")
 
 
 @main.command()
@@ -209,7 +226,10 @@ def risk(aibom_path: str, threshold: float | None, json_output: bool) -> None:
     from symbote.validators.risk import RiskScorer
 
     if threshold is None:
-        policy = load_policy(Path(aibom_path).parent)
+        try:
+            policy = load_policy(Path(aibom_path).parent)
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from exc
         threshold = policy.risk.fail_threshold if policy else 50.0
 
     scorer = RiskScorer(fail_threshold=threshold)
@@ -224,8 +244,9 @@ def risk(aibom_path: str, threshold: float | None, json_output: bool) -> None:
         "high": "red",
         "moderate": "yellow",
         "clean": "green",
+        "unknown": "yellow",
     }
-    color = level_colors[report.risk_level]
+    color = level_colors.get(report.risk_level, "yellow")
     score = report.overall_score
     level = report.risk_level
     console.print(f"[bold]Risk Score:[/] [{color}]{score:.1f}[/] ({level})")

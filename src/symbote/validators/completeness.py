@@ -8,6 +8,8 @@ from pathlib import Path
 from symbote.core.aibom import AIBOM
 from symbote.core.enums import AssuranceLevel, ComponentType
 
+REQUIRED_SCANNERS = frozenset({"mcp", "model", "prompt", "rag", "registry"})
+
 EXPECTED_SURFACES = {
     "mcp-config": "MCP server configuration (.mcp.json etc.)",
     "model-weights": "Model weight files and signing status",
@@ -83,16 +85,35 @@ class CompletenessValidator:
             )
             report.is_complete = False
 
-        for ctype in MINIMUM_COMPONENT_TYPES:
-            if ctype.value not in type_counts:
+        if bom.metadata.completeness:
+            claim = bom.metadata.completeness
+            if claim.scan_failures:
+                report.is_complete = False
+                for failure in claim.scan_failures:
+                    report.issues.append(CompletenessIssue("collection", failure, "error"))
+            missing = REQUIRED_SCANNERS - claim.scanner_status.keys()
+            if missing:
+                report.is_complete = False
                 report.issues.append(
                     CompletenessIssue(
-                        surface=ctype.value,
-                        description=f"No {ctype.value} components found — likely incomplete scan.",
-                        severity="warning",
+                        "coverage",
+                        "Missing scanner coverage: " + ", ".join(sorted(missing)),
+                        "error",
                     )
                 )
+            if claim.surfaces_excluded:
                 report.is_complete = False
+                report.issues.append(
+                    CompletenessIssue(
+                        "coverage", "Excluded surfaces leave coverage incomplete.", "error"
+                    )
+                )
+            for scanner, state in claim.scanner_status.items():
+                if state != "complete":
+                    report.is_complete = False
+                    report.issues.append(
+                        CompletenessIssue(scanner, f"Scanner coverage is {state}.", "error")
+                    )
 
         for c in bom.components:
             if not c.hashes and c.component_type in (

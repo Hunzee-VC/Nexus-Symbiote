@@ -387,8 +387,8 @@ class TestCycloneDXGeneratorFull:
         gen = CycloneDXGenerator()
         result = gen.generate(_full_component_aibom())
         deps = result["dependencies"]
-        assert len(deps) == 2
-        rels = {d["properties"][0]["value"] for d in deps}
+        assert all(set(d) == {"ref", "dependsOn"} for d in deps)
+        rels = {json.loads(p["value"])["type"] for p in result["metadata"]["properties"]}
         assert "trained-on" in rels
         assert "invokes" in rels
 

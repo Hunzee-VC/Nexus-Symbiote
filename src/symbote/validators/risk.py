@@ -8,6 +8,10 @@ from typing import Any
 from symbote.core.aibom import AIBOM
 from symbote.core.enums import RiskSeverity
 
+# The complete built-in collection scope; do not infer completeness from a
+# caller-provided subset. Update alongside the CLI scanner registry.
+REQUIRED_SCANNERS = frozenset({"mcp", "model", "prompt", "rag", "registry"})
+
 SEVERITY_WEIGHTS: dict[RiskSeverity, float] = {
     RiskSeverity.CRITICAL: 10.0,
     RiskSeverity.HIGH: 7.0,
@@ -38,6 +42,7 @@ class RiskReport:
     severity_counts: dict[str, int] = field(default_factory=dict)
     total_components: int = 0
     components_with_risks: int = 0
+    coverage_status: str = "unknown"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -45,6 +50,7 @@ class RiskReport:
             "risk_level": self.risk_level,
             "total_components": self.total_components,
             "components_with_risks": self.components_with_risks,
+            "coverage_status": self.coverage_status,
             "severity_counts": self.severity_counts,
             "category_scores": {k: round(v, 2) for k, v in self.category_scores.items()},
             "findings": [
@@ -78,6 +84,21 @@ class RiskScorer:
     def score(self, bom: AIBOM) -> RiskReport:
         report = RiskReport()
         report.total_components = len(bom.components)
+        coverage = bom.metadata.completeness
+        if coverage is not None and (coverage.scan_failures or coverage.surfaces_excluded):
+            report.coverage_status = "partial"
+        elif coverage is not None:
+            # Legacy claims lack per-scanner status. They cannot establish that
+            # omitted or unselected surfaces were assessed.
+            statuses = getattr(coverage, "scanner_status", None)
+            if statuses and (
+                not REQUIRED_SCANNERS.issubset(statuses)
+                or any(state != "complete" for state in statuses.values())
+            ):
+                report.coverage_status = "partial"
+            elif statuses and coverage.surfaces_scanned and bom.components:
+                # Reported collection is not independent proof of completeness.
+                report.coverage_status = "reported"
         components_with_risks: set[str] = set()
         category_scores: dict[str, float] = {}
 
@@ -110,7 +131,12 @@ class RiskScorer:
         report.components_with_risks = len(components_with_risks)
         report.category_scores = category_scores
         report.overall_score = sum(f.score for f in report.findings)
-        report.risk_level = self._classify(report.overall_score)
+        if report.severity_counts.get("critical", 0):
+            report.risk_level = "critical"
+        elif not report.findings and report.coverage_status != "reported":
+            report.risk_level = "unknown"
+        else:
+            report.risk_level = self._classify(report.overall_score)
         report.findings.sort(key=lambda f: self.weights.get(f.severity, 0.0), reverse=True)
 
         return report
@@ -126,5 +152,9 @@ class RiskScorer:
 
     def passes_gate(self, bom: AIBOM) -> tuple[bool, RiskReport]:
         report = self.score(bom)
-        passed = report.overall_score < self.fail_threshold
+        passed = (
+            report.overall_score < self.fail_threshold
+            and not report.severity_counts.get("critical", 0)
+            and report.coverage_status == "reported"
+        )
         return passed, report

@@ -186,12 +186,37 @@ class AIBOMDiffer:
 
         old_hash = getattr(old, "definition_hash", None)
         new_hash = getattr(new, "definition_hash", None)
-        if old_hash and new_hash and old_hash != new_hash:
+        old_hash_version = getattr(old, "definition_hash_version", None)
+        new_hash_version = getattr(new, "definition_hash_version", None)
+        if (
+            old_hash
+            and new_hash
+            and (old_hash_version != "rfc8785-jcs-v1" or new_hash_version != "rfc8785-jcs-v1")
+        ):
+            modifications.append(
+                {
+                    "detail": "Tool fingerprint versions are unknown or incompatible; re-collect and re-approve.",
+                    "severity": "high",
+                }
+            )
+        elif old_hash and new_hash and old_hash != new_hash:
             modifications.append(
                 {
                     "detail": "Tool definition hash changed — possible rug-pull attack.",
                     "severity": "critical",
                 }
+            )
+
+        elif old_hash and not new_hash:
+            modifications.append(
+                {
+                    "detail": "Tool definition hash missing — assurance regressed; content is unknown.",
+                    "severity": "high",
+                }
+            )
+        elif not old_hash and new_hash:
+            modifications.append(
+                {"detail": "Tool definition hash became available.", "severity": "info"}
             )
 
         old_content = getattr(old, "content_hash", None)
@@ -237,8 +262,8 @@ class AIBOMDiffer:
 
         old_signing = getattr(old, "signing_status", None)
         new_signing = getattr(new, "signing_status", None)
-        if old_signing and new_signing and old_signing != new_signing:
-            sev = "high" if new_signing == "unsigned" else "info"
+        if old_signing != new_signing:
+            sev = "high" if old_signing in {"sigstore-signed", "pgp-signed"} else "info"
             modifications.append(
                 {
                     "detail": f"Signing status changed: {old_signing} → {new_signing}",

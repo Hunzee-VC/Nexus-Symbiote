@@ -227,7 +227,7 @@ class TestAIBOM:
         v1 = ToolComponent(bom_ref="tool:test", name="test-v1")
         v2 = ToolComponent(bom_ref="tool:test", name="test-v2")
         bom.add_component(v1)
-        bom.add_component(v2)
+        bom.replace_component(v2)
         assert len(bom.components) == 1
         assert bom.get_component("tool:test").name == "test-v2"
 
