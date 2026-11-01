@@ -1,0 +1,299 @@
+{
+  "$defs": {
+    "AuthorityClaim": {
+      "additionalProperties": false,
+      "description": "A scoped authority assertion for an agent deployment.\n\nAn unknown or not-applicable claim does not imply an empty permission set.",
+      "properties": {
+        "action": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Action"
+        },
+        "audience": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Audience"
+        },
+        "delegating_principal": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Delegating Principal"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/EvidenceRecord"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expires At"
+        },
+        "kind": {
+          "$ref": "#/$defs/AuthorityKind"
+        },
+        "observed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observed At"
+        },
+        "principal": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Principal"
+        },
+        "resource": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resource"
+        },
+        "state": {
+          "$ref": "#/$defs/ClaimState",
+          "default": "unknown"
+        },
+        "unknown_reason": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unknown Reason"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "AuthorityClaim",
+      "type": "object"
+    },
+    "AuthorityKind": {
+      "enum": [
+        "declared",
+        "effective",
+        "observed"
+      ],
+      "title": "AuthorityKind",
+      "type": "string"
+    },
+    "ClaimState": {
+      "enum": [
+        "declared",
+        "observed",
+        "verified",
+        "unknown",
+        "not-applicable"
+      ],
+      "title": "ClaimState",
+      "type": "string"
+    },
+    "EvidenceRecord": {
+      "additionalProperties": false,
+      "description": "A producer's evidence reference, not an independently verified result.",
+      "properties": {
+        "collected_at": {
+          "format": "date-time",
+          "title": "Collected At",
+          "type": "string"
+        },
+        "collector": {
+          "minLength": 1,
+          "title": "Collector",
+          "type": "string"
+        },
+        "source": {
+          "description": "Non-secret source identifier",
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        },
+        "subject_digest": {
+          "anyOf": [
+            {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subject Digest"
+        },
+        "verification_policy": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verification Policy"
+        },
+        "verification_status": {
+          "$ref": "#/$defs/VerificationStatus",
+          "default": "unverified"
+        },
+        "verified_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified At"
+        },
+        "verifier": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verifier"
+        }
+      },
+      "required": [
+        "source",
+        "collector",
+        "collected_at"
+      ],
+      "title": "EvidenceRecord",
+      "type": "object"
+    },
+    "VerificationStatus": {
+      "enum": [
+        "unverified",
+        "verified",
+        "invalid",
+        "unsupported"
+      ],
+      "title": "VerificationStatus",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Scope a set of permission assertions to one agent deployment.",
+  "properties": {
+    "authority": {
+      "items": {
+        "$ref": "#/$defs/AuthorityClaim"
+      },
+      "title": "Authority",
+      "type": "array"
+    },
+    "deployment_id": {
+      "minLength": 1,
+      "title": "Deployment Id",
+      "type": "string"
+    },
+    "environment": {
+      "minLength": 1,
+      "title": "Environment",
+      "type": "string"
+    },
+    "tenant": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Tenant"
+    },
+    "workload_identity": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Workload Identity"
+    }
+  },
+  "required": [
+    "deployment_id",
+    "environment"
+  ],
+  "title": "DeploymentProfile",
+  "type": "object"
+}

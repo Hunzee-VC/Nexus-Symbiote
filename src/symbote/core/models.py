@@ -24,6 +24,7 @@ from symbote.core.enums import (
     SideEffectProfile,
     TrustTier,
 )
+from symbote.core.evidence import DeploymentProfile
 
 
 class ComponentBase(BaseModel):
@@ -102,6 +103,10 @@ class AgentComponent(ComponentBase):
     )
     capabilities: CapabilityDeclaration | None = None
     authorizations: list[AuthorizationRecord] = Field(default_factory=list)
+    deployment_profile: DeploymentProfile | None = Field(
+        default=None,
+        description="Optional deployment-scoped authority claims and their evidence provenance",
+    )
     risks: list[RiskAssessment] = Field(default_factory=list)
 
 
