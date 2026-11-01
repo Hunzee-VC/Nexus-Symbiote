@@ -55,5 +55,11 @@ so a lone CycloneDX file round-trips losslessly without the companion.
   k8s-aibom `AIBOM` custom resources are accepted directly (`status.bomDocument` inline or referenced).
 - SPDX 3.0.1 JSON-LD: via `JSONLDDeserializer`; Symbiote extensions decoded by IRI; `CdxPropertiesExtension`
   entries → properties → model.
+- Nexus-ShadowScan JSON reports: `symbiote.imp.shadowscan` maps selected findings onto observed
+  entities (MCP findings → ToolServer stubs with unknown identity facts, finding models → unpinned
+  hosted Models, the autonomy interval's floor → an observed `automationLevel` claim with the
+  ceiling preserved, scanned surfaces → coverage fragments); the report is pinned by a
+  `scan-report` evidence digest. The reverse export (`symbiote.export.shadowscan`) emits
+  schema-version-2 Agent Capability Cards and `agents:` inventories.
 - Imported documents are tagged `assurance=declared` unless they carry verifiable evidence
   (`agentbom-profile.md §5` for the k8s-aibom confidence mapping).

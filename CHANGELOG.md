@@ -31,3 +31,10 @@ schema, predicate types) is versioned independently of the tool; see `spec/versi
   the `k8s-aibom` importer (CR unwrapping via status.bomDocument, §5 confidence mapping, no
   signature laundering), and the drift-mode fixture MCP server
   (description|schema|annotations|order|pagination|unicode).
+- Nexus-ShadowScan bridge: `export/shadowscan.py` emits schema-version-2 Agent
+  Capability Cards (authorized_tools[].sha256 = tooldef/v1 digests, trust-zone
+  mapping, discovery resources derived symmetrically with ShadowScan's AgentBOM
+  inventory loader) and `agents:` inventories; `imp/shadowscan.py` imports
+  ShadowScan JSON reports as observed evidence (autonomy interval floor →
+  ISO-ladder claim with the ceiling preserved, unmapped surfaces reported, the
+  report pinned by a scan-report evidence digest).
