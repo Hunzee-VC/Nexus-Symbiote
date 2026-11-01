@@ -7,8 +7,9 @@ from pathlib import Path
 
 from symbiote.core.aibom import AIBOM
 from symbiote.core.enums import AssuranceLevel, ComponentType
+from symbiote.scanner_catalog import BUILTIN_SCANNER_NAMES
 
-REQUIRED_SCANNERS = frozenset({"mcp", "model", "prompt", "rag", "registry"})
+REQUIRED_SCANNERS = BUILTIN_SCANNER_NAMES
 
 EXPECTED_SURFACES = {
     "mcp-config": "MCP server configuration (.mcp.json etc.)",

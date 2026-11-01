@@ -177,7 +177,9 @@ def test_per_scanner_coverage_requires_every_state_to_be_complete() -> None:
     object.__setattr__(
         bom.metadata.completeness,
         "scanner_status",
-        dict.fromkeys(("mcp", "model", "prompt", "rag", "registry"), "complete"),
+        dict.fromkeys(
+            ("mcp", "model", "prompt", "rag", "registry", "a2a", "ide_agents"), "complete"
+        ),
     )
     passed, report = RiskScorer().passes_gate(bom)
     assert passed
