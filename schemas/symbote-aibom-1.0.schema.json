@@ -247,11 +247,309 @@
         "guardrail_refs": { "type": "array", "items": { "type": "string" } },
         "sub_agent_refs": { "type": "array", "items": { "type": "string" } },
         "capabilities": { "$ref": "#/$defs/CapabilityDeclaration" },
+        "deployment_profile": { "$ref": "#/$defs/DeploymentProfile" },
         "authorizations": {
           "type": "array",
           "items": { "$ref": "#/$defs/AuthorizationRecord" }
         }
       }
+    },
+    "AuthorityClaim": {
+      "additionalProperties": false,
+      "description": "A scoped authority assertion for an agent deployment.\n\nAn unknown or not-applicable claim does not imply an empty permission set.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/AuthorityKind"
+        },
+        "state": {
+          "$ref": "#/$defs/ClaimState",
+          "default": "unknown"
+        },
+        "principal": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Principal"
+        },
+        "action": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Action"
+        },
+        "resource": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resource"
+        },
+        "delegating_principal": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Delegating Principal"
+        },
+        "audience": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Audience"
+        },
+        "observed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observed At"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expires At"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/EvidenceRecord"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "unknown_reason": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unknown Reason"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "AuthorityClaim",
+      "type": "object"
+    },
+    "AuthorityKind": {
+      "enum": [
+        "declared",
+        "effective",
+        "observed"
+      ],
+      "title": "AuthorityKind",
+      "type": "string"
+    },
+    "ClaimState": {
+      "enum": [
+        "declared",
+        "observed",
+        "verified",
+        "unknown",
+        "not-applicable"
+      ],
+      "title": "ClaimState",
+      "type": "string"
+    },
+    "EvidenceRecord": {
+      "additionalProperties": false,
+      "description": "A producer's evidence reference, not an independently verified result.",
+      "properties": {
+        "source": {
+          "description": "Non-secret source identifier",
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        },
+        "collector": {
+          "minLength": 1,
+          "title": "Collector",
+          "type": "string"
+        },
+        "collected_at": {
+          "format": "date-time",
+          "title": "Collected At",
+          "type": "string"
+        },
+        "subject_digest": {
+          "anyOf": [
+            {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subject Digest"
+        },
+        "verification_status": {
+          "$ref": "#/$defs/VerificationStatus",
+          "default": "unverified"
+        },
+        "verifier": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verifier"
+        },
+        "verification_policy": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verification Policy"
+        },
+        "verified_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified At"
+        }
+      },
+      "required": [
+        "source",
+        "collector",
+        "collected_at"
+      ],
+      "title": "EvidenceRecord",
+      "type": "object"
+    },
+    "VerificationStatus": {
+      "enum": [
+        "unverified",
+        "verified",
+        "invalid",
+        "unsupported"
+      ],
+      "title": "VerificationStatus",
+      "type": "string"
+    },
+    "DeploymentProfile": {
+      "additionalProperties": false,
+      "description": "Scope a set of permission assertions to one agent deployment.",
+      "properties": {
+        "deployment_id": {
+          "minLength": 1,
+          "title": "Deployment Id",
+          "type": "string"
+        },
+        "environment": {
+          "minLength": 1,
+          "title": "Environment",
+          "type": "string"
+        },
+        "tenant": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tenant"
+        },
+        "workload_identity": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Workload Identity"
+        },
+        "authority": {
+          "items": {
+            "$ref": "#/$defs/AuthorityClaim"
+          },
+          "title": "Authority",
+          "type": "array"
+        }
+      },
+      "required": [
+        "deployment_id",
+        "environment"
+      ],
+      "title": "DeploymentProfile",
+      "type": "object"
     },
     "AuthorizationRecord": {
       "type": "object",
