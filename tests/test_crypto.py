@@ -118,4 +118,6 @@ class TestVerifySigstoreBundle:
         artifact.write_bytes(b"data")
         bundle.write_text("{}")
         result = verify_sigstore_bundle(artifact, bundle)
-        assert result.verified is False or result.verified is True
+        assert result.verified is False
+        assert "expected identity and issuer" in result.error
+        assert not verify_sigstore_bundle(artifact, bundle, "alice", "issuer").verified

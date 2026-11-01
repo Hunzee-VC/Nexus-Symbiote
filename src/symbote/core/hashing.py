@@ -7,79 +7,16 @@ hashing of tool definitions, prompt templates, and other mutable artifacts.
 from __future__ import annotations
 
 import hashlib
-import math
 import re
 from pathlib import Path
 from typing import Any
 
-
-def _serialize_value(value: Any) -> str:
-    if value is None:
-        return "null"
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, int):
-        return str(value)
-    if isinstance(value, float):
-        if math.isnan(value) or math.isinf(value):
-            return "null"
-        return _serialize_float(value)
-    if isinstance(value, str):
-        return _serialize_string(value)
-    if isinstance(value, list):
-        items = ",".join(_serialize_value(item) for item in value)
-        return f"[{items}]"
-    if isinstance(value, dict):
-        return _serialize_object(value)
-    return _serialize_string(str(value))
-
-
-def _serialize_float(value: float) -> str:
-    if value == 0.0:
-        return "0"
-    if value == int(value) and abs(value) < 2**53:
-        return str(int(value))
-    return repr(value)
-
-
-def _serialize_string(value: str) -> str:
-    result = ['"']
-    for ch in value:
-        cp = ord(ch)
-        if ch == '"':
-            result.append('\\"')
-        elif ch == "\\":
-            result.append("\\\\")
-        elif cp < 0x20:
-            if ch == "\b":
-                result.append("\\b")
-            elif ch == "\f":
-                result.append("\\f")
-            elif ch == "\n":
-                result.append("\\n")
-            elif ch == "\r":
-                result.append("\\r")
-            elif ch == "\t":
-                result.append("\\t")
-            else:
-                result.append(f"\\u{cp:04x}")
-        else:
-            result.append(ch)
-    result.append('"')
-    return "".join(result)
-
-
-def _serialize_object(obj: dict[str, Any]) -> str:
-    sorted_keys = sorted(obj.keys(), key=lambda k: [ord(c) for c in k])
-    pairs = []
-    for key in sorted_keys:
-        pairs.append(f"{_serialize_string(key)}:{_serialize_value(obj[key])}")
-    return "{" + ",".join(pairs) + "}"
+import rfc8785
 
 
 def canonical_json(data: Any) -> str:
-    """Produce RFC 8785 JCS canonical form of a JSON value."""
-    return _serialize_value(data)
+    """Serialize I-JSON to RFC 8785 bytes, rejecting unsupported values."""
+    return rfc8785.dumps(data).decode("utf-8")
 
 
 def hash_canonical(data: dict[str, Any], algorithm: str = "sha256") -> str:
