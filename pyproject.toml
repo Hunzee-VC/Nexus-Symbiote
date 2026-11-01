@@ -49,7 +49,7 @@ dependencies = [
 
 [project.optional-dependencies]
 cyclonedx = [
-    "cyclonedx-python-lib>=11.0,<12",
+    "cyclonedx-python-lib[json-validation]>=11.12,<12",
 ]
 sigstore = [
     "sigstore>=3.6,<4",
