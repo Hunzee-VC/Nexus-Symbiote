@@ -6,9 +6,9 @@ import re
 from pathlib import Path
 
 from symbote.core.enums import RiskSeverity, TrustTier
-from symbote.core.hashing import hash_file
+from symbote.core.hashing import hash_bytes
 from symbote.core.models import PromptComponent, RiskAssessment, SkillPackageComponent
-from symbote.scanners.base import Scanner, ScanResult
+from symbote.scanners.base import Scanner, ScanResult, read_regular_text
 
 INVISIBLE_CHARS: dict[str, str] = {
     "​": "ZERO WIDTH SPACE",
@@ -124,21 +124,26 @@ class PromptScanner(Scanner):
 
         for rel_path, prompt_type in INSTRUCTION_FILES.items():
             full_path = project_root / rel_path
-            if full_path.exists() and full_path.is_file():
+            if full_path.is_symlink() or full_path.exists():
                 result.surfaces_scanned.append(str(full_path))
-                comp = self._scan_instruction_file(full_path, rel_path, prompt_type)
-                result.components.append(comp)
+                try:
+                    comp = self._scan_instruction_file(full_path, rel_path, prompt_type)
+                    result.components.append(comp)
+                except (OSError, UnicodeError):
+                    result.scan_failures.append(f"Failed to read {full_path}")
 
         for skill_dir in SKILL_DIRECTORIES:
             full_dir = project_root / skill_dir
-            if full_dir.is_dir():
+            if full_dir.is_symlink():
+                result.scan_failures.append(f"Refusing symlinked skill directory {full_dir}")
+            elif full_dir.is_dir():
                 result.surfaces_scanned.append(str(full_dir))
-                skills = self._scan_skill_directory(full_dir)
+                skills = self._scan_skill_directory(full_dir, result)
                 result.components.extend(skills)
             else:
                 result.surfaces_excluded.append(f"skills ({skill_dir} not found)")
 
-        if not result.components:
+        if not result.components and not result.scan_failures:
             result.surfaces_excluded.append("prompts (no instruction files found)")
 
         return result
@@ -146,8 +151,10 @@ class PromptScanner(Scanner):
     def _scan_instruction_file(
         self, path: Path, rel_path: str, prompt_type: str
     ) -> PromptComponent:
-        content_hash = hash_file(path)
-        file_size = path.stat().st_size
+        content = read_regular_text(path)
+        encoded = content.encode("utf-8")
+        content_hash = hash_bytes(encoded)
+        file_size = len(encoded)
         risks: list[RiskAssessment] = []
 
         if file_size > 50_000:
@@ -160,12 +167,7 @@ class PromptScanner(Scanner):
                 )
             )
 
-        try:
-            content = path.read_text(encoding="utf-8", errors="replace")
-            trojan_risks = detect_invisible_characters(content, rel_path)
-            risks.extend(trojan_risks)
-        except OSError:
-            pass
+        risks.extend(detect_invisible_characters(content, rel_path))
 
         return PromptComponent(
             bom_ref=f"prompt:{rel_path}",
@@ -177,16 +179,25 @@ class PromptScanner(Scanner):
             risks=risks,
         )
 
-    def _scan_skill_directory(self, skill_dir: Path) -> list[SkillPackageComponent]:
+    def _scan_skill_directory(
+        self, skill_dir: Path, result: ScanResult
+    ) -> list[SkillPackageComponent]:
         skills: list[SkillPackageComponent] = []
         for path in sorted(skill_dir.rglob("*")):
-            if not path.is_file() or path.name.startswith("."):
+            if path.name.startswith("."):
                 continue
             if path.suffix.lower() not in (".md", ".txt", ".yaml", ".yml", ".json"):
                 continue
+            if not path.is_file() and not path.is_symlink():
+                result.scan_failures.append(f"Not a regular skill file: {path}")
+                continue
 
             rel_path = str(path.relative_to(skill_dir.parent.parent))
-            content_hash = hash_file(path)
+            try:
+                content_hash = hash_bytes(read_regular_text(path).encode("utf-8"))
+            except (OSError, UnicodeError):
+                result.scan_failures.append(f"Failed to read {path}")
+                continue
 
             skills.append(
                 SkillPackageComponent(
