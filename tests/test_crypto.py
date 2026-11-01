@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 
-from symbiote.utils.crypto import (
+from nexus_symbiote.utils.crypto import (
     compute_file_hash,
     verify_file_hash,
     verify_hash_consistency,

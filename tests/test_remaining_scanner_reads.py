@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from symbiote.scanners.base import hash_regular_file
-from symbiote.scanners.model import ModelScanner
-from symbiote.scanners.registry import RegistryScanner
+from nexus_symbiote.scanners.base import hash_regular_file
+from nexus_symbiote.scanners.model import ModelScanner
+from nexus_symbiote.scanners.registry import RegistryScanner
 
 
 def test_model_symlink_is_not_hashed_and_failure_is_reported(tmp_path: Path) -> None:
