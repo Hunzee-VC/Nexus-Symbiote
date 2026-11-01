@@ -201,6 +201,8 @@ class CompletenessValidator:
                 "prompt_refs",
                 "guardrail_refs",
                 "sub_agent_refs",
+                "mcp_server_refs",
+                "server_refs",
             ):
                 refs = getattr(c, ref_field, None)
                 if refs:
