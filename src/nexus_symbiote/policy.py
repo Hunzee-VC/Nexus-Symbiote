@@ -1,53 +1,83 @@
-"""Policy configuration — .nexus-symbiote.yaml loading and defaults."""
+"""Strict, fail-closed policy loading; absence alone selects defaults."""
 
 from __future__ import annotations
 
-import json
+import os
+import stat
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
+
+ScannerName = Literal[
+    "mcp", "model", "prompt", "rag", "registry", "shadowscan", "a2a", "ide_agents"
+]
+OutputFormat = Literal["json", "cyclonedx", "spdx", "sarif"]
 
 DEFAULT_SCANNERS = ("shadowscan", "mcp", "model", "prompt", "rag", "registry", "a2a", "ide_agents")
 
 
-class ScanPolicy(BaseModel):
-    model_config = {"extra": "forbid"}
+class PolicyError(ValueError):
+    """An existing policy cannot be interpreted without weakening its meaning."""
 
-    scanners: list[str] = Field(
-        default_factory=lambda: list(DEFAULT_SCANNERS),
-    )
+
+class PolicySection(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
+
+
+def _default_scanners() -> list[ScannerName]:
+    return ["mcp", "model", "prompt", "rag", "registry", "shadowscan", "a2a", "ide_agents"]
+
+
+class ScanPolicy(PolicySection):
+    scanners: list[ScannerName] = Field(default_factory=_default_scanners, min_length=1)
     exclude_paths: list[str] = Field(
-        default=["node_modules", ".git", "__pycache__", ".venv"],
+        default_factory=lambda: ["node_modules", ".git", "__pycache__", ".venv"]
     )
+    failure_mode: Literal["error", "report-only"] = "error"
+
+    @model_validator(mode="after")
+    def valid_paths(self) -> ScanPolicy:
+        if len(set(self.scanners)) != len(self.scanners):
+            raise ValueError("scanners must be unique")
+        if any(
+            not p.strip() or Path(p).is_absolute() or ".." in Path(p).parts
+            for p in self.exclude_paths
+        ):
+            raise ValueError("exclude_paths must be nonempty paths beneath the scan root")
+        return self
 
 
-class RiskPolicy(BaseModel):
-    model_config = {"extra": "forbid"}
-
-    fail_threshold: float = 50.0
-    warn_threshold: float = 25.0
+class RiskPolicy(PolicySection):
+    fail_threshold: float = Field(default=50.0, gt=0)
+    warn_threshold: float = Field(default=25.0, ge=0)
     ignore_categories: list[str] = Field(default_factory=list)
+    fail_on_severity: Literal["critical", "high", "medium", "low", "info", "none"] = "critical"
+
+    @model_validator(mode="after")
+    def valid_thresholds(self) -> RiskPolicy:
+        if self.warn_threshold > self.fail_threshold:
+            raise ValueError("warn_threshold cannot exceed fail_threshold")
+        if any(not c.strip() for c in self.ignore_categories):
+            raise ValueError("ignore_categories must contain nonempty exact category names")
+        return self
 
 
-class ValidatePolicy(BaseModel):
-    model_config = {"extra": "forbid"}
-
-    require_completeness: bool = True
-    require_integrity: bool = True
-    minimum_assurance_level: str = "declared"
+class ValidatePolicy(PolicySection):
+    require_completeness: StrictBool = True
+    require_integrity: StrictBool = True
+    minimum_assurance_level: Literal["declared", "observed", "verified"] = "declared"
 
 
-class OutputPolicy(BaseModel):
-    model_config = {"extra": "forbid"}
-
-    default_format: str = "json"
+class OutputPolicy(PolicySection):
+    default_format: OutputFormat = "json"
 
 
-class Policy(BaseModel):
-    model_config = {"populate_by_name": True, "extra": "forbid"}
-
-    version: str = "1.0"
+class Policy(PolicySection):
+    model_config = ConfigDict(
+        extra="forbid", populate_by_name=True, strict=True, allow_inf_nan=False
+    )
+    version: Literal["1.0"] = "1.0"
     scan: ScanPolicy = Field(default_factory=ScanPolicy)
     risk: RiskPolicy = Field(default_factory=RiskPolicy)
     validation: ValidatePolicy = Field(default_factory=ValidatePolicy, alias="validate")
@@ -60,56 +90,88 @@ def default_policy() -> Policy:
 
 def load_policy(project_root: Path) -> Policy | None:
     current = project_root.resolve()
-    for _ in range(20):
-        candidate = current / ".nexus-symbiote.yaml"
-        if candidate.exists():
-            return _parse_policy(candidate)
-        candidate = current / ".nexus-symbiote.yml"
-        if candidate.exists():
-            return _parse_policy(candidate)
-        parent = current.parent
-        if parent == current:
-            break
-        current = parent
-    return None
+    if current.is_file():
+        current = current.parent
+    while True:
+        for name in (".nexus-symbiote.yaml", ".nexus-symbiote.yml"):
+            candidate = current / name
+            if candidate.is_symlink():
+                raise PolicyError(f"policy must not be a symlink: {candidate}")
+            if candidate.exists():
+                return _parse_policy(candidate)
+        if current.parent == current:
+            return None
+        current = current.parent
 
 
-def _parse_policy(path: Path) -> Policy:
-    """Parse a configured policy strictly; never fall back to defaults on failure."""
+def parse_yaml_mapping(text: str) -> dict[str, Any]:
     try:
         import yaml
     except ImportError as exc:
-        raise ValueError("Policy file requires PyYAML; install nexus-symbiote[yaml]") from exc
+        raise PolicyError("PyYAML is required; install the declared dependencies") from exc
+
+    class UniqueLoader(yaml.SafeLoader):
+        pass
+
+    def mapping(loader: Any, node: Any) -> dict[str, Any]:
+        data: dict[str, Any] = {}
+        for key_node, value_node in node.value:
+            key = loader.construct_object(key_node)
+            if not isinstance(key, str) or key in data:
+                raise PolicyError("YAML mapping keys must be unique strings")
+            data[key] = loader.construct_object(value_node)
+        return data
+
+    UniqueLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, mapping)
     try:
-        from nexus_symbiote.scanners.base import read_regular_text
-
-        data: Any = yaml.safe_load(read_regular_text(path))
+        data = yaml.load(text, Loader=UniqueLoader)  # noqa: S506 - subclass of SafeLoader with unique-key enforcement
         if not isinstance(data, dict):
-            raise ValueError("policy must be a mapping")
-        return Policy.model_validate(data)
-    except Exception as exc:
-        raise ValueError(f"Invalid policy {path}: {exc}") from exc
+            raise PolicyError("configuration must be a nonempty YAML mapping")
+        return data
+    except (yaml.YAMLError, RecursionError) as exc:
+        raise PolicyError("invalid YAML document") from exc
 
 
-DEFAULT_POLICY_YAML = f"""\
-# Nexus SymBiote policy configuration
-# https://github.com/aisecnomad/nexus-symbiote
+def _parse_policy(path: Path) -> Policy:
+    from pydantic import ValidationError
+
+    try:
+        fd = os.open(
+            path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        )
+        with os.fdopen(fd, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_size > 1024 * 1024:
+                raise PolicyError("policy must be a regular file no larger than 1 MiB")
+            raw = stream.read(1024 * 1024 + 1)
+            if len(raw) > 1024 * 1024:
+                raise PolicyError("policy exceeds 1 MiB")
+        return Policy.model_validate(parse_yaml_mapping(raw.decode("utf-8")))
+    except ValidationError as exc:
+        locations = [".".join(map(str, e["loc"])) for e in exc.errors()]
+        raise PolicyError(
+            f"invalid policy {path}: invalid or unsupported settings: {', '.join(locations)}"
+        ) from exc
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise PolicyError(f"invalid policy {path}: {exc}") from exc
+
+
+DEFAULT_POLICY_YAML = """\
+# Nexus SymBiote policy; malformed or unsupported settings fail closed.
 version: "1.0"
-
 scan:
-  scanners: {json.dumps(DEFAULT_SCANNERS)}
+  scanners: ["mcp", "model", "prompt", "rag", "registry", "shadowscan", "a2a", "ide_agents"]
   exclude_paths: ["node_modules", ".git", "__pycache__", ".venv"]
-
+  failure_mode: "error"
 risk:
   fail_threshold: 50.0
   warn_threshold: 25.0
+  fail_on_severity: "critical"
   ignore_categories: []
-
 validate:
   require_completeness: true
   require_integrity: true
   minimum_assurance_level: "declared"
-
 output:
   default_format: "json"
 """

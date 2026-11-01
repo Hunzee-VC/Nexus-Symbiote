@@ -131,7 +131,7 @@ class TestSPDXGenerator:
         graph = result["@graph"]
         doc = graph[0]
         assert doc["type"] == "SpdxDocument"
-        assert doc["specVersion"] == "3.0.1"
+        assert next(e for e in graph if e["type"] == "CreationInfo")["specVersion"] == "3.0.1"
 
     def test_element_types(self):
         gen = SPDXGenerator()
@@ -144,7 +144,7 @@ class TestSPDXGenerator:
     def test_spdx_ids_unique(self):
         gen = SPDXGenerator()
         result = gen.generate(_sample_aibom())
-        ids = [e["spdxId"] for e in result["@graph"]]
+        ids = [e.get("spdxId", e.get("@id")) for e in result["@graph"]]
         assert len(ids) == len(set(ids))
 
     def test_extensions_present(self):
@@ -154,15 +154,17 @@ class TestSPDXGenerator:
         for elem in elements:
             if "extension" in elem:
                 ext = elem["extension"][0]
-                assert ext["specVersion"] == "nexus-symbiote-1.0.0"
-                assert "nexus-symbiote:componentType" in ext["properties"]
+                assert ext["type"] == "extension_CdxPropertiesExtension"
+                assert "nexus-symbiote:component" in {
+                    p["extension_cdxPropName"] for p in ext["extension_cdxProperty"]
+                }
 
     def test_relationship_types(self):
         gen = SPDXGenerator()
         result = gen.generate(_sample_aibom())
         rels = [e for e in result["@graph"] if e.get("type") == "Relationship"]
         assert len(rels) == 1
-        assert rels[0]["relationshipType"] == "DEPENDS_ON"
+        assert rels[0]["relationshipType"] == "usesTool"
 
     def test_generate_json_valid(self):
         gen = SPDXGenerator()
@@ -195,7 +197,7 @@ def _full_component_aibom() -> AIBOM:
             version="4.0",
             supplier="OpenAI",
             description="Large language model",
-            hashes={"sha256": "sha256:abc"},
+            hashes={"sha256": "sha256:" + "ab" * 32},
         )
     )
     bom.add_component(
@@ -387,10 +389,10 @@ class TestCycloneDXGeneratorFull:
         gen = CycloneDXGenerator()
         result = gen.generate(_full_component_aibom())
         deps = result["dependencies"]
-        assert all(set(d) == {"ref", "dependsOn"} for d in deps)
-        rels = {json.loads(p["value"])["type"] for p in result["metadata"]["properties"]}
-        assert "trained-on" in rels
-        assert "invokes" in rels
+        assert len(deps) == 1
+        assert set(deps[0]["dependsOn"]) == {"model:gpt-4o", "tool:read_file"}
+        recovered = CycloneDXGenerator.recover(result)
+        assert {d.relationship for d in recovered.dependencies} == {"trained-on", "invokes"}
 
     def test_authors_in_metadata(self):
         bom = _full_component_aibom()
@@ -409,8 +411,8 @@ class TestSPDXGeneratorFull:
         graph = result["@graph"]
         types = {e.get("name"): e["type"] for e in graph if "name" in e}
         assert types["my-agent"] == "ai_AIPackage"
-        assert types["conversation-store"] == "dataset_Dataset"
-        assert types["docs-index"] == "dataset_Dataset"
+        assert types["conversation-store"] == "dataset_DatasetPackage"
+        assert types["docs-index"] == "dataset_DatasetPackage"
         assert types["content-filter"] == "software_Package"
 
     def test_trained_on_relationship(self):
@@ -418,23 +420,27 @@ class TestSPDXGeneratorFull:
         result = gen.generate(_full_component_aibom())
         rels = [e for e in result["@graph"] if e.get("type") == "Relationship"]
         rel_types = {r["relationshipType"] for r in rels}
-        assert "TRAINED_ON" in rel_types
-        assert "DEPENDS_ON" in rel_types
+        assert "trainedOn" in rel_types
+        assert "usesTool" in rel_types
 
     def test_model_extensions(self):
         gen = SPDXGenerator()
         result = gen.generate(_full_component_aibom())
         model = next(e for e in result["@graph"] if e.get("name") == "gpt-4o")
         ext = model["extension"][0]
-        assert ext["properties"]["nexus-symbiote:serializationFormat"] == "safetensors"
-        assert ext["properties"]["nexus-symbiote:signingStatus"] == "sigstore-signed"
+        component = json.loads(ext["extension_cdxProperty"][0]["extension_cdxPropValue"])
+        assert component["serialization_format"] == "safetensors"
+        assert component["signing_status"] == "sigstore-signed"
 
     def test_supplier_mapped(self):
         gen = SPDXGenerator()
         result = gen.generate(_full_component_aibom())
         model = next(e for e in result["@graph"] if e.get("name") == "gpt-4o")
         assert "suppliedBy" in model
-        assert "OpenAI" in model["suppliedBy"]
+        assert (
+            next(e for e in result["@graph"] if e.get("spdxId") == model["suppliedBy"])["name"]
+            == "OpenAI"
+        )
 
     def test_hashes_mapped(self):
         gen = SPDXGenerator()

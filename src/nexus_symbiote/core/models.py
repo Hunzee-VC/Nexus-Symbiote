@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SerializerFunctionWrapHandler, model_serializer
 
 from nexus_symbiote.core.enums import (
     AssuranceLevel,
@@ -27,7 +27,24 @@ from nexus_symbiote.core.enums import (
 from nexus_symbiote.core.evidence import DeploymentProfile
 
 
-class ComponentBase(BaseModel):
+class InventoryModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class ClaimEvidence(InventoryModel):
+    """Evidence about one named claim; observation never establishes runtime permission."""
+
+    assurance: AssuranceLevel = AssuranceLevel.DECLARED
+    method: str
+    scope: str
+    collector: str | None = None
+    locator: str | None = None
+    observed_at: datetime | None = None
+    evidence_refs: list[str] = Field(default_factory=list)
+    unknown_reason: str | None = None
+
+
+class ComponentBase(InventoryModel):
     """Base for every AgentBOM component."""
 
     model_config = ConfigDict(extra="forbid")
@@ -45,9 +62,10 @@ class ComponentBase(BaseModel):
         default=None, description="Filesystem path or URL where this was discovered"
     )
     properties: dict[str, Any] = Field(default_factory=dict, description="Extension properties")
+    claims: dict[str, ClaimEvidence] = Field(default_factory=dict)
 
 
-class CapabilityDeclaration(BaseModel):
+class CapabilityDeclaration(InventoryModel):
     """What a component is permitted to do."""
 
     capabilities: list[CapabilityClass] = Field(default_factory=list)
@@ -63,7 +81,7 @@ class CapabilityDeclaration(BaseModel):
     )
 
 
-class AuthorizationRecord(BaseModel):
+class AuthorizationRecord(InventoryModel):
     """Who authorized what, under which policy."""
 
     principal: str
@@ -76,7 +94,7 @@ class AuthorizationRecord(BaseModel):
     policy_reference: str | None = None
 
 
-class RiskAssessment(BaseModel):
+class RiskAssessment(InventoryModel):
     """Per-component supply chain risk assessment."""
 
     severity: RiskSeverity
@@ -90,7 +108,13 @@ class AgentComponent(ComponentBase):
     """An autonomous AI agent deployment."""
 
     component_type: Literal[ComponentType.AGENT] = ComponentType.AGENT
-    autonomy_level: AutonomyLevel = AutonomyLevel.L2_AGENT
+    autonomy_level: AutonomyLevel | None = AutonomyLevel.L2_AGENT
+    deployment_status: Literal["unknown", "declared", "observed"] = "unknown"
+    deployment_id: str | None = None
+    workload_identity: str | None = None
+    tenant: str | None = None
+    data_refs: list[str] = Field(default_factory=list)
+    skill_refs: list[str] = Field(default_factory=list)
     framework: str | None = Field(
         default=None, description="Agent framework (LangGraph, CrewAI, etc.)"
     )
@@ -109,11 +133,20 @@ class AgentComponent(ComponentBase):
     )
     capabilities: CapabilityDeclaration | None = None
     authorizations: list[AuthorizationRecord] = Field(default_factory=list)
+    risks: list[RiskAssessment] = Field(default_factory=list)
+
+    @model_serializer(mode="wrap")
+    def preserve_unknown_autonomy(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        data: dict[str, Any] = handler(self)
+        # The legacy constructor default is L2; explicit unknown must survive exclude_none exports.
+        if self.autonomy_level is None:
+            data["autonomy_level"] = None
+        return data
+
     deployment_profile: DeploymentProfile | None = Field(
         default=None,
         description="Optional deployment-scoped authority claims and their evidence provenance",
     )
-    risks: list[RiskAssessment] = Field(default_factory=list)
 
 
 class MCPServerComponent(ComponentBase):
@@ -150,16 +183,17 @@ class ToolComponent(ComponentBase):
         default=None,
         description="JCS canonical hash of (name, description, inputSchema, annotations)",
     )
-    definition_hash_version: str | None = Field(
-        default=None,
-        description="Canonicalization protocol, or unknown for legacy fingerprints",
-    )
     capabilities: CapabilityDeclaration | None = None
     annotations: dict[str, Any] = Field(
         default_factory=dict,
         description="MCP tool annotations (readOnlyHint, destructiveHint, etc.)",
     )
     risks: list[RiskAssessment] = Field(default_factory=list)
+
+    definition_hash_version: str | None = Field(
+        default=None,
+        description="Canonicalization protocol, or unknown for legacy fingerprints",
+    )
 
 
 class ModelComponent(ComponentBase):
@@ -399,19 +433,24 @@ class VerifiedExtensionComponent(ComponentBase):
     risks: list[RiskAssessment] = Field(default_factory=list)
 
 
-class CompletenessClaim(BaseModel):
+class CompletenessClaim(InventoryModel):
     """What was actually scanned and what was excluded."""
 
     scope: str = Field(description="What this completeness claim covers (e.g. 'full-agent')")
     surfaces_scanned: list[str] = Field(default_factory=list)
     surfaces_excluded: list[str] = Field(default_factory=list)
     scan_failures: list[str] = Field(default_factory=list)
-    scanner_status: dict[str, str] = Field(default_factory=dict)
     timestamp: datetime | None = None
     assurance_level: AssuranceLevel = AssuranceLevel.DECLARED
+    collectors_requested: list[str] = Field(default_factory=list)
+    collectors_completed: list[str] = Field(default_factory=list)
+    unobserved_surfaces: list[str] = Field(default_factory=list)
+    exclusions: list[str] = Field(default_factory=list)
+
+    scanner_status: dict[str, str] = Field(default_factory=dict)
 
 
-class AIBOMMetadata(BaseModel):
+class AIBOMMetadata(InventoryModel):
     """Header metadata for an AgentBOM document."""
 
     spec_version: str = "1.0.0"
@@ -429,7 +468,6 @@ AnyComponent = Annotated[
     (
         AgentComponent
         | MCPServerComponent
-        | MCPClientComponent
         | ToolComponent
         | ModelComponent
         | PromptComponent
@@ -439,6 +477,7 @@ AnyComponent = Annotated[
         | DataSourceComponent
         | RegistryEntryComponent
         | SkillPackageComponent
+        | MCPClientComponent
         | A2AClientComponent
         | A2AServerComponent
         | IDEAgentComponent

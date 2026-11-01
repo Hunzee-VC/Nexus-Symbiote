@@ -18,7 +18,9 @@ def test_model_symlink_is_not_hashed_and_failure_is_reported(tmp_path: Path) -> 
     (project / "model.safetensors").symlink_to(external)
     result = ModelScanner().scan(project)
     assert result.scan_failures
-    assert result.components and not result.components[0].hashes
+    # A refused symlink is incomplete coverage, not evidence of a discovered
+    # model artifact. Do not manufacture a component from an unsafe locator.
+    assert not result.components
     assert hashlib.sha256(b"external-canary").hexdigest() not in repr(result)
 
 

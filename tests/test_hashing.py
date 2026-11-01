@@ -12,6 +12,12 @@ from nexus_symbiote.core.hashing import (
 )
 
 
+def test_container_content_digest_is_an_immutable_pin():
+    value = "registry.example.test/mcp@sha256:" + "ab" * 32
+    assert extract_version_pin(value) == "sha256:" + "ab" * 32
+    assert extract_version_pin(value[:-1]) is None
+
+
 class TestCanonicalJsonEdgeCases:
     def test_deeply_nested(self):
         obj = {"a": {"b": {"c": {"d": [1, 2, 3]}}}}
@@ -40,10 +46,6 @@ class TestCanonicalJsonEdgeCases:
     def test_unicode_strings(self):
         result = canonical_json({"emoji": "☃", "cjk": "世界"})
         assert result  # should not raise
-
-    def test_ecmascript_number_and_utf16_sort(self):
-        assert canonical_json({"v": 1e-6}) == '{"v":0.000001}'
-        assert canonical_json({"\ue000": 0, "😀": 1}) == '{"😀":1,"\ue000":0}'
 
     def test_null_value_preserved(self):
         result = canonical_json({"key": None, "other": 1})
@@ -175,3 +177,44 @@ class TestExtractVersionPin:
         v = extract_version_pin("1.0.0-beta.1")
         assert v is not None
         assert "1.0.0" in v
+
+
+class TestRFC8785Conformance:
+    def test_ecmascript_numeric_serialization(self):
+        assert canonical_json({"small": 1e-6, "large": 1e20}) == (
+            '{"large":100000000000000000000,"small":0.000001}'
+        )
+
+    def test_utf16_property_order(self):
+        assert canonical_json({"\ue000": 1, "\U0001f600": 2}) == '{"😀":2,"\ue000":1}'
+
+    def test_nonfinite_values_rejected(self):
+        import pytest
+
+        for value in [float("nan"), float("inf"), float("-inf")]:
+            with pytest.raises(ValueError):
+                canonical_json({"value": value})
+
+    def test_unsupported_values_and_lone_surrogates_rejected(self):
+        import pytest
+
+        for value in [object(), "\ud800", 2**60]:
+            with pytest.raises((ValueError, TypeError)):
+                canonical_json({"value": value})
+
+    def test_strict_parser_rejects_ambiguous_or_oversize_inputs(self):
+        import pytest
+
+        from nexus_symbiote.core.hashing import parse_json_strict
+
+        for text in ['{"x":1,"x":2}', '{"x":NaN}', '{"x":1e999}', '{"x":9007199254740992}']:
+            with pytest.raises(ValueError):
+                parse_json_strict(text)
+        with pytest.raises(ValueError):
+            parse_json_strict('{"data":"too much"}', max_bytes=4)
+
+    def test_absent_and_empty_annotations_share_contract(self):
+        assert hash_tool_definition("t", "d", {}, None) == hash_tool_definition("t", "d", {}, {})
+        assert hash_tool_definition("t", "d", {}, {}) != hash_tool_definition(
+            "t", "d", {}, {"readOnlyHint": True}
+        )

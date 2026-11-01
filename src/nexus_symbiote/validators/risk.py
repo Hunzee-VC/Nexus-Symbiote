@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -9,11 +10,7 @@ from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import RiskSeverity, SerializationSafety
 from nexus_symbiote.core.models import ModelComponent, RiskAssessment
 
-# The complete built-in collection scope; do not infer completeness from a
-# caller-provided subset. Update alongside the CLI scanner registry.
-from nexus_symbiote.scanner_catalog import BUILTIN_SCANNER_NAMES
-
-REQUIRED_SCANNERS = BUILTIN_SCANNER_NAMES
+REQUIRED_SCANNERS = frozenset({"mcp", "model", "prompt", "rag", "registry"})
 
 SEVERITY_WEIGHTS: dict[RiskSeverity, float] = {
     RiskSeverity.CRITICAL: 10.0,
@@ -45,15 +42,21 @@ class RiskReport:
     severity_counts: dict[str, int] = field(default_factory=dict)
     total_components: int = 0
     components_with_risks: int = 0
+    gate_reasons: list[str] = field(default_factory=list)
+    ignored_findings: int = 0
+    warning_threshold_exceeded: bool = False
     coverage_status: str = "unknown"
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "overall_score": round(self.overall_score, 2),
             "risk_level": self.risk_level,
+            "coverage_status": self.coverage_status,
+            "gate_reasons": self.gate_reasons,
+            "ignored_findings": self.ignored_findings,
+            "warning_threshold_exceeded": self.warning_threshold_exceeded,
             "total_components": self.total_components,
             "components_with_risks": self.components_with_risks,
-            "coverage_status": self.coverage_status,
             "severity_counts": self.severity_counts,
             "category_scores": {k: round(v, 2) for k, v in self.category_scores.items()},
             "findings": [
@@ -79,10 +82,20 @@ class RiskScorer:
         severity_weights: dict[RiskSeverity, float] | None = None,
         fail_threshold: float = 50.0,
         warn_threshold: float = 20.0,
+        ignore_categories: list[str] | None = None,
+        fail_on_severity: str = "critical",
     ) -> None:
+        if not math.isfinite(fail_threshold) or fail_threshold <= 0:
+            raise ValueError("fail_threshold must be positive and finite")
+        if not math.isfinite(warn_threshold) or warn_threshold < 0:
+            raise ValueError("warn_threshold must be finite and nonnegative")
         self.weights = severity_weights or SEVERITY_WEIGHTS
         self.fail_threshold = fail_threshold
         self.warn_threshold = warn_threshold
+        self.ignore_categories = set(ignore_categories or [])
+        if fail_on_severity not in (*[s.value for s in RiskSeverity], "none"):
+            raise ValueError("unknown fail_on_severity")
+        self.fail_on_severity = fail_on_severity
 
     def score(self, bom: AIBOM) -> RiskReport:
         report = RiskReport()
@@ -91,16 +104,13 @@ class RiskScorer:
         if coverage is not None and (coverage.scan_failures or coverage.surfaces_excluded):
             report.coverage_status = "partial"
         elif coverage is not None:
-            # Legacy claims lack per-scanner status. They cannot establish that
-            # omitted or unselected surfaces were assessed.
-            statuses = getattr(coverage, "scanner_status", None)
+            statuses = coverage.scanner_status
             if statuses and (
                 not set(DEFAULT_SCANNERS).issubset(statuses)
                 or any(state != "complete" for state in statuses.values())
             ):
                 report.coverage_status = "partial"
             elif statuses and coverage.surfaces_scanned and bom.components:
-                # Reported collection is not independent proof of completeness.
                 report.coverage_status = "reported"
         components_with_risks: set[str] = set()
         category_scores: dict[str, float] = {}
@@ -138,9 +148,11 @@ class RiskScorer:
 
             if not risks:
                 continue
-            components_with_risks.add(comp.bom_ref)
-
             for risk in risks:
+                if risk.category in self.ignore_categories:
+                    report.ignored_findings += 1
+                    continue
+                components_with_risks.add(comp.bom_ref)
                 sev = risk.severity
                 weight = self.weights.get(sev, 0.0)
 
@@ -163,12 +175,25 @@ class RiskScorer:
         report.components_with_risks = len(components_with_risks)
         report.category_scores = category_scores
         report.overall_score = sum(f.score for f in report.findings)
+        report.risk_level = (
+            "unknown"
+            if not report.findings and report.coverage_status != "reported"
+            else self._classify(report.overall_score)
+        )
         if report.severity_counts.get("critical", 0):
             report.risk_level = "critical"
-        elif not report.findings and report.coverage_status != "reported":
-            report.risk_level = "unknown"
-        else:
-            report.risk_level = self._classify(report.overall_score)
+        report.warning_threshold_exceeded = report.overall_score >= self.warn_threshold
+        order = list(RiskSeverity)
+        if self.fail_on_severity != "none":
+            cutoff = order.index(RiskSeverity(self.fail_on_severity))
+            if any(order.index(f.severity) <= cutoff for f in report.findings):
+                report.gate_reasons.append(f"finding at or above {self.fail_on_severity}")
+                if self.fail_on_severity == "critical":
+                    report.risk_level = "critical"
+        if report.overall_score >= self.fail_threshold:
+            report.gate_reasons.append("aggregate score exceeds fail_threshold")
+        if report.coverage_status != "reported":
+            report.gate_reasons.append("collection coverage is unknown or incomplete")
         report.findings.sort(key=lambda f: self.weights.get(f.severity, 0.0), reverse=True)
 
         return report
@@ -184,10 +209,5 @@ class RiskScorer:
 
     def passes_gate(self, bom: AIBOM) -> tuple[bool, RiskReport]:
         report = self.score(bom)
-        passed = (
-            report.overall_score < self.fail_threshold
-            and not report.severity_counts.get("critical", 0)
-            and "invalid_safetensors" not in report.category_scores
-            and report.coverage_status == "reported"
-        )
+        passed = not report.gate_reasons
         return passed, report
