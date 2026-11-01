@@ -206,7 +206,7 @@ def _hash(digest: str | None) -> list[dict[str, str]] | None:
 
 
 def _clean(obj: dict[str, Any]) -> dict[str, Any]:
-    return {k: v for k, v in obj.items() if v is not None and v != [] and v != {}}
+    return {k: v for k, v in obj.items() if v is not None and v not in ([], {})}
 
 
 def _party(bom: AgentBOM, ref: str | None) -> dict[str, Any] | None:
@@ -263,6 +263,7 @@ class _Builder:
         reason: E.LossReason,
         preserved: E.LossPreservedIn,
         severity: E.LossSeverity = E.LossSeverity.INFO,
+        *,
         entity: str | None = None,
         field: str | None = None,
     ) -> None:

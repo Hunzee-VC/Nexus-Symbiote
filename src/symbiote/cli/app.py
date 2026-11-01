@@ -297,22 +297,24 @@ def validate(files: list[Path], as_json: JsonFlag = False) -> None:
             results.append({"file": str(f), "format": "unknown", "ok": False, "errors": [str(exc)]})
             failed = True
             continue
-        if isinstance(data, dict) and data.get("specVersion") and "snapshot" in data:
+        if isinstance(data, dict) and data.get("bomFormat") == "CycloneDX":
+            from symbiote.export.cdx import validate_cyclonedx
+
+            errors = validate_cyclonedx(data)
+            fmt = f"cyclonedx-{data.get('specVersion')}"
+        elif isinstance(data, dict) and data.get("specVersion") and "snapshot" in data:
             errors = validate_companion(data)
-            results.append(
-                {"file": str(f), "format": "agentbom-companion", "ok": not errors, "errors": errors[:50]}
-            )
-            failed |= bool(errors)
+            fmt = "agentbom-companion"
+        elif isinstance(data, dict) and "@context" in data and "spdx" in str(data.get("@context")):
+            from symbiote.export.spdx import validate_spdx
+
+            errors = validate_spdx(data)
+            fmt = "spdx-3.0.1"
         else:
-            results.append(
-                {
-                    "file": str(f),
-                    "format": "unknown",
-                    "ok": False,
-                    "errors": ["not a companion document (CycloneDX/SPDX validation: see WP6/WP7)"],
-                }
-            )
-            failed = True
+            errors = ["not a companion, CycloneDX or SPDX 3 document"]
+            fmt = "unknown"
+        results.append({"file": str(f), "format": fmt, "ok": not errors, "errors": errors[:50]})
+        failed |= bool(errors)
     emit(
         results,
         as_json,
