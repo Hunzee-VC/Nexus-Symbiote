@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 
-from symbiote.core.enums import ComponentType
-from symbiote.scanners.a2a import A2AScanner
-from symbiote.scanners.ide_agents import IDEAgentScanner
-from symbiote.scanners.mcp import MCPScanner
+from nexus_symbiote.core.enums import ComponentType
+from nexus_symbiote.scanners.a2a import A2AScanner
+from nexus_symbiote.scanners.ide_agents import IDEAgentScanner
+from nexus_symbiote.scanners.mcp import MCPScanner
 
 
 class TestA2AScanner:
@@ -243,7 +243,10 @@ class TestMCPClientDetection:
         clients = [c for c in result.components if c.component_type == ComponentType.MCP_CLIENT]
         assert len(clients) == 1
         assert clients[0].host_application == "claude-code"
-        assert "mcp-server:filesystem" in clients[0].server_refs
+        assert any(
+            c.bom_ref in clients[0].server_refs and c.name == "filesystem"
+            for c in result.components
+        )
 
     def test_mcp_client_from_cursor_config(self, tmp_path):
         cursor_dir = tmp_path / ".cursor"
@@ -276,7 +279,7 @@ class TestMCPClientDetection:
 
 class TestNewComponentTypes:
     def test_new_enums_exist(self):
-        from symbiote.core.enums import ComponentType
+        from nexus_symbiote.core.enums import ComponentType
 
         assert ComponentType.MCP_CLIENT == "mcp-client"
         assert ComponentType.A2A_CLIENT == "a2a-client"
@@ -285,7 +288,7 @@ class TestNewComponentTypes:
         assert ComponentType.VERIFIED_EXTENSION == "verified-extension"
 
     def test_new_models_serializable(self):
-        from symbiote.core.models import (
+        from nexus_symbiote.core.models import (
             A2AClientComponent,
             A2AServerComponent,
             IDEAgentComponent,
@@ -309,8 +312,8 @@ class TestNewComponentTypes:
         assert ext.model_dump()["component_type"] == "verified-extension"
 
     def test_new_components_in_aibom(self):
-        from symbiote.core.aibom import AIBOM
-        from symbiote.core.models import (
+        from nexus_symbiote.core.aibom import AIBOM
+        from nexus_symbiote.core.models import (
             A2AServerComponent,
             IDEAgentComponent,
             MCPClientComponent,
@@ -327,3 +330,218 @@ class TestNewComponentTypes:
         assert "mcp-client" in types
         assert "a2a-server" in types
         assert "ide-agent" in types
+
+
+class TestNewCollectorBoundaries:
+    def test_a2a_yaml_configuration_and_secret_url_minimization(self, tmp_path):
+        (tmp_path / "a2a.yaml").write_text(
+            "clients:\n  - name: docs-agent\n    agentCardUrl: 'https://user:CANARY@agent.example/private/CANARY?token=CANARY'\n"
+        )
+        result = A2AScanner().scan(tmp_path)
+        assert not result.scan_failures
+        client = result.components[0]
+        assert client.agent_card_url == "https://agent.example"
+        assert "CANARY" not in repr(result)
+
+    def test_a2a_comments_and_strings_are_not_sdk_evidence(self, tmp_path):
+        (tmp_path / "agent.py").write_text('# from a2a import A2AClient\nmessage = "A2AClient()"\n')
+        assert not A2AScanner().scan(tmp_path).components
+
+    def test_a2a_yaml_alias_and_bad_field_shapes_report_failures(self, tmp_path):
+        (tmp_path / "a2a.yaml").write_text("clients: &c [*c]\n")
+        result = A2AScanner().scan(tmp_path)
+        assert result.scan_failures
+        assert not result.components
+        (tmp_path / "a2a.yaml").unlink()
+        (tmp_path / "agent.json").write_text('{"name":"bad","skills":true}')
+        assert A2AScanner().scan(tmp_path).scan_failures
+
+    def test_a2a_and_ide_and_importer_do_not_read_symlink_inputs(self, tmp_path):
+        from nexus_symbiote.scanners.shadowscan import ShadowScanImporter
+
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "agent.json").write_text('{"name":"CANARY"}')
+        (outside / "settings.json").write_text('{"permissions":{"mode":"default"}}')
+        (outside / "report.json").write_text('[{"id":"CANARY","kind":"agent"}]')
+        root = tmp_path / "root"
+        root.mkdir()
+        (root / "agent.json").symlink_to(outside / "agent.json")
+        (root / ".claude").symlink_to(outside, target_is_directory=True)
+        (root / "shadowscan-report.json").symlink_to(outside / "report.json")
+        for scanner in (A2AScanner(), IDEAgentScanner(), ShadowScanImporter()):
+            result = scanner.scan(root)
+            assert result.scan_failures
+            assert not result.components
+            assert "CANARY" not in repr(result)
+
+    def test_new_scanners_honor_policy_exclusions(self, tmp_path):
+        from nexus_symbiote.scanners.shadowscan import ShadowScanImporter
+
+        (tmp_path / "agent.json").write_text('{"name":"excluded"}')
+        (tmp_path / "CLAUDE.md").write_text("excluded")
+        (tmp_path / "shadowscan.json").write_text('[{"kind":"agent","title":"excluded"}]')
+        for scanner, excluded in (
+            (A2AScanner(), "agent.json"),
+            (IDEAgentScanner(), "CLAUDE.md"),
+            (ShadowScanImporter(), "shadowscan.json"),
+        ):
+            scanner.configure(exclude_paths=[excluded])
+            result = scanner.scan(tmp_path)
+            assert not result.components
+            assert any(
+                "excluded by collection policy" in reason for reason in result.surfaces_excluded
+            )
+
+    def test_malformed_ide_settings_and_extensions_do_not_crash_or_claim_complete(self, tmp_path):
+        (tmp_path / ".claude").mkdir()
+        (tmp_path / ".claude/settings.json").write_text('{"permissions":"not-an-object"}')
+        (tmp_path / ".vscode").mkdir()
+        (tmp_path / ".vscode/extensions.json").write_text('{"recommendations":"not-a-list"}')
+        result = IDEAgentScanner().scan(tmp_path)
+        assert len(result.scan_failures) >= 2
+        agent = next(
+            component for component in result.components if component.name == "claude-code"
+        )
+        assert agent.permission_mode is None
+
+    def test_empty_ide_directory_is_not_agent_deployment_evidence(self, tmp_path):
+        (tmp_path / ".claude/skills").mkdir(parents=True)
+        assert not IDEAgentScanner().scan(tmp_path).components
+
+    def test_mcp_host_clients_do_not_inherit_other_hosts_servers(self, tmp_path):
+        (tmp_path / ".mcp.json").write_text('{"mcpServers":{"claude-only":{}}}')
+        (tmp_path / ".cursor").mkdir()
+        (tmp_path / ".cursor/mcp.json").write_text('{"mcpServers":{"cursor-only":{}}}')
+        result = MCPScanner().scan(tmp_path)
+        clients = {
+            component.host_application: component
+            for component in result.components
+            if component.component_type == ComponentType.MCP_CLIENT
+        }
+        assert clients["claude-code"].server_refs == ["mcp-server:claude-only"]
+        assert clients["cursor"].server_refs == ["mcp-server:cursor-only"]
+
+    def test_mcp_same_host_settings_merge_without_duplicate_client_identity(self, tmp_path):
+        (tmp_path / ".mcp.json").write_text('{"mcpServers":{"one":{}}}')
+        (tmp_path / ".claude").mkdir()
+        (tmp_path / ".claude/mcp.json").write_text('{"mcpServers":{"two":{}}}')
+        clients = [
+            component
+            for component in MCPScanner().scan(tmp_path).components
+            if component.component_type == ComponentType.MCP_CLIENT
+        ]
+        assert len(clients) == 1
+        assert clients[0].server_refs == ["mcp-server:one", "mcp-server:two"]
+
+    def test_mcp_python_comments_are_not_sdk_evidence(self, tmp_path):
+        (tmp_path / "agent.py").write_text('# from mcp import Client\nmessage = "MCPClient()"\n')
+        assert not MCPScanner().scan(tmp_path).components
+
+    def test_mcp_ts_comment_does_not_hide_real_sdk_import(self, tmp_path):
+        (tmp_path / "agent.ts").write_text(
+            '// comment\nimport { Client } from "@modelcontextprotocol/sdk";\n'
+        )
+        assert any(
+            component.component_type == ComponentType.MCP_CLIENT
+            for component in MCPScanner().scan(tmp_path).components
+        )
+
+    def test_mcp_tool_digest_stamps_versioned_normalized_profile(self, tmp_path):
+        from nexus_symbiote.core.hashing import TOOL_DEFINITION_HASH_VERSION
+
+        (tmp_path / "mcp.json").write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "server": {"tools": [{"name": "read", "inputSchema": {"type": "object"}}]}
+                    }
+                }
+            )
+        )
+        tool = next(
+            component
+            for component in MCPScanner().scan(tmp_path).components
+            if component.component_type == ComponentType.TOOL
+        )
+        assert tool.definition_hash_version == TOOL_DEFINITION_HASH_VERSION
+
+    def test_shadowscan_native_mapping_omits_raw_sensitive_payloads(self, tmp_path):
+        from nexus_symbiote.core.enums import AssuranceLevel, TrustTier
+        from nexus_symbiote.scanners.shadowscan import ShadowScanImporter
+
+        report = [
+            {
+                "id": "agent:one",
+                "kind": "agent",
+                "title": "demo",
+                "resource": "https://user:CANARY@agent.example/private/CANARY?token=CANARY",
+                "shadow": True,
+                "risk": {"level": "high", "score": 80},
+                "evidence": {"api_key": "CANARY"},
+                "command": "echo CANARY",
+            }
+        ]
+        (tmp_path / "shadowscan-report.json").write_text(json.dumps(report))
+        result = ShadowScanImporter().scan(tmp_path)
+        assert not result.scan_failures
+        component = result.components[0]
+        assert component.bom_ref == "agent:one"
+        assert component.assurance_level == AssuranceLevel.DECLARED
+        assert component.trust_tier == TrustTier.UNKNOWN
+        assert component.source_path == "https://agent.example"
+        assert component.properties["shadowscan:report_hash"].startswith("sha256:")
+        assert component.properties["shadowscan:raw_payload_omitted"] is True
+        assert "CANARY" not in repr(result)
+        assert any(risk.category == "shadow-agent" for risk in component.risks)
+
+    def test_shadowscan_cyclonedx_mapping_preserves_kind_without_raw_properties(self, tmp_path):
+        from nexus_symbiote.scanners.shadowscan import ShadowScanImporter
+
+        report = {
+            "bomFormat": "CycloneDX",
+            "components": [
+                {
+                    "bom-ref": "mcp:one",
+                    "name": "server",
+                    "group": "mcp-server",
+                    "properties": [
+                        {"name": "secret", "value": "CANARY"},
+                        {"name": "shadowscan:heuristic-risk", "value": "high"},
+                    ],
+                }
+            ],
+        }
+        (tmp_path / "shadowscan.json").write_text(json.dumps(report))
+        result = ShadowScanImporter().scan(tmp_path)
+        assert not result.scan_failures
+        assert result.components[0].component_type == ComponentType.MCP_SERVER
+        assert "CANARY" not in repr(result)
+        assert result.components[0].risks[0].severity.value == "high"
+
+    def test_shadowscan_malformed_and_duplicate_reports_fail_without_payload_leak(self, tmp_path):
+        from nexus_symbiote.scanners.shadowscan import ShadowScanImporter
+
+        for content in (
+            '{"findings":"CANARY"}',
+            '[{"id":"dup"},{"id":"dup"}]',
+            '[{"risk":{"score":"CANARY"}}]',
+            '{"bomFormat":"CycloneDX","components":[{"properties":[{}]}]}',
+        ):
+            (tmp_path / "shadowscan.json").write_text(content)
+            result = ShadowScanImporter().scan(tmp_path)
+            assert result.scan_failures
+            assert not result.components
+            assert "CANARY" not in repr(result)
+
+    def test_shadowscan_explicit_import_rejects_symlink(self, tmp_path):
+        import pytest
+
+        from nexus_symbiote.scanners.shadowscan import ShadowScanImporter
+
+        target = tmp_path / "target"
+        target.write_text("[]")
+        link = tmp_path / "link.json"
+        link.symlink_to(target)
+        with pytest.raises(ValueError, match="unavailable"):
+            ShadowScanImporter().import_report(link)

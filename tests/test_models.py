@@ -6,8 +6,8 @@ import json
 
 import pytest
 
-from symbiote.core.aibom import AIBOM, DependencyEdge
-from symbiote.core.enums import (
+from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
+from nexus_symbiote.core.enums import (
     SERIALIZATION_FORMAT_SAFETY,
     AutonomyLevel,
     CapabilityClass,
@@ -16,14 +16,14 @@ from symbiote.core.enums import (
     SerializationSafety,
     TrustTier,
 )
-from symbiote.core.hashing import (
+from nexus_symbiote.core.hashing import (
     canonical_json,
     extract_version_pin,
     hash_bytes,
     hash_canonical,
     hash_tool_definition,
 )
-from symbiote.core.models import (
+from nexus_symbiote.core.models import (
     AgentComponent,
     AIBOMMetadata,
     AuthorizationRecord,
@@ -132,7 +132,7 @@ class TestModels:
     def test_metadata_defaults(self):
         meta = AIBOMMetadata()
         assert meta.spec_version == "1.0.0"
-        assert meta.tool_name == "symbiote"
+        assert meta.tool_name == "nexus-symbiote"
 
     def test_model_roundtrip(self):
         agent = AgentComponent(
@@ -222,7 +222,7 @@ class TestAIBOM:
         assert len(bom.components) == 1
         assert bom.get_component("tool:test") is not None
 
-    def test_add_component_replaces_existing(self):
+    def test_replace_component_is_explicit(self):
         bom = AIBOM()
         v1 = ToolComponent(bom_ref="tool:test", name="test-v1")
         v2 = ToolComponent(bom_ref="tool:test", name="test-v2")
@@ -274,7 +274,7 @@ class TestAIBOM:
         bom.add_component(ToolComponent(bom_ref="tool:x", name="x"))
         json_str = bom.to_json()
         data = json.loads(json_str)
-        assert data["metadata"]["tool_name"] == "symbiote"
+        assert data["metadata"]["tool_name"] == "nexus-symbiote"
         assert len(data["components"]) == 1
 
     def test_save_and_load(self, tmp_path):

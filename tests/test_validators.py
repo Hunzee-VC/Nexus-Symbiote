@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from symbiote.core.aibom import AIBOM, DependencyEdge
-from symbiote.core.enums import (
+from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
+from nexus_symbiote.core.enums import (
     AssuranceLevel,
     RiskSeverity,
     SerializationSafety,
     TrustTier,
 )
-from symbiote.core.models import (
+from nexus_symbiote.core.hashing import TOOL_DEFINITION_HASH_VERSION
+from nexus_symbiote.core.models import (
     CompletenessClaim,
     MCPServerComponent,
     ModelComponent,
@@ -17,10 +18,10 @@ from symbiote.core.models import (
     RiskAssessment,
     ToolComponent,
 )
-from symbiote.diff.differ import AIBOMDiffer
-from symbiote.validators.completeness import CompletenessValidator
-from symbiote.validators.integrity import IntegrityValidator
-from symbiote.validators.risk import RiskScorer
+from nexus_symbiote.diff.differ import AIBOMDiffer
+from nexus_symbiote.validators.completeness import CompletenessValidator
+from nexus_symbiote.validators.integrity import IntegrityValidator
+from nexus_symbiote.validators.risk import RiskScorer
 
 
 def _full_bom() -> AIBOM:
@@ -44,7 +45,7 @@ def _full_bom() -> AIBOM:
             name="read_file",
             mcp_server_ref="mcp:fs",
             definition_hash="sha256:abc123",
-            definition_hash_version="rfc8785-jcs-v1",
+            definition_hash_version=TOOL_DEFINITION_HASH_VERSION,
             description_text="Read a file",
         )
     )
@@ -154,7 +155,7 @@ class TestIntegrityValidator:
                 name="test_tool",
                 description_text="Does something",
                 definition_hash="sha256:wrong_hash_value",
-                definition_hash_version="rfc8785-jcs-v1",
+                definition_hash_version=TOOL_DEFINITION_HASH_VERSION,
             )
         )
         iv = IntegrityValidator()
@@ -163,7 +164,7 @@ class TestIntegrityValidator:
         assert report.hashes_failed > 0
 
     def test_tool_hash_correct(self):
-        from symbiote.core.hashing import hash_tool_definition
+        from nexus_symbiote.core.hashing import hash_tool_definition
 
         correct_hash = hash_tool_definition("test_tool", "Does something")
         bom = AIBOM()
@@ -173,7 +174,7 @@ class TestIntegrityValidator:
                 name="test_tool",
                 description_text="Does something",
                 definition_hash=correct_hash,
-                definition_hash_version="rfc8785-jcs-v1",
+                definition_hash_version=TOOL_DEFINITION_HASH_VERSION,
             )
         )
         iv = IntegrityValidator()
@@ -316,7 +317,7 @@ class TestAIBOMDiffer:
                 name="read_file",
                 mcp_server_ref="mcp:fs",
                 definition_hash="sha256:changed_hash",
-                definition_hash_version="rfc8785-jcs-v1",
+                definition_hash_version=TOOL_DEFINITION_HASH_VERSION,
                 description_text="Read a file (modified)",
             )
         )
@@ -551,7 +552,7 @@ class TestCompletenessValidatorAdvanced:
 
 class TestIntegrityValidatorAdvanced:
     def test_prompt_hash_verified_on_disk(self, tmp_path):
-        from symbiote.core.hashing import hash_file
+        from nexus_symbiote.core.hashing import hash_file
 
         prompt_file = tmp_path / "CLAUDE.md"
         prompt_file.write_text("System prompt content")
@@ -591,7 +592,7 @@ class TestIntegrityValidatorAdvanced:
         assert any(i.category == "hash_mismatch" for i in report.issues)
 
     def test_prompt_hash_relative_path(self, tmp_path):
-        from symbiote.core.hashing import hash_file
+        from nexus_symbiote.core.hashing import hash_file
 
         prompt_file = tmp_path / "CLAUDE.md"
         prompt_file.write_text("Relative path test")
@@ -638,7 +639,7 @@ class TestIntegrityValidatorAdvanced:
         assert any(i.category == "unsigned_model" for i in report.issues)
 
     def test_file_hash_verified(self, tmp_path):
-        from symbiote.core.hashing import hash_file
+        from nexus_symbiote.core.hashing import hash_file
 
         model_file = tmp_path / "model.safetensors"
         model_file.write_bytes(b"\x00" * 50)
