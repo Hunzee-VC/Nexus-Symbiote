@@ -7,7 +7,9 @@ from pathlib import Path
 
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import AssuranceLevel, ComponentType
-from nexus_symbiote.policy import DEFAULT_SCANNERS
+from nexus_symbiote.scanner_catalog import BUILTIN_SCANNER_NAMES
+
+REQUIRED_SCANNERS = BUILTIN_SCANNER_NAMES
 
 EXPECTED_SURFACES = {
     "mcp-config": "MCP server configuration (.mcp.json etc.)",

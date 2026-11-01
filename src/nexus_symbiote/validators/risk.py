@@ -11,7 +11,9 @@ from nexus_symbiote.core.models import ModelComponent, RiskAssessment
 
 # The complete built-in collection scope; do not infer completeness from a
 # caller-provided subset. Update alongside the CLI scanner registry.
-from nexus_symbiote.policy import DEFAULT_SCANNERS
+from nexus_symbiote.scanner_catalog import BUILTIN_SCANNER_NAMES
+
+REQUIRED_SCANNERS = BUILTIN_SCANNER_NAMES
 
 SEVERITY_WEIGHTS: dict[RiskSeverity, float] = {
     RiskSeverity.CRITICAL: 10.0,
