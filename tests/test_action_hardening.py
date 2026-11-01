@@ -37,7 +37,7 @@ def test_scan_inputs_are_data_not_shell(tmp_path: Path) -> None:
         "SCANNERS": "",
     }
     result = subprocess.run(  # noqa: S603
-        ["bash", "-e", "-c", action_steps()["Scan once and export"]["run"]],
+        ["/bin/bash", "-e", "-c", action_steps()["Scan once and export"]["run"]],
         env=env,
         check=False,
         capture_output=True,
@@ -61,7 +61,7 @@ def test_validation_failure_is_not_suppressed(tmp_path: Path) -> None:
         "SCAN_PATH": ".",
     }
     result = subprocess.run(  # noqa: S603
-        ["bash", "-e", "-c", action_steps()["Validate"]["run"]],
+        ["/bin/bash", "-e", "-c", action_steps()["Validate"]["run"]],
         env=env,
         check=False,
     )
