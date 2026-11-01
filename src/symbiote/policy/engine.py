@@ -14,6 +14,7 @@ from symbiote.model.document import AgentBOM, Derived
 from symbiote.model.entities import Finding, Flag
 from symbiote.model.enums import FindingState, Severity
 from symbiote.policy import checks as _checks  # noqa: F401 - registers the built-in checks
+from symbiote.policy.rego import REGO_RULES
 from symbiote.policy.spec import CHECKS, SEVERITY_ORDER, CheckSpec, PolicyContext
 
 __all__ = ["PolicyResult", "explain", "list_checks", "run_policy", "severity_at_least"]
@@ -129,5 +130,5 @@ def explain(check_id: str) -> dict[str, Any]:
         "inputs": list(spec.inputs),
         "mappings": [{"framework": m.framework, "id": m.id} for m in spec.mappings],
         "extension": spec.extension,
-        "rego": bool(spec.rego),
+        "rego": spec.id in REGO_RULES,
     }

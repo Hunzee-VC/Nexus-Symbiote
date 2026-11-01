@@ -32,7 +32,7 @@ stderr when a TTY), `--quiet`, `--store PATH` (default `./.symbiote/store`), `--
 | `symbiote digest tooldef FILE|-`, `digest file PATH`, `digest dir PATH`, `digest prompt FILE --engine E --role R`, `digest server …` | compute digests exactly as the BOM does |
 | `symbiote model manifest DIR [--tensors]`, `model risk DIR`, `model sign DIR`, `model verify DIR --bundle B --identity I --issuer U` | model identity, serialization risk, signing (model-signing) |
 | `symbiote registry resolve REF [--live] [--pin]` | name-resolution record; `--pin` writes the immutable ref back |
-| `symbiote policy check [FILE] [--fail-on SEV] [--sarif] [--rego DIR]`, `policy export-rego DIR`, `policy explain ID` | built-in checks, Rego export, documentation |
+| `symbiote policy check FILE [--fail-on SEV] [--select GLOB…] [--exclude GLOB…] [--baseline FILE] [--sarif OUT] [--rego DIR] [--fail-on-indeterminate]`, `policy list`, `policy explain ID`, `policy export-rego DIR` | built-in checks, organisation Rego, SARIF, Rego export (`checks.md §5`), documentation |
 | `symbiote conformance [FILE] --level minimal|standard|verified` | per-requirement pass/fail/unknown |
 | `symbiote score [FILE]` | completeness score with reasons and assurance distribution |
 | `symbiote attest snapshot|toolset|coverage|evaluation|resolution|delta|trust-status|approval … --out X.sigstore.json [--key KEY] [--staging] [--identity-token T]` | build and sign statements |
