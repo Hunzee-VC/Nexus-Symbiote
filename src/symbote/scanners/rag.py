@@ -10,11 +10,12 @@ Discovers RAG pipeline configurations from common frameworks:
 from __future__ import annotations
 
 import re
+from importlib import import_module
 from pathlib import Path
 
 from symbote.core.enums import RiskSeverity, TrustTier
 from symbote.core.models import RAGSourceComponent, RiskAssessment
-from symbote.scanners.base import Scanner, ScanResult
+from symbote.scanners.base import Scanner, ScanResult, read_regular_text, sanitized_origin
 
 RAG_CONFIG_PATTERNS = [
     "rag_config.json",
@@ -46,25 +47,38 @@ class RAGScanner(Scanner):
                 if ".git" in config_path.parts or "node_modules" in config_path.parts:
                     continue
                 result.surfaces_scanned.append(str(config_path))
-                comps = self._scan_rag_config(config_path)
+                comps = self._scan_rag_config(config_path, result)
                 result.components.extend(comps)
 
-        env_comps = self._scan_env_files(project_root)
+        env_comps = self._scan_env_files(project_root, result)
         if env_comps:
             result.components.extend(env_comps)
 
-        py_comps = self._scan_python_imports(project_root)
+        py_comps = self._scan_python_imports(project_root, result)
         if py_comps:
             result.components.extend(py_comps)
 
-        if not result.components:
+        if not result.components and not result.scan_failures:
             result.surfaces_excluded.append("rag (no RAG configuration found)")
 
         return result
 
-    def _scan_rag_config(self, config_path: Path) -> list[RAGSourceComponent]:
-        data = self._safe_read_json(config_path)
+    def _scan_rag_config(self, config_path: Path, result: ScanResult) -> list[RAGSourceComponent]:
+        if config_path.suffix.lower() in (".yaml", ".yml"):
+            try:
+                yaml = import_module("yaml")
+            except ImportError:
+                result.scan_failures.append(f"YAML support unavailable for {config_path}")
+                return []
+            try:
+                data = yaml.safe_load(read_regular_text(config_path))
+            except (yaml.YAMLError, OSError, UnicodeError):
+                result.scan_failures.append(f"Failed to parse {config_path}")
+                return []
+        else:
+            data = self._safe_read_json(config_path)
         if not isinstance(data, dict):
+            result.scan_failures.append(f"Failed to parse object from {config_path}")
             return []
 
         components: list[RAGSourceComponent] = []
@@ -99,7 +113,7 @@ class RAGScanner(Scanner):
                         RiskAssessment(
                             severity=RiskSeverity.HIGH,
                             category="data_integrity",
-                            detail=f"RAG source '{name}' ingests from unencrypted URI: {uri}",
+                            detail=f"RAG source '{name}' ingests from unencrypted URI: {sanitized_origin(uri)}",
                             recommendation="Use HTTPS for all data source connections.",
                         )
                     )
@@ -121,7 +135,7 @@ class RAGScanner(Scanner):
                     corpus_type=corpus_type,
                     embedding_model_name=embedding,
                     chunking_strategy=str(chunking) if chunking else None,
-                    source_uris=[str(u) for u in source_uris_list if u],
+                    source_uris=[sanitized_origin(str(u)) for u in source_uris_list if u],
                     trust_tier=TrustTier.UNKNOWN,
                     risks=risks,
                 )
@@ -129,7 +143,7 @@ class RAGScanner(Scanner):
 
         return components
 
-    def _scan_env_files(self, project_root: Path) -> list[RAGSourceComponent]:
+    def _scan_env_files(self, project_root: Path, result: ScanResult) -> list[RAGSourceComponent]:
         components: list[RAGSourceComponent] = []
         env_files = [".env", ".env.example", ".env.local"]
 
@@ -139,8 +153,9 @@ class RAGScanner(Scanner):
                 continue
 
             try:
-                content = env_path.read_text(encoding="utf-8", errors="replace")
-            except OSError:
+                content = read_regular_text(env_path)
+            except (OSError, UnicodeError):
+                result.scan_failures.append(f"Failed to read {env_path}")
                 continue
 
             detected_stores: set[str] = set()
@@ -175,7 +190,9 @@ class RAGScanner(Scanner):
 
         return components
 
-    def _scan_python_imports(self, project_root: Path) -> list[RAGSourceComponent]:
+    def _scan_python_imports(
+        self, project_root: Path, result: ScanResult
+    ) -> list[RAGSourceComponent]:
         components: list[RAGSourceComponent] = []
         store_imports = {
             "chromadb": "chroma",
@@ -197,8 +214,9 @@ class RAGScanner(Scanner):
             ):
                 continue
             try:
-                content = py_file.read_text(encoding="utf-8", errors="replace")
-            except OSError:
+                content = read_regular_text(py_file)
+            except (OSError, UnicodeError):
+                result.scan_failures.append(f"Failed to read {py_file}")
                 continue
 
             for import_name, store_name in store_imports.items():
