@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import hashlib
-import os
-import stat
 from abc import ABC, abstractmethod
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -14,87 +11,42 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from nexus_symbiote.core.models import AnyComponent
+from nexus_symbiote.utils.confined import ConfinedCollection
 
 MAX_CONFIG_BYTES = 4 * 1024 * 1024
 MAX_MODEL_BYTES = 1024 * 1024 * 1024
 
 
-@contextmanager
-def _open_regular(path: Path, max_bytes: int) -> Iterator[int]:
-    """Open a regular file without following links and check for read-time changes.
-
-    Fail closed if descriptor-relative no-follow opens are unavailable. This protects
-    scanner reads on POSIX; callers must surface failures as incomplete coverage.
-    """
-    if (
-        not hasattr(os, "O_NOFOLLOW")
-        or not hasattr(os, "O_DIRECTORY")
-        or os.open not in os.supports_dir_fd
-    ):
-        raise OSError("secure descriptor-relative file access is unavailable")
-    absolute = Path(os.path.abspath(path))
-    flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
-    directory = os.open(absolute.anchor, flags | os.O_DIRECTORY)
-    try:
-        for part in absolute.parts[1:-1]:
-            child = os.open(part, flags | os.O_DIRECTORY, dir_fd=directory)
-            os.close(directory)
-            directory = child
-        fd = os.open(absolute.name, flags | getattr(os, "O_NONBLOCK", 0), dir_fd=directory)
-        try:
-            info = os.fstat(fd)
-            if not stat.S_ISREG(info.st_mode) or info.st_size > max_bytes:
-                raise OSError("not a regular file or exceeds scanner size limit")
-            yield fd
-            after = os.fstat(fd)
-            if (info.st_size, info.st_mtime_ns, info.st_ctime_ns) != (
-                after.st_size,
-                after.st_mtime_ns,
-                after.st_ctime_ns,
-            ):
-                raise OSError("file changed during scanner read")
-        finally:
-            os.close(fd)
-    finally:
-        os.close(directory)
-
-
 def read_regular_text(path: Path, *, max_bytes: int = MAX_CONFIG_BYTES) -> str:
-    """Read bounded UTF-8 text without following symlinks."""
-    with _open_regular(path, max_bytes) as fd:
-        with os.fdopen(fd, "rb", closefd=False) as stream:
-            data = stream.read(max_bytes + 1)
-        if len(data) > max_bytes:
-            raise OSError("file exceeds scanner size limit")
-        return data.decode("utf-8")
+    """Legacy explicit-file reader, bounded and no-follow for all path parts."""
+    with ConfinedCollection(
+        path.parent, [], max_file_bytes=max_bytes, max_total_bytes=max_bytes
+    ) as files:
+        content = files.read_text(path.name)
+    if content is None:
+        raise OSError("bounded regular-file read refused")
+    return content
 
 
 def hash_regular_file(path: Path, *, max_bytes: int = MAX_MODEL_BYTES) -> str:
-    """Hash a bounded regular file incrementally without following symlinks."""
-    with _open_regular(path, max_bytes) as fd:
-        digest = hashlib.sha256()
-        remaining = max_bytes + 1
-        while remaining:
-            chunk = os.read(fd, min(1024 * 1024, remaining))
-            if not chunk:
-                break
-            digest.update(chunk)
-            remaining -= len(chunk)
-        if remaining == 0:
-            raise OSError("file exceeds scanner size limit")
-        return "sha256:" + digest.hexdigest()
+    """Legacy explicit-file hash; automatic scans use their project-root boundary."""
+    with ConfinedCollection(path.parent, [], max_total_bytes=max_bytes) as files:
+        digest = files.hash_file(path.name, max_bytes=max_bytes)
+    if digest is None:
+        raise OSError("bounded regular-file hash refused")
+    return digest
 
 
 def sanitized_origin(value: str) -> str:
-    """Retain only a URL's origin; paths, userinfo, query and fragment may be secrets."""
+    """Omit paths as well as userinfo, queries and fragments from URL output."""
     try:
         parsed = urlsplit(value)
-        host = parsed.hostname
-        port = parsed.port
-        if not parsed.scheme or not host:
+        if not parsed.scheme or not parsed.hostname:
             return "[redacted]"
+        host = parsed.hostname
         host = f"[{host}]" if ":" in host else host
-        return f"{parsed.scheme.lower()}://{host}" + (f":{port}" if port else "")
+        port = parsed.port
+        return f"{parsed.scheme.lower()}://{host}" + (f":{port}" if port is not None else "")
     except ValueError:
         return "[redacted]"
 
@@ -114,6 +66,29 @@ class Scanner(ABC):
     """Base class for all component scanners."""
 
     name: str = "base"
+    _exclude_paths: tuple[str | Path, ...] = ()
+    _files: ConfinedCollection | None = None
+
+    def configure(self, exclude_paths: Iterable[str | Path] = ()) -> None:
+        """Set root-relative or absolute collection exclusions before ``scan``."""
+        self._exclude_paths = tuple(exclude_paths)
+
+    @contextmanager
+    def _collection(
+        self, root: Path, result: ScanResult, **limits: Any
+    ) -> Iterator[ConfinedCollection]:
+        with ConfinedCollection(
+            root,
+            result.scan_failures,
+            result.surfaces_excluded,
+            exclude_paths=self._exclude_paths,
+            **limits,
+        ) as files:
+            self._files = files
+            try:
+                yield files
+            finally:
+                self._files = None
 
     @abstractmethod
     def scan(self, project_root: Path) -> ScanResult:
@@ -121,10 +96,48 @@ class Scanner(ABC):
         ...
 
     def _safe_read_json(self, path: Path) -> dict[str, Any] | list[Any] | None:
-        import json
+        # Compatibility for scanner helpers; scans should open a _collection so
+        # every failure is retained on the ScanResult and the project root pinned.
+        if self._files is not None:
+            data = self._files.read_json(path)
+        else:
+            with ConfinedCollection(path.parent, []) as files:
+                data = files.read_json(path.name)
+        return data if isinstance(data, (dict, list)) else None
 
-        try:
-            data: object = json.loads(read_regular_text(path))
-            return data if isinstance(data, (dict, list)) else None
-        except (json.JSONDecodeError, UnicodeError, OSError):
+    def _read_mapping(
+        self, path: Path, result: ScanResult, *, missing_ok: bool = True
+    ) -> dict[str, Any] | None:
+        """Read a bounded static JSON/YAML mapping and retain parse failures."""
+        assert self._files is not None
+        if path.suffix.lower() == ".json":
+            data = self._files.read_json(path, missing_ok=missing_ok)
+        else:
+            text = self._files.read_text(path, missing_ok=missing_ok)
+            if text is None:
+                return None
+            try:
+                import yaml
+            except ImportError:
+                result.scan_failures.append(f"{path.name}: YAML parser unavailable")
+                return None
+            from nexus_symbiote.policy import parse_yaml_mapping
+
+            try:
+                for index, token in enumerate(yaml.scan(text)):
+                    if index >= 20_000 or isinstance(
+                        token, (yaml.AliasToken, yaml.AnchorToken, yaml.TagToken)
+                    ):
+                        raise ValueError("unsupported YAML graph")
+                data = parse_yaml_mapping(text)
+            except (ValueError, RecursionError, yaml.YAMLError):
+                result.scan_failures.append(
+                    f"{path.name}: YAML mapping parse failed or unsupported"
+                )
+                return None
+        if data is None:
             return None
+        if not isinstance(data, dict):
+            result.scan_failures.append(f"{path.name}: expected a mapping")
+            return None
+        return data

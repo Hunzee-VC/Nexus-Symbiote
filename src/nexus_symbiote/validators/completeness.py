@@ -86,12 +86,32 @@ class CompletenessValidator:
             )
             report.is_complete = False
 
-        if bom.metadata.completeness:
-            claim = bom.metadata.completeness
-            if claim.scan_failures:
-                report.is_complete = False
-                for failure in claim.scan_failures:
-                    report.issues.append(CompletenessIssue("collection", failure, "error"))
+        claim = bom.metadata.completeness
+        if claim and claim.scope == "repository" and not claim.collectors_requested:
+            report.is_complete = False
+            report.issues.append(
+                CompletenessIssue(
+                    surface="collection",
+                    severity="error",
+                    description="Repository completeness requires explicit collection records",
+                )
+            )
+        if claim and claim.scan_failures:
+            report.is_complete = False
+            report.issues.extend(
+                CompletenessIssue(surface="collection", description=f, severity="error")
+                for f in claim.scan_failures
+            )
+        if claim and set(claim.collectors_requested) - set(claim.collectors_completed):
+            report.is_complete = False
+            report.issues.append(
+                CompletenessIssue(
+                    surface="collection",
+                    severity="error",
+                    description="Some requested collectors did not complete",
+                )
+            )
+        if claim:
             missing = REQUIRED_SCANNERS - claim.scanner_status.keys()
             if missing:
                 report.is_complete = False
@@ -115,6 +135,8 @@ class CompletenessValidator:
                     report.issues.append(
                         CompletenessIssue(scanner, f"Scanner coverage is {state}.", "error")
                     )
+        # A repository observation is complete only within its stated collection scope.
+        # It does not require tools/prompts to exist in every project.
 
         for c in bom.components:
             if not c.hashes and c.component_type in (
@@ -132,6 +154,13 @@ class CompletenessValidator:
                             )
                         )
 
+        from nexus_symbiote.graph import validate_graph
+
+        for issue in validate_graph(bom):
+            report.issues.append(
+                CompletenessIssue(surface="graph", description=issue, severity="error")
+            )
+            report.is_complete = False
         orphan_refs = self._find_orphan_refs(bom)
         for ref, field_name in orphan_refs:
             report.issues.append(

@@ -6,7 +6,6 @@ with agent-specific property taxonomies under the nexus-symbiote: namespace.
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
@@ -24,13 +23,28 @@ from nexus_symbiote.core.models import (
     SkillPackageComponent,
     ToolComponent,
 )
+from nexus_symbiote.generators._common import (
+    claim_properties,
+    component_property,
+    document_properties,
+    json_text,
+    normalize_hash,
+    prepare,
+    recover_document,
+)
 from nexus_symbiote.generators.base import Generator
+from nexus_symbiote.generators.validation import require_valid
 
 COMPONENT_TYPE_MAP: dict[ComponentType, str] = {
     ComponentType.AGENT: "application",
     ComponentType.MODEL: "machine-learning-model",
     ComponentType.TOOL: "library",
     ComponentType.MCP_SERVER: "application",
+    ComponentType.MCP_CLIENT: "application",
+    ComponentType.A2A_CLIENT: "application",
+    ComponentType.A2A_SERVER: "application",
+    ComponentType.IDE_AGENT: "application",
+    ComponentType.VERIFIED_EXTENSION: "library",
     ComponentType.PROMPT_TEMPLATE: "data",
     ComponentType.GUARDRAIL_POLICY: "library",
     ComponentType.MEMORY_STORE: "data",
@@ -45,37 +59,31 @@ class CycloneDXGenerator(Generator):
     format_name = "cyclonedx-1.7"
 
     def generate(self, aibom: AIBOM) -> dict[str, Any]:
-        aibom.finalize()
-        metadata = self._metadata(aibom)
-        # CycloneDX dependency objects do not carry typed edge semantics.
-        # Keep the original edges as documented metadata properties.
-        if aibom.dependencies:
-            metadata["properties"] = [
-                {
-                    "name": "nexus-symbiote:dependency:relationship",
-                    "value": json.dumps(
-                        {"from": edge.source_ref, "to": edge.target_ref, "type": edge.relationship},
-                        sort_keys=True,
-                        separators=(",", ":"),
-                    ),
-                }
-                for edge in aibom.dependencies
-            ]
-        grouped: dict[str, set[str]] = {}
+        prepare(aibom)
+        adjacency: dict[str, set[str]] = {}
         for edge in aibom.dependencies:
-            grouped.setdefault(edge.source_ref, set()).add(edge.target_ref)
-        return {
+            adjacency.setdefault(edge.source_ref, set()).add(edge.target_ref)
+        document = {
             "bomFormat": "CycloneDX",
             "specVersion": "1.7",
             "version": aibom.metadata.version,
             "serialNumber": aibom.metadata.serial_number,
-            "metadata": metadata,
-            "components": [self._component(c) for c in aibom.components],
+            "metadata": self._metadata(aibom),
+            "components": [
+                self._component(c) for c in sorted(aibom.components, key=lambda c: c.bom_ref)
+            ],
             "dependencies": [
                 {"ref": ref, "dependsOn": sorted(targets)}
-                for ref, targets in sorted(grouped.items())
+                for ref, targets in sorted(adjacency.items())
             ],
         }
+        require_valid(document, "cyclonedx")
+        return document
+
+    @staticmethod
+    def recover(document: dict[str, Any]) -> AIBOM:
+        require_valid(document, "cyclonedx")
+        return recover_document(document["metadata"]["properties"])
 
     def _metadata(self, aibom: AIBOM) -> dict[str, Any]:
         meta: dict[str, Any] = {
@@ -95,6 +103,17 @@ class CycloneDXGenerator(Generator):
         }
         if aibom.metadata.authors:
             meta["authors"] = [{"name": a} for a in aibom.metadata.authors]
+        edges = sorted(
+            {
+                json_text(
+                    {"from": edge.source_ref, "to": edge.target_ref, "type": edge.relationship}
+                )
+                for edge in aibom.dependencies
+            }
+        )
+        meta["properties"] = [
+            {"name": "nexus-symbiote:dependency:relationship", "value": edge} for edge in edges
+        ] + document_properties(aibom, self.format_name)
         return meta
 
     def _component(self, comp: AnyComponent) -> dict[str, Any]:
@@ -112,7 +131,7 @@ class CycloneDXGenerator(Generator):
             result["description"] = comp.description
         if comp.hashes:
             result["hashes"] = [
-                {"alg": alg.upper().replace("SHA", "SHA-"), "content": val.split(":", 1)[-1]}
+                {"alg": normalize_hash(alg, val)[0], "content": normalize_hash(alg, val)[1]}
                 for alg, val in comp.hashes.items()
                 if val
             ]
@@ -135,7 +154,10 @@ class CycloneDXGenerator(Generator):
         _add("assuranceLevel", comp.assurance_level.value)
 
         if isinstance(comp, AgentComponent):
-            _add("autonomyLevel", comp.autonomy_level.value)
+            _add(
+                "autonomyLevel",
+                comp.autonomy_level.value if comp.autonomy_level is not None else "unknown",
+            )
             _add("framework", comp.framework)
             for ref in comp.model_refs:
                 _add("modelRef", ref)
@@ -176,6 +198,9 @@ class CycloneDXGenerator(Generator):
             _add("publisherVerified", comp.publisher_verified)
         elif isinstance(comp, SkillPackageComponent):
             _add("skillType", comp.skill_type)
+
+        props.append(component_property(comp))
+        props.extend(claim_properties(comp))
 
         return props
 
