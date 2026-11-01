@@ -233,4 +233,4 @@ The AIBOM schema is defined in [`schemas/symbote-aibom-1.0.schema.json`](schemas
 
 ## License
 
-Apache-2.0
+MIT. See [LICENSE](LICENSE).

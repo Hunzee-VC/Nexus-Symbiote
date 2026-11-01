@@ -9,18 +9,18 @@ from __future__ import annotations
 import hashlib
 import re
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
-import jcs  # type: ignore[import-untyped]
+import rfc8785
 
 
 def canonical_json(data: Any) -> str:
-    """Produce RFC 8785 canonical JSON. Invalid values raise an exception.
+    """Serialize I-JSON to RFC 8785 bytes, rejecting unsupported values.
 
     Hashes made by releases before this correction may differ. Do not compare
     old and new fingerprints without re-collecting both snapshots.
     """
-    return cast(bytes, jcs.canonicalize(data)).decode("utf-8")
+    return rfc8785.dumps(data).decode("utf-8")
 
 
 def hash_canonical(data: dict[str, Any], algorithm: str = "sha256") -> str:
