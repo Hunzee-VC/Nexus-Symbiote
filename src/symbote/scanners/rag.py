@@ -27,7 +27,9 @@ RAG_CONFIG_PATTERNS = [
 ]
 
 VECTOR_STORE_PATTERNS = [
-    re.compile(r"(?:PINECONE|WEAVIATE|QDRANT|CHROMA|MILVUS|PGVECTOR)_(?:URL|HOST|API_KEY|INDEX)", re.I),
+    re.compile(
+        r"(?:PINECONE|WEAVIATE|QDRANT|CHROMA|MILVUS|PGVECTOR)_(?:URL|HOST|API_KEY|INDEX)", re.I
+    ),
     re.compile(r"VECTOR_(?:STORE|DB)_", re.I),
     re.compile(r"EMBEDDING_(?:MODEL|API)", re.I),
 ]
@@ -93,31 +95,37 @@ class RAGScanner(Scanner):
 
             for uri in source_uris_list:
                 if isinstance(uri, str) and ("http://" in uri or "ftp://" in uri):
-                    risks.append(RiskAssessment(
-                        severity=RiskSeverity.HIGH,
-                        category="data_integrity",
-                        detail=f"RAG source '{name}' ingests from unencrypted URI: {uri}",
-                        recommendation="Use HTTPS for all data source connections.",
-                    ))
+                    risks.append(
+                        RiskAssessment(
+                            severity=RiskSeverity.HIGH,
+                            category="data_integrity",
+                            detail=f"RAG source '{name}' ingests from unencrypted URI: {uri}",
+                            recommendation="Use HTTPS for all data source connections.",
+                        )
+                    )
 
             if not source.get("sanitization") and not source.get("content_filter"):
-                risks.append(RiskAssessment(
-                    severity=RiskSeverity.MEDIUM,
-                    category="data_integrity",
-                    detail=f"RAG source '{name}' has no configured content sanitization.",
-                    recommendation="Add input sanitization to prevent indirect prompt injection via ingested documents.",
-                ))
+                risks.append(
+                    RiskAssessment(
+                        severity=RiskSeverity.MEDIUM,
+                        category="data_integrity",
+                        detail=f"RAG source '{name}' has no configured content sanitization.",
+                        recommendation="Add input sanitization to prevent indirect prompt injection via ingested documents.",
+                    )
+                )
 
-            components.append(RAGSourceComponent(
-                bom_ref=f"rag:{name}",
-                name=name,
-                corpus_type=corpus_type,
-                embedding_model_name=embedding,
-                chunking_strategy=str(chunking) if chunking else None,
-                source_uris=[str(u) for u in source_uris_list if u],
-                trust_tier=TrustTier.UNKNOWN,
-                risks=risks,
-            ))
+            components.append(
+                RAGSourceComponent(
+                    bom_ref=f"rag:{name}",
+                    name=name,
+                    corpus_type=corpus_type,
+                    embedding_model_name=embedding,
+                    chunking_strategy=str(chunking) if chunking else None,
+                    source_uris=[str(u) for u in source_uris_list if u],
+                    trust_tier=TrustTier.UNKNOWN,
+                    risks=risks,
+                )
+            )
 
         return components
 
@@ -147,19 +155,23 @@ class RAGScanner(Scanner):
                         detected_stores.add(store_name)
 
             for store in detected_stores:
-                components.append(RAGSourceComponent(
-                    bom_ref=f"rag:env-{store}",
-                    name=f"{store} (from env)",
-                    corpus_type="vector-store",
-                    trust_tier=TrustTier.UNKNOWN,
-                    source_path=str(env_path),
-                    risks=[RiskAssessment(
-                        severity=RiskSeverity.INFO,
-                        category="rag_discovery",
-                        detail=f"Vector store '{store}' detected from environment variables.",
-                        recommendation="Document this data source in your AIBOM with explicit provenance.",
-                    )],
-                ))
+                components.append(
+                    RAGSourceComponent(
+                        bom_ref=f"rag:env-{store}",
+                        name=f"{store} (from env)",
+                        corpus_type="vector-store",
+                        trust_tier=TrustTier.UNKNOWN,
+                        source_path=str(env_path),
+                        risks=[
+                            RiskAssessment(
+                                severity=RiskSeverity.INFO,
+                                category="rag_discovery",
+                                detail=f"Vector store '{store}' detected from environment variables.",
+                                recommendation="Document this data source in your AIBOM with explicit provenance.",
+                            )
+                        ],
+                    )
+                )
 
         return components
 
@@ -178,7 +190,11 @@ class RAGScanner(Scanner):
         detected: set[str] = set()
 
         for py_file in project_root.rglob("*.py"):
-            if ".git" in py_file.parts or "node_modules" in py_file.parts or "__pycache__" in py_file.parts:
+            if (
+                ".git" in py_file.parts
+                or "node_modules" in py_file.parts
+                or "__pycache__" in py_file.parts
+            ):
                 continue
             try:
                 content = py_file.read_text(encoding="utf-8", errors="replace")
@@ -190,17 +206,21 @@ class RAGScanner(Scanner):
                     detected.add(store_name)
 
         for store in detected:
-            components.append(RAGSourceComponent(
-                bom_ref=f"rag:import-{store}",
-                name=f"{store} (from imports)",
-                corpus_type="vector-store",
-                trust_tier=TrustTier.UNKNOWN,
-                risks=[RiskAssessment(
-                    severity=RiskSeverity.INFO,
-                    category="rag_discovery",
-                    detail=f"Vector store library '{store}' imported in Python code.",
-                    recommendation="Add explicit RAG source configuration to your AIBOM.",
-                )],
-            ))
+            components.append(
+                RAGSourceComponent(
+                    bom_ref=f"rag:import-{store}",
+                    name=f"{store} (from imports)",
+                    corpus_type="vector-store",
+                    trust_tier=TrustTier.UNKNOWN,
+                    risks=[
+                        RiskAssessment(
+                            severity=RiskSeverity.INFO,
+                            category="rag_discovery",
+                            detail=f"Vector store library '{store}' imported in Python code.",
+                            recommendation="Add explicit RAG source configuration to your AIBOM.",
+                        )
+                    ],
+                )
+            )
 
         return components

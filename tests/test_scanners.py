@@ -112,7 +112,9 @@ class TestPromptScanner:
         (tmp_path / ".cursorrules").write_text("Always use TypeScript.")
         scanner = PromptScanner()
         result = scanner.scan(tmp_path)
-        prompts = [c for c in result.components if c.component_type == ComponentType.PROMPT_TEMPLATE]
+        prompts = [
+            c for c in result.components if c.component_type == ComponentType.PROMPT_TEMPLATE
+        ]
         assert len(prompts) >= 1
 
     def test_scan_skills_directory(self, tmp_path):
@@ -203,3 +205,209 @@ class TestRegistryScanner:
         scanner = RegistryScanner()
         result = scanner.scan(tmp_path)
         assert len(result.components) == 0
+
+    def test_scan_dockerfile_ai_image(self, tmp_path):
+        (tmp_path / "Dockerfile").write_text("FROM vllm/vllm-openai:latest\nRUN pip install app\n")
+        scanner = RegistryScanner()
+        result = scanner.scan(tmp_path)
+        docker_comps = [c for c in result.components if c.registry_type == "docker-hub"]
+        assert len(docker_comps) >= 1
+        assert any(r.category == "version_pinning" for c in docker_comps for r in c.risks)
+
+    def test_scan_dockerfile_pinned_tag(self, tmp_path):
+        (tmp_path / "Dockerfile").write_text("FROM vllm/vllm-openai:0.4.2\n")
+        scanner = RegistryScanner()
+        result = scanner.scan(tmp_path)
+        docker_comps = [c for c in result.components if c.registry_type == "docker-hub"]
+        assert len(docker_comps) >= 1
+        assert not any(r.category == "version_pinning" for c in docker_comps for r in c.risks)
+
+    def test_scan_pyproject_toml_ai_deps(self, tmp_path):
+        (tmp_path / "pyproject.toml").write_text(
+            '[project]\ndependencies = [\n  "transformers>=4.40",\n]\n'
+        )
+        scanner = RegistryScanner()
+        result = scanner.scan(tmp_path)
+        assert any(c.name == "transformers" for c in result.components)
+
+    def test_scan_pinned_pip_no_risk(self, tmp_path):
+        (tmp_path / "requirements.txt").write_text("transformers==4.40.0\n")
+        scanner = RegistryScanner()
+        result = scanner.scan(tmp_path)
+        tf = [c for c in result.components if c.name == "transformers"]
+        assert len(tf) == 1
+        assert not any(r.category == "version_pinning" for r in tf[0].risks)
+
+
+class TestMCPScannerAdvanced:
+    def test_sse_transport_detected(self, tmp_path):
+        config = {
+            "mcpServers": {
+                "remote": {
+                    "url": "https://example.com/sse",
+                }
+            }
+        }
+        (tmp_path / ".mcp.json").write_text(json.dumps(config))
+        scanner = MCPScanner()
+        result = scanner.scan(tmp_path)
+        mcp_comps = [c for c in result.components if c.component_type == ComponentType.MCP_SERVER]
+        assert len(mcp_comps) == 1
+        assert mcp_comps[0].transport == "sse"
+
+    def test_streamable_http_transport(self, tmp_path):
+        config = {
+            "mcpServers": {
+                "remote": {
+                    "url": "https://api.example.com/mcp",
+                }
+            }
+        }
+        (tmp_path / ".mcp.json").write_text(json.dumps(config))
+        scanner = MCPScanner()
+        result = scanner.scan(tmp_path)
+        mcp_comps = [c for c in result.components if c.component_type == ComponentType.MCP_SERVER]
+        assert mcp_comps[0].transport == "streamable-http"
+
+    def test_insecure_endpoint_risk(self, tmp_path):
+        config = {
+            "mcpServers": {
+                "insecure": {
+                    "url": "http://remote-server.example.com/mcp",
+                }
+            }
+        }
+        (tmp_path / ".mcp.json").write_text(json.dumps(config))
+        scanner = MCPScanner()
+        result = scanner.scan(tmp_path)
+        mcp_comps = [c for c in result.components if c.component_type == ComponentType.MCP_SERVER]
+        assert any(r.category == "transport_security" for r in mcp_comps[0].risks)
+
+    def test_docker_package_ref(self, tmp_path):
+        config = {
+            "mcpServers": {
+                "dockersrv": {
+                    "command": "docker",
+                    "args": ["run", "--rm", "mcp/filesystem:latest"],
+                }
+            }
+        }
+        (tmp_path / ".mcp.json").write_text(json.dumps(config))
+        scanner = MCPScanner()
+        result = scanner.scan(tmp_path)
+        mcp_comps = [c for c in result.components if c.component_type == ComponentType.MCP_SERVER]
+        assert len(mcp_comps) == 1
+
+    def test_uvx_package_ref(self, tmp_path):
+        config = {
+            "mcpServers": {
+                "pysrv": {
+                    "command": "uvx",
+                    "args": ["mcp-server-fetch@0.6.2"],
+                }
+            }
+        }
+        (tmp_path / ".mcp.json").write_text(json.dumps(config))
+        scanner = MCPScanner()
+        result = scanner.scan(tmp_path)
+        mcp_comps = [c for c in result.components if c.component_type == ComponentType.MCP_SERVER]
+        assert mcp_comps[0].version == "0.6.2"
+        assert mcp_comps[0].version_pinned is True
+
+    def test_tool_extraction_with_annotations(self, tmp_path):
+        config = {
+            "mcpServers": {
+                "toolsrv": {
+                    "command": "npx",
+                    "args": ["-y", "some-server@1.0.0"],
+                    "tools": [
+                        {
+                            "name": "delete_file",
+                            "description": "Delete a file from disk",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {"path": {"type": "string"}},
+                            },
+                            "annotations": {"destructiveHint": True},
+                        }
+                    ],
+                }
+            }
+        }
+        (tmp_path / ".mcp.json").write_text(json.dumps(config))
+        scanner = MCPScanner()
+        result = scanner.scan(tmp_path)
+        tools = [c for c in result.components if c.component_type == ComponentType.TOOL]
+        assert len(tools) == 1
+        assert tools[0].definition_hash is not None
+        assert any(r.category == "capability_scope" for r in tools[0].risks)
+
+    def test_capability_inference(self, tmp_path):
+        config = {
+            "mcpServers": {
+                "capsrv": {
+                    "command": "npx",
+                    "args": ["-y", "some-server@1.0.0"],
+                    "tools": [
+                        {
+                            "name": "fetch_url",
+                            "description": "Fetch content from a URL via http",
+                        },
+                        {
+                            "name": "read_file",
+                            "description": "Read a file from the filesystem path",
+                        },
+                    ],
+                }
+            }
+        }
+        (tmp_path / ".mcp.json").write_text(json.dumps(config))
+        scanner = MCPScanner()
+        result = scanner.scan(tmp_path)
+        tools = [c for c in result.components if c.component_type == ComponentType.TOOL]
+        assert len(tools) == 2
+        from symbote.core.enums import CapabilityClass
+
+        fetch = next(t for t in tools if t.name == "fetch_url")
+        assert CapabilityClass.NETWORK in fetch.capabilities.capabilities
+        read = next(t for t in tools if t.name == "read_file")
+        assert CapabilityClass.FILESYSTEM in read.capabilities.capabilities
+
+    def test_env_vars_redacted(self, tmp_path):
+        config = {
+            "mcpServers": {
+                "envsrv": {
+                    "command": "npx",
+                    "args": ["-y", "some-server@1.0.0"],
+                    "env": {"API_KEY": "sk-secret-12345", "OTHER": "value"},
+                }
+            }
+        }
+        (tmp_path / ".mcp.json").write_text(json.dumps(config))
+        scanner = MCPScanner()
+        result = scanner.scan(tmp_path)
+        mcp = [c for c in result.components if c.component_type == ComponentType.MCP_SERVER][0]
+        assert mcp.env.get("API_KEY") == "***"
+        assert mcp.env.get("OTHER") == "***"
+
+    def test_malformed_json_handled(self, tmp_path):
+        (tmp_path / ".mcp.json").write_text("{not valid json")
+        scanner = MCPScanner()
+        result = scanner.scan(tmp_path)
+        assert len(result.scan_failures) >= 1
+
+    def test_servers_key_alias(self, tmp_path):
+        config = {
+            "servers": {
+                "alt": {
+                    "command": "npx",
+                    "args": ["-y", "some-server@2.0.0"],
+                }
+            }
+        }
+        (tmp_path / "mcp.json").write_text(json.dumps(config))
+        scanner = MCPScanner()
+        result = scanner.scan(tmp_path)
+        assert (
+            len([c for c in result.components if c.component_type == ComponentType.MCP_SERVER]) >= 1
+        )

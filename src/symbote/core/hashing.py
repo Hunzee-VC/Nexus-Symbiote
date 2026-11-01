@@ -73,15 +73,13 @@ def _serialize_object(obj: dict[str, Any]) -> str:
     sorted_keys = sorted(obj.keys(), key=lambda k: [ord(c) for c in k])
     pairs = []
     for key in sorted_keys:
-        val = obj[key]
-        if val is not None:
-            pairs.append(f"{_serialize_string(key)}:{_serialize_value(val)}")
+        pairs.append(f"{_serialize_string(key)}:{_serialize_value(obj[key])}")
     return "{" + ",".join(pairs) + "}"
 
 
-def canonical_json(data: dict[str, Any]) -> str:
-    """Produce RFC 8785 JCS canonical form of a JSON object."""
-    return _serialize_object(data)
+def canonical_json(data: Any) -> str:
+    """Produce RFC 8785 JCS canonical form of a JSON value."""
+    return _serialize_value(data)
 
 
 def hash_canonical(data: dict[str, Any], algorithm: str = "sha256") -> str:
@@ -115,8 +113,10 @@ def hash_tool_definition(
     return hash_canonical(definition)
 
 
-def hash_file(path: Path, algorithm: str = "sha256") -> str:
-    """Hash a file's contents."""
+def hash_file(path: Path, algorithm: str = "sha256") -> str | None:
+    """Hash a file's contents. Returns None if the file does not exist."""
+    if not path.is_file():
+        return None
     h = hashlib.new(algorithm)
     with open(path, "rb") as f:
         while chunk := f.read(8192):
@@ -131,17 +131,28 @@ def hash_bytes(data: bytes, algorithm: str = "sha256") -> str:
     return f"{algorithm}:{h.hexdigest()}"
 
 
+_RANGE_PREFIX = re.compile(r"^[~^>=<!]+")
 _VERSION_PATTERN = re.compile(
-    r"(?:^|[/@:])(\d+\.\d+(?:\.\d+)?(?:[-+][a-zA-Z0-9.]+)?)(?:$|[/?#])"
+    r"(?:^|[/@:])(\d+\.\d+(?:\.\d+)?(?:[-+][a-zA-Z0-9.]+)?)(?:$|[/?#,;\s])"
 )
 
 
 def extract_version_pin(reference: str) -> str | None:
     """Extract a pinned version from a package reference or URL.
 
-    Returns None if no pinned version is found (floating/latest).
+    Returns None for range specifiers (^, ~, >=, etc.) and floating/latest.
+    Returns the version only for exact pins (@1.2.3, ==1.2.3, bare 1.2.3).
     """
-    if reference.endswith("@latest") or reference.endswith(":latest"):
+    stripped = reference.strip()
+    if stripped in ("*", "latest") or stripped.endswith("@latest") or stripped.endswith(":latest"):
         return None
-    m = _VERSION_PATTERN.search(reference)
+    if _RANGE_PREFIX.match(stripped):
+        prefix = _RANGE_PREFIX.match(stripped)
+        if prefix and prefix.group(0) not in ("==",):
+            return None
+        if prefix and prefix.group(0) == "==":
+            rest = stripped[prefix.end() :]
+            m = re.match(r"(\d+\.\d+(?:\.\d+)?(?:[-+][a-zA-Z0-9.]+)?)", rest)
+            return m.group(1) if m else None
+    m = _VERSION_PATTERN.search(stripped)
     return m.group(1) if m else None

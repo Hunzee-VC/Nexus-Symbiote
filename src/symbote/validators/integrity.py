@@ -70,12 +70,14 @@ class IntegrityValidator:
 
     def _check_tool_hash(self, comp, report: IntegrityReport) -> None:  # type: ignore[no-untyped-def]
         if not hasattr(comp, "definition_hash") or not comp.definition_hash:
-            report.issues.append(IntegrityIssue(
-                component_ref=comp.bom_ref,
-                category="missing_hash",
-                detail=f"Tool '{comp.name}' has no definition hash — rug-pull detection disabled.",
-                severity="warning",
-            ))
+            report.issues.append(
+                IntegrityIssue(
+                    component_ref=comp.bom_ref,
+                    category="missing_hash",
+                    detail=f"Tool '{comp.name}' has no definition hash — rug-pull detection disabled.",
+                    severity="warning",
+                )
+            )
             return
 
         if hasattr(comp, "description_text") and comp.description_text is not None:
@@ -86,66 +88,82 @@ class IntegrityValidator:
                 getattr(comp, "annotations", None) or None,
             )
             if recomputed != comp.definition_hash:
-                report.issues.append(IntegrityIssue(
-                    component_ref=comp.bom_ref,
-                    category="hash_mismatch",
-                    detail=(
-                        f"Tool '{comp.name}' definition hash mismatch: "
-                        f"declared={comp.definition_hash}, computed={recomputed}. "
-                        "Possible rug-pull — tool definition changed post-approval."
-                    ),
-                    severity="error",
-                ))
+                report.issues.append(
+                    IntegrityIssue(
+                        component_ref=comp.bom_ref,
+                        category="hash_mismatch",
+                        detail=(
+                            f"Tool '{comp.name}' definition hash mismatch: "
+                            f"declared={comp.definition_hash}, computed={recomputed}. "
+                            "Possible rug-pull — tool definition changed post-approval."
+                        ),
+                        severity="error",
+                    )
+                )
                 report.hashes_failed += 1
                 report.is_valid = False
             else:
                 report.hashes_verified += 1
 
     def _check_model_integrity(  # type: ignore[no-untyped-def]
-        self, comp, project_root: Path | None, report: IntegrityReport,
+        self,
+        comp,
+        project_root: Path | None,
+        report: IntegrityReport,
     ) -> None:
         if hasattr(comp, "serialization_safety"):
             if comp.serialization_safety == SerializationSafety.UNSAFE_CODE_EXECUTION:
-                report.issues.append(IntegrityIssue(
-                    component_ref=comp.bom_ref,
-                    category="unsafe_format",
-                    detail=(
-                        f"Model '{comp.name}' uses an unsafe serialization "
-                        "format that allows arbitrary code execution."
-                    ),
-                    severity="critical",
-                ))
+                report.issues.append(
+                    IntegrityIssue(
+                        component_ref=comp.bom_ref,
+                        category="unsafe_format",
+                        detail=(
+                            f"Model '{comp.name}' uses an unsafe serialization "
+                            "format that allows arbitrary code execution."
+                        ),
+                        severity="critical",
+                    )
+                )
 
         if hasattr(comp, "signing_status") and comp.signing_status == "unsigned":
-            report.issues.append(IntegrityIssue(
-                component_ref=comp.bom_ref,
-                category="unsigned_model",
-                detail=f"Model '{comp.name}' has no cryptographic signature.",
-                severity="warning",
-            ))
+            report.issues.append(
+                IntegrityIssue(
+                    component_ref=comp.bom_ref,
+                    category="unsigned_model",
+                    detail=f"Model '{comp.name}' has no cryptographic signature.",
+                    severity="warning",
+                )
+            )
 
         if hasattr(comp, "trust_remote_code") and comp.trust_remote_code:
-            report.issues.append(IntegrityIssue(
-                component_ref=comp.bom_ref,
-                category="trust_remote_code",
-                detail=(
-                    f"Model '{comp.name}' requires trust_remote_code=True "
-                    "— arbitrary code execution from model repo."
-                ),
-                severity="critical",
-            ))
+            report.issues.append(
+                IntegrityIssue(
+                    component_ref=comp.bom_ref,
+                    category="trust_remote_code",
+                    detail=(
+                        f"Model '{comp.name}' requires trust_remote_code=True "
+                        "— arbitrary code execution from model repo."
+                    ),
+                    severity="critical",
+                )
+            )
             report.is_valid = False
 
     def _check_prompt_hash(  # type: ignore[no-untyped-def]
-        self, comp, project_root: Path | None, report: IntegrityReport,
+        self,
+        comp,
+        project_root: Path | None,
+        report: IntegrityReport,
     ) -> None:
         if not hasattr(comp, "content_hash") or not comp.content_hash:
-            report.issues.append(IntegrityIssue(
-                component_ref=comp.bom_ref,
-                category="missing_hash",
-                detail=f"Prompt '{comp.name}' has no content hash.",
-                severity="warning",
-            ))
+            report.issues.append(
+                IntegrityIssue(
+                    component_ref=comp.bom_ref,
+                    category="missing_hash",
+                    detail=f"Prompt '{comp.name}' has no content hash.",
+                    severity="warning",
+                )
+            )
             return
 
         if project_root and comp.source_path:
@@ -155,15 +173,17 @@ class IntegrityValidator:
             if path.exists():
                 recomputed = hash_file(path)
                 if recomputed != comp.content_hash:
-                    report.issues.append(IntegrityIssue(
-                        component_ref=comp.bom_ref,
-                        category="hash_mismatch",
-                        detail=(
-                            f"Prompt '{comp.name}' content hash mismatch "
-                            "— file changed since scan."
-                        ),
-                        severity="error",
-                    ))
+                    report.issues.append(
+                        IntegrityIssue(
+                            component_ref=comp.bom_ref,
+                            category="hash_mismatch",
+                            detail=(
+                                f"Prompt '{comp.name}' content hash mismatch "
+                                "— file changed since scan."
+                            ),
+                            severity="error",
+                        )
+                    )
                     report.hashes_failed += 1
                     report.is_valid = False
                 else:
@@ -171,18 +191,23 @@ class IntegrityValidator:
 
     def _check_mcp_version_pin(self, comp, report: IntegrityReport) -> None:  # type: ignore[no-untyped-def]
         if hasattr(comp, "version_pinned") and not comp.version_pinned:
-            report.issues.append(IntegrityIssue(
-                component_ref=comp.bom_ref,
-                category="unpinned_version",
-                detail=(
-                    f"MCP server '{comp.name}' uses an unpinned package "
-                    "— vulnerable to supply chain attacks."
-                ),
-                severity="warning",
-            ))
+            report.issues.append(
+                IntegrityIssue(
+                    component_ref=comp.bom_ref,
+                    category="unpinned_version",
+                    detail=(
+                        f"MCP server '{comp.name}' uses an unpinned package "
+                        "— vulnerable to supply chain attacks."
+                    ),
+                    severity="warning",
+                )
+            )
 
     def _check_file_hash(  # type: ignore[no-untyped-def]
-        self, comp, project_root: Path | None, report: IntegrityReport,
+        self,
+        comp,
+        project_root: Path | None,
+        report: IntegrityReport,
     ) -> None:
         if not project_root or not comp.source_path:
             return
@@ -199,24 +224,28 @@ class IntegrityValidator:
             try:
                 recomputed = hash_file(path, algorithm=algo)
                 if recomputed != declared_hash:
-                    report.issues.append(IntegrityIssue(
-                        component_ref=comp.bom_ref,
-                        category="file_hash_mismatch",
-                        detail=(
-                            f"File hash mismatch for '{comp.name}': "
-                            f"declared={declared_hash}, "
-                            f"computed={recomputed}."
-                        ),
-                        severity="error",
-                    ))
+                    report.issues.append(
+                        IntegrityIssue(
+                            component_ref=comp.bom_ref,
+                            category="file_hash_mismatch",
+                            detail=(
+                                f"File hash mismatch for '{comp.name}': "
+                                f"declared={declared_hash}, "
+                                f"computed={recomputed}."
+                            ),
+                            severity="error",
+                        )
+                    )
                     report.hashes_failed += 1
                     report.is_valid = False
                 else:
                     report.hashes_verified += 1
             except OSError:
-                report.issues.append(IntegrityIssue(
-                    component_ref=comp.bom_ref,
-                    category="hash_error",
-                    detail=f"Could not read '{path}' to verify hash.",
-                    severity="warning",
-                ))
+                report.issues.append(
+                    IntegrityIssue(
+                        component_ref=comp.bom_ref,
+                        category="hash_error",
+                        detail=f"Could not read '{path}' to verify hash.",
+                        severity="warning",
+                    )
+                )

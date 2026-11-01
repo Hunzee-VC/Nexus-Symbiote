@@ -41,9 +41,7 @@ class ComponentBase(BaseModel):
     source_path: str | None = Field(
         default=None, description="Filesystem path or URL where this was discovered"
     )
-    properties: dict[str, Any] = Field(
-        default_factory=dict, description="Extension properties"
-    )
+    properties: dict[str, Any] = Field(default_factory=dict, description="Extension properties")
 
 
 class CapabilityDeclaration(BaseModel):
@@ -111,9 +109,7 @@ class MCPServerComponent(ComponentBase):
     """An MCP server that provides tools to agents."""
 
     component_type: ComponentType = ComponentType.MCP_SERVER
-    transport: str | None = Field(
-        default=None, description="stdio, sse, streamable-http"
-    )
+    transport: str | None = Field(default=None, description="stdio, sse, streamable-http")
     command: str | None = None
     args: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
@@ -195,9 +191,7 @@ class PromptComponent(ComponentBase):
         default=None,
         description="system-prompt, planner, instruction, rules-file, skill-definition",
     )
-    content_hash: str | None = Field(
-        default=None, description="Hash of the exact prompt bytes"
-    )
+    content_hash: str | None = Field(default=None, description="Hash of the exact prompt bytes")
     variable_schema: dict[str, Any] | None = Field(
         default=None, description="Schema of template variables"
     )
@@ -290,9 +284,7 @@ class RegistryEntryComponent(ComponentBase):
     publisher_verified: bool = False
     attestation_status: str | None = None
     signing_key_reference: str | None = None
-    trust_model: str | None = Field(
-        default=None, description="tofu, pki, sigstore, none"
-    )
+    trust_model: str | None = Field(default=None, description="tofu, pki, sigstore, none")
     risks: list[RiskAssessment] = Field(default_factory=list)
 
 
@@ -312,9 +304,7 @@ class SkillPackageComponent(ComponentBase):
 class CompletenessClaim(BaseModel):
     """What was actually scanned and what was excluded."""
 
-    scope: str = Field(
-        description="What this completeness claim covers (e.g. 'full-agent')"
-    )
+    scope: str = Field(description="What this completeness claim covers (e.g. 'full-agent')")
     surfaces_scanned: list[str] = Field(default_factory=list)
     surfaces_excluded: list[str] = Field(default_factory=list)
     scan_failures: list[str] = Field(default_factory=list)

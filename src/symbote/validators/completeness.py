@@ -74,20 +74,24 @@ class CompletenessValidator:
             report.surfaces_missing = list(bom.metadata.completeness.surfaces_excluded)
             report.assurance_level = bom.metadata.completeness.assurance_level
         else:
-            report.issues.append(CompletenessIssue(
-                surface="metadata",
-                description="AIBOM has no completeness claim — cannot assess coverage.",
-                severity="error",
-            ))
+            report.issues.append(
+                CompletenessIssue(
+                    surface="metadata",
+                    description="AIBOM has no completeness claim — cannot assess coverage.",
+                    severity="error",
+                )
+            )
             report.is_complete = False
 
         for ctype in MINIMUM_COMPONENT_TYPES:
             if ctype.value not in type_counts:
-                report.issues.append(CompletenessIssue(
-                    surface=ctype.value,
-                    description=f"No {ctype.value} components found — likely incomplete scan.",
-                    severity="warning",
-                ))
+                report.issues.append(
+                    CompletenessIssue(
+                        surface=ctype.value,
+                        description=f"No {ctype.value} components found — likely incomplete scan.",
+                        severity="warning",
+                    )
+                )
                 report.is_complete = False
 
         for c in bom.components:
@@ -98,30 +102,36 @@ class CompletenessValidator:
             ):
                 if not (hasattr(c, "content_hash") and c.content_hash):
                     if not (hasattr(c, "definition_hash") and c.definition_hash):
-                        report.issues.append(CompletenessIssue(
-                            surface=c.bom_ref,
-                            description=f"Component '{c.name}' has no integrity hash.",
-                            severity="warning",
-                        ))
+                        report.issues.append(
+                            CompletenessIssue(
+                                surface=c.bom_ref,
+                                description=f"Component '{c.name}' has no integrity hash.",
+                                severity="warning",
+                            )
+                        )
 
         orphan_refs = self._find_orphan_refs(bom)
         for ref, field_name in orphan_refs:
-            report.issues.append(CompletenessIssue(
-                surface=ref,
-                description=f"Reference '{ref}' in '{field_name}' points to no component.",
-                severity="error",
-            ))
+            report.issues.append(
+                CompletenessIssue(
+                    surface=ref,
+                    description=f"Reference '{ref}' in '{field_name}' points to no component.",
+                    severity="error",
+                )
+            )
             report.is_complete = False
 
         if report.surfaces_missing:
             for surface in report.surfaces_missing:
                 for key, _desc in EXPECTED_SURFACES.items():
                     if key in surface.lower():
-                        report.issues.append(CompletenessIssue(
-                            surface=key,
-                            description=f"Surface excluded: {surface}",
-                            severity="info",
-                        ))
+                        report.issues.append(
+                            CompletenessIssue(
+                                surface=key,
+                                description=f"Surface excluded: {surface}",
+                                severity="info",
+                            )
+                        )
 
         return report
 
@@ -142,27 +152,33 @@ class CompletenessValidator:
         bom_types = {c.component_type for c in bom.components}
 
         if has_mcp and ComponentType.MCP_SERVER not in bom_types:
-            report.issues.append(CompletenessIssue(
-                surface="mcp-config",
-                description="Project has MCP config files but AIBOM has no MCP server components.",
-                severity="error",
-            ))
+            report.issues.append(
+                CompletenessIssue(
+                    surface="mcp-config",
+                    description="Project has MCP config files but AIBOM has no MCP server components.",
+                    severity="error",
+                )
+            )
             report.is_complete = False
 
         if has_prompt and ComponentType.PROMPT_TEMPLATE not in bom_types:
-            report.issues.append(CompletenessIssue(
-                surface="prompts",
-                description="Project has instruction files but AIBOM has no prompt components.",
-                severity="error",
-            ))
+            report.issues.append(
+                CompletenessIssue(
+                    surface="prompts",
+                    description="Project has instruction files but AIBOM has no prompt components.",
+                    severity="error",
+                )
+            )
             report.is_complete = False
 
         if has_models and ComponentType.MODEL not in bom_types:
-            report.issues.append(CompletenessIssue(
-                surface="model-weights",
-                description="Project has model files but AIBOM has no model components.",
-                severity="error",
-            ))
+            report.issues.append(
+                CompletenessIssue(
+                    surface="model-weights",
+                    description="Project has model files but AIBOM has no model components.",
+                    severity="error",
+                )
+            )
             report.is_complete = False
 
         return report
@@ -178,16 +194,27 @@ class CompletenessValidator:
                 orphans.append((dep.target_ref, "dependency.target_ref"))
 
         for c in bom.components:
-            for ref_field in ("model_refs", "tool_refs", "memory_refs", "prompt_refs",
-                              "guardrail_refs", "sub_agent_refs"):
+            for ref_field in (
+                "model_refs",
+                "tool_refs",
+                "memory_refs",
+                "prompt_refs",
+                "guardrail_refs",
+                "sub_agent_refs",
+            ):
                 refs = getattr(c, ref_field, None)
                 if refs:
                     for ref in refs:
                         if ref not in all_refs:
                             orphans.append((ref, f"{c.bom_ref}.{ref_field}"))
 
-            for ref_field in ("mcp_server_ref", "model_ref", "embedding_model_ref",
-                              "registry_ref", "base_model_ref"):
+            for ref_field in (
+                "mcp_server_ref",
+                "model_ref",
+                "embedding_model_ref",
+                "registry_ref",
+                "base_model_ref",
+            ):
                 ref = getattr(c, ref_field, None)
                 if ref and ref not in all_refs:
                     orphans.append((ref, f"{c.bom_ref}.{ref_field}"))

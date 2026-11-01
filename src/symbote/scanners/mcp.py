@@ -116,7 +116,9 @@ class MCPScanner(Scanner):
                 )
             )
 
-        if endpoint_url and not (endpoint_url.startswith("https://") or endpoint_url.startswith("http://localhost")):
+        if endpoint_url and not (
+            endpoint_url.startswith("https://") or endpoint_url.startswith("http://localhost")
+        ):
             risks.append(
                 RiskAssessment(
                     severity=RiskSeverity.HIGH,
@@ -167,9 +169,7 @@ class MCPScanner(Scanner):
                     return args[-1]
         return None
 
-    def _extract_tools(
-        self, server_name: str, config: dict[str, Any]
-    ) -> list[ToolComponent]:
+    def _extract_tools(self, server_name: str, config: dict[str, Any]) -> list[ToolComponent]:
         tools_config = config.get("tools", [])
         tool_comps = []
 
@@ -181,9 +181,7 @@ class MCPScanner(Scanner):
                     t_schema = tool_def.get("inputSchema", tool_def.get("input_schema"))
                     t_annotations = tool_def.get("annotations", {})
 
-                    def_hash = hash_tool_definition(
-                        t_name, t_desc, t_schema, t_annotations
-                    )
+                    def_hash = hash_tool_definition(t_name, t_desc, t_schema, t_annotations)
 
                     side_effect = self._classify_side_effects(t_annotations, t_name)
                     caps = self._infer_capabilities(t_name, t_desc, t_annotations)

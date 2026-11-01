@@ -71,22 +71,26 @@ class RegistryScanner(Scanner):
             risks: list[RiskAssessment] = []
 
             if not pinned:
-                risks.append(RiskAssessment(
-                    severity=RiskSeverity.MEDIUM,
-                    category="version_pinning",
-                    detail=f"npm package '{pkg_name}' uses range '{version_spec}' instead of exact pin.",
-                    recommendation="Pin to exact version in package.json and verify integrity via lockfile.",
-                ))
+                risks.append(
+                    RiskAssessment(
+                        severity=RiskSeverity.MEDIUM,
+                        category="version_pinning",
+                        detail=f"npm package '{pkg_name}' uses range '{version_spec}' instead of exact pin.",
+                        recommendation="Pin to exact version in package.json and verify integrity via lockfile.",
+                    )
+                )
 
-            components.append(RegistryEntryComponent(
-                bom_ref=f"registry:npm/{pkg_name}",
-                name=pkg_name,
-                version=version_spec,
-                registry_type="npm",
-                registry_uri="https://registry.npmjs.org",
-                trust_tier=TrustTier.THIRD_PARTY_UNSIGNED,
-                risks=risks,
-            ))
+            components.append(
+                RegistryEntryComponent(
+                    bom_ref=f"registry:npm/{pkg_name}",
+                    name=pkg_name,
+                    version=version_spec,
+                    registry_type="npm",
+                    registry_uri="https://registry.npmjs.org",
+                    trust_tier=TrustTier.THIRD_PARTY_UNSIGNED,
+                    risks=risks,
+                )
+            )
 
         return components
 
@@ -108,7 +112,9 @@ class RegistryScanner(Scanner):
                 line = line.strip()
                 if not line or line.startswith("#") or line.startswith("-"):
                     continue
-                match = re.match(r"^([a-zA-Z0-9_.-]+)\s*([><=!~]+\s*[\d.]+(?:\s*,\s*[><=!~]+\s*[\d.]+)*)?", line)
+                match = re.match(
+                    r"^([a-zA-Z0-9_.-]+)\s*([><=!~]+\s*[\d.]+(?:\s*,\s*[><=!~]+\s*[\d.]+)*)?", line
+                )
                 if not match:
                     continue
                 pkg_name = match.group(1)
@@ -119,22 +125,26 @@ class RegistryScanner(Scanner):
                 pinned = bool(re.match(r"==\d+\.\d+", version_spec.strip()))
                 risks: list[RiskAssessment] = []
                 if not pinned:
-                    risks.append(RiskAssessment(
-                        severity=RiskSeverity.MEDIUM,
-                        category="version_pinning",
-                        detail=f"PyPI package '{pkg_name}' not pinned to exact version: '{version_spec}'",
-                        recommendation="Pin to exact version with hash checking (pip --require-hashes).",
-                    ))
+                    risks.append(
+                        RiskAssessment(
+                            severity=RiskSeverity.MEDIUM,
+                            category="version_pinning",
+                            detail=f"PyPI package '{pkg_name}' not pinned to exact version: '{version_spec}'",
+                            recommendation="Pin to exact version with hash checking (pip --require-hashes).",
+                        )
+                    )
 
-                components.append(RegistryEntryComponent(
-                    bom_ref=f"registry:pypi/{pkg_name}",
-                    name=pkg_name,
-                    version=version_spec.strip() if version_spec else None,
-                    registry_type="pypi",
-                    registry_uri="https://pypi.org",
-                    trust_tier=TrustTier.THIRD_PARTY_UNSIGNED,
-                    risks=risks,
-                ))
+                components.append(
+                    RegistryEntryComponent(
+                        bom_ref=f"registry:pypi/{pkg_name}",
+                        name=pkg_name,
+                        version=version_spec.strip() if version_spec else None,
+                        registry_type="pypi",
+                        registry_uri="https://pypi.org",
+                        trust_tier=TrustTier.THIRD_PARTY_UNSIGNED,
+                        risks=risks,
+                    )
+                )
 
         pyproject = root / "pyproject.toml"
         if pyproject.exists():
@@ -145,13 +155,15 @@ class RegistryScanner(Scanner):
                 for pkg_name in deps_section:
                     if self._is_ai_package(pkg_name):
                         if not any(c.name == pkg_name for c in components):
-                            components.append(RegistryEntryComponent(
-                                bom_ref=f"registry:pypi/{pkg_name}",
-                                name=pkg_name,
-                                registry_type="pypi",
-                                registry_uri="https://pypi.org",
-                                trust_tier=TrustTier.THIRD_PARTY_UNSIGNED,
-                            ))
+                            components.append(
+                                RegistryEntryComponent(
+                                    bom_ref=f"registry:pypi/{pkg_name}",
+                                    name=pkg_name,
+                                    registry_type="pypi",
+                                    registry_uri="https://pypi.org",
+                                    trust_tier=TrustTier.THIRD_PARTY_UNSIGNED,
+                                )
+                            )
             except OSError:
                 pass
 
@@ -160,7 +172,12 @@ class RegistryScanner(Scanner):
     def _scan_docker(self, root: Path, result: ScanResult) -> list[RegistryEntryComponent]:
         components: list[RegistryEntryComponent] = []
 
-        for dockerfile_name in ["Dockerfile", "Dockerfile.agent", "docker-compose.yml", "docker-compose.yaml"]:
+        for dockerfile_name in [
+            "Dockerfile",
+            "Dockerfile.agent",
+            "docker-compose.yml",
+            "docker-compose.yaml",
+        ]:
             path = root / dockerfile_name
             if not path.exists():
                 continue
@@ -172,24 +189,31 @@ class RegistryScanner(Scanner):
 
             from_images = re.findall(r"(?:FROM|image:\s*)\s*([^\s]+)", content)
             for image in from_images:
-                if any(kw in image.lower() for kw in ("vllm", "ollama", "triton", "tgi", "llama", "model")):
+                if any(
+                    kw in image.lower()
+                    for kw in ("vllm", "ollama", "triton", "tgi", "llama", "model")
+                ):
                     has_tag = ":" in image and not image.endswith(":latest")
                     risks: list[RiskAssessment] = []
                     if not has_tag:
-                        risks.append(RiskAssessment(
-                            severity=RiskSeverity.HIGH,
-                            category="version_pinning",
-                            detail=f"Docker image '{image}' is not pinned to a specific tag/digest.",
-                            recommendation="Pin to a SHA256 digest for reproducible builds.",
-                        ))
+                        risks.append(
+                            RiskAssessment(
+                                severity=RiskSeverity.HIGH,
+                                category="version_pinning",
+                                detail=f"Docker image '{image}' is not pinned to a specific tag/digest.",
+                                recommendation="Pin to a SHA256 digest for reproducible builds.",
+                            )
+                        )
 
-                    components.append(RegistryEntryComponent(
-                        bom_ref=f"registry:docker/{image}",
-                        name=image,
-                        registry_type="docker-hub",
-                        trust_tier=TrustTier.THIRD_PARTY_UNSIGNED,
-                        risks=risks,
-                    ))
+                    components.append(
+                        RegistryEntryComponent(
+                            bom_ref=f"registry:docker/{image}",
+                            name=image,
+                            registry_type="docker-hub",
+                            trust_tier=TrustTier.THIRD_PARTY_UNSIGNED,
+                            risks=risks,
+                        )
+                    )
 
         return components
 

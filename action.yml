@@ -1,0 +1,124 @@
+name: "SymBiote AIBOM Scanner"
+description: "Generate and validate an Agent Bill of Materials (AIBOM) for AI supply chain security"
+branding:
+  icon: "shield"
+  color: "blue"
+
+inputs:
+  scan-path:
+    description: "Path to the project to scan"
+    default: "."
+  format:
+    description: "Output format: json, cyclonedx, spdx, sarif"
+    default: "json"
+  output-file:
+    description: "Path to write the AIBOM"
+    default: "symbote-aibom.json"
+  scanners:
+    description: "Comma-separated list of scanners to run (default: all)"
+    default: ""
+  validate:
+    description: "Run completeness and integrity validation"
+    default: "true"
+  risk-check:
+    description: "Run risk scoring gate"
+    default: "true"
+  risk-threshold:
+    description: "Risk score threshold for pass/fail gate (0 to skip)"
+    default: "50"
+  sarif-upload:
+    description: "Generate and upload SARIF to GitHub Security tab"
+    default: "true"
+  python-version:
+    description: "Python version to use"
+    default: "3.12"
+
+outputs:
+  aibom-path:
+    description: "Path to the generated AIBOM file"
+    value: ${{ steps.scan.outputs.aibom_path }}
+  risk-score:
+    description: "Numeric risk score"
+    value: ${{ steps.risk.outputs.risk_score }}
+  risk-passed:
+    description: "Whether the risk gate passed (true/false/skipped)"
+    value: ${{ steps.risk.outputs.passed }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install SymBiote
+      shell: bash
+      run: pip install symbote
+
+    - name: Scan project
+      id: scan
+      shell: bash
+      run: |
+        ARGS="${{ inputs.scan-path }} -f ${{ inputs.format }} -o ${{ inputs.output-file }}"
+        if [ -n "${{ inputs.scanners }}" ]; then
+          IFS=',' read -ra SCANNERS <<< "${{ inputs.scanners }}"
+          for s in "${SCANNERS[@]}"; do
+            ARGS="$ARGS --scanner $(echo $s | xargs)"
+          done
+        fi
+        symbote scan $ARGS
+        echo "aibom_path=${{ inputs.output-file }}" >> "$GITHUB_OUTPUT"
+
+    - name: Generate native AIBOM for validation
+      if: inputs.validate == 'true' || inputs.risk-check == 'true'
+      shell: bash
+      run: |
+        ARGS="${{ inputs.scan-path }} -f json -o .symbote-native.json"
+        if [ -n "${{ inputs.scanners }}" ]; then
+          IFS=',' read -ra SCANNERS <<< "${{ inputs.scanners }}"
+          for s in "${SCANNERS[@]}"; do
+            ARGS="$ARGS --scanner $(echo $s | xargs)"
+          done
+        fi
+        symbote scan $ARGS
+
+    - name: Validate AIBOM
+      if: inputs.validate == 'true'
+      shell: bash
+      run: symbote validate .symbote-native.json --project "${{ inputs.scan-path }}" || true
+
+    - name: Risk gate
+      id: risk
+      shell: bash
+      if: inputs.risk-check == 'true' && inputs.risk-threshold != '0'
+      run: |
+        output=$(symbote risk .symbote-native.json --threshold "${{ inputs.risk-threshold }}" --json-output 2>&1) && passed=true || passed=false
+        score=$(echo "$output" | python3 -c "import sys,json; print(json.load(sys.stdin).get('overall_score', 0))" 2>/dev/null || echo "0")
+        echo "risk_score=$score" >> "$GITHUB_OUTPUT"
+        echo "passed=$passed" >> "$GITHUB_OUTPUT"
+        if [ "$passed" = "false" ]; then
+          echo "::error::SymBiote risk gate failed (score: $score, threshold: ${{ inputs.risk-threshold }})"
+          exit 1
+        fi
+
+    - name: Generate SARIF
+      if: inputs.sarif-upload == 'true'
+      shell: bash
+      run: symbote scan "${{ inputs.scan-path }}" -f sarif -o symbote-results.sarif
+
+    - name: Upload SARIF to GitHub Security
+      if: inputs.sarif-upload == 'true' && always()
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: symbote-results.sarif
+        category: symbote
+
+    - name: Upload AIBOM artifact
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: symbote-aibom
+        path: |
+          ${{ inputs.output-file }}
+          symbote-results.sarif

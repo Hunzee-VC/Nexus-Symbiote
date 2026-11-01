@@ -115,7 +115,11 @@ class ModelScanner(Scanner):
 
             model_type = self._infer_model_type(config, path)
             derivation = config.get("peft_type") if config else None
-            quant = (config.get("quantization_method") or config.get("quant_method")) if config else None
+            quant = (
+                (config.get("quantization_method") or config.get("quant_method"))
+                if config
+                else None
+            )
             trust_remote_code = bool(config.get("trust_remote_code")) if config else False
 
             comp = ModelComponent(
@@ -169,6 +173,7 @@ class ModelScanner(Scanner):
     def _hash_chat_template(self, model_dir: Path, config: dict[str, Any] | None) -> str | None:
         if config and "chat_template" in config:
             from symbote.core.hashing import hash_bytes
+
             template = config["chat_template"]
             if isinstance(template, str):
                 return hash_bytes(template.encode("utf-8"))
@@ -194,44 +199,58 @@ class ModelScanner(Scanner):
         return "foundation"
 
     def _assess_model_risks(
-        self, path: Path, fmt_key: str, safety: SerializationSafety,
-        signing_status: str, config: dict[str, Any] | None,
+        self,
+        path: Path,
+        fmt_key: str,
+        safety: SerializationSafety,
+        signing_status: str,
+        config: dict[str, Any] | None,
     ) -> list[RiskAssessment]:
         risks: list[RiskAssessment] = []
 
         if safety == SerializationSafety.UNSAFE_CODE_EXECUTION:
-            risks.append(RiskAssessment(
-                severity=RiskSeverity.CRITICAL,
-                category="serialization_format",
-                detail=f"Model '{path.name}' uses {fmt_key} format — arbitrary code execution on deserialization.",
-                recommendation="Convert to SafeTensors. Block pickle/pt/pth in production.",
-                references=["https://huggingface.co/blog/safetensors-security-audit"],
-            ))
+            risks.append(
+                RiskAssessment(
+                    severity=RiskSeverity.CRITICAL,
+                    category="serialization_format",
+                    detail=f"Model '{path.name}' uses {fmt_key} format — arbitrary code execution on deserialization.",
+                    recommendation="Convert to SafeTensors. Block pickle/pt/pth in production.",
+                    references=["https://huggingface.co/blog/safetensors-security-audit"],
+                )
+            )
 
         if safety == SerializationSafety.UNSAFE_TEMPLATE_INJECTION:
-            risks.append(RiskAssessment(
-                severity=RiskSeverity.HIGH,
-                category="serialization_format",
-                detail=f"Model '{path.name}' uses GGUF; chat template metadata vulnerable to Jinja2 SSTI (CVE-2024-34359).",
-                recommendation="Validate chat template content. Use llama-cpp-python >= 0.2.72.",
-                references=["https://nvd.nist.gov/vuln/detail/CVE-2024-34359"],
-            ))
+            risks.append(
+                RiskAssessment(
+                    severity=RiskSeverity.HIGH,
+                    category="serialization_format",
+                    detail=f"Model '{path.name}' uses GGUF; chat template metadata vulnerable to Jinja2 SSTI (CVE-2024-34359).",
+                    recommendation="Validate chat template content. Use llama-cpp-python >= 0.2.72.",
+                    references=["https://nvd.nist.gov/vuln/detail/CVE-2024-34359"],
+                )
+            )
 
         if signing_status == "unsigned":
-            risks.append(RiskAssessment(
-                severity=RiskSeverity.HIGH,
-                category="signing_status",
-                detail=f"Model '{path.name}' has no cryptographic signature.",
-                recommendation="Sign with OpenSSF Model Signing (Sigstore).",
-                references=["https://openssf.org/blog/2025/04/04/launch-of-model-signing-v1-0-openssf-ai-ml-working-group-secures-the-machine-learning-supply-chain/"],
-            ))
+            risks.append(
+                RiskAssessment(
+                    severity=RiskSeverity.HIGH,
+                    category="signing_status",
+                    detail=f"Model '{path.name}' has no cryptographic signature.",
+                    recommendation="Sign with OpenSSF Model Signing (Sigstore).",
+                    references=[
+                        "https://openssf.org/blog/2025/04/04/launch-of-model-signing-v1-0-openssf-ai-ml-working-group-secures-the-machine-learning-supply-chain/"
+                    ],
+                )
+            )
 
         if config and config.get("trust_remote_code"):
-            risks.append(RiskAssessment(
-                severity=RiskSeverity.CRITICAL,
-                category="code_execution",
-                detail="trust_remote_code=True allows arbitrary code from the model repository.",
-                recommendation="Audit remote code or use a model that does not require it.",
-            ))
+            risks.append(
+                RiskAssessment(
+                    severity=RiskSeverity.CRITICAL,
+                    category="code_execution",
+                    detail="trust_remote_code=True allows arbitrary code from the model repository.",
+                    recommendation="Audit remote code or use a model that does not require it.",
+                )
+            )
 
         return risks

@@ -22,6 +22,7 @@ class Generator(ABC):
     def generate_json(self, bom: AIBOM, indent: int = 2) -> str:
         """Convert an AIBOM into the target format as a JSON string."""
         import json
+
         return json.dumps(self.generate(bom), indent=indent, default=str)
 
     def save(self, bom: AIBOM, path: Path, indent: int = 2) -> None:

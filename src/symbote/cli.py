@@ -54,20 +54,20 @@ def main() -> None:
     "-f",
     "--format",
     "output_format",
-    type=click.Choice(["json", "cyclonedx", "spdx"]),
-    default="json",
-    help="Output format",
+    type=click.Choice(["json", "cyclonedx", "spdx", "sarif"]),
+    default=None,
+    help="Output format (default: json, or from .symbote.yaml)",
 )
 @click.option(
     "--scanner",
     "scanners",
     multiple=True,
-    help="Specific scanners to run (default: all)",
+    help="Specific scanners to run (default: all, or from .symbote.yaml)",
 )
 def scan(
     project_path: str,
     output: str | None,
-    output_format: str,
+    output_format: str | None,
     scanners: tuple[str, ...],
 ) -> None:
     """Scan a project and generate an AIBOM."""
@@ -76,11 +76,25 @@ def scan(
         err_console.print(f"[red]Error:[/] '{project_path}' is not a directory")
         sys.exit(1)
 
+    from symbote.policy import load_policy
+
+    policy = load_policy(root)
+
+    if not output_format:
+        output_format = policy.output.default_format if policy else "json"
+
     console.print(f"[bold]Scanning[/] {root}")
 
     aibom = AIBOM(metadata=AIBOMMetadata(authors=[]))
     all_scanners = _get_scanners()
-    selected = scanners or tuple(all_scanners.keys())
+
+    if scanners:
+        selected = scanners
+    elif policy:
+        selected = tuple(s for s in policy.scan.scanners if s in all_scanners)
+    else:
+        selected = tuple(all_scanners.keys())
+
     surfaces_scanned: list[str] = []
     surfaces_excluded: list[str] = []
     scan_failures: list[str] = []
@@ -122,6 +136,10 @@ def scan(
         from symbote.generators.spdx import SPDXGenerator
 
         out_data = SPDXGenerator().generate_json(aibom)
+    elif output_format == "sarif":
+        from symbote.generators.sarif import SARIFGenerator
+
+        out_data = SARIFGenerator().generate_json(aibom)
     else:
         out_data = aibom.to_json()
 
@@ -181,13 +199,18 @@ def validate(aibom_path: str, project: str | None) -> None:
 
 @main.command()
 @click.argument("aibom_path", type=click.Path(exists=True))
-@click.option("--threshold", type=float, default=50.0, help="Fail threshold score")
+@click.option("--threshold", type=float, default=None, help="Fail threshold score")
 @click.option("--json-output", is_flag=True, help="Output as JSON")
-def risk(aibom_path: str, threshold: float, json_output: bool) -> None:
+def risk(aibom_path: str, threshold: float | None, json_output: bool) -> None:
     """Score supply-chain risks in an AIBOM."""
     bom = AIBOM.load(Path(aibom_path))
 
+    from symbote.policy import load_policy
     from symbote.validators.risk import RiskScorer
+
+    if threshold is None:
+        policy = load_policy(Path(aibom_path).parent)
+        threshold = policy.risk.fail_threshold if policy else 50.0
 
     scorer = RiskScorer(fail_threshold=threshold)
     passed, report = scorer.passes_gate(bom)
@@ -222,15 +245,15 @@ def risk(aibom_path: str, threshold: float, json_output: bool) -> None:
         table.add_column("Category", width=20)
         table.add_column("Detail", width=50)
 
-        for f in report.findings[:15]:
+        for finding in report.findings[:15]:
             sev_color = {"critical": "red", "high": "red", "medium": "yellow", "low": "blue"}.get(
-                f.severity.value, "white"
+                finding.severity.value, "white"
             )
             table.add_row(
-                f"[{sev_color}]{f.severity.value}[/]",
-                f.component_name[:30],
-                f.category,
-                f.detail[:50],
+                f"[{sev_color}]{finding.severity.value}[/]",
+                finding.component_name[:30],
+                finding.category,
+                finding.detail[:50],
             )
         console.print(table)
 
@@ -311,6 +334,29 @@ def summary(aibom_path: str) -> None:
         console.print("  Risk breakdown:")
         for sev, count in sorted(s["risk_breakdown"].items()):
             console.print(f"    {sev}: {count}")
+
+
+@main.command()
+@click.option("--force", is_flag=True, help="Overwrite existing .symbote.yaml")
+@click.option(
+    "--path",
+    type=click.Path(),
+    default=".",
+    help="Directory to create .symbote.yaml in",
+)
+def init(force: bool, path: str) -> None:
+    """Initialize a .symbote.yaml policy configuration."""
+    from symbote.policy import DEFAULT_POLICY_YAML
+
+    target = Path(path).resolve() / ".symbote.yaml"
+
+    if target.exists() and not force:
+        err_console.print(f"[yellow]Warning:[/] {target} already exists. Use --force to overwrite.")
+        sys.exit(1)
+
+    target.write_text(DEFAULT_POLICY_YAML, encoding="utf-8")
+    console.print(f"[bold green]Created[/] {target}")
+    console.print("  Edit this file to customize scan, risk, and validation policies.")
 
 
 if __name__ == "__main__":

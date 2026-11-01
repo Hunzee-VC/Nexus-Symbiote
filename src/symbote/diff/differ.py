@@ -157,77 +157,94 @@ class AIBOMDiffer:
             old_rank = TRUST_TIER_ORDER.get(old.trust_tier, 5)
             new_rank = TRUST_TIER_ORDER.get(new.trust_tier, 5)
             if new_rank > old_rank:
-                modifications.append({
-                    "detail": (
-                        f"Trust tier downgraded: "
-                        f"{old.trust_tier.value} → {new.trust_tier.value}"
-                    ),
-                    "severity": "high",
-                })
+                modifications.append(
+                    {
+                        "detail": (
+                            f"Trust tier downgraded: "
+                            f"{old.trust_tier.value} → {new.trust_tier.value}"
+                        ),
+                        "severity": "high",
+                    }
+                )
             else:
-                modifications.append({
-                    "detail": (
-                        f"Trust tier upgraded: "
-                        f"{old.trust_tier.value} → {new.trust_tier.value}"
-                    ),
-                    "severity": "info",
-                })
+                modifications.append(
+                    {
+                        "detail": (
+                            f"Trust tier upgraded: {old.trust_tier.value} → {new.trust_tier.value}"
+                        ),
+                        "severity": "info",
+                    }
+                )
 
         if old.version != new.version:
-            modifications.append({
-                "detail": f"Version changed: {old.version} → {new.version}",
-                "severity": "medium",
-            })
+            modifications.append(
+                {
+                    "detail": f"Version changed: {old.version} → {new.version}",
+                    "severity": "medium",
+                }
+            )
 
         old_hash = getattr(old, "definition_hash", None)
         new_hash = getattr(new, "definition_hash", None)
         if old_hash and new_hash and old_hash != new_hash:
-            modifications.append({
-                "detail": "Tool definition hash changed — possible rug-pull attack.",
-                "severity": "critical",
-            })
+            modifications.append(
+                {
+                    "detail": "Tool definition hash changed — possible rug-pull attack.",
+                    "severity": "critical",
+                }
+            )
 
         old_content = getattr(old, "content_hash", None)
         new_content = getattr(new, "content_hash", None)
         if old_content and new_content and old_content != new_content:
-            modifications.append({
-                "detail": "Prompt content hash changed.",
-                "severity": "medium",
-            })
+            modifications.append(
+                {
+                    "detail": "Prompt content hash changed.",
+                    "severity": "medium",
+                }
+            )
 
         for hash_key in set(old.hashes.keys()) | set(new.hashes.keys()):
             old_h = old.hashes.get(hash_key)
             new_h = new.hashes.get(hash_key)
             if old_h and new_h and old_h != new_h:
-                modifications.append({
-                    "detail": f"File hash ({hash_key}) changed.",
-                    "severity": "high",
-                })
+                modifications.append(
+                    {
+                        "detail": f"File hash ({hash_key}) changed.",
+                        "severity": "high",
+                    }
+                )
 
         old_pinned = getattr(old, "version_pinned", None)
         new_pinned = getattr(new, "version_pinned", None)
         if old_pinned is True and new_pinned is False:
-            modifications.append({
-                "detail": "Version pin removed — now floating.",
-                "severity": "high",
-            })
+            modifications.append(
+                {
+                    "detail": "Version pin removed — now floating.",
+                    "severity": "high",
+                }
+            )
 
         old_safety = getattr(old, "serialization_safety", None)
         new_safety = getattr(new, "serialization_safety", None)
         if old_safety and new_safety and old_safety != new_safety:
-            modifications.append({
-                "detail": f"Serialization safety changed: {old_safety.value} → {new_safety.value}",
-                "severity": "high",
-            })
+            modifications.append(
+                {
+                    "detail": f"Serialization safety changed: {old_safety.value} → {new_safety.value}",
+                    "severity": "high",
+                }
+            )
 
         old_signing = getattr(old, "signing_status", None)
         new_signing = getattr(new, "signing_status", None)
         if old_signing and new_signing and old_signing != new_signing:
             sev = "high" if new_signing == "unsigned" else "info"
-            modifications.append({
-                "detail": f"Signing status changed: {old_signing} → {new_signing}",
-                "severity": sev,
-            })
+            modifications.append(
+                {
+                    "detail": f"Signing status changed: {old_signing} → {new_signing}",
+                    "severity": sev,
+                }
+            )
 
         return modifications
 
@@ -236,33 +253,46 @@ class AIBOMDiffer:
         new_deps = {(d.source_ref, d.target_ref, d.relationship) for d in new.dependencies}
 
         for src, tgt, rel in sorted(new_deps - old_deps):
-            report.dependencies_added.append(DependencyChange(
-                source_ref=src, target_ref=tgt, relationship=rel, change_type="added",
-            ))
+            report.dependencies_added.append(
+                DependencyChange(
+                    source_ref=src,
+                    target_ref=tgt,
+                    relationship=rel,
+                    change_type="added",
+                )
+            )
 
         for src, tgt, rel in sorted(old_deps - new_deps):
-            report.dependencies_removed.append(DependencyChange(
-                source_ref=src, target_ref=tgt, relationship=rel, change_type="removed",
-            ))
+            report.dependencies_removed.append(
+                DependencyChange(
+                    source_ref=src,
+                    target_ref=tgt,
+                    relationship=rel,
+                    change_type="removed",
+                )
+            )
 
     def _generate_security_alerts(self, report: DiffReport) -> None:
         for change in report.components_modified:
             if change.severity == "critical":
-                report.security_alerts.append({
-                    "severity": "critical",
-                    "component": change.bom_ref,
-                    "alert": (
-                        f"Critical change in '{change.name}': "
-                        f"{'; '.join(change.details)}"
-                    ),
-                })
+                report.security_alerts.append(
+                    {
+                        "severity": "critical",
+                        "component": change.bom_ref,
+                        "alert": (
+                            f"Critical change in '{change.name}': {'; '.join(change.details)}"
+                        ),
+                    }
+                )
 
         for change in report.components_added:
-            report.security_alerts.append({
-                "severity": "medium",
-                "component": change.bom_ref,
-                "alert": (
-                    f"New component '{change.name}' "
-                    f"({change.component_type}) added to supply chain."
-                ),
-            })
+            report.security_alerts.append(
+                {
+                    "severity": "medium",
+                    "component": change.bom_ref,
+                    "alert": (
+                        f"New component '{change.name}' "
+                        f"({change.component_type}) added to supply chain."
+                    ),
+                }
+            )

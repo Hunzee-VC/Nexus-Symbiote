@@ -105,9 +105,7 @@ class RiskScorer:
 
                 sev_key = sev.value
                 report.severity_counts[sev_key] = report.severity_counts.get(sev_key, 0) + 1
-                category_scores[risk.category] = (
-                    category_scores.get(risk.category, 0.0) + weight
-                )
+                category_scores[risk.category] = category_scores.get(risk.category, 0.0) + weight
 
         report.components_with_risks = len(components_with_risks)
         report.category_scores = category_scores

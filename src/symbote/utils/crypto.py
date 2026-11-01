@@ -93,10 +93,7 @@ def verify_sigstore_bundle(
     except ImportError:
         return VerificationResult(
             verified=False,
-            error=(
-                "sigstore package not installed. "
-                "Install with: pip install symbote[sigstore]"
-            ),
+            error=("sigstore package not installed. Install with: pip install symbote[sigstore]"),
         )
 
     try:
@@ -117,14 +114,14 @@ def verify_sigstore_bundle(
 
     identity_policy = sigstore_policy.UnsafeNoOp()
     if expected_identity and expected_issuer:
-        identity_policy = sigstore_policy.Identity(
+        identity_policy = sigstore_policy.Identity(  # type: ignore[assignment]
             identity=expected_identity,
             issuer=expected_issuer,
         )
 
     try:
         artifact_data = artifact_path.read_bytes()
-        result = verifier.verify(artifact_data, bundle, identity_policy)
+        result = verifier.verify(artifact_data, bundle, identity_policy)  # type: ignore[attr-defined]
         signer_identity = None
         signer_issuer = None
         if hasattr(result, "certificate") and result.certificate:
@@ -158,12 +155,10 @@ def compute_file_hash(path: Path, algorithm: str = "sha256") -> str | None:
         return None
 
 
-def verify_hash_consistency(
-    hashes: dict[str, str], path: Path
-) -> list[VerificationResult]:
+def verify_hash_consistency(hashes: dict[str, str], path: Path) -> list[VerificationResult]:
     """Verify all hashes in a component's hash dict against the actual file."""
     results = []
     for algo, expected in hashes.items():
         full_expected = expected if ":" in expected else f"{algo}:{expected}"
-        results.append(verify_file_hash(path, full_expected, algo))
+        results.append(verify_file_hash(path, full_expected))
     return results

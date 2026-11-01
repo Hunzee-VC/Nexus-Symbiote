@@ -58,9 +58,7 @@ class CycloneDXGenerator(Generator):
     def _metadata(self, aibom: AIBOM) -> dict[str, Any]:
         meta: dict[str, Any] = {
             "timestamp": (
-                aibom.metadata.timestamp.isoformat()
-                if aibom.metadata.timestamp
-                else None
+                aibom.metadata.timestamp.isoformat() if aibom.metadata.timestamp else None
             ),
             "tools": {
                 "components": [
@@ -162,7 +160,5 @@ class CycloneDXGenerator(Generator):
         return {
             "ref": edge.source_ref,
             "dependsOn": [edge.target_ref],
-            "properties": [
-                {"name": "symbote:relationship", "value": edge.relationship}
-            ],
+            "properties": [{"name": "symbote:relationship", "value": edge.relationship}],
         }

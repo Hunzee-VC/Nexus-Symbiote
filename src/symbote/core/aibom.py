@@ -45,8 +45,7 @@ class AIBOM(BaseModel):
         existing = {c.bom_ref for c in self.components}
         if component.bom_ref in existing:
             self.components = [
-                c if c.bom_ref != component.bom_ref else component
-                for c in self.components
+                c if c.bom_ref != component.bom_ref else component for c in self.components
             ]
         else:
             self.components.append(component)

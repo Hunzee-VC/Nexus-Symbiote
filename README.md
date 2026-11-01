@@ -100,6 +100,26 @@ SymBiote assesses risks across categories:
 
 The `symbote risk` command scores all findings and applies a pass/fail gate for CI integration.
 
+## CI/CD Integration
+
+Add SymBiote to your CI pipeline to gate deployments on supply chain risk:
+
+```yaml
+# .github/workflows/aibom.yml
+- name: Generate AIBOM
+  run: symbote scan . -o aibom.json
+
+- name: Risk gate
+  run: symbote risk aibom.json --threshold 50.0
+
+- name: Drift detection
+  run: |
+    symbote scan . -o aibom-new.json
+    symbote diff aibom-baseline.json aibom-new.json --json-output
+```
+
+Use `symbote risk --json-output` for machine-readable results.
+
 ## AIBOM Diff
 
 The `symbote diff` command compares two AIBOM snapshots and detects:
@@ -138,6 +158,16 @@ pytest
 ruff check src/ tests/
 mypy src/
 ```
+
+## Examples
+
+See [`examples/customer-support-agent.json`](examples/customer-support-agent.json) for a realistic AIBOM showing a customer support agent with models, MCP servers, tools, prompts, RAG sources, and risk assessments.
+
+See [`schemas/examples/minimal-aibom.json`](schemas/examples/minimal-aibom.json) for a minimal example.
+
+## JSON Schema
+
+The AIBOM schema is defined in [`schemas/symbote-aibom-1.0.schema.json`](schemas/symbote-aibom-1.0.schema.json).
 
 ## License
 

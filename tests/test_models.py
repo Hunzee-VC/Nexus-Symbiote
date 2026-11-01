@@ -163,12 +163,12 @@ class TestHashing:
 
     def test_canonical_json_string_escaping(self):
         result = canonical_json({"k": 'hello\nworld"!'})
-        assert '\\n' in result
+        assert "\\n" in result
         assert '\\"' in result
 
     def test_canonical_json_null_handling(self):
         result = canonical_json({"a": None, "b": 1})
-        assert '"a"' not in result
+        assert '"a":null' in result
 
     def test_canonical_json_float(self):
         result = canonical_json({"v": 1.0})
@@ -239,20 +239,24 @@ class TestAIBOM:
 
     def test_add_dependency(self):
         bom = AIBOM()
-        edge = DependencyEdge(source_ref="agent:main", target_ref="tool:read", relationship="invokes")
+        edge = DependencyEdge(
+            source_ref="agent:main", target_ref="tool:read", relationship="invokes"
+        )
         bom.add_dependency(edge)
         assert len(bom.dependencies) == 1
 
     def test_get_all_risks(self):
         bom = AIBOM()
-        bom.add_component(ToolComponent(
-            bom_ref="tool:test",
-            name="test",
-            risks=[
-                RiskAssessment(severity=RiskSeverity.HIGH, category="test", detail="d1"),
-                RiskAssessment(severity=RiskSeverity.LOW, category="test", detail="d2"),
-            ],
-        ))
+        bom.add_component(
+            ToolComponent(
+                bom_ref="tool:test",
+                name="test",
+                risks=[
+                    RiskAssessment(severity=RiskSeverity.HIGH, category="test", detail="d1"),
+                    RiskAssessment(severity=RiskSeverity.LOW, category="test", detail="d2"),
+                ],
+            )
+        )
         risks = bom.get_all_risks()
         assert len(risks) == 2
 
@@ -282,11 +286,13 @@ class TestAIBOM:
 
     def test_summary(self):
         bom = AIBOM()
-        bom.add_component(ToolComponent(
-            bom_ref="tool:x",
-            name="x",
-            risks=[RiskAssessment(severity=RiskSeverity.HIGH, category="test", detail="d")],
-        ))
+        bom.add_component(
+            ToolComponent(
+                bom_ref="tool:x",
+                name="x",
+                risks=[RiskAssessment(severity=RiskSeverity.HIGH, category="test", detail="d")],
+            )
+        )
         s = bom.summary()
         assert s["total_components"] == 1
         assert s["total_risks"] == 1
