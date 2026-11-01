@@ -1,11 +1,11 @@
-# SymBiote
+# Nexus SymBiote
 
 Agent Bill of Materials (AgentBOM) generator and validator for AI agent supply chain security.
 
 ## Project structure
 
 ```
-src/symbiote/
+src/nexus_symbiote/
   core/        — Domain models (Pydantic v2), enums, AIBOM container, RFC 8785 JCS hashing
   scanners/    — Component discovery (MCP, model weights, prompts, RAG, registry)
   generators/  — BOM output (native JSON, CycloneDX 1.7, SPDX 3.0)

@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from symbiote.core.enums import ExecutionIsolation, HumanInTheLoop
-from symbiote.core.models import (
+from nexus_symbiote.core.enums import ExecutionIsolation, HumanInTheLoop
+from nexus_symbiote.core.models import (
     AgentComponent,
     AuthorizationRecord,
     CapabilityDeclaration,
@@ -13,7 +13,7 @@ from symbiote.core.models import (
     ModelComponent,
     RegistryEntryComponent,
 )
-from symbiote.scanners.model import ModelScanner
+from nexus_symbiote.scanners.model import ModelScanner
 
 
 def test_missing_security_configuration_is_unknown():
