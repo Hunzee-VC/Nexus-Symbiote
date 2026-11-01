@@ -70,6 +70,8 @@ class RAGScanner(Scanner):
 
         if isinstance(sources, dict):
             sources = [sources]
+        if not isinstance(sources, list):
+            return []
 
         for i, source in enumerate(sources):
             if not isinstance(source, dict):
@@ -81,11 +83,15 @@ class RAGScanner(Scanner):
             chunking = source.get("chunking_strategy", source.get("chunk_size"))
 
             risks: list[RiskAssessment] = []
-            source_uris = source.get("source_uris", source.get("documents", []))
-            if isinstance(source_uris, str):
-                source_uris = [source_uris]
+            source_uris_raw = source.get("source_uris", source.get("documents", []))
+            if isinstance(source_uris_raw, str):
+                source_uris_list = [source_uris_raw]
+            elif isinstance(source_uris_raw, list):
+                source_uris_list = source_uris_raw
+            else:
+                source_uris_list = []
 
-            for uri in source_uris:
+            for uri in source_uris_list:
                 if isinstance(uri, str) and ("http://" in uri or "ftp://" in uri):
                     risks.append(RiskAssessment(
                         severity=RiskSeverity.HIGH,
@@ -108,7 +114,7 @@ class RAGScanner(Scanner):
                 corpus_type=corpus_type,
                 embedding_model_name=embedding,
                 chunking_strategy=str(chunking) if chunking else None,
-                source_uris=source_uris if isinstance(source_uris, list) else [],
+                source_uris=[str(u) for u in source_uris_list if u],
                 trust_tier=TrustTier.UNKNOWN,
                 risks=risks,
             ))

@@ -27,7 +27,7 @@ class IntegrityReport:
     signatures_checked: int = 0
     issues: list[IntegrityIssue] = field(default_factory=list)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, object]:
         return {
             "is_valid": self.is_valid,
             "components_checked": self.components_checked,
