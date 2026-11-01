@@ -26,6 +26,7 @@ from symbiote.snapshot.commit import verify_document
 BUNDLE = "application/vnd.symbiote.gateway-bundle.v1+json"
 APPROVAL = "application/vnd.symbiote.call-approval.v1+json"
 RECEIPT = "application/vnd.symbiote.call-decision.v1+json"
+DEFAULT_MAX_TRUST_AGE = timedelta(hours=24)
 Name = Annotated[str, StringConstraints(min_length=1, max_length=1024)]
 Verdict = Literal["allow", "deny", "approval-required"]
 
@@ -165,7 +166,7 @@ def _authority_matches(
     grant: Grant, intent: CallIntent, rule: dict[str, Any], credentials: dict[str, Any], now: datetime
 ) -> bool:
     """Verify tenant-qualified actor → workload → target, with explicit scope and delegation bounds."""
-    if grant.subject_ref not in (rule["id"], intent.server):
+    if not grant.credential_binding_ref or grant.subject_ref not in (rule["id"], intent.server):
         return False
     credential = credentials.get(grant.credential_binding_ref)
     if (
@@ -310,7 +311,7 @@ def admit_call(
     approval: Envelope | None = None,
     approval_keys: KeyRing | None = None,
     now: datetime | None = None,
-    max_trust_age: timedelta = timedelta(hours=24),
+    max_trust_age: timedelta = DEFAULT_MAX_TRUST_AGE,
 ) -> Envelope:
     """Verify policy, evaluate and persist a signed receipt before allowing external execution.
 
@@ -405,6 +406,7 @@ def dispatch_call(
     approval: Envelope | None = None,
     approval_keys: KeyRing | None = None,
     now: datetime | None = None,
+    max_trust_age: timedelta = DEFAULT_MAX_TRUST_AGE,
 ) -> tuple[Envelope, ResponseT | None]:
     """Adapter boundary. Isolate exact arguments and derive their resource before any dispatch."""
     encoded = canonical_bytes(arguments)
@@ -424,6 +426,7 @@ def dispatch_call(
         approval=approval,
         approval_keys=approval_keys,
         now=now,
+        max_trust_age=max_trust_age,
     )
     decision = verify_receipt(signed, KeyRing.from_public_keys([receipt_key.public_key()]))
     return signed, invoke(call_args) if decision.decision == "allow" else None
