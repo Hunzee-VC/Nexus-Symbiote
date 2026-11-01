@@ -1,29 +1,27 @@
-# Security
+# Security policy
 
-## Status and boundaries
-
-Nexus SymBiote is alpha software. Treat a repository, BOM, model file, registry response and tool description as untrusted input. A static scan observes supported local files; it does not prove the absence of other components or the effective permissions or behavior of a running agent.
-
-A digest identifies bytes only relative to a trusted expected digest. A signature must be verified against an authorized identity, issuer, subject and policy; it is not proof that content is safe or that the inventory is complete. Unknown, stale, excluded and failed collection are not evidence of absence.
-
-Generated inventories may contain sensitive paths, endpoint details, prompts, tool descriptions or configuration. Review and protect outputs and CI artifacts, apply appropriate access controls and retention, and avoid scanning sensitive production environments until the collection and redaction controls have been assessed.
-
-Do not execute discovered MCP servers, model code, hooks or other artifacts simply to inventory them. Scan untrusted projects in a disposable, least-privilege environment without production credentials or unnecessary network access.
-
-The `verify-live` command starts only exact server references and executable digests from an operator-owned launch policy. A checkout cannot supply launcher arguments, environment or working directory. The verifier copies the approved bytes into a private directory, applies a bounded protocol deadline and terminates the process group. Execute approved servers inside an externally isolated worker with a restricted filesystem, resource limits and egress policy. The OS, interpreter and dynamic dependencies remain in the trust boundary. Observed descriptors alone cannot establish runtime behavior or deployment identity.
-
-## Trust boundaries
-
-- Project files and imported BOMs cross into the parser and must not escape the intended filesystem scope or exhaust resources.
-- Model, registry and signature metadata are assertions until their source and subject are verified under an explicit trust policy.
-- The `advisories` command is the only networked surface; it posts package name and version to OSV.dev. `scan` and `verify-live` make no network requests of their own (launched MCP servers may).
-- The generated BOM and findings are inputs to a decision; they do not provide runtime isolation, authorization or enforcement.
-- CI and artifact publishing have separate trust boundaries. Never expose release credentials to workflows processing untrusted repository content.
+Nexus SymBiote is alpha security tooling. Inventory, signature verification, and policy decisions have different meanings. A successful scan or low risk score does not establish that an agent, model, dataset, or tool is benign.
 
 ## Reporting a vulnerability
 
-Please avoid publishing exploit details or secrets in a public issue. Contact the repository maintainers privately, or use GitHub's private vulnerability reporting if enabled for this repository. Include affected versions, a minimal reproduction without real credentials, impact, and any suggested mitigation. The maintainers will determine the supported disclosure channel and coordinate remediation.
+Report security-sensitive defects through the repository's **Security > Report a vulnerability** feature when available. If private reporting is unavailable, contact the repository owner through their GitHub profile and request a private reporting channel. Do not put credentials, private BOMs, exploit details, or customer data in a public issue.
 
-## Deployment guidance
+Include the affected commit or distribution version, platform and Python version, reproduction steps with synthetic inputs, expected and observed behavior, and the trust boundary crossed. Keep real credentials and sensitive agent context out of reproduction artifacts.
 
-Before relying on a particular revision, independently test its security controls, supported formats and failure modes. Pin the revision, run with least privilege, validate outputs against the target standard, and keep production gating separate from a score or completeness claim.
+The project does not promise response or remediation deadlines. Maintainers should acknowledge a report, agree on a disclosure plan with the reporter, and publish an advisory with affected and fixed versions when appropriate.
+
+## Supported versions
+
+Only the latest reviewed alpha revision is developed. There is no long-term support commitment or established production support window. Confirm release provenance and the matching source revision before installing a published distribution.
+
+## Imported discovery evidence
+
+Treat ShadowScan reports, CycloneDX imports, A2A cards, IDE settings, and extension manifests as untrusted inputs. A discovery record does not grant authority or authenticate the discovered endpoint. Verify the expected subject, signer, tenant, time, and policy before upgrading a claim. Never grant deployment or publication credentials to the import job merely to parse a report.
+
+## Security boundaries
+
+Static collection must not execute project modules, model loaders, repository hooks, or MCP launch commands. Treat repositories, model files, tool metadata, registry records, and imported BOMs as hostile input. Run scans with read-only access and without deployment or publication credentials.
+
+A signature proves that authorized key material signed particular bytes under the verifier's policy. It does not prove that the content is accurate or safe. A matching tool descriptor cannot prove that the backend behaves as declared. Enforcement integrations govern only calls actually mediated by those integrations.
+
+Agent inventories can expose infrastructure, permissions, endpoints, and instruction fingerprints. Restrict access to exported evidence and review its contents before sharing it. Keep raw credentials out of BOMs, logs, and issue reports.
