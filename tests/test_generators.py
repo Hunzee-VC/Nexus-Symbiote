@@ -476,10 +476,13 @@ def test_portable_formats_validate_offline(fixture):
             "http://cyclonedx.org/schema/" + file, Resource.from_contents(sub)
         )
     cdx = CycloneDXGenerator().generate(bom)
-    Draft7Validator(cdx_schema, registry=registry).validate(cdx)
+    Draft7Validator(
+        cdx_schema, registry=registry, format_checker=Draft7Validator.FORMAT_CHECKER
+    ).validate(cdx)
     spdx = SPDXGenerator().generate(bom)
     Draft202012Validator(
-        json.loads((schemas / "spdx-json-schema-3.0.1.json").read_text())
+        json.loads((schemas / "spdx-json-schema-3.0.1.json").read_text()),
+        format_checker=Draft202012Validator.FORMAT_CHECKER,
     ).validate(spdx)
     identifiers = {n.get("spdxId", n.get("@id")) for n in spdx["@graph"]}
     for n in spdx["@graph"]:
