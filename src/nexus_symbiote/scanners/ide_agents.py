@@ -189,9 +189,7 @@ class IDEAgentScanner(Scanner):
                     return data
         return None
 
-    def _extract_permission_mode(
-        self, settings: dict[str, Any], ide_type: str
-    ) -> str | None:
+    def _extract_permission_mode(self, settings: dict[str, Any], ide_type: str) -> str | None:
         if ide_type == "claude-code":
             perms = settings.get("permissions", {})
             mode = perms.get("mode") if isinstance(perms, dict) else None
@@ -231,8 +229,16 @@ class IDEAgentScanner(Scanner):
             return
 
         ai_extension_patterns = [
-            "anthropic", "claude", "copilot", "codeium", "cursor",
-            "tabnine", "codex", "openai", "ai-", "agent",
+            "anthropic",
+            "claude",
+            "copilot",
+            "codeium",
+            "cursor",
+            "tabnine",
+            "codex",
+            "openai",
+            "ai-",
+            "agent",
         ]
 
         recommendations = data.get("recommendations", [])

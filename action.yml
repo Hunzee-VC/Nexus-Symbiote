@@ -16,6 +16,12 @@ inputs:
   scanners:
     description: Comma-separated scanner names
     default: ""
+  model-signer:
+    description: Authorized model signer identity
+    default: ""
+  model-issuer:
+    description: Authorized model signer OIDC issuer
+    default: ""
   validate:
     description: Run completeness and integrity validation
     default: "true"
@@ -50,7 +56,12 @@ runs:
         python-version: ${{ inputs.python-version }}
     - name: Install this action's Nexus SymBiote revision
       shell: bash
-      run: python -m pip install -- "${GITHUB_ACTION_PATH}[yaml]"
+      env:
+        MODEL_SIGNER: ${{ inputs.model-signer }}
+      run: |
+        extras=yaml
+        if [[ -n "$MODEL_SIGNER" ]]; then extras=yaml,sigstore; fi
+        python -I -m pip install -- "${GITHUB_ACTION_PATH}[$extras]"
     - name: Scan once and export
       id: scan
       shell: bash
@@ -59,23 +70,28 @@ runs:
         OUTPUT_FILE: ${{ inputs.output-file }}
         OUTPUT_FORMAT: ${{ inputs.format }}
         SCANNERS: ${{ inputs.scanners }}
+        MODEL_SIGNER: ${{ inputs.model-signer }}
+        MODEL_ISSUER: ${{ inputs.model-issuer }}
       run: |
         set -euo pipefail
         case "$OUTPUT_FORMAT" in json|cyclonedx|spdx|sarif) ;; *) echo "::error::Invalid output format"; exit 1;; esac
         case "$OUTPUT_FILE" in *$'\n'*|*$'\r'*|"") echo "::error::Invalid output path"; exit 1;; esac
         workdir="$(mktemp -d "$RUNNER_TEMP/nexus-symbiote.XXXXXXXX")"
         echo "workdir=$workdir" >> "$GITHUB_OUTPUT"
-        args=("$SCAN_PATH" -f json -o "$workdir/native.json")
+        args=(--no-project-policy -f json -o "$workdir/native.json")
         if [[ -n "$SCANNERS" ]]; then
           IFS=',' read -ra names <<< "$SCANNERS"
           for name in "${names[@]}"; do
             name="${name//[[:space:]]/}"
-            case "$name" in mcp|model|prompt|rag|registry) ;; *) echo "::error::Invalid scanner"; exit 1;; esac
+            case "$name" in mcp|model|prompt|rag|registry|a2a|ide_agents|shadowscan) ;; *) echo "::error::Invalid scanner"; exit 1;; esac
             args+=(--scanner "$name")
           done
         fi
-        nexus-symbiote scan "${args[@]}"
-        NATIVE_BOM="$workdir/native.json" SARIF_FILE="$workdir/results.sarif" python - <<'PY'
+        if [[ -n "${MODEL_SIGNER:-}${MODEL_ISSUER:-}" ]]; then
+          args+=(--model-signer "${MODEL_SIGNER:-}" --model-issuer "${MODEL_ISSUER:-}")
+        fi
+        nexus-symbiote scan "${args[@]}" -- "$SCAN_PATH"
+        NATIVE_BOM="$workdir/native.json" SARIF_FILE="$workdir/results.sarif" python -I - <<'PY'
         import os
         from pathlib import Path
         from nexus_symbiote.core.aibom import AIBOM
@@ -86,11 +102,13 @@ runs:
         bom = AIBOM.load(Path(os.environ["NATIVE_BOM"]))
         generators = {"cyclonedx": CycloneDXGenerator, "spdx": SPDXGenerator, "sarif": SARIFGenerator}
         fmt = os.environ["OUTPUT_FORMAT"]
+        from nexus_symbiote.utils.files import write_output_file
+        workspace = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
         output = Path(os.environ["OUTPUT_FILE"])
         if fmt == "json":
-            output.write_bytes(Path(os.environ["NATIVE_BOM"]).read_bytes())
+            write_output_file(output, Path(os.environ["NATIVE_BOM"]).read_text(encoding="utf-8"), root=workspace)
         else:
-            output.write_text(generators[fmt]().generate_json(bom), encoding="utf-8")
+            write_output_file(output, generators[fmt]().generate_json(bom), root=workspace)
         Path(os.environ["SARIF_FILE"]).write_text(SARIFGenerator().generate_json(bom), encoding="utf-8")
         PY
         printf 'aibom_path=%s\n' "$OUTPUT_FILE" >> "$GITHUB_OUTPUT"
@@ -112,7 +130,7 @@ runs:
         set -uo pipefail
         result="$(nexus-symbiote risk "$NATIVE_BOM" --threshold "$RISK_THRESHOLD" --json-output)"
         status=$?
-        score="$(printf '%s' "$result" | python -c 'import json,sys; print(json.load(sys.stdin)["overall_score"])')" || exit 1
+        score="$(printf '%s' "$result" | python -I -c 'import json,sys; print(json.load(sys.stdin)["overall_score"])')" || exit 1
         printf 'risk_score=%s\n' "$score" >> "$GITHUB_OUTPUT"
         if (( status != 0 )); then
           echo "passed=false" >> "$GITHUB_OUTPUT"

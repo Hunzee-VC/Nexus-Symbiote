@@ -8,9 +8,9 @@ registry trust, and authorization records.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from nexus_symbiote.core.enums import (
     AssuranceLevel,
@@ -29,6 +29,8 @@ from nexus_symbiote.core.evidence import DeploymentProfile
 
 class ComponentBase(BaseModel):
     """Base for every AgentBOM component."""
+
+    model_config = ConfigDict(extra="forbid")
 
     bom_ref: str = Field(description="Unique reference within this BOM")
     component_type: ComponentType
@@ -87,7 +89,7 @@ class RiskAssessment(BaseModel):
 class AgentComponent(ComponentBase):
     """An autonomous AI agent deployment."""
 
-    component_type: ComponentType = ComponentType.AGENT
+    component_type: Literal[ComponentType.AGENT] = ComponentType.AGENT
     autonomy_level: AutonomyLevel = AutonomyLevel.L2_AGENT
     framework: str | None = Field(
         default=None, description="Agent framework (LangGraph, CrewAI, etc.)"
@@ -117,7 +119,7 @@ class AgentComponent(ComponentBase):
 class MCPServerComponent(ComponentBase):
     """An MCP server that provides tools to agents."""
 
-    component_type: ComponentType = ComponentType.MCP_SERVER
+    component_type: Literal[ComponentType.MCP_SERVER] = ComponentType.MCP_SERVER
     transport: str | None = Field(default=None, description="stdio, sse, streamable-http")
     command: str | None = None
     args: list[str] = Field(default_factory=list)
@@ -137,7 +139,7 @@ class MCPServerComponent(ComponentBase):
 class ToolComponent(ComponentBase):
     """A single tool definition (from MCP, plugin, or function call)."""
 
-    component_type: ComponentType = ComponentType.TOOL
+    component_type: Literal[ComponentType.TOOL] = ComponentType.TOOL
     mcp_server_ref: str | None = None
     input_schema: dict[str, Any] | None = None
     description_text: str | None = Field(
@@ -163,7 +165,7 @@ class ToolComponent(ComponentBase):
 class ModelComponent(ComponentBase):
     """A model (weights, adapter, embedding model) used by an agent."""
 
-    component_type: ComponentType = ComponentType.MODEL
+    component_type: Literal[ComponentType.MODEL] = ComponentType.MODEL
     model_type: str | None = Field(
         default=None,
         description="foundation, fine-tuned, adapter, embedding, quantized",
@@ -197,11 +199,18 @@ class ModelComponent(ComponentBase):
     )
     risks: list[RiskAssessment] = Field(default_factory=list)
 
+    @property
+    def unverified_safetensors(self) -> bool:
+        return (
+            self.serialization_format in {"safetensors", "safe-tensors"}
+            and self.serialization_safety == SerializationSafety.UNKNOWN
+        )
+
 
 class PromptComponent(ComponentBase):
     """A system prompt, instruction template, or behavior-shaping artifact."""
 
-    component_type: ComponentType = ComponentType.PROMPT_TEMPLATE
+    component_type: Literal[ComponentType.PROMPT_TEMPLATE] = ComponentType.PROMPT_TEMPLATE
     prompt_type: str | None = Field(
         default=None,
         description="system-prompt, planner, instruction, rules-file, skill-definition",
@@ -220,7 +229,7 @@ class PromptComponent(ComponentBase):
 class GuardrailComponent(ComponentBase):
     """A safety classifier, content filter, or output validator."""
 
-    component_type: ComponentType = ComponentType.GUARDRAIL_POLICY
+    component_type: Literal[ComponentType.GUARDRAIL_POLICY] = ComponentType.GUARDRAIL_POLICY
     guardrail_type: str | None = Field(
         default=None,
         description="input-filter, output-filter, classifier, rate-limiter",
@@ -236,7 +245,7 @@ class GuardrailComponent(ComponentBase):
 class MemoryStoreComponent(ComponentBase):
     """Persistent memory (conversation history, learned facts, skills)."""
 
-    component_type: ComponentType = ComponentType.MEMORY_STORE
+    component_type: Literal[ComponentType.MEMORY_STORE] = ComponentType.MEMORY_STORE
     store_type: str | None = Field(
         default=None,
         description="conversation, episodic, semantic, procedural, skill",
@@ -254,7 +263,7 @@ class MemoryStoreComponent(ComponentBase):
 class RAGSourceComponent(ComponentBase):
     """A retrieval-augmented generation data source or vector index."""
 
-    component_type: ComponentType = ComponentType.RAG_SOURCE
+    component_type: Literal[ComponentType.RAG_SOURCE] = ComponentType.RAG_SOURCE
     corpus_type: str | None = Field(
         default=None,
         description="vector-store, knowledge-base, web-scraper, api-connector",
@@ -273,7 +282,7 @@ class RAGSourceComponent(ComponentBase):
 class DataSourceComponent(ComponentBase):
     """A training or fine-tuning dataset."""
 
-    component_type: ComponentType = ComponentType.DATA_SOURCE
+    component_type: Literal[ComponentType.DATA_SOURCE] = ComponentType.DATA_SOURCE
     dataset_type: str | None = Field(
         default=None,
         description="pre-training, fine-tuning, evaluation, alignment",
@@ -289,7 +298,7 @@ class DataSourceComponent(ComponentBase):
 class RegistryEntryComponent(ComponentBase):
     """A registry from which components are discovered or installed."""
 
-    component_type: ComponentType = ComponentType.REGISTRY_ENTRY
+    component_type: Literal[ComponentType.REGISTRY_ENTRY] = ComponentType.REGISTRY_ENTRY
     registry_type: str | None = Field(
         default=None,
         description="npm, pypi, huggingface, mcp-registry, skill-marketplace, docker-hub",
@@ -306,7 +315,7 @@ class RegistryEntryComponent(ComponentBase):
 class SkillPackageComponent(ComponentBase):
     """A skill or plugin package that extends agent capabilities."""
 
-    component_type: ComponentType = ComponentType.SKILL_PACKAGE
+    component_type: Literal[ComponentType.SKILL_PACKAGE] = ComponentType.SKILL_PACKAGE
     skill_type: str | None = Field(
         default=None, description="skill, plugin, connector, hook, extension"
     )
@@ -319,7 +328,7 @@ class SkillPackageComponent(ComponentBase):
 class MCPClientComponent(ComponentBase):
     """An MCP client that connects to MCP servers."""
 
-    component_type: ComponentType = ComponentType.MCP_CLIENT
+    component_type: Literal[ComponentType.MCP_CLIENT] = ComponentType.MCP_CLIENT
     host_application: str | None = Field(
         default=None, description="The IDE or agent host (claude-code, cursor, etc.)"
     )
@@ -333,10 +342,8 @@ class MCPClientComponent(ComponentBase):
 class A2AClientComponent(ComponentBase):
     """An A2A protocol client that discovers and invokes remote agents."""
 
-    component_type: ComponentType = ComponentType.A2A_CLIENT
-    agent_card_url: str | None = Field(
-        default=None, description="URL of the remote agent card"
-    )
+    component_type: Literal[ComponentType.A2A_CLIENT] = ComponentType.A2A_CLIENT
+    agent_card_url: str | None = Field(default=None, description="URL of the remote agent card")
     supported_protocols: list[str] = Field(default_factory=list)
     authentication_methods: list[str] = Field(default_factory=list)
     capabilities: CapabilityDeclaration | None = None
@@ -346,7 +353,7 @@ class A2AClientComponent(ComponentBase):
 class A2AServerComponent(ComponentBase):
     """An A2A protocol server exposing agent capabilities to other agents."""
 
-    component_type: ComponentType = ComponentType.A2A_SERVER
+    component_type: Literal[ComponentType.A2A_SERVER] = ComponentType.A2A_SERVER
     agent_card_path: str | None = Field(
         default=None, description="Path or URL to the agent card JSON"
     )
@@ -361,7 +368,7 @@ class A2AServerComponent(ComponentBase):
 class IDEAgentComponent(ComponentBase):
     """An IDE coding agent configuration (Claude Code, Codex, Cursor, etc.)."""
 
-    component_type: ComponentType = ComponentType.IDE_AGENT
+    component_type: Literal[ComponentType.IDE_AGENT] = ComponentType.IDE_AGENT
     ide_type: str | None = Field(
         default=None,
         description="claude-code, codex, cursor, antigravity, xai, windsurf, cline",
@@ -376,7 +383,7 @@ class IDEAgentComponent(ComponentBase):
 class VerifiedExtensionComponent(ComponentBase):
     """An AI agent extension with verification/attestation status."""
 
-    component_type: ComponentType = ComponentType.VERIFIED_EXTENSION
+    component_type: Literal[ComponentType.VERIFIED_EXTENSION] = ComponentType.VERIFIED_EXTENSION
     extension_type: str | None = Field(
         default=None, description="plugin, skill, connector, integration, action"
     )
@@ -418,21 +425,24 @@ class AIBOMMetadata(BaseModel):
     completeness: CompletenessClaim | None = None
 
 
-AnyComponent = (
-    AgentComponent
-    | MCPServerComponent
-    | MCPClientComponent
-    | ToolComponent
-    | ModelComponent
-    | PromptComponent
-    | GuardrailComponent
-    | MemoryStoreComponent
-    | RAGSourceComponent
-    | DataSourceComponent
-    | RegistryEntryComponent
-    | SkillPackageComponent
-    | A2AClientComponent
-    | A2AServerComponent
-    | IDEAgentComponent
-    | VerifiedExtensionComponent
-)
+AnyComponent = Annotated[
+    (
+        AgentComponent
+        | MCPServerComponent
+        | MCPClientComponent
+        | ToolComponent
+        | ModelComponent
+        | PromptComponent
+        | GuardrailComponent
+        | MemoryStoreComponent
+        | RAGSourceComponent
+        | DataSourceComponent
+        | RegistryEntryComponent
+        | SkillPackageComponent
+        | A2AClientComponent
+        | A2AServerComponent
+        | IDEAgentComponent
+        | VerifiedExtensionComponent
+    ),
+    Field(discriminator="component_type"),
+]

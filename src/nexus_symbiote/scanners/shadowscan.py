@@ -12,6 +12,7 @@ generated ShadowScan report (produced by a separate, least-privilege run).
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -19,7 +20,6 @@ from typing import Any
 from nexus_symbiote.core.enums import (
     AssuranceLevel,
     AutonomyLevel,
-    ComponentType,
     RiskSeverity,
     TrustTier,
 )
@@ -28,9 +28,8 @@ from nexus_symbiote.core.models import (
     MCPServerComponent,
     ModelComponent,
     RiskAssessment,
-    ToolComponent,
 )
-from nexus_symbiote.scanners.base import Scanner, ScanResult
+from nexus_symbiote.scanners.base import Scanner, ScanResult, read_regular_text, sanitized_origin
 
 
 class ShadowScanImporter(Scanner):
@@ -59,7 +58,7 @@ class ShadowScanImporter(Scanner):
             project_root / "shadowscan.json",
         ]
         for path in candidates:
-            if path.is_file():
+            if path.exists() or path.is_symlink():
                 result.surfaces_scanned.append(str(path))
                 try:
                     comps = self.import_report(path)
@@ -73,7 +72,7 @@ class ShadowScanImporter(Scanner):
 
     def import_report(self, report_path: Path) -> list[Any]:
         """Load a ShadowScan report and return mapped components."""
-        text = report_path.read_text(encoding="utf-8")
+        text = read_regular_text(report_path)
         data = json.loads(text)
 
         if isinstance(data, dict) and data.get("bomFormat") == "CycloneDX":
@@ -90,8 +89,15 @@ class ShadowScanImporter(Scanner):
             if not isinstance(f, dict):
                 continue
             kind = str(f.get("kind", "")).lower()
-            title = f.get("title") or f.get("resource") or "discovered-component"
-            bom_ref = f.get("id") or f"shadowscan:{kind}:{title}"
+            title = f.get("title") or "discovered-component"
+            provenance = self._provenance(f)
+            resource = f.get("resource")
+            locator = (
+                sanitized_origin(resource)
+                if isinstance(resource, str) and "://" in resource
+                else None
+            )
+            bom_ref = f.get("id") or "shadowscan:" + provenance["shadowscan:sourceDigest"]
 
             risks = self._map_risks(f)
 
@@ -100,38 +106,41 @@ class ShadowScanImporter(Scanner):
                     MCPServerComponent(
                         bom_ref=bom_ref,
                         name=str(title),
-                        source_path=f.get("resource"),
+                        source_path=locator,
                         trust_tier=TrustTier.UNKNOWN,
                         assurance_level=AssuranceLevel.DECLARED,
                         risks=risks,
-                        properties={"shadowscan:raw": f},
+                        properties=provenance,
                     )
                 )
-            elif kind in {"local-model", "model"} or "model" in str(f.get("resource_type", "")).lower():
+            elif (
+                kind in {"local-model", "model"}
+                or "model" in str(f.get("resource_type", "")).lower()
+            ):
                 components.append(
                     ModelComponent(
                         bom_ref=bom_ref,
                         name=str(title),
-                        source_path=f.get("resource"),
+                        source_path=locator,
                         trust_tier=TrustTier.UNKNOWN,
                         assurance_level=AssuranceLevel.DECLARED,
                         risks=risks,
-                        properties={"shadowscan:raw": f},
+                        properties=provenance,
                     )
                 )
             else:
                 # Default to Agent for agent, caller, app, process, etc.
-                autonomy = AutonomyLevel.L2_AGENT
+                autonomy = AutonomyLevel.UNKNOWN
                 components.append(
                     AgentComponent(
                         bom_ref=bom_ref,
                         name=str(title),
-                        source_path=f.get("resource"),
+                        source_path=locator,
                         autonomy_level=autonomy,
                         trust_tier=TrustTier.UNKNOWN,
                         assurance_level=AssuranceLevel.DECLARED,
                         risks=risks,
-                        properties={"shadowscan:raw": f, "shadowscan:kind": kind},
+                        properties=provenance,
                     )
                 )
         return components
@@ -155,7 +164,7 @@ class ShadowScanImporter(Scanner):
                         trust_tier=TrustTier.UNKNOWN,
                         assurance_level=AssuranceLevel.DECLARED,
                         risks=risks,
-                        properties={"shadowscan:cdx": props},
+                        properties=self._provenance(c),
                     )
                 )
             elif c.get("type") == "machine-learning-model" or "model" in kind:
@@ -166,7 +175,7 @@ class ShadowScanImporter(Scanner):
                         trust_tier=TrustTier.UNKNOWN,
                         assurance_level=AssuranceLevel.DECLARED,
                         risks=risks,
-                        properties={"shadowscan:cdx": props},
+                        properties=self._provenance(c),
                     )
                 )
             else:
@@ -177,17 +186,24 @@ class ShadowScanImporter(Scanner):
                         trust_tier=TrustTier.UNKNOWN,
                         assurance_level=AssuranceLevel.DECLARED,
                         risks=risks,
-                        properties={"shadowscan:cdx": props, "shadowscan:kind": kind},
+                        properties=self._provenance(c),
                     )
                 )
         return components
+
+    @staticmethod
+    def _provenance(record: dict[str, Any]) -> dict[str, str]:
+        # Keep a reference to private source evidence without copying its arbitrary properties.
+        data = json.dumps(
+            record, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode()
+        return {"shadowscan:sourceDigest": "sha256:" + hashlib.sha256(data).hexdigest()}
 
     def _map_risks(self, finding: dict[str, Any]) -> list[RiskAssessment]:
         risks: list[RiskAssessment] = []
         risk_obj = finding.get("risk") or {}
         if isinstance(risk_obj, dict):
             level = str(risk_obj.get("level", "info")).lower()
-            score = risk_obj.get("score", 0)
             sev = {
                 "critical": RiskSeverity.CRITICAL,
                 "high": RiskSeverity.HIGH,
@@ -198,7 +214,7 @@ class ShadowScanImporter(Scanner):
                 RiskAssessment(
                     severity=sev,
                     category="shadowscan-heuristic",
-                    detail=f"ShadowScan heuristic risk {level} (score {score})",
+                    detail=f"ShadowScan heuristic risk {sev.value}",
                     recommendation="Review evidence and apply independent policy.",
                 )
             )
@@ -227,7 +243,7 @@ class ShadowScanImporter(Scanner):
                 RiskAssessment(
                     severity=sev,
                     category="shadowscan-heuristic",
-                    detail=f"ShadowScan heuristic risk {level}",
+                    detail=f"ShadowScan heuristic risk {sev.value}",
                 )
             )
         return risks

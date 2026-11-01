@@ -78,7 +78,9 @@ def _parse_policy(path: Path) -> Policy:
     except ImportError as exc:
         raise ValueError("Policy file requires PyYAML; install nexus-symbiote[yaml]") from exc
     try:
-        data: Any = yaml.safe_load(path.read_text(encoding="utf-8"))
+        from nexus_symbiote.scanners.base import read_regular_text
+
+        data: Any = yaml.safe_load(read_regular_text(path))
         if not isinstance(data, dict):
             raise ValueError("policy must be a mapping")
         return Policy.model_validate(data)

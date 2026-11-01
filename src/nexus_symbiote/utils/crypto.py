@@ -102,7 +102,9 @@ def verify_sigstore_digest(
         verifier = import_module("sigstore.verify").Verifier.production(offline=True)
         verifier.verify_artifact(hashed, bundle, policy)
     except ImportError:
-        return VerificationResult(False, error="Sigstore unavailable. Install nexus-symbiote[sigstore].")
+        return VerificationResult(
+            False, error="Sigstore unavailable. Install nexus-symbiote[sigstore]."
+        )
     except Exception as exc:
         return VerificationResult(False, error=f"Sigstore verification failed: {exc}")
     return VerificationResult(True, identity=expected_identity, issuer=expected_issuer)

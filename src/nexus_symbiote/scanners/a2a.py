@@ -149,9 +149,7 @@ class A2AScanner(Scanner):
                         comp = self._parse_a2a_client(client_cfg, config_path)
                         result.components.append(comp)
 
-    def _parse_a2a_client(
-        self, config: dict[str, Any], config_path: Path
-    ) -> A2AClientComponent:
+    def _parse_a2a_client(self, config: dict[str, Any], config_path: Path) -> A2AClientComponent:
         name = config.get("name", config.get("agentName", "unnamed-client"))
         card_url = config.get("agentCardUrl", config.get("url", config.get("endpoint")))
         auth_methods = config.get("authMethods", config.get("authentication", []))
@@ -217,9 +215,7 @@ class A2AScanner(Scanner):
 
             if any(p.search(content) for p in a2a_patterns):
                 result.surfaces_scanned.append(str(py_file))
-                if not any(
-                    c.bom_ref.startswith("a2a-") for c in result.components
-                ):
+                if not any(c.bom_ref.startswith("a2a-") for c in result.components):
                     result.components.append(
                         A2AClientComponent(
                             bom_ref="a2a-client:code-detected",

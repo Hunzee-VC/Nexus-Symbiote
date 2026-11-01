@@ -19,7 +19,7 @@ def test_failed_collector_produces_partial_output_and_nonzero(tmp_path, monkeypa
     )
     assert result.exit_code != 0
     bom = AIBOM.load(output)
-    assert bom.metadata.completeness.scope == "local-static-project+shadowscan"
+    assert bom.metadata.completeness.scope == "local-static-project"
     assert bom.metadata.completeness.scanner_status["broken"] == "failed"
     assert bom.metadata.completeness.scan_failures
     assert not CompletenessValidator().validate(bom).is_complete

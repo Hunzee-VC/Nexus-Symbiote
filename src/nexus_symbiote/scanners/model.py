@@ -6,8 +6,15 @@ checks for model signing, and computes weight hashes.
 
 from __future__ import annotations
 
+import hashlib
+import os
+import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
+
+from safetensors import SafetensorError, safe_open
 
 from nexus_symbiote.core.enums import (
     SERIALIZATION_FORMAT_SAFETY,
@@ -16,7 +23,14 @@ from nexus_symbiote.core.enums import (
     TrustTier,
 )
 from nexus_symbiote.core.models import ModelComponent, RiskAssessment
-from nexus_symbiote.scanners.base import Scanner, ScanResult, hash_regular_file
+from nexus_symbiote.scanners.base import (
+    MAX_MODEL_BYTES,
+    Scanner,
+    ScanResult,
+    _open_regular,
+    hash_regular_file,
+    read_regular_text,
+)
 
 MODEL_EXTENSIONS = {
     ".safetensors": ("safetensors", "safe-tensors"),
@@ -49,8 +63,84 @@ SIGNING_FILES = [
 ]
 
 
+@contextmanager
+def _library_path(stream: BinaryIO) -> Iterator[Path]:
+    # The Rust SafeTensors reader takes a filename. Hand it the already-open file.
+    for base in ("/proc/self/fd", "/dev/fd"):
+        alias = Path(base, str(stream.fileno()))
+        if alias.exists():
+            yield alias
+            return
+    # Windows has no descriptor pathname. Parse a private, bounded copy.
+    stream.seek(0)
+    with tempfile.TemporaryDirectory() as tmp:
+        copy = Path(tmp, "weights")
+        total = 0
+        with copy.open("wb") as out:
+            while chunk := stream.read(1024 * 1024):
+                total += len(chunk)
+                if total > MAX_MODEL_BYTES:
+                    raise ValueError("model exceeds scan limit")
+                out.write(chunk)
+        yield copy
+
+
+def _inspect_file(path: Path) -> tuple[str, SerializationSafety, str]:
+    ext_format = MODEL_EXTENSIONS[path.suffix.lower()][0]
+    with _open_regular(path, MAX_MODEL_BYTES) as fd, os.fdopen(fd, "rb", closefd=False) as stream:
+        stat_before = os.fstat(stream.fileno())
+        if stat_before.st_size > MAX_MODEL_BYTES:
+            raise ValueError("model exceeds scan limit")
+        head = stream.read(9)
+        fmt = ext_format
+        safety = SERIALIZATION_FORMAT_SAFETY.get(fmt, SerializationSafety.UNKNOWN)
+        if head.startswith(b"\x80") and len(head) > 1 and head[1] <= 5:
+            fmt, safety = "pickle", SerializationSafety.UNSAFE_CODE_EXECUTION
+        elif head.startswith(b"GGUF"):
+            fmt, safety = "gguf", SerializationSafety.UNSAFE_TEMPLATE_INJECTION
+        elif fmt == "safetensors" or (len(head) == 9 and head[-1:] == b"{"):
+            safety = SerializationSafety.UNKNOWN
+            header_len = int.from_bytes(head[:8], "little")
+            if (
+                len(head) == 9
+                and head[-1:] == b"{"
+                and header_len <= min(stat_before.st_size - 8, 16 * 1024 * 1024)
+            ):
+                with _library_path(stream) as name:
+                    try:
+                        with safe_open(name, framework="numpy") as tensors:
+                            tensors.keys()
+                    except SafetensorError:
+                        pass
+                    else:
+                        fmt, safety = "safetensors", SerializationSafety.SAFE
+        elif safety == SerializationSafety.SAFE:
+            # No format parser for ONNX/GGML here. A filename alone proves nothing.
+            safety = SerializationSafety.UNKNOWN
+        digest = hashlib.sha256()
+        total = 0
+        stream.seek(0)
+        while chunk := stream.read(1024 * 1024):
+            total += len(chunk)
+            if total > MAX_MODEL_BYTES:
+                raise ValueError("model exceeds scan limit")
+            digest.update(chunk)
+        stat_after = os.fstat(stream.fileno())
+        if total != stat_before.st_size or stat_after.st_ctime_ns != stat_before.st_ctime_ns:
+            raise ValueError("model changed while being read")
+    return fmt, safety, "sha256:" + digest.hexdigest()
+
+
 class ModelScanner(Scanner):
     name = "model"
+
+    def __init__(
+        self, expected_identity: str | None = None, expected_issuer: str | None = None
+    ) -> None:
+        if bool(expected_identity) != bool(expected_issuer):
+            raise ValueError("Model verification requires both signer and issuer")
+        self.expected_identity = expected_identity
+        self.expected_issuer = expected_issuer
 
     def scan(self, project_root: Path) -> ScanResult:
         result = ScanResult(scanner_name=self.name)
@@ -62,7 +152,7 @@ class ModelScanner(Scanner):
 
         for model_dir in model_dirs:
             result.surfaces_scanned.append(str(model_dir))
-            comps = self._scan_model_directory(model_dir, result)
+            comps = self._scan_model_directory(project_root, model_dir, result)
             result.components.extend(comps)
 
         return result
@@ -76,12 +166,13 @@ class ModelScanner(Scanner):
                 dirs.add(f.parent)
         return sorted(dirs)
 
-    def _scan_model_directory(self, model_dir: Path, result: ScanResult) -> list[ModelComponent]:
+    def _scan_model_directory(
+        self, root: Path, model_dir: Path, result: ScanResult
+    ) -> list[ModelComponent]:
         components: list[ModelComponent] = []
-        model_name = model_dir.name
+        model_name = model_dir.relative_to(root).as_posix()
 
         config = self._read_model_config(model_dir, result)
-        signing_status, signing_identity = self._check_signing(model_dir)
         tokenizer_hash = self._hash_tokenizer(model_dir, result)
         chat_template_hash = self._hash_chat_template(model_dir, config, result)
 
@@ -91,18 +182,20 @@ class ModelScanner(Scanner):
                 continue
 
             fmt_key, fmt_name = MODEL_EXTENSIONS[ext]
-            safety = SERIALIZATION_FORMAT_SAFETY.get(fmt_key, SerializationSafety.UNKNOWN)
+            safety = SerializationSafety.UNKNOWN
 
             weight_hash = None
             try:
-                weight_hash = hash_regular_file(path)
-            except OSError:
-                result.scan_failures.append(f"Failed to hash {path}")
+                fmt_key, safety, weight_hash = _inspect_file(path)
+                fmt_name = MODEL_EXTENSIONS.get("." + fmt_key, (fmt_key, fmt_key))[1]
+            except (OSError, ValueError):
+                result.scan_failures.append(f"Failed to inspect {path}")
+            signing_status, signing_identity = self._check_signing(path, weight_hash)
 
             risks = self._assess_model_risks(path, fmt_key, safety, signing_status, config)
 
             # A signature filename and serialization format do not establish trust.
-            trust_tier = TrustTier.UNKNOWN
+            trust_tier = TrustTier.THIRD_PARTY_SIGNED if signing_identity else TrustTier.UNKNOWN
 
             model_type = self._infer_model_type(config, path)
             derivation = config.get("peft_type") if config else None
@@ -150,14 +243,30 @@ class ModelScanner(Scanner):
                 result.scan_failures.append(f"Failed to parse {cfg_path}")
         return None
 
-    def _check_signing(self, model_dir: Path) -> tuple[str, str | None]:
-        for sig_file in SIGNING_FILES:
-            sig_path = model_dir / sig_file
-            if sig_path.exists():
-                # A filename alone cannot establish format, subject or signer.
-                return "signature-present-unverified", None
-        # Search is directory-local; it cannot prove that no signature exists.
-        return "signature-not-found", None
+    def _check_signing(self, path: Path, digest: str | None) -> tuple[str, str | None]:
+        names = [path.name + ".sigstore.json", path.name + ".sigstore", *SIGNING_FILES]
+        found = False
+        for name in names:
+            bundle = path.with_name(name)
+            if not bundle.exists() and not bundle.is_symlink():
+                continue
+            found = True
+            if digest and self.expected_identity and self.expected_issuer:
+                from nexus_symbiote.utils.crypto import verify_sigstore_digest
+
+                try:
+                    bundle_json = read_regular_text(bundle).encode()
+                except (OSError, ValueError):
+                    continue
+                result = verify_sigstore_digest(
+                    digest.removeprefix("sha256:"),
+                    bundle_json,
+                    self.expected_identity,
+                    self.expected_issuer,
+                )
+                if result.verified:
+                    return "sigstore-signed", self.expected_identity
+        return ("signature-present-unverified" if found else "signature-not-found"), None
 
     def _hash_tokenizer(self, model_dir: Path, result: ScanResult) -> str | None:
         for name in ("tokenizer.json", "tokenizer.model", "spiece.model"):

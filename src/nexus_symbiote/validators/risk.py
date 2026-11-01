@@ -6,7 +6,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from nexus_symbiote.core.aibom import AIBOM
-from nexus_symbiote.core.enums import RiskSeverity
+from nexus_symbiote.core.enums import RiskSeverity, SerializationSafety
+from nexus_symbiote.core.models import ModelComponent, RiskAssessment
 
 # The complete built-in collection scope; do not infer completeness from a
 # caller-provided subset. Update alongside the CLI scanner registry.
@@ -103,7 +104,36 @@ class RiskScorer:
         category_scores: dict[str, float] = {}
 
         for comp in bom.components:
-            risks = getattr(comp, "risks", [])
+            risks = list(getattr(comp, "risks", []))
+            if isinstance(comp, ModelComponent):
+                checks = (
+                    (
+                        comp.serialization_safety == SerializationSafety.UNSAFE_CODE_EXECUTION,
+                        RiskSeverity.CRITICAL,
+                        "serialization_format",
+                        "Unsafe serialization permits code execution.",
+                    ),
+                    (
+                        comp.trust_remote_code is True,
+                        RiskSeverity.CRITICAL,
+                        "code_execution",
+                        "The model configuration enables remote code.",
+                    ),
+                    (
+                        comp.unverified_safetensors,
+                        RiskSeverity.HIGH,
+                        "invalid_safetensors",
+                        "The artifact could not be verified as a SafeTensors file.",
+                    ),
+                )
+                for applies, severity, category, detail in checks:
+                    if applies and not any(
+                        r.category == category and r.severity == severity for r in risks
+                    ):
+                        risks.append(
+                            RiskAssessment(severity=severity, category=category, detail=detail)
+                        )
+
             if not risks:
                 continue
             components_with_risks.add(comp.bom_ref)
@@ -155,6 +185,7 @@ class RiskScorer:
         passed = (
             report.overall_score < self.fail_threshold
             and not report.severity_counts.get("critical", 0)
+            and "invalid_safetensors" not in report.category_scores
             and report.coverage_status == "reported"
         )
         return passed, report

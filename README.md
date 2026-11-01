@@ -218,3 +218,11 @@ The AIBOM schema is defined in [`schemas/nexus-symbiote-aibom-1.0.schema.json`](
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+### Static inventory and model verification
+
+Run `nexus-symbiote scan --no-project-policy . -o inventory.json` to select the built-in scanners independently of the checkout. TypeScript MCP registrations are declared source evidence. Each result includes the source and line. Runtime-generated registrations require live evidence. Configuration-scoped identifiers disambiguate repeated server names. A root `agent.yaml` can link declared models and instructions.
+
+For model signatures, install `nexus-symbiote[sigstore]` and supply both `--model-signer` and `--model-issuer` from trusted deployment configuration. The scanner verifies the exact artifact digest. It marks unparsed formats unknown and flags recognized pickle bytes without deserializing them. The composite Action accepts the same constraints as `model-signer` and `model-issuer`.
+
+The [offline regression corpus](benchmarks/README.md) includes the pinned upstream MCP filesystem server and labeled negative cases.

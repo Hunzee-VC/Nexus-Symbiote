@@ -39,7 +39,9 @@ class TestA2AScanner:
         (tmp_path / "agent.json").write_text(json.dumps(card))
 
         result = A2AScanner().scan(tmp_path)
-        assert len([c for c in result.components if c.component_type == ComponentType.A2A_SERVER]) >= 1
+        assert (
+            len([c for c in result.components if c.component_type == ComponentType.A2A_SERVER]) >= 1
+        )
 
     def test_insecure_endpoint_risk(self, tmp_path):
         card = {"name": "insecure", "url": "http://agent.example.com/a2a"}
@@ -99,9 +101,7 @@ class TestA2AScanner:
         assert any(r.category == "transport_security" for r in clients[0].risks)
 
     def test_scan_a2a_code_pattern(self, tmp_path):
-        (tmp_path / "main.py").write_text(
-            "from a2a import A2AClient\nclient = A2AClient()\n"
-        )
+        (tmp_path / "main.py").write_text("from a2a import A2AClient\nclient = A2AClient()\n")
 
         result = A2AScanner().scan(tmp_path)
         clients = [c for c in result.components if c.component_type == ComponentType.A2A_CLIENT]
@@ -243,15 +243,16 @@ class TestMCPClientDetection:
         clients = [c for c in result.components if c.component_type == ComponentType.MCP_CLIENT]
         assert len(clients) == 1
         assert clients[0].host_application == "claude-code"
-        assert "mcp-server:filesystem" in clients[0].server_refs
+        assert any(
+            c.bom_ref in clients[0].server_refs and c.name == "filesystem"
+            for c in result.components
+        )
 
     def test_mcp_client_from_cursor_config(self, tmp_path):
         cursor_dir = tmp_path / ".cursor"
         cursor_dir.mkdir()
         config = {
-            "mcpServers": {
-                "db": {"command": "npx", "args": ["-y", "mcp-server-sqlite@1.0.0"]}
-            }
+            "mcpServers": {"db": {"command": "npx", "args": ["-y", "mcp-server-sqlite@1.0.0"]}}
         }
         (cursor_dir / "mcp.json").write_text(json.dumps(config))
 
@@ -261,9 +262,7 @@ class TestMCPClientDetection:
         assert clients[0].host_application == "cursor"
 
     def test_mcp_sdk_client_code_detection(self, tmp_path):
-        (tmp_path / "agent.py").write_text(
-            "from mcp import Client\nclient = Client()\n"
-        )
+        (tmp_path / "agent.py").write_text("from mcp import Client\nclient = Client()\n")
 
         result = MCPScanner().scan(tmp_path)
         clients = [c for c in result.components if c.component_type == ComponentType.MCP_CLIENT]
@@ -271,9 +270,7 @@ class TestMCPClientDetection:
         assert any(c.host_application == "sdk" for c in clients)
 
     def test_mcp_ts_client_code_detection(self, tmp_path):
-        (tmp_path / "agent.ts").write_text(
-            'import { Client } from "@modelcontextprotocol/sdk";\n'
-        )
+        (tmp_path / "agent.ts").write_text('import { Client } from "@modelcontextprotocol/sdk";\n')
 
         result = MCPScanner().scan(tmp_path)
         clients = [c for c in result.components if c.component_type == ComponentType.MCP_CLIENT]
