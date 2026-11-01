@@ -81,7 +81,7 @@ class RiskScorer:
         report = RiskReport()
         report.total_components = len(bom.components)
         coverage = bom.metadata.completeness
-        if coverage is not None and coverage.scan_failures:
+        if coverage is not None and (coverage.scan_failures or coverage.surfaces_excluded):
             report.coverage_status = "partial"
         elif coverage is not None and coverage.surfaces_scanned and bom.components:
             # This reflects reported collection, not independent verification of completeness.

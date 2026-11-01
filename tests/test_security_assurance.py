@@ -131,6 +131,12 @@ def test_missing_or_failed_coverage_is_not_clean_or_passing() -> None:
     assert not passed
     assert report.coverage_status == "partial"
     assert report.risk_level == "unknown"
+    bom.metadata.completeness.scan_failures = []
+    bom.metadata.completeness.surfaces_excluded = ["runtime: not assessed"]
+    passed, report = RiskScorer().passes_gate(bom)
+    assert not passed
+    assert report.coverage_status == "partial"
+    assert report.risk_level == "unknown"
 
 
 def test_removing_tool_hash_is_assurance_regression() -> None:

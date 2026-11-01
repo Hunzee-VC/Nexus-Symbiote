@@ -232,13 +232,14 @@ class TestRiskCommand:
         assert "overall_score" in data
         assert "risk_level" in data
 
-    def test_risk_custom_threshold(self, tmp_path):
+    def test_risk_custom_threshold_does_not_override_partial_coverage(self, tmp_path):
         project = _create_test_project(tmp_path)
         runner = CliRunner()
         bom_path = tmp_path / "test.json"
         runner.invoke(main, ["scan", str(project), "-o", str(bom_path)])
-        result = runner.invoke(main, ["risk", str(bom_path), "--threshold", "100"])
-        assert result.exit_code == 0
+        result = runner.invoke(main, ["risk", str(bom_path), "--threshold", "100", "--json-output"])
+        assert result.exit_code == 1
+        assert json.loads(result.output)["coverage_status"] == "partial"
 
 
 class TestDiffCommand:
