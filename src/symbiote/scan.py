@@ -42,6 +42,7 @@ from symbiote.model.entities import (
 from symbiote.model.ids import make_id
 from symbiote.model.snapshot import Producer
 from symbiote.snapshot import finalize, new_document
+from symbiote.snapshot.state import ChainIssue, ChainStore, seal_with_chain
 
 _COLLECTION_BY_TYPE: list[tuple[type, str]] = [
     (Agent, "agents"),
@@ -74,6 +75,10 @@ class ScanOutcome:
     bom: AgentBOM
     results: list[CollectionResult]
     warnings: list[str] = field(default_factory=list)
+    policy: Any = None
+    chain_issues: list[ChainIssue] = field(default_factory=list)
+    policy: Any = None
+    chain_issues: list[ChainIssue] = field(default_factory=list)
 
     @property
     def counts(self) -> dict[str, int]:
@@ -159,6 +164,8 @@ def scan(
     include_text: bool = False,
     collectors: list[str] | None = None,
     budget_seconds: float = 20.0,
+    policy: bool = True,
+    store: Path | None = None,
 ) -> ScanOutcome:
     """Collect declared facts from ``root`` and return a finalised document."""
     root = Path(root).resolve()
@@ -230,8 +237,21 @@ def scan(
         redactions=redactions,
         **collections,
     )
-    bom = finalize(doc, nonce=nonce if nonce is not None else (bytes(32) if deterministic else None))
-    return ScanOutcome(bom=bom, results=results, warnings=warnings)
+    policy_result = None
+    if policy:
+        from symbiote.policy import run_policy
+
+        policy_result = run_policy(doc, now=now)
+        doc = policy_result.apply(doc)
+    use_nonce = nonce if nonce is not None else (bytes(32) if deterministic else None)
+    chain_issues: list[ChainIssue] = []
+    if store is not None:
+        bom, chain_issues = seal_with_chain(doc, ChainStore(store), nonce=use_nonce)
+    else:
+        bom = finalize(doc, nonce=use_nonce)
+    return ScanOutcome(
+        bom=bom, results=results, warnings=warnings, policy=policy_result, chain_issues=chain_issues
+    )
 
 
 __all__ = ["AGENT_DECLARATION_FILES", "ScanOutcome", "read_agent_declaration", "root_agent_from", "scan"]

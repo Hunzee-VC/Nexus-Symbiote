@@ -30,6 +30,8 @@ app.add_typer(allowlist_app, name="allowlist")
 app.add_typer(digest_app, name="digest")
 app.add_typer(merkle_app, name="merkle")
 app.add_typer(attest_app, name="attest")
+policy_app = typer.Typer(help="Built-in policy checks (SYM-*), SARIF output and check documentation.")
+app.add_typer(policy_app, name="policy")
 
 console = Console(stderr=True)
 JsonFlag = Annotated[bool, typer.Option("--json", help="Machine-readable JSON on stdout.")]
@@ -203,23 +205,42 @@ def scan(
             "--user-scope", help="Also read user-scope client configuration from the home directory."
         ),
     ] = False,
+    store: Annotated[
+        Path | None,
+        typer.Option(
+            "--store", help="Chain store directory: allocate serial/prev and enforce anti-rollback."
+        ),
+    ] = None,
+    no_policy: Annotated[
+        bool,
+        typer.Option(
+            "--no-policy", help="Skip the built-in policy checks (derived flags/findings stay empty)."
+        ),
+    ] = False,
     as_json: JsonFlag = False,
 ) -> None:
     """Zero-config collection: produce a declared AgentBOM snapshot (companion, CycloneDX 1.7, SPDX 3.0.1) from a repository."""
     from symbiote.digest import bytes_digest
     from symbiote.export.companion import companion_bytes
     from symbiote.scan import scan as run_scan
+    from symbiote.snapshot.state import ChainConflictError
 
     if fmt not in ("companion", "cyclonedx", "spdx", "all"):
         console.print(f"[red]unknown format {fmt!r}[/red]")
         raise typer.Exit(exit_codes.USAGE)
-    outcome = run_scan(
-        path,
-        agent_name=name,
-        home=Path.home() if user_scope else None,
-        deterministic=deterministic,
-        include_text=include_text,
-    )
+    try:
+        outcome = run_scan(
+            path,
+            agent_name=name,
+            home=Path.home() if user_scope else None,
+            deterministic=deterministic,
+            include_text=include_text,
+            policy=not no_policy,
+            store=store,
+        )
+    except ChainConflictError as exc:
+        console.print(f"[red]anti-rollback conflict[/red]: {exc}")
+        raise typer.Exit(exit_codes.ROLLBACK) from None
     bom = outcome.bom
     out.mkdir(parents=True, exist_ok=True)
     written: dict[str, str] = {}
@@ -275,6 +296,12 @@ def scan(
         "cyclonedxErrors": errors.get("cyclonedx", [])[:20],
         "spdxValid": not errors.get("spdx"),
         "spdxErrors": errors.get("spdx", [])[:20],
+        "findings": outcome.policy.counts() if outcome.policy else None,
+        "flags": {f.flag.value: f.value.value for f in bom.derived.flags if f.value.value != "false"},
+        "chainIssues": [
+            {"check": i.check_id, "severity": i.severity.value, "message": i.message}
+            for i in outcome.chain_issues
+        ],
     }
     lines = [
         f"[bold]{bom.subject}[/bold]  snapshot {bom.snapshot.digest[:23]}…  ({bom.snapshot.kind.value}, serial {bom.snapshot.serial})",
@@ -286,6 +313,18 @@ def scan(
         *(f"[yellow]warning[/yellow] {w}" for w in outcome.warnings[:10]),
         *(f"written: {v}" for v in written.values()),
     ]
+    if outcome.policy:
+        fails = [f for f in outcome.policy.findings if f.state.value == "fail"]
+        indet = [f for f in outcome.policy.findings if f.state.value == "indeterminate"]
+        lines.append(
+            f"policy: {len(fails)} failing finding(s), {len(indet)} indeterminate — run `symbiote policy check {companion_path}` for details"
+        )
+        for f in fails[:8]:
+            lines.append(
+                f"  [red]{f.severity.value:8s}[/red] {f.check_id}  {', '.join(f.subject_refs[:2])}  {f.message[:90]}"
+            )
+    for i in outcome.chain_issues:
+        lines.append(f"[yellow]{i.check_id}[/yellow] {i.message}")
     for label, key in (("CycloneDX 1.7", "cyclonedx"), ("SPDX 3.0.1", "spdx")):
         if key in errors:
             lines.append(
@@ -474,6 +513,12 @@ def verify(
             help="Accept a Sigstore signature without identity constraints (outcome: signature-valid-unconstrained).",
         ),
     ] = False,
+    store: Annotated[
+        Path | None,
+        typer.Option(
+            "--store", help="Chain store directory for anti-rollback checks of the companion's snapshot."
+        ),
+    ] = None,
     as_json: JsonFlag = False,
 ) -> None:
     """Verify a DSSE envelope (key-based) or a Sigstore bundle (keyless) and its binding to a companion document."""
@@ -524,16 +569,29 @@ def verify(
     assert stmt is not None
     result["predicateType"] = stmt.get("predicateType")
     ok = True
+    rollback = False
     if companion is not None:
         ok, result["bindings"] = _check_bindings(stmt, companion)
         if not ok:
             result["outcome"] = "digest-mismatch"
+        if store is not None:
+            from symbiote.export.companion import load_companion
+            from symbiote.snapshot.state import ChainStore
+
+            issues = ChainStore(store).check(load_companion(companion).snapshot)
+            result["chainIssues"] = [
+                {"check": i.check_id, "severity": i.severity.value, "message": i.message} for i in issues
+            ]
+            rollback = any(i.check_id == "SYM-SNAP-001" for i in issues)
     emit(
         result,
         as_json,
         ("[green]" + result["outcome"] + "[/green] " if ok else "[red]digest mismatch[/red] ")
-        + str(result["predicateType"]),
+        + str(result["predicateType"])
+        + ("  [red]SERIAL REGRESSION[/red]" if rollback else ""),
     )
+    if rollback:
+        raise typer.Exit(exit_codes.ROLLBACK)
     if not ok:
         raise typer.Exit(exit_codes.VERIFICATION)
 
@@ -589,6 +647,180 @@ def allowlist_check(
         "\n".join(f"{d.action:5s} {d.tool or '-':30s} {d.reason}" for d in decisions),
     )
     if any(d.action != "allow" for d in decisions):
+        raise typer.Exit(exit_codes.FINDINGS)
+
+
+@policy_app.command("check")
+def policy_check(
+    companion: Path,
+    fail_on: Annotated[str, typer.Option("--fail-on", help="critical | high | medium | low | info")] = "high",
+    select: Annotated[
+        list[str] | None, typer.Option("--select", help="Check id glob(s) to run, e.g. SYM-MCP-*")
+    ] = None,
+    exclude: Annotated[list[str] | None, typer.Option("--exclude", help="Check id glob(s) to skip")] = None,
+    baseline: Annotated[
+        Path | None,
+        typer.Option(
+            "--baseline",
+            help="Approved/declared companion to compare against (undeclared-component findings)",
+        ),
+    ] = None,
+    sarif: Annotated[Path | None, typer.Option("--sarif", help="Write SARIF 2.1.0 to this file")] = None,
+    fail_on_indeterminate: Annotated[
+        bool, typer.Option("--fail-on-indeterminate", help="Treat indeterminate findings as failures")
+    ] = False,
+    as_json: JsonFlag = False,
+) -> None:
+    """Run the built-in SYM-* checks over a companion document (spec/checks.md)."""
+    from symbiote.export.companion import load_companion
+    from symbiote.model.enums import Severity
+    from symbiote.policy import run_policy, to_sarif
+
+    bom = load_companion(companion)
+    base = load_companion(baseline) if baseline else None
+    result = run_policy(bom, select=select, exclude=exclude or (), baseline=base)
+    threshold = Severity(fail_on)
+    if sarif:
+        sarif.write_text(
+            json.dumps(to_sarif(result.findings, artifact_root=str(companion.parent)), indent=2) + "\n",
+            encoding="utf-8",
+        )
+    data = {
+        "companion": str(companion),
+        "checksRun": list(result.checks_run),
+        "counts": result.counts(),
+        "findings": [f.to_json_dict() for f in result.findings],
+        "flags": [f.to_json_dict() for f in result.flags],
+        "errors": list(result.errors),
+        "sarif": str(sarif) if sarif else None,
+    }
+    lines = [
+        f"{len(result.findings)} finding(s) from {len(result.checks_run)} checks; flags: "
+        + ", ".join(f"{f.flag.value}={f.value.value}" for f in result.flags if f.value.value != "false")
+    ]
+    for f in result.findings:
+        colour = {"critical": "red", "high": "red", "medium": "yellow", "low": "cyan", "info": "white"}[
+            f.severity.value
+        ]
+        lines.append(
+            f"[{colour}]{f.severity.value:8s}[/{colour}] {f.state.value:13s} {f.check_id:14s} {', '.join(f.subject_refs[:2])}\n           {f.message[:160]}"
+        )
+    emit(data, as_json, "\n".join(lines))
+    if result.exit_code(threshold, include_indeterminate=fail_on_indeterminate):
+        raise typer.Exit(exit_codes.FINDINGS)
+
+
+@policy_app.command("list")
+def policy_list(as_json: JsonFlag = False) -> None:
+    """List the built-in checks."""
+    from symbiote.policy import list_checks
+
+    rows = []
+    for c in list_checks():
+        sev = getattr(c, "severity", None)
+        rows.append(
+            {"id": c.id, "severity": sev.value if sev is not None else None, "title": getattr(c, "title", "")}
+        )
+    emit(rows, as_json, "\n".join(f"{r['id']:14s} {r['severity'] or ''!s:8s} {r['title']}" for r in rows))
+
+
+@policy_app.command("explain")
+def policy_explain(check_id: str, as_json: JsonFlag = False) -> None:
+    """Explain one check: inputs, logic, threat mappings."""
+    from symbiote.policy import explain
+
+    info = explain(check_id)
+    emit(info, as_json, json.dumps(info, indent=2, default=str))
+
+
+@app.command()
+def conformance(
+    companion: Path,
+    level: Annotated[str, typer.Option("--level", help="minimal | standard | verified")] = "minimal",
+    as_json: JsonFlag = False,
+) -> None:
+    """Evaluate AgentBOM conformance requirements (spec/conformance.md) up to the requested level."""
+    from symbiote.export.companion import load_companion
+    from symbiote.policy import evaluate_conformance
+
+    if level not in ("minimal", "standard", "verified"):
+        console.print("[red]level must be minimal, standard or verified[/red]")
+        raise typer.Exit(exit_codes.USAGE)
+    report = evaluate_conformance(load_companion(companion), level)  # type: ignore[arg-type]
+    data = report.to_json()
+    lines = [
+        f"requested {report.requested}; attained {report.attained or 'none'} — {'PASS' if report.passed else 'NOT ATTAINED'}",
+        data["note"],
+    ]
+    for r in report.requirements:
+        mark = {
+            "pass": "[green]pass[/green]",
+            "fail": "[red]fail[/red]",
+            "unknown": "[yellow]unknown[/yellow]",
+        }.get(r.status, r.status)
+        lines.append(
+            f"{mark:22s} {r.id:10s} {r.title}" + ("" if not r.reasons else "  — " + "; ".join(r.reasons[:2]))
+        )
+    emit(data, as_json, "\n".join(lines))
+    if not report.passed:
+        statuses = {r.status for r in report.requirements}
+        raise typer.Exit(exit_codes.FINDINGS if "fail" in statuses else exit_codes.COVERAGE)
+
+
+@app.command()
+def score(companion: Path, as_json: JsonFlag = False) -> None:
+    """Completeness score (a BOM-quality number, never a trust score) with per-area reasons."""
+    from symbiote.export.companion import load_companion
+    from symbiote.policy import completeness_score
+
+    report = completeness_score(load_companion(companion))
+    data = report.to_json()
+    lines = [
+        f"completeness {report.score}/100 — {data['note']}",
+        "assurance: " + ", ".join(f"{k}={v:.0%}" for k, v in report.assurance.items()),
+    ]
+    for a in report.areas:
+        lines.append(
+            f"{a.area:14s} {a.present}/{a.total} (weight {a.weight})"
+            + ("" if not a.missing else "  missing: " + ", ".join(a.missing[:4]))
+        )
+    emit(data, as_json, "\n".join(lines))
+
+
+@app.command()
+def diff(
+    before: Path,
+    after: Path,
+    fail_on_change: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--fail-on-change",
+            help="Delta event type(s) that make the command exit 1, e.g. tool-definition-changed",
+        ),
+    ] = None,
+    out: Annotated[Path | None, typer.Option("-o", "--out", help="Write the Delta JSON here")] = None,
+    as_json: JsonFlag = False,
+) -> None:
+    """Typed delta between two companion documents of any snapshot kinds — the diff is the finding."""
+    from symbiote.export.companion import load_companion
+    from symbiote.snapshot import diff as snapshot_diff
+
+    a, b = load_companion(before), load_companion(after)
+    delta = snapshot_diff(a, b)
+    data = delta.to_json_dict()
+    if out:
+        out.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    lines = [
+        f"{len(delta.events)} event(s): {a.snapshot.digest[:19]}… ({a.snapshot.kind.value}) -> {b.snapshot.digest[:19]}… ({b.snapshot.kind.value})"
+    ]
+    for e in delta.events:
+        lines.append(
+            f"[yellow]{e.severity_hint.value:8s}[/yellow] {e.type.value:28s} {e.subject_ref}"
+            + (f"  {e.detail[:80]}" if e.detail else "")
+        )
+    emit(data, as_json, "\n".join(lines))
+    wanted = set(fail_on_change or [])
+    if wanted and any(e.type.value in wanted for e in delta.events):
         raise typer.Exit(exit_codes.FINDINGS)
 
 
