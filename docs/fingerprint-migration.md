@@ -13,8 +13,8 @@ old and new digests as directly comparable. Keep the original evidence for
 audit. Malformed or non-finite numeric values now fail canonicalization rather
 than being converted to null.
 
-CycloneDX dependency edges encode only generic dependencies. Original SymBiote
-relationship types are carried as JSON strings in `symbiote:dependency:relationship`
+CycloneDX dependency edges encode only generic dependencies. Original Nexus SymBiote
+relationship types are carried as JSON strings in `nexus-symbiote:dependency:relationship`
 metadata properties; consumers that discard those properties lose the typed
 edge semantics. The SPDX exporter has not been independently validated and is
 not claimed conformant by these changes.

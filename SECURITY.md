@@ -2,7 +2,7 @@
 
 ## Status and boundaries
 
-SymBiote is alpha software. Treat a repository, BOM, model file, registry response and tool description as untrusted input. A static scan observes supported local files; it does not prove the absence of other components or the effective permissions or behavior of a running agent.
+Nexus SymBiote is alpha software. Treat a repository, BOM, model file, registry response and tool description as untrusted input. A static scan observes supported local files; it does not prove the absence of other components or the effective permissions or behavior of a running agent.
 
 A digest identifies bytes only relative to a trusted expected digest. A signature must be verified against an authorized identity, issuer, subject and policy; it is not proof that content is safe or that the inventory is complete. Unknown, stale, excluded and failed collection are not evidence of absence.
 

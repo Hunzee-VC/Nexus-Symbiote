@@ -7,9 +7,9 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from symbiote.core.aibom import AIBOM
-from symbiote.core.evidence import AuthorityClaim, DeploymentProfile, EvidenceRecord
-from symbiote.core.models import AgentComponent
+from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote.core.evidence import AuthorityClaim, DeploymentProfile, EvidenceRecord
+from nexus_symbiote.core.models import AgentComponent
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -128,7 +128,7 @@ def test_timestamps_must_have_timezone():
 def test_native_schema_checks_deployment_profile_shape():
     jsonschema = pytest.importorskip("jsonschema")
     schema = json.loads(
-        (Path(__file__).parents[1] / "schemas" / "symbiote-aibom-1.0.schema.json").read_text()
+        (Path(__file__).parents[1] / "schemas" / "nexus-symbiote-aibom-1.0.schema.json").read_text()
     )
     profile = DeploymentProfile(deployment_id="prod:a:v1", environment="production")
     agent = AgentComponent(bom_ref="agent:a", name="a", deployment_profile=profile)

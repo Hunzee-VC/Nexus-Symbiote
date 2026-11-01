@@ -29,7 +29,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev,all]" types-PyYAML
-      - run: mypy src/symbiote/
+      - run: mypy src/nexus_symbiote/
 
   test:
     runs-on: ubuntu-latest
@@ -42,4 +42,4 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e ".[dev,all]"
-      - run: pytest --cov=symbiote --cov-report=term-missing
+      - run: pytest --cov=nexus_symbiote --cov-report=term-missing
