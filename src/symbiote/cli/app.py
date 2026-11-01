@@ -24,7 +24,9 @@ schema_app = typer.Typer(help="Export the schemas and vocabularies Symbiote impl
 digest_app = typer.Typer(help="Compute digests exactly as the BOM does (spec/digests.md).")
 merkle_app = typer.Typer(help="Merkle commitment: verify documents and produce inclusion proofs.")
 attest_app = typer.Typer(help="Build and sign in-toto statements (DSSE).")
+allowlist_app = typer.Typer(help="Enforcement exports for tool gateways and policy engines.")
 app.add_typer(schema_app, name="schema")
+app.add_typer(allowlist_app, name="allowlist")
 app.add_typer(digest_app, name="digest")
 app.add_typer(merkle_app, name="merkle")
 app.add_typer(attest_app, name="attest")
@@ -325,6 +327,60 @@ def verify(
     )
     if not ok:
         raise typer.Exit(exit_codes.VERIFICATION)
+
+
+@allowlist_app.command("export")
+def allowlist_export(
+    companion: Path,
+    fmt: Annotated[str, typer.Option("--format", help="gab | opa-data | mcp-gateway-generic")] = "gab",
+    out: Annotated[Path | None, typer.Option("-o", "--out")] = None,
+    attestation: Annotated[
+        list[str] | None,
+        typer.Option("--attestation", help="Attestation file names to reference from the bundle."),
+    ] = None,
+) -> None:
+    """Export a Gateway Allowlist Bundle (or OPA data / generic name-digest pairs) from a companion document."""
+    from symbiote.enforce import export_allowlist
+    from symbiote.export.companion import load_companion
+
+    bom = load_companion(companion)
+    if fmt not in ("gab", "opa-data", "mcp-gateway-generic"):
+        console.print(f"[red]unknown format {fmt!r}[/red]")
+        raise typer.Exit(exit_codes.USAGE)
+    data = export_allowlist(bom, fmt, attestations=attestation or [])  # type: ignore[arg-type]
+    text = json.dumps(data, indent=2, sort_keys=True) + "\n"
+    if out:
+        out.write_text(text, encoding="utf-8")
+        console.print(f"wrote {out} ({fmt})")
+    else:
+        sys.stdout.write(text)
+
+
+@allowlist_app.command("check")
+def allowlist_check(
+    gab: Path,
+    server: str,
+    tools_json: Annotated[
+        Path,
+        typer.Argument(help="JSON array of raw served tool definitions (a tools/list result's 'tools')."),
+    ],
+    as_json: JsonFlag = False,
+) -> None:
+    """Reference enforcement: decide allow/block/drop for served tools against a GAB."""
+    from symbiote.enforce import check_served_toolset
+
+    bundle = json.loads(gab.read_text(encoding="utf-8"))
+    served = json.loads(tools_json.read_text(encoding="utf-8"))
+    if isinstance(served, dict) and "tools" in served:
+        served = served["tools"]
+    decisions = check_served_toolset(bundle, server, served)
+    emit(
+        [d.to_json_dict() for d in decisions],
+        as_json,
+        "\n".join(f"{d.action:5s} {d.tool or '-':30s} {d.reason}" for d in decisions),
+    )
+    if any(d.action != "allow" for d in decisions):
+        raise typer.Exit(exit_codes.FINDINGS)
 
 
 def main() -> None:
