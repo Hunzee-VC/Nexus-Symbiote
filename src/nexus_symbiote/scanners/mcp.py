@@ -360,22 +360,37 @@ class MCPScanner(Scanner):
     def _scan_code_mcp_clients(self, root: Path, result: ScanResult) -> None:
         assert self._files is not None
         sources = list(self._files.iter_files())
+        from nexus_symbiote.scanners.python_tools import collect_python_tools
         from nexus_symbiote.scanners.ts_tools import collect_typescript
 
         collect_typescript(self._files, result, sources)
         detected: list[str] = []
         for suffix in (".py", ".ts", ".js"):
-            paths = [path for path in sources if len(path.parts) == 1 and path.suffix == suffix]
-            if len(paths) > 10:
-                result.scan_failures.append(
-                    f"MCP {suffix} references: 10-file collection limit exceeded"
+            paths = [
+                path
+                for path in sources
+                if path.suffix == suffix
+                and (
+                    len(path.parts) == 1
+                    or suffix == ".py"
+                    and not {"tests", "test", "dist", "build"}.intersection(path.parts)
                 )
-            for path in paths[:10]:
+            ]
+            if suffix == ".py":
+                paths.sort(key=lambda path: len(path.parts) > 1)
+            limit = 50 if suffix == ".py" else 10
+            if len(paths) > limit:
+                result.scan_failures.append(
+                    f"MCP {suffix} references: {limit}-file collection limit exceeded"
+                )
+            for path in paths[:limit]:
                 content = self._files.read_text(path)
                 if content is None:
                     continue
+                if suffix == ".py" and len(path.parts) > 1 and "mcp" not in content:
+                    continue
                 result.surfaces_scanned.append(str(root / path))
-                if len(content) > 262_144:
+                if len(content.encode("utf-8")) > 262_144:
                     result.scan_failures.append(f"{path}: syntax collection size limit exceeded")
                     continue
                 if suffix == ".py":
@@ -384,6 +399,7 @@ class MCPScanner(Scanner):
                     except (SyntaxError, ValueError, RecursionError):
                         result.scan_failures.append(f"{path}: invalid Python syntax")
                         continue
+                    collect_python_tools(tree, content, path, result)
                     found = any(
                         isinstance(node, ast.ImportFrom)
                         and node.module is not None

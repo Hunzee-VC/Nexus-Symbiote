@@ -68,6 +68,8 @@ The policy maps exact server BOM references to `{"command":"/operator/approved-l
 
 For explicitly authorized HTTPS observations, use `discover-mcp ENDPOINT --allowed-origin HTTPS_ORIGIN`. Both commands enumerate served descriptors without calling tools. Review and authenticate their observations separately before using them as approval evidence.
 
+The MCP scanner also inventories Python SDK source declarations in application files. It recognizes module-level `FastMCP` and `MCPServer` constructors imported directly from the SDK, including import aliases, and literal `@server.tool()` names. Each tool links to its server, source line and source digest. Its effective input schema, runtime registration and descriptor hash require separate evidence. Dynamic tool names, ambiguous bindings and low-level listing callbacks appear in collection gaps. Collection examines at most 50 Python files, with a 256 KiB limit per file. Nested test, build and distribution directories fall outside the application-source search.
+
 MCP server and tool references are scoped to the relative configuration path and declared name. The same server name in two hosts remains two inventory entries, with separate client links. Existing snapshots using name-only references require review and recollection before comparison or approval.
 
 | Surface | Evidence and limitation |
@@ -125,6 +127,8 @@ jobs:
 `uses: ./` is for this repository or a trusted, separately checked-out Nexus SymBiote source tree. In another repository use `aisecnomad/nexus-symbiote@<reviewed 40-character commit SHA>`; do not point `uses: ./` at an unrelated target project. Treat Action source as executable code. Do not run an untrusted pull request's Action checkout with deployment credentials or use `pull_request_target` to execute its content.
 
 The Action installs its own reviewed source, collects once, and derives the requested format and SARIF from that same native inventory. Inputs are passed as data, validation failures fail the Action, and malformed risk reports cannot become a zero score. Scan and output paths must stay inside the workspace, and output paths must not contain artifact glob syntax. Collection failures fail the Action even when later validation is disabled. Isolated Python execution prevents the scanned repository from supplying a replacement module through its current directory or `PYTHONPATH`. SARIF uploading is off by default; enable it only when repository code scanning and the event's permissions support uploading. Fork pull requests may have restricted tokens; use the evidence artifact when upload is unavailable.
+
+The Action uses built-in policy and the workflow inputs for collection, validation and scoring. A policy file in the scanned checkout cannot exclude a model or disable either validator. Standalone CLI calls continue to load project policy by default. Pass `--no-project-policy` to `scan`, `validate` or `risk` when evaluating an untrusted checkout.
 
 A threshold of `0` explicitly disables the risk gate. Disabling `validate` or `risk-check` is a caller policy choice, not evidence that verification passed. Outputs distinguish an actual risk score from a skipped evaluation. Inventories may expose infrastructure details; restrict access to uploaded artifacts.
 

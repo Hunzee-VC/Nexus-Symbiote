@@ -136,7 +136,15 @@ def run(
     emit(risk_score="", passed="skipped")
     with tempfile.TemporaryDirectory(prefix="nexus-symbiote-action-") as scratch:
         native = Path(scratch) / "native.json"
-        args = ["scan", "--report-only", "--format", "json", "--output", str(native)]
+        args = [
+            "scan",
+            "--no-project-policy",
+            "--report-only",
+            "--format",
+            "json",
+            "--output",
+            str(native),
+        ]
         for scanner in config.scanners:
             args.extend(["--scanner", scanner])
         collected = command([*args, "--", str(config.project)])
@@ -154,13 +162,22 @@ def run(
             emit_export(native, sarif, "sarif")
             emit(sarif_path=str(sarif))
         if config.validate:
-            validated = command(["validate", str(native), "--project", str(config.project)])
+            validated = command(
+                ["validate", "--no-project-policy", str(native), "--project", str(config.project)]
+            )
             if validated.returncode != 0:
                 print(validated.stderr, file=sys.stderr)
                 return 1
         if config.risk_check and config.threshold != 0:
             scored = command(
-                ["risk", str(native), "--threshold", str(config.threshold), "--json-output"]
+                [
+                    "risk",
+                    "--no-project-policy",
+                    str(native),
+                    "--threshold",
+                    str(config.threshold),
+                    "--json-output",
+                ]
             )
             if scored.returncode not in {0, 1}:
                 raise ValueError("risk evaluation failed to run")

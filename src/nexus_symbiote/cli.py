@@ -26,9 +26,11 @@ console = Console(stderr=True)
 err_console = Console(stderr=True)
 
 
-def _policy(root: Path) -> Policy:
+def _policy(root: Path, *, ignore_project: bool = False) -> Policy:
     from nexus_symbiote.policy import PolicyError, default_policy, load_policy
 
+    if ignore_project:
+        return default_policy()
     try:
         return load_policy(root) or default_policy()
     except PolicyError as exc:
@@ -95,6 +97,11 @@ def main() -> None:
     type=click.Path(exists=True, path_type=Path),
     help="Explicit operator signer policy JSON",
 )
+@click.option(
+    "--no-project-policy",
+    is_flag=True,
+    help="Use built-in policy without reading configuration from the target.",
+)
 def scan(
     project_path: str,
     output: str | None,
@@ -102,6 +109,7 @@ def scan(
     scanners: tuple[str, ...],
     report_only: bool = False,
     signature_policy: Path | None = None,
+    no_project_policy: bool = False,
 ) -> None:
     """Scan a project and generate an AIBOM."""
     root = Path(project_path).resolve()
@@ -115,7 +123,7 @@ def scan(
     from nexus_symbiote.signature_policy import load_signature_policies
     from nexus_symbiote.validators.risk import RiskScorer
 
-    policy = _policy(root)
+    policy = _policy(root, ignore_project=no_project_policy)
     try:
         signature_policies = (
             load_signature_policies(signature_policy, root) if signature_policy else []
@@ -513,7 +521,17 @@ def verify_discovery(
     type=click.Path(exists=True, path_type=Path),
     help="Explicit operator signer policy JSON; requires --project",
 )
-def validate(aibom_path: str, project: str | None, signature_policy: Path | None = None) -> None:
+@click.option(
+    "--no-project-policy",
+    is_flag=True,
+    help="Use built-in policy without reading configuration from the target.",
+)
+def validate(
+    aibom_path: str,
+    project: str | None,
+    signature_policy: Path | None = None,
+    no_project_policy: bool = False,
+) -> None:
     """Validate an AIBOM for completeness and integrity."""
     bom = AIBOM.load(Path(aibom_path))
 
@@ -532,7 +550,10 @@ def validate(aibom_path: str, project: str | None, signature_policy: Path | None
     except ValueError as exc:
         raise click.ClickException(str(exc)) from None
 
-    policy = _policy(Path(project).resolve() if project else Path(aibom_path).parent)
+    policy = _policy(
+        Path(project).resolve() if project else Path(aibom_path).parent,
+        ignore_project=no_project_policy,
+    )
     valid = True
     console.print("[bold]Completeness check[/]")
     if policy.validation.require_completeness:
@@ -599,15 +620,24 @@ def validate(aibom_path: str, project: str | None, signature_policy: Path | None
     type=click.Choice(["critical", "high", "medium", "low", "info", "none"]),
     default=None,
 )
+@click.option(
+    "--no-project-policy",
+    is_flag=True,
+    help="Use built-in policy without reading configuration from the target.",
+)
 def risk(
-    aibom_path: str, threshold: float | None, json_output: bool, fail_on_severity: str | None
+    aibom_path: str,
+    threshold: float | None,
+    json_output: bool,
+    fail_on_severity: str | None,
+    no_project_policy: bool = False,
 ) -> None:
     """Score supply-chain risks in an AIBOM."""
     bom = AIBOM.load(Path(aibom_path))
 
     from nexus_symbiote.validators.risk import RiskScorer
 
-    policy = _policy(Path(aibom_path).parent)
+    policy = _policy(Path(aibom_path).parent, ignore_project=no_project_policy)
     threshold = threshold if threshold is not None else policy.risk.fail_threshold
     if threshold <= 0 or not __import__("math").isfinite(threshold):
         raise click.BadParameter("threshold must be positive and finite", param_hint="--threshold")

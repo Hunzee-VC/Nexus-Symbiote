@@ -166,8 +166,8 @@ def test_workflow_pins_structure_and_release_privilege_separation():
         assert all("run" not in step for step in jobs[name]["steps"])
 
 
-@pytest.mark.parametrize("validation_status", [0, 7])
-def test_real_entry_point_ignores_untrusted_python_path(tmp_path, validation_status):
+@pytest.mark.parametrize("validate", [True, False])
+def test_real_entry_point_ignores_untrusted_python_path_and_policy(tmp_path, validate):
     project = tmp_path / "$(touch PWNED)'quoted space"
     project.mkdir()
     package_root = tmp_path / "stub"
@@ -180,17 +180,18 @@ def test_real_entry_point_ignores_untrusted_python_path(tmp_path, validation_sta
     (package_root / "sitecustomize.py").write_text(
         "from pathlib import Path\nPath('PWNED').write_text('startup')\n"
     )
-    (project / ".nexus-symbiote.yaml").write_text("validate:\n  require_completeness: false\n")
+    (project / ".nexus-symbiote.yaml").write_text(
+        "scan:\n  scanners: [prompt]\nvalidate:\n  require_completeness: false\n  require_integrity: false\n"
+    )
     (project / "CLAUDE.md").write_text("Review issues with read-only tools.\n")
-    if validation_status:
-        (project / "model.pkl").write_bytes(b"unsafe-format-fixture")
+    (project / "model.pkl").write_bytes(b"unsafe-format-fixture")
     env = {
         **os.environ,
         "GITHUB_WORKSPACE": str(tmp_path),
         "SYMBIOTE_SCAN_PATH": project.name,
-        "SYMBIOTE_SCANNERS": "prompt,model" if validation_status else "prompt",
+        "SYMBIOTE_SCANNERS": "",
         "SYMBIOTE_FORMAT": "json",
-        "SYMBIOTE_VALIDATE": "true",
+        "SYMBIOTE_VALIDATE": str(validate).lower(),
         "SYMBIOTE_RISK_CHECK": "false",
         "SYMBIOTE_RISK_THRESHOLD": "50",
         "SYMBIOTE_SARIF": "false",
@@ -202,6 +203,11 @@ def test_real_entry_point_ignores_untrusted_python_path(tmp_path, validation_sta
     result = subprocess.run(  # noqa: S603
         [sys.executable, "-I", str(entry)], cwd=tmp_path, env=env, capture_output=True, check=False
     )
-    assert result.returncode == (0 if validation_status == 0 else 1)
+    assert result.returncode == (1 if validate else 0)
     assert not (tmp_path / "PWNED").exists()
-    assert "components" in json.loads((tmp_path / "result.json").read_text())
+    models = [
+        c
+        for c in json.loads((tmp_path / "result.json").read_text())["components"]
+        if c["component_type"] == "model"
+    ]
+    assert [c["serialization_safety"] for c in models] == ["unsafe-code-execution"]
