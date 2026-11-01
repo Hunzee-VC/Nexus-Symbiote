@@ -45,7 +45,11 @@ jobs:
           cd "$RUNNER_TEMP"
           "$RUNNER_TEMP/release-smoke/bin/python" -m nexus_symbiote --version
           "$RUNNER_TEMP/release-smoke/bin/python" -m nexus_symbiote scan "$GITHUB_WORKSPACE" --report-only -f cyclonedx -o "$GITHUB_WORKSPACE/evidence/project.cdx.json"
-          cd "$GITHUB_WORKSPACE"
+      - name: Package the installed wheel's inventory benchmark
+        run: |
+          "$RUNNER_TEMP/release-smoke/bin/python" benchmarks/inventory/evidence.py prepare "$RUNNER_TEMP/inventory-benchmark"
+          sha256sum dist/*.whl > "$RUNNER_TEMP/inventory-benchmark/wheel.sha256"
+          tar -C "$RUNNER_TEMP/inventory-benchmark" -czf evidence/inventory-benchmark.tar.gz results.json statement.json wheel.sha256
           python scripts/release_checksums.py
       - name: Upload distributions
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -76,6 +80,21 @@ jobs:
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
         with:
           subject-path: dist/*
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: release-evidence
+          path: evidence
+      - name: Attest inventory benchmark results and wheel digest
+        id: inventory
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: evidence/inventory-benchmark.tar.gz
+      - name: Retain inventory attestation bundle
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: inventory-benchmark-attestation
+          path: ${{ steps.inventory.outputs.bundle-path }}
+          if-no-files-found: error
   publish:
     if: inputs.publish && github.ref == 'refs/heads/main'
     needs: [build, attest]

@@ -25,3 +25,27 @@ model format, signature uncertainty, scoping and secret redaction are reported
 separately as controls. A collection failure makes the case fail and remains
 visible. This pinned upstream file is one inspectable public example and is not
 a representative real-world sample.
+
+## Verify a release candidate's inventory benchmark
+
+The manual release workflow runs the public corpus against the built wheel on
+`main`. The `release-evidence` artifact includes `inventory-benchmark.tar.gz`.
+The archive contains the per-case results, the in-toto statement binding those
+results to the corpus and installed scanner sources, and the SHA-256 of the
+tested wheel. A separate job attests the archive with GitHub's workflow identity.
+
+Download the archive from the candidate run and set `RELEASE_COMMIT` to the full
+commit you intend to verify. Check the provenance before extracting the archive.
+
+```sh
+gh attestation verify inventory-benchmark.tar.gz \
+  --repo aisecnomad/Nexus-symbiote \
+  --signer-workflow aisecnomad/Nexus-symbiote/.github/workflows/release.yml \
+  --source-ref refs/heads/main --source-digest "${RELEASE_COMMIT:?set the expected commit}" \
+  --deny-self-hosted-runners
+```
+
+For a retained copy of the attestation, download `inventory-benchmark-attestation`
+from that run and supply its file to `gh attestation verify` with `--bundle`.
+Compare the candidate wheel against `wheel.sha256` before using the results for
+that distribution. The counts describe the versioned public fixtures.
