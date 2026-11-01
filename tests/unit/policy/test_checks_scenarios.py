@@ -302,3 +302,23 @@ def test_memory_writers_unknown(tmp_path: Path) -> None:
     assert ("SYM-MEM-001", "fail") in found
     assert ValueState.UNKNOWN.value == "unknown"  # SYM-INSTR-001 fires only for prompts with unknown editors
     assert FindingState.FAIL.value == "fail"
+
+
+def test_ci_prompt_interpolation_and_bypass_flags(tmp_path: Path) -> None:
+    def extra(c: dict[str, list[Any]]) -> None:
+        c["identities"].append(
+            Identity(
+                id="ident:gha-review",
+                kind=IdentityKind.GITHUB_APP,
+                ref="github-actions:.github/workflows/review.yml#review",
+                tags=[
+                    "ai-agent-action:anthropics/claude-code-action",
+                    "prompt-interpolates:github.event.issue.title",
+                    "agent-cli-bypass:--dangerously-skip-permissions",
+                ],
+            )
+        )
+
+    found = _ids(tmp_path, extra, ["SYM-CI-003", "SYM-HITL-002"])
+    assert ("SYM-CI-003", "fail") in found
+    assert ("SYM-HITL-002", "fail") in found

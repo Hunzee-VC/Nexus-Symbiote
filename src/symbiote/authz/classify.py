@@ -120,7 +120,8 @@ class ApprovalDecision:
     reason: str
 
 
-#: How each client behaves for MCP tool calls when no auto-approval setting applies.
+#: How each client behaves for MCP tool calls when no auto-approval setting applies (WP9 format research,
+#: 2026-11-01). Goose and OpenClaw default to autonomous operation; unknown clients are never assumed gated.
 _CLIENT_DEFAULT: Final[dict[str, ApprovalDecision]] = {
     "claude-code": ApprovalDecision(
         ApprovalGate.REQUIRED, "claude-code prompts for MCP tools unless allowed"
@@ -135,6 +136,28 @@ _CLIENT_DEFAULT: Final[dict[str, ApprovalDecision]] = {
         ApprovalGate.REQUIRED, "gemini-cli confirms tool calls unless the server is trusted"
     ),
     "codex": ApprovalDecision(ApprovalGate.CONDITIONAL, "codex approval depends on approval_policy"),
+    "cline": ApprovalDecision(ApprovalGate.REQUIRED, "cline asks before MCP tool calls unless auto-approved"),
+    "roo": ApprovalDecision(ApprovalGate.REQUIRED, "roo asks before MCP tool calls unless always-allowed"),
+    "kiro": ApprovalDecision(ApprovalGate.REQUIRED, "kiro asks before MCP tool calls unless auto-approved"),
+    "continue": ApprovalDecision(ApprovalGate.REQUIRED, "continue defaults to allowedWithPermission"),
+    "amazon-q": ApprovalDecision(
+        ApprovalGate.REQUIRED, "amazon-q prompts unless the tool is in allowedTools"
+    ),
+    "github-copilot-cli": ApprovalDecision(
+        ApprovalGate.REQUIRED, "copilot-cli prompts unless tools are allowed"
+    ),
+    "zed": ApprovalDecision(ApprovalGate.REQUIRED, "zed tool_permissions default is confirm"),
+    "goose": ApprovalDecision(ApprovalGate.NONE, "goose GOOSE_MODE defaults to auto (no approvals)"),
+    "openclaw": ApprovalDecision(
+        ApprovalGate.NONE, "openclaw's default full-permission posture does not prompt for MCP tools"
+    ),
+}
+
+_GOOSE_MODE: Final[dict[str, ApprovalDecision]] = {
+    "auto": ApprovalDecision(ApprovalGate.NONE, "goose GOOSE_MODE=auto"),
+    "approve": ApprovalDecision(ApprovalGate.REQUIRED, "goose GOOSE_MODE=approve"),
+    "smart_approve": ApprovalDecision(ApprovalGate.CONDITIONAL, "goose GOOSE_MODE=smart_approve"),
+    "chat": ApprovalDecision(ApprovalGate.REQUIRED, "goose GOOSE_MODE=chat (no tool execution)"),
 }
 
 _CODEX_POLICY: Final[dict[str, ApprovalDecision]] = {
@@ -173,9 +196,27 @@ def server_approval_gate(server: ToolServer, tool_name: str | None = None) -> Ap
         return ApprovalDecision(ApprovalGate.NONE, "VS Code chat.tools.autoApprove=true")
     if flags.get("gemini-cli.trust") == "true":
         return ApprovalDecision(ApprovalGate.NONE, "gemini-cli trust=true bypasses confirmations")
-    for key in ("cline.autoApprove", "roo.alwaysAllow", "kiro.autoApprove", "cline.alwaysAllow"):
+    for key in ("cline.autoApprove", "kiro.autoApprove", "cline.alwaysAllow"):
         if _listed(flags, key, tool_name):
             return ApprovalDecision(ApprovalGate.NONE, f"{key} lists this tool")
+    if _listed(flags, "roo.alwaysAllow", tool_name):
+        return ApprovalDecision(
+            ApprovalGate.CONDITIONAL,
+            "roo alwaysAllow lists this tool (effective when auto-approval and MCP auto-approval are on)",
+        )
+    if (
+        flags.get("zed.agent.tool_permissions.default") == "allow"
+        or flags.get("zed.agent.always_allow_tool_actions") == "true"
+    ):
+        return ApprovalDecision(ApprovalGate.NONE, "zed tool_permissions allow every tool")
+    if flags.get("opencode.permission") == "allow":
+        return ApprovalDecision(ApprovalGate.NONE, "opencode permission=allow")
+    allowed = flags.get("amazon-q.allowedTools", "")
+    entries = {e.strip() for e in allowed.split(",") if e.strip()}
+    if entries & {"*", f"@{server.name}", f"@{server.name}/{tool_name}" if tool_name else ""}:
+        return ApprovalDecision(ApprovalGate.NONE, "amazon-q allowedTools covers this server")
+    if client == "goose" and flags.get("goose.GOOSE_MODE") in _GOOSE_MODE:
+        return _GOOSE_MODE[flags["goose.GOOSE_MODE"]]
     if client == "codex":
         policy = flags.get("codex.approval_policy")
         if policy in _CODEX_POLICY:
