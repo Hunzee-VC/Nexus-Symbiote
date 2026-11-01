@@ -90,6 +90,7 @@ def test_observed_effects_override_hints() -> None:
 def _server(client: str, **flags: str) -> ToolServer:
     return ToolServer(
         id="server:s",
+        name="s",
         kind=ToolServerKind.MCP,
         client=client,
         transport=Claim.declared(Transport.STDIO),
@@ -114,6 +115,18 @@ def _server(client: str, **flags: str) -> ToolServer:
         ("codex", {"codex.approval_policy": "untrusted"}, "t", ApprovalGate.REQUIRED),
         ("codex", {}, "t", ApprovalGate.CONDITIONAL),
         ("cline", {"cline.autoApprove": "t"}, "t", ApprovalGate.NONE),
+        ("cline", {}, "t", ApprovalGate.REQUIRED),
+        ("roo", {"roo.alwaysAllow": "t"}, "t", ApprovalGate.CONDITIONAL),
+        ("kiro", {"kiro.autoApprove": "t"}, "t", ApprovalGate.NONE),
+        ("zed", {"zed.agent.tool_permissions.default": "allow"}, "t", ApprovalGate.NONE),
+        ("zed", {}, "t", ApprovalGate.REQUIRED),
+        ("opencode", {"opencode.permission": "allow"}, "t", ApprovalGate.NONE),
+        ("opencode", {}, "t", ApprovalGate.UNKNOWN),
+        ("goose", {}, "t", ApprovalGate.NONE),
+        ("goose", {"goose.GOOSE_MODE": "approve"}, "t", ApprovalGate.REQUIRED),
+        ("amazon-q", {"amazon-q.allowedTools": "@s"}, "t", ApprovalGate.NONE),
+        ("amazon-q", {}, "t", ApprovalGate.REQUIRED),
+        ("openclaw", {}, "t", ApprovalGate.NONE),
         ("cursor", {}, "t", ApprovalGate.UNKNOWN),
     ],
 )

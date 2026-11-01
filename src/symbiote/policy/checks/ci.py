@@ -103,3 +103,52 @@ def publish_secret_on_untrusted_trigger(spec: CheckSpec, ctx: PolicyContext) -> 
                 subjects=[identity.id],
                 message=f"{identity.ref} can read publish secrets {', '.join(publish)} on untrusted events.",
             )
+
+
+@check(
+    "SYM-CI-003",
+    "Untrusted event text interpolated into an agent prompt or command",
+    Severity.CRITICAL,
+    mappings=(asi(1), atlas("AML.T0051")),
+    inputs=("identities[github-app].tags",),
+    remediation=(
+        "Never place ${{ github.event.* }} text (issue or PR titles and bodies, comments, branch names) inside a prompt "
+        "or run script. Pass it through an environment variable, tell the agent it is untrusted data, and keep the "
+        "job's tools read-only."
+    ),
+    extension=True,
+)
+def untrusted_text_in_prompt(spec: CheckSpec, ctx: PolicyContext) -> Iterator[Finding]:
+    """The root cause of Clinejection: attacker-controlled event fields are templated into an agent's prompt."""
+    for identity in _job_identities(ctx):
+        exprs = _tags(identity, "prompt-interpolates")
+        if exprs:
+            agents = _tags(identity, "ai-agent-action") or ["a workflow step"]
+            yield spec.finding(
+                ctx,
+                subjects=[identity.id],
+                message=f"{identity.ref}: {', '.join(agents)} receives {', '.join(exprs[:4])} inside its prompt or command.",
+            )
+
+
+@check(
+    "SYM-HITL-002",
+    "Agent CLI invoked with approval-bypass flags",
+    Severity.HIGH,
+    mappings=(asi(9), asi(2), asi(5)),
+    inputs=("identities[github-app].tags", "instructions[].tags"),
+    remediation=(
+        "Remove --dangerously-skip-permissions / --yolo / --trust-all-tools / --dangerously-bypass-approvals-and-sandbox "
+        "from scripts and workflows; allow specific read-only tools instead and run the agent in a sandbox without secrets."
+    ),
+    extension=True,
+)
+def bypass_flags(spec: CheckSpec, ctx: PolicyContext) -> Iterator[Finding]:
+    """Coding-agent CLIs started with every approval disabled (the Nx s1ngularity malware used exactly these flags)."""
+    for entity in (*ctx.bom.identities, *ctx.bom.instructions):
+        flags = sorted({t.split(":", 1)[1] for t in entity.tags if t.startswith("agent-cli-bypass:")})
+        if flags:
+            where = getattr(entity, "ref", None) or getattr(entity, "path", None) or entity.id
+            yield spec.finding(
+                ctx, subjects=[entity.id], message=f"{where} runs an agent CLI with {', '.join(flags)}."
+            )
