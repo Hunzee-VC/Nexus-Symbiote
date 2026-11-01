@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import stat
 from pathlib import Path
@@ -9,12 +10,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 
-ScannerName = Literal[
-    "mcp", "model", "prompt", "rag", "registry", "shadowscan", "a2a", "ide_agents"
-]
-OutputFormat = Literal["json", "cyclonedx", "spdx", "sarif"]
+from nexus_symbiote.scanner_catalog import DEFAULT_SCANNERS, ScannerName
 
-DEFAULT_SCANNERS = ("shadowscan", "mcp", "model", "prompt", "rag", "registry", "a2a", "ide_agents")
+OutputFormat = Literal["json", "cyclonedx", "spdx", "sarif"]
 
 
 class PolicyError(ValueError):
@@ -26,7 +24,7 @@ class PolicySection(BaseModel):
 
 
 def _default_scanners() -> list[ScannerName]:
-    return ["mcp", "model", "prompt", "rag", "registry", "shadowscan", "a2a", "ide_agents"]
+    return list(DEFAULT_SCANNERS)
 
 
 class ScanPolicy(PolicySection):
@@ -156,11 +154,11 @@ def _parse_policy(path: Path) -> Policy:
         raise PolicyError(f"invalid policy {path}: {exc}") from exc
 
 
-DEFAULT_POLICY_YAML = """\
+DEFAULT_POLICY_YAML = f"""\
 # Nexus SymBiote policy; malformed or unsupported settings fail closed.
 version: "1.0"
 scan:
-  scanners: ["mcp", "model", "prompt", "rag", "registry", "shadowscan", "a2a", "ide_agents"]
+  scanners: {json.dumps(DEFAULT_SCANNERS)}
   exclude_paths: ["node_modules", ".git", "__pycache__", ".venv"]
   failure_mode: "error"
 risk:

@@ -166,6 +166,9 @@ def scan(
     scanners: tuple[str, ...],
     report_only: bool = False,
     signature_policy: Path | None = None,
+    no_project_policy: bool = False,
+    model_signer: str | None = None,
+    model_issuer: str | None = None,
 ) -> None:
     """Scan a project and generate an AIBOM."""
     root = Path(project_path).resolve()
@@ -175,11 +178,15 @@ def scan(
 
     from nexus_symbiote.core.models import ClaimEvidence
     from nexus_symbiote.graph import assemble_repository_agent, validate_graph
-    from nexus_symbiote.policy import PolicyError
+    from nexus_symbiote.policy import PolicyError, default_policy
     from nexus_symbiote.signature_policy import load_signature_policies
     from nexus_symbiote.validators.risk import RiskScorer
 
-    policy = _policy(root)
+    if bool(model_signer) != bool(model_issuer):
+        raise click.UsageError("--model-signer and --model-issuer must be supplied together")
+    if model_signer and signature_policy:
+        raise click.UsageError("Choose a signature policy or the model signer/issuer pair")
+    policy = default_policy() if no_project_policy else _policy(root)
     try:
         signature_policies = (
             load_signature_policies(signature_policy, root) if signature_policy else []
@@ -206,8 +213,10 @@ def scan(
     scanner_status: dict[str, str] = dict.fromkeys(all_scanners, "unknown")
     for name in selected:
         scanner = (
-            all_scanners[name](signature_policies=signature_policies)
-            if name == "model"
+            all_scanners[name](model_signer, model_issuer)
+            if name == "model" and model_signer
+            else all_scanners[name](signature_policies=signature_policies)
+            if name == "model" and signature_policies
             else all_scanners[name]()
         )
         console.print(f"  Running [cyan]{name}[/] scanner...")

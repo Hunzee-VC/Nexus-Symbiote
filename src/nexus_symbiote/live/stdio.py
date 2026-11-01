@@ -15,7 +15,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from nexus_symbiote.scanners.base import _open_regular
+from nexus_symbiote.core.hashing import open_regular_file
 
 PROTOCOL = "2025-06-18"
 MAX_LINE = 1024 * 1024
@@ -173,8 +173,10 @@ def list_pinned_tools(command: str, digest: str) -> list[dict[str, Any]]:
         staged = work / "server"
         hasher = hashlib.sha256()
         budget = 128 * 1024 * 1024
-        with _open_regular(Path(command), budget) as fd, staged.open("xb") as out:
-            while chunk := os.read(fd, 1024 * 1024):
+        with open_regular_file(Path(command)) as source, staged.open("xb") as out:
+            if os.fstat(source.fileno()).st_size > budget:
+                raise OSError("launcher exceeds byte budget")
+            while chunk := source.read(1024 * 1024):
                 budget -= len(chunk)
                 if budget < 0:
                     raise OSError("launcher exceeds byte budget")

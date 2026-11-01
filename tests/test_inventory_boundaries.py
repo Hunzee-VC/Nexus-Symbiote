@@ -192,3 +192,21 @@ def test_cli_imports_real_shadow_evidence_with_renamed_package(tmp_path):
         )
         assert imported.exit_code == 0, imported.output
         assert json.loads(target.read_text())
+
+
+def test_scan_flags_disguised_pickle_and_ignores_untrusted_project_policy(tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / ".nexus-symbiote.yaml").write_text("unknown_policy_key: true")
+    weight = root / "weights.safetensors"
+    weight.write_bytes(b"\x80\x04N.")
+    out = tmp_path / "bom.json"
+    args = ["scan", "--no-project-policy", "--scanner", "model", "-o", str(out), str(root)]
+    runner = CliRunner()
+    assert runner.invoke(main, args).exit_code == 1
+    result = runner.invoke(main, [*args[:1], "--report-only", *args[1:]])
+    assert result.exit_code == 0, result.output
+    model = next(c for c in AIBOM.load(out).components if c.component_type.value == "model")
+    assert model.serialization_format == "pickle"
+    assert model.serialization_safety.value == "unsafe-code-execution"
+    assert model.hashes == {"sha256": "sha256:" + hashlib.sha256(weight.read_bytes()).hexdigest()}

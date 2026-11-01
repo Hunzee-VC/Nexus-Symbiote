@@ -181,7 +181,7 @@ class CycloneDXGenerator(Generator):
                 props.append({"name": key, "value": str(value)})
 
         if isinstance(comp, AgentComponent):
-            _add("autonomyLevel", comp.autonomy_level.value)
+            _add("autonomyLevel", comp.autonomy_level.value if comp.autonomy_level else None)
             _add("framework", comp.framework)
             for ref in comp.model_refs:
                 _add("modelRef", ref)

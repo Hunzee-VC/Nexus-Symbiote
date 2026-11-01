@@ -13,6 +13,7 @@ from nexus_symbiote.core.hashing import (
     TOOL_DEFINITION_HASH_VERSION,
     hash_tool_definition,
     normalize_digest,
+    safetensors_fingerprint,
 )
 from nexus_symbiote.core.models import (
     AnyComponent,
@@ -226,6 +227,32 @@ class IntegrityValidator:
             )
         path = self._artifact_path(comp, project_root, report)
         if path is not None:
+            declared = {k: v for k, v in comp.hashes.items() if k in DERIVED_DIGEST_KEYS}
+            for key, attr in (
+                ("tensor_inventory_sha256", comp.tensor_inventory_hash),
+                ("safetensors_header_sha256", comp.safetensors_header_hash),
+            ):
+                if attr is not None and declared.get(key, attr) != attr:
+                    report.issues.append(
+                        IntegrityIssue(
+                            comp.bom_ref,
+                            "tensor_inventory_mismatch",
+                            "Conflicting tensor metadata digests",
+                        )
+                    )
+                if attr is not None:
+                    declared[key] = attr
+            if declared:
+                fingerprint = safetensors_fingerprint(path)
+                if fingerprint is None or any(fingerprint.get(k) != v for k, v in declared.items()):
+                    report.hashes_failed += 1
+                    report.issues.append(
+                        IntegrityIssue(
+                            comp.bom_ref,
+                            "tensor_inventory_mismatch",
+                            "Tensor metadata differs from the observed header",
+                        )
+                    )
             actual, explanation = inspect_model_format(path)
             if actual in {
                 SerializationSafety.UNSAFE_CODE_EXECUTION,
@@ -336,6 +363,8 @@ class IntegrityValidator:
         # Reject malformed declarations even when the artifact cannot be opened.
         valid: list[tuple[str, str]] = []
         for algorithm, expected in comp.hashes.items():
+            if isinstance(comp, ModelComponent) and algorithm in DERIVED_DIGEST_KEYS:
+                continue
             try:
                 normalize_digest(expected, algorithm)
                 valid.append((algorithm, expected))

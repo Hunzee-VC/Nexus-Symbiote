@@ -9,8 +9,9 @@ from typing import Any
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import RiskSeverity, SerializationSafety
 from nexus_symbiote.core.models import ModelComponent, RiskAssessment
+from nexus_symbiote.scanner_catalog import BUILTIN_SCANNER_NAMES
 
-REQUIRED_SCANNERS = frozenset({"mcp", "model", "prompt", "rag", "registry"})
+REQUIRED_SCANNERS = BUILTIN_SCANNER_NAMES
 
 SEVERITY_WEIGHTS: dict[RiskSeverity, float] = {
     RiskSeverity.CRITICAL: 10.0,
@@ -106,7 +107,7 @@ class RiskScorer:
         elif coverage is not None:
             statuses = coverage.scanner_status
             if statuses and (
-                not set(DEFAULT_SCANNERS).issubset(statuses)
+                not REQUIRED_SCANNERS.issubset(statuses)
                 or any(state != "complete" for state in statuses.values())
             ):
                 report.coverage_status = "partial"

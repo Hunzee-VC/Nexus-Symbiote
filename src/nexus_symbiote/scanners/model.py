@@ -6,9 +6,9 @@ checks for model signing, and computes weight hashes.
 
 from __future__ import annotations
 
+import hashlib
 import os
 from collections.abc import Sequence
-from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -17,7 +17,11 @@ from nexus_symbiote.core.enums import (
     SerializationSafety,
     TrustTier,
 )
-from nexus_symbiote.core.hashing import open_regular_file, parse_json_strict
+from nexus_symbiote.core.hashing import (
+    open_regular_file,
+    parse_json_strict,
+    tensor_header_fingerprint,
+)
 from nexus_symbiote.core.models import ModelComponent, RiskAssessment
 from nexus_symbiote.scanners.base import Scanner, ScanResult
 from nexus_symbiote.utils.crypto import SigstoreArtifactPolicy, verify_sigstore_bundle
@@ -76,152 +80,135 @@ _DTYPE_BYTES = {
 _UNSAFE_SUFFIXES = {".pickle", ".pkl", ".pt", ".pth", ".bin", ".joblib"}
 
 
+def _classify(
+    path: Path, prefix: bytes, header_bytes: bytes, size: int, fd: int
+) -> tuple[str, SerializationSafety, str]:
+    fmt = MODEL_EXTENSIONS.get(path.suffix.lower(), ("unknown", ""))[0]
+    if len(prefix) >= 2 and prefix[0] == 0x80 and prefix[1] <= 5:
+        return "pickle", SerializationSafety.UNSAFE_CODE_EXECUTION, "Binary pickle protocol marker"
+    if path.suffix.lower() in _UNSAFE_SUFFIXES:
+        return (
+            fmt,
+            SerializationSafety.UNSAFE_CODE_EXECUTION,
+            "Potential code-executing loader format",
+        )
+    if not header_bytes:
+        return fmt, SerializationSafety.UNKNOWN, "No supported tensor header"
+    try:
+        raw_header = header_bytes
+        length = len(raw_header)
+        header = parse_json_strict(raw_header, max_bytes=MAX_MODEL_HEADER_BYTES)
+        if not isinstance(header, dict):
+            raise ValueError("SafeTensors header must be an object")
+        data_bytes = size - 8 - length
+        spans: list[tuple[int, int]] = []
+        for name, entry in header.items():
+            if name == "__metadata__":
+                if not isinstance(entry, dict) or not all(
+                    isinstance(k, str) and isinstance(v, str) for k, v in entry.items()
+                ):
+                    raise ValueError("Invalid SafeTensors metadata")
+                continue
+            if not isinstance(entry, dict) or set(entry) != {"dtype", "shape", "data_offsets"}:
+                raise ValueError("Invalid tensor descriptor")
+            dtype, shape, offsets = entry["dtype"], entry["shape"], entry["data_offsets"]
+            if not isinstance(dtype, str) or dtype not in _DTYPE_BYTES:
+                raise ValueError("Unsupported tensor dtype")
+            if (
+                not isinstance(shape, list)
+                or len(shape) > 64
+                or not all(type(n) is int and n >= 0 for n in shape)
+            ):
+                raise ValueError("Invalid tensor shape")
+            if (
+                not isinstance(offsets, list)
+                or len(offsets) != 2
+                or not all(type(n) is int and 0 <= n <= data_bytes for n in offsets)
+            ):
+                raise ValueError("Invalid tensor offsets")
+            start, end = offsets
+            elements = 1
+            for dim in shape:
+                elements *= dim
+            if end < start or end - start != elements * _DTYPE_BYTES[dtype]:
+                raise ValueError("Tensor shape and offsets disagree")
+            spans.append((start, end))
+        cursor = 0
+        for start, end in sorted(spans):
+            if start != cursor:
+                raise ValueError("Tensor buffer contains holes or overlaps")
+            cursor = end
+        if cursor != data_bytes:
+            raise ValueError("Tensor buffer is not fully indexed")
+        # The native parser only reads metadata. Give it the same open file.
+        from safetensors import SafetensorError, safe_open
+
+        alias = next(
+            (p for p in (Path("/proc/self/fd", str(fd)), Path("/dev/fd", str(fd))) if p.exists()),
+            None,
+        )
+        if alias is None:
+            return (
+                fmt,
+                SerializationSafety.UNKNOWN,
+                "Descriptor-based native validation unavailable",
+            )
+        try:
+            with safe_open(alias, framework="numpy") as tensors:
+                tensors.keys()
+        except SafetensorError:
+            return fmt, SerializationSafety.UNKNOWN, "Native parser rejected tensor header"
+        return (
+            "safetensors",
+            SerializationSafety.SAFE,
+            "Bounded SafeTensors header, shapes and offsets checked",
+        )
+    except (ImportError, OSError, ValueError, RecursionError, UnicodeError):
+        return fmt, SerializationSafety.UNKNOWN, "Malformed or unsupported SafeTensors structure"
+
+
+def _read_header(stream: BinaryIO) -> tuple[int, bytes, bytes]:
+    size = os.fstat(stream.fileno()).st_size
+    prefix = stream.read(8)
+    length = int.from_bytes(prefix, "little")
+    header = (
+        stream.read(length)
+        if len(prefix) == 8 and 2 <= length <= min(MAX_MODEL_HEADER_BYTES, size - 8)
+        else b""
+    )
+    return size, prefix, header
+
+
 def inspect_model_format(
     path: Path, *, stream: BinaryIO | None = None
 ) -> tuple[SerializationSafety, str]:
-    """Inspect bounded structure without deserializing a model or running code.
-
-    SAFE means the checked file has a supported non-executable tensor container
-    layout. It is not a claim about model behavior, parser vulnerabilities,
-    adjacent repository code, or the safety of the eventual loader.
-    """
-    if path.suffix.lower() in _UNSAFE_SUFFIXES:
-        return SerializationSafety.UNSAFE_CODE_EXECUTION, "Potential code-executing loader format"
-    if path.suffix.lower() != ".safetensors":
-        return SerializationSafety.UNKNOWN, "No bounded structural validator for this format/loader"
-    try:
-        context = nullcontext(stream) if stream is not None else open_regular_file(path)
-        with context as opened:
-            size = os.fstat(opened.fileno()).st_size
-            prefix = opened.read(8)
-            if len(prefix) != 8:
-                raise ValueError("Missing SafeTensors header length")
-            length = int.from_bytes(prefix, "little")
-            if not 2 <= length <= MAX_MODEL_HEADER_BYTES or length > size - 8:
-                raise ValueError("Invalid or over-limit SafeTensors header length")
-            raw_header = opened.read(length)
-            if len(raw_header) != length or not raw_header.startswith(b"{"):
-                raise ValueError("Invalid SafeTensors header")
-            header = parse_json_strict(raw_header, max_bytes=MAX_MODEL_HEADER_BYTES)
-            if not isinstance(header, dict):
-                raise ValueError("SafeTensors header must be an object")
-            data_bytes = size - 8 - length
-            spans: list[tuple[int, int]] = []
-            for name, entry in header.items():
-                if name == "__metadata__":
-                    if not isinstance(entry, dict) or not all(
-                        isinstance(k, str) and isinstance(v, str) for k, v in entry.items()
-                    ):
-                        raise ValueError("Invalid SafeTensors metadata")
-                    continue
-                if not isinstance(entry, dict) or set(entry) != {"dtype", "shape", "data_offsets"}:
-                    raise ValueError("Invalid tensor descriptor")
-                dtype, shape, offsets = entry["dtype"], entry["shape"], entry["data_offsets"]
-                if not isinstance(dtype, str) or dtype not in _DTYPE_BYTES:
-                    raise ValueError("Unsupported tensor dtype")
-                if (
-                    not isinstance(shape, list)
-                    or len(shape) > 64
-                    or not all(type(n) is int and n >= 0 for n in shape)
-                ):
-                    raise ValueError("Invalid tensor shape")
-                if (
-                    not isinstance(offsets, list)
-                    or len(offsets) != 2
-                    or not all(type(n) is int and 0 <= n <= data_bytes for n in offsets)
-                ):
-                    raise ValueError("Invalid tensor offsets")
-                start, end = offsets
-                elements = 1
-                for dim in shape:
-                    elements *= dim
-                if end < start or end - start != elements * _DTYPE_BYTES[dtype]:
-                    raise ValueError("Tensor shape and offsets disagree")
-                spans.append((start, end))
-            cursor = 0
-            for start, end in sorted(spans):
-                if start != cursor:
-                    raise ValueError("Tensor buffer contains holes or overlaps")
-                cursor = end
-            if cursor != data_bytes:
-                raise ValueError("Tensor buffer is not fully indexed")
-        return SerializationSafety.SAFE, "Bounded SafeTensors header, shapes and offsets checked"
-    except (OSError, ValueError, RecursionError, UnicodeError):
-        return SerializationSafety.UNKNOWN, "Malformed or unsupported SafeTensors structure"
-
-
-@contextmanager
-def _library_path(stream: BinaryIO) -> Iterator[Path]:
-    # The Rust SafeTensors reader takes a filename. Hand it the already-open file.
-    for base in ("/proc/self/fd", "/dev/fd"):
-        alias = Path(base, str(stream.fileno()))
-        if alias.exists():
-            yield alias
-            return
-    # Windows has no descriptor pathname. Parse a private, bounded copy.
-    stream.seek(0)
-    with tempfile.TemporaryDirectory() as tmp:
-        copy = Path(tmp, "weights")
-        total = 0
-        with copy.open("wb") as out:
-            while chunk := stream.read(1024 * 1024):
-                total += len(chunk)
-                if total > MAX_MODEL_BYTES:
-                    raise ValueError("model exceeds scan limit")
-                out.write(chunk)
-        yield copy
-
-
-def _inspect_file(path: Path) -> tuple[str, SerializationSafety, str]:
-    ext_format = MODEL_EXTENSIONS[path.suffix.lower()][0]
-    with _open_regular(path, MAX_MODEL_BYTES) as fd, os.fdopen(fd, "rb", closefd=False) as stream:
-        stat_before = os.fstat(stream.fileno())
-        if stat_before.st_size > MAX_MODEL_BYTES:
-            raise ValueError("model exceeds scan limit")
-        head = stream.read(9)
-        fmt = ext_format
-        safety = SERIALIZATION_FORMAT_SAFETY.get(fmt, SerializationSafety.UNKNOWN)
-        if head.startswith(b"\x80") and len(head) > 1 and head[1] <= 5:
-            fmt, safety = "pickle", SerializationSafety.UNSAFE_CODE_EXECUTION
-        elif head.startswith(b"GGUF"):
-            fmt, safety = "gguf", SerializationSafety.UNSAFE_TEMPLATE_INJECTION
-        elif fmt == "safetensors" or (len(head) == 9 and head[-1:] == b"{"):
-            safety = SerializationSafety.UNKNOWN
-            header_len = int.from_bytes(head[:8], "little")
-            if (
-                len(head) == 9
-                and head[-1:] == b"{"
-                and header_len <= min(stat_before.st_size - 8, 16 * 1024 * 1024)
-            ):
-                with _library_path(stream) as name:
-                    try:
-                        with safe_open(name, framework="numpy") as tensors:
-                            tensors.keys()
-                    except SafetensorError:
-                        pass
-                    else:
-                        fmt, safety = "safetensors", SerializationSafety.SAFE
-        elif safety == SerializationSafety.SAFE:
-            # No format parser for ONNX/GGML here. A filename alone proves nothing.
-            safety = SerializationSafety.UNKNOWN
-        digest = hashlib.sha256()
-        total = 0
-        stream.seek(0)
-        while chunk := stream.read(1024 * 1024):
-            total += len(chunk)
-            if total > MAX_MODEL_BYTES:
-                raise ValueError("model exceeds scan limit")
-            digest.update(chunk)
-        stat_after = os.fstat(stream.fileno())
-        if total != stat_before.st_size or stat_after.st_ctime_ns != stat_before.st_ctime_ns:
-            raise ValueError("model changed while being read")
-    return fmt, safety, "sha256:" + digest.hexdigest()
+    """Inspect bounded metadata without executing model code."""
+    if stream is None:
+        try:
+            with open_regular_file(path) as opened:
+                return inspect_model_format(path, stream=opened)
+        except OSError:
+            return SerializationSafety.UNKNOWN, "Artifact could not be inspected"
+    size, prefix, header = _read_header(stream)
+    _, safety, evidence = _classify(path, prefix, header, size, stream.fileno())
+    return safety, evidence
 
 
 class ModelScanner(Scanner):
     name = "model"
 
-    def __init__(self, signature_policies: Sequence[SigstoreArtifactPolicy] = ()) -> None:
+    def __init__(
+        self,
+        signature_policies: Sequence[SigstoreArtifactPolicy] | str = (),
+        expected_issuer: str | None = None,
+    ) -> None:
+        self._expected_signer = signature_policies if isinstance(signature_policies, str) else None
+        self._expected_issuer = expected_issuer
+        if bool(self._expected_signer) != bool(expected_issuer):
+            raise ValueError("Model verification requires both a signer and issuer")
+        if isinstance(signature_policies, str):
+            signature_policies = ()
+
         self._signature_policies = {p.artifact_path.resolve(): p for p in signature_policies}
         self._discovered_paths: tuple[Path, ...] = ()
         if len(self._signature_policies) != len(signature_policies):
@@ -251,13 +238,13 @@ class ModelScanner(Scanner):
 
     def _scan_model_directory(self, model_dir: Path) -> list[ModelComponent]:
         components: list[ModelComponent] = []
-        model_name = model_dir.relative_to(root).as_posix()
+        assert self._files is not None
+        model_name = model_dir.relative_to(self._files.root).as_posix()
 
         config = self._read_model_config(model_dir)
         tokenizer_hash = self._hash_tokenizer(model_dir)
         chat_template_hash = self._hash_chat_template(model_dir, config)
 
-        assert self._files is not None
         for path in self._discovered_paths:
             if path.parent != model_dir:
                 continue
@@ -266,15 +253,27 @@ class ModelScanner(Scanner):
                 continue
 
             fmt_key, fmt_name = MODEL_EXTENSIONS[ext]
+            component_hashes: dict[str, str] = {}
             try:
                 with self._files.open_regular(path, max_bytes=MAX_HASH_SIZE) as stream:
-                    safety, format_evidence = inspect_model_format(path, stream=stream)
+                    size, prefix, header = _read_header(stream)
+                    fmt_key, safety, format_evidence = _classify(
+                        path, prefix, header, size, stream.fileno()
+                    )
+                    digest = hashlib.sha256(prefix + header)
+                    while chunk := stream.read(1024 * 1024):
+                        digest.update(chunk)
+                component_hashes["sha256"] = "sha256:" + digest.hexdigest()
+                if safety == SerializationSafety.SAFE:
+                    component_hashes.update(tensor_header_fingerprint(header) or {})
+                if fmt_key != MODEL_EXTENSIONS[ext][0]:
+                    fmt_name = fmt_key
             except (OSError, ValueError):
                 safety, format_evidence = (
                     SerializationSafety.UNKNOWN,
                     "Artifact could not be inspected",
                 )
-            weight_hash = self._files.hash_file(path, max_bytes=MAX_HASH_SIZE)
+            weight_hash = component_hashes.get("sha256")
 
             signing_status, signing_identity = self._check_signing(path, weight_hash)
             risks = self._assess_model_risks(path, fmt_key, safety, signing_status, config)
@@ -282,12 +281,6 @@ class ModelScanner(Scanner):
             trust_tier = TrustTier.UNKNOWN
             if signing_status == "sigstore-signed":
                 trust_tier = TrustTier.THIRD_PARTY_SIGNED
-
-            component_hashes: dict[str, str] = {}
-            if fmt_key == "safetensors":
-                component_hashes.update(safetensors_fingerprint(path) or {})
-            if weight_hash:
-                component_hashes["sha256"] = weight_hash
 
             model_type = self._infer_model_type(config, path)
             derivation = config.get("peft_type") if config else None
@@ -352,6 +345,26 @@ class ModelScanner(Scanner):
             ):
                 return "sigstore-signed", result.identity
             return "verification-failed", None
+        sidecar = artifact.with_name(artifact.name + ".sigstore.json")
+        if sidecar in self._discovered_paths:
+            if self._expected_signer and self._expected_issuer:
+                from nexus_symbiote.utils.crypto import verify_sigstore_digest
+
+                assert self._files is not None
+                bundle = self._files.read_bytes(sidecar)
+                if (
+                    weight_hash
+                    and bundle
+                    and verify_sigstore_digest(
+                        weight_hash.removeprefix("sha256:"),
+                        bundle,
+                        self._expected_signer,
+                        self._expected_issuer,
+                    ).verified
+                ):
+                    return "sigstore-signed", self._expected_signer
+                return "verification-failed", None
+            return "signature-present-unverified", None
         # An adjacent file is a discovery fact, never proof of a signature.
         if any(artifact.parent / name in self._discovered_paths for name in SIGNING_FILES):
             return "signature-present-unverified", None

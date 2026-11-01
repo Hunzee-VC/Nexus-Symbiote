@@ -1,9 +1,9 @@
-"""Built-in scanner universe used when assessing static coverage.
+"""Built-in collection surfaces shared by policy and inventory validators."""
 
-Adding a scanner changes the minimum evidence required for a complete scan.
-Keep this set synchronized with the CLI registry and its regression test.
-"""
+from typing import Literal, get_args
 
-BUILTIN_SCANNER_NAMES = frozenset(
-    {"mcp", "model", "prompt", "rag", "registry", "a2a", "ide_agents"}
-)
+ScannerName = Literal[
+    "shadowscan", "mcp", "model", "prompt", "rag", "registry", "a2a", "ide_agents"
+]
+DEFAULT_SCANNERS: tuple[ScannerName, ...] = get_args(ScannerName)
+BUILTIN_SCANNER_NAMES = frozenset(DEFAULT_SCANNERS)

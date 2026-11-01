@@ -386,7 +386,7 @@ class MCPClientComponent(ComponentBase):
 class A2AClientComponent(ComponentBase):
     """An A2A protocol client that discovers and invokes remote agents."""
 
-    component_type: ComponentType = ComponentType.A2A_CLIENT
+    component_type: Literal[ComponentType.A2A_CLIENT] = ComponentType.A2A_CLIENT
     agent_card_url: str | None = Field(default=None, description="URL of the remote agent card")
     supported_protocols: list[str] = Field(default_factory=list)
     authentication_methods: list[str] = Field(default_factory=list)

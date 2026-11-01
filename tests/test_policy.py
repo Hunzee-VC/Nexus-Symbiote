@@ -80,12 +80,12 @@ class TestPolicyModel:
             version="1.0",
         )
         assert policy.scan.scanners == [
+            "shadowscan",
             "mcp",
             "model",
             "prompt",
             "rag",
             "registry",
-            "shadowscan",
             "a2a",
             "ide_agents",
         ]

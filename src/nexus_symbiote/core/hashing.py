@@ -167,12 +167,12 @@ def safetensors_fingerprint(path: Path) -> dict[str, str] | None:
     import struct
 
     try:
-        with open(path, "rb") as f:
+        with open_regular_file(path) as f:
             header_len_bytes = f.read(8)
             if len(header_len_bytes) != 8:
                 return None
             header_len = struct.unpack("<Q", header_len_bytes)[0]
-            if header_len <= 0 or header_len > 64 * 1024 * 1024:
+            if header_len <= 0 or header_len > 1024 * 1024:
                 return None
             header_raw = f.read(header_len)
             if len(header_raw) != header_len:
@@ -180,9 +180,14 @@ def safetensors_fingerprint(path: Path) -> dict[str, str] | None:
     except OSError:
         return None
 
+    return tensor_header_fingerprint(header_raw)
+
+
+def tensor_header_fingerprint(header_raw: bytes) -> dict[str, str] | None:
+    """Hash tensor metadata from a bounded header already read by the caller."""
     try:
-        header = json.loads(header_raw)
-    except (ValueError, UnicodeError):
+        header = parse_json_strict(header_raw, max_bytes=1024 * 1024)
+    except (ValueError, UnicodeError, RecursionError):
         return None
     if not isinstance(header, dict):
         return None
@@ -191,7 +196,13 @@ def safetensors_fingerprint(path: Path) -> dict[str, str] | None:
     for name, meta in header.items():
         if name == "__metadata__" or not isinstance(meta, dict):
             continue
-        offsets = meta.get("data_offsets", [0, 0])
+        offsets = meta.get("data_offsets")
+        if (
+            not isinstance(offsets, list)
+            or len(offsets) != 2
+            or not all(type(x) is int for x in offsets)
+        ):
+            return None
         tensors.append(
             {
                 "name": name,
