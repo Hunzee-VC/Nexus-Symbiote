@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+DEFAULT_SCANNERS = ("shadowscan", "mcp", "model", "prompt", "rag", "registry", "a2a", "ide_agents")
 
 
 class ScanPolicy(BaseModel):
     model_config = {"extra": "forbid"}
 
     scanners: list[str] = Field(
-        default=["mcp", "model", "prompt", "rag", "registry"],
+        default_factory=lambda: list(DEFAULT_SCANNERS),
     )
     exclude_paths: list[str] = Field(
         default=["node_modules", ".git", "__pycache__", ".venv"],
@@ -88,13 +91,13 @@ def _parse_policy(path: Path) -> Policy:
         raise ValueError(f"Invalid policy {path}: {exc}") from exc
 
 
-DEFAULT_POLICY_YAML = """\
+DEFAULT_POLICY_YAML = f"""\
 # Nexus SymBiote policy configuration
 # https://github.com/aisecnomad/nexus-symbiote
 version: "1.0"
 
 scan:
-  scanners: ["mcp", "model", "prompt", "rag", "registry", "a2a", "ide_agents"]
+  scanners: {json.dumps(DEFAULT_SCANNERS)}
   exclude_paths: ["node_modules", ".git", "__pycache__", ".venv"]
 
 risk:

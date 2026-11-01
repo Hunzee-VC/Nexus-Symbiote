@@ -4109,63 +4109,6 @@
         "variable_schema": { "type": "object" },
         "modification_authority": { "type": "string" }
       }
-    },
-    "MCPClientProperties": {
-      "type": "object",
-      "properties": {
-        "host_application": { "type": "string", "description": "The IDE or agent host (claude-code, cursor, etc.)" },
-        "server_refs": { "type": "array", "items": { "type": "string" } },
-        "config_path": { "type": "string" }
-      }
-    },
-    "A2AClientProperties": {
-      "type": "object",
-      "properties": {
-        "agent_card_url": { "type": "string" },
-        "supported_protocols": { "type": "array", "items": { "type": "string" } },
-        "authentication_methods": { "type": "array", "items": { "type": "string" } },
-        "capabilities": { "$ref": "#/$defs/CapabilityDeclaration" }
-      }
-    },
-    "A2AServerProperties": {
-      "type": "object",
-      "properties": {
-        "agent_card_path": { "type": "string" },
-        "endpoint_url": { "type": "string" },
-        "supported_protocols": { "type": "array", "items": { "type": "string" } },
-        "skills_declared": { "type": "array", "items": { "type": "string" } },
-        "authentication_required": { "type": "boolean" },
-        "capabilities": { "$ref": "#/$defs/CapabilityDeclaration" }
-      }
-    },
-    "IDEAgentProperties": {
-      "type": "object",
-      "properties": {
-        "ide_type": {
-          "type": "string",
-          "enum": ["claude-code", "codex", "cursor", "antigravity", "xai", "windsurf", "cline", "copilot"]
-        },
-        "config_files": { "type": "array", "items": { "type": "string" } },
-        "mcp_server_refs": { "type": "array", "items": { "type": "string" } },
-        "prompt_refs": { "type": "array", "items": { "type": "string" } },
-        "permission_mode": { "type": "string" }
-      }
-    },
-    "VerifiedExtensionProperties": {
-      "type": "object",
-      "properties": {
-        "extension_type": { "type": "string" },
-        "publisher": { "type": "string" },
-        "publisher_verified": { "type": "boolean" },
-        "attestation_status": {
-          "type": "string",
-          "enum": ["verified", "unverified", "revoked", "expired"]
-        },
-        "signing_identity": { "type": "string" },
-        "marketplace_url": { "type": "string" },
-        "install_count": { "type": "integer" },
-        "capabilities": { "$ref": "#/$defs/CapabilityDeclaration" }
-      }
     }
   }
 }
