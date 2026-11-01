@@ -14,6 +14,7 @@ from nexus_symbiote import __version__
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import AssuranceLevel
 from nexus_symbiote.core.models import AIBOMMetadata, CompletenessClaim
+from nexus_symbiote.live_cli import register_live_commands
 from nexus_symbiote.policy import Policy
 from nexus_symbiote.runtime_cli import register_runtime_commands
 
@@ -609,6 +610,7 @@ def init(force: bool, path: str) -> None:
 
 
 register_runtime_commands(main)
+register_live_commands(main)
 
 if __name__ == "__main__":
     main()
