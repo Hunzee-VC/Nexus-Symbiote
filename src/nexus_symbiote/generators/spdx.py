@@ -30,9 +30,9 @@ SPDX_TYPE_MAP: dict[ComponentType, str] = {
     ComponentType.MCP_CLIENT: "software_Package",
     ComponentType.PROMPT_TEMPLATE: "software_Snippet",
     ComponentType.GUARDRAIL_POLICY: "software_Package",
-    ComponentType.MEMORY_STORE: "dataset_Dataset",
-    ComponentType.RAG_SOURCE: "dataset_Dataset",
-    ComponentType.DATA_SOURCE: "dataset_Dataset",
+    ComponentType.MEMORY_STORE: "dataset_DatasetPackage",
+    ComponentType.RAG_SOURCE: "dataset_DatasetPackage",
+    ComponentType.DATA_SOURCE: "dataset_DatasetPackage",
     ComponentType.REGISTRY_ENTRY: "software_Package",
     ComponentType.SKILL_PACKAGE: "software_Package",
     ComponentType.A2A_CLIENT: "software_Package",
@@ -153,7 +153,7 @@ class SPDXGenerator(Generator):
             "name": comp.name,
         }
         if comp.version:
-            element["packageVersion"] = comp.version
+            element["software_packageVersion"] = comp.version
         if comp.supplier:
             element["suppliedBy"] = _org_iri(comp.supplier)
         if comp.description:
