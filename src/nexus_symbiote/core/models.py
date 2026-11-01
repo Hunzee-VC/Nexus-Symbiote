@@ -334,9 +334,7 @@ class A2AClientComponent(ComponentBase):
     """An A2A protocol client that discovers and invokes remote agents."""
 
     component_type: ComponentType = ComponentType.A2A_CLIENT
-    agent_card_url: str | None = Field(
-        default=None, description="URL of the remote agent card"
-    )
+    agent_card_url: str | None = Field(default=None, description="URL of the remote agent card")
     supported_protocols: list[str] = Field(default_factory=list)
     authentication_methods: list[str] = Field(default_factory=list)
     capabilities: CapabilityDeclaration | None = None
@@ -400,6 +398,17 @@ class CompletenessClaim(BaseModel):
     surfaces_excluded: list[str] = Field(default_factory=list)
     scan_failures: list[str] = Field(default_factory=list)
     scanner_status: dict[str, str] = Field(default_factory=dict)
+    source_report_digest: str | None = Field(
+        default=None, description="SHA-256 of imported report bytes"
+    )
+    source_report_format: str | None = None
+    source_report_status: str | None = Field(
+        default=None, description="Source-reported status, not independently verified"
+    )
+    source_unmapped_count: int = Field(default=0, ge=0)
+    source_unmapped_indexes: list[int] = Field(
+        default_factory=list, description="Indexes in the source report, not validated identities"
+    )
     timestamp: datetime | None = None
     assurance_level: AssuranceLevel = AssuranceLevel.DECLARED
 

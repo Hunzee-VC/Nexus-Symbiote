@@ -117,6 +117,11 @@ def scan(
     surfaces_scanned: list[str] = []
     surfaces_excluded: list[str] = []
     scan_failures: list[str] = []
+    source_report_digest = None
+    source_report_format = None
+    source_report_status = None
+    source_unmapped_count = 0
+    source_unmapped_indexes: list[int] = []
     scanner_status: dict[str, str] = dict.fromkeys(all_scanners, "unknown")
 
     for name in selected:
@@ -131,6 +136,12 @@ def scan(
 
         try:
             result = scanner.scan(root)
+            if name == "shadowscan":
+                source_report_digest = result.source_report_digest
+                source_report_format = result.source_report_format
+                source_report_status = result.source_report_status
+                source_unmapped_count = result.source_unmapped_count
+                source_unmapped_indexes = result.source_unmapped_indexes
             for comp in result.components:
                 aibom.add_component(comp)
             surfaces_scanned.extend(result.surfaces_scanned)
@@ -150,14 +161,24 @@ def scan(
             scanner_status[name] = "failed"
 
     aibom.metadata.completeness = CompletenessClaim(
-        scope="local-static-project+shadowscan",
+        scope="local-static-project+shadowscan" if source_report_digest else "local-static-project",
         surfaces_scanned=surfaces_scanned,
         surfaces_excluded=surfaces_excluded,
         scan_failures=scan_failures,
         scanner_status=scanner_status,
+        source_report_digest=source_report_digest,
+        source_report_format=source_report_format,
+        source_report_status=source_report_status,
+        source_unmapped_count=source_unmapped_count,
+        source_unmapped_indexes=source_unmapped_indexes,
         assurance_level=AssuranceLevel.OBSERVED,
     )
 
+    if source_report_digest and output_format in ("spdx", "sarif"):
+        raise click.ClickException(
+            "ShadowScan import supports native JSON and CycloneDX; SPDX and SARIF "
+            "cannot yet preserve discovery coverage."
+        )
     if output_format == "cyclonedx":
         from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
 
@@ -194,46 +215,109 @@ def scan(
     default="json",
 )
 def import_shadowscan(report_path: str, output: str, output_format: str) -> None:
-    """Import a Nexus-ShadowScan report and generate a verified AIBOM.
+    """Import a Nexus-ShadowScan report as unverified discovery evidence.
 
     This is the recommended primary workflow: run ShadowScan for discovery,
     then SymBiote for verification, integrity, and BOM emission.
     """
-    from symbiote.scanners.shadowscan import ShadowScanImporter
+    from nexus_symbiote.scanners.shadowscan import ShadowScanImporter
 
     importer = ShadowScanImporter()
     try:
-        components = importer.import_report(Path(report_path))
-    except Exception as exc:
-        raise click.ClickException(f"Failed to import ShadowScan report: {exc}") from exc
+        imported = importer.read_report(Path(report_path))
+    except (ValueError, OSError, UnicodeError, RecursionError) as exc:
+        raise click.ClickException("Failed to safely import the ShadowScan report") from exc
 
     aibom = AIBOM(metadata=AIBOMMetadata(authors=[]))
-    for comp in components:
+    for comp in imported.components:
         aibom.add_component(comp)
 
     aibom.metadata.completeness = CompletenessClaim(
         scope="shadowscan-imported",
-        surfaces_scanned=[report_path],
+        surfaces_scanned=["shadowscan:report"],
+        surfaces_excluded=imported.limitations,
+        scan_failures=(
+            []
+            if imported.source_status == "complete"
+            else ["ShadowScan source report is incomplete or has unknown status"]
+        ),
+        scanner_status={"shadowscan": "partial"},
+        source_report_digest=imported.digest,
+        source_report_format=imported.source_format,
+        source_report_status=imported.source_status,
+        source_unmapped_count=imported.unmapped_count,
+        source_unmapped_indexes=imported.unmapped_indexes,
         assurance_level=AssuranceLevel.DECLARED,
     )
 
+    if output_format in ("spdx", "sarif"):
+        raise click.ClickException(
+            "ShadowScan import supports native JSON and CycloneDX; SPDX and SARIF "
+            "cannot yet preserve discovery coverage."
+        )
     if output_format == "cyclonedx":
-        from symbiote.generators.cyclonedx import CycloneDXGenerator
+        from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
 
         out_data = CycloneDXGenerator().generate_json(aibom)
     elif output_format == "spdx":
-        from symbiote.generators.spdx import SPDXGenerator
+        from nexus_symbiote.generators.spdx import SPDXGenerator
 
         out_data = SPDXGenerator().generate_json(aibom)
     elif output_format == "sarif":
-        from symbiote.generators.sarif import SARIFGenerator
+        from nexus_symbiote.generators.sarif import SARIFGenerator
 
         out_data = SARIFGenerator().generate_json(aibom)
     else:
         out_data = aibom.to_json()
 
-    Path(output).write_text(out_data, encoding="utf-8")
-    console.print(f"[bold green]Imported {len(components)} components and saved[/] {output}")
+    try:
+        with Path(output).open("x", encoding="utf-8") as stream:
+            stream.write(out_data)
+    except OSError as exc:
+        raise click.ClickException("Cannot create output; choose a new output path") from exc
+    console.print(
+        f"Imported {len(imported.components)} components and saved {output}; discovery and BOM coverage remain unverified."
+    )
+    if imported.source_status != "complete":
+        raise click.ClickException("ShadowScan source report is incomplete; the BOM is partial")
+
+
+@main.command("verify-discovery")
+@click.argument("aibom_path", type=click.Path(exists=True))
+@click.argument("report_path", type=click.Path(exists=True))
+def verify_discovery(aibom_path: str, report_path: str) -> None:
+    """Compare a ShadowScan report to the digest recorded in a native BOM."""
+    import hashlib
+    import hmac
+    import re
+
+    from nexus_symbiote.scanners.base import read_regular_text
+    from nexus_symbiote.scanners.shadowscan import (
+        MAX_REPORT_BYTES,
+        _object_no_duplicates,
+        _reject_constant,
+    )
+
+    try:
+        raw_bom = read_regular_text(Path(aibom_path), max_bytes=MAX_REPORT_BYTES)
+        bom = AIBOM.model_validate(
+            json.loads(
+                raw_bom, object_pairs_hook=_object_no_duplicates, parse_constant=_reject_constant
+            )
+        )
+        raw_report = read_regular_text(Path(report_path), max_bytes=MAX_REPORT_BYTES)
+    except (OSError, ValueError, UnicodeError, RecursionError) as exc:
+        raise click.ClickException("Cannot safely read the BOM or discovery report") from exc
+    claim = bom.metadata.completeness
+    expected = claim.source_report_digest if claim else None
+    if not isinstance(expected, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", expected):
+        raise click.ClickException("BOM does not contain a valid ShadowScan report digest")
+    actual = "sha256:" + hashlib.sha256(raw_report.encode("utf-8")).hexdigest()
+    if not hmac.compare_digest(actual, expected):
+        raise click.ClickException("Discovery report digest mismatch")
+    click.echo(
+        "Report bytes match the recorded digest. Source identity, signature, and truth were not verified."
+    )
 
 
 @main.command()

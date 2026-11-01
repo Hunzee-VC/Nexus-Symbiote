@@ -85,6 +85,11 @@
           "description": "Scanner outcomes in the local static collection scope.",
           "additionalProperties": { "type": "string", "enum": ["complete", "partial", "failed", "unknown", "not-applicable"] }
         },
+        "source_report_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "source_report_format": {"type": "string"},
+        "source_report_status": {"type": "string", "enum": ["complete", "incomplete", "unknown"]},
+        "source_unmapped_count": {"type": "integer", "minimum": 0},
+        "source_unmapped_indexes": {"type": "array", "items": {"type": "integer", "minimum": 0}},
         "timestamp": {
           "type": "string",
           "format": "date-time"
@@ -242,7 +247,7 @@
       "properties": {
         "autonomy_level": {
           "type": "string",
-          "enum": ["L0-chatbot", "L1-copilot", "L2-agent", "L3-autonomous", "L4-fully-autonomous"]
+          "enum": ["unknown", "L0-chatbot", "L1-copilot", "L2-agent", "L3-autonomous", "L4-fully-autonomous"]
         },
         "framework": { "type": "string" },
         "model_refs": { "type": "array", "items": { "type": "string" } },

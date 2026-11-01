@@ -8,13 +8,15 @@
 
 **Nexus-ShadowScan** is the primary multi-surface discovery engine. It inventories shadow AI agents and evidence across code, identity, LLM gateways, low-code, SaaS, cloud, endpoints, network, and runtime.
 
-**Nexus SymBiote** is the verification, integrity, and bill-of-materials layer. It consumes ShadowScan reports (native JSON or CycloneDX), maps findings into an agent-native domain model, applies confined integrity checks, risk scoring, policy evaluation, and emits standards-oriented AIBOMs (native, CycloneDX 1.7, SPDX 3.0, SARIF).
+**Nexus SymBiote** is the verification, integrity, and bill-of-materials layer. It imports ShadowScan native JSON or CycloneDX reports as source claims, maps supported findings, and produces native JSON or CycloneDX BOMs. An import is not a verification of the report, its publisher, or the discovered artifacts. Apply separate verification and policy to the resulting evidence.
 
 Recommended workflow:
 1. Run ShadowScan for discovery (least-privilege, fail-closed).
 2. `nexus-symbiote import-shadowscan report.json -o aibom.json` (or place report at `.shadowscan/report.json` and run `nexus-symbiote scan`).
-3. `nexus-symbiote validate`, `nexus-symbiote risk`, and emit the desired format.
-4. Gate in CI on critical findings and completeness claims.
+3. Preserve the original report and its access controls; use the BOM's report digest and finding indexes to trace imported entries back to it.
+4. Use `nexus-symbiote validate` and `nexus-symbiote risk`, then independently verify artifacts and apply policy. Imported coverage is intentionally partial and does not pass a complete-coverage gate.
+
+The bridge retains only selected safe metadata. Unmapped findings, original names, detailed evidence and relationships remain in the source report; the BOM records the unmapped indexes. Incomplete source reports produce a partial native/CycloneDX BOM and a nonzero exit code. SPDX and SARIF export of ShadowScan imports is unavailable until those paths preserve coverage and provenance. See [ShadowScan integration](docs/shadowscan-integration.md).
 
 Local project scanners (MCP, model, prompt, RAG, registry) remain available for fine-grained, file-level verification that complements the broader discovery.
 
@@ -67,7 +69,7 @@ nexus-symbiote summary aibom.json
 
 | Source | Role | Notes |
 |--------|------|-------|
-| **ShadowScan** | Primary discovery | Multi-surface inventory; import JSON or CycloneDX |
+| **ShadowScan** | Primary discovery | Import JSON or CycloneDX source claims; preserve the original report |
 | **MCP** | Local verification | Configs, tool definition hashes (JCS), transport checks |
 | **Model** | Local verification | Serialization safety, signing presence, weight hashes |
 | **Prompt** | Local verification | Content hashes, instruction files |
