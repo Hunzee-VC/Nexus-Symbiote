@@ -116,3 +116,29 @@ def test_shadow_report_is_confined_and_raw_evidence_stays_private(tmp_path):
     comp = ShadowScanImporter().import_report(report)[0]
     assert "SECRET" not in comp.model_dump_json()
     assert comp.properties["shadowscan:sourceDigest"].startswith("sha256:")
+
+
+def test_benchmark_statement_binds_outputs_and_materials(tmp_path, monkeypatch):
+    from symbiote.utils.crypto import VerificationResult
+
+    monkeypatch.syspath_prepend(str(ROOT / "benchmarks"))
+    import evidence
+
+    target = tmp_path / "run"
+    evidence.prepare(target)
+    statement = (target / "statement.json").read_bytes()
+    (target / "statement.sigstore.json").write_bytes(b"test-only")
+    expected = hashlib.sha256(statement).hexdigest()
+
+    def check(digest, bundle, identity, issuer):
+        return VerificationResult(
+            (digest, bundle, identity, issuer) == (expected, b"test-only", "signer", "authority")
+        )
+
+    monkeypatch.setattr("symbiote.utils.crypto.verify_sigstore_digest", check)
+    evidence.verify(target, "signer", "authority", compare_installation=True)
+    with pytest.raises(ValueError, match="signature"):
+        evidence.verify(target, "other", "authority")
+    (target / "results.json").write_bytes(b"{}")
+    with pytest.raises(ValueError, match="bind"):
+        evidence.verify(target, "signer", "authority")
