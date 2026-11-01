@@ -121,7 +121,9 @@ def _min06(bom: AgentBOM, _: Mapping[str, Any]) -> Result:
 def _min07(bom: AgentBOM, evidence: Mapping[str, Any]) -> Result:
     if "cyclonedx_valid" not in evidence:
         return "unknown", ["no CycloneDX validation result supplied (run `symbiote validate`)"]
-    ok = bool(evidence["cyclonedx_valid"]) and bool(evidence.get("spdx_valid", True))
+    if bom.links.spdx is not None and "spdx_valid" not in evidence:
+        return "unknown", ["no validation result supplied for the linked SPDX document"]
+    ok = evidence["cyclonedx_valid"] is True and evidence.get("spdx_valid", True) is True
     return _ok(ok, ["an exported document failed official schema validation"])
 
 
@@ -219,7 +221,7 @@ def _ver_evidence(key: str, what: str) -> Evaluator:
         del bom
         if key not in evidence:
             return "unknown", [f"{what}: not supplied"]
-        return _ok(bool(evidence[key]), [f"{what}: did not verify"])
+        return _ok(evidence[key] is True, [f"{what}: did not verify"])
 
     return evaluate
 

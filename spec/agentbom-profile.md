@@ -96,7 +96,7 @@ document and is the attestation subject.
 A standalone, signable change record between two snapshots:
 `{id, from_snapshot: Digest, to_snapshot: Digest, produced_at, producer, events: [DeltaEvent]}` with
 `DeltaEvent = {type, subject: id, before: Digest|null, after: Digest|null, evidence: [EvidenceRef], assurance, severity_hint}` and
-`type ∈ {tool-registered, tool-removed, tool-definition-changed, tool-annotations-changed, server-added, server-removed, server-identity-changed, model-added, model-routed, model-alias-resolved, sub-agent-spawned, memory-writer-added, instruction-changed, skill-changed, grant-added, grant-removed, grant-changed, identity-changed, registry-status-changed, signer-changed, data-source-added, trust-status-changed}`.
+`type ∈ {tool-registered, tool-removed, tool-definition-changed, tool-annotations-changed, server-added, server-removed, server-identity-changed, model-added, model-routed, model-alias-resolved, sub-agent-spawned, memory-writer-added, instruction-changed, skill-changed, grant-added, grant-removed, grant-changed, identity-changed, registry-status-changed, signer-changed, data-source-added, data-source-changed, data-source-removed, trust-status-changed}`.
 
 ## 3. Entities
 

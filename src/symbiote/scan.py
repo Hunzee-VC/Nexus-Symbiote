@@ -11,6 +11,7 @@ import yaml
 
 from symbiote import __version__
 from symbiote.collect import CollectContext, CollectionResult, load_collectors, merge_coverage, run_collectors
+from symbiote.collect._common import read_bounded, url_facts
 from symbiote.model import AgentBOM, Claim, Edge, Party
 from symbiote.model import enums as E
 from symbiote.model.document import COLLECTIONS
@@ -96,12 +97,16 @@ def read_agent_declaration(root: Path) -> tuple[dict[str, Any], str | None]:
     """Load ``symbiote.yaml`` / ``agent.yaml`` if present (declared facts about the root agent)."""
     for name in AGENT_DECLARATION_FILES:
         path = root / name
-        if path.is_file():
-            try:
-                data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-            except (yaml.YAMLError, OSError):
-                return {}, name
-            return (data if isinstance(data, dict) else {}), name
+        outcome = read_bounded(path, 1024 * 1024, root=root)
+        if outcome.error_class == "not-found":
+            continue
+        if outcome.data is None:
+            raise ValueError(f"cannot safely read {name}: {outcome.error_class}")
+        try:
+            data = yaml.safe_load(outcome.data.decode("utf-8")) or {}
+        except (yaml.YAMLError, UnicodeError):
+            return {}, name
+        return (data if isinstance(data, dict) else {}), name
     return {}, None
 
 
@@ -123,7 +128,7 @@ def root_agent_from(
             id=make_id("party", str(owner["name"])),
             kind=kind,
             name=str(owner["name"]),
-            urls=[str(owner["url"])] if owner.get("url") else [],
+            urls=[url_facts(str(owner["url"])).display] if owner.get("url") else [],
         )
         parties.append(party)
         owner_ref = party.id

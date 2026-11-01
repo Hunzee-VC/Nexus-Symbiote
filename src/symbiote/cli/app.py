@@ -220,6 +220,7 @@ def scan(
     as_json: JsonFlag = False,
 ) -> None:
     """Zero-config collection: produce a declared AgentBOM snapshot (companion, CycloneDX 1.7, SPDX 3.0.1) from a repository."""
+    from symbiote.confined import write_scan_output
     from symbiote.digest import bytes_digest
     from symbiote.export.companion import companion_bytes
     from symbiote.scan import scan as run_scan
@@ -242,11 +243,10 @@ def scan(
         console.print(f"[red]anti-rollback conflict[/red]: {exc}")
         raise typer.Exit(exit_codes.ROLLBACK) from None
     bom = outcome.bom
-    out.mkdir(parents=True, exist_ok=True)
     written: dict[str, str] = {}
     companion = companion_bytes(bom)
     companion_path = out / "agentbom.json"
-    companion_path.write_bytes(companion)
+    write_scan_output(companion_path, companion)
     written["companion"] = str(companion_path)
     companion_digest = bytes_digest(companion)
     errors: dict[str, list[str]] = {}
@@ -260,9 +260,9 @@ def scan(
             companion_ref=companion_path.name,
         )
         errors["cyclonedx"] = validate_cyclonedx(doc)
-        (out / "agentbom.cdx.json").write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
-        (out / "agentbom.cdx.loss.json").write_text(
-            json.dumps(loss.to_json_dict(), indent=2) + "\n", encoding="utf-8"
+        write_scan_output(out / "agentbom.cdx.json", (json.dumps(doc, indent=2) + "\n").encode())
+        write_scan_output(
+            out / "agentbom.cdx.loss.json", (json.dumps(loss.to_json_dict(), indent=2) + "\n").encode()
         )
         written["cyclonedx"] = str(out / "agentbom.cdx.json")
     if fmt in ("spdx", "all"):
@@ -275,9 +275,9 @@ def scan(
             companion_ref=companion_path.name,
         )
         errors["spdx"] = validate_spdx(sdoc)
-        (out / "agentbom.spdx.json").write_text(json.dumps(sdoc, indent=2) + "\n", encoding="utf-8")
-        (out / "agentbom.spdx.loss.json").write_text(
-            json.dumps(sloss.to_json_dict(), indent=2) + "\n", encoding="utf-8"
+        write_scan_output(out / "agentbom.spdx.json", (json.dumps(sdoc, indent=2) + "\n").encode())
+        write_scan_output(
+            out / "agentbom.spdx.loss.json", (json.dumps(sloss.to_json_dict(), indent=2) + "\n").encode()
         )
         written["spdx"] = str(out / "agentbom.spdx.json")
     coverage = {s.value: c.status.value for s, c in bom.coverage.surfaces.items()}
@@ -292,9 +292,9 @@ def scan(
         "collectors": [c.to_json_dict() for c in bom.coverage.collectors],
         "warnings": outcome.warnings,
         "written": written,
-        "cyclonedxValid": not errors.get("cyclonedx"),
+        "cyclonedxValid": not errors["cyclonedx"] if "cyclonedx" in errors else None,
         "cyclonedxErrors": errors.get("cyclonedx", [])[:20],
-        "spdxValid": not errors.get("spdx"),
+        "spdxValid": not errors["spdx"] if "spdx" in errors else None,
         "spdxErrors": errors.get("spdx", [])[:20],
         "findings": outcome.policy.counts() if outcome.policy else None,
         "flags": {f.flag.value: f.value.value for f in bom.derived.flags if f.value.value != "false"},

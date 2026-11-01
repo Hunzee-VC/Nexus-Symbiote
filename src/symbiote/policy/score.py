@@ -23,6 +23,7 @@ from symbiote.model.enums import (
     EnforcementPointKind,
     SideEffectClass,
     SignatureStatus,
+    Surface,
     TrustTier,
     ValueState,
 )
@@ -50,9 +51,11 @@ class AreaScore:
     total: int
     missing: tuple[str, ...]
 
+    status: str = "assessed"
+
     @property
     def fraction(self) -> float:
-        return 1.0 if self.total == 0 else self.present / self.total
+        return self.present / self.total if self.total else 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +74,7 @@ class ScoreReport:
                     "weight": a.weight,
                     "present": a.present,
                     "total": a.total,
+                    "status": a.status,
                     "missing": list(a.missing[:25]),
                 }
                 for a in self.areas
@@ -79,8 +83,22 @@ class ScoreReport:
         }
 
 
-def _area(name: str, checks: Iterable[tuple[str, bool]]) -> AreaScore:
+def _area(
+    name: str, checks: Iterable[tuple[str, bool]], bom: AgentBOM, surface: Surface | None = None
+) -> AreaScore:
     items = list(checks)
+    if not items:
+        coverage = bom.coverage.surfaces[surface] if surface is not None else None
+        confirmed_empty = (
+            coverage is not None
+            and coverage.status is CoverageStatus.QUERIED
+            and coverage.items_seen == 0
+            and bool(coverage.sources)
+            and all(run.ok and run.items == 0 for run in coverage.sources)
+        )
+        if confirmed_empty:
+            return AreaScore(name, WEIGHTS[name], 0, 0, (), "not-applicable")
+        return AreaScore(name, WEIGHTS[name], 0, 0, ("no applicable facts established",), "unknown")
     missing = tuple(label for label, ok in items if not ok)
     return AreaScore(name, WEIGHTS[name], len(items) - len(missing), len(items), missing)
 
@@ -173,16 +191,16 @@ def _claims(obj: Any) -> Iterator[str]:
 
 def completeness_score(bom: AgentBOM) -> ScoreReport:
     areas = (
-        _area("tools", _tools(bom)),
-        _area("authorization", _authorization(bom)),
-        _area("models", _models(bom)),
-        _area("data", _data(bom)),
-        _area("identity", _identity(bom)),
-        _area("instructions", _instructions(bom)),
-        _area("coverage", _coverage(bom)),
-        _area("evidence", _evidence(bom)),
+        _area("tools", _tools(bom), bom, Surface.TOOLS),
+        _area("authorization", _authorization(bom), bom, Surface.POLICY),
+        _area("models", _models(bom), bom, Surface.MODEL_GATEWAY),
+        _area("data", _data(bom), bom, Surface.DATA),
+        _area("identity", _identity(bom), bom, Surface.IDENTITY),
+        _area("instructions", _instructions(bom), bom, Surface.INSTRUCTIONS),
+        _area("coverage", _coverage(bom), bom),
+        _area("evidence", _evidence(bom), bom),
     )
-    total_weight = sum(a.weight for a in areas)
+    total_weight = sum(a.weight for a in areas if a.status != "not-applicable")
     score = round(100 * sum(a.weight * a.fraction for a in areas) / total_weight)
     tally = Counter(_claims(bom.to_json_dict()))
     n = sum(tally.values()) or 1

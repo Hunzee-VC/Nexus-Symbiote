@@ -18,6 +18,7 @@ from urllib.parse import parse_qsl, urlsplit, urlunsplit
 
 import yaml
 
+from symbiote.confined import open_scoped_file
 from symbiote.model.common import looks_like_secret
 from symbiote.model.enums import TrustZone
 
@@ -53,14 +54,14 @@ class ReadOutcome:
         return self.data is not None
 
 
-def read_bounded(path: Path, limit: int) -> ReadOutcome:
+def read_bounded(path: Path, limit: int, *, root: Path | None = None) -> ReadOutcome:
     """Read a whole file if it is at most ``limit`` bytes; failures are classified, never raised."""
     try:
-        size = path.stat().st_size
-        if size > limit:
-            return ReadOutcome(None, "too-large", f"{size} > {limit} bytes")
-        with path.open("rb") as fh:
-            return ReadOutcome(fh.read(limit + 1)[:limit])
+        with open_scoped_file(root if root is not None else path.parent, path) as fh:
+            data = fh.read(limit + 1)
+        if len(data) > limit:
+            return ReadOutcome(None, "too-large", f"file exceeds {limit} bytes")
+        return ReadOutcome(data)
     except PermissionError as exc:
         return ReadOutcome(None, "permission-denied", str(exc))
     except FileNotFoundError as exc:
