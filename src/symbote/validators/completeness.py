@@ -8,6 +8,8 @@ from pathlib import Path
 from symbote.core.aibom import AIBOM
 from symbote.core.enums import AssuranceLevel, ComponentType
 
+REQUIRED_SCANNERS = frozenset({"mcp", "model", "prompt", "rag", "registry"})
+
 EXPECTED_SURFACES = {
     "mcp-config": "MCP server configuration (.mcp.json etc.)",
     "model-weights": "Model weight files and signing status",
@@ -89,13 +91,21 @@ class CompletenessValidator:
                 report.is_complete = False
                 for failure in claim.scan_failures:
                     report.issues.append(CompletenessIssue("collection", failure, "error"))
-            if not claim.scanner_status:
+            missing = REQUIRED_SCANNERS - claim.scanner_status.keys()
+            if missing:
                 report.is_complete = False
                 report.issues.append(
                     CompletenessIssue(
                         "coverage",
-                        "No per-scanner coverage recorded; completeness is unknown.",
+                        "Missing scanner coverage: " + ", ".join(sorted(missing)),
                         "error",
+                    )
+                )
+            if claim.surfaces_excluded:
+                report.is_complete = False
+                report.issues.append(
+                    CompletenessIssue(
+                        "coverage", "Excluded surfaces leave coverage incomplete.", "error"
                     )
                 )
             for scanner, state in claim.scanner_status.items():
