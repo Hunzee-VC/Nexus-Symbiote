@@ -1,68 +1,70 @@
-"""Security regressions for the composite action shell steps."""
+"""Security regressions for the composite Action's data-only Python runner."""
 
-import os
+from __future__ import annotations
+
+import importlib.util
 import subprocess
+import sys
 from pathlib import Path
 
 import yaml
 
+ROOT = Path(__file__).resolve().parents[1]
+SPEC = importlib.util.spec_from_file_location(
+    "action_hardening_runner", ROOT / "scripts/run_action.py"
+)
+assert SPEC is not None and SPEC.loader is not None
+runner = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = runner
+SPEC.loader.exec_module(runner)
 
-def action_steps() -> dict[str, dict]:
-    action = yaml.safe_load((Path(__file__).resolve().parents[1] / "action.yml").read_text())
-    return {step["name"]: step for step in action["runs"]["steps"]}
+
+def action_steps() -> list[dict]:
+    action = yaml.safe_load((ROOT / "action.yml").read_text())
+    return action["runs"]["steps"]
 
 
 def test_scan_inputs_are_data_not_shell(tmp_path: Path) -> None:
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    symbiote = bin_dir / "nexus-symbiote"
-    symbiote.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$ARG_LOG"\n')
-    symbiote.chmod(0o755)
-    fake_python = bin_dir / "python"
-    fake_python.write_text("#!/bin/sh\ncat >/dev/null\n")
-    fake_python.chmod(0o755)
-    output = tmp_path / "github_output"
-    output.touch()
-    marker = tmp_path / "pwned"
-    payload = f"$(touch {marker})"
-    env = {
-        **os.environ,
-        "PATH": f"{bin_dir}:{os.environ['PATH']}",
-        "ARG_LOG": str(tmp_path / "args"),
-        "RUNNER_TEMP": str(tmp_path),
-        "GITHUB_OUTPUT": str(output),
-        "SCAN_PATH": payload,
-        "OUTPUT_FILE": str(tmp_path / "bom.json"),
-        "OUTPUT_FORMAT": "json",
-        "SCANNERS": "",
-    }
-    result = subprocess.run(  # noqa: S603
-        ["/bin/bash", "-e", "-c", action_steps()["Scan once and export"]["run"]],
-        env=env,
-        check=False,
-        capture_output=True,
-        text=True,
+    step = next(step for step in action_steps() if step.get("id") == "scan")
+    assert step["env"]["SYMBIOTE_SCAN_PATH"] == "${{ inputs.scan-path }}"
+    assert "${{" not in step["run"]
+    assert 'python -I "$SYMBIOTE_ACTION_PATH/scripts/run_action.py"' in step["run"]
+    payload = "$(touch PWNED)'quoted space"
+    (tmp_path / payload).mkdir()
+    config = runner.Config.from_env(
+        {
+            "GITHUB_WORKSPACE": str(tmp_path),
+            "SYMBIOTE_SCAN_PATH": payload,
+            "SYMBIOTE_VALIDATE": "false",
+            "SYMBIOTE_RISK_CHECK": "false",
+        }
     )
-    assert result.returncode == 0, result.stderr
-    assert not marker.exists()
-    assert payload in (tmp_path / "args").read_text().splitlines()
+    calls = []
+
+    def command(args):
+        calls.append(args)
+        Path(args[args.index("--output") + 1]).write_text("{}")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    assert runner.run(config, command=command) == 0
+    assert len(calls) == 1
+    assert calls[0][-2:] == ["--", str(tmp_path / payload)]
+    assert not (tmp_path / "PWNED").exists()
 
 
 def test_validation_failure_is_not_suppressed(tmp_path: Path) -> None:
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    command = bin_dir / "nexus-symbiote"
-    command.write_text("#!/bin/sh\nexit 7\n")
-    command.chmod(0o755)
-    env = {
-        **os.environ,
-        "PATH": f"{bin_dir}:{os.environ['PATH']}",
-        "NATIVE_BOM": "bom.json",
-        "SCAN_PATH": ".",
-    }
-    result = subprocess.run(  # noqa: S603
-        ["/bin/bash", "-e", "-c", action_steps()["Validate"]["run"]],
-        env=env,
-        check=False,
-    )
-    assert result.returncode == 7
+    for step in action_steps():
+        if "run" in step:
+            assert "|| true" not in step["run"]
+    config = runner.Config.from_env({"GITHUB_WORKSPACE": str(tmp_path)})
+    calls = []
+
+    def command(args):
+        calls.append(args[0])
+        if args[0] == "scan":
+            Path(args[args.index("--output") + 1]).write_text("{}")
+        return subprocess.CompletedProcess(args, 7 if args[0] == "validate" else 0, "", "")
+
+    assert runner.run(config, command=command) == 1
+    assert calls == ["scan", "validate"]
+    assert config.output.read_text() == "{}"

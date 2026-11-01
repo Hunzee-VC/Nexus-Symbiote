@@ -24,7 +24,7 @@ from nexus_symbiote.core.models import (
     SkillPackageComponent,
     ToolComponent,
 )
-from nexus_symbiote.generators.base import Generator
+from nexus_symbiote.generators.base import Generator, validate_references, wire_hashes
 
 COMPONENT_TYPE_MAP: dict[ComponentType, str] = {
     ComponentType.AGENT: "application",
@@ -46,25 +46,32 @@ class CycloneDXGenerator(Generator):
 
     def generate(self, aibom: AIBOM) -> dict[str, Any]:
         aibom.finalize()
+        validate_references(aibom)
         metadata = self._metadata(aibom)
         # CycloneDX dependency objects do not carry typed edge semantics.
         # Keep the original edges as documented metadata properties.
         if aibom.dependencies:
-            metadata["properties"] = [
-                {
-                    "name": "nexus-symbiote:dependency:relationship",
-                    "value": json.dumps(
-                        {"from": edge.source_ref, "to": edge.target_ref, "type": edge.relationship},
-                        sort_keys=True,
-                        separators=(",", ":"),
-                    ),
-                }
-                for edge in aibom.dependencies
-            ]
+            metadata.setdefault("properties", []).extend(
+                [
+                    {
+                        "name": "nexus-symbiote:dependency:relationship",
+                        "value": json.dumps(
+                            {
+                                "from": edge.source_ref,
+                                "to": edge.target_ref,
+                                "type": edge.relationship,
+                            },
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ),
+                    }
+                    for edge in aibom.dependencies
+                ]
+            )
         grouped: dict[str, set[str]] = {}
         for edge in aibom.dependencies:
             grouped.setdefault(edge.source_ref, set()).add(edge.target_ref)
-        return {
+        document = {
             "bomFormat": "CycloneDX",
             "specVersion": "1.7",
             "version": aibom.metadata.version,
@@ -76,6 +83,10 @@ class CycloneDXGenerator(Generator):
                 for ref, targets in sorted(grouped.items())
             ],
         }
+        claim = aibom.metadata.completeness
+        if claim and claim.source_report_digest:
+            document["compositions"] = [{"aggregate": "incomplete"}]
+        return document
 
     def _metadata(self, aibom: AIBOM) -> dict[str, Any]:
         meta: dict[str, Any] = {
@@ -95,6 +106,26 @@ class CycloneDXGenerator(Generator):
         }
         if aibom.metadata.authors:
             meta["authors"] = [{"name": a} for a in aibom.metadata.authors]
+        claim = aibom.metadata.completeness
+        if claim and claim.source_report_digest:
+            meta["properties"] = [
+                {
+                    "name": "nexus-symbiote:discovery:reportSha256",
+                    "value": claim.source_report_digest,
+                },
+                {
+                    "name": "nexus-symbiote:discovery:sourceFormat",
+                    "value": claim.source_report_format or "unknown",
+                },
+                {
+                    "name": "nexus-symbiote:discovery:sourceStatus",
+                    "value": claim.source_report_status or "unknown",
+                },
+                {
+                    "name": "nexus-symbiote:discovery:unmappedCount",
+                    "value": str(claim.source_unmapped_count),
+                },
+            ]
         return meta
 
     def _component(self, comp: AnyComponent) -> dict[str, Any]:
@@ -112,18 +143,17 @@ class CycloneDXGenerator(Generator):
             result["description"] = comp.description
         if comp.hashes:
             result["hashes"] = [
-                {"alg": alg.upper().replace("SHA", "SHA-"), "content": val.split(":", 1)[-1]}
-                for alg, val in comp.hashes.items()
-                if val
+                {"alg": alg, "content": val} for alg, val in wire_hashes(comp.hashes, spdx=False)
             ]
 
-        props = self._extension_properties(comp)
+        props = self.component_properties(comp)
         if props:
             result["properties"] = props
 
         return result
 
-    def _extension_properties(self, comp: AnyComponent) -> list[dict[str, str]]:
+    @staticmethod
+    def component_properties(comp: AnyComponent) -> list[dict[str, str]]:
         props: list[dict[str, str]] = []
 
         def _add(name: str, value: Any) -> None:
@@ -133,6 +163,16 @@ class CycloneDXGenerator(Generator):
         _add("componentType", comp.component_type.value)
         _add("trustTier", comp.trust_tier.value)
         _add("assuranceLevel", comp.assurance_level.value)
+        for key, value in comp.properties.items():
+            if key in {
+                "shadowscan:report-sha256",
+                "shadowscan:finding-index",
+                "shadowscan:source-id-sha256",
+                "shadowscan:surface",
+                "shadowscan:kind",
+                "shadowscan:inventory-unmatched",
+            } and isinstance(value, (str, int, bool)):
+                props.append({"name": key, "value": str(value)})
 
         if isinstance(comp, AgentComponent):
             _add("autonomyLevel", comp.autonomy_level.value)

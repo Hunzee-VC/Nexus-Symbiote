@@ -56,7 +56,13 @@ class TestModelScanner:
     def test_scan_safetensors(self, tmp_path):
         model_dir = tmp_path / "my_model"
         model_dir.mkdir()
-        (model_dir / "model.safetensors").write_bytes(b"\x00" * 100)
+        header = json.dumps(
+            {"weight": {"dtype": "U8", "shape": [4], "data_offsets": [0, 4]}}
+        ).encode()
+        header += b" " * (-len(header) % 8)
+        (model_dir / "model.safetensors").write_bytes(
+            len(header).to_bytes(8, "little") + header + b"abcd"
+        )
         (model_dir / "config.json").write_text('{"model_type": "llama"}')
 
         scanner = ModelScanner()
@@ -82,7 +88,11 @@ class TestModelScanner:
     def test_scan_trust_remote_code(self, tmp_path):
         model_dir = tmp_path / "remote_code_model"
         model_dir.mkdir()
-        (model_dir / "model.safetensors").write_bytes(b"\x00" * 100)
+        (model_dir / "model.safetensors").write_bytes(
+            bytes.fromhex(
+                "38000000000000007b2278223a7b226474797065223a225538222c227368617065223a5b315d2c22646174615f6f666673657473223a5b302c315d7d7d20202000"
+            )
+        )
         (model_dir / "config.json").write_text('{"trust_remote_code": true}')
 
         scanner = ModelScanner()

@@ -19,8 +19,8 @@ def digest(content: bytes) -> str:
 def validate_path(root: Path, path: str, expected: str):
     bom = AIBOM()
     bom.add_component(
-        ModelComponent(
-            bom_ref="model:test", name="model", source_path=path, hashes={"sha256": expected}
+        PromptComponent(
+            bom_ref="prompt:test", name="prompt", source_path=path, content_hash=expected
         )
     )
     return IntegrityValidator().validate(bom, root)

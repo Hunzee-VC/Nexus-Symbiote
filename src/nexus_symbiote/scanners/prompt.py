@@ -8,7 +8,7 @@ from pathlib import Path
 from nexus_symbiote.core.enums import RiskSeverity, TrustTier
 from nexus_symbiote.core.hashing import hash_bytes
 from nexus_symbiote.core.models import PromptComponent, RiskAssessment, SkillPackageComponent
-from nexus_symbiote.scanners.base import Scanner, ScanResult, read_regular_text
+from nexus_symbiote.scanners.base import Scanner, ScanResult
 
 INVISIBLE_CHARS: dict[str, str] = {
     "​": "ZERO WIDTH SPACE",
@@ -122,26 +122,55 @@ class PromptScanner(Scanner):
     def scan(self, project_root: Path) -> ScanResult:
         result = ScanResult(scanner_name=self.name)
 
-        for rel_path, prompt_type in INSTRUCTION_FILES.items():
-            full_path = project_root / rel_path
-            if full_path.is_symlink() or full_path.exists():
+        with self._collection(project_root, result) as files:
+            for rel_path, prompt_type in INSTRUCTION_FILES.items():
+                content = files.read_bytes(rel_path, missing_ok=True)
+                if content is None:
+                    continue
+                full_path = files.root / rel_path
                 result.surfaces_scanned.append(str(full_path))
                 try:
-                    comp = self._scan_instruction_file(full_path, rel_path, prompt_type)
-                    result.components.append(comp)
-                except (OSError, UnicodeError):
-                    result.scan_failures.append(f"Failed to read {full_path}")
+                    content.decode("utf-8")
+                except UnicodeDecodeError:
+                    result.scan_failures.append(f"{rel_path}: invalid UTF-8 instruction")
+                    continue
+                comp = self._scan_instruction_file(full_path, rel_path, prompt_type, content)
+                result.components.append(comp)
 
-        for skill_dir in SKILL_DIRECTORIES:
-            full_dir = project_root / skill_dir
-            if full_dir.is_symlink():
-                result.scan_failures.append(f"Refusing symlinked skill directory {full_dir}")
-            elif full_dir.is_dir():
-                result.surfaces_scanned.append(str(full_dir))
-                skills = self._scan_skill_directory(full_dir, result)
-                result.components.extend(skills)
-            else:
-                result.surfaces_excluded.append(f"skills ({skill_dir} not found)")
+            for skill_dir in SKILL_DIRECTORIES:
+                found = False
+                for path in files.iter_files(skill_dir):
+                    if path.name.startswith(".") or path.suffix.lower() not in (
+                        ".md",
+                        ".txt",
+                        ".yaml",
+                        ".yml",
+                        ".json",
+                    ):
+                        continue
+                    content = files.read_bytes(path)
+                    if content is None:
+                        continue
+                    try:
+                        content.decode("utf-8")
+                    except UnicodeDecodeError:
+                        result.scan_failures.append(f"{path}: invalid UTF-8 skill declaration")
+                        continue
+                    found = True
+                    relative = path.as_posix()
+                    result.surfaces_scanned.append(str(files.root / path))
+                    result.components.append(
+                        SkillPackageComponent(
+                            bom_ref=f"skill:{relative}",
+                            name=relative,
+                            skill_type="skill",
+                            hashes={"sha256": hash_bytes(content)},
+                            source_path=str(files.root / path),
+                            trust_tier=TrustTier.INTERNAL_UNVERIFIED,
+                        )
+                    )
+                if not found:
+                    result.surfaces_excluded.append(f"skills ({skill_dir} no readable skill files)")
 
         if not result.components and not result.scan_failures:
             result.surfaces_excluded.append("prompts (no instruction files found)")
@@ -149,12 +178,10 @@ class PromptScanner(Scanner):
         return result
 
     def _scan_instruction_file(
-        self, path: Path, rel_path: str, prompt_type: str
+        self, path: Path, rel_path: str, prompt_type: str, raw: bytes
     ) -> PromptComponent:
-        content = read_regular_text(path)
-        encoded = content.encode("utf-8")
-        content_hash = hash_bytes(encoded)
-        file_size = len(encoded)
+        content_hash = hash_bytes(raw)
+        file_size = len(raw)
         risks: list[RiskAssessment] = []
 
         if file_size > 50_000:
@@ -167,7 +194,7 @@ class PromptScanner(Scanner):
                 )
             )
 
-        risks.extend(detect_invisible_characters(content, rel_path))
+        risks.extend(detect_invisible_characters(raw.decode("utf-8"), rel_path))
 
         return PromptComponent(
             bom_ref=f"prompt:{rel_path}",
@@ -178,35 +205,3 @@ class PromptScanner(Scanner):
             trust_tier=TrustTier.INTERNAL_UNVERIFIED,
             risks=risks,
         )
-
-    def _scan_skill_directory(
-        self, skill_dir: Path, result: ScanResult
-    ) -> list[SkillPackageComponent]:
-        skills: list[SkillPackageComponent] = []
-        for path in sorted(skill_dir.rglob("*")):
-            if path.name.startswith("."):
-                continue
-            if path.suffix.lower() not in (".md", ".txt", ".yaml", ".yml", ".json"):
-                continue
-            if not path.is_file() and not path.is_symlink():
-                result.scan_failures.append(f"Not a regular skill file: {path}")
-                continue
-
-            rel_path = str(path.relative_to(skill_dir.parent.parent))
-            try:
-                content_hash = hash_bytes(read_regular_text(path).encode("utf-8"))
-            except (OSError, UnicodeError):
-                result.scan_failures.append(f"Failed to read {path}")
-                continue
-
-            skills.append(
-                SkillPackageComponent(
-                    bom_ref=f"skill:{rel_path}",
-                    name=rel_path,
-                    skill_type="skill",
-                    hashes={"sha256": content_hash},
-                    source_path=str(path),
-                    trust_tier=TrustTier.INTERNAL_UNVERIFIED,
-                )
-            )
-        return skills
