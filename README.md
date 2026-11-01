@@ -52,7 +52,7 @@ The foundation is in place and tested (offline test suite):
 ```bash
 uv tool install symbiote            # or: pipx install symbiote   (from a checkout: uv pip install -e ".[dev]")
 
-# Zero-config: collect from MCP client configs etc., write agentbom.json + agentbom.cdx.json (CycloneDX 1.7)
+# Zero-config: collect from MCP client configs etc.; write agentbom.json, agentbom.cdx.json (CycloneDX 1.7), agentbom.spdx.json (SPDX 3.0.1)
 symbiote scan examples/triage-agent -o out/
 
 # Content-address the model-visible surface of an MCP tool exactly as a gateway would (fail-closed)
@@ -86,14 +86,14 @@ from symbiote.snapshot import finalize, new_document, redact_entities, verify_do
 | Hidden-Unicode / external-`$ref` / cross-tool-directive lints over model-visible text | ✅ |
 | Model identity: serialization-risk sniffing (pickle, torch, joblib, GGUF, safetensors, chat templates), Hugging Face directory analysis | ✅ |
 | CycloneDX 1.7 exporter (direct JSON, validated against the official schema and cyclonedx-python-lib) | ✅ exporter · 🚧 importer |
-| SPDX 3.0.1 JSON-LD exporter and importer (typed extensions + `CdxPropertiesExtension` mirror) | 🚧 WP7 |
+| SPDX 3.0.1 JSON-LD exporter (native classes + typed extensions + `CdxPropertiesExtension` mirror, validated against the official schema and round-tripped through spdx-python-model) | ✅ exporter · 🚧 importer |
 | Collectors: MCP client configs (Claude Code, Claude Desktop, Cursor, VS Code, Windsurf, Codex, Gemini CLI) | ✅ |
 | Collectors: skills, instructions, frameworks, models, A2A cards, registry, live `tools/list`, OTel traces, k8s-aibom import | 🚧 WP9 / WP10 |
 | Policy checks (`SYM-*`), computed flags, conformance levels, completeness score, SARIF | 🚧 WP12 |
 | Snapshot diff and deltas, anti-rollback state | 🚧 WP5 |
 | Sigstore keyless signing with identity-constraint policies; Gateway Allowlist Bundle + reference served-tool check | ✅ |
 | Trust-status lists, incident index | 🚧 WP11 / WP13 |
-| `symbiote scan .` zero-config: companion + CycloneDX 1.7 from a repository | ✅ (coverage grows with each collector) |
+| `symbiote scan .` zero-config: companion + CycloneDX 1.7 + SPDX 3.0.1 from a repository | ✅ (coverage grows with each collector) |
 
 Progress and ownership: [`docs/development/work-packages.md`](docs/development/work-packages.md).
 

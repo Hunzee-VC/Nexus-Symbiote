@@ -186,7 +186,7 @@ def scan(
             "--name", help="Agent name (defaults to symbiote.yaml/agent.yaml or the directory name)."
         ),
     ] = None,
-    fmt: Annotated[str, typer.Option("--format", help="companion | cyclonedx | all")] = "all",
+    fmt: Annotated[str, typer.Option("--format", help="companion | cyclonedx | spdx | all")] = "all",
     include_text: Annotated[
         bool,
         typer.Option("--include-text", help="Embed tool descriptions and schemas (digests only by default)."),
@@ -205,12 +205,14 @@ def scan(
     ] = False,
     as_json: JsonFlag = False,
 ) -> None:
-    """Zero-config collection: produce a declared AgentBOM snapshot (companion + CycloneDX 1.7) from a repository."""
+    """Zero-config collection: produce a declared AgentBOM snapshot (companion, CycloneDX 1.7, SPDX 3.0.1) from a repository."""
     from symbiote.digest import bytes_digest
-    from symbiote.export.cdx import export_cyclonedx, validate_cyclonedx
     from symbiote.export.companion import companion_bytes
     from symbiote.scan import scan as run_scan
 
+    if fmt not in ("companion", "cyclonedx", "spdx", "all"):
+        console.print(f"[red]unknown format {fmt!r}[/red]")
+        raise typer.Exit(exit_codes.USAGE)
     outcome = run_scan(
         path,
         agent_name=name,
@@ -223,25 +225,40 @@ def scan(
     written: dict[str, str] = {}
     companion = companion_bytes(bom)
     companion_path = out / "agentbom.json"
-    if fmt in ("companion", "all"):
-        companion_path.write_bytes(companion)
-        written["companion"] = str(companion_path)
-    cdx_errors: list[str] = []
+    companion_path.write_bytes(companion)
+    written["companion"] = str(companion_path)
+    companion_digest = bytes_digest(companion)
+    errors: dict[str, list[str]] = {}
     if fmt in ("cyclonedx", "all"):
+        from symbiote.export.cdx import export_cyclonedx, validate_cyclonedx
+
         doc, loss = export_cyclonedx(
             bom,
             include_text=include_text,
-            companion_digest=bytes_digest(companion),
+            companion_digest=companion_digest,
             companion_ref=companion_path.name,
         )
-        cdx_errors = validate_cyclonedx(doc)
-        cdx_path = out / "agentbom.cdx.json"
-        cdx_path.write_text(json.dumps(doc, indent=2, sort_keys=False) + "\n", encoding="utf-8")
-        written["cyclonedx"] = str(cdx_path)
+        errors["cyclonedx"] = validate_cyclonedx(doc)
+        (out / "agentbom.cdx.json").write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
         (out / "agentbom.cdx.loss.json").write_text(
             json.dumps(loss.to_json_dict(), indent=2) + "\n", encoding="utf-8"
         )
-        written["lossReport"] = str(out / "agentbom.cdx.loss.json")
+        written["cyclonedx"] = str(out / "agentbom.cdx.json")
+    if fmt in ("spdx", "all"):
+        from symbiote.export.spdx import export_spdx, validate_spdx
+
+        sdoc, sloss = export_spdx(
+            bom,
+            include_text=include_text,
+            companion_digest=companion_digest,
+            companion_ref=companion_path.name,
+        )
+        errors["spdx"] = validate_spdx(sdoc)
+        (out / "agentbom.spdx.json").write_text(json.dumps(sdoc, indent=2) + "\n", encoding="utf-8")
+        (out / "agentbom.spdx.loss.json").write_text(
+            json.dumps(sloss.to_json_dict(), indent=2) + "\n", encoding="utf-8"
+        )
+        written["spdx"] = str(out / "agentbom.spdx.json")
     coverage = {s.value: c.status.value for s, c in bom.coverage.surfaces.items()}
     summary = {
         "agent": bom.subject,
@@ -254,32 +271,30 @@ def scan(
         "collectors": [c.to_json_dict() for c in bom.coverage.collectors],
         "warnings": outcome.warnings,
         "written": written,
-        "cyclonedxValid": not cdx_errors,
-        "cyclonedxErrors": cdx_errors[:20],
+        "cyclonedxValid": not errors.get("cyclonedx"),
+        "cyclonedxErrors": errors.get("cyclonedx", [])[:20],
+        "spdxValid": not errors.get("spdx"),
+        "spdxErrors": errors.get("spdx", [])[:20],
     }
-    human = "\n".join(
-        [
-            f"[bold]{bom.subject}[/bold]  snapshot {bom.snapshot.digest[:23]}…  ({bom.snapshot.kind.value}, serial {bom.snapshot.serial})",
-            "entities: " + ", ".join(f"{k}={v}" for k, v in outcome.counts.items()),
-            "coverage: "
-            + ", ".join(f"{k}={v}" for k, v in coverage.items() if v != "not-attempted")
-            + "  (other surfaces: not-attempted)",
-            "collectors: " + ", ".join(f"{c.name}:{c.status.value}" for c in bom.coverage.collectors),
-            *(f"[yellow]warning[/yellow] {w}" for w in outcome.warnings[:10]),
-            *(f"written: {v}" for v in written.values()),
-            (
-                "[green]CycloneDX 1.7 validates against the official schema[/green]"
-                if written.get("cyclonedx") and not cdx_errors
-                else (
-                    "[red]CycloneDX validation errors[/red]: " + "; ".join(cdx_errors[:3])
-                    if cdx_errors
-                    else ""
-                )
-            ),
-        ]
-    )
-    emit(summary, as_json, human)
-    if cdx_errors:
+    lines = [
+        f"[bold]{bom.subject}[/bold]  snapshot {bom.snapshot.digest[:23]}…  ({bom.snapshot.kind.value}, serial {bom.snapshot.serial})",
+        "entities: " + ", ".join(f"{k}={v}" for k, v in outcome.counts.items()),
+        "coverage: "
+        + ", ".join(f"{k}={v}" for k, v in coverage.items() if v != "not-attempted")
+        + "  (other surfaces: not-attempted)",
+        "collectors: " + ", ".join(f"{c.name}:{c.status.value}" for c in bom.coverage.collectors),
+        *(f"[yellow]warning[/yellow] {w}" for w in outcome.warnings[:10]),
+        *(f"written: {v}" for v in written.values()),
+    ]
+    for label, key in (("CycloneDX 1.7", "cyclonedx"), ("SPDX 3.0.1", "spdx")):
+        if key in errors:
+            lines.append(
+                f"[green]{label} validates against the official schema[/green]"
+                if not errors[key]
+                else f"[red]{label} validation errors[/red]: " + "; ".join(errors[key][:3])
+            )
+    emit(summary, as_json, "\n".join(lines))
+    if any(errors.values()):
         raise typer.Exit(exit_codes.SCHEMA)
 
 
