@@ -126,6 +126,8 @@ jobs:
 
 The Action installs its own reviewed source, collects once, and derives the requested format and SARIF from that same native inventory. Inputs are passed as data, validation failures fail the Action, and malformed risk reports cannot become a zero score. Scan and output paths must stay inside the workspace, and output paths must not contain artifact glob syntax. Collection failures fail the Action even when later validation is disabled. Isolated Python execution prevents the scanned repository from supplying a replacement module through its current directory or `PYTHONPATH`. SARIF uploading is off by default; enable it only when repository code scanning and the event's permissions support uploading. Fork pull requests may have restricted tokens; use the evidence artifact when upload is unavailable.
 
+The Action uses built-in policy and the workflow inputs for collection, validation and scoring. A policy file in the scanned checkout cannot exclude a model or disable either validator. Standalone CLI calls continue to load project policy by default. Pass `--no-project-policy` to `scan`, `validate` or `risk` when evaluating an untrusted checkout.
+
 A threshold of `0` explicitly disables the risk gate. Disabling `validate` or `risk-check` is a caller policy choice, not evidence that verification passed. Outputs distinguish an actual risk score from a skipped evaluation. Inventories may expose infrastructure details; restrict access to uploaded artifacts.
 
 ## Policy and trust
