@@ -13,8 +13,10 @@ and detects unpinned versions, missing transport security, and rug-pull risk.
 
 from __future__ import annotations
 
+import ipaddress
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from symbote.core.enums import (
     CapabilityClass,
@@ -29,7 +31,7 @@ from symbote.core.models import (
     RiskAssessment,
     ToolComponent,
 )
-from symbote.scanners.base import Scanner, ScanResult
+from symbote.scanners.base import Scanner, ScanResult, sanitized_origin
 
 MCP_CONFIG_FILES = [
     ".mcp.json",
@@ -101,7 +103,7 @@ class MCPScanner(Scanner):
                 RiskAssessment(
                     severity=RiskSeverity.HIGH,
                     category="version_pinning",
-                    detail=f"MCP server '{name}' uses unpinned package reference: {package_ref}",
+                    detail=f"MCP server '{name}' uses an unpinned package reference.",
                     recommendation="Pin to an exact version and store a hash of the tool schema.",
                 )
             )
@@ -116,14 +118,12 @@ class MCPScanner(Scanner):
                 )
             )
 
-        if endpoint_url and not (
-            endpoint_url.startswith("https://") or endpoint_url.startswith("http://localhost")
-        ):
+        if endpoint_url and not self._secure_endpoint(endpoint_url):
             risks.append(
                 RiskAssessment(
                     severity=RiskSeverity.HIGH,
                     category="transport_security",
-                    detail=f"MCP server '{name}' endpoint is not HTTPS: {endpoint_url}",
+                    detail=f"MCP server '{name}' endpoint has insecure or invalid transport: {sanitized_origin(endpoint_url)}",
                     recommendation="Use HTTPS for all remote MCP server connections.",
                 )
             )
@@ -133,10 +133,10 @@ class MCPScanner(Scanner):
             name=name,
             version=version,
             transport=transport,
-            command=command if command else None,
-            args=args,
+            command=Path(command).name if command else None,
+            args=["[redacted]" for _ in args],
             env=dict.fromkeys(env, "***"),
-            endpoint_url=endpoint_url,
+            endpoint_url=sanitized_origin(endpoint_url) if endpoint_url else None,
             version_pinned=version_pinned,
             source_path=str(config_path),
             trust_tier=TrustTier.THIRD_PARTY_UNSIGNED,
@@ -145,6 +145,28 @@ class MCPScanner(Scanner):
 
         tools = self._extract_tools(name, config)
         return server_comp, tools
+
+    @staticmethod
+    def _secure_endpoint(url: str) -> bool:
+        """HTTPS or an exact HTTP loopback host; userinfo is never accepted."""
+        try:
+            parsed = urlsplit(url)
+            if not parsed.hostname or parsed.username is not None or parsed.password is not None:
+                return False
+            _ = parsed.port  # reject invalid ports
+            if parsed.scheme.lower() == "https":
+                return True
+            if parsed.scheme.lower() != "http":
+                return False
+            host = parsed.hostname.lower()
+            if host == "localhost":
+                return True
+            try:
+                return ipaddress.ip_address(host).is_loopback
+            except ValueError:
+                return False
+        except ValueError:
+            return False
 
     def _detect_transport(self, config: dict[str, Any]) -> str:
         if config.get("url") or config.get("endpoint"):
