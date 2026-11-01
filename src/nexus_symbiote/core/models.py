@@ -8,9 +8,9 @@ registry trust, and authorization records.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, SerializerFunctionWrapHandler, model_serializer
 
 from nexus_symbiote.core.enums import (
     AssuranceLevel,
@@ -27,8 +27,27 @@ from nexus_symbiote.core.enums import (
 from nexus_symbiote.core.evidence import DeploymentProfile
 
 
-class ComponentBase(BaseModel):
+class InventoryModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class ClaimEvidence(InventoryModel):
+    """Evidence about one named claim; observation never establishes runtime permission."""
+
+    assurance: AssuranceLevel = AssuranceLevel.DECLARED
+    method: str
+    scope: str
+    collector: str | None = None
+    locator: str | None = None
+    observed_at: datetime | None = None
+    evidence_refs: list[str] = Field(default_factory=list)
+    unknown_reason: str | None = None
+
+
+class ComponentBase(InventoryModel):
     """Base for every AgentBOM component."""
+
+    model_config = ConfigDict(extra="forbid")
 
     bom_ref: str = Field(description="Unique reference within this BOM")
     component_type: ComponentType
@@ -43,9 +62,10 @@ class ComponentBase(BaseModel):
         default=None, description="Filesystem path or URL where this was discovered"
     )
     properties: dict[str, Any] = Field(default_factory=dict, description="Extension properties")
+    claims: dict[str, ClaimEvidence] = Field(default_factory=dict)
 
 
-class CapabilityDeclaration(BaseModel):
+class CapabilityDeclaration(InventoryModel):
     """What a component is permitted to do."""
 
     capabilities: list[CapabilityClass] = Field(default_factory=list)
@@ -61,7 +81,7 @@ class CapabilityDeclaration(BaseModel):
     )
 
 
-class AuthorizationRecord(BaseModel):
+class AuthorizationRecord(InventoryModel):
     """Who authorized what, under which policy."""
 
     principal: str
@@ -74,7 +94,7 @@ class AuthorizationRecord(BaseModel):
     policy_reference: str | None = None
 
 
-class RiskAssessment(BaseModel):
+class RiskAssessment(InventoryModel):
     """Per-component supply chain risk assessment."""
 
     severity: RiskSeverity
@@ -87,8 +107,14 @@ class RiskAssessment(BaseModel):
 class AgentComponent(ComponentBase):
     """An autonomous AI agent deployment."""
 
-    component_type: ComponentType = ComponentType.AGENT
-    autonomy_level: AutonomyLevel = AutonomyLevel.L2_AGENT
+    component_type: Literal[ComponentType.AGENT] = ComponentType.AGENT
+    autonomy_level: AutonomyLevel | None = AutonomyLevel.L2_AGENT
+    deployment_status: Literal["unknown", "declared", "observed"] = "unknown"
+    deployment_id: str | None = None
+    workload_identity: str | None = None
+    tenant: str | None = None
+    data_refs: list[str] = Field(default_factory=list)
+    skill_refs: list[str] = Field(default_factory=list)
     framework: str | None = Field(
         default=None, description="Agent framework (LangGraph, CrewAI, etc.)"
     )
@@ -107,17 +133,26 @@ class AgentComponent(ComponentBase):
     )
     capabilities: CapabilityDeclaration | None = None
     authorizations: list[AuthorizationRecord] = Field(default_factory=list)
+    risks: list[RiskAssessment] = Field(default_factory=list)
+
+    @model_serializer(mode="wrap")
+    def preserve_unknown_autonomy(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        data: dict[str, Any] = handler(self)
+        # The legacy constructor default is L2; explicit unknown must survive exclude_none exports.
+        if self.autonomy_level is None:
+            data["autonomy_level"] = None
+        return data
+
     deployment_profile: DeploymentProfile | None = Field(
         default=None,
         description="Optional deployment-scoped authority claims and their evidence provenance",
     )
-    risks: list[RiskAssessment] = Field(default_factory=list)
 
 
 class MCPServerComponent(ComponentBase):
     """An MCP server that provides tools to agents."""
 
-    component_type: ComponentType = ComponentType.MCP_SERVER
+    component_type: Literal[ComponentType.MCP_SERVER] = ComponentType.MCP_SERVER
     transport: str | None = Field(default=None, description="stdio, sse, streamable-http")
     command: str | None = None
     args: list[str] = Field(default_factory=list)
@@ -137,7 +172,7 @@ class MCPServerComponent(ComponentBase):
 class ToolComponent(ComponentBase):
     """A single tool definition (from MCP, plugin, or function call)."""
 
-    component_type: ComponentType = ComponentType.TOOL
+    component_type: Literal[ComponentType.TOOL] = ComponentType.TOOL
     mcp_server_ref: str | None = None
     input_schema: dict[str, Any] | None = None
     description_text: str | None = Field(
@@ -148,10 +183,6 @@ class ToolComponent(ComponentBase):
         default=None,
         description="JCS canonical hash of (name, description, inputSchema, annotations)",
     )
-    definition_hash_version: str | None = Field(
-        default=None,
-        description="Canonicalization protocol, or unknown for legacy fingerprints",
-    )
     capabilities: CapabilityDeclaration | None = None
     annotations: dict[str, Any] = Field(
         default_factory=dict,
@@ -159,11 +190,16 @@ class ToolComponent(ComponentBase):
     )
     risks: list[RiskAssessment] = Field(default_factory=list)
 
+    definition_hash_version: str | None = Field(
+        default=None,
+        description="Canonicalization protocol, or unknown for legacy fingerprints",
+    )
+
 
 class ModelComponent(ComponentBase):
     """A model (weights, adapter, embedding model) used by an agent."""
 
-    component_type: ComponentType = ComponentType.MODEL
+    component_type: Literal[ComponentType.MODEL] = ComponentType.MODEL
     model_type: str | None = Field(
         default=None,
         description="foundation, fine-tuned, adapter, embedding, quantized",
@@ -197,11 +233,18 @@ class ModelComponent(ComponentBase):
     )
     risks: list[RiskAssessment] = Field(default_factory=list)
 
+    @property
+    def unverified_safetensors(self) -> bool:
+        return (
+            self.serialization_format in {"safetensors", "safe-tensors"}
+            and self.serialization_safety == SerializationSafety.UNKNOWN
+        )
+
 
 class PromptComponent(ComponentBase):
     """A system prompt, instruction template, or behavior-shaping artifact."""
 
-    component_type: ComponentType = ComponentType.PROMPT_TEMPLATE
+    component_type: Literal[ComponentType.PROMPT_TEMPLATE] = ComponentType.PROMPT_TEMPLATE
     prompt_type: str | None = Field(
         default=None,
         description="system-prompt, planner, instruction, rules-file, skill-definition",
@@ -220,7 +263,7 @@ class PromptComponent(ComponentBase):
 class GuardrailComponent(ComponentBase):
     """A safety classifier, content filter, or output validator."""
 
-    component_type: ComponentType = ComponentType.GUARDRAIL_POLICY
+    component_type: Literal[ComponentType.GUARDRAIL_POLICY] = ComponentType.GUARDRAIL_POLICY
     guardrail_type: str | None = Field(
         default=None,
         description="input-filter, output-filter, classifier, rate-limiter",
@@ -236,7 +279,7 @@ class GuardrailComponent(ComponentBase):
 class MemoryStoreComponent(ComponentBase):
     """Persistent memory (conversation history, learned facts, skills)."""
 
-    component_type: ComponentType = ComponentType.MEMORY_STORE
+    component_type: Literal[ComponentType.MEMORY_STORE] = ComponentType.MEMORY_STORE
     store_type: str | None = Field(
         default=None,
         description="conversation, episodic, semantic, procedural, skill",
@@ -254,7 +297,7 @@ class MemoryStoreComponent(ComponentBase):
 class RAGSourceComponent(ComponentBase):
     """A retrieval-augmented generation data source or vector index."""
 
-    component_type: ComponentType = ComponentType.RAG_SOURCE
+    component_type: Literal[ComponentType.RAG_SOURCE] = ComponentType.RAG_SOURCE
     corpus_type: str | None = Field(
         default=None,
         description="vector-store, knowledge-base, web-scraper, api-connector",
@@ -273,7 +316,7 @@ class RAGSourceComponent(ComponentBase):
 class DataSourceComponent(ComponentBase):
     """A training or fine-tuning dataset."""
 
-    component_type: ComponentType = ComponentType.DATA_SOURCE
+    component_type: Literal[ComponentType.DATA_SOURCE] = ComponentType.DATA_SOURCE
     dataset_type: str | None = Field(
         default=None,
         description="pre-training, fine-tuning, evaluation, alignment",
@@ -289,7 +332,7 @@ class DataSourceComponent(ComponentBase):
 class RegistryEntryComponent(ComponentBase):
     """A registry from which components are discovered or installed."""
 
-    component_type: ComponentType = ComponentType.REGISTRY_ENTRY
+    component_type: Literal[ComponentType.REGISTRY_ENTRY] = ComponentType.REGISTRY_ENTRY
     registry_type: str | None = Field(
         default=None,
         description="npm, pypi, huggingface, mcp-registry, skill-marketplace, docker-hub",
@@ -306,7 +349,7 @@ class RegistryEntryComponent(ComponentBase):
 class SkillPackageComponent(ComponentBase):
     """A skill or plugin package that extends agent capabilities."""
 
-    component_type: ComponentType = ComponentType.SKILL_PACKAGE
+    component_type: Literal[ComponentType.SKILL_PACKAGE] = ComponentType.SKILL_PACKAGE
     skill_type: str | None = Field(
         default=None, description="skill, plugin, connector, hook, extension"
     )
@@ -319,7 +362,7 @@ class SkillPackageComponent(ComponentBase):
 class MCPClientComponent(ComponentBase):
     """An MCP client that connects to MCP servers."""
 
-    component_type: ComponentType = ComponentType.MCP_CLIENT
+    component_type: Literal[ComponentType.MCP_CLIENT] = ComponentType.MCP_CLIENT
     host_application: str | None = Field(
         default=None, description="The IDE or agent host (claude-code, cursor, etc.)"
     )
@@ -344,7 +387,7 @@ class A2AClientComponent(ComponentBase):
 class A2AServerComponent(ComponentBase):
     """An A2A protocol server exposing agent capabilities to other agents."""
 
-    component_type: ComponentType = ComponentType.A2A_SERVER
+    component_type: Literal[ComponentType.A2A_SERVER] = ComponentType.A2A_SERVER
     agent_card_path: str | None = Field(
         default=None, description="Path or URL to the agent card JSON"
     )
@@ -359,7 +402,7 @@ class A2AServerComponent(ComponentBase):
 class IDEAgentComponent(ComponentBase):
     """An IDE coding agent configuration (Claude Code, Codex, Cursor, etc.)."""
 
-    component_type: ComponentType = ComponentType.IDE_AGENT
+    component_type: Literal[ComponentType.IDE_AGENT] = ComponentType.IDE_AGENT
     ide_type: str | None = Field(
         default=None,
         description="claude-code, codex, cursor, antigravity, xai, windsurf, cline",
@@ -374,7 +417,7 @@ class IDEAgentComponent(ComponentBase):
 class VerifiedExtensionComponent(ComponentBase):
     """An AI agent extension with verification/attestation status."""
 
-    component_type: ComponentType = ComponentType.VERIFIED_EXTENSION
+    component_type: Literal[ComponentType.VERIFIED_EXTENSION] = ComponentType.VERIFIED_EXTENSION
     extension_type: str | None = Field(
         default=None, description="plugin, skill, connector, integration, action"
     )
@@ -390,19 +433,24 @@ class VerifiedExtensionComponent(ComponentBase):
     risks: list[RiskAssessment] = Field(default_factory=list)
 
 
-class CompletenessClaim(BaseModel):
+class CompletenessClaim(InventoryModel):
     """What was actually scanned and what was excluded."""
 
     scope: str = Field(description="What this completeness claim covers (e.g. 'full-agent')")
     surfaces_scanned: list[str] = Field(default_factory=list)
     surfaces_excluded: list[str] = Field(default_factory=list)
     scan_failures: list[str] = Field(default_factory=list)
-    scanner_status: dict[str, str] = Field(default_factory=dict)
     timestamp: datetime | None = None
     assurance_level: AssuranceLevel = AssuranceLevel.DECLARED
+    collectors_requested: list[str] = Field(default_factory=list)
+    collectors_completed: list[str] = Field(default_factory=list)
+    unobserved_surfaces: list[str] = Field(default_factory=list)
+    exclusions: list[str] = Field(default_factory=list)
+
+    scanner_status: dict[str, str] = Field(default_factory=dict)
 
 
-class AIBOMMetadata(BaseModel):
+class AIBOMMetadata(InventoryModel):
     """Header metadata for an AgentBOM document."""
 
     spec_version: str = "1.0.0"
@@ -416,21 +464,24 @@ class AIBOMMetadata(BaseModel):
     completeness: CompletenessClaim | None = None
 
 
-AnyComponent = (
-    AgentComponent
-    | MCPServerComponent
-    | MCPClientComponent
-    | ToolComponent
-    | ModelComponent
-    | PromptComponent
-    | GuardrailComponent
-    | MemoryStoreComponent
-    | RAGSourceComponent
-    | DataSourceComponent
-    | RegistryEntryComponent
-    | SkillPackageComponent
-    | A2AClientComponent
-    | A2AServerComponent
-    | IDEAgentComponent
-    | VerifiedExtensionComponent
-)
+AnyComponent = Annotated[
+    (
+        AgentComponent
+        | MCPServerComponent
+        | ToolComponent
+        | ModelComponent
+        | PromptComponent
+        | GuardrailComponent
+        | MemoryStoreComponent
+        | RAGSourceComponent
+        | DataSourceComponent
+        | RegistryEntryComponent
+        | SkillPackageComponent
+        | MCPClientComponent
+        | A2AClientComponent
+        | A2AServerComponent
+        | IDEAgentComponent
+        | VerifiedExtensionComponent
+    ),
+    Field(discriminator="component_type"),
+]
