@@ -177,8 +177,115 @@ def digest_prompt(
 
 
 @app.command()
+def scan(
+    path: Annotated[Path, typer.Argument(help="Repository or agent directory to scan.")] = Path("."),
+    out: Annotated[Path, typer.Option("-o", "--out", help="Output directory.")] = Path("."),
+    name: Annotated[
+        str | None,
+        typer.Option(
+            "--name", help="Agent name (defaults to symbiote.yaml/agent.yaml or the directory name)."
+        ),
+    ] = None,
+    fmt: Annotated[str, typer.Option("--format", help="companion | cyclonedx | all")] = "all",
+    include_text: Annotated[
+        bool,
+        typer.Option("--include-text", help="Embed tool descriptions and schemas (digests only by default)."),
+    ] = False,
+    deterministic: Annotated[
+        bool,
+        typer.Option(
+            "--deterministic", help="Pin timestamps and the Merkle nonce for byte-identical output."
+        ),
+    ] = False,
+    user_scope: Annotated[
+        bool,
+        typer.Option(
+            "--user-scope", help="Also read user-scope client configuration from the home directory."
+        ),
+    ] = False,
+    as_json: JsonFlag = False,
+) -> None:
+    """Zero-config collection: produce a declared AgentBOM snapshot (companion + CycloneDX 1.7) from a repository."""
+    from symbiote.digest import bytes_digest
+    from symbiote.export.cdx import export_cyclonedx, validate_cyclonedx
+    from symbiote.export.companion import companion_bytes
+    from symbiote.scan import scan as run_scan
+
+    outcome = run_scan(
+        path,
+        agent_name=name,
+        home=Path.home() if user_scope else None,
+        deterministic=deterministic,
+        include_text=include_text,
+    )
+    bom = outcome.bom
+    out.mkdir(parents=True, exist_ok=True)
+    written: dict[str, str] = {}
+    companion = companion_bytes(bom)
+    companion_path = out / "agentbom.json"
+    if fmt in ("companion", "all"):
+        companion_path.write_bytes(companion)
+        written["companion"] = str(companion_path)
+    cdx_errors: list[str] = []
+    if fmt in ("cyclonedx", "all"):
+        doc, loss = export_cyclonedx(
+            bom,
+            include_text=include_text,
+            companion_digest=bytes_digest(companion),
+            companion_ref=companion_path.name,
+        )
+        cdx_errors = validate_cyclonedx(doc)
+        cdx_path = out / "agentbom.cdx.json"
+        cdx_path.write_text(json.dumps(doc, indent=2, sort_keys=False) + "\n", encoding="utf-8")
+        written["cyclonedx"] = str(cdx_path)
+        (out / "agentbom.cdx.loss.json").write_text(
+            json.dumps(loss.to_json_dict(), indent=2) + "\n", encoding="utf-8"
+        )
+        written["lossReport"] = str(out / "agentbom.cdx.loss.json")
+    coverage = {s.value: c.status.value for s, c in bom.coverage.surfaces.items()}
+    summary = {
+        "agent": bom.subject,
+        "snapshot": bom.snapshot.digest,
+        "serial": bom.snapshot.serial,
+        "kind": bom.snapshot.kind.value,
+        "entities": outcome.counts,
+        "edges": len(bom.edges),
+        "coverage": coverage,
+        "collectors": [c.to_json_dict() for c in bom.coverage.collectors],
+        "warnings": outcome.warnings,
+        "written": written,
+        "cyclonedxValid": not cdx_errors,
+        "cyclonedxErrors": cdx_errors[:20],
+    }
+    human = "\n".join(
+        [
+            f"[bold]{bom.subject}[/bold]  snapshot {bom.snapshot.digest[:23]}…  ({bom.snapshot.kind.value}, serial {bom.snapshot.serial})",
+            "entities: " + ", ".join(f"{k}={v}" for k, v in outcome.counts.items()),
+            "coverage: "
+            + ", ".join(f"{k}={v}" for k, v in coverage.items() if v != "not-attempted")
+            + "  (other surfaces: not-attempted)",
+            "collectors: " + ", ".join(f"{c.name}:{c.status.value}" for c in bom.coverage.collectors),
+            *(f"[yellow]warning[/yellow] {w}" for w in outcome.warnings[:10]),
+            *(f"written: {v}" for v in written.values()),
+            (
+                "[green]CycloneDX 1.7 validates against the official schema[/green]"
+                if written.get("cyclonedx") and not cdx_errors
+                else (
+                    "[red]CycloneDX validation errors[/red]: " + "; ".join(cdx_errors[:3])
+                    if cdx_errors
+                    else ""
+                )
+            ),
+        ]
+    )
+    emit(summary, as_json, human)
+    if cdx_errors:
+        raise typer.Exit(exit_codes.SCHEMA)
+
+
+@app.command()
 def validate(files: list[Path], as_json: JsonFlag = False) -> None:
-    """Validate companion documents against the AgentBOM schema (CycloneDX/SPDX validators arrive with WP6/WP7)."""
+    """Validate companion documents (AgentBOM schema) and CycloneDX 1.6/1.7 documents (official schemas)."""
     from symbiote.export.companion import validate_companion
 
     results = []
