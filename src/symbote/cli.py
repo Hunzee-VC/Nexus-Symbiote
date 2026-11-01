@@ -29,13 +29,15 @@ def _get_scanners() -> dict[str, type]:
         from symbote.scanners.rag import RAGScanner
         from symbote.scanners.registry import RegistryScanner
 
-        SCANNER_REGISTRY.update({
-            "mcp": MCPScanner,
-            "model": ModelScanner,
-            "prompt": PromptScanner,
-            "rag": RAGScanner,
-            "registry": RegistryScanner,
-        })
+        SCANNER_REGISTRY.update(
+            {
+                "mcp": MCPScanner,
+                "model": ModelScanner,
+                "prompt": PromptScanner,
+                "rag": RAGScanner,
+                "registry": RegistryScanner,
+            }
+        )
     return SCANNER_REGISTRY
 
 
@@ -114,9 +116,11 @@ def scan(
 
     if output_format == "cyclonedx":
         from symbote.generators.cyclonedx import CycloneDXGenerator
+
         out_data = CycloneDXGenerator().generate_json(aibom)
     elif output_format == "spdx":
         from symbote.generators.spdx import SPDXGenerator
+
         out_data = SPDXGenerator().generate_json(aibom)
     else:
         out_data = aibom.to_json()
@@ -193,7 +197,10 @@ def risk(aibom_path: str, threshold: float, json_output: bool) -> None:
         sys.exit(0 if passed else 1)
 
     level_colors = {
-        "critical": "red", "high": "red", "moderate": "yellow", "clean": "green",
+        "critical": "red",
+        "high": "red",
+        "moderate": "yellow",
+        "clean": "green",
     }
     color = level_colors[report.risk_level]
     score = report.overall_score
@@ -240,8 +247,16 @@ def risk(aibom_path: str, threshold: float, json_output: bool) -> None:
 @click.option("--json-output", is_flag=True, help="Output as JSON")
 def diff(old_path: str, new_path: str, json_output: bool) -> None:
     """Compare two AIBOM snapshots for supply-chain drift."""
-    old_bom = AIBOM.load(Path(old_path))
-    new_bom = AIBOM.load(Path(new_path))
+    try:
+        old_bom = AIBOM.load(Path(old_path))
+    except Exception:
+        click.echo(f"Error: {old_path} is not a valid native AIBOM file.", err=True)
+        sys.exit(1)
+    try:
+        new_bom = AIBOM.load(Path(new_path))
+    except Exception:
+        click.echo(f"Error: {new_path} is not a valid native AIBOM file.", err=True)
+        sys.exit(1)
 
     from symbote.diff.differ import AIBOMDiffer
 
