@@ -150,8 +150,14 @@ def test_per_scanner_coverage_requires_every_state_to_be_complete() -> None:
     passed, report = RiskScorer().passes_gate(bom)
     assert not passed
     assert report.coverage_status == "partial"
+    object.__setattr__(bom.metadata.completeness, "scanner_status", {"model": "complete"})
+    passed, report = RiskScorer().passes_gate(bom)
+    assert not passed
+    assert report.coverage_status == "partial"
     object.__setattr__(
-        bom.metadata.completeness, "scanner_status", {"model": "complete", "mcp": "complete"}
+        bom.metadata.completeness,
+        "scanner_status",
+        dict.fromkeys(("mcp", "model", "prompt", "rag", "registry"), "complete"),
     )
     passed, report = RiskScorer().passes_gate(bom)
     assert passed

@@ -8,6 +8,10 @@ from typing import Any
 from symbote.core.aibom import AIBOM
 from symbote.core.enums import RiskSeverity
 
+# The complete built-in collection scope; do not infer completeness from a
+# caller-provided subset. Update alongside the CLI scanner registry.
+REQUIRED_SCANNERS = frozenset({"mcp", "model", "prompt", "rag", "registry"})
+
 SEVERITY_WEIGHTS: dict[RiskSeverity, float] = {
     RiskSeverity.CRITICAL: 10.0,
     RiskSeverity.HIGH: 7.0,
@@ -87,7 +91,10 @@ class RiskScorer:
             # Legacy claims lack per-scanner status. They cannot establish that
             # omitted or unselected surfaces were assessed.
             statuses = getattr(coverage, "scanner_status", None)
-            if statuses and any(state != "complete" for state in statuses.values()):
+            if statuses and (
+                not REQUIRED_SCANNERS.issubset(statuses)
+                or any(state != "complete" for state in statuses.values())
+            ):
                 report.coverage_status = "partial"
             elif statuses and coverage.surfaces_scanned and bom.components:
                 # Reported collection is not independent proof of completeness.
