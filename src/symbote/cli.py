@@ -120,7 +120,13 @@ def scan(
             surfaces_scanned.extend(result.surfaces_scanned)
             surfaces_excluded.extend(result.surfaces_excluded)
             scan_failures.extend(result.scan_failures)
-            scanner_status[name] = "failed" if result.scan_failures else "complete"
+            scanner_status[name] = (
+                "failed"
+                if result.scan_failures
+                else "partial"
+                if result.surfaces_excluded
+                else "complete"
+            )
             console.print(f"    Found [green]{len(result.components)}[/] components")
         except Exception as e:
             err_console.print(f"  [red]Scanner '{name}' failed:[/] {e}")
