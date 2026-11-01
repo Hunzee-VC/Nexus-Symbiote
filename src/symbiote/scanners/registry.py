@@ -14,7 +14,7 @@ from pathlib import Path
 
 from symbiote.core.enums import RiskSeverity, TrustTier
 from symbiote.core.models import RegistryEntryComponent, RiskAssessment
-from symbiote.scanners.base import Scanner, ScanResult, read_regular_text
+from symbiote.scanners.base import Scanner, ScanResult, read_regular_text, sanitized_origin
 
 AI_PACKAGE_PATTERNS = [
     re.compile(r"(?:^|/)@modelcontextprotocol/", re.I),
@@ -55,9 +55,18 @@ class RegistryScanner(Scanner):
         result.surfaces_scanned.append(str(pkg_path))
         data = self._safe_read_json(pkg_path)
         if not isinstance(data, dict):
-            result.scan_failures.append(f"Failed to parse {pkg_path}")
+            result.scan_failures.append("Invalid or unreadable package.json")
             return components
 
+        lock_path = root / "package-lock.json"
+        resolutions = {}
+        if lock_path.exists() or lock_path.is_symlink():
+            lock = self._safe_read_json(lock_path)
+            if isinstance(lock, dict) and isinstance(lock.get("packages"), dict):
+                resolutions = lock["packages"]
+                result.surfaces_scanned.append("package-lock.json")
+            else:
+                result.scan_failures.append("Unsupported or unreadable npm lockfile")
         all_deps: dict[str, str] = {}
         for key in ("dependencies", "devDependencies", "optionalDependencies"):
             deps = data.get(key, {})
@@ -68,6 +77,33 @@ class RegistryScanner(Scanner):
             if not self._is_ai_package(pkg_name):
                 continue
 
+            if not isinstance(version_spec, str):
+                result.scan_failures.append(f"Invalid dependency requirement for {pkg_name!r}")
+                continue
+            record = resolutions.get(f"node_modules/{pkg_name}", {})
+            if not isinstance(record, dict):
+                record = {}
+            locator = record.get("resolved")
+            resolved = (
+                sanitized_origin(locator)
+                if isinstance(locator, str) and locator.startswith(("https://", "http://"))
+                else None
+            )
+            locked_version = record.get("version")
+            if not isinstance(locked_version, str) or not re.fullmatch(
+                r"[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.+-]+)?", locked_version
+            ):
+                locked_version = None
+            integrity = record.get("integrity")
+            metadata = {
+                "requested_version": version_spec
+                if re.fullmatch(r"[0-9a-zA-Z~^*<>=.+ |,-]+", version_spec)
+                else "non-semver"
+            }
+            if isinstance(integrity, str) and re.fullmatch(
+                r"sha(?:256|384|512)-[A-Za-z0-9+/=]+", integrity
+            ):
+                metadata["lockfile_integrity"] = integrity
             pinned = bool(re.match(r"^\d+\.\d+\.\d+$", version_spec))
             risks: list[RiskAssessment] = []
 
@@ -76,7 +112,7 @@ class RegistryScanner(Scanner):
                     RiskAssessment(
                         severity=RiskSeverity.MEDIUM,
                         category="version_pinning",
-                        detail=f"npm package '{pkg_name}' uses range '{version_spec}' instead of exact pin.",
+                        detail=f"npm package '{pkg_name}' has no exact manifest pin.",
                         recommendation="Pin to exact version in package.json and verify integrity via lockfile.",
                     )
                 )
@@ -85,10 +121,12 @@ class RegistryScanner(Scanner):
                 RegistryEntryComponent(
                     bom_ref=f"registry:npm/{pkg_name}",
                     name=pkg_name,
-                    version=version_spec,
+                    version=locked_version or metadata["requested_version"],
                     registry_type="npm",
-                    registry_uri="https://registry.npmjs.org",
-                    trust_tier=TrustTier.THIRD_PARTY_UNSIGNED,
+                    registry_uri=resolved,
+                    source_path="package-lock.json" if record else "package.json",
+                    properties=metadata,
+                    trust_tier=TrustTier.UNKNOWN,
                     risks=risks,
                 )
             )

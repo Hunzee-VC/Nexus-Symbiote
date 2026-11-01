@@ -76,11 +76,17 @@ def main() -> None:
     multiple=True,
     help="Specific scanners to run (default: all, or from .symbiote.yaml). Prefer 'shadowscan' for primary discovery.",
 )
+@click.option("--no-project-policy", is_flag=True, help="Ignore the scanned repository’s policy.")
+@click.option("--model-signer", help="Authorized model signer identity.")
+@click.option("--model-issuer", help="Authorized model signer OIDC issuer.")
 def scan(
     project_path: str,
     output: str | None,
     output_format: str | None,
     scanners: tuple[str, ...],
+    no_project_policy: bool,
+    model_signer: str | None,
+    model_issuer: str | None,
 ) -> None:
     """Scan a project and generate an AIBOM.
 
@@ -94,8 +100,10 @@ def scan(
 
     from symbiote.policy import load_policy
 
+    if bool(model_signer) != bool(model_issuer):
+        raise click.UsageError("Specify both --model-signer and --model-issuer")
     try:
-        policy = load_policy(root)
+        policy = None if no_project_policy else load_policy(root)
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
 
@@ -119,6 +127,9 @@ def scan(
     scan_failures: list[str] = []
     scanner_status: dict[str, str] = dict.fromkeys(all_scanners, "unknown")
 
+    if not selected:
+        scan_failures.append("No scanners selected")
+
     for name in selected:
         if name not in all_scanners:
             scan_failures.append(f"Unknown scanner: {name}")
@@ -126,7 +137,11 @@ def scan(
             continue
 
         scanner_cls = all_scanners[name]
-        scanner = scanner_cls()
+        scanner = (
+            scanner_cls(model_signer, model_issuer)
+            if name == "model" and model_signer
+            else scanner_cls()
+        )
         console.print(f"  Running [cyan]{name}[/] scanner...")
 
         try:
@@ -149,13 +164,19 @@ def scan(
             scan_failures.append(f"{name}: {e}")
             scanner_status[name] = "failed"
 
+    from symbiote.scanners.inventory import add_inventory_graph
+
+    add_inventory_graph(aibom, root, scan_failures)
+
     aibom.metadata.completeness = CompletenessClaim(
-        scope="local-static-project+shadowscan",
+        scope="local-static-project+shadowscan"
+        if scanner_status.get("shadowscan") == "complete"
+        else "local-static-project",
         surfaces_scanned=surfaces_scanned,
         surfaces_excluded=surfaces_excluded,
         scan_failures=scan_failures,
         scanner_status=scanner_status,
-        assurance_level=AssuranceLevel.OBSERVED,
+        assurance_level=AssuranceLevel.DECLARED,
     )
 
     if output_format == "cyclonedx":
@@ -174,7 +195,9 @@ def scan(
         out_data = aibom.to_json()
 
     if output:
-        Path(output).write_text(out_data, encoding="utf-8")
+        from symbiote.utils.files import write_output_file
+
+        write_output_file(Path(output), out_data)
         console.print(f"[bold green]Saved[/] {output}")
     else:
         click.echo(out_data)
@@ -194,7 +217,7 @@ def scan(
     default="json",
 )
 def import_shadowscan(report_path: str, output: str, output_format: str) -> None:
-    """Import a Nexus-ShadowScan report and generate a verified AIBOM.
+    """Import a Nexus-ShadowScan report and generate a declared AIBOM.
 
     This is the recommended primary workflow: run ShadowScan for discovery,
     then SymBiote for verification, integrity, and BOM emission.
@@ -232,7 +255,9 @@ def import_shadowscan(report_path: str, output: str, output_format: str) -> None
     else:
         out_data = aibom.to_json()
 
-    Path(output).write_text(out_data, encoding="utf-8")
+    from symbiote.utils.files import write_output_file
+
+    write_output_file(Path(output), out_data)
     console.print(f"[bold green]Imported {len(components)} components and saved[/] {output}")
 
 

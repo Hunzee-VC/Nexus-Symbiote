@@ -16,7 +16,7 @@ from __future__ import annotations
 import ipaddress
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from symbiote.core.enums import (
     CapabilityClass,
@@ -33,6 +33,7 @@ from symbiote.core.models import (
     ToolComponent,
 )
 from symbiote.scanners.base import Scanner, ScanResult, read_regular_text, sanitized_origin
+from symbiote.scanners.ts_tools import collect_typescript
 
 MCP_CONFIG_FILES = [
     ".mcp.json",
@@ -49,13 +50,13 @@ class MCPScanner(Scanner):
     def scan(self, project_root: Path) -> ScanResult:
         result = ScanResult(scanner_name=self.name)
         found_any = False
-        server_names: list[str] = []
 
         for config_name in MCP_CONFIG_FILES:
             config_path = project_root / config_name
             if not config_path.exists():
                 continue
 
+            server_names: list[str] = []
             found_any = True
             result.surfaces_scanned.append(str(config_path))
             data = self._safe_read_json(config_path)
@@ -71,17 +72,26 @@ class MCPScanner(Scanner):
                     mcp_comp, tool_comps = self._parse_server(
                         server_name, server_config, config_path
                     )
+                    # Keep the established root-config references for compatibility.
+                    # Each other configuration is its own declaration scope.
+                    if config_name != ".mcp.json":
+                        prefix = quote(config_name, safe="") + ":"
+                        mcp_comp.bom_ref = f"mcp-server:{prefix}{quote(server_name, safe='')}"
+                        for tool in tool_comps:
+                            tool.bom_ref = f"tool:{prefix}{quote(server_name, safe='')}/{quote(tool.name, safe='')}"
+                            tool.mcp_server_ref = mcp_comp.bom_ref
+                    mcp_comp.tool_refs = [t.bom_ref for t in tool_comps]
+                    mcp_comp.tool_count = len(tool_comps)
                     result.components.append(mcp_comp)
                     result.components.extend(tool_comps)
-                    server_names.append(server_name)
+                    server_names.append(mcp_comp.bom_ref)
 
                 host_app = self._detect_host_from_config(config_name)
                 if host_app:
-                    client_comp = self._create_mcp_client(
-                        host_app, config_path, server_names
-                    )
+                    client_comp = self._create_mcp_client(host_app, config_path, server_names)
                     result.components.append(client_comp)
 
+        collect_typescript(project_root, result)
         self._scan_code_mcp_clients(project_root, result)
 
         if not found_any:
@@ -274,7 +284,7 @@ class MCPScanner(Scanner):
             bom_ref=f"mcp-client:{host_app}",
             name=f"{host_app} MCP client",
             host_application=host_app,
-            server_refs=[f"mcp-server:{s}" for s in server_names],
+            server_refs=server_names,
             config_path=str(config_path),
             source_path=str(config_path),
             trust_tier=TrustTier.INTERNAL_UNVERIFIED,

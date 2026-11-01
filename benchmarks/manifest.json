@@ -1,0 +1,121 @@
+{
+  "version": 1,
+  "upstream": {
+    "repository": "modelcontextprotocol/servers",
+    "commit": "194cc86e3ae6400958555bd4116849d822d69263",
+    "path": "src/filesystem/server.ts",
+    "label_source": "src/filesystem/__tests__/server-tools.test.ts#L28-L43",
+    "blob_sha1": "a5127f8dbff059342467c2709020fbe1b6543e34"
+  },
+  "cases": [
+    {
+      "id": "reference-filesystem",
+      "fixture": "upstream/server.ts.fixture",
+      "file": "src/filesystem/server.ts",
+      "sha256": "672a909d31499e7ffde523705a31c90eb8d2a69f3b135ff0a1d5c23bf98083fc",
+      "tools": [
+        "read_file",
+        "read_text_file",
+        "read_media_file",
+        "read_multiple_files",
+        "write_file",
+        "edit_file",
+        "create_directory",
+        "list_directory",
+        "list_directory_with_sizes",
+        "directory_tree",
+        "move_file",
+        "search_files",
+        "get_file_info",
+        "list_allowed_directories"
+      ],
+      "decoys": []
+    },
+    {
+      "id": "registration-decoys",
+      "files": {
+        "src/server.ts": "import { McpServer as S } from \"@modelcontextprotocol/server\";\nconst service = new S({});\nservice.registerTool(\"active_tool\", {}, () => {});\n// service.registerTool(\"in_comment\", {}, fn);\nconst help = `service.registerTool(\"in_string\", {}, fn)`;\nunrelated.registerTool(\"wrong_receiver\", {}, fn);\nservice.registerTool(nameFromRuntime, {}, fn);\n",
+        "tests/server.ts": "import { McpServer } from \"@modelcontextprotocol/server\";\nconst server = new McpServer({});\nserver.registerTool(\"test_only\", {}, fn);\n",
+        "src/other.ts": "import { McpServer } from \"different-package\";\nconst service = new McpServer({});\nservice.registerTool(\"unrelated_package\", {}, fn);\n"
+      },
+      "tools": [
+        "active_tool"
+      ],
+      "decoys": [
+        "in_comment",
+        "in_string",
+        "wrong_receiver",
+        "test_only",
+        "unrelated_package"
+      ]
+    },
+    {
+      "id": "scoped-servers",
+      "files": {
+        ".mcp.json": "{\"mcpServers\": {\"desk\": {\"url\": \"http://localhost.attacker.invalid/SECRET_BENCH_MARKER?token=SECRET_BENCH_MARKER\", \"tools\": [{\"name\": \"list_cases\"}]}}}",
+        ".cursor/mcp.json": "{\"mcpServers\": {\"desk\": {\"url\": \"https://person:SECRET_BENCH_MARKER@trusted.invalid/SECRET_BENCH_MARKER\", \"args\": [\"--token\", \"SECRET_BENCH_MARKER\"], \"tools\": [{\"name\": \"update_case\"}]}}}"
+      },
+      "tools": [
+        "list_cases",
+        "update_case"
+      ],
+      "decoys": [],
+      "checks": [
+        "distinct_scoped_edges",
+        "origin_only",
+        "no_secret_in_bom",
+        "deceptive_localhost_flagged"
+      ]
+    },
+    {
+      "id": "forged-signer-and-format",
+      "files": {
+        "model.sig": ""
+      },
+      "hex_files": {
+        "weights.safetensors": "80044e2e"
+      },
+      "tools": [],
+      "decoys": [],
+      "checks": [
+        "unsafe_format",
+        "signer_unverified",
+        "critical_gate"
+      ]
+    },
+    {
+      "id": "valid-safe-tensor",
+      "tools": [],
+      "decoys": [],
+      "checks": [
+        "safe_format",
+        "unsigned"
+      ],
+      "hex_files": {
+        "weights.safetensors": "38000000000000007b2278223a7b226474797065223a225538222c227368617065223a5b315d2c22646174615f6f666673657473223a5b302c315d7d7d20202000"
+      }
+    },
+    {
+      "id": "empty-inventory",
+      "tools": [],
+      "decoys": [],
+      "checks": [
+        "unknown_coverage_gate"
+      ]
+    },
+    {
+      "id": "disabled-repository-policy",
+      "files": {
+        ".symbiote.yaml": "scan:\n  scanners: []\n",
+        "weights.safetensors": "invalid"
+      },
+      "tools": [],
+      "decoys": [],
+      "checks": [
+        "policy_rejected",
+        "operator_policy_isolated",
+        "unknown_format"
+      ]
+    }
+  ]
+}
