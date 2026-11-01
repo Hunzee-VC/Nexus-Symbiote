@@ -19,7 +19,6 @@ from typing import Any
 from nexus_symbiote.core.enums import (
     AssuranceLevel,
     AutonomyLevel,
-    ComponentType,
     RiskSeverity,
     TrustTier,
 )
@@ -28,7 +27,6 @@ from nexus_symbiote.core.models import (
     MCPServerComponent,
     ModelComponent,
     RiskAssessment,
-    ToolComponent,
 )
 from nexus_symbiote.scanners.base import Scanner, ScanResult
 
