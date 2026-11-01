@@ -45,7 +45,7 @@ dependencies = [
 
 [project.optional-dependencies]
 cyclonedx = [
-    "cyclonedx-python-lib>=7.0,<8",
+    "cyclonedx-python-lib>=11.12,<12",
 ]
 sigstore = [
     "sigstore>=3.0,<4",

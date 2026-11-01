@@ -6,6 +6,7 @@ with agent-specific property taxonomies under the symbote: namespace.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from symbote.core.aibom import AIBOM, DependencyEdge
@@ -26,7 +27,7 @@ from symbote.core.models import (
 from symbote.generators.base import Generator
 
 COMPONENT_TYPE_MAP: dict[ComponentType, str] = {
-    ComponentType.AGENT: "machine-learning-model",
+    ComponentType.AGENT: "application",
     ComponentType.MODEL: "machine-learning-model",
     ComponentType.TOOL: "library",
     ComponentType.MCP_SERVER: "application",
@@ -45,14 +46,35 @@ class CycloneDXGenerator(Generator):
 
     def generate(self, aibom: AIBOM) -> dict[str, Any]:
         aibom.finalize()
+        metadata = self._metadata(aibom)
+        # CycloneDX dependency objects do not carry typed edge semantics.
+        # Keep the original edges as documented metadata properties.
+        if aibom.dependencies:
+            metadata["properties"] = [
+                {
+                    "name": "symbote:dependency:relationship",
+                    "value": json.dumps(
+                        {"from": edge.source_ref, "to": edge.target_ref, "type": edge.relationship},
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                }
+                for edge in aibom.dependencies
+            ]
+        grouped: dict[str, set[str]] = {}
+        for edge in aibom.dependencies:
+            grouped.setdefault(edge.source_ref, set()).add(edge.target_ref)
         return {
             "bomFormat": "CycloneDX",
             "specVersion": "1.7",
             "version": aibom.metadata.version,
             "serialNumber": aibom.metadata.serial_number,
-            "metadata": self._metadata(aibom),
+            "metadata": metadata,
             "components": [self._component(c) for c in aibom.components],
-            "dependencies": [self._dependency(d) for d in aibom.dependencies],
+            "dependencies": [
+                {"ref": ref, "dependsOn": sorted(targets)}
+                for ref, targets in sorted(grouped.items())
+            ],
         }
 
     def _metadata(self, aibom: AIBOM) -> dict[str, Any]:
@@ -90,7 +112,7 @@ class CycloneDXGenerator(Generator):
             result["description"] = comp.description
         if comp.hashes:
             result["hashes"] = [
-                {"alg": alg.upper().replace("SHA", "SHA-"), "content": val}
+                {"alg": alg.upper().replace("SHA", "SHA-"), "content": val.split(":", 1)[-1]}
                 for alg, val in comp.hashes.items()
                 if val
             ]
@@ -105,7 +127,7 @@ class CycloneDXGenerator(Generator):
         props: list[dict[str, str]] = []
 
         def _add(name: str, value: Any) -> None:
-            if value is not None and value != "" and value is not False:
+            if value is not None and value != "":
                 props.append({"name": f"symbote:{name}", "value": str(value)})
 
         _add("componentType", comp.component_type.value)
@@ -160,5 +182,4 @@ class CycloneDXGenerator(Generator):
         return {
             "ref": edge.source_ref,
             "dependsOn": [edge.target_ref],
-            "properties": [{"name": "symbote:relationship", "value": edge.relationship}],
         }
