@@ -44,6 +44,7 @@ def _full_bom() -> AIBOM:
             name="read_file",
             mcp_server_ref="mcp:fs",
             definition_hash="sha256:abc123",
+            definition_hash_version="rfc8785-jcs-v1",
             description_text="Read a file",
         )
     )
@@ -153,6 +154,7 @@ class TestIntegrityValidator:
                 name="test_tool",
                 description_text="Does something",
                 definition_hash="sha256:wrong_hash_value",
+                definition_hash_version="rfc8785-jcs-v1",
             )
         )
         iv = IntegrityValidator()
@@ -171,6 +173,7 @@ class TestIntegrityValidator:
                 name="test_tool",
                 description_text="Does something",
                 definition_hash=correct_hash,
+                definition_hash_version="rfc8785-jcs-v1",
             )
         )
         iv = IntegrityValidator()
@@ -224,7 +227,7 @@ class TestRiskScorer:
         scorer = RiskScorer()
         report = scorer.score(bom)
         assert report.overall_score == 0.0
-        assert report.risk_level == "clean"
+        assert report.risk_level == "unknown"
 
     def test_risky_bom_high_score(self):
         bom = _risky_bom()
@@ -238,7 +241,8 @@ class TestRiskScorer:
         bom = _full_bom()
         scorer = RiskScorer(fail_threshold=50.0)
         passed, report = scorer.passes_gate(bom)
-        assert passed
+        assert not passed
+        assert report.coverage_status == "unknown"
 
     def test_fails_gate(self):
         bom = _risky_bom()
@@ -290,7 +294,7 @@ class TestAIBOMDiffer:
     def test_component_modified(self):
         old = _full_bom()
         new = _full_bom()
-        new.add_component(
+        new.replace_component(
             MCPServerComponent(
                 bom_ref="mcp:fs",
                 name="filesystem",
@@ -306,12 +310,13 @@ class TestAIBOMDiffer:
     def test_security_alert_on_hash_change(self):
         old = _full_bom()
         new = _full_bom()
-        new.add_component(
+        new.replace_component(
             ToolComponent(
                 bom_ref="tool:read",
                 name="read_file",
                 mcp_server_ref="mcp:fs",
                 definition_hash="sha256:changed_hash",
+                definition_hash_version="rfc8785-jcs-v1",
                 description_text="Read a file (modified)",
             )
         )

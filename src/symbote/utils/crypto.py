@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from dataclasses import dataclass
+from importlib import import_module
 from pathlib import Path
 from typing import Any
 
@@ -74,73 +75,55 @@ def verify_file_hash(
     )
 
 
+def verify_sigstore_digest(
+    digest_hex: str,
+    bundle_json: bytes,
+    expected_identity: str,
+    expected_issuer: str,
+) -> VerificationResult:
+    """Verify the SHA-256 of the bytes inspected under an operator's signer policy."""
+    if not expected_identity or not expected_issuer:
+        return VerificationResult(False, error="Both an expected identity and issuer are required")
+    try:
+        digest = bytes.fromhex(digest_hex.removeprefix("sha256:"))
+        if len(digest) != hashlib.sha256().digest_size:
+            raise ValueError("expected a SHA-256 digest")
+        # Sigstore is an optional extra. Use its public v3 verification API.
+        bundle = import_module("sigstore.models").Bundle.from_json(bundle_json)
+        hashed = import_module("sigstore.hashes").Hashed(
+            algorithm=import_module(
+                "sigstore_protobuf_specs.dev.sigstore.common.v1"
+            ).HashAlgorithm.SHA2_256,
+            digest=digest,
+        )
+        policy = import_module("sigstore.verify.policy").Identity(
+            identity=expected_identity, issuer=expected_issuer
+        )
+        verifier = import_module("sigstore.verify").Verifier.production(offline=True)
+        verifier.verify_artifact(hashed, bundle, policy)
+    except ImportError:
+        return VerificationResult(False, error="Sigstore unavailable. Install symbote[sigstore].")
+    except Exception as exc:
+        return VerificationResult(False, error=f"Sigstore verification failed: {exc}")
+    return VerificationResult(True, identity=expected_identity, issuer=expected_issuer)
+
+
 def verify_sigstore_bundle(
     artifact_path: Path,
     bundle_path: Path,
     expected_identity: str | None = None,
     expected_issuer: str | None = None,
 ) -> VerificationResult:
-    """Verify a Sigstore bundle against an artifact.
-
-    Requires the `sigstore` optional dependency. Returns a VerificationResult
-    indicating whether the bundle's signature is valid and the signing identity
-    matches expectations.
-    """
+    """Bind a local artifact to a Sigstore bundle under an explicit signer policy."""
+    if not expected_identity or not expected_issuer:
+        return VerificationResult(False, error="Both an expected identity and issuer are required")
     try:
-        from sigstore.models import Bundle
-        from sigstore.verify import Verifier
-        from sigstore.verify import policy as sigstore_policy
-    except ImportError:
-        return VerificationResult(
-            verified=False,
-            error=("sigstore package not installed. Install with: pip install symbote[sigstore]"),
-        )
-
-    try:
-        bundle = Bundle.from_json(bundle_path.read_text(encoding="utf-8"))
-    except Exception as e:
-        return VerificationResult(
-            verified=False,
-            error=f"Failed to parse Sigstore bundle: {e}",
-        )
-
-    try:
-        verifier = Verifier.production()
-    except Exception as e:
-        return VerificationResult(
-            verified=False,
-            error=f"Failed to initialize Sigstore verifier: {e}",
-        )
-
-    identity_policy = sigstore_policy.UnsafeNoOp()
-    if expected_identity and expected_issuer:
-        identity_policy = sigstore_policy.Identity(  # type: ignore[assignment]
-            identity=expected_identity,
-            issuer=expected_issuer,
-        )
-
-    try:
-        artifact_data = artifact_path.read_bytes()
-        result = verifier.verify(artifact_data, bundle, identity_policy)  # type: ignore[attr-defined]
-        signer_identity = None
-        signer_issuer = None
-        if hasattr(result, "certificate") and result.certificate:
-            cert = result.certificate
-            if hasattr(cert, "san") and cert.san:
-                signer_identity = str(cert.san)
-            if hasattr(cert, "issuer"):
-                signer_issuer = str(cert.issuer)
-        return VerificationResult(
-            verified=True,
-            identity=signer_identity,
-            issuer=signer_issuer,
-            details={"bundle_path": str(bundle_path)},
-        )
-    except Exception as e:
-        return VerificationResult(
-            verified=False,
-            error=f"Sigstore verification failed: {e}",
-        )
+        with artifact_path.open("rb") as artifact:
+            digest = hashlib.file_digest(artifact, "sha256").hexdigest()
+        bundle = bundle_path.read_bytes()
+    except OSError as exc:
+        return VerificationResult(False, error=f"Cannot read verification input: {exc}")
+    return verify_sigstore_digest(digest, bundle, expected_identity, expected_issuer)
 
 
 def compute_file_hash(path: Path, algorithm: str = "sha256") -> str | None:

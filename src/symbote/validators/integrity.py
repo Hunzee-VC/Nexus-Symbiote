@@ -7,7 +7,8 @@ from pathlib import Path
 
 from symbote.core.aibom import AIBOM
 from symbote.core.enums import ComponentType, SerializationSafety
-from symbote.core.hashing import hash_file, hash_tool_definition
+from symbote.core.hashing import hash_tool_definition
+from symbote.utils.confined import hash_confined_file
 
 
 @dataclass
@@ -80,6 +81,18 @@ class IntegrityValidator:
             )
             return
 
+        if getattr(comp, "definition_hash_version", None) != "rfc8785-jcs-v1":
+            report.issues.append(
+                IntegrityIssue(
+                    component_ref=comp.bom_ref,
+                    category="fingerprint_version_unknown",
+                    detail=f"Tool '{comp.name}' fingerprint version is unknown or unsupported; re-collect and re-approve.",
+                    severity="error",
+                )
+            )
+            report.is_valid = False
+            return
+
         if hasattr(comp, "description_text") and comp.description_text is not None:
             recomputed = hash_tool_definition(
                 comp.name,
@@ -124,6 +137,7 @@ class IntegrityValidator:
                         severity="critical",
                     )
                 )
+                report.is_valid = False
 
         if hasattr(comp, "signing_status") and comp.signing_status == "unsigned":
             report.issues.append(
@@ -166,28 +180,36 @@ class IntegrityValidator:
             )
             return
 
-        if project_root and comp.source_path:
-            path = Path(comp.source_path)
-            if not path.is_absolute():
-                path = project_root / path
-            if path.exists():
-                recomputed = hash_file(path)
+        if not project_root:
+            report.issues.append(
+                IntegrityIssue(
+                    component_ref=comp.bom_ref,
+                    category="project_required",
+                    detail="A project root is required to verify prompt content.",
+                    severity="error",
+                )
+            )
+            report.hashes_failed += 1
+            report.is_valid = False
+        else:
+            try:
+                if not comp.source_path:
+                    raise OSError("missing source path")
+                recomputed = hash_confined_file(project_root, comp.source_path)
                 if recomputed != comp.content_hash:
-                    report.issues.append(
-                        IntegrityIssue(
-                            component_ref=comp.bom_ref,
-                            category="hash_mismatch",
-                            detail=(
-                                f"Prompt '{comp.name}' content hash mismatch "
-                                "— file changed since scan."
-                            ),
-                            severity="error",
-                        )
+                    raise OSError("content hash mismatch")
+                report.hashes_verified += 1
+            except OSError:
+                report.issues.append(
+                    IntegrityIssue(
+                        component_ref=comp.bom_ref,
+                        category="hash_mismatch",
+                        detail=f"Prompt '{comp.name}' could not be verified within the project root.",
+                        severity="error",
                     )
-                    report.hashes_failed += 1
-                    report.is_valid = False
-                else:
-                    report.hashes_verified += 1
+                )
+                report.hashes_failed += 1
+                report.is_valid = False
 
     def _check_mcp_version_pin(self, comp, report: IntegrityReport) -> None:  # type: ignore[no-untyped-def]
         if hasattr(comp, "version_pinned") and not comp.version_pinned:
@@ -209,30 +231,33 @@ class IntegrityValidator:
         project_root: Path | None,
         report: IntegrityReport,
     ) -> None:
-        if not project_root or not comp.source_path:
-            return
         if not comp.hashes:
             return
 
-        path = Path(comp.source_path)
-        if not path.is_absolute():
-            path = project_root / path
-        if not path.exists():
+        if not project_root:
+            report.issues.append(
+                IntegrityIssue(
+                    component_ref=comp.bom_ref,
+                    category="project_required",
+                    detail="A project root is required to verify file hashes.",
+                    severity="error",
+                )
+            )
+            report.hashes_failed += len(comp.hashes)
+            report.is_valid = False
             return
 
         for algo, declared_hash in comp.hashes.items():
             try:
-                recomputed = hash_file(path, algorithm=algo)
+                if not comp.source_path:
+                    raise OSError("missing source path")
+                recomputed = hash_confined_file(project_root, comp.source_path, algorithm=algo)
                 if recomputed != declared_hash:
                     report.issues.append(
                         IntegrityIssue(
                             component_ref=comp.bom_ref,
                             category="file_hash_mismatch",
-                            detail=(
-                                f"File hash mismatch for '{comp.name}': "
-                                f"declared={declared_hash}, "
-                                f"computed={recomputed}."
-                            ),
+                            detail=(f"File hash mismatch for '{comp.name}'."),
                             severity="error",
                         )
                     )
@@ -245,7 +270,9 @@ class IntegrityValidator:
                     IntegrityIssue(
                         component_ref=comp.bom_ref,
                         category="hash_error",
-                        detail=f"Could not read '{path}' to verify hash.",
-                        severity="warning",
+                        detail=f"Could not verify '{comp.name}' within the project root.",
+                        severity="error",
                     )
                 )
+                report.hashes_failed += 1
+                report.is_valid = False

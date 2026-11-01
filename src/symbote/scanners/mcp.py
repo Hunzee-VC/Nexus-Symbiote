@@ -230,6 +230,7 @@ class MCPScanner(Scanner):
                             description_text=t_desc,
                             input_schema=t_schema,
                             definition_hash=def_hash,
+                            definition_hash_version="rfc8785-jcs-v1",
                             annotations=t_annotations,
                             capabilities=CapabilityDeclaration(
                                 capabilities=caps,

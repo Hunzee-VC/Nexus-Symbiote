@@ -41,6 +41,10 @@ class TestCanonicalJsonEdgeCases:
         result = canonical_json({"emoji": "☃", "cjk": "世界"})
         assert result  # should not raise
 
+    def test_ecmascript_number_and_utf16_sort(self):
+        assert canonical_json({"v": 1e-6}) == '{"v":0.000001}'
+        assert canonical_json({"\ue000": 0, "😀": 1}) == '{"😀":1,"\ue000":0}'
+
     def test_null_value_preserved(self):
         result = canonical_json({"key": None, "other": 1})
         assert '"key":null' in result
