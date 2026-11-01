@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -16,6 +17,17 @@ from nexus_symbiote.core.models import (
     AIBOMMetadata,
     AnyComponent,
 )
+
+
+def _source_date_epoch() -> int | None:
+    """Return SOURCE_DATE_EPOCH as an integer, or None if it is unset or malformed."""
+    raw = os.environ.get("SOURCE_DATE_EPOCH", "").strip()
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
 
 
 class DependencyEdge(BaseModel):
@@ -85,11 +97,30 @@ class AIBOM(BaseModel):
         return results
 
     def finalize(self) -> None:
-        now = datetime.now(UTC)
-        self.metadata.timestamp = now
+        """Stamp the document with its timestamp, serial number, and tool version.
+
+        Values that are already set are kept, so serialising a BOM never changes it.
+        When SOURCE_DATE_EPOCH is set, the timestamp and serial number are derived from
+        it and from the content, so identical input gives identical output.
+        """
+        epoch = _source_date_epoch()
         self.metadata.tool_version = __version__
+        if self.metadata.timestamp is None:
+            self.metadata.timestamp = (
+                datetime.fromtimestamp(epoch, UTC) if epoch is not None else datetime.now(UTC)
+            )
         if self.metadata.serial_number is None:
-            self.metadata.serial_number = f"urn:uuid:{uuid.uuid4()}"
+            if epoch is not None:
+                canonical = json.dumps(
+                    self.model_dump(mode="json", exclude={"metadata"}),
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                self.metadata.serial_number = (
+                    f"urn:uuid:{uuid.uuid5(uuid.NAMESPACE_URL, canonical)}"
+                )
+            else:
+                self.metadata.serial_number = f"urn:uuid:{uuid.uuid4()}"
 
     def to_dict(self) -> dict[str, Any]:
         self.finalize()
