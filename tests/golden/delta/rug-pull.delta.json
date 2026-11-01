@@ -1,0 +1,24 @@
+{
+  "id": "delta:30271e408cd3:f5a43d6b8103",
+  "fromSnapshot": "sha256:30271e408cd3d5f036b53648c87c8872643c588fe5893f38aee9d782a22cfa2c",
+  "toSnapshot": "sha256:f5a43d6b8103f8b3d28ab2b4df67fe1f4a1c5ef82f188b45c4853a48347e1b7b",
+  "producedAt": "2026-11-01T12:00:00Z",
+  "producer": {
+    "name": "symbiote",
+    "version": "0.1.0",
+    "digest": null,
+    "collectors": []
+  },
+  "events": [
+    {
+      "type": "tool-definition-changed",
+      "subjectRef": "tool:github/get_issue",
+      "before": "sha256:abababababababababababababababababababababababababababababababab",
+      "after": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "evidence": [],
+      "assurance": "declared",
+      "severityHint": "critical",
+      "detail": "model-visible description changed (schema unchanged)"
+    }
+  ]
+}

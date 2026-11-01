@@ -4,7 +4,12 @@ import pytest
 
 sigstore = pytest.importorskip("sigstore")
 
-from symbiote.attest.sigstore_backend import IdentityConstraint, VerifyPolicySpec, build_policy, verify_bundle  # noqa: E402
+from symbiote.attest.sigstore_backend import (  # noqa: E402
+    IdentityConstraint,
+    VerifyPolicySpec,
+    build_policy,
+    verify_bundle,
+)
 from symbiote.model.enums import SignatureOutcome  # noqa: E402
 
 
