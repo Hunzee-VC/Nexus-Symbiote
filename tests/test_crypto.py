@@ -61,6 +61,36 @@ class TestVerifyFileHash:
         assert result.verified is True
 
 
+class TestSymlinkRefusal:
+    def test_symlinked_artifact_is_refused(self, tmp_path):
+        target = tmp_path / "target.bin"
+        target.write_bytes(b"data")
+        link = tmp_path / "link.bin"
+        link.symlink_to(target)
+        expected = hashlib.sha256(b"data").hexdigest()
+        result = verify_file_hash(link, f"sha256:{expected}")
+        assert result.verified is False
+        assert "symbolic link" in (result.error or "").lower()
+
+    def test_symlinked_artifact_has_no_computed_hash(self, tmp_path):
+        target = tmp_path / "target.bin"
+        target.write_bytes(b"data")
+        link = tmp_path / "link.bin"
+        link.symlink_to(target)
+        assert compute_file_hash(link) is None
+
+    def test_symlinked_bundle_is_refused(self, tmp_path):
+        artifact = tmp_path / "artifact.bin"
+        artifact.write_bytes(b"data")
+        real_bundle = tmp_path / "real.sigstore.json"
+        real_bundle.write_text("{}")
+        bundle = tmp_path / "artifact.sigstore.json"
+        bundle.symlink_to(real_bundle)
+        result = verify_sigstore_bundle(artifact, bundle, "alice", "issuer")
+        assert result.verified is False
+        assert "Cannot read verification input" in (result.error or "")
+
+
 class TestComputeFileHash:
     def test_sha256_default(self, tmp_path):
         f = tmp_path / "test.bin"

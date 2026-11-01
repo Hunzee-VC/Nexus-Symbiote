@@ -111,7 +111,8 @@ class TestA2AScanner:
     def test_scan_no_a2a(self, tmp_path):
         result = A2AScanner().scan(tmp_path)
         assert len(result.components) == 0
-        assert any("a2a" in e for e in result.surfaces_excluded)
+        assert result.surfaces_excluded == []
+        assert any(s.startswith("a2a-configuration") for s in result.surfaces_scanned)
 
     def test_malformed_agent_card(self, tmp_path):
         (tmp_path / "agent.json").write_text("{not valid json")
@@ -212,7 +213,8 @@ class TestIDEAgentScanner:
     def test_scan_no_ide_agents(self, tmp_path):
         result = IDEAgentScanner().scan(tmp_path)
         assert len(result.components) == 0
-        assert any("ide-agents" in e for e in result.surfaces_excluded)
+        assert result.surfaces_excluded == []
+        assert any(s.startswith("ide-agent-config") for s in result.surfaces_scanned)
 
     def test_multiple_ide_agents(self, tmp_path):
         (tmp_path / "CLAUDE.md").write_text("Claude prompt")

@@ -1,10 +1,15 @@
 """Security regressions for the composite action shell steps."""
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
 import yaml
+
+from nexus_symbiote.core.vocab import SCANNER_NAMES
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def action_steps() -> dict[str, dict]:
@@ -66,3 +71,25 @@ def test_validation_failure_is_not_suppressed(tmp_path: Path) -> None:
         check=False,
     )
     assert result.returncode == 7
+
+
+def test_scanner_allowlist_matches_registry() -> None:
+    run = action_steps()["Scan once and export"]["run"]
+    match = re.search(r'case "\$name" in ([a-z_|]+)\) ;;', run)
+    assert match is not None
+    assert set(match.group(1).split("|")) == set(SCANNER_NAMES)
+
+
+def test_action_inputs_exist() -> None:
+    action = yaml.safe_load((REPO_ROOT / "action.yml").read_text())
+    inputs = action["inputs"]
+    for name in ("fail-on-validation-error", "upload-artifact", "policy-file"):
+        assert name in inputs
+
+
+def test_precommit_hooks_have_no_fixed_tmp_path() -> None:
+    text = (REPO_ROOT / ".pre-commit-hooks.yaml").read_text(encoding="utf-8")
+    hooks = yaml.safe_load(text)
+    assert hooks
+    assert "/tmp/" not in text
+    assert all("entry" in hook for hook in hooks)

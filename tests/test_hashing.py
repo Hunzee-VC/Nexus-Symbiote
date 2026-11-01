@@ -144,8 +144,8 @@ class TestHashCanonical:
 
 
 class TestExtractVersionPin:
-    def test_npm_exact(self):
-        assert extract_version_pin("1.2.3") == "1.2.3"
+    def test_bare_version_is_not_a_pin(self):
+        assert extract_version_pin("1.2.3") is None
 
     def test_npm_caret_not_pinned(self):
         v = extract_version_pin("^1.2.3")
@@ -159,11 +159,13 @@ class TestExtractVersionPin:
         v = extract_version_pin("pkg@4.40.0")
         assert v == "4.40.0"
 
-    def test_colon_version(self):
-        v = extract_version_pin("image:2.5.0")
-        assert v == "2.5.0"
+    def test_at_version_with_v_prefix(self):
+        assert extract_version_pin("pkg@v1.2.3") == "1.2.3"
 
-    def test_url_with_version(self):
+    def test_colon_tag_is_not_a_pin(self):
+        assert extract_version_pin("image:2.5.0") is None
+
+    def test_scoped_package_version(self):
         v = extract_version_pin("@modelcontextprotocol/server-filesystem@1.2.3")
         assert v == "1.2.3"
 
@@ -171,7 +173,30 @@ class TestExtractVersionPin:
         v = extract_version_pin("latest")
         assert v is None
 
-    def test_prerelease(self):
-        v = extract_version_pin("1.0.0-beta.1")
-        assert v is not None
-        assert "1.0.0" in v
+    def test_at_latest_is_not_a_pin(self):
+        assert extract_version_pin("pkg@latest") is None
+
+    def test_npm_range_after_at_is_not_a_pin(self):
+        assert extract_version_pin("pkg@^1.2.3") is None
+
+    def test_prerelease_after_at(self):
+        assert extract_version_pin("pkg@1.0.0-beta.1") == "1.0.0-beta.1"
+
+    def test_pep508_exact(self):
+        assert extract_version_pin("requests==2.31.0") == "2.31.0"
+
+    def test_pep508_exact_with_extra_and_marker(self):
+        assert extract_version_pin("requests[socks]==2.31.0; python_version > '3'") == "2.31.0"
+
+    def test_pep508_range_is_not_a_pin(self):
+        assert extract_version_pin("requests>=2.31.0") is None
+
+    def test_docker_digest(self):
+        digest = "sha256:" + "a" * 64
+        assert extract_version_pin(f"registry.example/img@{digest}") == digest
+
+    def test_url_is_not_a_pin(self):
+        assert extract_version_pin("https://example.com/pkg@1.2.3") is None
+
+    def test_wildcard_is_not_a_pin(self):
+        assert extract_version_pin("*") is None

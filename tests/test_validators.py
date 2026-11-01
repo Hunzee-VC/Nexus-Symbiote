@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import pytest
+
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.enums import (
     AssuranceLevel,
+    ComponentType,
     RiskSeverity,
     SerializationSafety,
     TrustTier,
 )
+from nexus_symbiote.core.hashing import hash_tool_definition
 from nexus_symbiote.core.models import (
     CompletenessClaim,
     MCPServerComponent,
@@ -16,6 +20,11 @@ from nexus_symbiote.core.models import (
     PromptComponent,
     RiskAssessment,
     ToolComponent,
+)
+from nexus_symbiote.core.vocab import (
+    REQUIRED_SCANNERS,
+    SIGNING_NOT_FOUND,
+    normalize_signing_status,
 )
 from nexus_symbiote.diff.differ import AIBOMDiffer
 from nexus_symbiote.validators.completeness import CompletenessValidator
@@ -165,7 +174,8 @@ class TestIntegrityValidator:
     def test_tool_hash_correct(self):
         from nexus_symbiote.core.hashing import hash_tool_definition
 
-        correct_hash = hash_tool_definition("test_tool", "Does something")
+        # The integrity validator hashes the stored annotations, which default to {}.
+        correct_hash = hash_tool_definition("test_tool", "Does something", None, {})
         bom = AIBOM()
         bom.add_component(
             ToolComponent(
@@ -242,7 +252,7 @@ class TestRiskScorer:
         scorer = RiskScorer(fail_threshold=50.0)
         passed, report = scorer.passes_gate(bom)
         assert not passed
-        assert report.coverage_status == "unknown"
+        assert report.coverage_status == "partial"
 
     def test_fails_gate(self):
         bom = _risky_bom()
@@ -674,3 +684,205 @@ class TestIntegrityValidatorAdvanced:
         report = iv.validate(bom, tmp_path)
         assert not report.is_valid
         assert any(i.category == "file_hash_mismatch" for i in report.issues)
+
+
+def _complete_claim(**overrides: object) -> CompletenessClaim:
+    fields: dict[str, object] = {
+        "scope": "project",
+        "scanner_status": dict.fromkeys(REQUIRED_SCANNERS, "complete"),
+        "assurance_level": AssuranceLevel.OBSERVED,
+    }
+    fields.update(overrides)
+    return CompletenessClaim(**fields)  # type: ignore[arg-type]
+
+
+def _bom_with_claim(claim: CompletenessClaim | None) -> AIBOM:
+    bom = _full_bom()
+    bom.metadata.completeness = claim
+    return bom
+
+
+class TestCoverageGate:
+    def test_repository_without_optional_surfaces_is_complete_and_passes(self):
+        bom = _bom_with_claim(_complete_claim(surfaces_scanned=["CLAUDE.md (checked; none present)"]))
+        passed, report = RiskScorer(fail_threshold=50.0).passes_gate(bom)
+        assert report.coverage_status == "complete"
+        assert passed
+
+    def test_dropped_file_records_failure_and_fails_gate(self):
+        claim = _complete_claim(scan_failures=["mcp: could not read .mcp.json"])
+        passed, report = RiskScorer(fail_threshold=50.0).passes_gate(_bom_with_claim(claim))
+        assert report.coverage_status == "failed"
+        assert not passed
+
+    def test_excluded_path_makes_coverage_partial(self):
+        claim = _complete_claim(surfaces_excluded=["models (excluded by policy)"])
+        passed, report = RiskScorer(fail_threshold=50.0).passes_gate(_bom_with_claim(claim))
+        assert report.coverage_status == "partial"
+        assert not passed
+
+    @pytest.mark.parametrize(
+        "claim",
+        [
+            None,
+            _complete_claim(scanner_status={}),
+            _complete_claim(scanner_status={**dict.fromkeys(REQUIRED_SCANNERS, "complete"), "mcp": "failed"}),
+        ],
+        ids=["unknown", "partial", "failed"],
+    )
+    def test_gate_requires_complete_coverage(self, claim):
+        passed, report = RiskScorer(fail_threshold=50.0).passes_gate(_bom_with_claim(claim))
+        assert report.coverage_status != "complete"
+        assert not passed
+
+    def test_complete_low_score_passes(self):
+        bom = _bom_with_claim(_complete_claim())
+        bom.add_component(
+            ToolComponent(
+                bom_ref="tool:low",
+                name="low_tool",
+                risks=[
+                    RiskAssessment(
+                        severity=RiskSeverity.LOW,
+                        category="minor",
+                        detail="Minor issue.",
+                    )
+                ],
+            )
+        )
+        passed, report = RiskScorer(fail_threshold=50.0).passes_gate(bom)
+        assert passed
+        assert report.overall_score == 1.0
+
+    def test_critical_finding_fails_even_when_category_is_ignored(self):
+        bom = _bom_with_claim(_complete_claim())
+        bom.add_component(
+            ModelComponent(
+                bom_ref="model:pkl",
+                name="model.pkl",
+                risks=[
+                    RiskAssessment(
+                        severity=RiskSeverity.CRITICAL,
+                        category="serialization_format",
+                        detail="Pickle allows arbitrary code execution.",
+                    )
+                ],
+            )
+        )
+        scorer = RiskScorer(fail_threshold=50.0, ignore_categories=["serialization_format"])
+        passed, report = scorer.passes_gate(bom)
+        assert not passed
+        assert report.suppressed == 0
+        assert report.severity_counts.get("critical") == 1
+
+    def test_threshold_outside_range_is_rejected(self):
+        with pytest.raises(ValueError):
+            RiskScorer(fail_threshold=150.0)
+
+
+class TestIntegrityRemediation:
+    def test_empty_annotations_hash_validates(self):
+        digest = hash_tool_definition("quiet_tool", "Quiet.", None, {})
+        bom = AIBOM()
+        bom.add_component(
+            ToolComponent(
+                bom_ref="tool:quiet",
+                name="quiet_tool",
+                description_text="Quiet.",
+                definition_hash=digest,
+                definition_hash_version="rfc8785-jcs-v1",
+                annotations={},
+            )
+        )
+        report = IntegrityValidator().validate(bom)
+        assert report.hashes_verified == 1
+        assert report.hashes_failed == 0
+        assert report.is_valid
+
+    def test_hash_without_description_is_unverifiable(self):
+        bom = AIBOM()
+        bom.add_component(
+            ToolComponent(
+                bom_ref="tool:opaque",
+                name="opaque_tool",
+                description_text=None,
+                definition_hash="sha256:" + "0" * 64,
+                definition_hash_version="rfc8785-jcs-v1",
+            )
+        )
+        report = IntegrityValidator().validate(bom)
+        assert not report.is_valid
+        assert any(i.category == "unverifiable_definition" for i in report.issues)
+
+    def test_relabelled_component_still_runs_its_checks(self):
+        tool = ToolComponent(
+            bom_ref="tool:relabelled",
+            name="relabelled_tool",
+            description_text="Does something",
+            definition_hash="sha256:" + "1" * 64,
+            definition_hash_version="rfc8785-jcs-v1",
+        )
+        tool.component_type = ComponentType.PROMPT_TEMPLATE
+        bom = AIBOM()
+        bom.add_component(tool)
+        report = IntegrityValidator().validate(bom)
+        assert any(i.category == "hash_mismatch" for i in report.issues)
+        assert not report.is_valid
+
+
+class TestDiffRemediation:
+    def test_removed_file_hash_is_high(self):
+        old = AIBOM()
+        old.add_component(
+            ModelComponent(bom_ref="model:m", name="m", hashes={"sha256": "sha256:aaa"})
+        )
+        new = AIBOM()
+        new.add_component(ModelComponent(bom_ref="model:m", name="m"))
+        result = AIBOMDiffer().diff(old, new)
+        assert len(result.components_modified) == 1
+        assert result.components_modified[0].severity == "high"
+        assert any(
+            "evidence removed: hashes.sha256" in d for d in result.components_modified[0].details
+        )
+
+    def test_highest_severity_is_none_without_changes(self):
+        assert AIBOMDiffer().diff(_full_bom(), _full_bom()).highest_severity() is None
+
+    def test_highest_severity_reports_critical(self):
+        old = _full_bom()
+        new = _full_bom()
+        new.replace_component(
+            ToolComponent(
+                bom_ref="tool:read",
+                name="read_file",
+                mcp_server_ref="mcp:fs",
+                definition_hash="sha256:changed_hash",
+                definition_hash_version="rfc8785-jcs-v1",
+                description_text="Read a file (modified)",
+            )
+        )
+        result = AIBOMDiffer().diff(old, new)
+        assert result.highest_severity() == "critical"
+
+    def test_removed_signing_evidence_is_high(self):
+        old = AIBOM()
+        old.add_component(
+            ModelComponent(bom_ref="model:s", name="s", signing_status="sigstore-signed")
+        )
+        new = AIBOM()
+        new.add_component(ModelComponent(bom_ref="model:s", name="s"))
+        result = AIBOMDiffer().diff(old, new)
+        assert len(result.components_modified) == 1
+        assert result.components_modified[0].severity == "high"
+        assert any(
+            "signing evidence removed" in d for d in result.components_modified[0].details
+        )
+
+
+class TestSigningVocabulary:
+    def test_legacy_unsigned_normalizes_to_not_found(self):
+        assert normalize_signing_status("unsigned") == "signature-not-found"
+        assert normalize_signing_status("unsigned") == SIGNING_NOT_FOUND
+
+    def test_none_stays_none(self):
+        assert normalize_signing_status(None) is None

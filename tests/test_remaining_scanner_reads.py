@@ -18,7 +18,8 @@ def test_model_symlink_is_not_hashed_and_failure_is_reported(tmp_path: Path) -> 
     (project / "model.safetensors").symlink_to(external)
     result = ModelScanner().scan(project)
     assert result.scan_failures
-    assert result.components and not result.components[0].hashes
+    # A symlinked weight is not followed, so it never becomes a component.
+    assert not result.components
     assert hashlib.sha256(b"external-canary").hexdigest() not in repr(result)
 
 

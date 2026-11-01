@@ -9,6 +9,7 @@ from click.testing import CliRunner
 
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote.core.vocab import SCANNER_NAMES
 
 
 def _create_full_project(root: Path) -> Path:
@@ -97,7 +98,10 @@ class TestFullPipeline:
         scan2 = runner.invoke(main, ["scan", str(project), "-o", str(bom_v2)])
         assert scan2.exit_code == 0
 
-        diff = runner.invoke(main, ["diff", str(bom_v1), str(bom_v2), "--json-output"])
+        # diff now fails on high-severity changes by default; this test checks output, not the gate.
+        diff = runner.invoke(
+            main, ["diff", str(bom_v1), str(bom_v2), "--json-output", "--fail-on", "none"]
+        )
         assert diff.exit_code == 0
         diff_data = json.loads(diff.output)
         assert "has_changes" in diff_data
@@ -128,7 +132,7 @@ class TestFullPipeline:
         bom = AIBOM.load(bom_path)
         assert len(bom.components) >= 3
         assert bom.metadata.completeness is not None
-        assert bom.metadata.completeness.scope == "local-static-project+shadowscan"
+        assert bom.metadata.completeness.scope == "project:" + ",".join(sorted(SCANNER_NAMES))
 
     def test_validate_against_project(self, tmp_path: Path) -> None:
         """Cross-validate a BOM against the project that produced it."""

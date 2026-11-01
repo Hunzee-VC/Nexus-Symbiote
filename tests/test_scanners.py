@@ -49,7 +49,9 @@ class TestMCPScanner:
         scanner = MCPScanner()
         result = scanner.scan(tmp_path)
         assert len(result.components) == 0
-        assert len(result.surfaces_excluded) > 0
+        # Absence is a checked, empty surface, not an exclusion.
+        assert result.surfaces_excluded == []
+        assert any(s.startswith("mcp-config") for s in result.surfaces_scanned)
 
 
 class TestModelScanner:

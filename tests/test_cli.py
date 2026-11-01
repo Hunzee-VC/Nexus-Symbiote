@@ -14,6 +14,7 @@ from nexus_symbiote.core.enums import (
     RiskSeverity,
     SerializationSafety,
 )
+from nexus_symbiote.core.vocab import SCANNER_NAMES
 from nexus_symbiote.core.models import (
     AIBOMMetadata,
     CompletenessClaim,
@@ -176,16 +177,15 @@ class TestScanCommand:
         data = json.loads(out.read_text())
         assert len(data["components"]) >= 1
 
-    def test_scan_unknown_scanner_warns(self, tmp_path):
+    def test_scan_unknown_scanner_is_usage_error(self, tmp_path):
         project = _create_test_project(tmp_path)
         out = tmp_path / "unknown.json"
         runner = CliRunner()
         result = runner.invoke(
             main, ["scan", str(project), "--scanner", "nonexistent", "-o", str(out)]
         )
-        assert result.exit_code != 0
-        data = json.loads(out.read_text())
-        assert data["metadata"]["completeness"]["scanner_status"]["nonexistent"] == "failed"
+        assert result.exit_code == 2
+        assert not out.exists()
 
     def test_scan_empty_project(self, tmp_path):
         out = tmp_path / "empty.json"
@@ -235,9 +235,15 @@ class TestRiskCommand:
 
     def test_risk_custom_threshold_does_not_override_partial_coverage(self, tmp_path):
         project = _create_test_project(tmp_path)
+        policy = tmp_path / "exclude.yaml"
+        policy.write_text(
+            'scan:\n  exclude_paths: ["models", "node_modules", ".git", "__pycache__", ".venv"]\n'
+        )
         runner = CliRunner()
         bom_path = tmp_path / "test.json"
-        runner.invoke(main, ["scan", str(project), "-o", str(bom_path)])
+        runner.invoke(
+            main, ["scan", str(project), "--policy", str(policy), "-o", str(bom_path)]
+        )
         result = runner.invoke(main, ["risk", str(bom_path), "--threshold", "100", "--json-output"])
         assert result.exit_code == 1
         assert json.loads(result.output)["coverage_status"] == "partial"
@@ -262,7 +268,7 @@ class TestDiffCommand:
         bom_b = tmp_path / "b.json"
         runner.invoke(main, ["scan", str(project), "-o", str(bom_b)])
 
-        result = runner.invoke(main, ["diff", str(bom_a), str(bom_b)])
+        result = runner.invoke(main, ["diff", str(bom_a), str(bom_b), "--fail-on", "none"])
         assert result.exit_code == 0
 
     def test_diff_json_output(self, tmp_path):
@@ -306,13 +312,14 @@ class TestVersionAndHelp:
 class TestRiskFixture:
     """Risk command tests against pre-built fixture BOMs for deterministic coverage."""
 
-    def test_risk_legacy_coverage_is_unknown(self, tmp_path):
+    def test_risk_unrecorded_scanners_are_partial(self, tmp_path):
         bom_path = _make_fixture_bom(tmp_path, with_risks=False)
         runner = CliRunner()
-        result = runner.invoke(main, ["risk", str(bom_path)])
+        result = runner.invoke(main, ["risk", str(bom_path), "--json-output"])
         assert result.exit_code == 1
-        assert "unknown" in result.output.lower()
-        assert "FAILED" in result.output
+        data = json.loads(result.output)
+        assert data["coverage_status"] == "partial"
+        assert any("scanner not recorded" in reason for reason in data["coverage_reasons"])
 
     def test_risk_risky_bom_fails_gate(self, tmp_path):
         bom_path = _make_fixture_bom(tmp_path, with_risks=True)
@@ -344,9 +351,13 @@ class TestRiskFixture:
 
     def test_critical_risk_vetoes_high_threshold(self, tmp_path):
         bom_path = _make_fixture_bom(tmp_path, with_risks=True)
+        bom = AIBOM.load(bom_path)
+        bom.metadata.completeness.scanner_status = dict.fromkeys(SCANNER_NAMES, "complete")
+        bom.save(bom_path)
         runner = CliRunner()
-        result = runner.invoke(main, ["risk", str(bom_path), "--threshold", "200"])
-        assert result.exit_code != 0
+        result = runner.invoke(main, ["risk", str(bom_path), "--threshold", "100"])
+        assert result.exit_code == 1
+        assert "FAILED" in result.output
 
 
 class TestValidateFixture:
@@ -417,7 +428,8 @@ class TestDiffFixture:
 
         runner = CliRunner()
         result = runner.invoke(main, ["diff", str(old_path), str(new_path)])
-        assert result.exit_code == 0
+        # Removing a tool is a high-severity change, which fails the default --fail-on high.
+        assert result.exit_code == 1
         assert "removed" in result.output.lower()
 
     def test_diff_component_modified(self, tmp_path):
@@ -431,7 +443,8 @@ class TestDiffFixture:
 
         runner = CliRunner()
         result = runner.invoke(main, ["diff", str(old_path), str(new_path)])
-        assert result.exit_code == 0
+        # A changed tool definition hash is critical, which fails the default --fail-on high.
+        assert result.exit_code == 1
         assert "modified" in result.output.lower() or "Security Alerts" in result.output
 
     def test_diff_json_with_security_alert(self, tmp_path):
@@ -528,7 +541,8 @@ class TestInitCommand:
         (tmp_path / ".nexus-symbiote.yaml").write_text("existing")
         runner = CliRunner()
         result = runner.invoke(main, ["init", "--path", str(tmp_path)])
-        assert result.exit_code != 0
+        assert result.exit_code == 2
+        assert (tmp_path / ".nexus-symbiote.yaml").read_text() == "existing"
 
     def test_init_force_overwrites(self, tmp_path):
         (tmp_path / ".nexus-symbiote.yaml").write_text("existing")
@@ -541,10 +555,9 @@ class TestInitCommand:
     def test_init_content_is_parseable(self, tmp_path):
         runner = CliRunner()
         runner.invoke(main, ["init", "--path", str(tmp_path)])
-        from nexus_symbiote.policy import load_policy
+        from nexus_symbiote.policy import load_policy_file
 
-        policy = load_policy(tmp_path)
-        assert policy is not None
+        policy = load_policy_file(tmp_path / ".nexus-symbiote.yaml")
         assert policy.version == "1.0"
         assert "mcp" in policy.scan.scanners
 

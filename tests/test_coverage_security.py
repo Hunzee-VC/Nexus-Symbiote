@@ -8,19 +8,20 @@ from nexus_symbiote.validators.completeness import CompletenessValidator
 
 
 def test_failed_collector_produces_partial_output_and_nonzero(tmp_path, monkeypatch):
+    # --scanner only accepts registered names, so a real name is replaced by a failing one.
     class Broken:
         def scan(self, root):
             raise RuntimeError("unavailable")
 
-    monkeypatch.setitem(SCANNER_REGISTRY, "broken", Broken)
+    monkeypatch.setitem(SCANNER_REGISTRY, "model", Broken)
     output = tmp_path / "bom.json"
     result = CliRunner().invoke(
-        main, ["scan", str(tmp_path), "--scanner", "broken", "-o", str(output)]
+        main, ["scan", str(tmp_path), "--scanner", "model", "--policy", "none", "-o", str(output)]
     )
     assert result.exit_code != 0
     bom = AIBOM.load(output)
-    assert bom.metadata.completeness.scope == "local-static-project+shadowscan"
-    assert bom.metadata.completeness.scanner_status["broken"] == "failed"
+    assert bom.metadata.completeness.scope == "project:model"
+    assert bom.metadata.completeness.scanner_status["model"] == "failed"
     assert bom.metadata.completeness.scan_failures
     assert not CompletenessValidator().validate(bom).is_complete
 
@@ -28,12 +29,14 @@ def test_failed_collector_produces_partial_output_and_nonzero(tmp_path, monkeypa
 def test_unselected_scanners_remain_unknown(tmp_path):
     output = tmp_path / "bom.json"
     result = CliRunner().invoke(
-        main, ["scan", str(tmp_path), "--scanner", "model", "-o", str(output)]
+        main, ["scan", str(tmp_path), "--scanner", "model", "--policy", "none", "-o", str(output)]
     )
     assert result.exit_code == 0
     bom = AIBOM.load(output)
-    assert bom.metadata.completeness.scanner_status["model"] == "partial"
-    assert bom.metadata.completeness.surfaces_excluded
+    # An empty model surface is checked and absent, so the scanner is complete.
+    assert bom.metadata.completeness.scanner_status["model"] == "complete"
+    assert bom.metadata.completeness.surfaces_excluded == []
+    assert any(s.startswith("model-weights") for s in bom.metadata.completeness.surfaces_scanned)
     assert bom.metadata.completeness.scanner_status["mcp"] == "unknown"
     assert not CompletenessValidator().validate(bom).is_complete
 

@@ -299,3 +299,45 @@ class TestAIBOM:
         assert s["total_components"] == 1
         assert s["total_risks"] == 1
         assert "high" in s["risk_breakdown"]
+
+
+class TestFinalizeReproducibility:
+    def test_source_date_epoch_gives_equal_serial_and_timestamp(self, monkeypatch):
+        monkeypatch.setenv("SOURCE_DATE_EPOCH", "1700000000")
+
+        def build() -> AIBOM:
+            bom = AIBOM()
+            bom.add_component(ToolComponent(bom_ref="tool:x", name="x"))
+            return bom
+
+        first, second = build(), build()
+        first.finalize()
+        second.finalize()
+        assert first.metadata.serial_number == second.metadata.serial_number
+        assert first.metadata.timestamp == second.metadata.timestamp
+
+    def test_finalize_keeps_existing_timestamp_without_epoch(self, monkeypatch):
+        from datetime import UTC, datetime
+
+        monkeypatch.delenv("SOURCE_DATE_EPOCH", raising=False)
+        fixed = datetime(2024, 1, 2, 3, 4, 5, tzinfo=UTC)
+        bom = AIBOM()
+        bom.metadata.timestamp = fixed
+        bom.finalize()
+        assert bom.metadata.timestamp == fixed
+
+    def test_finalize_is_idempotent_for_serial_number(self, monkeypatch):
+        monkeypatch.setenv("SOURCE_DATE_EPOCH", "1700000000")
+        bom = AIBOM()
+        bom.finalize()
+        serial = bom.metadata.serial_number
+        timestamp = bom.metadata.timestamp
+        bom.finalize()
+        assert bom.metadata.serial_number == serial
+        assert bom.metadata.timestamp == timestamp
+
+    def test_conflicting_duplicate_bom_ref_is_rejected(self):
+        bom = AIBOM()
+        bom.add_component(ToolComponent(bom_ref="tool:dup", name="one"))
+        with pytest.raises(ValueError):
+            bom.add_component(ToolComponent(bom_ref="tool:dup", name="two"))

@@ -4,8 +4,18 @@ import json
 
 import pytest
 
+from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote.core.enums import RiskSeverity
 from nexus_symbiote.core.hashing import canonical_json
+from nexus_symbiote.core.models import (
+    AIBOMMetadata,
+    CompletenessClaim,
+    ModelComponent,
+    RiskAssessment,
+)
+from nexus_symbiote.core.vocab import REQUIRED_SCANNERS
 from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
+from nexus_symbiote.generators.sarif import SARIFGenerator
 from tests.test_generators import _sample_aibom
 
 
@@ -46,7 +56,12 @@ def test_legacy_tool_fingerprint_requires_migration():
 
     bom = AIBOM()
     bom.add_component(
-        ToolComponent(bom_ref="tool:legacy", name="legacy", definition_hash="sha256:old")
+        ToolComponent(
+            bom_ref="tool:legacy",
+            name="legacy",
+            description_text="legacy tool",
+            definition_hash="sha256:old",
+        )
     )
     report = IntegrityValidator().validate(bom)
     assert not report.is_valid
@@ -75,3 +90,49 @@ def test_diff_does_not_compare_legacy_and_new_fingerprints():
     assert any(
         "unknown or incompatible" in item for c in result.components_modified for item in c.details
     )
+
+
+def _sarif_bom(scan_failures: list[str], scanner_status: dict[str, str]) -> AIBOM:
+    bom = AIBOM(
+        metadata=AIBOMMetadata(
+            completeness=CompletenessClaim(
+                scope="test",
+                scan_failures=scan_failures,
+                scanner_status=scanner_status,
+            )
+        )
+    )
+    bom.add_component(
+        ModelComponent(
+            bom_ref="model:m",
+            name="m",
+            risks=[
+                RiskAssessment(
+                    severity=RiskSeverity.HIGH,
+                    category="signing_status",
+                    detail="Model is unsigned.",
+                )
+            ],
+        )
+    )
+    return bom
+
+
+def test_sarif_execution_successful_when_no_failures():
+    bom = _sarif_bom([], dict.fromkeys(REQUIRED_SCANNERS, "complete"))
+    run = SARIFGenerator().generate(bom)["runs"][0]
+    assert run["invocations"][0]["executionSuccessful"] is True
+
+
+def test_sarif_execution_unsuccessful_when_scan_failure_recorded():
+    bom = _sarif_bom(["mcp: could not read .mcp.json"], dict.fromkeys(REQUIRED_SCANNERS, "complete"))
+    run = SARIFGenerator().generate(bom)["runs"][0]
+    assert run["invocations"][0]["executionSuccessful"] is False
+
+
+def test_sarif_execution_unsuccessful_when_scanner_failed():
+    status = dict.fromkeys(REQUIRED_SCANNERS, "complete")
+    status["rag"] = "failed"
+    bom = _sarif_bom([], status)
+    run = SARIFGenerator().generate(bom)["runs"][0]
+    assert run["invocations"][0]["executionSuccessful"] is False

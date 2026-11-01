@@ -77,14 +77,15 @@ class TestCycloneDXGenerator:
         assert result["specVersion"] == "1.7"
         assert "serialNumber" in result
         assert len(result["components"]) == 4
-        assert len(result["dependencies"]) == 1
+        # One entry per component, so every component appears even with no outgoing edges.
+        assert len(result["dependencies"]) == 4
 
     def test_component_types_mapped(self):
         gen = CycloneDXGenerator()
         result = gen.generate(_sample_aibom())
         types = {c["name"]: c["type"] for c in result["components"]}
         assert types["gpt-4o"] == "machine-learning-model"
-        assert types["read_file"] == "library"
+        assert types["read_file"] == "application"
         assert types["@modelcontextprotocol/server-filesystem"] == "application"
 
     def test_extension_properties(self):
@@ -146,6 +147,7 @@ class TestSPDXGenerator:
         result = gen.generate(_sample_aibom())
         ids = [e["spdxId"] for e in result["@graph"]]
         assert len(ids) == len(set(ids))
+        assert "urn:spdx:agent%3Amain" in ids
 
     def test_extensions_present(self):
         gen = SPDXGenerator()
@@ -162,7 +164,7 @@ class TestSPDXGenerator:
         result = gen.generate(_sample_aibom())
         rels = [e for e in result["@graph"] if e.get("type") == "Relationship"]
         assert len(rels) == 1
-        assert rels[0]["relationshipType"] == "DEPENDS_ON"
+        assert rels[0]["relationshipType"] == "dependsOn"
 
     def test_generate_json_valid(self):
         gen = SPDXGenerator()
@@ -296,7 +298,7 @@ class TestCycloneDXGeneratorFull:
         assert props["nexus-symbiote:serializationFormat"] == "safetensors"
         assert props["nexus-symbiote:serializationSafety"] == "safe"
         assert props["nexus-symbiote:signingStatus"] == "sigstore-signed"
-        assert props["nexus-symbiote:trustRemoteCode"] == "True"
+        assert props["nexus-symbiote:trustRemoteCode"] == "true"
 
     def test_model_version_and_supplier(self):
         gen = CycloneDXGenerator()
@@ -357,8 +359,8 @@ class TestCycloneDXGeneratorFull:
         m = next(c for c in result["components"] if c["name"] == "conversation-store")
         props = {p["name"]: p["value"] for p in m.get("properties", [])}
         assert props["nexus-symbiote:storeType"] == "conversation"
-        assert props["nexus-symbiote:tenantIsolated"] == "True"
-        assert props["nexus-symbiote:encryptionAtRest"] == "True"
+        assert props["nexus-symbiote:tenantIsolated"] == "true"
+        assert props["nexus-symbiote:encryptionAtRest"] == "true"
 
     def test_rag_properties(self):
         gen = CycloneDXGenerator()
@@ -374,7 +376,7 @@ class TestCycloneDXGeneratorFull:
         r = next(c for c in result["components"] if c["name"] == "npm-registry")
         props = {p["name"]: p["value"] for p in r.get("properties", [])}
         assert props["nexus-symbiote:registryType"] == "npm"
-        assert props["nexus-symbiote:publisherVerified"] == "True"
+        assert props["nexus-symbiote:publisherVerified"] == "true"
 
     def test_skill_properties(self):
         gen = CycloneDXGenerator()
@@ -409,8 +411,8 @@ class TestSPDXGeneratorFull:
         graph = result["@graph"]
         types = {e.get("name"): e["type"] for e in graph if "name" in e}
         assert types["my-agent"] == "ai_AIPackage"
-        assert types["conversation-store"] == "dataset_Dataset"
-        assert types["docs-index"] == "dataset_Dataset"
+        assert types["conversation-store"] == "dataset_DatasetPackage"
+        assert types["docs-index"] == "dataset_DatasetPackage"
         assert types["content-filter"] == "software_Package"
 
     def test_trained_on_relationship(self):
@@ -418,8 +420,8 @@ class TestSPDXGeneratorFull:
         result = gen.generate(_full_component_aibom())
         rels = [e for e in result["@graph"] if e.get("type") == "Relationship"]
         rel_types = {r["relationshipType"] for r in rels}
-        assert "TRAINED_ON" in rel_types
-        assert "DEPENDS_ON" in rel_types
+        assert "trainedOn" in rel_types
+        assert "dependsOn" in rel_types
 
     def test_model_extensions(self):
         gen = SPDXGenerator()
@@ -442,3 +444,57 @@ class TestSPDXGeneratorFull:
         model = next(e for e in result["@graph"] if e.get("name") == "gpt-4o")
         assert "verifiedUsing" in model
         assert model["verifiedUsing"][0]["type"] == "Hash"
+
+
+def _all_cyclonedx_property_values(doc: dict) -> list[object]:
+    values: list[object] = []
+    for holder in [doc["metadata"], *doc["components"]]:
+        values.extend(p["value"] for p in holder.get("properties", []))
+    return values
+
+
+class TestGeneratorRemediation:
+    def test_cyclonedx_dependencies_present_when_edges_exist(self):
+        result = CycloneDXGenerator().generate(_sample_aibom())
+        deps = {d["ref"]: d["dependsOn"] for d in result["dependencies"]}
+        assert deps["agent:main"] == ["tool:read_file"]
+        assert deps["tool:read_file"] == []
+
+    def test_cyclonedx_property_values_are_strings(self):
+        result = CycloneDXGenerator().generate(_full_component_aibom())
+        values = _all_cyclonedx_property_values(result)
+        assert values
+        assert all(isinstance(value, str) for value in values)
+
+    def test_spdx_relationship_types_are_camel_case(self):
+        result = SPDXGenerator().generate(_full_component_aibom())
+        rel_types = {
+            e["relationshipType"] for e in result["@graph"] if e.get("type") == "Relationship"
+        }
+        assert rel_types <= {"dependsOn", "trainedOn", "derivedFrom", "other"}
+        assert all(t[0].islower() and "_" not in t for t in rel_types)
+
+    def test_spdx_ids_are_deterministic_with_source_date_epoch(self, monkeypatch):
+        monkeypatch.setenv("SOURCE_DATE_EPOCH", "1700000000")
+        first = SPDXGenerator().generate(_full_component_aibom())
+        second = SPDXGenerator().generate(_full_component_aibom())
+        assert json.dumps(first, sort_keys=True) == json.dumps(second, sort_keys=True)
+
+    def test_spdx_document_id_is_not_random(self, monkeypatch):
+        monkeypatch.setenv("SOURCE_DATE_EPOCH", "1700000000")
+        doc_a = SPDXGenerator().generate(_sample_aibom())["@graph"][0]
+        doc_b = SPDXGenerator().generate(_sample_aibom())["@graph"][0]
+        assert doc_a["spdxId"] == doc_b["spdxId"]
+        assert doc_a["name"] == doc_b["name"]
+
+    def test_cyclonedx_is_deterministic_with_source_date_epoch(self, monkeypatch):
+        monkeypatch.setenv("SOURCE_DATE_EPOCH", "1700000000")
+        first = CycloneDXGenerator().generate(_sample_aibom())
+        second = CycloneDXGenerator().generate(_sample_aibom())
+        assert first["serialNumber"] == second["serialNumber"]
+        assert first["metadata"]["timestamp"] == second["metadata"]["timestamp"]
+
+    def test_epoch_not_set_is_not_forced(self, monkeypatch):
+        monkeypatch.delenv("SOURCE_DATE_EPOCH", raising=False)
+        result = CycloneDXGenerator().generate(_sample_aibom())
+        assert result["serialNumber"].startswith("urn:uuid:")

@@ -1,10 +1,19 @@
 """Regression tests for evidence and policy assurance boundaries."""
 
+import stat
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pytest
+
+from nexus_symbiote.core.redact import REDACTED, redact_aibom, redact_string, redact_url
+from nexus_symbiote.core.textsafety import find_hidden_characters
+from nexus_symbiote.scanners.base import hash_regular_file
+from nexus_symbiote.scanners.prompt import PromptScanner
+from nexus_symbiote.scanners.rag import RAGScanner
+from nexus_symbiote.scanners.shadowscan import ShadowScanImporter
+from nexus_symbiote.utils.fsio import MAX_MODEL_BYTES, write_text_safely
 
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import RiskSeverity, SerializationSafety, TrustTier
@@ -15,6 +24,7 @@ from nexus_symbiote.core.models import (
     RiskAssessment,
     ToolComponent,
 )
+from nexus_symbiote.core.vocab import SCANNER_NAMES
 from nexus_symbiote.diff.differ import AIBOMDiffer
 from nexus_symbiote.scanners.model import ModelScanner
 from nexus_symbiote.utils.crypto import verify_sigstore_bundle
@@ -149,7 +159,7 @@ def test_missing_or_failed_coverage_is_not_clean_or_passing() -> None:
     bom.add_component(ModelComponent(bom_ref="model:p", name="p"))
     passed, report = RiskScorer().passes_gate(bom)
     assert not passed
-    assert report.coverage_status == "partial"
+    assert report.coverage_status == "failed"
     assert report.risk_level == "unknown"
     bom.metadata.completeness.scan_failures = []
     bom.metadata.completeness.surfaces_excluded = ["runtime: not assessed"]
@@ -177,11 +187,11 @@ def test_per_scanner_coverage_requires_every_state_to_be_complete() -> None:
     object.__setattr__(
         bom.metadata.completeness,
         "scanner_status",
-        dict.fromkeys(("mcp", "model", "prompt", "rag", "registry"), "complete"),
+        dict.fromkeys(SCANNER_NAMES, "complete"),
     )
     passed, report = RiskScorer().passes_gate(bom)
     assert passed
-    assert report.coverage_status == "reported"
+    assert report.coverage_status == "complete"
 
 
 def test_removing_tool_hash_is_assurance_regression() -> None:
@@ -197,3 +207,148 @@ def test_removing_tool_hash_is_assurance_regression() -> None:
 def test_installed_sigstore_exposes_supported_api() -> None:
     verify = pytest.importorskip("sigstore.verify")
     assert callable(verify.Verifier.verify_artifact)
+
+
+def test_bidi_and_tag_characters_are_flagged() -> None:
+    kinds = {(h.codepoint, h.kind) for h in find_hidden_characters("a\u202eb\U000e0041")}
+    assert kinds == {("U+202E", "bidi-control"), ("U+E0041", "tag-character")}
+
+
+def test_joiner_and_variation_selector_are_not_flagged() -> None:
+    assert find_hidden_characters("a\u200db\ufe0f") == []
+
+
+def test_prompt_with_bidi_control_is_high_risk(tmp_path: Path) -> None:
+    (tmp_path / "CLAUDE.md").write_text("Allow only \u202eread\u202c operations.", encoding="utf-8")
+    components = PromptScanner().scan(tmp_path).components
+    assert components
+    risks = [r for c in components for r in c.risks if r.category == "hidden-characters"]
+    assert risks
+    assert all(r.severity == RiskSeverity.HIGH for r in risks)
+
+
+def test_redact_string_removes_credential_shapes() -> None:
+    text = (
+        "AKIAIOSFODNN7EXAMPLE ghp_" + "a" * 36 + " password=hunter2 "
+        "https://user:pw@example.com/mcp?token=abc"
+    )
+    redacted = redact_string(text)
+    for secret in ("AKIAIOSFODNN7EXAMPLE", "ghp_" + "a" * 36, "hunter2", "user:pw", "token=abc"):
+        assert secret not in redacted
+    assert redact_url("https://user:pw@example.com:8443/mcp?token=abc#frag") == (
+        "https://example.com:8443/mcp"
+    )
+    assert REDACTED in redacted
+
+
+def test_redact_aibom_leaves_fingerprinted_fields_unchanged() -> None:
+    digest = "sha256:" + "b" * 64
+    bom = AIBOM()
+    bom.add_component(
+        ToolComponent(
+            bom_ref="tool:t",
+            name="t",
+            description_text="reads files, password=hunter2",
+            definition_hash=digest,
+            definition_hash_version="rfc8785-jcs-v1",
+            description="token=abcdef123456",
+        )
+    )
+    redact_aibom(bom)
+    tool = bom.components[0]
+    assert tool.description_text == "reads files, password=hunter2"
+    assert tool.definition_hash == digest
+    assert tool.description == f"token={REDACTED}"
+
+
+def test_write_text_safely_refuses_symlink_destination(tmp_path: Path) -> None:
+    target = tmp_path / "target.json"
+    target.write_text("original", encoding="utf-8")
+    link = tmp_path / "out.json"
+    link.symlink_to(target)
+    with pytest.raises(OSError):
+        write_text_safely(link, "replacement")
+    assert target.read_text(encoding="utf-8") == "original"
+
+
+def test_write_text_safely_replaces_atomically(tmp_path: Path) -> None:
+    out = tmp_path / "out.json"
+    out.write_text("old", encoding="utf-8")
+    write_text_safely(out, "new")
+    assert out.read_text(encoding="utf-8") == "new"
+    assert not list(tmp_path.glob(".out.json.*.tmp"))
+
+
+def test_write_text_safely_creates_owner_only_file(tmp_path: Path) -> None:
+    out = tmp_path / "fresh.json"
+    write_text_safely(out, "{}")
+    assert stat.S_IMODE(out.stat().st_mode) == 0o600
+
+
+def test_write_text_safely_respects_overwrite_false(tmp_path: Path) -> None:
+    out = tmp_path / "keep.json"
+    out.write_text("keep", encoding="utf-8")
+    with pytest.raises(FileExistsError):
+        write_text_safely(out, "new", overwrite=False)
+    assert out.read_text(encoding="utf-8") == "keep"
+
+
+def test_model_size_bound_is_at_least_256_gib() -> None:
+    assert MAX_MODEL_BYTES >= 256 * 1024**3
+
+
+def test_model_file_above_one_gib_is_hashed(tmp_path: Path) -> None:
+    weights = tmp_path / "big.safetensors"
+    with weights.open("wb") as handle:
+        handle.truncate(1024**3 + 1)
+    digest = hash_regular_file(weights)
+    assert digest.startswith("sha256:")
+
+
+def test_model_directories_with_same_name_get_distinct_refs(tmp_path: Path) -> None:
+    for parent in ("a", "b"):
+        model_dir = tmp_path / parent / "model"
+        model_dir.mkdir(parents=True)
+        (model_dir / "model.safetensors").write_bytes(b"weights")
+    refs = [c.bom_ref for c in ModelScanner().scan(tmp_path).components]
+    assert len(refs) == 2
+    assert len(set(refs)) == 2
+
+
+def test_env_and_example_naming_same_store_get_distinct_refs(tmp_path: Path) -> None:
+    line = "PINECONE_URL=https://example.com\n"
+    (tmp_path / ".env").write_text(line, encoding="utf-8")
+    (tmp_path / ".env.example").write_text(line, encoding="utf-8")
+    refs = [c.bom_ref for c in RAGScanner().scan(tmp_path).components]
+    assert len(refs) == len(set(refs)) == 2
+
+
+def test_symlinked_shadowscan_report_is_refused(tmp_path: Path) -> None:
+    real = tmp_path / "real.json"
+    real.write_text('{"findings": []}', encoding="utf-8")
+    link = tmp_path / "report.json"
+    link.symlink_to(real)
+    with pytest.raises(OSError):
+        ShadowScanImporter().import_report(link)
+
+
+def test_shadowscan_raw_fields_are_not_copied(tmp_path: Path) -> None:
+    report = tmp_path / "report.json"
+    report.write_text(
+        '{"findings": [{"id": "f1", "kind": "mcp-server", "title": "srv",'
+        ' "secret_note": "token-XYZ-123", "risk": {"level": "high", "score": 80}}]}',
+        encoding="utf-8",
+    )
+    components = ShadowScanImporter().import_report(report)
+    assert len(components) == 1
+    assert "shadowscan:raw" not in components[0].properties
+    assert "token-XYZ-123" not in str(components[0].properties)
+
+
+def test_shadowscan_record_without_risk_is_unassessed(tmp_path: Path) -> None:
+    report = tmp_path / "report.json"
+    report.write_text('{"findings": [{"id": "f2", "kind": "agent", "title": "a"}]}', encoding="utf-8")
+    components = ShadowScanImporter().import_report(report)
+    categories = [r.category for c in components for r in c.risks]
+    assert "unassessed-discovery" in categories
+
