@@ -1,0 +1,28 @@
+{
+  "name": "numbers",
+  "tool": {
+    "name": "n",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "x": {
+          "type": "number",
+          "minimum": 1.0,
+          "maximum": 1e+21,
+          "default": -0.0
+        }
+      }
+    }
+  },
+  "expected": {
+    "algorithm": "tooldef/v1",
+    "typeUri": "https://aisecnomad.github.io/symbiote/digest/tooldef/v1",
+    "status": "ok",
+    "value": "sha256:060957e933d5d40d75492cb9ace5bfbb7d1ad6400e2bb8f3a22f426bbd0f451c",
+    "reason": null,
+    "fullDigest": {
+      "status": "ok",
+      "value": "sha256:0bfd16a35c98690c57211463e45d43ed51ed5abeac7f189d0f52326f34b79cef"
+    }
+  }
+}

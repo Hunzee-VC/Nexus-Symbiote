@@ -1,0 +1,20 @@
+{
+  "name": "minimal",
+  "tool": {
+    "name": "echo",
+    "inputSchema": {
+      "type": "object"
+    }
+  },
+  "expected": {
+    "algorithm": "tooldef/v1",
+    "typeUri": "https://aisecnomad.github.io/symbiote/digest/tooldef/v1",
+    "status": "ok",
+    "value": "sha256:7e4acc686bbfb6b9b4bafcde733cd87bb6d41a972aafa46c9f60f74f1f05d687",
+    "reason": null,
+    "fullDigest": {
+      "status": "ok",
+      "value": "sha256:2f9c57fd4eee3399b2096bcd15e85841768e342c43243c615d097f1a6d5a9d3f"
+    }
+  }
+}

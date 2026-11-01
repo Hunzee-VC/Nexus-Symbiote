@@ -1,0 +1,20 @@
+{
+  "name": "undigestable-bigint",
+  "tool": {
+    "name": "big",
+    "inputSchema": {
+      "maximum": 9223372036854775807
+    }
+  },
+  "expected": {
+    "algorithm": "tooldef/v1",
+    "typeUri": "https://aisecnomad.github.io/symbiote/digest/tooldef/v1",
+    "status": "undigestable",
+    "value": null,
+    "reason": "integer-out-of-range: $.inputSchema.maximum: |9223372036854775807| > 2^53",
+    "fullDigest": {
+      "status": "undigestable",
+      "value": null
+    }
+  }
+}

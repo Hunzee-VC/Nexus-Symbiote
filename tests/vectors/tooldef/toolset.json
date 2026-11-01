@@ -1,0 +1,12 @@
+{
+  "protocolVersion": "2025-06-18",
+  "server": null,
+  "tools": [
+    "minimal",
+    "annotated",
+    "unicode",
+    "numbers",
+    "meta-ignored"
+  ],
+  "expected": "sha256:1e51719da617450ff7ae1724d499978bc3c094004e6cff332efe1d514caedf67"
+}

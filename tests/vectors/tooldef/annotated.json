@@ -1,0 +1,34 @@
+{
+  "name": "annotated",
+  "tool": {
+    "name": "get_issue",
+    "title": "Get issue",
+    "description": "Get an issue",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "number": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "number"
+      ]
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "openWorldHint": false
+    }
+  },
+  "expected": {
+    "algorithm": "tooldef/v1",
+    "typeUri": "https://aisecnomad.github.io/symbiote/digest/tooldef/v1",
+    "status": "ok",
+    "value": "sha256:2436ff3a7eff3889c2e071ff658d6db0ca957620ba565f0fae3c80b0052c2c5b",
+    "reason": null,
+    "fullDigest": {
+      "status": "ok",
+      "value": "sha256:76ca6e254eb4b4dbf711e23bb1116ac5f6a8d8d3e909b6be01933bdbd57379b5"
+    }
+  }
+}

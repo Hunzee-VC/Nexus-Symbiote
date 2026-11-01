@@ -1,0 +1,21 @@
+{
+  "name": "unicode",
+  "tool": {
+    "name": "déjà",
+    "description": "Ünïcödé — 😀 — ‮",
+    "inputSchema": {
+      "type": "object"
+    }
+  },
+  "expected": {
+    "algorithm": "tooldef/v1",
+    "typeUri": "https://aisecnomad.github.io/symbiote/digest/tooldef/v1",
+    "status": "ok",
+    "value": "sha256:ecd4b51c66c46c53ec9c341535213e8570727d1cc50599c0ed3eda04673d1f46",
+    "reason": null,
+    "fullDigest": {
+      "status": "ok",
+      "value": "sha256:617fa4a88f2a333125bb53bc3d9879d5bd796bfe41d087af0babbcbe067bd615"
+    }
+  }
+}

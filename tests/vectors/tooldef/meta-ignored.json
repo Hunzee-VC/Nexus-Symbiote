@@ -1,0 +1,28 @@
+{
+  "name": "meta-ignored",
+  "tool": {
+    "name": "m",
+    "inputSchema": {
+      "type": "object"
+    },
+    "_meta": {
+      "ui": true
+    },
+    "icons": [
+      {
+        "src": "x"
+      }
+    ]
+  },
+  "expected": {
+    "algorithm": "tooldef/v1",
+    "typeUri": "https://aisecnomad.github.io/symbiote/digest/tooldef/v1",
+    "status": "ok",
+    "value": "sha256:bc9cde8ebeaa6787932e9025f09c2d9e7f30f46f72fba218fbb864ca75f15633",
+    "reason": null,
+    "fullDigest": {
+      "status": "ok",
+      "value": "sha256:7b5d4d06c34dbe69888a14c886475a42d02293a1847f60a86c57e3afd90acc75"
+    }
+  }
+}

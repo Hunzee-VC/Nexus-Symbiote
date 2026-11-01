@@ -6,7 +6,7 @@ this document alone; gateways and auditors MUST be able to recompute every diges
 ## 1. Canonical JSON (RFC 8785)
 Structural digests are computed over **JCS** (RFC 8785) bytes produced by `rfc8785.dumps`. Properties the
 implementation relies on: object keys sorted by UTF-16 code units; `1.0` serialises as `1`; `1e21` as `1e+21`;
-NaN/±Infinity raise; integers outside ±2^53 raise. No `null` members are stripped (absent and `null` are
+NaN/±Infinity raise; integers with |n| ≥ 2^53 raise. No `null` members are stripped (absent and `null` are
 different facts). No Unicode normalization, whitespace normalization or case folding is ever applied to
 collected data (ADR-0004).
 
@@ -15,7 +15,7 @@ collected data (ADR-0004).
 The `_type` URI gives domain separation between artefact kinds. Type URIs are
 `https://aisecnomad.github.io/symbiote/digest/<kind>/v1`.
 
-Failure semantics: if JCS raises (non-finite number, big integer, invalid UTF-8) or the source JSON text
+Failure semantics: if JCS raises (non-finite number, |integer| ≥ 2^53, invalid UTF-8) or the source JSON text
 contained duplicate keys (detected with an `object_pairs_hook`), the result is
 `{algorithm: "<kind>/v1", status: "undigestable", reason: "<class>: <detail>"}` — never a best-effort value.
 
