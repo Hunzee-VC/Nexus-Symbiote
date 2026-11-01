@@ -288,6 +288,7 @@
         "input_schema": { "type": "object" },
         "description_text": { "type": "string" },
         "definition_hash": { "type": "string" },
+        "definition_hash_version": { "type": ["string", "null"] },
         "capabilities": { "$ref": "#/$defs/CapabilityDeclaration" },
         "annotations": { "type": "object" }
       }

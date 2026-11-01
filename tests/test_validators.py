@@ -44,6 +44,7 @@ def _full_bom() -> AIBOM:
             name="read_file",
             mcp_server_ref="mcp:fs",
             definition_hash="sha256:abc123",
+            definition_hash_version="rfc8785-jcs-v1",
             description_text="Read a file",
         )
     )
@@ -153,6 +154,7 @@ class TestIntegrityValidator:
                 name="test_tool",
                 description_text="Does something",
                 definition_hash="sha256:wrong_hash_value",
+                definition_hash_version="rfc8785-jcs-v1",
             )
         )
         iv = IntegrityValidator()
@@ -171,6 +173,7 @@ class TestIntegrityValidator:
                 name="test_tool",
                 description_text="Does something",
                 definition_hash=correct_hash,
+                definition_hash_version="rfc8785-jcs-v1",
             )
         )
         iv = IntegrityValidator()
@@ -312,6 +315,7 @@ class TestAIBOMDiffer:
                 name="read_file",
                 mcp_server_ref="mcp:fs",
                 definition_hash="sha256:changed_hash",
+                definition_hash_version="rfc8785-jcs-v1",
                 description_text="Read a file (modified)",
             )
         )

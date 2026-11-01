@@ -150,6 +150,7 @@ class CycloneDXGenerator(Generator):
             _add("trustRemoteCode", comp.trust_remote_code)
         elif isinstance(comp, ToolComponent):
             _add("definitionHash", comp.definition_hash)
+            _add("definitionHashVersion", comp.definition_hash_version)
             if comp.annotations:
                 for k, v in comp.annotations.items():
                     _add(f"annotation.{k}", v)

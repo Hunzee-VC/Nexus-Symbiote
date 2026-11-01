@@ -139,6 +139,10 @@ class ToolComponent(ComponentBase):
         default=None,
         description="JCS canonical hash of (name, description, inputSchema, annotations)",
     )
+    definition_hash_version: str | None = Field(
+        default=None,
+        description="Canonicalization protocol, or unknown for legacy fingerprints",
+    )
     capabilities: CapabilityDeclaration | None = None
     annotations: dict[str, Any] = Field(
         default_factory=dict,

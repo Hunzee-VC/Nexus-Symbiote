@@ -186,7 +186,20 @@ class AIBOMDiffer:
 
         old_hash = getattr(old, "definition_hash", None)
         new_hash = getattr(new, "definition_hash", None)
-        if old_hash and new_hash and old_hash != new_hash:
+        old_hash_version = getattr(old, "definition_hash_version", None)
+        new_hash_version = getattr(new, "definition_hash_version", None)
+        if (
+            old_hash
+            and new_hash
+            and (old_hash_version != "rfc8785-jcs-v1" or new_hash_version != "rfc8785-jcs-v1")
+        ):
+            modifications.append(
+                {
+                    "detail": "Tool fingerprint versions are unknown or incompatible; re-collect and re-approve.",
+                    "severity": "high",
+                }
+            )
+        elif old_hash and new_hash and old_hash != new_hash:
             modifications.append(
                 {
                     "detail": "Tool definition hash changed — possible rug-pull attack.",

@@ -37,3 +37,41 @@ def test_cyclonedx_strict_validator():
         pytest.skip("installed cyclonedx library does not support 1.7")
     data = CycloneDXGenerator().generate_json(_sample_aibom())
     assert JsonStrictValidator(SchemaVersion.V1_7).validate_str(data) is None
+
+
+def test_legacy_tool_fingerprint_requires_migration():
+    from symbote.core.aibom import AIBOM
+    from symbote.core.models import ToolComponent
+    from symbote.validators.integrity import IntegrityValidator
+
+    bom = AIBOM()
+    bom.add_component(
+        ToolComponent(bom_ref="tool:legacy", name="legacy", definition_hash="sha256:old")
+    )
+    report = IntegrityValidator().validate(bom)
+    assert not report.is_valid
+    assert report.hashes_verified == 0
+    assert any(i.category == "fingerprint_version_unknown" for i in report.issues)
+
+
+def test_diff_does_not_compare_legacy_and_new_fingerprints():
+    from symbote.core.aibom import AIBOM
+    from symbote.core.models import ToolComponent
+    from symbote.diff.differ import AIBOMDiffer
+
+    old = AIBOM()
+    new = AIBOM()
+    old.add_component(ToolComponent(bom_ref="tool:t", name="t", definition_hash="sha256:old"))
+    new.add_component(
+        ToolComponent(
+            bom_ref="tool:t",
+            name="t",
+            definition_hash="sha256:new",
+            definition_hash_version="rfc8785-jcs-v1",
+        )
+    )
+    result = AIBOMDiffer().diff(old, new)
+    assert result.has_changes
+    assert any(
+        "unknown or incompatible" in item for c in result.components_modified for item in c.details
+    )

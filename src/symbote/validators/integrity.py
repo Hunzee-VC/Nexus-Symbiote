@@ -80,6 +80,18 @@ class IntegrityValidator:
             )
             return
 
+        if getattr(comp, "definition_hash_version", None) != "rfc8785-jcs-v1":
+            report.issues.append(
+                IntegrityIssue(
+                    component_ref=comp.bom_ref,
+                    category="fingerprint_version_unknown",
+                    detail=f"Tool '{comp.name}' fingerprint version is unknown or unsupported; re-collect and re-approve.",
+                    severity="error",
+                )
+            )
+            report.is_valid = False
+            return
+
         if hasattr(comp, "description_text") and comp.description_text is not None:
             recomputed = hash_tool_definition(
                 comp.name,
