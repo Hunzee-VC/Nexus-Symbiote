@@ -8,23 +8,28 @@ honest coverage gap instead of a silent absence (I2).
 
 Safety rules enforced here:
 
-* a server process is launched **only** when its name/id is on the ``live_allow`` allowlist
-  (``--live-allow``); everything else is recorded as not-allowlisted coverage, never executed;
-* environment *values* are passed to the child process but never recorded — entities carry names
-  only (the declared collector already recorded those);
+* the collector requires an independently supplied SHA-256 pin for the server ID as well as
+  live opt-in. It stages a private copy and executes only those approved bytes;
+* the collector accepts single-file commands with no project-controlled arguments, environment
+  or working directory. Host isolation and interpreter trust are the operator's responsibility;
 * every server gets a hard wall-clock deadline (default 15 s); a hung server yields a coverage
   fact, not a hung scan.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import signal
+import stat
 import subprocess
+import tempfile
 import threading
 import time
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from pathlib import Path
 from queue import Empty, Queue
 from typing import Any, ClassVar
 
@@ -40,7 +45,7 @@ from symbiote.digest import (
     tooldef_full_digest,
     toolset_digest,
 )
-from symbiote.digest.jcs import UndigestableError
+from symbiote.digest.jcs import UndigestableError, parse_json_strict
 from symbiote.model.common import Claim, EvidenceRef
 from symbiote.model.edges import Edge
 from symbiote.model.entities import (
@@ -69,7 +74,9 @@ from symbiote.model.enums import (
 PROTOCOL_VERSION = "2025-06-18"
 DEFAULT_SERVER_DEADLINE = 15.0
 _MAX_PAGES = 64
-_MAX_STDERR_BYTES = 64 * 1024
+_MAX_RPC_LINE = 1024 * 1024
+_MAX_RPC_BYTES = 8 * _MAX_RPC_LINE
+_MAX_RPC_FRAMES = 1024
 
 
 class McpLiveError(RuntimeError):
@@ -142,14 +149,26 @@ class _StdioRpc:
     def _read_loop(self) -> None:
         stdout = self._proc.stdout
         assert stdout is not None
-        for line in stdout:
+        total = 0
+        for _ in range(_MAX_RPC_FRAMES):
+            line = stdout.readline(_MAX_RPC_LINE + 1)
+            if not line:
+                break
+            total += len(line)
+            if len(line) > _MAX_RPC_LINE or total > _MAX_RPC_BYTES:
+                self._queue.put(McpLiveError("truncated", "server response exceeds capture budget"))
+                return
             stripped = line.strip()
-            if not stripped:
-                continue
+            if not stripped.startswith(b"{"):
+                continue  # non-protocol log lines
             try:
-                self._queue.put(json.loads(stripped.decode("utf-8")))
-            except (ValueError, UnicodeDecodeError):
-                continue  # servers sometimes log to stdout; non-JSON lines are not protocol data
+                self._queue.put(parse_json_strict(stripped))
+            except (UndigestableError, RecursionError):
+                self._queue.put(McpLiveError("protocol-error", "invalid or ambiguous JSON-RPC object"))
+                return
+        else:
+            self._queue.put(McpLiveError("truncated", "server exceeded JSON-RPC frame budget"))
+            return
         self._queue.put(None)  # EOF marker
 
     def _remaining(self) -> float:
@@ -185,13 +204,14 @@ class _StdioRpc:
                 item = self._queue.get(timeout=min(self._remaining(), 0.5))
             except Empty:
                 continue
+            if isinstance(item, McpLiveError):
+                raise item
             if item is None:
                 raise McpLiveError("unreachable", f"server exited before replying to {method}")
             if not isinstance(item, Mapping) or item.get("id") != request_id:
                 continue  # notifications and unrelated responses
             if "error" in item:
-                error = item["error"]
-                raise McpLiveError("protocol-error", f"{method}: {error.get('code')}: {error.get('message')}")
+                raise McpLiveError("protocol-error", f"server returned an error for {method}")
             result = item.get("result")
             if not isinstance(result, Mapping):
                 raise McpLiveError("protocol-error", f"{method}: result is not an object")
@@ -204,7 +224,7 @@ def introspect_stdio(
     deadline_seconds: float = DEFAULT_SERVER_DEADLINE,
     base_env: Mapping[str, str] | None = None,
 ) -> LiveCapture:
-    """Launch ``spec`` and capture ``initialize`` + every ``tools/list`` page as raw objects."""
+    """Run a caller-trusted command. Collectors handling untrusted configuration must first stage its approved bytes."""
     if not spec.command:
         raise McpLiveError("unsupported-source", "stdio server without a command")
     env: dict[str, str] = dict(base_env if base_env is not None else {"PATH": os.environ.get("PATH", "")})
@@ -214,12 +234,26 @@ def introspect_stdio(
             [spec.command, *spec.args],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            start_new_session=os.name == "posix",
             cwd=spec.cwd,
             env=env,
         )
     except OSError as exc:
         raise McpLiveError("unreachable", f"failed to launch {spec.command!r}: {exc}") from exc
+
+    def stop() -> None:
+        try:
+            if os.name == "posix":
+                os.killpg(proc.pid, signal.SIGKILL)
+            else:
+                proc.kill()
+        except ProcessLookupError:
+            pass
+
+    watchdog = threading.Timer(deadline_seconds, stop)
+    watchdog.daemon = True
+    watchdog.start()
     deadline = time.monotonic() + deadline_seconds
     rpc = _StdioRpc(proc, deadline)
     try:
@@ -233,6 +267,7 @@ def introspect_stdio(
         )
         rpc.notify("notifications/initialized")
         raw_tools: list[Mapping[str, Any]] = []
+        names: set[str] = set()
         list_meta: dict[str, Any] = {}
         cursor: str | None = None
         pages = 0
@@ -243,7 +278,17 @@ def introspect_stdio(
             tools = result.get("tools")
             if not isinstance(tools, list):
                 raise McpLiveError("protocol-error", "tools/list result has no tools array")
-            raw_tools.extend(t for t in tools if isinstance(t, Mapping))
+            for tool in tools:
+                if (
+                    not isinstance(tool, Mapping)
+                    or not isinstance(tool.get("name"), str)
+                    or not isinstance(tool.get("inputSchema"), Mapping)
+                ):
+                    raise McpLiveError("protocol-error", "malformed tool descriptor")
+                if tool["name"] in names:
+                    raise McpLiveError("protocol-error", "duplicate tool name")
+                names.add(tool["name"])
+                raw_tools.append(tool)
             for key in ("ttlMs", "cacheScope"):
                 if key in result:
                     list_meta[key] = result[key]
@@ -265,13 +310,11 @@ def introspect_stdio(
             pages=pages,
         )
     finally:
-        try:
-            proc.terminate()
-            proc.wait(timeout=2)
-        except (ProcessLookupError, subprocess.TimeoutExpired):
-            proc.kill()
-        if proc.stderr is not None:
-            proc.stderr.read(_MAX_STDERR_BYTES)
+        watchdog.cancel()
+        stop()
+        proc.wait()
+        if proc.stdin:
+            proc.stdin.close()
 
 
 # --------------------------------------------------------------------------------------------- shaping
@@ -294,7 +337,9 @@ def capture_to_entities(
         kind="mcp",
         transport=spec.transport,
         endpoint=spec.url,
-        package={"purl": spec.package_purl, "digest": spec.package_digest} if spec.package_purl else None,
+        package={"purl": spec.package_purl, "digest": spec.package_digest}
+        if spec.package_purl or spec.package_digest
+        else None,
         server_info={
             "name": str(capture.server_info.get("name")) if capture.server_info else None,
             "version": str(capture.server_info.get("version")) if capture.server_info else None,
@@ -333,7 +378,7 @@ def capture_to_entities(
                 server_ref=spec.id,
                 tool_name=name,
                 title=raw.get("title"),
-                description=description if isinstance(description, str) else None,
+                description=description if ctx.include_text and isinstance(description, str) else None,
                 input_schema=dict(raw.get("inputSchema") or {}),
                 output_schema=dict(raw["outputSchema"])
                 if isinstance(raw.get("outputSchema"), Mapping)
@@ -433,6 +478,49 @@ def capture_to_entities(
 # --------------------------------------------------------------------------------------------- collector
 
 
+def _capture_approved(spec: LiveServerSpec, pins: Mapping[str, str], deadline: float) -> LiveCapture:
+    """Run a pinned, self-contained stdio executable; launcher arguments and project environment are outside this policy.
+
+    The caller provides operator-owned pins independent of project metadata. This authenticates
+    launcher bytes, not their effects, interpreter or other host dependencies. Run live scans
+    inside an externally isolated worker with bounded resources, no secrets and restricted egress.
+    """
+    expected = pins.get(spec.id)
+    if not expected or not isinstance(expected, str):
+        raise McpLiveError("unapproved-executable", "no operator-provided SHA-256 pin for this server ID")
+    if not spec.command or not Path(spec.command).is_absolute() or spec.args or spec.env or spec.cwd:
+        raise McpLiveError(
+            "unapproved-launch", "expected a single absolute executable without args, env or cwd"
+        )
+    with tempfile.TemporaryDirectory(prefix="symbiote-live-") as work:
+        staged = Path(work) / "mcp-server"
+        digest = hashlib.sha256()
+        try:
+            # O_NONBLOCK avoids hanging on a FIFO before fstat. Only the staged bytes are executed.
+            flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
+            with os.fdopen(os.open(spec.command, flags), "rb") as src, staged.open("xb") as dst:
+                limit = 128 * 1024 * 1024
+                meta = os.fstat(src.fileno())
+                if not stat.S_ISREG(meta.st_mode) or meta.st_size > limit:
+                    raise McpLiveError("unsupported-source", "launcher must be a bounded regular file")
+                while block := src.read(1024 * 1024):
+                    limit -= len(block)
+                    if limit < 0:
+                        raise McpLiveError("unsupported-source", "launcher exceeds the byte limit")
+                    digest.update(block)
+                    dst.write(block)
+            if expected != "sha256:" + digest.hexdigest():
+                raise McpLiveError("unapproved-executable", "launcher differs from the approved bytes")
+            staged.chmod(0o500)
+        except OSError as exc:
+            raise McpLiveError("unreachable", f"cannot stage approved launcher: {exc}") from exc
+        return introspect_stdio(
+            replace(spec, command=str(staged), cwd=work),
+            deadline_seconds=deadline,
+            base_env={"PATH": os.defpath},
+        )
+
+
 class McpLiveCollector(BaseCollector):
     """``mcp-live``: introspect allowlisted stdio servers and record what they actually serve."""
 
@@ -449,7 +537,7 @@ class McpLiveCollector(BaseCollector):
         specs = [LiveServerSpec.from_mapping(raw) for raw in ctx.options.get("live_servers", [])]
         allow = {str(a) for a in ctx.options.get("live_allow", [])}
         deadline = float(ctx.options.get("live_deadline_seconds", DEFAULT_SERVER_DEADLINE))
-        base_env = ctx.options.get("live_base_env")
+        pins = ctx.options.get("live_executable_pins") or {}
         for spec in specs:
             source = f"live:{spec.id}"
             if spec.id not in allow and spec.name not in allow:
@@ -470,7 +558,11 @@ class McpLiveCollector(BaseCollector):
                 )
                 continue
             try:
-                capture = introspect_stdio(spec, deadline_seconds=deadline, base_env=base_env)
+                if not isinstance(pins, Mapping):
+                    raise McpLiveError("unapproved-executable", "invalid operator pin mapping")
+                capture = _capture_approved(spec, pins, deadline)
+                # A project-supplied package identity is not independently witnessed by stdio.
+                observed_spec = replace(spec, package_purl=None, package_digest=pins[spec.id], url=None)
             except McpLiveError as exc:
                 result.add_source(
                     Surface.TOOLS, source, ok=False, error_class=exc.error_class, locator=source
@@ -478,7 +570,7 @@ class McpLiveCollector(BaseCollector):
                 result.warnings.append(f"{spec.id}: {exc}")
                 continue
             server, tools, evidence, edges = capture_to_entities(
-                spec, capture, collector_ref=self.ref, ctx=ctx
+                observed_spec, capture, collector_ref=self.ref, ctx=ctx
             )
             result.entities.append(server)
             result.entities.extend(tools)

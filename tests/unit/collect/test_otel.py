@@ -10,6 +10,11 @@ from symbiote.collect.otel import OtelTracesCollector
 from symbiote.model.enums import CoverageStatus, Surface, ToolSource, ToolState
 
 NOW = datetime(2026, 11, 1, 12, 0, tzinfo=UTC)
+SCOPE = {
+    "agentbom.tenant.id": "tenant-a",
+    "agentbom.deployment.id": "deployment:a",
+    "agentbom.snapshot.digest": "sha256:" + "ab" * 32,
+}
 NS = 1_000_000_000
 T0 = 1_767_000_000 * NS
 
@@ -67,14 +72,17 @@ def spans_jsonl(path, *, with_definitions: bool = True) -> None:
             },
         },
     ]
-    path.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    path.write_text("\n".join(json.dumps({**r, "resource": SCOPE}) for r in rows) + "\n", encoding="utf-8")
 
 
 def collect(tmp_path, **kw):
     trace = tmp_path / "spans.jsonl"
     spans_jsonl(trace, **kw)
     ctx = CollectContext(
-        root=tmp_path, agent_id="agent:triager", now=NOW, options={"otel_files": [str(trace)]}
+        root=tmp_path,
+        agent_id="agent:triager",
+        now=NOW,
+        options={"otel_scope": SCOPE, "otel_files": [str(trace)]},
     )
     collector = OtelTracesCollector()
     result = collector.collect(ctx)
@@ -84,7 +92,9 @@ def collect(tmp_path, **kw):
 
 def test_tool_invocations_aggregate_with_counts_and_window(tmp_path) -> None:
     result = collect(tmp_path)
-    tool = next(e for e in result.entities if e.id == "tool:observed/get_issue")
+    tool = next(
+        e for e in result.entities if e.id.startswith("tool:observed/") and e.id.endswith("/get_issue")
+    )
     assert tool.state is ToolState.INVOKED and tool.source is ToolSource.TRACE
     assert tool.invocation_count == 2
     assert tool.digest.ok  # the captured definition yields a real tooldef digest
@@ -95,18 +105,20 @@ def test_tool_invocations_aggregate_with_counts_and_window(tmp_path) -> None:
 
 def test_trace_only_tool_without_definition_fails_closed(tmp_path) -> None:
     result = collect(tmp_path, with_definitions=False)
-    tool = next(e for e in result.entities if e.id == "tool:observed/get_issue")
+    tool = next(
+        e for e in result.entities if e.id.startswith("tool:observed/") and e.id.endswith("/get_issue")
+    )
     assert not tool.digest.ok and tool.digest.reason and "no tool definition" in tool.digest.reason
 
 
 def test_alias_routing_models_and_satellite_entities(tmp_path) -> None:
     result = collect(tmp_path)
     ids = {e.id for e in result.entities}
-    assert "server:observed" in ids  # stub server for trace-only tools
+    assert any(i.startswith("server:observed/") for i in ids)  # stub server for trace-only tools
     model = next(e for e in result.entities if e.id.startswith("model:anthropic"))
     assert model.hosted is not None and model.hosted.value.resolved_ref.value == "claude-sonnet-4-5-20250929"
     assert any(e.id.startswith("agent:helper") for e in result.entities)
-    assert any(e.id == "data:kb-prod" for e in result.entities)
+    assert any(e.id.startswith("data:kb-prod/") for e in result.entities)
     assert any(e.id.startswith("data:memory-") for e in result.entities)
     instr = next(e for e in result.entities if e.id.startswith("instr:otel-"))
     assert instr.size > 0  # hashed and sized, never stored
@@ -117,9 +129,52 @@ def test_alias_routing_models_and_satellite_entities(tmp_path) -> None:
 def test_unreadable_file_is_a_coverage_fact(tmp_path) -> None:
     bad = tmp_path / "broken.jsonl"
     bad.write_text("{not json", encoding="utf-8")
-    ctx = CollectContext(root=tmp_path, now=NOW, options={"otel_files": [str(bad)]})
+    ctx = CollectContext(root=tmp_path, now=NOW, options={"otel_scope": SCOPE, "otel_files": [str(bad)]})
     collector = OtelTracesCollector()
     result = collector.collect(ctx)
     result.finalize_coverage(collector.surfaces)
     cov = result.coverage[Surface.RUNTIME]
     assert cov.sources[0].ok is False and cov.status is not CoverageStatus.QUERIED
+
+
+def test_scope_mismatch_and_ambiguous_routing(tmp_path) -> None:
+    path = tmp_path / "spans.jsonl"
+    rows = []
+    for dep, tenant, snapshot, response in [
+        ("deployment:a", "tenant-a", SCOPE["agentbom.snapshot.digest"], "z-first"),
+        ("deployment:a", "tenant-a", SCOPE["agentbom.snapshot.digest"], "a-later"),
+        ("deployment:b", "tenant-a", SCOPE["agentbom.snapshot.digest"], "wrong-deployment"),
+        ("deployment:a", "tenant-b", SCOPE["agentbom.snapshot.digest"], "wrong-tenant"),
+        ("deployment:a", "tenant-a", "sha256:" + "0" * 64, "wrong-snapshot"),
+    ]:
+        rows.append(
+            {
+                "resource": {
+                    "agentbom.tenant.id": tenant,
+                    "agentbom.deployment.id": dep,
+                    "agentbom.snapshot.digest": snapshot,
+                },
+                "attributes": {
+                    "gen_ai.operation.name": "chat",
+                    "gen_ai.request.model": "stable",
+                    "gen_ai.response.model": response,
+                },
+            }
+        )
+    path.write_text("\n".join(json.dumps(row) for row in rows))
+
+    def run(**opts):
+        return OtelTracesCollector().collect(
+            CollectContext(
+                root=tmp_path, agent_id="agent:selected", now=NOW, options={"otel_files": [path], **opts}
+            )
+        )
+
+    assert not run().edges
+    result = run(otel_scope=SCOPE)
+    assert any("omitted 3" in w for w in result.warnings)
+    (model,) = result.entities
+    assert model.hosted.value.resolved_ref.state.value == "unknown"
+    (edge,) = result.edges
+    assert all(edge.qualifiers[k] == v for k, v in SCOPE.items())
+    assert edge.qualifiers["traceSource"].endswith("spans.jsonl")

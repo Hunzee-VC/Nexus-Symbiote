@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -104,7 +105,7 @@ def test_unicode_drift_sets_text_flags() -> None:
     assert any(f.value == "hidden-unicode" for f in get_issue.text_flags)
 
 
-def test_collector_enforces_allowlist_and_records_coverage() -> None:
+def test_collector_enforces_allowlist_and_records_coverage(tmp_path) -> None:
     collector = McpLiveCollector()
     live = {
         "id": "server:fixture",
@@ -117,8 +118,20 @@ def test_collector_enforces_allowlist_and_records_coverage() -> None:
     assert denied.entities == []
     tools_cov = denied.coverage[Surface.TOOLS]
     assert tools_cov.sources and tools_cov.sources[0].error_class == "not-allowlisted"
+    executable = tmp_path / "fixture"
+    executable.write_bytes(FIXTURE.read_bytes())
+    pin = "sha256:" + hashlib.sha256(executable.read_bytes()).hexdigest()
+    live = {**live, "command": str(executable), "args": []}
+    name_only = collector.collect(ctx(live=True, live_servers=[live], live_allow=["server:fixture"]))
+    assert name_only.coverage[Surface.TOOLS].sources[0].error_class == "unapproved-executable"
     allowed = collector.collect(
-        ctx(live=True, live_servers=[live], live_allow=["server:fixture"], live_deadline_seconds=10)
+        ctx(
+            live=True,
+            live_servers=[live],
+            live_allow=["server:fixture"],
+            live_executable_pins={"server:fixture": pin},
+            live_deadline_seconds=10,
+        )
     )
     allowed.finalize_coverage(collector.surfaces)
     assert allowed.coverage[Surface.TOOLS].status is CoverageStatus.QUERIED
@@ -137,3 +150,24 @@ def test_remote_transport_is_an_honest_gap() -> None:
     cov = result.coverage[Surface.TOOLS]
     assert cov.sources[0].error_class == "unsupported-source"
     assert result.entities == []
+
+
+def test_replaced_launcher_or_added_args_never_start(tmp_path) -> None:
+    executable = tmp_path / "tool"
+    canary = tmp_path / "effect"
+    executable.write_text("#!/bin/sh\ntouch " + str(canary) + "\n")
+    base = {"id": "server:fixture", "command": str(executable), "package_digest": "sha256:" + "b" * 64}
+    for args, digest in [
+        ([], "sha256:" + "b" * 64),
+        (["--ignored"], "sha256:" + hashlib.sha256(executable.read_bytes()).hexdigest()),
+    ]:
+        result = McpLiveCollector().collect(
+            ctx(
+                live=True,
+                live_servers=[{**base, "args": args}],
+                live_allow=["server:fixture"],
+                live_executable_pins={"server:fixture": digest},
+            )
+        )
+        assert not result.entities and not canary.exists()
+        assert not result.coverage[Surface.TOOLS].sources[0].ok
