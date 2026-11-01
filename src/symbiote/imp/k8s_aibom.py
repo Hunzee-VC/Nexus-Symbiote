@@ -5,10 +5,10 @@ Accepts either a k8s-aibom CycloneDX 1.6 ML-BOM document or an ``AIBOM`` custom 
 ``status.bomDocument.inline.data`` (base64, documents under 256 KiB) or references it by URL —
 a URL reference is never fetched here; it is reported as an unresolved input.
 
-Confidence mapping (normative, ``agentbom-profile.md §5``):
+Unsigned input confidence mapping (``agentbom-profile.md §5``):
 
 * ``declared``   → ``assurance=declared``
-* ``inferred``   → ``assurance=observed`` with ``method=heuristic`` and ``confidence=0.5``
+* ``inferred``   → an external declaration, retaining the source locator
 * ``unresolved`` → ``state=unknown``
 * ``verified`` → a supplier declaration. Signature properties describe the supplier's claim.
   A separate verifier must authenticate the artifact and signer under the consumer's policy.
@@ -39,12 +39,9 @@ from symbiote.model.entities import (
     Model,
     Redaction,
     SignatureFacts,
-    WeightsIdentity,
     WorkloadRef,
 )
 from symbiote.model.enums import (
-    AliasPinning,
-    ClaimMethod,
     EnvironmentKind,
     ModelKind,
     SignatureOutcome,
@@ -127,8 +124,6 @@ def _confidence_claim(
     facts: list[str],
 ) -> Claim[Any]:
     tier = (confidence or "declared").lower()
-    if tier == "inferred":
-        return Claim.observed(value, locator=locator, method=ClaimMethod.HEURISTIC, confidence=0.5)
     if tier == "unresolved":
         return Claim.unknown(UnknownReason.PROVIDER_UNDISCLOSED, locator=locator)
     if tier == "verified":
@@ -210,10 +205,28 @@ def import_k8s_aibom(
             raise K8sAibomError(f"invalid SHA-256 for model {bom_ref}")
         locator = f"cdx:{bom_ref}"
         # A display name can cover many weight revisions, endpoints and BOM subjects.
+        source_ref = bom_ref
+        props_by_name = dict(props)
+        meta = document.get("metadata", {}).get("component") or {}
+        workload_ref = meta.get("bom-ref")
+        container = props_by_name.get("container.name")
+        selector = props_by_name.get("aibom.evidence.source")
+        primary_arg = selector == "container_arg" and props_by_name.get("identity.argFlag") == "--model"
+        primary_env = selector == "env_var" and props_by_name.get("identity.envVarName") == "HF_MODEL_ID"
+        if (
+            not digest
+            and workload_ref
+            and container
+            and (primary_arg or primary_env)
+            and props_by_name.get("aibom.evidence.locator")
+        ):
+            # Coalesce a declaration for the same primary selector in the same container.
+            # Keep both original observation locations. This does not identify model bytes.
+            source_ref = [workload_ref, container, "primary-model"]
         subject = [
             agent_id,
             document.get("serialNumber"),
-            bom_ref,
+            source_ref,
             source,
             name,
             component.get("version"),
@@ -223,28 +236,16 @@ def import_k8s_aibom(
         model_id = make_id("model", name, key)
         if component.get("bom-ref") and model_refs.setdefault(bom_ref, model_id) != model_id:
             raise K8sAibomError(f"conflicting components at model reference {bom_ref}")
-        if digest:
-            identity_claim = _confidence_claim(
-                WeightsIdentity(manifest_root=digest, file_count=1, formats=[]),
-                confidence,
-                locator=locator,
-                facts=result.facts,
-            )
-            model = Model(
-                id=model_id,
-                name=name,
-                model_kind=ModelKind.WEIGHTS,
-                weights=identity_claim,
-                signature=signature,
-            )
-        else:
-            requested = str(component.get("version") or name)
-            identity_claim = _confidence_claim(
+        artifact = (
+            _confidence_claim(digest, confidence, locator=locator, facts=result.facts) if digest else None
+        )
+        hosting = _dialect_value(props, "aibom.model.hosting", "k8s-aibom:model:hosting")
+        if hosting == "hosted" and source:
+            hosted = _confidence_claim(
                 HostedIdentity(
-                    provider=str(source or "unknown"),
-                    requested_ref=requested,
+                    provider=source,
+                    requested_ref=name,
                     resolved_ref=Claim.unknown(UnknownReason.PROVIDER_UNDISCLOSED),
-                    alias_pinning=AliasPinning.UNKNOWN,
                 ),
                 confidence,
                 locator=locator,
@@ -254,8 +255,21 @@ def import_k8s_aibom(
                 id=model_id,
                 name=name,
                 model_kind=ModelKind.HOSTED,
-                hosted=identity_claim,
+                hosted=hosted,
                 signature=signature,
+                artifact_digest=artifact,
+            )
+        else:
+            model = Model(
+                id=model_id,
+                name=name,
+                model_kind=ModelKind.UNKNOWN,
+                signature=signature,
+                artifact_digest=artifact,
+            )
+        if source_ref != bom_ref:
+            result.foreign_properties.append(
+                ForeignProperty(dialect=DIALECT, element_id=model_id, name="sourceComponent", value=bom_ref)
             )
         previous = seen_components.get(model.id)
         if previous is not None and previous != model:

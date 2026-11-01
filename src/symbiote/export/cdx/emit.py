@@ -725,6 +725,8 @@ class _Builder:
         props = Props()
         self._common_props(props, m, "model")
         props.add("agentbom:model:kind", m.model_kind)
+        if m.artifact_digest:
+            props.add_json("agentbom:model:artifact-digest-claim", m.artifact_digest.to_json_dict())
         version = None
         purl = None
         hashes = None

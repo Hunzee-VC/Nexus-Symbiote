@@ -514,6 +514,8 @@ class _Emitter:
             pkg.name = mo.name or mo.id.split(":", 1)[1]
             pkg.software_primaryPurpose = m.software_SoftwarePurpose.model
             ext_fields: dict[str, Any] = {"kind": mo.model_kind}
+            if mo.artifact_digest:
+                ext_fields["artifactDigestClaim"] = mo.artifact_digest.to_json_dict()
             if mo.hosted and mo.hosted.value:
                 h = mo.hosted.value
                 pkg.software_downloadLocation = h.endpoint_origin or "NOASSERTION"

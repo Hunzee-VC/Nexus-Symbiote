@@ -233,6 +233,7 @@ class TemplateRiskClass(StrEnum):
 
 
 class ModelKind(StrEnum):
+    UNKNOWN = "unknown"
     WEIGHTS = "weights"
     HOSTED = "hosted"
     ADAPTER = "adapter"
