@@ -197,9 +197,9 @@ def import_shadowscan(report_path: str, output: str, output_format: str) -> None
     """Import a Nexus-ShadowScan report and generate a verified AIBOM.
 
     This is the recommended primary workflow: run ShadowScan for discovery,
-    then SymBiote for verification, integrity, and BOM emission.
+    then Nexus SymBiote for verification, integrity, and BOM emission.
     """
-    from symbiote.scanners.shadowscan import ShadowScanImporter
+    from nexus_symbiote.scanners.shadowscan import ShadowScanImporter
 
     importer = ShadowScanImporter()
     try:
@@ -218,15 +218,15 @@ def import_shadowscan(report_path: str, output: str, output_format: str) -> None
     )
 
     if output_format == "cyclonedx":
-        from symbiote.generators.cyclonedx import CycloneDXGenerator
+        from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
 
         out_data = CycloneDXGenerator().generate_json(aibom)
     elif output_format == "spdx":
-        from symbiote.generators.spdx import SPDXGenerator
+        from nexus_symbiote.generators.spdx import SPDXGenerator
 
         out_data = SPDXGenerator().generate_json(aibom)
     elif output_format == "sarif":
-        from symbiote.generators.sarif import SARIFGenerator
+        from nexus_symbiote.generators.sarif import SARIFGenerator
 
         out_data = SARIFGenerator().generate_json(aibom)
     else:

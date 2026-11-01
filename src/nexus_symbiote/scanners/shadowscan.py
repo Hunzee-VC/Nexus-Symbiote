@@ -19,7 +19,6 @@ from typing import Any
 from nexus_symbiote.core.enums import (
     AssuranceLevel,
     AutonomyLevel,
-    ComponentType,
     RiskSeverity,
     TrustTier,
 )
@@ -28,7 +27,6 @@ from nexus_symbiote.core.models import (
     MCPServerComponent,
     ModelComponent,
     RiskAssessment,
-    ToolComponent,
 )
 from nexus_symbiote.scanners.base import Scanner, ScanResult
 
@@ -107,7 +105,10 @@ class ShadowScanImporter(Scanner):
                         properties={"shadowscan:raw": f},
                     )
                 )
-            elif kind in {"local-model", "model"} or "model" in str(f.get("resource_type", "")).lower():
+            elif (
+                kind in {"local-model", "model"}
+                or "model" in str(f.get("resource_type", "")).lower()
+            ):
                 components.append(
                     ModelComponent(
                         bom_ref=bom_ref,
