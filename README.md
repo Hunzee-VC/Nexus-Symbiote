@@ -23,16 +23,16 @@ For optional signature integration, install `.[sigstore]` from the same checkout
 
 ```bash
 # Preferred input from a separate discovery run
-nexus-symbiote import-shadowscan shadowscan-report.json -o agentbom.json
+nexus-symbiote import-shadowscan shadowscan-report.json -o agentbom.json --report-only
 
 # Or place the report at .shadowscan/report.json and collect local evidence too
 nexus-symbiote scan /path/to/agent-project -f json -o agentbom.json
 
 # Export imported claims directly
-nexus-symbiote import-shadowscan shadowscan-report.json -f cyclonedx -o agentbom.cdx.json
+nexus-symbiote import-shadowscan shadowscan-report.json -f cyclonedx -o agentbom.cdx.json --report-only
 ```
 
-Imported discovery records remain attributed claims. Importing them does not verify their publisher, observe the deployment again, establish effective authorization, or upgrade a supplied trust label. Local collectors complement discovery with file-level evidence. A command can write evidence while returning a failing policy status; inspect both the exit code and the inventory. `--report-only` is an explicit exploratory option, not successful approval.
+Imported discovery records retain the exact source-report SHA-256, source-reported status and unmapped finding indexes. Unknown kinds remain unmapped, and imported coverage stays partial. See [ShadowScan integration](docs/shadowscan-integration.md). Imported discovery records remain attributed claims. Importing them does not verify their publisher, observe the deployment again, establish effective authorization, or upgrade a supplied trust label. Local collectors complement discovery with file-level evidence. A command can write evidence while returning a failing policy status; inspect both the exit code and the inventory. `--report-only` is an explicit exploratory option, not successful approval.
 
 ## Collect and inspect
 
@@ -45,6 +45,30 @@ nexus-symbiote summary agentbom.json
 ```
 
 Collection is static by default: repository instructions, MCP configuration, local model references and files, retrieval configuration, and package manifests provide evidence of declared composition. A configuration entry does not prove that a server is running or that its live tool definitions match the declaration. Failed or inaccessible inputs must remain visible in coverage.
+
+Additional review commands:
+
+```bash
+nexus-symbiote baseline /path/to/agent-project -o reviewed-baseline.json
+nexus-symbiote vex agentbom.json -o findings.vex.json
+nexus-symbiote advisories agentbom.json -o advisories.json
+```
+
+`baseline` publishes an unsigned snapshot only after collection and risk gates pass; review and authenticate it separately. VEX exports schema-validated inventory findings as `in_triage`, without asserting exploitability. `advisories` explicitly contacts OSV over constrained HTTPS for exact declared PyPI/npm package URLs; unresolved identities and lookup failures return a nonzero status. Unsupported ecosystems are counted as skipped. Manifest references do not prove which artifacts were installed.
+
+SafeTensors fingerprints record header bytes and tensor names, dtypes, shapes and offsets. They describe metadata; changing weight bytes without changing the header leaves those metadata fingerprints unchanged. Whole-file digests remain required for weight-byte integrity. Collection and verification use bounded reads within the supplied root.
+
+`verify-live` requires an independently provisioned launch policy outside the project. It starts only private copies of explicitly pinned standalone POSIX launchers, without project arguments, environment or working directory. For example:
+
+```bash
+nexus-symbiote verify-live agentbom.json --project /path/to/project --launch-policy /operator/launch-policy.json --json-output
+```
+
+The policy maps exact server BOM references to `{"command":"/operator/approved-launcher","sha256":"sha256:<64 lowercase hex characters>"}` records. Acquire pins through a trusted operator channel. `--record` emits a separate unsigned candidate on stdout after complete collection; missing tools prevent candidate emission. It never overwrites the supplied inventory. Run launchers under an externally isolated identity with restricted filesystem and egress; the OS, interpreter and linked dependencies remain trusted. A descriptor match does not establish backend safety or authorization.
+
+For explicitly authorized HTTPS observations, use `discover-mcp ENDPOINT --allowed-origin HTTPS_ORIGIN`. Both commands enumerate served descriptors without calling tools. Review and authenticate their observations separately before using them as approval evidence.
+
+MCP server and tool references are scoped to the relative configuration path and declared name. The same server name in two hosts remains two inventory entries, with separate client links. Existing snapshots using name-only references require review and recollection before comparison or approval.
 
 | Surface | Evidence and limitation |
 | --- | --- |
@@ -112,7 +136,15 @@ nexus-symbiote init
 
 Review `.nexus-symbiote.yaml` as security-relevant configuration. A risk score summarizes findings under a policy; it is not a probability of compromise or a safety certificate. Signatures need explicit subject and signer constraints. Registry membership, trust labels, or model-visible hints must not increase permissions.
 
-Runtime approval integrations govern only calls that pass through their adapter. Use deployment identity, token scopes, sandboxing, and network policy to enforce the surrounding boundary. See the [security model](docs/security-model.md) for the contract, invocation binding, revocation state, and limitations.
+Runtime approval integrations govern only calls that pass through their adapter. Use deployment identity, token scopes, sandboxing, and network policy to enforce the surrounding boundary. See the [security model](docs/security-model.md) and [runtime assurance guide](docs/runtime-assurance.md) for the contract, invocation binding, revocation state, and limitations.
+
+## Reproduce the security regression corpus
+
+```bash
+PYTHONPATH=src python scripts/benchmark_security.py --out benchmark-results.json
+```
+
+The [committed synthetic corpus](benchmarks/README.md) contains inspectable labels and hashes. The runner records its corpus and source digests, tool version, confusion counts, unknowns, denominators, runtime, and Python allocation measurements. Credential-redaction and coverage contracts are separate from detection metrics. These finite hand-authored fixtures support regression evidence, not a representative efficacy estimate or a claim to rank in a particular percentile.
 
 ## Development and releases
 

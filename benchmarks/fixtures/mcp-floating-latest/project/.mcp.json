@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "fixture": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "fixture-mcp@latest"
+      ]
+    }
+  }
+}

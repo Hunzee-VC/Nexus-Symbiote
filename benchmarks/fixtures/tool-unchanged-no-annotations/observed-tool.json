@@ -1,0 +1,12 @@
+{
+  "name": "get_issue",
+  "description": "Read one issue.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "integer"
+      }
+    }
+  }
+}

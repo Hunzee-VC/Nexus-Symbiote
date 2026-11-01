@@ -1,48 +1,162 @@
-"""Import bounded, pre-generated ShadowScan reports without running discovery.
+"""Import untrusted Nexus-ShadowScan reports as *declared* discovery evidence.
 
-Imported claims retain declared assurance and unknown trust. Raw findings and
-arbitrary properties are intentionally omitted; the exact report digest and
-source index link each projection to separately governed source evidence.
+No live collection, artifact execution, identity verification, or security
+attestation occurs here. Report bytes remain a separate sensitive artifact.
 """
 
 from __future__ import annotations
 
-import re
+import hashlib
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import AssuranceLevel, RiskSeverity, TrustTier
-from nexus_symbiote.core.hashing import hash_bytes, parse_json_strict
+from nexus_symbiote.core.hashing import parse_json_strict
 from nexus_symbiote.core.models import (
     AgentComponent,
+    AIBOMMetadata,
+    AnyComponent,
+    CompletenessClaim,
     MCPServerComponent,
     ModelComponent,
     RiskAssessment,
 )
-from nexus_symbiote.scanners.base import Scanner, ScanResult, sanitized_origin
+from nexus_symbiote.scanners.base import Scanner, ScanResult
 from nexus_symbiote.utils.confined import ConfinedCollection
-from nexus_symbiote.utils.secrets import redact_text
 
+MAX_REPORT_BYTES = 16 * 1024 * 1024
 MAX_FINDINGS = 10_000
+_ALLOWED_SURFACES = frozenset(
+    {"code", "identity", "gateway", "lowcode", "saas", "cloud", "endpoint", "network", "runtime"}
+)
 
 
-def _label(value: Any) -> str:
-    if not isinstance(value, str) or len(value) > 4096:
-        raise ValueError("invalid imported label")
-    value = redact_text(value)
-    return re.sub(
-        r"[a-zA-Z][a-zA-Z0-9+.-]*://[^\s\"'<>]+",
-        lambda match: sanitized_origin(match.group()),
-        value,
-    )
+@dataclass
+class ImportedReport:
+    components: list[AnyComponent] = field(default_factory=list)
+    digest: str = ""
+    source_format: str = ""
+    source_status: str = "unknown"
+    unmapped_count: int = 0
+    unmapped_indexes: list[int] = field(default_factory=list)
+    limitations: list[str] = field(default_factory=list)
+
+    def to_native_bom(self) -> AIBOM:
+        """Reproduce a direct native import without promoting source assertions."""
+        aibom = AIBOM(metadata=AIBOMMetadata(authors=[]))
+        for component in self.components:
+            aibom.add_component(component)
+        aibom.metadata.completeness = CompletenessClaim(
+            scope="shadowscan-imported",
+            surfaces_scanned=["shadowscan:report"],
+            surfaces_excluded=self.limitations,
+            scan_failures=(
+                []
+                if self.source_status == "complete"
+                else ["ShadowScan source report is incomplete or has unknown status"]
+            ),
+            scanner_status={"shadowscan": "partial"},
+            source_report_digest=self.digest,
+            source_report_format=self.source_format,
+            source_report_status=self.source_status,
+            source_unmapped_count=self.unmapped_count,
+            source_unmapped_indexes=self.unmapped_indexes,
+            assurance_level=AssuranceLevel.DECLARED,
+            collectors_requested=["shadowscan"],
+            collectors_completed=["shadowscan"],
+            unobserved_surfaces=["runtime", "effective-identity", "effective-authorization"],
+        )
+        return aibom
+
+
+def _short_hash(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _risks(level: Any, shadow: Any) -> list[RiskAssessment]:
+    findings: list[RiskAssessment] = []
+    levels = {x.value: x for x in RiskSeverity}
+    if isinstance(level, str) and level in levels:
+        findings.append(
+            RiskAssessment(
+                severity=levels[level],
+                category="shadowscan-heuristic",
+                detail=f"ShadowScan heuristic risk: {level}; not an independently verified vulnerability.",
+                recommendation="Review the original source evidence and verify under policy.",
+            )
+        )
+    if shadow is True:
+        findings.append(
+            RiskAssessment(
+                severity=RiskSeverity.INFO,
+                category="shadowscan-inventory-unmatched",
+                detail="ShadowScan reports no matching entry in its supplied inventory; authorization is not established.",
+                recommendation="Verify inventory scope and reconcile the source finding.",
+            )
+        )
+    return findings
+
+
+def _make_component(
+    kind: str,
+    source_id: str,
+    index: int,
+    digest: str,
+    surface: str | None,
+    level: Any,
+    shadow: Any,
+    *,
+    cdx_model: bool = False,
+    cdx_mcp: bool = False,
+) -> AnyComponent | None:
+    identity_hash = _short_hash(source_id)
+    ref = "shadowscan:" + identity_hash
+    props: dict[str, Any] = {
+        "shadowscan:report-sha256": digest,
+        "shadowscan:finding-index": index,
+        "shadowscan:source-id-sha256": identity_hash,
+        "collection_mode": "imported-unverified-report",
+    }
+    if surface in _ALLOWED_SURFACES:
+        props["shadowscan:surface"] = surface
+    if kind in {"agent", "mcp-server", "local-model", "model"}:
+        props["shadowscan:kind"] = kind
+    if isinstance(shadow, bool):
+        props["shadowscan:inventory-unmatched"] = shadow
+    risks = _risks(level, shadow)
+    safe_kind = kind if kind in {"agent", "mcp-server", "local-model", "model"} else "component"
+    common: dict[str, Any] = {
+        "bom_ref": ref,
+        "name": "ShadowScan " + safe_kind + " " + identity_hash[:12],
+        "trust_tier": TrustTier.UNKNOWN,
+        "assurance_level": AssuranceLevel.DECLARED,
+        "properties": props,
+        "risks": risks,
+    }
+    if kind == "mcp-server" or cdx_mcp:
+        return MCPServerComponent(**common)
+    if kind in {"local-model", "model"} or cdx_model:
+        return ModelComponent(**common)
+    if kind == "agent":
+        return AgentComponent(autonomy_level=None, **common)
+    return None
 
 
 class ShadowScanImporter(Scanner):
+    """Import supported ShadowScan JSON and CycloneDX observations conservatively."""
+
     name = "shadowscan"
 
     def scan(self, project_root: Path) -> ScanResult:
         result = ScanResult(scanner_name=self.name)
-        with self._collection(project_root, result) as files:
+        with self._collection(
+            project_root,
+            result,
+            max_file_bytes=MAX_REPORT_BYTES,
+            max_total_bytes=MAX_REPORT_BYTES,
+        ) as files:
             for relative in (
                 ".shadowscan/report.json",
                 "shadowscan-report.json",
@@ -51,189 +165,218 @@ class ShadowScanImporter(Scanner):
                 raw = files.read_bytes(relative, missing_ok=True)
                 if raw is None:
                     continue
-                result.surfaces_scanned.append(str(files.root / relative))
                 try:
-                    result.components.extend(self._import_bytes(raw))
-                except (ValueError, TypeError, RecursionError):
+                    imported = self._import_bytes(raw)
+                except (ValueError, TypeError, UnicodeError, RecursionError):
+                    result.scan_failures.append("ShadowScan report could not be safely imported")
+                    break
+                result.components.extend(imported.components)
+                result.source_report_digest = imported.digest
+                result.source_report_format = imported.source_format
+                result.source_report_status = imported.source_status
+                result.source_unmapped_count = imported.unmapped_count
+                result.source_unmapped_indexes = imported.unmapped_indexes
+                result.surfaces_scanned.append("shadowscan:report")
+                result.surfaces_excluded.extend(imported.limitations)
+                if imported.source_status != "complete":
                     result.scan_failures.append(
-                        f"{relative}: ShadowScan report rejected (format, fields or limits)"
+                        "ShadowScan source report is incomplete or has unknown status"
                     )
                 break
-        if not result.components and not result.scan_failures:
-            result.surfaces_excluded.append("shadowscan-report (no conventional report file found)")
+        if not result.source_report_digest and not result.scan_failures:
+            result.surfaces_excluded.append("shadowscan-report (no report found)")
         return result
 
-    def import_report(self, report_path: Path) -> list[Any]:
-        """Import an explicit caller-selected local report, never a subprocess.
+    def import_report(self, report_path: Path) -> ImportedReport:
+        """Import components together with mandatory coverage and provenance."""
+        return self.read_report(report_path)
 
-        The report's parent is the boundary for this explicit-file API. Automatic
-        scan() instead uses the complete project root and configured exclusions.
-        """
+    def read_report(self, report_path: Path) -> ImportedReport:
         failures: list[str] = []
-        with ConfinedCollection(report_path.parent, failures) as files:
+        with ConfinedCollection(
+            report_path.parent,
+            failures,
+            max_file_bytes=MAX_REPORT_BYTES,
+            max_total_bytes=MAX_REPORT_BYTES,
+        ) as files:
             raw = files.read_bytes(report_path.name)
-        if raw is None:
+        if raw is None or failures:
             raise ValueError("ShadowScan report unavailable or outside safe read limits")
-        try:
-            return self._import_bytes(raw)
-        except (ValueError, TypeError, RecursionError) as exc:
-            raise ValueError("ShadowScan report rejected (format, fields or limits)") from exc
+        return self._import_bytes(raw)
 
-    def _import_bytes(self, raw: bytes) -> list[Any]:
-        data = parse_json_strict(raw, max_bytes=4 * 1024 * 1024)
-        report_hash = hash_bytes(raw)
-        if isinstance(data, dict) and data.get("bomFormat") == "CycloneDX":
-            components = self._from_cyclonedx(data, report_hash)
-        elif isinstance(data, dict) and "findings" in data:
-            components = self._from_native(data["findings"], report_hash)
-        elif isinstance(data, list):
-            components = self._from_native(data, report_hash)
+    def parse_report(self, text: str | bytes) -> ImportedReport:
+        """Parse the exact bounded bytes used for digest and signature verification."""
+        return self._import_bytes(text.encode("utf-8") if isinstance(text, str) else text)
+
+    def _import_bytes(self, raw: bytes) -> ImportedReport:
+        data = parse_json_strict(raw, max_bytes=MAX_REPORT_BYTES)
+        if not isinstance(data, dict):
+            raise ValueError("expected a ShadowScan report object")
+        digest = "sha256:" + hashlib.sha256(raw).hexdigest()
+        if data.get("bomFormat") == "CycloneDX":
+            result = self._from_cyclonedx(data, digest)
         else:
-            raise ValueError("unrecognized ShadowScan report format")
-        identifiers = [component.bom_ref for component in components]
-        if len(set(identifiers)) != len(identifiers):
-            raise ValueError("duplicate imported component identity")
-        return components
+            result = self._from_native(data, digest)
+        # Discovery is not a verified, complete BOM even when source scan is complete.
+        result.limitations.append(
+            "ShadowScan discovery is a source claim; artifact integrity and full BOM coverage are unverified"
+        )
+        result.limitations.append(
+            "Names, detailed evidence, models, and relationships remain in the source report and are not mapped"
+        )
+        if result.unmapped_count:
+            result.limitations.append(
+                f"{result.unmapped_count} source entries were not mapped into BOM components"
+            )
+        return result
 
-    def _from_native(self, findings: Any, report_hash: str = "") -> list[Any]:
-        if not isinstance(findings, list) or len(findings) > MAX_FINDINGS:
-            raise ValueError("invalid or oversized finding list")
-        components: list[Any] = []
+    def _from_native(self, data: dict[str, Any], digest: str) -> ImportedReport:
+        findings, stats, summary = data.get("findings"), data.get("stats"), data.get("summary")
+        if (
+            not isinstance(data.get("version"), str)
+            or not isinstance(findings, list)
+            or len(findings) > MAX_FINDINGS
+        ):
+            raise ValueError("invalid ShadowScan report envelope")
+        if not isinstance(stats, list) or not isinstance(summary, dict):
+            raise ValueError("ShadowScan report must include stats and summary")
+        complete = summary.get("complete") is True and bool(stats)
+        for stat in stats:
+            if (
+                not isinstance(stat, dict)
+                or not isinstance(stat.get("errors"), list)
+                or not isinstance(stat.get("skipped"), bool)
+                or not isinstance(stat.get("incomplete"), bool)
+            ):
+                raise ValueError("invalid ShadowScan connector statistics")
+            if stat["errors"] or stat["skipped"] or stat["incomplete"]:
+                complete = False
+            omissions = stat.get("declared_omissions", 0)
+            if not isinstance(omissions, int) or isinstance(omissions, bool) or omissions != 0:
+                complete = False
+        for key in ("declared_omissions", "tolerated_gaps"):
+            value = summary.get(key)
+            if not isinstance(value, int) or isinstance(value, bool) or value != 0:
+                complete = False
+        result = ImportedReport(
+            digest=digest,
+            source_format="shadowscan-json",
+            source_status="complete" if complete else "incomplete",
+        )
+        ids: set[str] = set()
         for index, finding in enumerate(findings):
-            if not isinstance(finding, dict):
-                raise ValueError("invalid finding object")
-            kind = _label(finding.get("kind", "")).lower()
-            title = _label(
-                finding.get("title") or finding.get("resource") or "discovered-component"
+            if (
+                not isinstance(finding, dict)
+                or not isinstance(finding.get("id"), str)
+                or not finding["id"]
+                or len(finding["id"]) > 4096
+            ):
+                raise ValueError("invalid ShadowScan finding or identifier")
+            source_id = finding["id"]
+            if source_id in ids:
+                raise ValueError("duplicate ShadowScan finding identifier")
+            ids.add(source_id)
+            kind, surface = finding.get("kind"), finding.get("surface")
+            if not isinstance(kind, str) or not isinstance(surface, str):
+                raise ValueError("invalid ShadowScan finding kind or surface")
+            risk = finding.get("risk")
+            level = risk.get("level") if isinstance(risk, dict) else None
+            comp = _make_component(
+                kind, source_id, index, digest, surface, level, finding.get("shadow")
             )
-            reference = _label(finding.get("id") or f"shadowscan:{kind}:{title}")
-            resource = finding.get("resource")
-            resource = _label(resource) if resource is not None else None
-            connector = _label(finding.get("connector", "")).lower()
-            resource_type = _label(finding.get("resource_type", "")).lower()
-            fields = {
-                "bom_ref": reference,
-                "name": title,
-                "source_path": resource,
-                "trust_tier": TrustTier.UNKNOWN,
-                "assurance_level": AssuranceLevel.DECLARED,
-                "risks": self._map_risks(finding),
-                "properties": {
-                    "shadowscan:kind": kind,
-                    "shadowscan:report_hash": report_hash,
-                    "shadowscan:source_index": index,
-                    "shadowscan:raw_payload_omitted": True,
-                    "collection_mode": "imported-unverified-report",
-                },
-            }
-            if kind in {"mcp-server", "mcp"} or "mcp" in connector:
-                components.append(MCPServerComponent(**fields))
-            elif kind in {"local-model", "model"} or "model" in resource_type:
-                components.append(ModelComponent(**fields))
+            if comp is None:
+                result.unmapped_count += 1
+                result.unmapped_indexes.append(index)
             else:
-                # Preserve the upstream generic-agent projection without treating
-                # its kind, privileges or autonomy as independently established.
-                components.append(AgentComponent(**fields))
-        return components
+                result.components.append(comp)
+        return result
 
-    def _from_cyclonedx(self, bom: dict[str, Any], report_hash: str = "") -> list[Any]:
-        source = bom.get("components", [])
-        if not isinstance(source, list) or len(source) > MAX_FINDINGS:
-            raise ValueError("invalid or oversized CycloneDX components")
-        components: list[Any] = []
-        for index, component in enumerate(source):
-            if not isinstance(component, dict):
-                raise ValueError("invalid CycloneDX component")
-            properties = component.get("properties", [])
-            if not isinstance(properties, list) or len(properties) > 1000:
-                raise ValueError("invalid CycloneDX properties")
-            selected: dict[str, str] = {}
-            for prop in properties:
-                if (
-                    not isinstance(prop, dict)
-                    or not isinstance(prop.get("name"), str)
-                    or not isinstance(prop.get("value"), str)
-                ):
-                    raise ValueError("invalid CycloneDX property record")
-                if prop["name"] in {"shadowscan:kind", "shadowscan:heuristic-risk"}:
-                    if prop["name"] in selected:
-                        raise ValueError("ambiguous duplicate property")
-                    selected[prop["name"]] = _label(prop["value"])
-            kind = selected.get("shadowscan:kind", "").lower()
-            name = _label(component.get("name", "unknown"))
-            reference = _label(component.get("bom-ref", f"cdx:{name}"))
-            fields = {
-                "bom_ref": reference,
-                "name": name,
-                "trust_tier": TrustTier.UNKNOWN,
-                "assurance_level": AssuranceLevel.DECLARED,
-                "risks": self._map_risks_from_props(selected),
-                "properties": {
-                    "shadowscan:kind": kind,
-                    "shadowscan:report_hash": report_hash,
-                    "shadowscan:source_index": index,
-                    "shadowscan:raw_payload_omitted": True,
-                    "collection_mode": "imported-unverified-report",
-                },
-            }
-            if "mcp" in kind or component.get("group") == "mcp-server":
-                components.append(MCPServerComponent(**fields))
-            elif component.get("type") == "machine-learning-model" or "model" in kind:
-                components.append(ModelComponent(**fields))
+    def _from_cyclonedx(self, data: dict[str, Any], digest: str) -> ImportedReport:
+        meta = data.get("metadata")
+        if data.get("specVersion") not in ("1.6", "1.7") or not isinstance(meta, dict):
+            raise ValueError("unsupported ShadowScan CycloneDX envelope")
+        props = _properties(meta.get("properties", []))
+        status = props.get("shadowscan:scan:status")
+        if status not in ("complete", "incomplete"):
+            raise ValueError("CycloneDX document lacks ShadowScan scan status")
+        result = ImportedReport(
+            digest=digest, source_format="shadowscan-cyclonedx", source_status=status
+        )
+        compositions = data.get("compositions")
+        if not isinstance(compositions, list) or not compositions:
+            result.limitations.append("CycloneDX composition completeness is not reported")
+        elif any(
+            not isinstance(c, dict) or c.get("aggregate") not in {"unknown", "complete"}
+            for c in compositions
+        ):
+            result.limitations.append("CycloneDX source declares incomplete composition")
+        for key in (
+            "shadowscan:bom:truncated-findings",
+            "shadowscan:scan:credential-findings-excluded",
+        ):
+            if props.get(key) not in (None, "0"):
+                result.limitations.append("CycloneDX source omits or truncates findings")
+        # CycloneDX is a lossy projection of discovery; it cannot prove full report coverage.
+        result.limitations.append(
+            "CycloneDX source omits or summarizes discovery evidence and relationships"
+        )
+        ids: set[str] = set()
+        entries = []
+        for key in ("components", "services"):
+            items = data.get(key, [])
+            if not isinstance(items, list):
+                raise ValueError("invalid CycloneDX component list")
+            entries.extend(items)
+        if len(entries) > MAX_FINDINGS:
+            raise ValueError("too many CycloneDX entries")
+        for index, entry in enumerate(entries):
+            if (
+                not isinstance(entry, dict)
+                or not isinstance(entry.get("bom-ref"), str)
+                or not entry["bom-ref"]
+                or len(entry["bom-ref"]) > 4096
+            ):
+                raise ValueError("invalid CycloneDX entry")
+            ref = entry["bom-ref"]
+            if ref in ids:
+                raise ValueError("duplicate CycloneDX bom-ref")
+            ids.add(ref)
+            p = _properties(entry.get("properties", []))
+            kind = p.get("shadowscan:kind", "")
+            shadow = {"true": True, "false": False}.get(p.get("shadowscan:shadow", ""))
+            comp = _make_component(
+                kind,
+                ref,
+                index,
+                digest,
+                p.get("shadowscan:surface"),
+                p.get("shadowscan:heuristic-risk"),
+                shadow,
+                cdx_model=entry.get("type") == "machine-learning-model",
+                cdx_mcp=entry.get("group") == "mcp-server",
+            )
+            if comp is None:
+                result.unmapped_count += 1
+                result.unmapped_indexes.append(index)
             else:
-                components.append(AgentComponent(**fields))
-        return components
+                result.components.append(comp)
+        return result
 
-    @staticmethod
-    def _risk_level(level: Any) -> RiskSeverity:
-        if not isinstance(level, str):
-            raise ValueError("invalid risk level")
-        return {
-            "critical": RiskSeverity.CRITICAL,
-            "high": RiskSeverity.HIGH,
-            "medium": RiskSeverity.MEDIUM,
-            "low": RiskSeverity.LOW,
-            "info": RiskSeverity.INFO,
-        }.get(level.lower(), RiskSeverity.INFO)
 
-    def _map_risks(self, finding: dict[str, Any]) -> list[RiskAssessment]:
-        risks: list[RiskAssessment] = []
-        risk = finding.get("risk")
-        if risk is not None:
-            if not isinstance(risk, dict):
-                raise ValueError("invalid finding risk")
-            severity = self._risk_level(risk.get("level", "info"))
-            score = risk.get("score")
-            if score is not None and (type(score) not in (int, float) or not 0 <= score <= 100):
-                raise ValueError("invalid finding risk score")
-            risks.append(
-                RiskAssessment(
-                    severity=severity,
-                    category="shadowscan-heuristic",
-                    detail=f"Imported ShadowScan heuristic risk {severity.value}; not independently verified.",
-                    recommendation="Review source evidence and apply independent deployment policy.",
-                )
-            )
-        if finding.get("shadow") is True:
-            risks.append(
-                RiskAssessment(
-                    severity=RiskSeverity.HIGH,
-                    category="shadow-agent",
-                    detail="Source report marks this finding as absent from its approved inventory.",
-                    recommendation="Verify report coverage and reconcile against the enterprise registry.",
-                )
-            )
-        return risks
-
-    def _map_risks_from_props(self, props: dict[str, str]) -> list[RiskAssessment]:
-        level = props.get("shadowscan:heuristic-risk")
-        if not level:
-            return []
-        severity = self._risk_level(level)
-        return [
-            RiskAssessment(
-                severity=severity,
-                category="shadowscan-heuristic",
-                detail=f"Imported ShadowScan heuristic risk {severity.value}; not independently verified.",
-            )
-        ]
+def _properties(value: Any) -> dict[str, str]:
+    if not isinstance(value, list):
+        raise ValueError("invalid CycloneDX properties")
+    result: dict[str, str] = {}
+    for item in value:
+        if (
+            not isinstance(item, dict)
+            or not isinstance(item.get("name"), str)
+            or not isinstance(item.get("value"), str)
+        ):
+            raise ValueError("invalid CycloneDX property")
+        name = item["name"]
+        if name.startswith("shadowscan:"):
+            if name in result:
+                raise ValueError("duplicate ShadowScan property")
+            result[name] = item["value"]
+    return result

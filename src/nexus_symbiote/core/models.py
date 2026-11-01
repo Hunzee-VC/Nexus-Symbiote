@@ -47,8 +47,6 @@ class ClaimEvidence(InventoryModel):
 class ComponentBase(InventoryModel):
     """Base for every AgentBOM component."""
 
-    model_config = ConfigDict(extra="forbid")
-
     bom_ref: str = Field(description="Unique reference within this BOM")
     component_type: ComponentType
     name: str
@@ -163,8 +161,7 @@ class MCPServerComponent(ComponentBase):
     registry_source: str | None = None
     version_pinned: bool | None = Field(
         default=None,
-        description="True when pinned to an exact version; None when there is no "
-        "package reference to pin (not applicable, not a finding)",
+        description="Exact declared package reference; null when no package is declared",
     )
     schema_hash: str | None = Field(
         default=None,
@@ -234,21 +231,13 @@ class ModelComponent(ComponentBase):
     chat_template_hash: str | None = None
     tensor_inventory_hash: str | None = Field(
         default=None,
-        description="Digest of the sorted tensor inventory; detects single-tensor tampering "
-        "that a whole-file hash cannot distinguish",
+        description="SHA-256 of tensor names, dtypes, shapes and offsets; not tensor bytes",
     )
     safetensors_header_hash: str | None = None
     trust_remote_code: bool | None = Field(
         default=None, description="Declared configuration only; the runtime value may differ"
     )
     risks: list[RiskAssessment] = Field(default_factory=list)
-
-    @property
-    def unverified_safetensors(self) -> bool:
-        return (
-            self.serialization_format in {"safetensors", "safe-tensors"}
-            and self.serialization_safety == SerializationSafety.UNKNOWN
-        )
 
 
 class PromptComponent(ComponentBase):
@@ -343,6 +332,10 @@ class RegistryEntryComponent(ComponentBase):
     """A registry from which components are discovered or installed."""
 
     component_type: Literal[ComponentType.REGISTRY_ENTRY] = ComponentType.REGISTRY_ENTRY
+    package_url: str | None = Field(
+        default=None,
+        description="Declared exact package URL; not proof of installed artifact identity",
+    )
     registry_type: str | None = Field(
         default=None,
         description="npm, pypi, huggingface, mcp-registry, skill-marketplace, docker-hub",
@@ -386,7 +379,7 @@ class MCPClientComponent(ComponentBase):
 class A2AClientComponent(ComponentBase):
     """An A2A protocol client that discovers and invokes remote agents."""
 
-    component_type: ComponentType = ComponentType.A2A_CLIENT
+    component_type: Literal[ComponentType.A2A_CLIENT] = ComponentType.A2A_CLIENT
     agent_card_url: str | None = Field(default=None, description="URL of the remote agent card")
     supported_protocols: list[str] = Field(default_factory=list)
     authentication_methods: list[str] = Field(default_factory=list)
@@ -456,6 +449,16 @@ class CompletenessClaim(InventoryModel):
     collectors_completed: list[str] = Field(default_factory=list)
     unobserved_surfaces: list[str] = Field(default_factory=list)
     exclusions: list[str] = Field(default_factory=list)
+
+    source_report_digest: str | None = Field(
+        default=None,
+        pattern=r"^sha256:[0-9a-f]{64}$",
+        description="SHA-256 of exact imported report bytes, not producer authentication",
+    )
+    source_report_format: Literal["shadowscan-json", "shadowscan-cyclonedx"] | None = None
+    source_report_status: Literal["complete", "incomplete", "unknown"] | None = None
+    source_unmapped_count: int = Field(default=0, ge=0)
+    source_unmapped_indexes: list[Annotated[int, Field(ge=0)]] = Field(default_factory=list)
 
     scanner_status: dict[str, str] = Field(default_factory=dict)
 

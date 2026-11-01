@@ -1165,6 +1165,67 @@
           "title": "Exclusions",
           "type": "array"
         },
+        "source_report_digest": {
+          "anyOf": [
+            {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "SHA-256 of exact imported report bytes, not producer authentication",
+          "title": "Source Report Digest"
+        },
+        "source_report_format": {
+          "anyOf": [
+            {
+              "enum": [
+                "shadowscan-json",
+                "shadowscan-cyclonedx"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Report Format"
+        },
+        "source_report_status": {
+          "anyOf": [
+            {
+              "enum": [
+                "complete",
+                "incomplete",
+                "unknown"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Report Status"
+        },
+        "source_unmapped_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Source Unmapped Count",
+          "type": "integer"
+        },
+        "source_unmapped_indexes": {
+          "items": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "title": "Source Unmapped Indexes",
+          "type": "array"
+        },
         "scanner_status": {
           "additionalProperties": {
             "type": "string"
@@ -2231,9 +2292,17 @@
           "title": "Registry Source"
         },
         "version_pinned": {
-          "default": false,
-          "title": "Version Pinned",
-          "type": "boolean"
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Exact declared package reference; null when no package is declared",
+          "title": "Version Pinned"
         },
         "schema_hash": {
           "anyOf": [
@@ -2697,6 +2766,31 @@
           ],
           "default": null,
           "title": "Chat Template Hash"
+        },
+        "tensor_inventory_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "SHA-256 of tensor names, dtypes, shapes and offsets; not tensor bytes",
+          "title": "Tensor Inventory Hash"
+        },
+        "safetensors_header_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Safetensors Header Hash"
         },
         "trust_remote_code": {
           "anyOf": [
@@ -3201,6 +3295,19 @@
           },
           "title": "Claims",
           "type": "object"
+        },
+        "package_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Declared exact package URL; not proof of installed artifact identity",
+          "title": "Package Url"
         },
         "registry_type": {
           "anyOf": [
@@ -3954,7 +4061,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "Agent Bill of Materials — the complete supply chain inventory.",
+  "description": "Agent Bill of Materials \u2014 the complete supply chain inventory.",
   "properties": {
     "metadata": {
       "$ref": "#/$defs/AIBOMMetadata"
@@ -4045,7 +4152,5 @@
     }
   },
   "title": "AIBOM",
-  "type": "object",
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/aisecnomad/nexus-symbiote/schemas/nexus-symbiote-aibom-1.0.schema.json"
+  "type": "object"
 }

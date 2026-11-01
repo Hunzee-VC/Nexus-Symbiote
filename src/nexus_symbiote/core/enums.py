@@ -77,7 +77,6 @@ class RiskSeverity(str, Enum):
 
 
 class AutonomyLevel(str, Enum):
-    UNKNOWN = "unknown"
     L0_CHATBOT = "L0-chatbot"
     L1_COPILOT = "L1-copilot"
     L2_AGENT = "L2-agent"

@@ -22,6 +22,8 @@ Treat ShadowScan reports, CycloneDX imports, A2A cards, IDE settings, and extens
 
 Static collection must not execute project modules, model loaders, repository hooks, or MCP launch commands. Treat repositories, model files, tool metadata, registry records, and imported BOMs as hostile input. Run scans with read-only access and without deployment or publication credentials.
 
+`verify-live` is an explicit execution operation. Its operator-owned launch policy must be outside the scanned project and binds exact server references to independently obtained executable SHA-256 pins. It stages the approved bytes privately, passes no project arguments, clears inherited environment variables, uses a private working directory and terminates the process group after bounded protocol collection. It invokes no tools. Launcher pins do not authenticate the OS, interpreter, linked libraries or other host dependencies. Execute launchers in an externally isolated worker with resource limits and restricted filesystem, identity and network access. `--record` emits a separate unsigned candidate, not an approval or admission decision; incomplete observations and missing tools fail closed.
+
 A signature proves that authorized key material signed particular bytes under the verifier's policy. It does not prove that the content is accurate or safe. A matching tool descriptor cannot prove that the backend behaves as declared. Enforcement integrations govern only calls actually mediated by those integrations.
 
 Agent inventories can expose infrastructure, permissions, endpoints, and instruction fingerprints. Restrict access to exported evidence and review its contents before sharing it. Keep raw credentials out of BOMs, logs, and issue reports.

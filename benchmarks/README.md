@@ -1,17 +1,19 @@
-# Inventory regression corpus
+# Synthetic security regression corpus
 
-From a Nexus SymBiote development install run `python benchmarks/run_inventory.py`. The command prints per-case predictions, missed and unexpected tool names, control outcomes and counts. It returns nonzero on any mismatch. Run offline. Cases extract declared tools without executing repository code.
+This small, committed corpus checks named security conditions and control contracts. It is not a representative sample of production agents, does not estimate population efficacy, and supports no competitive ranking or percentile claim.
 
-The upstream server and its license are in `fixtures/upstream`. The manifest pins the commit, blob and SHA-256, and points to the upstream test that enumerates the expected tools. The remaining cases are hand-labeled regression fixtures. True negatives count only explicitly labeled decoys. This development corpus measures neither production accuracy nor held-out performance.
+Each case has an inspectable label, rationale, task, and SHA-256 manifest of exact inputs. The harness calls the installed Nexus SymBiote scanners and validators. Detection outcomes are computed from their outputs, not from the label. Labels are used only after evaluation for confusion counts. No fixture launches a tool, loads a model, or contacts a service. The SafeTensors fixture is a valid single zero-valued F32 tensor, not a trained model; pickle fixtures contain only inert serialized data and are never deserialized.
 
-### Sign and check a result
+Run from a reviewed checkout with its dependencies installed:
 
-Install the project's Sigstore extra. Prepare the evidence directory on a trusted checkout. Sign the statement with the release operator's authorized OIDC identity. Consumers can verify the exact result bytes offline with their own signer and issuer policy.
-
-```sh
-python benchmarks/evidence.py prepare run
-python -m sigstore sign --bundle run/statement.sigstore.json run/statement.json
-python benchmarks/evidence.py verify run --identity "$EXPECTED_SIGNER" --issuer "$EXPECTED_ISSUER"
+```bash
+PYTHONPATH=src python scripts/benchmark_security.py --out benchmark-results.json
 ```
 
-The statement binds the output, the corpus, the runner, and the installed scanner source. It records Python and key library versions. Add `--compare-installation` to require the local scanner, fixtures and runner to match. Publish `results.json`, `statement.json`, and the signature bundle together.
+The default corpus is `benchmarks/manifest.json`. `--manifest` selects another manifest under the same schema. A file hash mismatch, symlink, undeclared input file, invalid case, or duplicate case ID fails the run instead of quietly modifying the denominator. The output records corpus and runner digests, imported source digests, tool version, source Git revision and dirty state, platform, elapsed time, and Python traced peak allocation. Traced allocation is not whole-process resident memory.
+
+Detection metrics include TP, FP, TN, FN, precision, recall, F1, specificity, and their denominators. A missing prerequisite or incomplete collection yields `unknown`; unknown predictions are excluded explicitly, and the report records their known labels separately so recall cannot conceal abstentions. Metrics are additionally separated by condition kind. Different kinds test different policies and their aggregate is only a regression summary.
+
+Credential disclosure and collection-failure coverage are control contracts, reported separately from detection metrics. Their outcomes must not inflate TP/TN. The plaintext fixture secret is a public synthetic sentinel; tests check that this literal is absent from actual native, CycloneDX, SPDX, and SARIF exports.
+
+The corpus is intentionally finite. Blind spots include real signed provider bundles, undocumented hosted-model revisions, deployed endpoint authentication, runtime revocation races, multi-tenant retrieval ACLs, framework diversity, and adversarial obfuscation beyond these fixtures. Expanding the corpus requires reviewed labels, independent fixture hashes, negative controls, and a documented sampling rationale. A perfect result on this corpus is not a safety or completeness certificate.

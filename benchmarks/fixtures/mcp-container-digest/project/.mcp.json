@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "fixture": {
+      "command": "docker",
+      "args": [
+        "run",
+        "--rm",
+        "fixture/mcp@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ]
+    }
+  }
+}

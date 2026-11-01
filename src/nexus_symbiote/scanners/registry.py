@@ -6,14 +6,18 @@ installed versions, or cryptographic verification.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import re
 import tomllib
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
-from nexus_symbiote.core.enums import RiskSeverity, TrustTier
-from nexus_symbiote.core.models import RegistryEntryComponent, RiskAssessment
-from nexus_symbiote.scanners.base import Scanner, ScanResult
+from nexus_symbiote.core.enums import AssuranceLevel, RiskSeverity, TrustTier
+from nexus_symbiote.core.hashing import hash_bytes, parse_json_strict
+from nexus_symbiote.core.models import ClaimEvidence, RegistryEntryComponent, RiskAssessment
+from nexus_symbiote.scanners.base import Scanner, ScanResult, sanitized_origin
 from nexus_symbiote.utils.secrets import redact_text
 
 AI_PACKAGE_PATTERNS = [
@@ -65,11 +69,119 @@ class RegistryScanner(Scanner):
                 result.scan_failures.append(f"package.json: invalid {key} map")
                 continue
             all_deps.update(deps)
+        # Parse and bind the same bounded bytes; a second open for hashing could
+        # associate a swapped lockfile with a previously parsed resolution.
+        lock_path = root / "package-lock.json"
+        lock_bytes = self._files.read_bytes(lock_path, missing_ok=True)
+        resolutions: dict[str, Any] = {}
+        lock_digest = None
+        if lock_bytes is not None:
+            result.surfaces_scanned.append("package-lock.json")
+            try:
+                lock = parse_json_strict(lock_bytes)
+                if (
+                    not isinstance(lock, dict)
+                    or not isinstance(lock.get("packages"), dict)
+                    or (
+                        lock.get("lockfileVersion") is not None
+                        and (
+                            type(lock["lockfileVersion"]) is not int
+                            or lock["lockfileVersion"] not in (2, 3)
+                        )
+                    )
+                ):
+                    raise ValueError("unsupported npm lockfile structure")
+                resolutions = lock["packages"]
+                lock_digest = hash_bytes(lock_bytes)
+            except (ValueError, TypeError, UnicodeError, RecursionError):
+                result.scan_failures.append("package-lock.json: invalid or unsupported lockfile")
         components: list[RegistryEntryComponent] = []
         for raw_name, raw_spec in sorted(all_deps.items()):
             if not self._is_ai_package(raw_name):
                 continue
             name, spec = redact_text(raw_name), redact_text(raw_spec)
+            properties: dict[str, Any] = {
+                "collection_mode": "manifest-reference",
+                "registry_origin_verified": False,
+                "requested_version": spec,
+            }
+            claims: dict[str, ClaimEvidence] = {}
+            version = spec
+            registry_origin = None
+            source = str(path)
+            key = "node_modules/" + raw_name
+            record = resolutions.get(key)
+            if record is not None:
+                if not isinstance(record, dict):
+                    result.scan_failures.append(
+                        "package-lock.json: invalid selected package record"
+                    )
+                elif record.get("name", raw_name) != raw_name:
+                    result.surfaces_excluded.append(
+                        "package-lock.json: aliased package identity is unresolved"
+                    )
+                elif record.get("link") is True:
+                    result.surfaces_excluded.append(
+                        "package-lock.json: local link resolution is unverified"
+                    )
+                else:
+                    resolved_version = record.get("version")
+                    if (
+                        isinstance(resolved_version, str)
+                        and len(resolved_version) <= 128
+                        and re.fullmatch(
+                            r"\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?",
+                            resolved_version,
+                        )
+                    ):
+                        version = resolved_version
+                    else:
+                        result.scan_failures.append(
+                            "package-lock.json: selected package lacks an exact version"
+                        )
+                    locator = "package-lock.json#/packages/" + key.replace("~", "~0").replace(
+                        "/", "~1"
+                    )
+                    # Keep only source origin; paths, credentials and signed URLs
+                    # are not needed to identify this declared registry reference.
+                    url = record.get("resolved")
+                    if isinstance(url, str) and url.startswith(("https://", "http://")):
+                        origin = sanitized_origin(url)
+                        registry_origin = origin if origin != "[redacted]" else None
+                    properties.update(
+                        {
+                            "collection_mode": "lockfile-resolution-claim",
+                            "lockfile_sha256": lock_digest,
+                            "lockfile_record": locator,
+                            "artifact_verified": False,
+                        }
+                    )
+                    claims["package_resolution"] = ClaimEvidence(
+                        assurance=AssuranceLevel.DECLARED,
+                        method="npm-lockfile",
+                        scope="dependency-resolution",
+                        collector="registry",
+                        locator=locator,
+                    )
+                    source = "package-lock.json"
+                    integrity = record.get("integrity")
+                    if integrity is not None:
+                        try:
+                            if not isinstance(integrity, str) or len(integrity) > 1024:
+                                raise ValueError("invalid integrity")
+                            algorithm, encoded = integrity.split("-", 1)
+                            size = {"sha256": 32, "sha384": 48, "sha512": 64}.get(algorithm)
+                            if (
+                                size is None
+                                or len(base64.b64decode(encoded, validate=True)) != size
+                            ):
+                                raise ValueError("invalid integrity")
+                        except (ValueError, binascii.Error):
+                            result.scan_failures.append(
+                                "package-lock.json: invalid selected package integrity"
+                            )
+                        else:
+                            properties["lockfile_integrity"] = integrity
             risks: list[RiskAssessment] = []
             if not re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][a-zA-Z0-9.-]+)?", raw_spec):
                 risks.append(
@@ -84,16 +196,20 @@ class RegistryScanner(Scanner):
                 RegistryEntryComponent(
                     bom_ref=f"registry:npm/{name}",
                     name=name,
-                    version=spec,
+                    version=version,
+                    package_url=(
+                        f"pkg:npm/{quote(name, safe='/')}@{quote(version, safe='')}"
+                        if re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][a-zA-Z0-9.-]+)?", version)
+                        else None
+                    ),
                     registry_type="npm",
-                    registry_uri="https://registry.npmjs.org",
-                    source_path=str(path),
+                    registry_uri=registry_origin,
+                    source_path=source,
                     trust_tier=TrustTier.UNKNOWN,
+                    assurance_level=AssuranceLevel.DECLARED,
                     risks=risks,
-                    properties={
-                        "collection_mode": "manifest-reference",
-                        "registry_origin_verified": False,
-                    },
+                    properties=properties,
+                    claims=claims,
                 )
             )
         return components
@@ -122,6 +238,11 @@ class RegistryScanner(Scanner):
             bom_ref=f"registry:pypi/{name}",
             name=name,
             version=spec or None,
+            package_url=(
+                f"pkg:pypi/{quote(name, safe='')}@{quote(raw_spec[2:], safe='')}"
+                if pinned
+                else None
+            ),
             registry_type="pypi",
             registry_uri="https://pypi.org",
             source_path=str(path),

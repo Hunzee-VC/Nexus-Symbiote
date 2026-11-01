@@ -6,11 +6,14 @@ checks for model signing, and computes weight hashes.
 
 from __future__ import annotations
 
+import hashlib
+import io
 import os
+import pickletools
 from collections.abc import Sequence
 from contextlib import nullcontext
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, cast
 
 from nexus_symbiote.core.enums import (
     RiskSeverity,
@@ -55,6 +58,7 @@ SIGNING_FILES = [
 MAX_HASH_SIZE = 5 * 1024 * 1024 * 1024
 
 MAX_MODEL_HEADER_BYTES = 1024 * 1024
+MAX_PICKLE_INSPECTION_BYTES = 65536
 _DTYPE_BYTES = {
     "BOOL": 1,
     "U8": 1,
@@ -76,6 +80,30 @@ _DTYPE_BYTES = {
 _UNSAFE_SUFFIXES = {".pickle", ".pkl", ".pt", ".pth", ".bin", ".joblib"}
 
 
+def _recognized_binary_pickle(stream: BinaryIO, prefix: bytes, size: int) -> bool:
+    """Recognize bounded binary pickle instructions without loading objects.
+
+    PROTO alone is insufficient: valid tensor header lengths can have the same
+    first byte. Static opcode/stack checks must reach STOP within local limits.
+    This intentionally leaves unsupported, truncated and large samples unknown.
+    """
+    if len(prefix) < 2 or prefix[0] != 0x80 or not 2 <= prefix[1] <= 5:
+        return False
+    sample = prefix + stream.read(max(0, min(size, MAX_PICKLE_INSPECTION_BYTES) - len(prefix)))
+    try:
+        marks = 0
+        for count, (opcode, _, _) in enumerate(pickletools.genops(sample), start=1):
+            marks += opcode.name == "MARK"
+            if count > 4096 or marks > 64:
+                return False
+        # dis() only checks opcode stack/memo consistency; it never resolves
+        # globals, imports artifact code, invokes reducers or constructs objects.
+        pickletools.dis(sample, out=io.StringIO())
+    except (ValueError, UnicodeError, OverflowError, RecursionError):
+        return False
+    return True
+
+
 def inspect_model_format(
     path: Path, *, stream: BinaryIO | None = None
 ) -> tuple[SerializationSafety, str]:
@@ -87,16 +115,29 @@ def inspect_model_format(
     """
     if path.suffix.lower() in _UNSAFE_SUFFIXES:
         return SerializationSafety.UNSAFE_CODE_EXECUTION, "Potential code-executing loader format"
-    if path.suffix.lower() != ".safetensors":
-        return SerializationSafety.UNKNOWN, "No bounded structural validator for this format/loader"
     try:
         context = nullcontext(stream) if stream is not None else open_regular_file(path)
         with context as opened:
             size = os.fstat(opened.fileno()).st_size
             prefix = opened.read(8)
+            length = int.from_bytes(prefix, "little")
+            tensor_candidate = (
+                path.suffix.lower() == ".safetensors"
+                and len(prefix) == 8
+                and 2 <= length <= min(MAX_MODEL_HEADER_BYTES, size - 8)
+            )
+            if not tensor_candidate and _recognized_binary_pickle(opened, prefix, size):
+                return (
+                    SerializationSafety.UNSAFE_CODE_EXECUTION,
+                    "Recognized binary pickle opcode stream; object loading can execute code",
+                )
+            if path.suffix.lower() != ".safetensors":
+                return (
+                    SerializationSafety.UNKNOWN,
+                    "No bounded structural validator for this format/loader",
+                )
             if len(prefix) != 8:
                 raise ValueError("Missing SafeTensors header length")
-            length = int.from_bytes(prefix, "little")
             if not 2 <= length <= MAX_MODEL_HEADER_BYTES or length > size - 8:
                 raise ValueError("Invalid or over-limit SafeTensors header length")
             raw_header = opened.read(length)
@@ -150,72 +191,60 @@ def inspect_model_format(
         return SerializationSafety.UNKNOWN, "Malformed or unsupported SafeTensors structure"
 
 
-@contextmanager
-def _library_path(stream: BinaryIO) -> Iterator[Path]:
-    # The Rust SafeTensors reader takes a filename. Hand it the already-open file.
-    for base in ("/proc/self/fd", "/dev/fd"):
-        alias = Path(base, str(stream.fileno()))
-        if alias.exists():
-            yield alias
-            return
-    # Windows has no descriptor pathname. Parse a private, bounded copy.
-    stream.seek(0)
-    with tempfile.TemporaryDirectory() as tmp:
-        copy = Path(tmp, "weights")
-        total = 0
-        with copy.open("wb") as out:
-            while chunk := stream.read(1024 * 1024):
-                total += len(chunk)
-                if total > MAX_MODEL_BYTES:
-                    raise ValueError("model exceeds scan limit")
-                out.write(chunk)
-        yield copy
+class _HashingModelReader:
+    """Hash the inspected prefix and remaining bytes from one pinned stream."""
+
+    def __init__(self, stream: BinaryIO) -> None:
+        self.stream = stream
+        self.digest = hashlib.sha256()
+        self.bytes_read = 0
+        self.prefix = bytearray()
+
+    def fileno(self) -> int:
+        return self.stream.fileno()
+
+    def read(self, size: int) -> bytes:
+        if self.bytes_read > MAX_HASH_SIZE:
+            raise OSError("model artifact exceeds the hash byte limit")
+        content = self.stream.read(min(size, MAX_HASH_SIZE + 1 - self.bytes_read))
+        self.bytes_read += len(content)
+        if self.bytes_read > MAX_HASH_SIZE:
+            raise OSError("model artifact exceeds the hash byte limit")
+        self.digest.update(content)
+        self.prefix.extend(content[: max(0, MAX_MODEL_HEADER_BYTES + 8 - len(self.prefix))])
+        return content
 
 
-def _inspect_file(path: Path) -> tuple[str, SerializationSafety, str]:
-    ext_format = MODEL_EXTENSIONS[path.suffix.lower()][0]
-    with _open_regular(path, MAX_MODEL_BYTES) as fd, os.fdopen(fd, "rb", closefd=False) as stream:
-        stat_before = os.fstat(stream.fileno())
-        if stat_before.st_size > MAX_MODEL_BYTES:
-            raise ValueError("model exceeds scan limit")
-        head = stream.read(9)
-        fmt = ext_format
-        safety = SERIALIZATION_FORMAT_SAFETY.get(fmt, SerializationSafety.UNKNOWN)
-        if head.startswith(b"\x80") and len(head) > 1 and head[1] <= 5:
-            fmt, safety = "pickle", SerializationSafety.UNSAFE_CODE_EXECUTION
-        elif head.startswith(b"GGUF"):
-            fmt, safety = "gguf", SerializationSafety.UNSAFE_TEMPLATE_INJECTION
-        elif fmt == "safetensors" or (len(head) == 9 and head[-1:] == b"{"):
-            safety = SerializationSafety.UNKNOWN
-            header_len = int.from_bytes(head[:8], "little")
-            if (
-                len(head) == 9
-                and head[-1:] == b"{"
-                and header_len <= min(stat_before.st_size - 8, 16 * 1024 * 1024)
-            ):
-                with _library_path(stream) as name:
-                    try:
-                        with safe_open(name, framework="numpy") as tensors:
-                            tensors.keys()
-                    except SafetensorError:
-                        pass
-                    else:
-                        fmt, safety = "safetensors", SerializationSafety.SAFE
-        elif safety == SerializationSafety.SAFE:
-            # No format parser for ONNX/GGML here. A filename alone proves nothing.
-            safety = SerializationSafety.UNKNOWN
-        digest = hashlib.sha256()
-        total = 0
-        stream.seek(0)
-        while chunk := stream.read(1024 * 1024):
-            total += len(chunk)
-            if total > MAX_MODEL_BYTES:
-                raise ValueError("model exceeds scan limit")
-            digest.update(chunk)
-        stat_after = os.fstat(stream.fileno())
-        if total != stat_before.st_size or stat_after.st_ctime_ns != stat_before.st_ctime_ns:
-            raise ValueError("model changed while being read")
-    return fmt, safety, "sha256:" + digest.hexdigest()
+def inspect_model_artifact(
+    path: Path, *, stream: BinaryIO, metadata: dict[str, str] | None = None
+) -> tuple[SerializationSafety, str, str]:
+    """Bind structural inspection and SHA-256 to the same opened artifact.
+
+    The caller must hold a confined regular-file context.
+    A pathname replacement cannot substitute different bytes between inspection
+    and hashing because neither operation reopens that pathname.
+    """
+    before = os.fstat(stream.fileno())
+    if before.st_size > MAX_HASH_SIZE:
+        raise OSError("model artifact exceeds the hash byte limit")
+    observed = _HashingModelReader(stream)
+    safety, explanation = inspect_model_format(path, stream=cast(BinaryIO, observed))
+    while observed.read(65536):
+        pass
+    if metadata is not None and safety == SerializationSafety.SAFE:
+        from nexus_symbiote.utils.tensors import fingerprint_stream
+
+        metadata.update(
+            fingerprint_stream(io.BytesIO(observed.prefix), artifact_size=before.st_size)
+        )
+    after = os.fstat(stream.fileno())
+    if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
+        after.st_size,
+        after.st_mtime_ns,
+        after.st_ctime_ns,
+    ):
+        raise OSError("model artifact changed during inspection and hashing")
+    return safety, explanation, "sha256:" + observed.digest.hexdigest()
 
 
 class ModelScanner(Scanner):
@@ -251,7 +280,7 @@ class ModelScanner(Scanner):
 
     def _scan_model_directory(self, model_dir: Path) -> list[ModelComponent]:
         components: list[ModelComponent] = []
-        model_name = model_dir.relative_to(root).as_posix()
+        model_name = model_dir.name
 
         config = self._read_model_config(model_dir)
         tokenizer_hash = self._hash_tokenizer(model_dir)
@@ -266,15 +295,20 @@ class ModelScanner(Scanner):
                 continue
 
             fmt_key, fmt_name = MODEL_EXTENSIONS[ext]
+            fingerprint: dict[str, str] = {}
             try:
                 with self._files.open_regular(path, max_bytes=MAX_HASH_SIZE) as stream:
-                    safety, format_evidence = inspect_model_format(path, stream=stream)
+                    safety, format_evidence, weight_hash = inspect_model_artifact(
+                        path, stream=stream, metadata=fingerprint
+                    )
             except (OSError, ValueError):
+                self._files._fail(path, "model inspection or hashing failed")
                 safety, format_evidence = (
                     SerializationSafety.UNKNOWN,
                     "Artifact could not be inspected",
                 )
-            weight_hash = self._files.hash_file(path, max_bytes=MAX_HASH_SIZE)
+                weight_hash = None
+                fingerprint.clear()
 
             signing_status, signing_identity = self._check_signing(path, weight_hash)
             risks = self._assess_model_risks(path, fmt_key, safety, signing_status, config)
@@ -282,12 +316,6 @@ class ModelScanner(Scanner):
             trust_tier = TrustTier.UNKNOWN
             if signing_status == "sigstore-signed":
                 trust_tier = TrustTier.THIRD_PARTY_SIGNED
-
-            component_hashes: dict[str, str] = {}
-            if fmt_key == "safetensors":
-                component_hashes.update(safetensors_fingerprint(path) or {})
-            if weight_hash:
-                component_hashes["sha256"] = weight_hash
 
             model_type = self._infer_model_type(config, path)
             derivation = config.get("peft_type") if config else None
@@ -315,13 +343,13 @@ class ModelScanner(Scanner):
                 trust_remote_code=trust_remote_code,
                 tokenizer_hash=tokenizer_hash,
                 chat_template_hash=chat_template_hash,
-                hashes=component_hashes,
+                tensor_inventory_hash=fingerprint.get("tensor_inventory_sha256"),
+                safetensors_header_hash=fingerprint.get("safetensors_header_sha256"),
+                hashes={"sha256": weight_hash} if weight_hash else {},
                 source_path=str(path),
                 trust_tier=trust_tier,
                 risks=risks,
             )
-            comp.tensor_inventory_hash = comp.hashes.get("tensor_inventory_sha256")
-            comp.safetensors_header_hash = comp.hashes.get("safetensors_header_sha256")
             components.append(comp)
 
         return components
@@ -405,7 +433,7 @@ class ModelScanner(Scanner):
                 RiskAssessment(
                     severity=RiskSeverity.CRITICAL,
                     category="serialization_format",
-                    detail=f"Model '{path.name}' uses {fmt_key} format — arbitrary code execution on deserialization.",
+                    detail=f"Model '{path.name}' has evidence of a potentially code-executing serialization or loader.",
                     recommendation="Convert to SafeTensors. Block pickle/pt/pth in production.",
                     references=["https://huggingface.co/blog/safetensors-security-audit"],
                 )

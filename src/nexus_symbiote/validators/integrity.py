@@ -13,6 +13,7 @@ from nexus_symbiote.core.hashing import (
     TOOL_DEFINITION_HASH_VERSION,
     hash_tool_definition,
     normalize_digest,
+    open_regular_file,
 )
 from nexus_symbiote.core.models import (
     AnyComponent,
@@ -21,15 +22,12 @@ from nexus_symbiote.core.models import (
     PromptComponent,
     ToolComponent,
 )
-from nexus_symbiote.scanners.model import inspect_model_format
+from nexus_symbiote.scanners.model import inspect_model_artifact
 from nexus_symbiote.utils.crypto import (
     SigstoreArtifactPolicy,
     verify_file_hash,
     verify_sigstore_bundle,
 )
-
-# Digests derived from parsed artifact structure rather than raw file bytes.
-DERIVED_DIGEST_KEYS = {"tensor_inventory_sha256", "safetensors_header_sha256", "tensor_count"}
 
 
 @dataclass
@@ -112,9 +110,10 @@ class IntegrityValidator:
                 self._check_tool_hash(comp, report)
             elif isinstance(comp, ModelComponent):
                 self._check_model_integrity(comp, project_root, report)
+                self._check_tensor_metadata(comp, project_root, report)
             elif isinstance(comp, PromptComponent):
                 self._check_prompt_hash(comp, project_root, report)
-            elif isinstance(comp, MCPServerComponent) and not comp.version_pinned:
+            elif isinstance(comp, MCPServerComponent) and comp.version_pinned is False:
                 report.issues.append(
                     IntegrityIssue(
                         comp.bom_ref,
@@ -123,8 +122,62 @@ class IntegrityValidator:
                         "warning",
                     )
                 )
+            if isinstance(comp, MCPServerComponent) and comp.endpoint_url:
+                try:
+                    if comp.schema_hash is None:
+                        raise ValueError("descriptor digest is unavailable")
+                    normalize_digest(comp.schema_hash, "sha256")
+                except ValueError:
+                    report.issues.append(
+                        IntegrityIssue(
+                            comp.bom_ref,
+                            "unpinned_remote_server",
+                            "Remote MCP descriptor digest is unavailable or malformed; endpoint identity and behavior remain unverified",
+                            "warning",
+                        )
+                    )
             self._check_file_hash(comp, project_root, report)
         return report
+
+    def _check_tensor_metadata(
+        self, comp: ModelComponent, project_root: Path | None, report: IntegrityReport
+    ) -> None:
+        declared = {
+            "tensor_inventory_sha256": comp.tensor_inventory_hash,
+            "safetensors_header_sha256": comp.safetensors_header_hash,
+        }
+        declared = {key: value for key, value in declared.items() if value is not None}
+        if not declared:
+            return
+        from nexus_symbiote.utils.tensors import safetensors_fingerprint
+
+        try:
+            if project_root is None or comp.source_path is None:
+                raise ValueError("project root and artifact path are required")
+            expected_weight = comp.hashes.get("sha256")
+            if not expected_weight:
+                raise ValueError("tensor metadata requires a whole-artifact SHA-256 binding")
+            algorithm, hex_digest = normalize_digest(expected_weight, "sha256")
+            live = safetensors_fingerprint(
+                Path(comp.source_path),
+                root=project_root,
+                expected_digest=f"{algorithm}:{hex_digest}",
+            )
+            for key, expected in declared.items():
+                assert expected is not None
+                normalize_digest(expected, "sha256")
+                if live[key] != expected:
+                    raise ValueError("tensor metadata differs from the declared fingerprint")
+                report.hashes_verified += 1
+        except (OSError, ValueError, RecursionError):
+            report.hashes_failed += 1
+            report.issues.append(
+                IntegrityIssue(
+                    comp.bom_ref,
+                    "tensor_metadata_unverified",
+                    "Declared tensor metadata cannot be corroborated within the supplied root",
+                )
+            )
 
     def _check_tool_hash(self, comp: ToolComponent, report: IntegrityReport) -> None:
         if not comp.definition_hash:
@@ -226,7 +279,25 @@ class IntegrityValidator:
             )
         path = self._artifact_path(comp, project_root, report)
         if path is not None:
-            actual, explanation = inspect_model_format(path)
+            try:
+                with open_regular_file(path) as stream:
+                    actual, explanation, inspected_digest = inspect_model_artifact(
+                        path, stream=stream
+                    )
+                _, expected_digest = normalize_digest(comp.hashes.get("sha256", ""), "sha256")
+                if inspected_digest != f"sha256:{expected_digest}":
+                    report.issues.append(
+                        IntegrityIssue(
+                            comp.bom_ref,
+                            "format_subject_mismatch",
+                            "Inspected model structure does not match the BOM's SHA-256 subject",
+                        )
+                    )
+            except (OSError, ValueError):
+                actual, explanation = (
+                    SerializationSafety.UNKNOWN,
+                    "Model structure could not be bound to its SHA-256 subject",
+                )
             if actual in {
                 SerializationSafety.UNSAFE_CODE_EXECUTION,
                 SerializationSafety.UNSAFE_TEMPLATE_INJECTION,

@@ -1,15 +1,27 @@
-"""Project AgentBOM components and qualified edges into SPDX 3.0.1 JSON-LD."""
+"""Validated SPDX 3.0.1 projection with a digest-bound native document extension."""
 
 from __future__ import annotations
 
+import uuid
 from datetime import UTC
 from typing import Any
-from urllib.parse import quote
 
-from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.enums import ComponentType
-from nexus_symbiote.generators.base import Generator, validate_references, wire_hashes
-from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
+from nexus_symbiote.core.models import AnyComponent, ModelComponent
+from nexus_symbiote.generators._common import (
+    NAMESPACE,
+    claim_properties,
+    component_property,
+    content_digest,
+    document_properties,
+    json_text,
+    normalize_hash,
+    prepare,
+    recover_document,
+)
+from nexus_symbiote.generators.base import Generator
+from nexus_symbiote.generators.validation import require_valid
 
 SPDX_TYPE_MAP = {
     ComponentType.AGENT: "ai_AIPackage",
@@ -19,21 +31,12 @@ SPDX_TYPE_MAP = {
     ComponentType.RAG_SOURCE: "dataset_DatasetPackage",
     ComponentType.DATA_SOURCE: "dataset_DatasetPackage",
 }
-RELATIONSHIP_TYPES = {
-    "invokes": "usesTool",
-    "depends-on": "dependsOn",
-    "retrieves-from": "dependsOn",
-    "trained-on": "trainedOn",
-    "fine-tuned-from": "descendantOf",
-    "quantized-from": "descendantOf",
-    "merged-from": "descendantOf",
-}
 
-# Standard SPDX individual indicating that no license determination is made.
+
 NO_ASSERTION_LICENSE = "https://spdx.org/rdf/3.0.1/terms/Licensing/NoAssertion"
 
 
-def _properties_extension(props: list[dict[str, str]]) -> list[dict[str, Any]]:
+def _extension(properties: list[dict[str, str]]) -> list[dict[str, Any]]:
     return [
         {
             "type": "extension_CdxPropertiesExtension",
@@ -43,130 +46,210 @@ def _properties_extension(props: list[dict[str, str]]) -> list[dict[str, Any]]:
                     "extension_cdxPropName": prop["name"],
                     "extension_cdxPropValue": prop["value"],
                 }
-                for prop in props
+                for prop in properties
             ],
         }
     ]
 
 
 class SPDXGenerator(Generator):
-    format_name = "spdx-3.0"
+    format_name = "spdx-3.0.1"
 
-    def __init__(self, namespace: str = "https://spdx.org/spdxdocs/nexus-symbiote") -> None:
+    def __init__(self, namespace: str = "https://spdx.org/spdxdocs/nexus_symbiote") -> None:
         self._namespace = namespace.rstrip("/")
 
+    def _id(self, kind: str, key: str) -> str:
+        return self._namespace + "/" + kind + "/" + str(uuid.uuid5(NAMESPACE, kind + ":" + key))
+
     def generate(self, aibom: AIBOM) -> dict[str, Any]:
-        aibom.finalize()
-        validate_references(aibom)
-        meta = aibom.metadata
-        if meta.serial_number is None or meta.timestamp is None:
-            raise ValueError("SPDX export requires a serial number and timestamp")
-        base = f"{self._namespace}/{quote(meta.serial_number, safe='')}/{meta.version}/"
-        producer_id = base + "producer"
-        creation: dict[str, Any] = {
-            "@id": "_:creation",
+        prepare(aibom)
+        ci = "_:creation"
+        producer_id = self._id("producer", aibom.metadata.tool_name)
+        tool_id = self._id("generator", aibom.metadata.tool_name)
+        creator = {
+            "type": "SoftwareAgent",
+            "spdxId": producer_id,
+            "creationInfo": ci,
+            "name": aibom.metadata.tool_name,
+        }
+        generator = {
+            "type": "Tool",
+            "spdxId": tool_id,
+            "creationInfo": ci,
+            "name": aibom.metadata.tool_name,
+            "summary": aibom.metadata.tool_version,
+        }
+        assert aibom.metadata.timestamp is not None
+        creation = {
             "type": "CreationInfo",
+            "@id": ci,
             "specVersion": "3.0.1",
-            "created": meta.timestamp.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "created": aibom.metadata.timestamp.astimezone(UTC)
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z"),
             "createdBy": [producer_id],
+            "createdUsing": [tool_id],
         }
-        elements: list[dict[str, Any]] = [
-            {"type": "SoftwareAgent", "spdxId": producer_id, "name": meta.tool_name}
-        ]
-        suppliers = {
-            name: base + "supplier/" + quote(name, safe="")
-            for name in sorted({c.supplier for c in aibom.components if c.supplier})
-        }
-        for name, identifier in suppliers.items():
-            elements.append({"type": "Organization", "spdxId": identifier, "name": name})
-
-        ids = {c.bom_ref: base + "component/" + quote(c.bom_ref, safe="") for c in aibom.components}
-        for comp in aibom.components:
-            spdx_type = SPDX_TYPE_MAP.get(comp.component_type, "software_Package")
-            props = CycloneDXGenerator.component_properties(comp)
-            element: dict[str, Any] = {
-                "type": spdx_type,
-                "spdxId": ids[comp.bom_ref],
-                "name": comp.name,
+        suppliers = {comp.supplier for comp in aibom.components if comp.supplier}
+        parties = [
+            {
+                "type": "Organization",
+                "spdxId": self._id("supplier", name),
+                "creationInfo": ci,
+                "name": name,
             }
-            if spdx_type == "dataset_DatasetPackage":
-                element["dataset_datasetType"] = ["noAssertion"]
-            if comp.version:
-                if spdx_type == "software_File":
-                    props.append({"name": "nexus-symbiote:version", "value": comp.version})
-                else:
-                    element["software_packageVersion"] = comp.version
-            if comp.supplier:
-                element["suppliedBy"] = suppliers[comp.supplier]
-            if comp.description:
-                element["description"] = comp.description
-            if comp.hashes:
-                element["verifiedUsing"] = [
-                    {"type": "Hash", "algorithm": alg, "hashValue": digest}
-                    for alg, digest in wire_hashes(comp.hashes, spdx=True)
-                ]
-            element["extension"] = _properties_extension(props)
-            elements.append(element)
-
-            # AI and Dataset profiles require exactly one declared and one
-            # concluded license relationship for each package. NoAssertion is
-            # deliberate: discovery does not determine licensing terms.
-            if spdx_type in ("ai_AIPackage", "dataset_DatasetPackage"):
-                for relationship in ("hasDeclaredLicense", "hasConcludedLicense"):
-                    elements.append(
-                        {
-                            "type": "Relationship",
-                            "spdxId": base
-                            + "license/"
-                            + quote(comp.bom_ref, safe="")
-                            + "/"
-                            + relationship,
-                            "relationshipType": relationship,
-                            "from": ids[comp.bom_ref],
-                            "to": [NO_ASSERTION_LICENSE],
-                        }
-                    )
-
-        for index, edge in enumerate(aibom.dependencies):
-            elements.append(
-                {
-                    "type": "Relationship",
-                    "spdxId": base + f"relationship/{index}",
-                    "relationshipType": RELATIONSHIP_TYPES.get(edge.relationship, "other"),
-                    "from": ids[edge.source_ref],
-                    "to": [ids[edge.target_ref]],
-                    "extension": _properties_extension(
-                        [
-                            {
-                                "name": "nexus-symbiote:relationship",
-                                "value": edge.model_dump_json(exclude_none=True),
-                            }
-                        ]
-                    ),
-                }
-            )
-        for element in elements:
-            element["creationInfo"] = creation["@id"]
-        document = {
+            for name in sorted(suppliers)
+        ]
+        components = [
+            self._element(comp) for comp in sorted(aibom.components, key=lambda c: c.bom_ref)
+        ]
+        edge_values = {
+            json_text(edge.model_dump(mode="json", exclude_none=True)): edge
+            for edge in aibom.dependencies
+        }
+        relationships = [self._relationship(edge_values[key]) for key in sorted(edge_values)]
+        license_relationships = [
+            {
+                "type": "Relationship",
+                "spdxId": self._id("license-relationship", component["spdxId"] + ":" + kind),
+                "creationInfo": ci,
+                "relationshipType": kind,
+                "from": component["spdxId"],
+                "to": [NO_ASSERTION_LICENSE],
+            }
+            for component in components
+            if component["type"] in {"ai_AIPackage", "dataset_DatasetPackage"}
+            for kind in ("hasDeclaredLicense", "hasConcludedLicense")
+        ]
+        elements: list[dict[str, Any]] = [
+            creator,
+            generator,
+            *parties,
+            *components,
+            *relationships,
+            *license_relationships,
+        ]
+        doc = {
             "type": "SpdxDocument",
-            "spdxId": base + "document",
-            "creationInfo": creation["@id"],
-            "name": f"nexus-symbiote-aibom-{meta.serial_number}",
-            "profileConformance": [
-                "core",
-                "software",
-                "ai",
-                "dataset",
-                "extension",
-                "simpleLicensing",
-                "expandedLicensing",
-            ],
+            "spdxId": self._id("document", str(aibom.metadata.serial_number)),
+            "creationInfo": ci,
+            "name": "Nexus SymBiote AgentBOM " + str(aibom.metadata.serial_number),
             "element": [element["spdxId"] for element in elements],
             "rootElement": [
-                ids[c.bom_ref] for c in aibom.components if c.component_type == ComponentType.AGENT
+                self._id("component", comp.bom_ref)
+                for comp in sorted(aibom.components, key=lambda c: c.bom_ref)
+                if comp.component_type == ComponentType.AGENT
             ],
+            # The inventory does not collect all AI/Dataset-profile conformance evidence.
+            "profileConformance": ["core", "software", "extension"],
+            "extension": _extension(document_properties(aibom, self.format_name)),
         }
-        return {
+        result = {
             "@context": "https://spdx.org/rdf/3.0.1/spdx-context.jsonld",
-            "@graph": [document, creation, *elements],
+            "@graph": [doc, *elements, creation],
         }
+        require_valid(result, "spdx")
+        return result
+
+    def _element(self, comp: AnyComponent) -> dict[str, Any]:
+        typ = SPDX_TYPE_MAP.get(comp.component_type, "software_Package")
+        element: dict[str, Any] = {
+            "type": typ,
+            "spdxId": self._id("component", comp.bom_ref),
+            "creationInfo": "_:creation",
+            "name": comp.name,
+            "extension": _extension([component_property(comp), *claim_properties(comp)]),
+        }
+        if comp.version and typ != "software_File":
+            element["software_packageVersion"] = comp.version
+        if comp.supplier:
+            element["suppliedBy"] = self._id("supplier", comp.supplier)
+        if comp.description:
+            element["description"] = comp.description
+        if typ != "software_File":
+            element["software_downloadLocation"] = "NOASSERTION"
+        if typ == "ai_AIPackage":
+            element.update(
+                {
+                    "software_primaryPurpose": "model"
+                    if isinstance(comp, ModelComponent)
+                    else "application",
+                    "ai_autonomyType": "noAssertion",
+                    "ai_informationAboutTraining": "Not supplied by the inventory producer.",
+                    "ai_informationAboutApplication": comp.description
+                    or "Not supplied by the inventory producer.",
+                    "ai_limitation": "Inventory assertions do not establish model safety or authorization.",
+                    "ai_useSensitivePersonalInformation": "noAssertion",
+                }
+            )
+            if isinstance(comp, ModelComponent) and comp.model_type:
+                element["ai_typeOfModel"] = [comp.model_type]
+        elif typ == "dataset_DatasetPackage":
+            element.update(
+                {
+                    "software_primaryPurpose": "data",
+                    "dataset_datasetType": ["noAssertion"],
+                    "dataset_hasSensitivePersonalInformation": "noAssertion",
+                    "dataset_dataCollectionProcess": "Not supplied by the inventory producer.",
+                    "dataset_intendedUse": "Not supplied by the inventory producer.",
+                }
+            )
+        elif comp.component_type in {
+            ComponentType.MCP_CLIENT,
+            ComponentType.MCP_SERVER,
+            ComponentType.A2A_CLIENT,
+            ComponentType.A2A_SERVER,
+            ComponentType.IDE_AGENT,
+        }:
+            element["software_primaryPurpose"] = "application"
+        elif comp.component_type == ComponentType.VERIFIED_EXTENSION:
+            element["software_primaryPurpose"] = "library"
+        if comp.hashes:
+            hashes = []
+            for algorithm, value in sorted(comp.hashes.items()):
+                name, digest = normalize_hash(algorithm, value)
+                spdx_algorithm = (
+                    name.lower().replace("-", "_")
+                    if name.startswith("SHA3-")
+                    else name.lower().replace("-", "")
+                )
+                hashes.append({"type": "Hash", "algorithm": spdx_algorithm, "hashValue": digest})
+            element["verifiedUsing"] = hashes
+        return element
+
+    def _relationship(self, edge: DependencyEdge) -> dict[str, Any]:
+        mapping = {
+            "invokes": "usesTool",
+            "trained-on": "trainedOn",
+            "depends-on": "dependsOn",
+            "fine-tuned-from": "descendantOf",
+            "quantized-from": "descendantOf",
+            "merged-from": "descendantOf",
+        }
+        body = edge.model_dump(mode="json", exclude_none=True)
+        return {
+            "type": "Relationship",
+            "spdxId": self._id("relationship", content_digest(body)),
+            "creationInfo": "_:creation",
+            "relationshipType": mapping.get(edge.relationship, "other"),
+            "from": self._id("component", edge.source_ref),
+            "to": [self._id("component", edge.target_ref)],
+            "extension": _extension(
+                [{"name": "nexus-symbiote:relationship", "value": json_text(body)}]
+            ),
+        }
+
+    @staticmethod
+    def recover(document: dict[str, Any]) -> AIBOM:
+        require_valid(document, "spdx")
+        docs = [node for node in document["@graph"] if node["type"] == "SpdxDocument"]
+        if len(docs) != 1:
+            raise ValueError("expected exactly one SPDX document")
+        entries = docs[0]["extension"][0]["extension_cdxProperty"]
+        return recover_document(
+            [
+                {"name": prop["extension_cdxPropName"], "value": prop["extension_cdxPropValue"]}
+                for prop in entries
+            ]
+        )

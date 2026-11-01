@@ -27,8 +27,12 @@ def _boolean(value: str) -> bool:
 def _within(workspace: Path, value: str) -> Path:
     if not value or any(c in value for c in "\r\n\x00"):
         raise ValueError("paths must be nonempty and contain no newline or NUL")
-    path = (workspace / value).resolve()
-    if not path.is_relative_to(workspace):
+    path = (workspace / value).absolute()
+    if (
+        ".." in path.parts
+        or not path.is_relative_to(workspace)
+        or not path.resolve().is_relative_to(workspace)
+    ):
         raise ValueError("Action paths must stay within GITHUB_WORKSPACE")
     return path
 
@@ -89,22 +93,15 @@ def _run(args: list[str]) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _write(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        mode="w", encoding="utf-8", dir=path.parent, delete=False
-    ) as tmp:
-        tmp.write(content)
-        staged = Path(tmp.name)
-    try:
-        staged.replace(path)
-    finally:
-        staged.unlink(missing_ok=True)
+def _write(path: Path, content: str, *, root: Path | None = None) -> None:
+    from nexus_symbiote.utils.files import write_output_file
+
+    write_output_file(path, content, root=root, create_parents=True)
 
 
-def _export(native: Path, output: Path, fmt: str) -> None:
+def _export(native: Path, output: Path, fmt: str, *, root: Path | None = None) -> None:
     if fmt == "json":
-        _write(output, native.read_text(encoding="utf-8"))
+        _write(output, native.read_text(encoding="utf-8"), root=root)
         return
     from nexus_symbiote.core.aibom import AIBOM
     from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
@@ -112,14 +109,14 @@ def _export(native: Path, output: Path, fmt: str) -> None:
     from nexus_symbiote.generators.spdx import SPDXGenerator
 
     generators = {"cyclonedx": CycloneDXGenerator, "sarif": SARIFGenerator, "spdx": SPDXGenerator}
-    _write(output, generators[fmt]().generate_json(AIBOM.load(native)))
+    _write(output, generators[fmt]().generate_json(AIBOM.load(native)), root=root)
 
 
 def run(
     config: Config,
     *,
     command: Callable[[list[str]], subprocess.CompletedProcess[str]] = _run,
-    export: Callable[[Path, Path, str], None] = _export,
+    export: Callable[[Path, Path, str], None] | None = None,
     outputs: Path | None = None,
 ) -> int:
     def emit(**values: str) -> None:
@@ -129,6 +126,12 @@ def run(
                     if any(c in value for c in "\r\n"):
                         raise ValueError("invalid multiline Action output")
                     stream.write(f"{name}={value}\n")
+
+    def emit_export(native: Path, output: Path, fmt: str) -> None:
+        if export is None:
+            _export(native, output, fmt, root=config.workspace)
+        else:
+            export(native, output, fmt)
 
     emit(risk_score="", passed="skipped")
     with tempfile.TemporaryDirectory(prefix="nexus-symbiote-action-") as scratch:
@@ -140,7 +143,7 @@ def run(
         if collected.returncode != 0:
             print(collected.stderr, file=sys.stderr)
             return 1
-        export(native, config.output, config.format)
+        emit_export(native, config.output, config.format)
         emit(aibom_path=str(config.output))
         inventory = json.loads(native.read_text(encoding="utf-8"))
         if inventory.get("metadata", {}).get("completeness", {}).get("scan_failures"):
@@ -148,7 +151,7 @@ def run(
             return 1
         if config.sarif:
             sarif = config.output.with_name(config.output.name + ".sarif")
-            export(native, sarif, "sarif")
+            emit_export(native, sarif, "sarif")
             emit(sarif_path=str(sarif))
         if config.validate:
             validated = command(["validate", str(native), "--project", str(config.project)])

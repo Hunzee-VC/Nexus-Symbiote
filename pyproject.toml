@@ -45,6 +45,8 @@ dependencies = [
     "jsonschema>=4.23,<5",
     "referencing>=0.35,<1",
     "cryptography>=43,<48",
+    "tree-sitter>=0.25,<0.26",
+    "tree-sitter-typescript>=0.23,<0.24",
 ]
 
 [project.optional-dependencies]
@@ -52,14 +54,14 @@ cyclonedx = [
     "cyclonedx-python-lib[json-validation]>=11.12,<12",
 ]
 sigstore = [
-    "sigstore>=3.6,<4",
+    "sigstore>=3.6.7,<4",
 ]
 yaml = [
     "pyyaml>=6.0,<7",
 ]
 all = [
-    "cyclonedx-python-lib>=11.0,<12",
-    "sigstore>=3.6,<4",
+    "cyclonedx-python-lib[json-validation]>=11.12,<12",
+    "sigstore>=3.6.7,<4",
     "pyyaml>=6.0,<7",
 ]
 dev = [
@@ -69,12 +71,12 @@ dev = [
     "mypy>=1.10,<2",
     "types-PyYAML>=6.0,<7",
     "types-jsonschema>=4.23,<5",
-    "sigstore>=3.6,<4",
+    "sigstore>=3.6.7,<4",
     "build>=1.2,<2",
     "twine>=6.0,<7",
     "hypothesis>=6.0,<7",
     "spdx-python-model>=0.0.6,<1",
-    "cyclonedx-python-lib>=11.0,<12",
+    "cyclonedx-python-lib[json-validation]>=11.12,<12",
     "hatchling>=1.25,<2",
     "editables>=0.5,<1",
 ]

@@ -1,147 +1,138 @@
-"""OSV.dev advisory lookups for discovered registry dependencies.
-
-Static discovery finds packages; OSV answers whether those exact versions
-have known vulnerabilities. This module queries the public OSV.dev API
-(https://api.osv.dev) and maps results back to AIBOM components.
-
-Network use is explicit: this runs only under the `symbiote advisories`
-command, never during `scan`, so static BOM generation remains offline.
-"""
+"""Explicit, bounded OSV queries for exact declared PyPI/npm package identities."""
 
 from __future__ import annotations
 
-import json
-import urllib.request
-from dataclasses import dataclass, field
+import re
+import time
+from dataclasses import asdict, dataclass, field
 from typing import Any
+from urllib.parse import unquote
 
 from nexus_symbiote.core.aibom import AIBOM
-from nexus_symbiote.core.enums import ComponentType
+from nexus_symbiote.core.hashing import parse_json_strict
 from nexus_symbiote.core.models import RegistryEntryComponent
+from nexus_symbiote.scanners.live_mcp import DiscoveryTransport, PinnedHTTPTransport
 
 OSV_QUERY_URL = "https://api.osv.dev/v1/query"
-OSV_TIMEOUT_SECONDS = 15.0
-
-REGISTRY_TO_OSV_ECOSYSTEM: dict[str, str] = {
-    "pypi": "PyPI",
-    "npm": "npm",
-    "maven": "Maven",
-    "go": "Go",
-    "crates-io": "crates.io",
-    "rubygems": "RubyGems",
-    "packagist": "Packagist",
-    "nuget": "NuGet",
-    "huggingface": "PyPI",
-    "docker-hub": "Docker",
-    "mcp-registry": "npm",
-    "skill-marketplace": "npm",
-}
-
-
-@dataclass
-class Advisory:
-    component_ref: str
-    component_name: str
-    package_name: str
-    ecosystem: str
-    version: str | None
-    advisory_id: str
-    aliases: list[str] = field(default_factory=list)
-    summary: str | None = None
-    fixed_versions: list[str] = field(default_factory=list)
-    url: str | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        return self.__dict__.copy()
+MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+MAX_COMPONENTS = 500
+TOTAL_TIMEOUT_SECONDS = 60.0
+_VERSION = re.compile(r"[0-9][A-Za-z0-9.+!_-]{0,199}")
 
 
 @dataclass
 class AdvisoryReport:
     components_checked: int = 0
-    lookups_failed: int = 0
+    components_skipped: int = 0
     errors: list[str] = field(default_factory=list)
-    advisories: list[Advisory] = field(default_factory=list)
+    advisories: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "components_checked": self.components_checked,
-            "lookups_failed": self.lookups_failed,
-            "errors": self.errors,
-            "advisories": [a.to_dict() for a in self.advisories],
+            **asdict(self),
+            "complete": not self.errors,
+            "scope": "exact declared PyPI/npm package URLs; installed artifacts unverified",
         }
 
 
-def _query_osv(package_name: str, ecosystem: str, version: str | None) -> list[dict[str, Any]]:
-    """Query OSV for one package. Raises OSError on network failure."""
-    payload: dict[str, Any] = {"package": {"name": package_name, "ecosystem": ecosystem}}
-    if version:
-        payload["version"] = version
-
-    request = urllib.request.Request(
-        OSV_QUERY_URL,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
+def package_identity(component: RegistryEntryComponent) -> tuple[str, str, str]:
+    """Accept a narrow purl subset and reconcile it with the inventory declaration."""
+    purl = component.package_url
+    if not isinstance(purl, str) or len(purl) > 2048 or "?" in purl or "#" in purl:
+        raise ValueError("exact package_url is required, without qualifiers or subpath")
+    match = re.fullmatch(r"pkg:(pypi|npm)/(.+)@([^@/]+)", purl)
+    if match is None:
+        raise ValueError("only exact PyPI/npm package URLs are supported")
+    kind, encoded_name, encoded_version = match.groups()
+    name, version = (
+        unquote(encoded_name, errors="strict"),
+        unquote(encoded_version, errors="strict"),
     )
-    # OSV_QUERY_URL is a pinned https:// constant; no untrusted scheme reaches here.
-    with urllib.request.urlopen(request, timeout=OSV_TIMEOUT_SECONDS) as response:  # noqa: S310
-        body = json.loads(response.read().decode("utf-8"))
-    vulns = body.get("vulns", [])
-    return [v for v in vulns if isinstance(v, dict)] if isinstance(vulns, list) else []
+    valid_name = (
+        re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,199}", name)
+        if kind == "pypi"
+        else re.fullmatch(r"(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*", name)
+    )
+    if valid_name is None or _VERSION.fullmatch(version) is None:
+        raise ValueError("package URL name or exact version is invalid")
+    normalize = (
+        (lambda value: re.sub(r"[-_.]+", "-", value).lower())
+        if kind == "pypi"
+        else (lambda value: value)
+    )
+    declared_version = (component.version or "").removeprefix("==")
+    if (
+        component.registry_type != kind
+        or normalize(component.name) != normalize(name)
+        or declared_version != version
+    ):
+        raise ValueError("package URL disagrees with registry, name or version")
+    return ("PyPI" if kind == "pypi" else "npm"), normalize(name), version
 
 
-def fetch_advisories(bom: AIBOM, timeout: float = OSV_TIMEOUT_SECONDS) -> AdvisoryReport:
-    """Look up OSV advisories for every registry component in the BOM."""
+def fetch_advisories(
+    bom: AIBOM, timeout: float = 15.0, *, transport: DiscoveryTransport | None = None
+) -> AdvisoryReport:
+    """Query only OSV over pinned HTTPS; report missing identity and lookup failures."""
+    import json
+
+    if not 0 < timeout <= 30:
+        raise ValueError("timeout must be in (0, 30] seconds")
     report = AdvisoryReport()
-
-    registry_components = [
-        c
-        for c in bom.components
-        if c.component_type == ComponentType.REGISTRY_ENTRY
-        and isinstance(c, RegistryEntryComponent)
-    ]
-
-    for comp in registry_components:
-        if not comp.name:
+    client = transport or PinnedHTTPTransport()
+    deadline = time.monotonic() + TOTAL_TIMEOUT_SECONDS
+    components = [c for c in bom.components if isinstance(c, RegistryEntryComponent)]
+    if len(components) > MAX_COMPONENTS:
+        report.errors.append("registry component limit exceeded; no lookups performed")
+        return report
+    for comp in components:
+        if comp.registry_type not in {"pypi", "npm"}:
+            report.components_skipped += 1
             continue
-        ecosystem = REGISTRY_TO_OSV_ECOSYSTEM.get(comp.registry_type or "")
-        if ecosystem is None:
-            continue
-
-        report.components_checked += 1
         try:
-            vulns = _query_osv(comp.name, ecosystem, comp.version)
-        except (OSError, ValueError) as exc:
-            report.lookups_failed += 1
-            report.errors.append(f"{comp.bom_ref}: OSV lookup failed ({exc})")
-            continue
-
-        for vuln in vulns:
-            aliases = list(vuln.get("aliases", []))
-            fixed: list[str] = []
-            for affected in vuln.get("affected", []):
-                for rg in affected.get("ranges", []):
-                    for event in rg.get("events", []):
-                        if "fixed" in event:
-                            fixed.append(str(event["fixed"]))
-            report.advisories.append(
-                Advisory(
-                    component_ref=comp.bom_ref,
-                    component_name=comp.name,
-                    package_name=comp.name,
-                    ecosystem=ecosystem,
-                    version=comp.version,
-                    advisory_id=str(vuln.get("id", "unknown")),
-                    aliases=aliases,
-                    summary=vuln.get("summary"),
-                    fixed_versions=sorted(set(fixed)),
-                    url=f"https://osv.dev/vulnerability/{vuln.get('id', '')}",
-                )
+            ecosystem, name, version = package_identity(comp)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ValueError("total OSV lookup deadline exceeded")
+            report.components_checked += 1
+            reply = client.request(
+                OSV_QUERY_URL,
+                json.dumps(
+                    {"package": {"name": name, "ecosystem": ecosystem}, "version": version}
+                ).encode(),
+                {"Content-Type": "application/json", "Accept": "application/json"},
+                timeout=min(timeout, remaining),
+                max_bytes=MAX_RESPONSE_BYTES,
             )
-
+            if reply.status != 200 or len(reply.body) > MAX_RESPONSE_BYTES:
+                raise ValueError("OSV returned a non-success or oversized response")
+            body = parse_json_strict(reply.body, max_bytes=MAX_RESPONSE_BYTES)
+            if not isinstance(body, dict) or body.get("next_page_token"):
+                raise ValueError("invalid or incomplete OSV response")
+            vulns = body.get("vulns", [])
+            if not isinstance(vulns, list) or len(vulns) > 10_000:
+                raise ValueError("invalid or over-limit OSV vulnerability list")
+            pending: list[dict[str, Any]] = []
+            for vuln in vulns:
+                if (
+                    not isinstance(vuln, dict)
+                    or not isinstance(vuln.get("id"), str)
+                    or re.fullmatch(r"[A-Za-z0-9_.:-]{1,200}", vuln["id"]) is None
+                ):
+                    raise ValueError("invalid OSV vulnerability record")
+                # No uncontrolled nested API data is propagated as verified local evidence.
+                pending.append(
+                    {
+                        "component_ref": comp.bom_ref,
+                        "package_url": comp.package_url,
+                        "advisory_id": vuln["id"],
+                        "ecosystem": ecosystem,
+                        "version": version,
+                        "url": "https://osv.dev/vulnerability/" + vuln["id"],
+                    }
+                )
+            report.advisories.extend(pending)
+        except (OSError, ValueError, TypeError, RecursionError):
+            # Transport exception text can contain server data; keep it out of reports.
+            report.errors.append(f"{comp.bom_ref}: OSV lookup incomplete or identity unverified")
     return report
-
-
-def lookup_for_component(component: RegistryEntryComponent) -> str | None:
-    """Return the OSV ecosystem for a registry component, or None if unsupported."""
-    return REGISTRY_TO_OSV_ECOSYSTEM.get(component.registry_type or "")

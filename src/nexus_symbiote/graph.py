@@ -4,13 +4,36 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
+from urllib.parse import quote
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
-from nexus_symbiote.core.enums import AssuranceLevel, ComponentType
-from nexus_symbiote.core.models import AgentComponent, ClaimEvidence
+from nexus_symbiote.core.enums import AssuranceLevel, AutonomyLevel, ComponentType
+from nexus_symbiote.core.models import (
+    AgentComponent,
+    ClaimEvidence,
+    ModelComponent,
+    PromptComponent,
+)
+
+NonemptyString = Annotated[str, Field(min_length=1)]
+
+
+class ModelDeclaration(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    path: NonemptyString | None = None
+    provider: NonemptyString | None = None
+    requested_ref: NonemptyString | None = None
+
+    @model_validator(mode="after")
+    def one_model_source(self) -> ModelDeclaration:
+        local = self.path is not None
+        hosted = self.provider is not None and self.requested_ref is not None
+        if local == hosted or (local and (self.provider or self.requested_ref)):
+            raise ValueError("model requires a local path or both provider and requested_ref")
+        return self
 
 
 class AgentDeclaration(BaseModel):
@@ -21,6 +44,106 @@ class AgentDeclaration(BaseModel):
     purpose: str | None = None
     framework: str | None = None
     owner: str | None = None
+    instructions: list[NonemptyString] = Field(default_factory=list, max_length=1024)
+    models: dict[NonemptyString, ModelDeclaration] = Field(default_factory=dict, max_length=1024)
+    autonomy_level: AutonomyLevel | None = None
+
+
+def _manifest_dependencies(
+    bom: AIBOM, declared: AgentDeclaration, root: Path, agent_ref: str
+) -> list[PromptComponent | ModelComponent]:
+    """Collect instruction bytes and local path bindings before changing the BOM."""
+    from nexus_symbiote.policy import PolicyError
+    from nexus_symbiote.utils.confined import MAX_HASH_BYTES, ConfinedCollection
+
+    def relative(value: str) -> Path:
+        path = Path(value)
+        if path.is_absolute() or ".." in path.parts or not path.parts:
+            raise PolicyError("agent.yaml references must be relative paths beneath the repository")
+        return path
+
+    additions: list[PromptComponent | ModelComponent] = []
+    failures: list[str] = []
+    with ConfinedCollection(root, failures) as files:
+        for instruction in declared.instructions:
+            path = relative(instruction)
+            digest = files.hash_file(path)
+            if digest is None:
+                raise PolicyError("agent.yaml instruction could not be collected safely")
+            existing = [
+                comp
+                for comp in bom.components
+                if isinstance(comp, PromptComponent) and comp.source_path == path.as_posix()
+            ]
+            if any(comp.content_hash and comp.content_hash != digest for comp in existing):
+                raise PolicyError("agent.yaml instruction changed since scanner collection")
+            if any(comp.content_hash == digest for comp in existing):
+                continue
+            ref = "prompt:manifest:" + hashlib.sha256(path.as_posix().encode()).hexdigest()[:24]
+            additions.append(
+                PromptComponent(
+                    bom_ref=ref,
+                    name=path.name,
+                    source_path=path.as_posix(),
+                    content_hash=digest,
+                    assurance_level=AssuranceLevel.OBSERVED,
+                    claims={
+                        "content_hash": ClaimEvidence(
+                            assurance=AssuranceLevel.OBSERVED,
+                            method="confined-file-sha256",
+                            scope="repository",
+                            locator=path.as_posix(),
+                            observed_at=bom.metadata.timestamp,
+                        )
+                    },
+                )
+            )
+        for key, model in declared.models.items():
+            if model.path is not None:
+                local = relative(model.path)
+                matches = [
+                    comp
+                    for comp in bom.components
+                    if isinstance(comp, ModelComponent)
+                    and comp.source_path
+                    and (Path(comp.source_path) == local or Path(comp.source_path).parent == local)
+                ]
+                if not matches:
+                    raise PolicyError("agent.yaml local model has no collected model artifact")
+                for comp in matches:
+                    assert comp.source_path is not None
+                    path = relative(comp.source_path)
+                    try:
+                        with files.open_regular(path, max_bytes=MAX_HASH_BYTES):
+                            pass
+                    except OSError as exc:
+                        raise PolicyError("agent.yaml local model path is unavailable") from exc
+            else:
+                ref = f"model:{agent_ref}/hosted/{quote(key, safe='')}"
+                additions.append(
+                    ModelComponent(
+                        bom_ref=ref,
+                        name=model.requested_ref or key,
+                        provider=model.provider,
+                        requested_alias=model.requested_ref,
+                        model_type="hosted",
+                        source_path="agent.yaml",
+                        claims={
+                            "requested_alias": ClaimEvidence(
+                                assurance=AssuranceLevel.DECLARED,
+                                method="agent-manifest",
+                                scope="repository",
+                                locator=f"agent.yaml#/models/{quote(key, safe='')}",
+                            )
+                        },
+                    )
+                )
+    if failures:
+        raise PolicyError("agent.yaml dependencies could not be collected safely")
+    refs = [comp.bom_ref for comp in additions]
+    if len(refs) != len(set(refs)) or any(bom.get_component(ref) for ref in refs):
+        raise PolicyError("agent.yaml dependencies contain conflicting component references")
+    return additions
 
 
 def assemble_repository_agent(bom: AIBOM, root: Path) -> AgentComponent:
@@ -43,6 +166,7 @@ def assemble_repository_agent(bom: AIBOM, root: Path) -> AgentComponent:
             ) from exc
     identity = declared.id if declared and declared.id else str(root.resolve())
     agent_ref = "agent:repository:" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
+    additions = _manifest_dependencies(bom, declared, root, agent_ref) if declared else []
     discovery = ClaimEvidence(
         assurance=AssuranceLevel.OBSERVED,
         method="filesystem-inventory",
@@ -77,8 +201,19 @@ def assemble_repository_agent(bom: AIBOM, root: Path) -> AgentComponent:
         },
     )
     if declared:
-        for key in ("name", "version", "framework", "owner", "purpose"):
-            if getattr(declared, key) is not None:
+        if declared.autonomy_level is not None:
+            agent.properties["declared_autonomy_level"] = declared.autonomy_level.value
+        for key in (
+            "name",
+            "version",
+            "framework",
+            "owner",
+            "purpose",
+            "autonomy_level",
+            "instructions",
+            "models",
+        ):
+            if key in declared.model_fields_set and getattr(declared, key) is not None:
                 agent.claims[key] = ClaimEvidence(
                     assurance=AssuranceLevel.DECLARED,
                     method="agent-manifest",
@@ -86,6 +221,8 @@ def assemble_repository_agent(bom: AIBOM, root: Path) -> AgentComponent:
                     collector="repository-assembler",
                     locator=f"agent.yaml#/{key}",
                 )
+    for addition in additions:
+        bom.add_component(addition)
     relations = {
         ComponentType.MCP_SERVER: ("tool_refs", "configured-with"),
         ComponentType.TOOL: ("tool_refs", "configured-with"),
@@ -105,6 +242,10 @@ def assemble_repository_agent(bom: AIBOM, root: Path) -> AgentComponent:
         ComponentType.VERIFIED_EXTENSION,
     }
     for component in list(bom.components):
+        # A report stored in this repository does not associate discovered assets
+        # with this repository agent. Imported relationships remain unobserved.
+        if component.properties.get("collection_mode") == "imported-unverified-report":
+            continue
         if component.component_type in associated_kinds:
             bom.add_dependency(
                 DependencyEdge(

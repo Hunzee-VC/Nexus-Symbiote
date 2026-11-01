@@ -9,8 +9,9 @@ from typing import Any
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import RiskSeverity, SerializationSafety
 from nexus_symbiote.core.models import ModelComponent, RiskAssessment
+from nexus_symbiote.scanner_catalog import BUILTIN_SCANNER_NAMES
 
-REQUIRED_SCANNERS = frozenset({"mcp", "model", "prompt", "rag", "registry"})
+REQUIRED_SCANNERS = BUILTIN_SCANNER_NAMES
 
 SEVERITY_WEIGHTS: dict[RiskSeverity, float] = {
     RiskSeverity.CRITICAL: 10.0,
@@ -19,6 +20,40 @@ SEVERITY_WEIGHTS: dict[RiskSeverity, float] = {
     RiskSeverity.LOW: 1.0,
     RiskSeverity.INFO: 0.0,
 }
+
+
+def _intrinsic_model_risks(component: ModelComponent) -> list[RiskAssessment]:
+    """Derive risk from declared security facts even if findings were removed."""
+    risks = list(component.risks)
+    checks = (
+        (
+            component.serialization_safety
+            in {
+                SerializationSafety.UNSAFE_CODE_EXECUTION,
+                SerializationSafety.UNSAFE_TEMPLATE_INJECTION,
+            },
+            RiskSeverity.CRITICAL,
+            "serialization_format",
+            "The declared model serialization or loader permits unsafe execution.",
+        ),
+        (
+            component.trust_remote_code is True,
+            RiskSeverity.CRITICAL,
+            "code_execution",
+            "The model configuration enables repository code execution.",
+        ),
+        (
+            component.serialization_format in {"safetensors", "safe-tensors"}
+            and component.serialization_safety == SerializationSafety.UNKNOWN,
+            RiskSeverity.HIGH,
+            "invalid_safetensors",
+            "The declared SafeTensors artifact has no corroborated structural safety.",
+        ),
+    )
+    for applies, severity, category, detail in checks:
+        if applies and not any(r.category == category and r.severity == severity for r in risks):
+            risks.append(RiskAssessment(severity=severity, category=category, detail=detail))
+    return risks
 
 
 @dataclass
@@ -106,7 +141,7 @@ class RiskScorer:
         elif coverage is not None:
             statuses = coverage.scanner_status
             if statuses and (
-                not set(DEFAULT_SCANNERS).issubset(statuses)
+                not REQUIRED_SCANNERS.issubset(statuses)
                 or any(state != "complete" for state in statuses.values())
             ):
                 report.coverage_status = "partial"
@@ -116,36 +151,11 @@ class RiskScorer:
         category_scores: dict[str, float] = {}
 
         for comp in bom.components:
-            risks = list(getattr(comp, "risks", []))
-            if isinstance(comp, ModelComponent):
-                checks = (
-                    (
-                        comp.serialization_safety == SerializationSafety.UNSAFE_CODE_EXECUTION,
-                        RiskSeverity.CRITICAL,
-                        "serialization_format",
-                        "Unsafe serialization permits code execution.",
-                    ),
-                    (
-                        comp.trust_remote_code is True,
-                        RiskSeverity.CRITICAL,
-                        "code_execution",
-                        "The model configuration enables remote code.",
-                    ),
-                    (
-                        comp.unverified_safetensors,
-                        RiskSeverity.HIGH,
-                        "invalid_safetensors",
-                        "The artifact could not be verified as a SafeTensors file.",
-                    ),
-                )
-                for applies, severity, category, detail in checks:
-                    if applies and not any(
-                        r.category == category and r.severity == severity for r in risks
-                    ):
-                        risks.append(
-                            RiskAssessment(severity=severity, category=category, detail=detail)
-                        )
-
+            risks = (
+                _intrinsic_model_risks(comp)
+                if isinstance(comp, ModelComponent)
+                else getattr(comp, "risks", [])
+            )
             if not risks:
                 continue
             for risk in risks:
@@ -192,6 +202,8 @@ class RiskScorer:
                     report.risk_level = "critical"
         if report.overall_score >= self.fail_threshold:
             report.gate_reasons.append("aggregate score exceeds fail_threshold")
+        if "invalid_safetensors" in category_scores:
+            report.gate_reasons.append("SafeTensors structural safety is unverified")
         if report.coverage_status != "reported":
             report.gate_reasons.append("collection coverage is unknown or incomplete")
         report.findings.sort(key=lambda f: self.weights.get(f.severity, 0.0), reverse=True)
