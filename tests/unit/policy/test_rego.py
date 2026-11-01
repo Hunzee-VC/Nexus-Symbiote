@@ -89,6 +89,7 @@ INPUT_PATHS = (
     "models[].serialization.value.riskClass",
     "models[].serialization.value.trustRemoteCode",
     "models[].serialization.value.chatTemplateExecutable",
+    "models[].hosted.value.endpointOrigin",
     "instructions[].id",
     "instructions[].path",
     "instructions[].kind",

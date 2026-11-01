@@ -97,6 +97,7 @@ scanner indicators from the static model-artefact analysis (WP3). `symbiote poli
 | SYM-SKILL-002 skill scripts with shell access | medium | a skill bundles scripts and its `allowed-tools` grant shell execution | ASI05, ASI04 |
 | SYM-MODEL-005 malicious indicators in model artefacts | critical | the models-local collector recorded scanner indicators (dangerous pickle globals, broken-stream evasion, chat-template SSTI gadgets) as `malicious-indicator:*` tags | ASI05; AML.T0010, AML.T0018 |
 | SYM-MODEL-006 weights metadata anomalies | medium | safetensors/GGUF structural anomalies recorded as `format-anomaly:*` tags | ASI04 |
+| SYM-MODEL-007 model endpoint redirected by the repository | high | a project-scoped setting (`.claude/settings.json` `env.ANTHROPIC_BASE_URL`, `.env`, a gateway `api_base`) points a hosted model's API traffic at a host that is not the provider's (`endpoint-override:project`, from `models-hosted`); user-scope overrides are not flagged | ASI04, ASI03; AML.T0010 |
 
 Clarifications applied by the implementation:
 - `SYM-TOOL-001` also fails for a tool server with no observed or approved tool definitions (nothing is pinned).
