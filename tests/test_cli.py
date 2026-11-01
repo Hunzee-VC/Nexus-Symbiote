@@ -339,11 +339,11 @@ class TestRiskFixture:
         assert len(data["findings"]) == 2
         assert data["findings"][0]["severity"] == "critical"
 
-    def test_risk_high_threshold_passes(self, tmp_path):
+    def test_critical_risk_vetoes_high_threshold(self, tmp_path):
         bom_path = _make_fixture_bom(tmp_path, with_risks=True)
         runner = CliRunner()
         result = runner.invoke(main, ["risk", str(bom_path), "--threshold", "200"])
-        assert result.exit_code == 0
+        assert result.exit_code != 0
 
 
 class TestValidateFixture:

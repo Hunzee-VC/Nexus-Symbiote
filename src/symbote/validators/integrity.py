@@ -124,6 +124,7 @@ class IntegrityValidator:
                         severity="critical",
                     )
                 )
+                report.is_valid = False
 
         if hasattr(comp, "signing_status") and comp.signing_status == "unsigned":
             report.issues.append(

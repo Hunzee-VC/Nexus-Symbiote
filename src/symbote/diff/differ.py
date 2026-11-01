@@ -194,6 +194,18 @@ class AIBOMDiffer:
                 }
             )
 
+        elif old_hash and not new_hash:
+            modifications.append(
+                {
+                    "detail": "Tool definition hash missing — assurance regressed; content is unknown.",
+                    "severity": "high",
+                }
+            )
+        elif not old_hash and new_hash:
+            modifications.append(
+                {"detail": "Tool definition hash became available.", "severity": "info"}
+            )
+
         old_content = getattr(old, "content_hash", None)
         new_content = getattr(new, "content_hash", None)
         if old_content and new_content and old_content != new_content:
@@ -237,8 +249,8 @@ class AIBOMDiffer:
 
         old_signing = getattr(old, "signing_status", None)
         new_signing = getattr(new, "signing_status", None)
-        if old_signing and new_signing and old_signing != new_signing:
-            sev = "high" if new_signing == "unsigned" else "info"
+        if old_signing != new_signing:
+            sev = "high" if old_signing in {"sigstore-signed", "pgp-signed"} else "info"
             modifications.append(
                 {
                     "detail": f"Signing status changed: {old_signing} → {new_signing}",
