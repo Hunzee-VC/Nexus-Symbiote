@@ -83,16 +83,27 @@ class CompletenessValidator:
             )
             report.is_complete = False
 
-        for ctype in MINIMUM_COMPONENT_TYPES:
-            if ctype.value not in type_counts:
+        if bom.metadata.completeness:
+            claim = bom.metadata.completeness
+            if claim.scan_failures:
+                report.is_complete = False
+                for failure in claim.scan_failures:
+                    report.issues.append(CompletenessIssue("collection", failure, "error"))
+            if not claim.scanner_status:
+                report.is_complete = False
                 report.issues.append(
                     CompletenessIssue(
-                        surface=ctype.value,
-                        description=f"No {ctype.value} components found — likely incomplete scan.",
-                        severity="warning",
+                        "coverage",
+                        "No per-scanner coverage recorded; completeness is unknown.",
+                        "error",
                     )
                 )
-                report.is_complete = False
+            for scanner, state in claim.scanner_status.items():
+                if state != "complete":
+                    report.is_complete = False
+                    report.issues.append(
+                        CompletenessIssue(scanner, f"Scanner coverage is {state}.", "error")
+                    )
 
         for c in bom.components:
             if not c.hashes and c.component_type in (

@@ -290,7 +290,7 @@ class TestAIBOMDiffer:
     def test_component_modified(self):
         old = _full_bom()
         new = _full_bom()
-        new.add_component(
+        new.replace_component(
             MCPServerComponent(
                 bom_ref="mcp:fs",
                 name="filesystem",
@@ -306,7 +306,7 @@ class TestAIBOMDiffer:
     def test_security_alert_on_hash_change(self):
         old = _full_bom()
         new = _full_bom()
-        new.add_component(
+        new.replace_component(
             ToolComponent(
                 bom_ref="tool:read",
                 name="read_file",

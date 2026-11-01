@@ -308,6 +308,7 @@ class CompletenessClaim(BaseModel):
     surfaces_scanned: list[str] = Field(default_factory=list)
     surfaces_excluded: list[str] = Field(default_factory=list)
     scan_failures: list[str] = Field(default_factory=list)
+    scanner_status: dict[str, str] = Field(default_factory=dict)
     timestamp: datetime | None = None
     assurance_level: AssuranceLevel = AssuranceLevel.DECLARED
 

@@ -182,9 +182,9 @@ class TestScanCommand:
         result = runner.invoke(
             main, ["scan", str(project), "--scanner", "nonexistent", "-o", str(out)]
         )
-        assert result.exit_code == 0
+        assert result.exit_code != 0
         data = json.loads(out.read_text())
-        assert len(data["components"]) == 0
+        assert data["metadata"]["completeness"]["scanner_status"]["nonexistent"] == "failed"
 
     def test_scan_empty_project(self, tmp_path):
         out = tmp_path / "empty.json"
