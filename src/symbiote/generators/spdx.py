@@ -29,6 +29,9 @@ RELATIONSHIP_TYPES = {
     "merged-from": "descendantOf",
 }
 
+# Standard SPDX individual indicating that no license determination is made.
+NO_ASSERTION_LICENSE = "https://spdx.org/rdf/3.0.1/terms/Licensing/NoAssertion"
+
 
 def _properties_extension(props: list[dict[str, str]]) -> list[dict[str, Any]]:
     return [
@@ -105,6 +108,25 @@ class SPDXGenerator(Generator):
             element["extension"] = _properties_extension(props)
             elements.append(element)
 
+            # AI and Dataset profiles require exactly one declared and one
+            # concluded license relationship for each package. NoAssertion is
+            # deliberate: discovery does not determine licensing terms.
+            if spdx_type in ("ai_AIPackage", "dataset_DatasetPackage"):
+                for relationship in ("hasDeclaredLicense", "hasConcludedLicense"):
+                    elements.append(
+                        {
+                            "type": "Relationship",
+                            "spdxId": base
+                            + "license/"
+                            + quote(comp.bom_ref, safe="")
+                            + "/"
+                            + relationship,
+                            "relationshipType": relationship,
+                            "from": ids[comp.bom_ref],
+                            "to": [NO_ASSERTION_LICENSE],
+                        }
+                    )
+
         for index, edge in enumerate(aibom.dependencies):
             elements.append(
                 {
@@ -130,7 +152,15 @@ class SPDXGenerator(Generator):
             "spdxId": base + "document",
             "creationInfo": creation["@id"],
             "name": f"symbiote-aibom-{meta.serial_number}",
-            "profileConformance": ["core", "software", "ai", "dataset", "extension"],
+            "profileConformance": [
+                "core",
+                "software",
+                "ai",
+                "dataset",
+                "extension",
+                "simpleLicensing",
+                "expandedLicensing",
+            ],
             "element": [element["spdxId"] for element in elements],
             "rootElement": [
                 ids[c.bom_ref] for c in aibom.components if c.component_type == ComponentType.AGENT

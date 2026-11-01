@@ -171,9 +171,31 @@ class TestSPDXGenerator:
     def test_relationship_types(self):
         gen = SPDXGenerator()
         result = gen.generate(_sample_aibom())
-        rels = [e for e in result["@graph"] if e.get("type") == "Relationship"]
+        rels = [
+            e
+            for e in result["@graph"]
+            if e.get("type") == "Relationship" and e.get("relationshipType") == "usesTool"
+        ]
         assert len(rels) == 1
         assert rels[0]["relationshipType"] == "usesTool"
+
+    def test_ai_and_dataset_license_profile_requirements(self):
+        from symbiote.generators.spdx import NO_ASSERTION_LICENSE
+
+        graph = SPDXGenerator().generate(_full_component_aibom())["@graph"]
+        packages = [e for e in graph if e.get("type") in ("ai_AIPackage", "dataset_DatasetPackage")]
+        assert packages
+        for package in packages:
+            for kind in ("hasDeclaredLicense", "hasConcludedLicense"):
+                relations = [
+                    e
+                    for e in graph
+                    if e.get("type") == "Relationship"
+                    and e.get("relationshipType") == kind
+                    and e.get("from") == package["spdxId"]
+                ]
+                assert len(relations) == 1
+                assert relations[0]["to"] == [NO_ASSERTION_LICENSE]
 
     def test_generate_json_valid(self):
         gen = SPDXGenerator()
@@ -482,6 +504,8 @@ def test_portable_formats_validate_offline(fixture):
         json.loads((schemas / "spdx-json-schema-3.0.1.json").read_text())
     ).validate(spdx)
     identifiers = {n.get("spdxId", n.get("@id")) for n in spdx["@graph"]}
+    # SPDX's predefined no-assertion license is an external vocabulary individual.
+    identifiers.add("https://spdx.org/rdf/3.0.1/terms/Licensing/NoAssertion")
     for n in spdx["@graph"]:
         if "spdxId" in n:
             assert n["creationInfo"] in identifiers
