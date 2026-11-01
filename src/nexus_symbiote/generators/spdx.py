@@ -6,17 +6,25 @@ profiles alongside agent-specific extensions under the nexus-symbiote namespace.
 
 from __future__ import annotations
 
-import uuid
+import hashlib
 from typing import Any
 
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.enums import ComponentType
 from nexus_symbiote.core.models import (
+    A2AClientComponent,
+    A2AServerComponent,
     AgentComponent,
     AnyComponent,
+    IDEAgentComponent,
+    MCPClientComponent,
+    MCPServerComponent,
     ModelComponent,
+    PromptComponent,
     RAGSourceComponent,
+    RegistryEntryComponent,
     ToolComponent,
+    VerifiedExtensionComponent,
 )
 from nexus_symbiote.generators.base import Generator
 
@@ -32,6 +40,11 @@ SPDX_TYPE_MAP: dict[ComponentType, str] = {
     ComponentType.DATA_SOURCE: "dataset_Dataset",
     ComponentType.REGISTRY_ENTRY: "software_Package",
     ComponentType.SKILL_PACKAGE: "software_Package",
+    ComponentType.MCP_CLIENT: "software_Package",
+    ComponentType.A2A_CLIENT: "software_Package",
+    ComponentType.A2A_SERVER: "software_Package",
+    ComponentType.IDE_AGENT: "ai_AIPackage",
+    ComponentType.VERIFIED_EXTENSION: "software_Package",
 }
 
 
@@ -43,7 +56,10 @@ class SPDXGenerator(Generator):
 
     def generate(self, aibom: AIBOM) -> dict[str, Any]:
         aibom.finalize()
-        doc_id = f"urn:spdx:document:{uuid.uuid4()}"
+        # Deterministic doc id from the (content-addressed under SOURCE_DATE_EPOCH)
+        # serial number, so SPDX output is reproducible across runs (NS-13).
+        serial = (aibom.metadata.serial_number or "").removeprefix("urn:uuid:") or "unknown"
+        doc_id = f"urn:spdx:document:{serial}"
 
         elements: list[dict[str, Any]] = []
         for comp in aibom.components:
@@ -138,6 +154,27 @@ class SPDXGenerator(Generator):
         elif isinstance(comp, RAGSourceComponent):
             if comp.corpus_type:
                 props["nexus-symbiote:corpusType"] = comp.corpus_type
+        elif isinstance(comp, MCPServerComponent):
+            if comp.transport:
+                props["nexus-symbiote:transport"] = comp.transport
+            props["nexus-symbiote:versionPinned"] = comp.version_pinned
+        elif isinstance(comp, PromptComponent):
+            if comp.content_hash:
+                props["nexus-symbiote:contentHash"] = comp.content_hash
+        elif isinstance(comp, RegistryEntryComponent):
+            if comp.registry_type:
+                props["nexus-symbiote:registryType"] = comp.registry_type
+        elif isinstance(comp, MCPClientComponent):
+            if comp.host_application:
+                props["nexus-symbiote:hostApplication"] = comp.host_application
+        elif isinstance(comp, A2AClientComponent | A2AServerComponent):
+            props["nexus-symbiote:a2aProtocols"] = ",".join(comp.supported_protocols)
+        elif isinstance(comp, IDEAgentComponent):
+            if comp.ide_type:
+                props["nexus-symbiote:ideType"] = comp.ide_type
+        elif isinstance(comp, VerifiedExtensionComponent):
+            if comp.attestation_status:
+                props["nexus-symbiote:attestationStatus"] = comp.attestation_status
 
         return [
             {
@@ -158,9 +195,12 @@ class SPDXGenerator(Generator):
             "merged-from": "DERIVED_FROM",
             "depends-on": "DEPENDS_ON",
         }
+        rel_id = hashlib.sha256(
+            f"{edge.source_ref}|{edge.target_ref}|{edge.relationship}".encode()
+        ).hexdigest()[:32]
         return {
             "type": "Relationship",
-            "spdxId": f"urn:spdx:rel:{uuid.uuid4()}",
+            "spdxId": f"urn:spdx:rel:{rel_id}",
             "relationshipType": rel_map.get(edge.relationship, "OTHER"),
             "from": f"urn:spdx:{edge.source_ref.replace(':', '-')}",
             "to": [f"urn:spdx:{edge.target_ref.replace(':', '-')}"],

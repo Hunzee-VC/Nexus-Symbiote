@@ -12,9 +12,14 @@ from typing import Any
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.enums import ComponentType
 from nexus_symbiote.core.models import (
+    A2AClientComponent,
+    A2AServerComponent,
     AgentComponent,
     AnyComponent,
+    DataSourceComponent,
     GuardrailComponent,
+    IDEAgentComponent,
+    MCPClientComponent,
     MCPServerComponent,
     MemoryStoreComponent,
     ModelComponent,
@@ -23,6 +28,7 @@ from nexus_symbiote.core.models import (
     RegistryEntryComponent,
     SkillPackageComponent,
     ToolComponent,
+    VerifiedExtensionComponent,
 )
 from nexus_symbiote.generators.base import Generator
 
@@ -38,6 +44,11 @@ COMPONENT_TYPE_MAP: dict[ComponentType, str] = {
     ComponentType.DATA_SOURCE: "data",
     ComponentType.REGISTRY_ENTRY: "platform",
     ComponentType.SKILL_PACKAGE: "library",
+    ComponentType.MCP_CLIENT: "application",
+    ComponentType.A2A_CLIENT: "application",
+    ComponentType.A2A_SERVER: "application",
+    ComponentType.IDE_AGENT: "application",
+    ComponentType.VERIFIED_EXTENSION: "library",
 }
 
 
@@ -176,6 +187,30 @@ class CycloneDXGenerator(Generator):
             _add("publisherVerified", comp.publisher_verified)
         elif isinstance(comp, SkillPackageComponent):
             _add("skillType", comp.skill_type)
+        elif isinstance(comp, MCPClientComponent):
+            _add("hostApplication", comp.host_application)
+            for ref in comp.server_refs:
+                _add("serverRef", ref)
+        elif isinstance(comp, A2AClientComponent):
+            _add("agentCardUrl", comp.agent_card_url)
+            for proto in comp.supported_protocols:
+                _add("supportedProtocol", proto)
+        elif isinstance(comp, A2AServerComponent):
+            _add("endpointUrl", comp.endpoint_url)
+            _add("authenticationRequired", comp.authentication_required)
+            for skill in comp.skills_declared:
+                _add("skillDeclared", skill)
+        elif isinstance(comp, IDEAgentComponent):
+            _add("ideType", comp.ide_type)
+            _add("permissionMode", comp.permission_mode)
+        elif isinstance(comp, VerifiedExtensionComponent):
+            _add("extensionType", comp.extension_type)
+            _add("publisherVerified", comp.publisher_verified)
+            _add("attestationStatus", comp.attestation_status)
+        elif isinstance(comp, DataSourceComponent):
+            _add("datasetType", comp.dataset_type)
+            _add("license", comp.license)
+            _add("consentStatus", comp.consent_status)
 
         return props
 

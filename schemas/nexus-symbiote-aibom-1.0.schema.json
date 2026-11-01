@@ -1,279 +1,11 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/aisecnomad/nexus-symbiote/schemas/nexus-symbiote-aibom-1.0.schema.json",
-  "title": "Nexus SymBiote AgentBOM Schema",
-  "description": "JSON Schema for Nexus SymBiote Agent Bill of Materials (AIBOM) documents. Extends CycloneDX 1.7 and SPDX 3.0 with agent-native component types.",
-  "type": "object",
-  "required": ["metadata", "components"],
-  "properties": {
-    "metadata": {
-      "$ref": "#/$defs/AIBOMMetadata"
-    },
-    "components": {
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/Component"
-      },
-      "description": "All agent supply chain components"
-    },
-    "dependencies": {
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/DependencyEdge"
-      },
-      "description": "Typed relationships between components"
-    }
-  },
   "$defs": {
-    "AIBOMMetadata": {
-      "type": "object",
-      "required": ["spec_version"],
+    "A2AClientComponent": {
+      "description": "An A2A protocol client that discovers and invokes remote agents.",
       "properties": {
-        "spec_version": {
-          "type": "string",
-          "const": "1.0.0"
-        },
-        "serial_number": {
-          "type": "string",
-          "pattern": "^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
-        },
-        "version": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "timestamp": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "tool_name": {
-          "type": "string"
-        },
-        "tool_version": {
-          "type": "string"
-        },
-        "tool_vendor": {
-          "type": "string"
-        },
-        "authors": {
-          "type": "array",
-          "items": { "type": "string" }
-        },
-        "completeness": {
-          "$ref": "#/$defs/CompletenessClaim"
-        }
-      }
-    },
-    "CompletenessClaim": {
-      "type": "object",
-      "required": ["scope"],
-      "properties": {
-        "scope": { "type": "string" },
-        "surfaces_scanned": {
-          "type": "array",
-          "items": { "type": "string" }
-        },
-        "surfaces_excluded": {
-          "type": "array",
-          "items": { "type": "string" }
-        },
-        "scan_failures": {
-          "type": "array",
-          "items": { "type": "string" }
-        },
-        "scanner_status": {
-          "type": "object",
-          "description": "Scanner outcomes in the local static collection scope.",
-          "additionalProperties": { "type": "string", "enum": ["complete", "partial", "failed", "unknown", "not-applicable"] }
-        },
-        "timestamp": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "assurance_level": {
-          "$ref": "#/$defs/AssuranceLevel"
-        }
-      }
-    },
-    "DependencyEdge": {
-      "type": "object",
-      "required": ["source_ref", "target_ref", "relationship"],
-      "properties": {
-        "source_ref": { "type": "string" },
-        "target_ref": { "type": "string" },
-        "relationship": {
-          "type": "string",
-          "enum": [
-            "invokes", "delegates-to", "retrieves-from", "acts-as-identity",
-            "registered-as", "approved-under", "observed-using", "trained-on",
-            "fine-tuned-from", "quantized-from", "merged-from", "depends-on"
-          ]
-        },
-        "assurance_level": { "type": "string" },
-        "conditions": { "type": "string" }
-      }
-    },
-    "Component": {
-      "type": "object",
-      "required": ["bom_ref", "component_type", "name"],
-      "properties": {
-        "bom_ref": {
-          "type": "string",
-          "description": "Unique reference within this BOM"
-        },
-        "component_type": {
-          "$ref": "#/$defs/ComponentType"
-        },
-        "name": { "type": "string" },
-        "version": { "type": "string" },
-        "supplier": { "type": "string" },
-        "description": { "type": "string" },
-        "hashes": {
-          "type": "object",
-          "additionalProperties": { "type": "string" }
-        },
-        "trust_tier": {
-          "$ref": "#/$defs/TrustTier"
-        },
-        "assurance_level": {
-          "$ref": "#/$defs/AssuranceLevel"
-        },
-        "source_path": { "type": "string" },
-        "properties": {
-          "type": "object",
-          "additionalProperties": true
-        },
-        "risks": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/RiskAssessment"
-          }
-        }
-      },
-      "allOf": [
-        {
-          "if": { "properties": { "component_type": { "const": "agent" } } },
-          "then": { "$ref": "#/$defs/AgentProperties" }
-        },
-        {
-          "if": { "properties": { "component_type": { "const": "mcp-server" } } },
-          "then": { "$ref": "#/$defs/MCPServerProperties" }
-        },
-        {
-          "if": { "properties": { "component_type": { "const": "tool" } } },
-          "then": { "$ref": "#/$defs/ToolProperties" }
-        },
-        {
-          "if": { "properties": { "component_type": { "const": "model" } } },
-          "then": { "$ref": "#/$defs/ModelProperties" }
-        },
-        {
-          "if": { "properties": { "component_type": { "const": "prompt-template" } } },
-          "then": { "$ref": "#/$defs/PromptProperties" }
-        }
-      ]
-    },
-    "ComponentType": {
-      "type": "string",
-      "enum": [
-        "agent", "mcp-server", "tool", "model", "prompt-template",
-        "guardrail-policy", "memory-store", "rag-source", "data-source",
-        "registry-entry", "skill-package"
-      ]
-    },
-    "TrustTier": {
-      "type": "string",
-      "enum": [
-        "internal-verified", "internal-unverified",
-        "third-party-signed", "third-party-unsigned",
-        "untrusted-public", "unknown"
-      ]
-    },
-    "AssuranceLevel": {
-      "type": "string",
-      "enum": ["declared", "observed", "verified"]
-    },
-    "RiskSeverity": {
-      "type": "string",
-      "enum": ["critical", "high", "medium", "low", "info"]
-    },
-    "RiskAssessment": {
-      "type": "object",
-      "required": ["severity", "category", "detail"],
-      "properties": {
-        "severity": { "$ref": "#/$defs/RiskSeverity" },
-        "category": { "type": "string" },
-        "detail": { "type": "string" },
-        "recommendation": { "type": "string" },
-        "references": {
-          "type": "array",
-          "items": { "type": "string" }
-        }
-      }
-    },
-    "CapabilityDeclaration": {
-      "type": "object",
-      "properties": {
-        "capabilities": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "enum": ["read", "write", "execute", "network", "filesystem", "payment", "credentials", "destructive"]
-          }
-        },
-        "oauth_scopes": { "type": "array", "items": { "type": "string" } },
-        "egress_domains": { "type": "array", "items": { "type": "string" } },
-        "filesystem_paths": { "type": "array", "items": { "type": "string" } },
-        "side_effect_profile": {
-          "type": "string",
-          "enum": ["read-only", "state-modifying", "destructive", "financial-transaction", "unknown"]
-        },
-        "execution_isolation": {
-          "type": "string",
-          "enum": ["none", "process", "container", "wasm", "microvm", "gvisor"]
-        },
-        "human_in_the_loop": {
-          "type": "string",
-          "enum": ["required", "conditional", "none"]
-        }
-      }
-    },
-    "AgentProperties": {
-      "type": "object",
-      "properties": {
-        "autonomy_level": {
-          "type": "string",
-          "enum": ["L0-chatbot", "L1-copilot", "L2-agent", "L3-autonomous", "L4-fully-autonomous"]
-        },
-        "framework": { "type": "string" },
-        "model_refs": { "type": "array", "items": { "type": "string" } },
-        "tool_refs": { "type": "array", "items": { "type": "string" } },
-        "memory_refs": { "type": "array", "items": { "type": "string" } },
-        "prompt_refs": { "type": "array", "items": { "type": "string" } },
-        "guardrail_refs": { "type": "array", "items": { "type": "string" } },
-        "sub_agent_refs": { "type": "array", "items": { "type": "string" } },
-        "capabilities": { "$ref": "#/$defs/CapabilityDeclaration" },
-        "deployment_profile": { "$ref": "#/$defs/DeploymentProfile" },
-        "authorizations": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/AuthorizationRecord" }
-        }
-      }
-    },
-    "AuthorityClaim": {
-      "additionalProperties": false,
-      "description": "A scoped authority assertion for an agent deployment.\n\nAn unknown or not-applicable claim does not imply an empty permission set.",
-      "properties": {
-        "kind": {
-          "$ref": "#/$defs/AuthorityKind"
-        },
-        "state": {
-          "$ref": "#/$defs/ClaimState",
-          "default": "unknown"
-        },
-        "principal": {
+        "agent_card_url": {
           "anyOf": [
             {
-              "minLength": 1,
               "type": "string"
             },
             {
@@ -281,8 +13,589 @@
             }
           ],
           "default": null,
-          "title": "Principal"
+          "description": "URL of the remote agent card",
+          "title": "Agent Card Url"
         },
+        "assurance_level": {
+          "$ref": "#/$defs/AssuranceLevel",
+          "default": "declared"
+        },
+        "authentication_methods": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Authentication Methods",
+          "type": "array"
+        },
+        "bom_ref": {
+          "description": "Unique reference within this BOM",
+          "title": "Bom Ref",
+          "type": "string"
+        },
+        "capabilities": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CapabilityDeclaration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "component_type": {
+          "const": "a2a-client",
+          "default": "a2a-client",
+          "title": "Component Type",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "hashes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Hashes",
+          "type": "object"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "properties": {
+          "additionalProperties": true,
+          "description": "Extension properties",
+          "title": "Properties",
+          "type": "object"
+        },
+        "risks": {
+          "items": {
+            "$ref": "#/$defs/RiskAssessment"
+          },
+          "title": "Risks",
+          "type": "array"
+        },
+        "source_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Filesystem path or URL where this was discovered",
+          "title": "Source Path"
+        },
+        "supplier": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supplier"
+        },
+        "supported_protocols": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Supported Protocols",
+          "type": "array"
+        },
+        "trust_tier": {
+          "$ref": "#/$defs/TrustTier",
+          "default": "unknown"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "bom_ref",
+        "name"
+      ],
+      "title": "A2AClientComponent",
+      "type": "object"
+    },
+    "A2AServerComponent": {
+      "description": "An A2A protocol server exposing agent capabilities to other agents.",
+      "properties": {
+        "agent_card_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path or URL to the agent card JSON",
+          "title": "Agent Card Path"
+        },
+        "assurance_level": {
+          "$ref": "#/$defs/AssuranceLevel",
+          "default": "declared"
+        },
+        "authentication_required": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Authentication Required"
+        },
+        "bom_ref": {
+          "description": "Unique reference within this BOM",
+          "title": "Bom Ref",
+          "type": "string"
+        },
+        "capabilities": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CapabilityDeclaration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "component_type": {
+          "const": "a2a-server",
+          "default": "a2a-server",
+          "title": "Component Type",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "endpoint_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Endpoint Url"
+        },
+        "hashes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Hashes",
+          "type": "object"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "properties": {
+          "additionalProperties": true,
+          "description": "Extension properties",
+          "title": "Properties",
+          "type": "object"
+        },
+        "risks": {
+          "items": {
+            "$ref": "#/$defs/RiskAssessment"
+          },
+          "title": "Risks",
+          "type": "array"
+        },
+        "skills_declared": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Skills Declared",
+          "type": "array"
+        },
+        "source_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Filesystem path or URL where this was discovered",
+          "title": "Source Path"
+        },
+        "supplier": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supplier"
+        },
+        "supported_protocols": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Supported Protocols",
+          "type": "array"
+        },
+        "trust_tier": {
+          "$ref": "#/$defs/TrustTier",
+          "default": "unknown"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "bom_ref",
+        "name"
+      ],
+      "title": "A2AServerComponent",
+      "type": "object"
+    },
+    "AIBOMMetadata": {
+      "description": "Header metadata for an AgentBOM document.",
+      "properties": {
+        "authors": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Authors",
+          "type": "array"
+        },
+        "completeness": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompletenessClaim"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "serial_number": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Serial Number"
+        },
+        "spec_version": {
+          "default": "1.0.0",
+          "title": "Spec Version",
+          "type": "string"
+        },
+        "timestamp": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timestamp"
+        },
+        "tool_name": {
+          "default": "nexus-symbiote",
+          "title": "Tool Name",
+          "type": "string"
+        },
+        "tool_vendor": {
+          "default": "aisecnomad",
+          "title": "Tool Vendor",
+          "type": "string"
+        },
+        "tool_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Version"
+        },
+        "version": {
+          "default": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "title": "AIBOMMetadata",
+      "type": "object"
+    },
+    "AgentComponent": {
+      "description": "An autonomous AI agent deployment.",
+      "properties": {
+        "assurance_level": {
+          "$ref": "#/$defs/AssuranceLevel",
+          "default": "declared"
+        },
+        "authorizations": {
+          "items": {
+            "$ref": "#/$defs/AuthorizationRecord"
+          },
+          "title": "Authorizations",
+          "type": "array"
+        },
+        "autonomy_level": {
+          "$ref": "#/$defs/AutonomyLevel",
+          "default": "L2-agent"
+        },
+        "bom_ref": {
+          "description": "Unique reference within this BOM",
+          "title": "Bom Ref",
+          "type": "string"
+        },
+        "capabilities": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CapabilityDeclaration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "component_type": {
+          "const": "agent",
+          "default": "agent",
+          "title": "Component Type",
+          "type": "string"
+        },
+        "deployment_profile": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DeploymentProfile"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional deployment-scoped authority claims and their evidence provenance"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "framework": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Agent framework (LangGraph, CrewAI, etc.)",
+          "title": "Framework"
+        },
+        "guardrail_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Guardrail Refs",
+          "type": "array"
+        },
+        "hashes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Hashes",
+          "type": "object"
+        },
+        "memory_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Memory Refs",
+          "type": "array"
+        },
+        "model_refs": {
+          "description": "bom_ref pointers to model components",
+          "items": {
+            "type": "string"
+          },
+          "title": "Model Refs",
+          "type": "array"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "prompt_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Prompt Refs",
+          "type": "array"
+        },
+        "properties": {
+          "additionalProperties": true,
+          "description": "Extension properties",
+          "title": "Properties",
+          "type": "object"
+        },
+        "risks": {
+          "items": {
+            "$ref": "#/$defs/RiskAssessment"
+          },
+          "title": "Risks",
+          "type": "array"
+        },
+        "source_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Filesystem path or URL where this was discovered",
+          "title": "Source Path"
+        },
+        "sub_agent_refs": {
+          "description": "bom_ref pointers to delegated sub-agents",
+          "items": {
+            "type": "string"
+          },
+          "title": "Sub Agent Refs",
+          "type": "array"
+        },
+        "supplier": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supplier"
+        },
+        "tool_refs": {
+          "description": "bom_ref pointers to tool/MCP components",
+          "items": {
+            "type": "string"
+          },
+          "title": "Tool Refs",
+          "type": "array"
+        },
+        "trust_tier": {
+          "$ref": "#/$defs/TrustTier",
+          "default": "unknown"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "bom_ref",
+        "name"
+      ],
+      "title": "AgentComponent",
+      "type": "object"
+    },
+    "AssuranceLevel": {
+      "enum": [
+        "declared",
+        "observed",
+        "verified"
+      ],
+      "title": "AssuranceLevel",
+      "type": "string"
+    },
+    "AuthorityClaim": {
+      "additionalProperties": false,
+      "description": "A scoped authority assertion for an agent deployment.\n\nAn unknown or not-applicable claim does not imply an empty permission set.",
+      "properties": {
         "action": {
           "anyOf": [
             {
@@ -295,32 +608,6 @@
           ],
           "default": null,
           "title": "Action"
-        },
-        "resource": {
-          "anyOf": [
-            {
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Resource"
-        },
-        "delegating_principal": {
-          "anyOf": [
-            {
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Delegating Principal"
         },
         "audience": {
           "anyOf": [
@@ -335,10 +622,10 @@
           "default": null,
           "title": "Audience"
         },
-        "observed_at": {
+        "delegating_principal": {
           "anyOf": [
             {
-              "format": "date-time",
+              "minLength": 1,
               "type": "string"
             },
             {
@@ -346,7 +633,14 @@
             }
           ],
           "default": null,
-          "title": "Observed At"
+          "title": "Delegating Principal"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/EvidenceRecord"
+          },
+          "title": "Evidence",
+          "type": "array"
         },
         "expires_at": {
           "anyOf": [
@@ -361,12 +655,51 @@
           "default": null,
           "title": "Expires At"
         },
-        "evidence": {
-          "items": {
-            "$ref": "#/$defs/EvidenceRecord"
-          },
-          "title": "Evidence",
-          "type": "array"
+        "kind": {
+          "$ref": "#/$defs/AuthorityKind"
+        },
+        "observed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observed At"
+        },
+        "principal": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Principal"
+        },
+        "resource": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resource"
+        },
+        "state": {
+          "$ref": "#/$defs/ClaimState",
+          "default": "unknown"
         },
         "unknown_reason": {
           "anyOf": [
@@ -397,6 +730,181 @@
       "title": "AuthorityKind",
       "type": "string"
     },
+    "AuthorizationRecord": {
+      "description": "Who authorized what, under which policy.",
+      "properties": {
+        "action": {
+          "title": "Action",
+          "type": "string"
+        },
+        "approval_required": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Approval Required"
+        },
+        "conditions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Conditions",
+          "type": "array"
+        },
+        "delegating_principal": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Delegating Principal"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expires At"
+        },
+        "policy_reference": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Policy Reference"
+        },
+        "principal": {
+          "title": "Principal",
+          "type": "string"
+        },
+        "resource_scope": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resource Scope"
+        }
+      },
+      "required": [
+        "principal",
+        "action"
+      ],
+      "title": "AuthorizationRecord",
+      "type": "object"
+    },
+    "AutonomyLevel": {
+      "enum": [
+        "L0-chatbot",
+        "L1-copilot",
+        "L2-agent",
+        "L3-autonomous",
+        "L4-fully-autonomous"
+      ],
+      "title": "AutonomyLevel",
+      "type": "string"
+    },
+    "CapabilityClass": {
+      "enum": [
+        "read",
+        "write",
+        "execute",
+        "network",
+        "filesystem",
+        "payment",
+        "credentials",
+        "destructive"
+      ],
+      "title": "CapabilityClass",
+      "type": "string"
+    },
+    "CapabilityDeclaration": {
+      "description": "What a component is permitted to do.",
+      "properties": {
+        "capabilities": {
+          "items": {
+            "$ref": "#/$defs/CapabilityClass"
+          },
+          "title": "Capabilities",
+          "type": "array"
+        },
+        "egress_domains": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Egress Domains",
+          "type": "array"
+        },
+        "execution_isolation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExecutionIsolation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Declared isolation; null or absent means unknown"
+        },
+        "filesystem_paths": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Filesystem Paths",
+          "type": "array"
+        },
+        "human_in_the_loop": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HumanInTheLoop"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Declared human-approval setting; null or absent means unknown"
+        },
+        "oauth_scopes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Oauth Scopes",
+          "type": "array"
+        },
+        "side_effect_profile": {
+          "$ref": "#/$defs/SideEffectProfile",
+          "default": "unknown"
+        }
+      },
+      "title": "CapabilityDeclaration",
+      "type": "object"
+    },
     "ClaimState": {
       "enum": [
         "declared",
@@ -408,68 +916,47 @@
       "title": "ClaimState",
       "type": "string"
     },
-    "EvidenceRecord": {
-      "additionalProperties": false,
-      "description": "A producer's evidence reference, not an independently verified result.",
+    "CompletenessClaim": {
+      "description": "What was actually scanned and what was excluded.",
       "properties": {
-        "source": {
-          "description": "Non-secret source identifier",
-          "minLength": 1,
-          "title": "Source",
+        "assurance_level": {
+          "$ref": "#/$defs/AssuranceLevel",
+          "default": "declared"
+        },
+        "scan_failures": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Scan Failures",
+          "type": "array"
+        },
+        "scanner_status": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Scanner Status",
+          "type": "object"
+        },
+        "scope": {
+          "description": "What this completeness claim covers (e.g. 'full-agent')",
+          "title": "Scope",
           "type": "string"
         },
-        "collector": {
-          "minLength": 1,
-          "title": "Collector",
-          "type": "string"
+        "surfaces_excluded": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Surfaces Excluded",
+          "type": "array"
         },
-        "collected_at": {
-          "format": "date-time",
-          "title": "Collected At",
-          "type": "string"
+        "surfaces_scanned": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Surfaces Scanned",
+          "type": "array"
         },
-        "subject_digest": {
-          "anyOf": [
-            {
-              "pattern": "^sha256:[0-9a-f]{64}$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Subject Digest"
-        },
-        "verification_status": {
-          "$ref": "#/$defs/VerificationStatus",
-          "default": "unverified"
-        },
-        "verifier": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Verifier"
-        },
-        "verification_policy": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Verification Policy"
-        },
-        "verified_at": {
+        "timestamp": {
           "anyOf": [
             {
               "format": "date-time",
@@ -480,31 +967,251 @@
             }
           ],
           "default": null,
-          "title": "Verified At"
+          "title": "Timestamp"
         }
       },
       "required": [
-        "source",
-        "collector",
-        "collected_at"
+        "scope"
       ],
-      "title": "EvidenceRecord",
+      "title": "CompletenessClaim",
       "type": "object"
     },
-    "VerificationStatus": {
-      "enum": [
-        "unverified",
-        "verified",
-        "invalid",
-        "unsupported"
+    "DataSourceComponent": {
+      "description": "A training or fine-tuning dataset.",
+      "properties": {
+        "assurance_level": {
+          "$ref": "#/$defs/AssuranceLevel",
+          "default": "declared"
+        },
+        "bom_ref": {
+          "description": "Unique reference within this BOM",
+          "title": "Bom Ref",
+          "type": "string"
+        },
+        "collection_date": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Collection Date"
+        },
+        "component_type": {
+          "const": "data-source",
+          "default": "data-source",
+          "title": "Component Type",
+          "type": "string"
+        },
+        "consent_status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Consent Status"
+        },
+        "content_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content Hash"
+        },
+        "dataset_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "pre-training, fine-tuning, evaluation, alignment",
+          "title": "Dataset Type"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "hashes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Hashes",
+          "type": "object"
+        },
+        "license": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "License"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "properties": {
+          "additionalProperties": true,
+          "description": "Extension properties",
+          "title": "Properties",
+          "type": "object"
+        },
+        "risks": {
+          "items": {
+            "$ref": "#/$defs/RiskAssessment"
+          },
+          "title": "Risks",
+          "type": "array"
+        },
+        "source_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Filesystem path or URL where this was discovered",
+          "title": "Source Path"
+        },
+        "source_uri": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Uri"
+        },
+        "supplier": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supplier"
+        },
+        "trust_tier": {
+          "$ref": "#/$defs/TrustTier",
+          "default": "unknown"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "bom_ref",
+        "name"
       ],
-      "title": "VerificationStatus",
-      "type": "string"
+      "title": "DataSourceComponent",
+      "type": "object"
+    },
+    "DependencyEdge": {
+      "description": "A typed relationship between two components.",
+      "properties": {
+        "assurance_level": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Assurance Level"
+        },
+        "conditions": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conditions"
+        },
+        "relationship": {
+          "description": "invokes, delegates-to, retrieves-from, acts-as-identity, registered-as, approved-under, observed-using, trained-on, fine-tuned-from, quantized-from, merged-from, depends-on",
+          "title": "Relationship",
+          "type": "string"
+        },
+        "source_ref": {
+          "title": "Source Ref",
+          "type": "string"
+        },
+        "target_ref": {
+          "title": "Target Ref",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_ref",
+        "target_ref",
+        "relationship"
+      ],
+      "title": "DependencyEdge",
+      "type": "object"
     },
     "DeploymentProfile": {
       "additionalProperties": false,
       "description": "Scope a set of permission assertions to one agent deployment.",
       "properties": {
+        "authority": {
+          "items": {
+            "$ref": "#/$defs/AuthorityClaim"
+          },
+          "title": "Authority",
+          "type": "array"
+        },
         "deployment_id": {
           "minLength": 1,
           "title": "Deployment Id",
@@ -540,13 +1247,6 @@
           ],
           "default": null,
           "title": "Workload Identity"
-        },
-        "authority": {
-          "items": {
-            "$ref": "#/$defs/AuthorityClaim"
-          },
-          "title": "Authority",
-          "type": "array"
         }
       },
       "required": [
@@ -556,74 +1256,2462 @@
       "title": "DeploymentProfile",
       "type": "object"
     },
-    "AuthorizationRecord": {
-      "type": "object",
-      "required": ["principal", "action"],
+    "EvidenceRecord": {
+      "additionalProperties": false,
+      "description": "A producer's evidence reference, not an independently verified result.",
       "properties": {
-        "principal": { "type": "string" },
-        "delegating_principal": { "type": "string" },
-        "action": { "type": "string" },
-        "resource_scope": { "type": "string" },
-        "conditions": { "type": "array", "items": { "type": "string" } },
-        "approval_required": { "type": "boolean" },
-        "expires_at": { "type": "string", "format": "date-time" },
-        "policy_reference": { "type": "string" }
-      }
-    },
-    "MCPServerProperties": {
-      "type": "object",
-      "properties": {
-        "transport": { "type": "string", "enum": ["stdio", "sse", "streamable-http"] },
-        "command": { "type": "string" },
-        "args": { "type": "array", "items": { "type": "string" } },
-        "env": { "type": "object", "additionalProperties": { "type": "string" } },
-        "endpoint_url": { "type": "string" },
-        "tool_count": { "type": "integer" },
-        "tool_refs": { "type": "array", "items": { "type": "string" } },
-        "version_pinned": { "type": "boolean" },
-        "schema_hash": { "type": "string" }
-      }
-    },
-    "ToolProperties": {
-      "type": "object",
-      "properties": {
-        "mcp_server_ref": { "type": "string" },
-        "input_schema": { "type": "object" },
-        "description_text": { "type": "string" },
-        "definition_hash": { "type": "string" },
-        "definition_hash_version": { "type": ["string", "null"] },
-        "capabilities": { "$ref": "#/$defs/CapabilityDeclaration" },
-        "annotations": { "type": "object" }
-      }
-    },
-    "ModelProperties": {
-      "type": "object",
-      "properties": {
-        "model_type": { "type": "string" },
-        "provider": { "type": "string" },
-        "endpoint": { "type": "string" },
-        "serialization_format": { "type": "string" },
-        "serialization_safety": {
-          "type": "string",
-          "enum": ["safe", "unsafe-code-execution", "unsafe-template-injection", "unknown"]
+        "collected_at": {
+          "format": "date-time",
+          "title": "Collected At",
+          "type": "string"
         },
-        "signing_status": { "type": "string" },
-        "signing_identity": { "type": "string" },
-        "derivation_type": { "type": "string" },
-        "quantization_method": { "type": "string" },
-        "tokenizer_hash": { "type": "string" },
-        "chat_template_hash": { "type": "string" },
-        "trust_remote_code": { "type": "boolean" }
-      }
+        "collector": {
+          "minLength": 1,
+          "title": "Collector",
+          "type": "string"
+        },
+        "source": {
+          "description": "Non-secret source identifier",
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        },
+        "subject_digest": {
+          "anyOf": [
+            {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subject Digest"
+        },
+        "verification_policy": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verification Policy"
+        },
+        "verification_status": {
+          "$ref": "#/$defs/VerificationStatus",
+          "default": "unverified"
+        },
+        "verified_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified At"
+        },
+        "verifier": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verifier"
+        }
+      },
+      "required": [
+        "source",
+        "collector",
+        "collected_at"
+      ],
+      "title": "EvidenceRecord",
+      "type": "object"
     },
-    "PromptProperties": {
-      "type": "object",
+    "ExecutionIsolation": {
+      "enum": [
+        "none",
+        "process",
+        "container",
+        "wasm",
+        "microvm",
+        "gvisor"
+      ],
+      "title": "ExecutionIsolation",
+      "type": "string"
+    },
+    "GuardrailComponent": {
+      "description": "A safety classifier, content filter, or output validator.",
       "properties": {
-        "prompt_type": { "type": "string" },
-        "content_hash": { "type": "string" },
-        "variable_schema": { "type": "object" },
-        "modification_authority": { "type": "string" }
-      }
+        "assurance_level": {
+          "$ref": "#/$defs/AssuranceLevel",
+          "default": "declared"
+        },
+        "bom_ref": {
+          "description": "Unique reference within this BOM",
+          "title": "Bom Ref",
+          "type": "string"
+        },
+        "component_type": {
+          "const": "guardrail-policy",
+          "default": "guardrail-policy",
+          "title": "Component Type",
+          "type": "string"
+        },
+        "config_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Config Hash"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "guardrail_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "input-filter, output-filter, classifier, rate-limiter",
+          "title": "Guardrail Type"
+        },
+        "hashes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Hashes",
+          "type": "object"
+        },
+        "model_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "bom_ref of the model backing this guardrail",
+          "title": "Model Ref"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "policy_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Policy Version"
+        },
+        "properties": {
+          "additionalProperties": true,
+          "description": "Extension properties",
+          "title": "Properties",
+          "type": "object"
+        },
+        "risks": {
+          "items": {
+            "$ref": "#/$defs/RiskAssessment"
+          },
+          "title": "Risks",
+          "type": "array"
+        },
+        "source_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Filesystem path or URL where this was discovered",
+          "title": "Source Path"
+        },
+        "supplier": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supplier"
+        },
+        "trust_tier": {
+          "$ref": "#/$defs/TrustTier",
+          "default": "unknown"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "bom_ref",
+        "name"
+      ],
+      "title": "GuardrailComponent",
+      "type": "object"
+    },
+    "HumanInTheLoop": {
+      "enum": [
+        "required",
+        "conditional",
+        "none"
+      ],
+      "title": "HumanInTheLoop",
+      "type": "string"
+    },
+    "IDEAgentComponent": {
+      "description": "An IDE coding agent configuration (Claude Code, Codex, Cursor, etc.).",
+      "properties": {
+        "assurance_level": {
+          "$ref": "#/$defs/AssuranceLevel",
+          "default": "declared"
+        },
+        "bom_ref": {
+          "description": "Unique reference within this BOM",
+          "title": "Bom Ref",
+          "type": "string"
+        },
+        "component_type": {
+          "const": "ide-agent",
+          "default": "ide-agent",
+          "title": "Component Type",
+          "type": "string"
+        },
+        "config_files": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Config Files",
+          "type": "array"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "hashes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Hashes",
+          "type": "object"
+        },
+        "ide_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "claude-code, codex, cursor, antigravity, xai, windsurf, cline",
+          "title": "Ide Type"
+        },
+        "mcp_server_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Mcp Server Refs",
+          "type": "array"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "permission_mode": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Permission Mode"
+        },
+        "prompt_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Prompt Refs",
+          "type": "array"
+        },
+        "properties": {
+          "additionalProperties": true,
+          "description": "Extension properties",
+          "title": "Properties",
+          "type": "object"
+        },
+        "risks": {
+          "items": {
+            "$ref": "#/$defs/RiskAssessment"
+          },
+          "title": "Risks",
+          "type": "array"
+        },
+        "source_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Filesystem path or URL where this was discovered",
+          "title": "Source Path"
+        },
+        "supplier": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supplier"
+        },
+        "trust_tier": {
+          "$ref": "#/$defs/TrustTier",
+          "default": "unknown"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "bom_ref",
+        "name"
+      ],
+      "title": "IDEAgentComponent",
+      "type": "object"
+    },
+    "MCPClientComponent": {
+      "description": "An MCP client that connects to MCP servers.",
+      "properties": {
+        "assurance_level": {
+          "$ref": "#/$defs/AssuranceLevel",
+          "default": "declared"
+        },
+        "bom_ref": {
+          "description": "Unique reference within this BOM",
+          "title": "Bom Ref",
+          "type": "string"
+        },
+        "component_type": {
+          "const": "mcp-client",
+          "default": "mcp-client",
+          "title": "Component Type",
+          "type": "string"
+        },
+        "config_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Config Path"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "hashes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Hashes",
+          "type": "object"
+        },
+        "host_application": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The IDE or agent host (claude-code, cursor, etc.)",
+          "title": "Host Application"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "properties": {
+          "additionalProperties": true,
+          "description": "Extension properties",
+          "title": "Properties",
+          "type": "object"
+        },
+        "risks": {
+          "items": {
+            "$ref": "#/$defs/RiskAssessment"
+          },
+          "title": "Risks",
+          "type": "array"
+        },
+        "server_refs": {
+          "description": "bom_ref pointers to connected MCP servers",
+          "items": {
+            "type": "string"
+          },
+          "title": "Server Refs",
+          "type": "array"
+        },
+        "source_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Filesystem path or URL where this was discovered",
+          "title": "Source Path"
+        },
+        "supplier": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supplier"
+        },
+        "trust_tier": {
+          "$ref": "#/$defs/TrustTier",
+          "default": "unknown"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "bom_ref",
+        "name"
+      ],
+      "title": "MCPClientComponent",
+      "type": "object"
+    },
+    "MCPServerComponent": {
+      "description": "An MCP server that provides tools to agents.",
+      "properties": {
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Args",
+          "type": "array"
+        },
+        "assurance_level": {
+          "$ref": "#/$defs/AssuranceLevel",
+          "default": "declared"
+        },
+        "bom_ref": {
+          "description": "Unique reference within this BOM",
+          "title": "Bom Ref",
+          "type": "string"
+        },
+        "command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Command"
+        },
+        "component_type": {
+          "const": "mcp-server",
+          "default": "mcp-server",
+          "title": "Component Type",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "endpoint_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Endpoint Url"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Env",
+          "type": "object"
+        },
+        "hashes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Hashes",
+          "type": "object"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "properties": {
+          "additionalProperties": true,
+          "description": "Extension properties",
+          "title": "Properties",
+          "type": "object"
+        },
+        "registry_source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Registry Source"
+        },
+        "risks": {
+          "items": {
+            "$ref": "#/$defs/RiskAssessment"
+          },
+          "title": "Risks",
+          "type": "array"
+        },
+        "schema_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Hash of the aggregate tool definitions served by this MCP server",
+          "title": "Schema Hash"
+        },
+        "source_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Filesystem path or URL where this was discovered",
+          "title": "Source Path"
+        },
+        "supplier": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supplier"
+        },
+        "tool_count": {
+          "default": 0,
+          "title": "Tool Count",
+          "type": "integer"
+        },
+        "tool_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tool Refs",
+          "type": "array"
+        },
+        "transport": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "stdio, sse, streamable-http",
+          "title": "Transport"
+        },
+        "trust_tier": {
+          "$ref": "#/$defs/TrustTier",
+          "default": "unknown"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        },
+        "version_pinned": {
+          "default": false,
+          "title": "Version Pinned",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "bom_ref",
+        "name"
+      ],
+      "title": "MCPServerComponent",
+      "type": "object"
+    },
+    "MemoryStoreComponent": {
+      "description": "Persistent memory (conversation history, learned facts, skills).",
+      "properties": {
+        "assurance_level": {
+          "$ref": "#/$defs/AssuranceLevel",
+          "default": "declared"
+        },
+        "bom_ref": {
+          "description": "Unique reference within this BOM",
+          "title": "Bom Ref",
+          "type": "string"
+        },
+        "component_type": {
+          "const": "memory-store",
+          "default": "memory-store",
+          "title": "Component Type",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "encryption_at_rest": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Encryption At Rest"
+        },
+        "hashes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Hashes",
+          "type": "object"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "properties": {
+          "additionalProperties": true,
+          "description": "Extension properties",
+          "title": "Properties",
+          "type": "object"
+        },
+        "retention_policy": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retention Policy"
+        },
+        "risks": {
+          "items": {
+            "$ref": "#/$defs/RiskAssessment"
+          },
+          "title": "Risks",
+          "type": "array"
+        },
+        "source_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Filesystem path or URL where this was discovered",
+          "title": "Source Path"
+        },
+        "store_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "conversation, episodic, semantic, procedural, skill",
+          "title": "Store Type"
+        },
+        "supplier": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supplier"
+        },
+        "tenant_isolated": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tenant Isolated"
+        },
+        "trust_tier": {
+          "$ref": "#/$defs/TrustTier",
+          "default": "unknown"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        },
+        "write_authority": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Who may write: agent-only, user, system, public",
+          "title": "Write Authority"
+        }
+      },
+      "required": [
+        "bom_ref",
+        "name"
+      ],
+      "title": "MemoryStoreComponent",
+      "type": "object"
+    },
+    "ModelComponent": {
+      "description": "A model (weights, adapter, embedding model) used by an agent.",
+      "properties": {
+        "assurance_level": {
+          "$ref": "#/$defs/AssuranceLevel",
+          "default": "declared"
+        },
+        "base_model_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "bom_ref of the base model this derives from",
+          "title": "Base Model Ref"
+        },
+        "bom_ref": {
+          "description": "Unique reference within this BOM",
+          "title": "Bom Ref",
+          "type": "string"
+        },
+        "chat_template_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Chat Template Hash"
+        },
+        "component_type": {
+          "const": "model",
+          "default": "model",
+          "title": "Component Type",
+          "type": "string"
+        },
+        "derivation_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "fine-tune, lora, qlora, merge, quantization, distillation",
+          "title": "Derivation Type"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "endpoint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Endpoint"
+        },
+        "hashes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Hashes",
+          "type": "object"
+        },
+        "model_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "foundation, fine-tuned, adapter, embedding, quantized",
+          "title": "Model Type"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "properties": {
+          "additionalProperties": true,
+          "description": "Extension properties",
+          "title": "Properties",
+          "type": "object"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider"
+        },
+        "quantization_method": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Quantization Method"
+        },
+        "requested_alias": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The alias requested (e.g. 'gpt-4o')",
+          "title": "Requested Alias"
+        },
+        "resolved_revision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Provider-specific snapshot identifier",
+          "title": "Resolved Revision"
+        },
+        "risks": {
+          "items": {
+            "$ref": "#/$defs/RiskAssessment"
+          },
+          "title": "Risks",
+          "type": "array"
+        },
+        "serialization_format": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Serialization Format"
+        },
+        "serialization_safety": {
+          "$ref": "#/$defs/SerializationSafety",
+          "default": "unknown"
+        },
+        "signing_identity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Signing Identity"
+        },
+        "signing_status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "unsigned, sigstore-signed, pgp-signed",
+          "title": "Signing Status"
+        },
+        "source_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Filesystem path or URL where this was discovered",
+          "title": "Source Path"
+        },
+        "supplier": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supplier"
+        },
+        "tokenizer_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tokenizer Hash"
+        },
+        "trust_remote_code": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Declared configuration only; the runtime value may differ",
+          "title": "Trust Remote Code"
+        },
+        "trust_tier": {
+          "$ref": "#/$defs/TrustTier",
+          "default": "unknown"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "bom_ref",
+        "name"
+      ],
+      "title": "ModelComponent",
+      "type": "object"
+    },
+    "PromptComponent": {
+      "description": "A system prompt, instruction template, or behavior-shaping artifact.",
+      "properties": {
+        "assurance_level": {
+          "$ref": "#/$defs/AssuranceLevel",
+          "default": "declared"
+        },
+        "bom_ref": {
+          "description": "Unique reference within this BOM",
+          "title": "Bom Ref",
+          "type": "string"
+        },
+        "component_type": {
+          "const": "prompt-template",
+          "default": "prompt-template",
+          "title": "Component Type",
+          "type": "string"
+        },
+        "content_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Hash of the exact prompt bytes",
+          "title": "Content Hash"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "hashes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Hashes",
+          "type": "object"
+        },
+        "modification_authority": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Who can edit this prompt (owner, admin, agent, public)",
+          "title": "Modification Authority"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "prompt_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "system-prompt, planner, instruction, rules-file, skill-definition",
+          "title": "Prompt Type"
+        },
+        "properties": {
+          "additionalProperties": true,
+          "description": "Extension properties",
+          "title": "Properties",
+          "type": "object"
+        },
+        "risks": {
+          "items": {
+            "$ref": "#/$defs/RiskAssessment"
+          },
+          "title": "Risks",
+          "type": "array"
+        },
+        "source_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Filesystem path or URL where this was discovered",
+          "title": "Source Path"
+        },
+        "supplier": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supplier"
+        },
+        "trust_tier": {
+          "$ref": "#/$defs/TrustTier",
+          "default": "unknown"
+        },
+        "variable_schema": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Schema of template variables",
+          "title": "Variable Schema"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "bom_ref",
+        "name"
+      ],
+      "title": "PromptComponent",
+      "type": "object"
+    },
+    "RAGSourceComponent": {
+      "description": "A retrieval-augmented generation data source or vector index.",
+      "properties": {
+        "assurance_level": {
+          "$ref": "#/$defs/AssuranceLevel",
+          "default": "declared"
+        },
+        "bom_ref": {
+          "description": "Unique reference within this BOM",
+          "title": "Bom Ref",
+          "type": "string"
+        },
+        "chunking_strategy": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Chunking Strategy"
+        },
+        "component_type": {
+          "const": "rag-source",
+          "default": "rag-source",
+          "title": "Component Type",
+          "type": "string"
+        },
+        "corpus_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "vector-store, knowledge-base, web-scraper, api-connector",
+          "title": "Corpus Type"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "document_count": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Document Count"
+        },
+        "embedding_model_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Embedding Model Name"
+        },
+        "embedding_model_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Embedding Model Ref"
+        },
+        "hashes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Hashes",
+          "type": "object"
+        },
+        "index_snapshot_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Index Snapshot Hash"
+        },
+        "last_indexed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Indexed At"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "properties": {
+          "additionalProperties": true,
+          "description": "Extension properties",
+          "title": "Properties",
+          "type": "object"
+        },
+        "refresh_policy": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Refresh Policy"
+        },
+        "risks": {
+          "items": {
+            "$ref": "#/$defs/RiskAssessment"
+          },
+          "title": "Risks",
+          "type": "array"
+        },
+        "source_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Filesystem path or URL where this was discovered",
+          "title": "Source Path"
+        },
+        "source_uris": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Source Uris",
+          "type": "array"
+        },
+        "supplier": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supplier"
+        },
+        "trust_tier": {
+          "$ref": "#/$defs/TrustTier",
+          "default": "unknown"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "bom_ref",
+        "name"
+      ],
+      "title": "RAGSourceComponent",
+      "type": "object"
+    },
+    "RegistryEntryComponent": {
+      "description": "A registry from which components are discovered or installed.",
+      "properties": {
+        "assurance_level": {
+          "$ref": "#/$defs/AssuranceLevel",
+          "default": "declared"
+        },
+        "attestation_status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attestation Status"
+        },
+        "bom_ref": {
+          "description": "Unique reference within this BOM",
+          "title": "Bom Ref",
+          "type": "string"
+        },
+        "component_type": {
+          "const": "registry-entry",
+          "default": "registry-entry",
+          "title": "Component Type",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "hashes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Hashes",
+          "type": "object"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "properties": {
+          "additionalProperties": true,
+          "description": "Extension properties",
+          "title": "Properties",
+          "type": "object"
+        },
+        "publisher_identity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Publisher Identity"
+        },
+        "publisher_verified": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Publisher Verified"
+        },
+        "registry_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "npm, pypi, huggingface, mcp-registry, skill-marketplace, docker-hub",
+          "title": "Registry Type"
+        },
+        "registry_uri": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Registry Uri"
+        },
+        "risks": {
+          "items": {
+            "$ref": "#/$defs/RiskAssessment"
+          },
+          "title": "Risks",
+          "type": "array"
+        },
+        "signing_key_reference": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Signing Key Reference"
+        },
+        "source_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Filesystem path or URL where this was discovered",
+          "title": "Source Path"
+        },
+        "supplier": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supplier"
+        },
+        "trust_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "tofu, pki, sigstore, none",
+          "title": "Trust Model"
+        },
+        "trust_tier": {
+          "$ref": "#/$defs/TrustTier",
+          "default": "unknown"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "bom_ref",
+        "name"
+      ],
+      "title": "RegistryEntryComponent",
+      "type": "object"
+    },
+    "RiskAssessment": {
+      "description": "Per-component supply chain risk assessment.",
+      "properties": {
+        "category": {
+          "title": "Category",
+          "type": "string"
+        },
+        "detail": {
+          "title": "Detail",
+          "type": "string"
+        },
+        "recommendation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Recommendation"
+        },
+        "references": {
+          "items": {
+            "type": "string"
+          },
+          "title": "References",
+          "type": "array"
+        },
+        "severity": {
+          "$ref": "#/$defs/RiskSeverity"
+        }
+      },
+      "required": [
+        "severity",
+        "category",
+        "detail"
+      ],
+      "title": "RiskAssessment",
+      "type": "object"
+    },
+    "RiskSeverity": {
+      "enum": [
+        "critical",
+        "high",
+        "medium",
+        "low",
+        "info"
+      ],
+      "title": "RiskSeverity",
+      "type": "string"
+    },
+    "SerializationSafety": {
+      "enum": [
+        "safe",
+        "unsafe-code-execution",
+        "unsafe-template-injection",
+        "unknown"
+      ],
+      "title": "SerializationSafety",
+      "type": "string"
+    },
+    "SideEffectProfile": {
+      "enum": [
+        "read-only",
+        "state-modifying",
+        "destructive",
+        "financial-transaction",
+        "unknown"
+      ],
+      "title": "SideEffectProfile",
+      "type": "string"
+    },
+    "SkillPackageComponent": {
+      "description": "A skill or plugin package that extends agent capabilities.",
+      "properties": {
+        "assurance_level": {
+          "$ref": "#/$defs/AssuranceLevel",
+          "default": "declared"
+        },
+        "bom_ref": {
+          "description": "Unique reference within this BOM",
+          "title": "Bom Ref",
+          "type": "string"
+        },
+        "capabilities": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CapabilityDeclaration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "component_type": {
+          "const": "skill-package",
+          "default": "skill-package",
+          "title": "Component Type",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "entry_point": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Entry Point"
+        },
+        "hashes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Hashes",
+          "type": "object"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "properties": {
+          "additionalProperties": true,
+          "description": "Extension properties",
+          "title": "Properties",
+          "type": "object"
+        },
+        "registry_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Registry Ref"
+        },
+        "risks": {
+          "items": {
+            "$ref": "#/$defs/RiskAssessment"
+          },
+          "title": "Risks",
+          "type": "array"
+        },
+        "skill_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "skill, plugin, connector, hook, extension",
+          "title": "Skill Type"
+        },
+        "source_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Filesystem path or URL where this was discovered",
+          "title": "Source Path"
+        },
+        "supplier": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supplier"
+        },
+        "trust_tier": {
+          "$ref": "#/$defs/TrustTier",
+          "default": "unknown"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "bom_ref",
+        "name"
+      ],
+      "title": "SkillPackageComponent",
+      "type": "object"
+    },
+    "ToolComponent": {
+      "description": "A single tool definition (from MCP, plugin, or function call).",
+      "properties": {
+        "annotations": {
+          "additionalProperties": true,
+          "description": "MCP tool annotations (readOnlyHint, destructiveHint, etc.)",
+          "title": "Annotations",
+          "type": "object"
+        },
+        "assurance_level": {
+          "$ref": "#/$defs/AssuranceLevel",
+          "default": "declared"
+        },
+        "bom_ref": {
+          "description": "Unique reference within this BOM",
+          "title": "Bom Ref",
+          "type": "string"
+        },
+        "capabilities": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CapabilityDeclaration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "component_type": {
+          "const": "tool",
+          "default": "tool",
+          "title": "Component Type",
+          "type": "string"
+        },
+        "definition_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "JCS canonical hash of (name, description, inputSchema, annotations)",
+          "title": "Definition Hash"
+        },
+        "definition_hash_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonicalization protocol, or unknown for legacy fingerprints",
+          "title": "Definition Hash Version"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "description_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The natural-language description fed into the LLM context",
+          "title": "Description Text"
+        },
+        "hashes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Hashes",
+          "type": "object"
+        },
+        "input_schema": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Input Schema"
+        },
+        "mcp_server_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mcp Server Ref"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "properties": {
+          "additionalProperties": true,
+          "description": "Extension properties",
+          "title": "Properties",
+          "type": "object"
+        },
+        "risks": {
+          "items": {
+            "$ref": "#/$defs/RiskAssessment"
+          },
+          "title": "Risks",
+          "type": "array"
+        },
+        "source_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Filesystem path or URL where this was discovered",
+          "title": "Source Path"
+        },
+        "supplier": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supplier"
+        },
+        "trust_tier": {
+          "$ref": "#/$defs/TrustTier",
+          "default": "unknown"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "bom_ref",
+        "name"
+      ],
+      "title": "ToolComponent",
+      "type": "object"
+    },
+    "TrustTier": {
+      "enum": [
+        "internal-verified",
+        "internal-unverified",
+        "third-party-signed",
+        "third-party-unsigned",
+        "untrusted-public",
+        "unknown"
+      ],
+      "title": "TrustTier",
+      "type": "string"
+    },
+    "VerificationStatus": {
+      "enum": [
+        "unverified",
+        "verified",
+        "invalid",
+        "unsupported"
+      ],
+      "title": "VerificationStatus",
+      "type": "string"
+    },
+    "VerifiedExtensionComponent": {
+      "description": "An AI agent extension with verification/attestation status.",
+      "properties": {
+        "assurance_level": {
+          "$ref": "#/$defs/AssuranceLevel",
+          "default": "declared"
+        },
+        "attestation_status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "verified, unverified, revoked, expired",
+          "title": "Attestation Status"
+        },
+        "bom_ref": {
+          "description": "Unique reference within this BOM",
+          "title": "Bom Ref",
+          "type": "string"
+        },
+        "capabilities": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CapabilityDeclaration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "component_type": {
+          "const": "verified-extension",
+          "default": "verified-extension",
+          "title": "Component Type",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "extension_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "plugin, skill, connector, integration, action",
+          "title": "Extension Type"
+        },
+        "hashes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Hashes",
+          "type": "object"
+        },
+        "install_count": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Install Count"
+        },
+        "marketplace_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Marketplace Url"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "properties": {
+          "additionalProperties": true,
+          "description": "Extension properties",
+          "title": "Properties",
+          "type": "object"
+        },
+        "publisher": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Publisher"
+        },
+        "publisher_verified": {
+          "default": false,
+          "title": "Publisher Verified",
+          "type": "boolean"
+        },
+        "risks": {
+          "items": {
+            "$ref": "#/$defs/RiskAssessment"
+          },
+          "title": "Risks",
+          "type": "array"
+        },
+        "signing_identity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Signing Identity"
+        },
+        "source_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Filesystem path or URL where this was discovered",
+          "title": "Source Path"
+        },
+        "supplier": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Supplier"
+        },
+        "trust_tier": {
+          "$ref": "#/$defs/TrustTier",
+          "default": "unknown"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "bom_ref",
+        "name"
+      ],
+      "title": "VerifiedExtensionComponent",
+      "type": "object"
     }
-  }
+  },
+  "$id": "https://github.com/aisecnomad/nexus-symbiote/schemas/nexus-symbiote-aibom-1.0.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Agent Bill of Materials \u2014 the complete supply chain inventory.",
+  "properties": {
+    "components": {
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "a2a-client": "#/$defs/A2AClientComponent",
+            "a2a-server": "#/$defs/A2AServerComponent",
+            "agent": "#/$defs/AgentComponent",
+            "data-source": "#/$defs/DataSourceComponent",
+            "guardrail-policy": "#/$defs/GuardrailComponent",
+            "ide-agent": "#/$defs/IDEAgentComponent",
+            "mcp-client": "#/$defs/MCPClientComponent",
+            "mcp-server": "#/$defs/MCPServerComponent",
+            "memory-store": "#/$defs/MemoryStoreComponent",
+            "model": "#/$defs/ModelComponent",
+            "prompt-template": "#/$defs/PromptComponent",
+            "rag-source": "#/$defs/RAGSourceComponent",
+            "registry-entry": "#/$defs/RegistryEntryComponent",
+            "skill-package": "#/$defs/SkillPackageComponent",
+            "tool": "#/$defs/ToolComponent",
+            "verified-extension": "#/$defs/VerifiedExtensionComponent"
+          },
+          "propertyName": "component_type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/AgentComponent"
+          },
+          {
+            "$ref": "#/$defs/MCPServerComponent"
+          },
+          {
+            "$ref": "#/$defs/MCPClientComponent"
+          },
+          {
+            "$ref": "#/$defs/ToolComponent"
+          },
+          {
+            "$ref": "#/$defs/ModelComponent"
+          },
+          {
+            "$ref": "#/$defs/PromptComponent"
+          },
+          {
+            "$ref": "#/$defs/GuardrailComponent"
+          },
+          {
+            "$ref": "#/$defs/MemoryStoreComponent"
+          },
+          {
+            "$ref": "#/$defs/RAGSourceComponent"
+          },
+          {
+            "$ref": "#/$defs/DataSourceComponent"
+          },
+          {
+            "$ref": "#/$defs/RegistryEntryComponent"
+          },
+          {
+            "$ref": "#/$defs/SkillPackageComponent"
+          },
+          {
+            "$ref": "#/$defs/A2AClientComponent"
+          },
+          {
+            "$ref": "#/$defs/A2AServerComponent"
+          },
+          {
+            "$ref": "#/$defs/IDEAgentComponent"
+          },
+          {
+            "$ref": "#/$defs/VerifiedExtensionComponent"
+          }
+        ]
+      },
+      "title": "Components",
+      "type": "array"
+    },
+    "dependencies": {
+      "items": {
+        "$ref": "#/$defs/DependencyEdge"
+      },
+      "title": "Dependencies",
+      "type": "array"
+    },
+    "metadata": {
+      "$ref": "#/$defs/AIBOMMetadata"
+    }
+  },
+  "title": "AIBOM",
+  "type": "object",
+  "version": "1.0.0"
 }
