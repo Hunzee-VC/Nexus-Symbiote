@@ -237,3 +237,95 @@ def test_conventional_scan_carries_source_fingerprint(tmp_path):
     claim = AIBOM.load(out).metadata.completeness
     assert claim.source_report_digest == "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
     assert claim.scanner_status["shadowscan"] == "partial"
+
+
+def test_verify_direct_projection_rejects_copied_digest_and_ignored_fields(tmp_path):
+    report, target = tmp_path / "report.json", tmp_path / "bom.json"
+    # Include CRLF so a reader normalizing newlines would fail the digest check.
+    report.write_bytes(json.dumps(_report(), indent=2).replace("\n", "\r\n").encode())
+    runner = CliRunner()
+    assert runner.invoke(main, ["import-shadowscan", str(report), "-o", str(target)]).exit_code == 0
+    original = target.read_text()
+    args = ["verify-discovery", str(target), str(report), "--projection"]
+    assert runner.invoke(main, args).exit_code == 0
+    for change in ("component", "coverage", "relationship", "unknown"):
+        doc = json.loads(original)
+        if change == "component":
+            doc["components"][0]["assurance_level"] = "observed"
+        elif change == "coverage":
+            doc["metadata"]["completeness"]["source_unmapped_count"] = 0
+        elif change == "relationship":
+            ref = doc["components"][0]["bom_ref"]
+            doc["dependencies"].append(
+                {"source_ref": ref, "target_ref": ref, "relationship": "approved-under"}
+            )
+        else:
+            doc["components"][0]["permission_granted"] = True
+        target.write_text(json.dumps(doc))
+        failed = runner.invoke(main, args)
+        assert failed.exit_code != 0, change
+
+
+def test_report_signer_is_external_policy_and_applies_to_exact_report(tmp_path, monkeypatch):
+    from nexus_symbiote.utils.crypto import VerificationResult
+
+    report, target, bundle = (tmp_path / n for n in ("report.json", "bom.json", "bundle.json"))
+    report.write_text(json.dumps(_report()))
+    expected = "sha256:" + hashlib.sha256(report.read_bytes()).hexdigest()
+    bundle.write_bytes(b"test-bundle")
+    runner = CliRunner()
+    assert runner.invoke(main, ["import-shadowscan", str(report), "-o", str(target)]).exit_code == 0
+    cmd = ["verify-discovery", str(target), str(report)]
+    for partial in (
+        ["--bundle", str(bundle)],
+        ["--issuer", "authority"],
+        ["--signer-identity", "operator"],
+    ):
+        assert runner.invoke(main, cmd + partial).exit_code != 0
+
+    calls = []
+
+    def check(digest, payload, signer, issuer):
+        calls.append((digest, payload, signer, issuer))
+        return VerificationResult(calls[-1] == (expected, b"test-bundle", "operator", "authority"))
+
+    monkeypatch.setattr("nexus_symbiote.utils.crypto.verify_sigstore_digest", check)
+    signed = cmd + [
+        "--bundle",
+        str(bundle),
+        "--signer-identity",
+        "operator",
+        "--issuer",
+        "authority",
+    ]
+    assert runner.invoke(main, signed).exit_code == 0 and len(calls) == 1
+    assert runner.invoke(main, signed[:-1] + ["wrong-issuer"]).exit_code != 0
+    assert (
+        runner.invoke(main, [("someone-else" if v == "operator" else v) for v in signed]).exit_code
+        != 0
+    )
+    doc = json.loads(target.read_text())
+    doc["components"] = []
+    target.write_text(json.dumps(doc))
+    assert runner.invoke(main, signed).exit_code != 0 and len(calls) == 3
+
+
+def test_offline_production_sigstore_policy_on_upstream_release_fixture():
+    from pathlib import Path
+
+    pytest.importorskip("sigstore")
+    from nexus_symbiote.utils.crypto import verify_sigstore_digest
+
+    # Official sigstore-python release fixture. The expected identity and digest
+    # below are independent policy inputs, never extracted from the bundle.
+    path = Path(__file__).parent / "fixtures/sigstore-python/bundle_v3_github.whl.sigstore"
+    digest = "sha256:c4e92e9ecc828bef2aa7dba1de8ac983511f7532a0df11c770d39099a25cf201"
+    signer = (
+        "https://github.com/trailofbits/rfc8785.py/.github/workflows/release.yml@refs/tags/v0.1.2"
+    )
+    issuer = "https://token.actions.githubusercontent.com"
+    data = path.read_bytes()
+    assert verify_sigstore_digest(digest, data, signer, issuer).verified
+    assert not verify_sigstore_digest(digest, data, "wrong-identity", issuer).verified
+    assert not verify_sigstore_digest(digest, data, signer, "https://wrong.invalid").verified
+    assert not verify_sigstore_digest("sha256:" + "0" * 64, data, signer, issuer).verified

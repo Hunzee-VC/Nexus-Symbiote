@@ -12,10 +12,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import AssuranceLevel, AutonomyLevel, RiskSeverity, TrustTier
 from nexus_symbiote.core.models import (
     AgentComponent,
+    AIBOMMetadata,
     AnyComponent,
+    CompletenessClaim,
     MCPServerComponent,
     ModelComponent,
     RiskAssessment,
@@ -38,6 +41,31 @@ class ImportedReport:
     unmapped_count: int = 0
     unmapped_indexes: list[int] = field(default_factory=list)
     limitations: list[str] = field(default_factory=list)
+
+    def to_native_bom(self) -> AIBOM:
+        """Reproduce the native inventory for a direct ShadowScan import."""
+        aibom = AIBOM(metadata=AIBOMMetadata(authors=[]))
+        for comp in self.components:
+            aibom.add_component(comp)
+
+        aibom.metadata.completeness = CompletenessClaim(
+            scope="shadowscan-imported",
+            surfaces_scanned=["shadowscan:report"],
+            surfaces_excluded=self.limitations,
+            scan_failures=(
+                []
+                if self.source_status == "complete"
+                else ["ShadowScan source report is incomplete or has unknown status"]
+            ),
+            scanner_status={"shadowscan": "partial"},
+            source_report_digest=self.digest,
+            source_report_format=self.source_format,
+            source_report_status=self.source_status,
+            source_unmapped_count=self.unmapped_count,
+            source_unmapped_indexes=self.unmapped_indexes,
+            assurance_level=AssuranceLevel.DECLARED,
+        )
+        return aibom
 
 
 def _object_no_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -167,7 +195,10 @@ class ShadowScanImporter(Scanner):
         return self.read_report(report_path)
 
     def read_report(self, report_path: Path) -> ImportedReport:
-        text = read_regular_text(report_path, max_bytes=MAX_REPORT_BYTES)
+        return self.parse_report(read_regular_text(report_path, max_bytes=MAX_REPORT_BYTES))
+
+    def parse_report(self, text: str) -> ImportedReport:
+        """Parse the same bounded bytes used for digest and signature verification."""
         data = json.loads(
             text, object_pairs_hook=_object_no_duplicates, parse_constant=_reject_constant
         )

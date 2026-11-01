@@ -49,3 +49,32 @@ dependency. A complete ShadowScan run is only complete for its configured scope;
 Nexus SymBiote records the imported BOM coverage as partial. SPDX and SARIF are not
 available for imported discovery until their coverage and provenance mappings
 are validated.
+
+### Verify the native import and its producer
+
+For a BOM written by `import-shadowscan`, reproduce the direct import and compare
+the component records, dependencies, coverage, unmapped indexes and metadata.
+
+```sh
+nexus-symbiote verify-discovery agentbom.json shadowscan.json --projection
+```
+
+For an independently signed report, pass the signing policy from trusted operator
+configuration. The bundle must be a Sigstore artifact bundle over the exact
+ShadowScan report bytes. Install the Sigstore extra for this mode.
+
+```sh
+nexus-symbiote verify-discovery agentbom.json shadowscan.json \
+  --bundle shadowscan.json.sigstore --signer-identity "$EXPECTED_IDENTITY" \
+  --issuer "$EXPECTED_ISSUER"
+```
+
+The signed mode also verifies the direct native projection. Use the same importer
+version. The comparison ignores JSON object key ordering and the BOM’s locally
+generated timestamp and serial number. Source findings keep their declared
+assurance. Merged, enriched and portable BOMs require their own provenance.
+
+The offline signature regression uses a public release bundle from
+[sigstore-python at 19b8aec](https://github.com/sigstore/sigstore-python/blob/19b8aec7063e62c718efd327f5a45582472c3b3c/test/assets/bundle_v3_github.whl.sigstore).
+Its Apache-2.0 license accompanies the fixture. Production report verification
+requires your own producer identity, issuer and report bundle.
