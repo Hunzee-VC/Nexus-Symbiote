@@ -166,14 +166,14 @@ class TestScanCommand:
         project = _create_test_project(tmp_path)
         out = tmp_path / "spdx.json"
         runner = CliRunner()
-        result = runner.invoke(
-            main, ["scan", "--report-only", str(project), "-f", "spdx", "-o", str(out)]
-        )
-        assert result.exit_code == 0
-        data = json.loads(out.read_text())
-        assert "@context" in data
-        graph = data.get("@graph", [])
-        assert any(e.get("type") == "SpdxDocument" for e in graph)
+        result = runner.invoke(main, ["scan", str(project), "-f", "spdx", "-o", str(out)])
+        assert result.exit_code != 0
+        assert "SPDX export is unavailable" in result.output
+        assert not out.exists()
+        out.write_text("existing artifact")
+        result = runner.invoke(main, ["scan", str(project), "-f", "spdx", "-o", str(out)])
+        assert result.exit_code != 0
+        assert out.read_text() == "existing artifact"
 
     def test_scan_specific_scanner(self, tmp_path):
         project = _create_test_project(tmp_path)
