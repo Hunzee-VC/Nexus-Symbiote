@@ -10,7 +10,9 @@ from nexus_symbiote.core.enums import RiskSeverity
 
 # The complete built-in collection scope; do not infer completeness from a
 # caller-provided subset. Update alongside the CLI scanner registry.
-REQUIRED_SCANNERS = frozenset({"mcp", "model", "prompt", "rag", "registry"})
+from symbiote.scanner_catalog import BUILTIN_SCANNER_NAMES
+
+REQUIRED_SCANNERS = BUILTIN_SCANNER_NAMES
 
 SEVERITY_WEIGHTS: dict[RiskSeverity, float] = {
     RiskSeverity.CRITICAL: 10.0,
