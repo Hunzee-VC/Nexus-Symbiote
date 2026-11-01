@@ -64,3 +64,25 @@ def test_recorded_failure_cannot_be_complete():
         scan_failures=["read failed"],
     )
     assert not CompletenessValidator().validate(bom).is_complete
+
+
+def test_imported_status_cannot_omit_required_scanners():
+    bom = AIBOM()
+    bom.metadata.completeness = CompletenessClaim(
+        scope="local-static-project",
+        scanner_status={"model": "complete"},
+        surfaces_scanned=["model"],
+    )
+    result = CompletenessValidator().validate(bom)
+    assert not result.is_complete
+    assert any("Missing scanner coverage" in issue.description for issue in result.issues)
+
+
+def test_imported_complete_status_cannot_hide_excluded_surfaces():
+    bom = AIBOM()
+    bom.metadata.completeness = CompletenessClaim(
+        scope="local-static-project",
+        scanner_status=dict.fromkeys(("model", "mcp", "prompt", "rag", "registry"), "complete"),
+        surfaces_excluded=["prompts (not scanned)"],
+    )
+    assert not CompletenessValidator().validate(bom).is_complete
