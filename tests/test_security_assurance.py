@@ -160,6 +160,8 @@ def test_missing_or_failed_coverage_is_not_clean_or_passing() -> None:
 
 
 def test_per_scanner_coverage_requires_every_state_to_be_complete() -> None:
+    from nexus_symbiote.policy import DEFAULT_SCANNERS
+
     claim = CompletenessClaim(scope="test", surfaces_scanned=["model"])
     bom = AIBOM(metadata=AIBOMMetadata(completeness=claim))
     bom.add_component(ModelComponent(bom_ref="model:p", name="p"))
@@ -177,7 +179,9 @@ def test_per_scanner_coverage_requires_every_state_to_be_complete() -> None:
     object.__setattr__(
         bom.metadata.completeness,
         "scanner_status",
-        dict.fromkeys(("mcp", "model", "prompt", "rag", "registry"), "complete"),
+        dict.fromkeys(
+            ("mcp", "model", "prompt", "rag", "registry", "a2a", "ide_agents"), "complete"
+        ),
     )
     passed, report = RiskScorer().passes_gate(bom)
     assert passed

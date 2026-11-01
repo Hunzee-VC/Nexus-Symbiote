@@ -11,6 +11,7 @@ from typing import Any
 
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import TrustTier
+from nexus_symbiote.core.hashing import TOOL_DEFINITION_HASH_VERSION
 
 TRUST_TIER_ORDER = {
     TrustTier.INTERNAL_VERIFIED: 0,
@@ -191,7 +192,10 @@ class AIBOMDiffer:
         if (
             old_hash
             and new_hash
-            and (old_hash_version != "rfc8785-jcs-v1" or new_hash_version != "rfc8785-jcs-v1")
+            and (
+                old_hash_version != TOOL_DEFINITION_HASH_VERSION
+                or new_hash_version != TOOL_DEFINITION_HASH_VERSION
+            )
         ):
             modifications.append(
                 {

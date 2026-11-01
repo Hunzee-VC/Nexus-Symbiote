@@ -1,20 +1,20 @@
-"""Registry trust scanner.
+"""Offline registry references collected from bounded local manifests.
 
-Analyzes package manager lock files and dependency manifests to identify
-AI/agent-related dependencies and assess registry trust:
-  - npm/yarn/pnpm lock files for MCP packages
-  - pip/poetry/uv lock files for ML dependencies
-  - Docker images for model serving
+These declarations do not establish registry authenticity, resolved artifacts,
+installed versions, or cryptographic verification.
 """
 
 from __future__ import annotations
 
 import re
+import tomllib
 from pathlib import Path
+from typing import Any
 
 from nexus_symbiote.core.enums import RiskSeverity, TrustTier
 from nexus_symbiote.core.models import RegistryEntryComponent, RiskAssessment
-from nexus_symbiote.scanners.base import Scanner, ScanResult, read_regular_text
+from nexus_symbiote.scanners.base import Scanner, ScanResult
+from nexus_symbiote.utils.secrets import redact_text
 
 AI_PACKAGE_PATTERNS = [
     re.compile(r"(?:^|/)@modelcontextprotocol/", re.I),
@@ -31,193 +31,205 @@ class RegistryScanner(Scanner):
 
     def scan(self, project_root: Path) -> ScanResult:
         result = ScanResult(scanner_name=self.name)
-
-        npm_comps = self._scan_npm(project_root, result)
-        result.components.extend(npm_comps)
-
-        pip_comps = self._scan_pip(project_root, result)
-        result.components.extend(pip_comps)
-
-        docker_comps = self._scan_docker(project_root, result)
-        result.components.extend(docker_comps)
-
+        with self._collection(project_root, result) as files:
+            result.components.extend(self._scan_npm(files.root, result))
+            result.components.extend(self._scan_pip(files.root, result))
+            result.components.extend(self._scan_docker(files.root, result))
         if not result.components and not result.scan_failures:
             result.surfaces_excluded.append("registry (no AI-related dependencies found)")
-
         return result
 
+    def _read(self, path: Path, result: ScanResult) -> str | None:
+        assert self._files is not None
+        content = self._files.read_text(path, missing_ok=True)
+        if content is not None:
+            result.surfaces_scanned.append(str(path))
+        return content
+
     def _scan_npm(self, root: Path, result: ScanResult) -> list[RegistryEntryComponent]:
-        components: list[RegistryEntryComponent] = []
-        pkg_path = root / "package.json"
-        if not pkg_path.exists() and not pkg_path.is_symlink():
-            return components
-
-        result.surfaces_scanned.append(str(pkg_path))
-        data = self._safe_read_json(pkg_path)
+        assert self._files is not None
+        path = root / "package.json"
+        data = self._files.read_json(path, missing_ok=True)
+        if data is None:
+            return []
+        result.surfaces_scanned.append(str(path))
         if not isinstance(data, dict):
-            result.scan_failures.append(f"Failed to parse {pkg_path}")
-            return components
-
+            result.scan_failures.append("package.json: expected an object")
+            return []
         all_deps: dict[str, str] = {}
         for key in ("dependencies", "devDependencies", "optionalDependencies"):
             deps = data.get(key, {})
-            if isinstance(deps, dict):
-                all_deps.update(deps)
-
-        for pkg_name, version_spec in all_deps.items():
-            if not self._is_ai_package(pkg_name):
+            if not isinstance(deps, dict) or not all(
+                isinstance(value, str) for value in deps.values()
+            ):
+                result.scan_failures.append(f"package.json: invalid {key} map")
                 continue
-
-            pinned = bool(re.match(r"^\d+\.\d+\.\d+$", version_spec))
+            all_deps.update(deps)
+        components: list[RegistryEntryComponent] = []
+        for raw_name, raw_spec in sorted(all_deps.items()):
+            if not self._is_ai_package(raw_name):
+                continue
+            name, spec = redact_text(raw_name), redact_text(raw_spec)
             risks: list[RiskAssessment] = []
-
-            if not pinned:
+            if not re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][a-zA-Z0-9.-]+)?", raw_spec):
                 risks.append(
                     RiskAssessment(
                         severity=RiskSeverity.MEDIUM,
                         category="version_pinning",
-                        detail=f"npm package '{pkg_name}' uses range '{version_spec}' instead of exact pin.",
-                        recommendation="Pin to exact version in package.json and verify integrity via lockfile.",
+                        detail=f"npm package '{name}' has a nonexact declared reference: {spec}",
+                        recommendation="Resolve and verify an immutable artifact with lockfile integrity evidence.",
                     )
                 )
-
             components.append(
                 RegistryEntryComponent(
-                    bom_ref=f"registry:npm/{pkg_name}",
-                    name=pkg_name,
-                    version=version_spec,
+                    bom_ref=f"registry:npm/{name}",
+                    name=name,
+                    version=spec,
                     registry_type="npm",
                     registry_uri="https://registry.npmjs.org",
-                    trust_tier=TrustTier.THIRD_PARTY_UNSIGNED,
+                    source_path=str(path),
+                    trust_tier=TrustTier.UNKNOWN,
                     risks=risks,
+                    properties={
+                        "collection_mode": "manifest-reference",
+                        "registry_origin_verified": False,
+                    },
                 )
             )
-
         return components
+
+    def _pip_component(self, line: str, path: Path) -> RegistryEntryComponent | None:
+        match = re.match(r"^([a-zA-Z0-9_.-]+)(?:\[[^\]]*\])?\s*(.*)$", line.strip())
+        if not match or not self._is_ai_package(match.group(1)):
+            return None
+        name = match.group(1)
+        raw_spec = match.group(2).split(";", 1)[0].split(" #", 1)[0].strip()
+        spec = redact_text(raw_spec)
+        pinned = bool(re.fullmatch(r"==\d+(?:\.\d+)+(?:[a-zA-Z0-9.+-]*)", raw_spec))
+        risks = (
+            []
+            if pinned
+            else [
+                RiskAssessment(
+                    severity=RiskSeverity.MEDIUM,
+                    category="version_pinning",
+                    detail=f"PyPI package '{name}' has a nonexact declared reference: {spec}",
+                    recommendation="Pin the version and verify artifact hashes (pip --require-hashes).",
+                )
+            ]
+        )
+        return RegistryEntryComponent(
+            bom_ref=f"registry:pypi/{name}",
+            name=name,
+            version=spec or None,
+            registry_type="pypi",
+            registry_uri="https://pypi.org",
+            source_path=str(path),
+            trust_tier=TrustTier.UNKNOWN,
+            risks=risks,
+            properties={"collection_mode": "manifest-reference", "registry_origin_verified": False},
+        )
 
     def _scan_pip(self, root: Path, result: ScanResult) -> list[RegistryEntryComponent]:
         components: list[RegistryEntryComponent] = []
-
-        for req_file in ["requirements.txt", "requirements-dev.txt", "requirements-ml.txt"]:
-            req_path = root / req_file
-            if not req_path.exists() and not req_path.is_symlink():
+        for filename in ("requirements.txt", "requirements-dev.txt", "requirements-ml.txt"):
+            path = root / filename
+            content = self._read(path, result)
+            if content is None:
                 continue
-            result.surfaces_scanned.append(str(req_path))
-            try:
-                lines = read_regular_text(req_path).splitlines()
-            except (OSError, UnicodeError):
-                result.scan_failures.append(f"Failed to read {req_path}")
-                continue
-
-            for line in lines:
-                line = line.strip()
-                if not line or line.startswith("#") or line.startswith("-"):
+            for line in content.splitlines():
+                if not line.strip() or line.lstrip().startswith(("#", "-")):
                     continue
-                match = re.match(
-                    r"^([a-zA-Z0-9_.-]+)\s*([><=!~]+\s*[\d.]+(?:\s*,\s*[><=!~]+\s*[\d.]+)*)?", line
-                )
-                if not match:
-                    continue
-                pkg_name = match.group(1)
-                version_spec = match.group(2) or ""
-                if not self._is_ai_package(pkg_name):
-                    continue
-
-                pinned = bool(re.match(r"==\d+\.\d+", version_spec.strip()))
-                risks: list[RiskAssessment] = []
-                if not pinned:
-                    risks.append(
-                        RiskAssessment(
-                            severity=RiskSeverity.MEDIUM,
-                            category="version_pinning",
-                            detail=f"PyPI package '{pkg_name}' not pinned to exact version: '{version_spec}'",
-                            recommendation="Pin to exact version with hash checking (pip --require-hashes).",
-                        )
-                    )
-
-                components.append(
-                    RegistryEntryComponent(
-                        bom_ref=f"registry:pypi/{pkg_name}",
-                        name=pkg_name,
-                        version=version_spec.strip() if version_spec else None,
-                        registry_type="pypi",
-                        registry_uri="https://pypi.org",
-                        trust_tier=TrustTier.THIRD_PARTY_UNSIGNED,
-                        risks=risks,
-                    )
-                )
-
-        pyproject = root / "pyproject.toml"
-        if pyproject.exists() or pyproject.is_symlink():
-            result.surfaces_scanned.append(str(pyproject))
-            try:
-                content = read_regular_text(pyproject)
-                deps_section = re.findall(r'^\s*"?([a-zA-Z0-9_.-]+)"?\s*[><=!~]', content, re.M)
-                for pkg_name in deps_section:
-                    if self._is_ai_package(pkg_name):
-                        if not any(c.name == pkg_name for c in components):
-                            components.append(
-                                RegistryEntryComponent(
-                                    bom_ref=f"registry:pypi/{pkg_name}",
-                                    name=pkg_name,
-                                    registry_type="pypi",
-                                    registry_uri="https://pypi.org",
-                                    trust_tier=TrustTier.THIRD_PARTY_UNSIGNED,
-                                )
-                            )
-            except (OSError, UnicodeError):
-                result.scan_failures.append(f"Failed to read {pyproject}")
-
+                component = self._pip_component(line, path)
+                if component:
+                    components.append(component)
+        path = root / "pyproject.toml"
+        content = self._read(path, result)
+        if content is None:
+            return components
+        try:
+            data = tomllib.loads(content)
+        except (tomllib.TOMLDecodeError, RecursionError):
+            result.scan_failures.append("pyproject.toml: invalid TOML")
+            return components
+        declarations: list[str] = []
+        project = data.get("project", {})
+        if not isinstance(project, dict):
+            result.scan_failures.append("pyproject.toml: invalid project table")
+            return components
+        deps = project.get("dependencies", [])
+        if isinstance(deps, list) and all(isinstance(value, str) for value in deps):
+            declarations.extend(deps)
+        else:
+            result.scan_failures.append("pyproject.toml: invalid project dependencies")
+        optional = project.get("optional-dependencies", {})
+        if isinstance(optional, dict):
+            for values in optional.values():
+                if isinstance(values, list) and all(isinstance(value, str) for value in values):
+                    declarations.extend(values)
+                else:
+                    result.scan_failures.append("pyproject.toml: invalid optional dependencies")
+        tool = data.get("tool", {})
+        poetry: Any = tool.get("poetry", {}) if isinstance(tool, dict) else {}
+        poetry_deps = poetry.get("dependencies", {}) if isinstance(poetry, dict) else {}
+        if isinstance(poetry_deps, dict):
+            for name, value in poetry_deps.items():
+                if isinstance(value, str):
+                    declarations.append(f"{name}{value}")
+                elif isinstance(value, dict) and isinstance(value.get("version"), str):
+                    declarations.append(f"{name}{value['version']}")
+        for declaration in declarations:
+            component = self._pip_component(declaration, path)
+            if component and not any(item.name == component.name for item in components):
+                components.append(component)
         return components
 
     def _scan_docker(self, root: Path, result: ScanResult) -> list[RegistryEntryComponent]:
         components: list[RegistryEntryComponent] = []
-
-        for dockerfile_name in [
+        for filename in (
             "Dockerfile",
             "Dockerfile.agent",
             "docker-compose.yml",
             "docker-compose.yaml",
-        ]:
-            path = root / dockerfile_name
-            if not path.exists() and not path.is_symlink():
+        ):
+            path = root / filename
+            content = self._read(path, result)
+            if content is None:
                 continue
-            result.surfaces_scanned.append(str(path))
-            try:
-                content = read_regular_text(path)
-            except (OSError, UnicodeError):
-                result.scan_failures.append(f"Failed to read {path}")
-                continue
-
-            from_images = re.findall(r"(?:FROM|image:\s*)\s*([^\s]+)", content)
-            for image in from_images:
-                if any(
-                    kw in image.lower()
-                    for kw in ("vllm", "ollama", "triton", "tgi", "llama", "model")
+            for raw_image in re.findall(r"(?:FROM|image:\s*)\s*([^\s]+)", content):
+                if not any(
+                    word in raw_image.lower()
+                    for word in ("vllm", "ollama", "triton", "tgi", "llama", "model")
                 ):
-                    has_tag = ":" in image and not image.endswith(":latest")
-                    risks: list[RiskAssessment] = []
-                    if not has_tag:
-                        risks.append(
-                            RiskAssessment(
-                                severity=RiskSeverity.HIGH,
-                                category="version_pinning",
-                                detail=f"Docker image '{image}' is not pinned to a specific tag/digest.",
-                                recommendation="Pin to a SHA256 digest for reproducible builds.",
-                            )
-                        )
-
-                    components.append(
-                        RegistryEntryComponent(
-                            bom_ref=f"registry:docker/{image}",
-                            name=image,
-                            registry_type="docker-hub",
-                            trust_tier=TrustTier.THIRD_PARTY_UNSIGNED,
-                            risks=risks,
+                    continue
+                image = redact_text(raw_image)
+                has_digest = bool(re.search(r"@sha256:[0-9a-fA-F]{64}$", raw_image))
+                has_tag = ":" in raw_image.rsplit("/", 1)[-1] and not raw_image.endswith(":latest")
+                risks: list[RiskAssessment] = []
+                if not has_digest:
+                    risks.append(
+                        RiskAssessment(
+                            severity=RiskSeverity.MEDIUM if has_tag else RiskSeverity.HIGH,
+                            category="mutable_image_tag" if has_tag else "version_pinning",
+                            detail=f"Docker image '{image}' lacks an immutable digest pin.",
+                            recommendation="Pin to a SHA256 artifact digest and verify its provenance.",
                         )
                     )
-
+                components.append(
+                    RegistryEntryComponent(
+                        bom_ref=f"registry:docker/{image}",
+                        name=image,
+                        registry_type="docker-hub",
+                        source_path=str(path),
+                        trust_tier=TrustTier.UNKNOWN,
+                        risks=risks,
+                        properties={
+                            "collection_mode": "manifest-reference",
+                            "registry_origin_verified": False,
+                        },
+                    )
+                )
         return components
 
     def _is_ai_package(self, name: str) -> bool:
-        return any(p.search(name) for p in AI_PACKAGE_PATTERNS)
+        return any(pattern.search(name) for pattern in AI_PACKAGE_PATTERNS)
