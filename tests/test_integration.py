@@ -128,7 +128,7 @@ class TestFullPipeline:
         bom = AIBOM.load(bom_path)
         assert len(bom.components) >= 3
         assert bom.metadata.completeness is not None
-        assert bom.metadata.completeness.scope == "full-agent"
+        assert bom.metadata.completeness.scope == "local-static-project"
 
     def test_validate_against_project(self, tmp_path: Path) -> None:
         """Cross-validate a BOM against the project that produced it."""

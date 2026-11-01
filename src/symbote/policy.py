@@ -9,6 +9,8 @@ from pydantic import BaseModel, Field
 
 
 class ScanPolicy(BaseModel):
+    model_config = {"extra": "forbid"}
+
     scanners: list[str] = Field(
         default=["mcp", "model", "prompt", "rag", "registry"],
     )
@@ -18,23 +20,29 @@ class ScanPolicy(BaseModel):
 
 
 class RiskPolicy(BaseModel):
+    model_config = {"extra": "forbid"}
+
     fail_threshold: float = 50.0
     warn_threshold: float = 25.0
     ignore_categories: list[str] = Field(default_factory=list)
 
 
 class ValidatePolicy(BaseModel):
+    model_config = {"extra": "forbid"}
+
     require_completeness: bool = True
     require_integrity: bool = True
     minimum_assurance_level: str = "declared"
 
 
 class OutputPolicy(BaseModel):
+    model_config = {"extra": "forbid"}
+
     default_format: str = "json"
 
 
 class Policy(BaseModel):
-    model_config = {"populate_by_name": True}
+    model_config = {"populate_by_name": True, "extra": "forbid"}
 
     version: str = "1.0"
     scan: ScanPolicy = Field(default_factory=ScanPolicy)
@@ -63,66 +71,19 @@ def load_policy(project_root: Path) -> Policy | None:
     return None
 
 
-def _parse_policy(path: Path) -> Policy | None:
+def _parse_policy(path: Path) -> Policy:
+    """Parse a configured policy strictly; never fall back to defaults on failure."""
     try:
         import yaml
-    except ImportError:
-        return _parse_policy_fallback(path)
-
+    except ImportError as exc:
+        raise ValueError("Policy file requires PyYAML; install symbote[yaml]") from exc
     try:
-        text = path.read_text(encoding="utf-8")
-        data: Any = yaml.safe_load(text)
+        data: Any = yaml.safe_load(path.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
-            return None
+            raise ValueError("policy must be a mapping")
         return Policy.model_validate(data)
-    except Exception:
-        return None
-
-
-def _parse_policy_fallback(path: Path) -> Policy | None:
-    """Minimal YAML-like parsing when PyYAML is not installed."""
-    import re
-
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        return None
-
-    data: dict[str, Any] = {}
-    section: str | None = None
-
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-
-        indent = len(line) - len(line.lstrip())
-
-        if indent == 0 and ":" in stripped:
-            key, _, val = stripped.partition(":")
-            val = val.strip().strip('"').strip("'")
-            if val:
-                data[key.strip()] = val
-            else:
-                section = key.strip()
-                data.setdefault(section, {})
-        elif indent > 0 and section and ":" in stripped:
-            key, _, val = stripped.partition(":")
-            val = val.strip().strip('"').strip("'")
-            if val.startswith("[") and val.endswith("]"):
-                items = [s.strip().strip('"').strip("'") for s in val[1:-1].split(",") if s.strip()]
-                data[section][key.strip()] = items
-            elif val.lower() in ("true", "false"):
-                data[section][key.strip()] = val.lower() == "true"
-            elif re.match(r"^[\d.]+$", val):
-                data[section][key.strip()] = float(val)
-            elif val:
-                data[section][key.strip()] = val
-
-    try:
-        return Policy.model_validate(data)
-    except Exception:
-        return None
+    except Exception as exc:
+        raise ValueError(f"Invalid policy {path}: {exc}") from exc
 
 
 DEFAULT_POLICY_YAML = """\

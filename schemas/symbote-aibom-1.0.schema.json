@@ -80,6 +80,11 @@
           "type": "array",
           "items": { "type": "string" }
         },
+        "scanner_status": {
+          "type": "object",
+          "description": "Scanner outcomes in the local static collection scope.",
+          "additionalProperties": { "type": "string", "enum": ["complete", "partial", "failed", "unknown", "not-applicable"] }
+        },
         "timestamp": {
           "type": "string",
           "format": "date-time"
