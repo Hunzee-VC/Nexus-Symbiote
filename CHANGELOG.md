@@ -16,3 +16,9 @@ schema, predicate types) is versioned independently of the tool; see `spec/versi
   `diff()` produces typed, deterministic `Delta` events from identity digests with
   claim-noise-immune body comparison (`entity/v1`, `spec/digests.md §3.8`);
   `stale_evaluation_ids()` backs `SYM-EVAL-001`.
+- WP16 test infrastructure: shared hypothesis strategies for referentially consistent model
+  documents (`tests/strategies.py`), byte-identical golden tooling with explicit regeneration
+  (`tests/support/golden.py`, `UPDATE_GOLDENS=1`), a cross-cutting invariant property suite
+  (seal→verify, determinism, redaction verifiability, diff reseal-immunity, JCS idempotence,
+  chain-store rollback refusal), and the first two goldens: the sealed minimal companion document
+  and the canonical rug-pull delta.

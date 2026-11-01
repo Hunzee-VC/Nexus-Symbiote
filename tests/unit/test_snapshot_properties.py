@@ -15,9 +15,7 @@ from symbiote.snapshot import diff
 
 NOW = datetime(2026, 11, 1, 12, 0, tzinfo=UTC)
 
-hex_digest = st.sampled_from("0123456789abcdef").flatmap(
-    lambda c: st.just("sha256:" + c * 64)
-)
+hex_digest = st.sampled_from("0123456789abcdef").flatmap(lambda c: st.just("sha256:" + c * 64))
 tool_name = st.from_regex(r"[a-z][a-z0-9_]{0,10}", fullmatch=True)
 
 
