@@ -29,7 +29,22 @@ jobs:
         run: |
           python -m pip install --require-hashes -r requirements-ci.lock
           python -m pip install --no-deps --no-build-isolation -e .
-      - run: python -m pytest
+      - name: Run full test suite with bounded diagnostics
+        env:
+          PYTEST_LOG: ${{ runner.temp }}/pytest-python-${{ matrix.python }}.log
+        run: |
+          set -o pipefail
+          timeout --signal=INT --kill-after=30s 12m \
+            python -m pytest -vv -o faulthandler_timeout=120 --durations=20 \
+            2>&1 | tee "$PYTEST_LOG"
+      - name: Preserve test diagnostics
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: pytest-log-python-${{ matrix.python }}
+          path: ${{ runner.temp }}/pytest-python-${{ matrix.python }}.log
+          if-no-files-found: error
+          retention-days: 7
   coverage:
     name: Coverage Python 3.12
     runs-on: ubuntu-latest
@@ -47,7 +62,23 @@ jobs:
         run: |
           python -m pip install --require-hashes -r requirements-ci.lock
           python -m pip install --no-deps --no-build-isolation -e .
-      - run: python -m pytest --cov=nexus_symbiote --cov-report=term-missing
+      - name: Run full coverage suite with bounded diagnostics
+        env:
+          PYTEST_LOG: ${{ runner.temp }}/pytest-coverage-python-3.12.log
+        run: |
+          set -o pipefail
+          timeout --signal=INT --kill-after=30s 25m \
+            python -m pytest -vv -o faulthandler_timeout=120 --durations=20 \
+            --cov=nexus_symbiote --cov-report=term-missing \
+            2>&1 | tee "$PYTEST_LOG"
+      - name: Preserve coverage diagnostics
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: pytest-log-coverage-python-3.12
+          path: ${{ runner.temp }}/pytest-coverage-python-3.12.log
+          if-no-files-found: error
+          retention-days: 7
   quality:
     runs-on: ubuntu-latest
     timeout-minutes: 15

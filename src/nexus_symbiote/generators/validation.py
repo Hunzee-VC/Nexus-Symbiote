@@ -11,6 +11,8 @@ from jsonschema import Draft7Validator, Draft202012Validator, FormatChecker
 from referencing import Registry, Resource
 from referencing.jsonschema import DRAFT7
 
+from nexus_symbiote.generators._spdx_dispatch import dispatched_spdx_schema
+
 
 def _schema(name: str) -> dict[str, Any]:
     schema = json.loads(
@@ -25,7 +27,8 @@ def _schema(name: str) -> dict[str, Any]:
 def _validator(fmt: str) -> Any:
     if fmt == "spdx":
         return Draft202012Validator(
-            _schema("spdx/spdx-json-schema-3.0.1.json"), format_checker=FormatChecker()
+            dispatched_spdx_schema(_schema("spdx/spdx-json-schema-3.0.1.json")),
+            format_checker=FormatChecker(),
         )
     main = _schema("cyclonedx/bom-1.7.schema.json")
     base = main["$id"]
