@@ -56,7 +56,7 @@ class RAGScanner(Scanner):
         for config_path in configs:
             result.surfaces_scanned.append(relative_posix(config_path, project_root))
             components.extend(self._scan_rag_config(config_path, project_root, result))
-        if not configs:
+        if not configs and not result.surfaces_excluded:
             result.record_absent("rag-config", RAG_CONFIG_PATTERNS)
 
         components.extend(self._scan_env_files(project_root, result))
