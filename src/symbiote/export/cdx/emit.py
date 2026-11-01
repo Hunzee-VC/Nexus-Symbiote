@@ -11,6 +11,7 @@ from typing import Any
 from symbiote import __version__
 from symbiote.digest.envelope import strip_prefix
 from symbiote.digest.jcs import canonical_bytes
+from symbiote.export import account_for_companion
 from symbiote.model import enums as E
 from symbiote.model.common import Claim, Provenance
 from symbiote.model.document import AgentBOM
@@ -298,13 +299,7 @@ class _Builder:
             props.add(f"{p}:assurance", g.provenance.assurance)
             if g.delegation_chain:
                 props.add_json(f"{p}:delegation-chain:json", [h.to_json_dict() for h in g.delegation_chain])
-            self._lose(
-                f"/grants/{g.id}",
-                E.LossReason.NO_NATIVE_CONSTRUCT,
-                E.LossPreservedIn.PROPERTY,
-                E.LossSeverity.SECURITY_RELEVANT,
-                entity=g.id,
-            )
+
         for i, cb in enumerate(sorted(self.bindings_by_subject.get(subject_id, []), key=lambda c: c.id)):
             p = f"agentbom:credential:{i}"
             props.add(f"{p}:identity", cb.identity_ref)
@@ -1013,6 +1008,17 @@ class _Builder:
             props.add("agentbom:merkle:root", bom.merkle.root)
             props.add("agentbom:merkle:leaf-count", bom.merkle.leaf_count)
             props.add("agentbom:merkle:algorithm", bom.merkle.algorithm)
+        props.add("agentbom:authorization-use", "requires-externally-authenticated-companion")
+        for index, grant in enumerate(bom.grants):
+            # Keep the complete record even for a subject without a native CycloneDX component.
+            props.add_json("agentbom:authz:grant-record", grant.to_json_dict())
+            self._lose(
+                f"/grants/{index}",
+                E.LossReason.NO_NATIVE_CONSTRUCT,
+                E.LossPreservedIn.PROPERTY,
+                E.LossSeverity.SECURITY_RELEVANT,
+                entity=grant.id,
+            )
         props.add("agentbom:companion:ref", self.companion_ref)
         props.add("agentbom:companion:digest", self.companion_digest)
         if self.companion_ref or self.companion_digest:
@@ -1494,7 +1500,7 @@ def export_cyclonedx(
         source_format="agentbom-model",
         target_format="cyclonedx-1.7",
         model_digest=bom.snapshot.digest,
-        items=b.loss,
+        items=account_for_companion(b.loss, companion_ref, companion_digest),
     )
     return doc, report
 

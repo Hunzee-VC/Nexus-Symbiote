@@ -17,6 +17,7 @@ from spdx_python_model.bindings import v3_0_1 as m
 from symbiote import BASE_URI, __version__
 from symbiote.digest.envelope import strip_prefix
 from symbiote.digest.jcs import canonical_bytes
+from symbiote.export import account_for_companion
 from symbiote.export.cdx.emit import export_cyclonedx
 from symbiote.model import enums as E
 from symbiote.model.document import AgentBOM
@@ -724,24 +725,31 @@ class _Emitter:
                     "dependsOn",
                     qualifiers={"edgeType": "holdsCredential", "credentialKind": cb.credential_kind},
                 )
-        for g in self.bom.grants:
+        for index, g in enumerate(self.bom.grants):
+            # The Sbom's CDX property bridge retains the complete record even for a subject
+            # without a native SPDX element. The indexed fields below are query aids.
+            self.loss.append(
+                LossItem(
+                    path=f"/grants/{index}",
+                    entity=g.id,
+                    reason=E.LossReason.NO_NATIVE_CONSTRUCT,
+                    preserved_in=E.LossPreservedIn.EXTENSION,
+                    severity=E.LossSeverity.SECURITY_RELEVANT,
+                )
+            )
             subject = self.elements.get(g.subject_ref)
             if subject is None:
-                self.loss.append(
-                    LossItem(
-                        path=f"/grants/{g.id}",
-                        entity=g.id,
-                        reason=E.LossReason.NO_NATIVE_CONSTRUCT,
-                        preserved_in=E.LossPreservedIn.COMPANION,
-                        severity=E.LossSeverity.SECURITY_RELEVANT,
-                    )
-                )
                 continue
             ext = extension(
                 "CapabilityGrant",
                 id=g.id,
                 layer=g.layer,
                 capability=g.capability,
+                conditions=[condition.to_json_dict() for condition in g.conditions] or None,
+                spendCeiling=g.scope.spend_ceiling.to_json_dict() if g.scope.spend_ceiling else None,
+                rateLimit=g.scope.rate_limit,
+                gateRef=g.gate_ref,
+                enforcementPointLocator=g.enforcement_point.locator,
                 scopeResources=g.scope.resources or None,
                 scopeEgress=g.scope.egress or None,
                 scopeDataClasses=g.scope.data_classes or None,
@@ -872,7 +880,7 @@ class _Emitter:
             )
 
     def unknown_surfaces(self, root_ref: str) -> None:
-        """Verified absence vs unknown per surface (``spec/spdx-mapping.md §3``)."""
+        """Describe empty collections without inferring deployment-wide absence from scoped collection."""
         for collection, surface in (
             ("tool_servers", E.Surface.TOOLS),
             ("models", E.Surface.MODEL_GATEWAY),
@@ -883,20 +891,16 @@ class _Emitter:
             if getattr(self.bom, collection):
                 continue
             cov = self.bom.coverage.surfaces.get(surface)
-            target = NONE_ELEMENT if cov and cov.status is E.CoverageStatus.QUERIED else NOASSERTION_ELEMENT
-            completeness = (
-                m.RelationshipCompleteness.complete
-                if target == NONE_ELEMENT
-                else m.RelationshipCompleteness.noAssertion
-            )
+            # A completed query covers only its listed sources. Even an observed snapshot
+            # can combine static files and sampled traces; it cannot prove a closed runtime set.
             try:
                 self.relate(
                     f"rel:surface:{surface.value}",
                     root_ref,
-                    [target],
+                    [NOASSERTION_ELEMENT],
                     "dependsOn",
                     scope="runtime",
-                    completeness=completeness,
+                    completeness=m.RelationshipCompleteness.noAssertion,
                     qualifiers={
                         "surface": surface.value,
                         "coverageStatus": cov.status if cov else "not-attempted",
@@ -1034,7 +1038,7 @@ def export_spdx(
         source_format="agentbom-model",
         target_format="spdx-3.0.1",
         model_digest=bom.snapshot.digest,
-        items=em.loss,
+        items=account_for_companion(em.loss, companion_ref, companion_digest),
     )
     return doc, report
 
