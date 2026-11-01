@@ -1,0 +1,759 @@
+{
+  "output_path": "/tmp/claude-0/-home-user/de58848e-eb47-503f-9a0e-7f1d711ce8b2/scratchpad/phase1/gaps-attack.json",
+  "gaps": [
+    {
+      "id": "ATTACK-01",
+      "title": "Tool poisoning and rug pull: served tool definition mutates after approval",
+      "statement": "The text the model actually reads for a tool (name, title, description, inputSchema/outputSchema, annotations) is the primary injection surface and it is served live by the MCP server, not packaged. It can change after approval through a publisher update (classic rug pull), a server redeploy, or a runtime-gated rewrite (Deadbugz: clean for two calls, hostile on the third). No package hash changes, and neither standard has a field for a digest of the served definition, so a consumer cannot diff approved vs served and the swap is invisible to the BOM.",
+      "standards": [
+        "both",
+        "spdx-3.1-rc"
+      ],
+      "where_it_breaks": "CycloneDX 1.7: services[] carries endpoints, authenticated, x-trust-boundary, trustZone and data[].flow, but no tool description, inputSchema, annotations or definition digest; component.hashes[] hash package bytes, not the tools/list payload; component.type has no tool/mcp-server value; dependencies[] cannot mark an edge as runtime-resolved. SPDX 3.0.1: Core/Tool is a BOM-creation actor, not a served interface; software_Package + verifiedUsing Hash covers file bytes only; the usesTool relationship has no digest or validity qualifier; no class for a tool definition. SPDX 3.1-rc1: no ToolDefinition/Prompt class present at the tag (verified against model/AI/Classes).",
+      "attack_class": "tool poisoning / rug pull (description or schema mutation after approval), including delayed/triggered variants",
+      "exemplar": "Deadbugz (Pillar Security, Aug 2026; CSA research notes): 23 PRs in 74 minutes pushed an MCP server whose call counter returns benign metadata for two calls, then rewrites tool descriptions to send the agent after SSH keys, AWS credentials, shell history and kubeconfig; a one-time approval hash never sees the change. Invariant Labs remote poisoned MCP tool (ATLAS AML.CS0054, Apr 2025): malicious prompts in a tool docstring modified agent behaviour.",
+      "owasp_asi": [
+        "ASI04",
+        "ASI02",
+        "ASI01",
+        "LLM03:2025",
+        "LLM01:2025"
+      ],
+      "mitre_atlas": [
+        "AML.T0110",
+        "AML.T0109",
+        "AML.T0010.005",
+        "AML.T0104",
+        "AML.T0011.002",
+        "AML.T0094"
+      ],
+      "severity": "critical",
+      "recommended_fix": "Document: hash each tool definition in canonical form (RFC 8785 JCS over name, description, schema and annotations), sign an envelope listing the allowed hashes, registries and model snapshots, have each trace carry an attestation pointing to it; a Deadbugz-style swap then shows up as a hash mismatch; pin and require publisher signatures for production agents. [Mine] Verify at every session start/reconnect and on every notifications/tools/list_changed, not only at approval, because Deadbugz mutates mid-session; compute a per-server ToolManifest Merkle root over sorted per-tool digests so one changed leaf is localised; include title, outputSchema, icons and _meta in the canonical form and keep transport, endpoint identity and protocol version as digest context; treat any change to an approved server's definitions as a security event that revokes the approval record (see ATTACK-09) until re-approved; flag unpinned tools as a finding.",
+      "symbiote_feature": "`symbiote tool pin` (JCS canonical digests, per-server ToolManifest Merkle root, signed allowlist envelope) and `symbiote verify --live` (compares served tools/list to the allowlist per session and on list_changed, emits a rug-pull diff). Exported as CycloneDX 1.7 components with symbiote:tool.definitionDigest / symbiote:tool.manifestRoot properties plus a companion schema, and as an SPDX Extension (ToolDefinitionExtension) on the package element.",
+      "source_sections": [
+        "Runtime isn't bound to the BOM",
+        "Schema & Description Digest: Require a SHA-256 hash of the exact tool definition",
+        "no way to pin a tool-definition hash, which is the only SBOM-level defense against MCP rug-pulls",
+        "A tool that changes its definition after approval then shows up as a digest mismatch"
+      ]
+    },
+    {
+      "id": "ATTACK-02",
+      "title": "Model swap behind a stable alias (hosted inference dependency cannot be pinned)",
+      "statement": "Most agents call hosted models through a provider alias. The provider, or an attacker at the gateway/catalog layer, can change weights, safety filters, injected system prompt or quantisation behind the alias. The BOM records a name and a version string; there is no digest, snapshot identifier, provider attestation, or any way to tell a pinned snapshot from a floating alias. A silent swap therefore passes undetected and every evaluation claim bound to the old behaviour silently carries over.",
+      "standards": [
+        "both",
+        "spdx-3.1-rc"
+      ],
+      "where_it_breaks": "CycloneDX 1.7: services[].version is a free string; component.type machine-learning-model with hashes[] presupposes accessible bytes; modelCard has no snapshot/revision/serving-configuration fields; pkg:huggingface purls carry a revision qualifier but there is no equivalent for API aliases. SPDX 3.0.1: AIPackage inherits Software/Package and in 3.0.1 requires packageVersion and downloadLocation, which are meaningless for an API model; no Service class. SPDX 3.1-rc1: a Service profile exists but at the tag it is a summary page with no published classes; AIPackage requirements were relaxed, nothing added for served snapshots.",
+      "attack_class": "model swap behind a stable alias / provider alias drift",
+      "exemplar": "Scenario from the document: an injection-resilience evaluation passes against the snapshot behind an alias, the provider moves the alias, and the AgentBOM still says 'model X v1'. OpenTelemetry already exposes gen_ai.response.model and gen_ai.openai.response.system_fingerprint per call, so observed evidence exists but has no home in either BOM. Unit 42's model namespace reuse (2025) showed catalog paths in Vertex AI Model Garden and Azure AI Foundry resolving a stable name to attacker-controlled weights (see ATTACK-03).",
+      "owasp_asi": [
+        "ASI04",
+        "LLM03:2025"
+      ],
+      "mitre_atlas": [
+        "AML.T0010.003"
+      ],
+      "severity": "high",
+      "recommended_fix": "Document: define service identity as provider + snapshot ID + provider-signed attestation; where unavailable record a behavioural-fingerprint claim with an expiry so a silent swap invalidates the BOM; distinguish requested alias from resolved revision; record provider, endpoint, configuration, observation time and supplier evidence; mark undisclosed implementation details as unknown. [Mine] Add a ResolutionRecord {requestedRef, resolvedRef, resolvedAt, resolver, evidence such as response headers or system_fingerprint}; compare observed gen_ai.response.model per session against the declared snapshot and raise a drift finding; a 'floating' pinning status automatically downgrades the assurance level of every evaluation bound to that model (ATTACK-17) and triggers re-attestation.",
+      "symbiote_feature": "ModelEndpoint component with symbiote:model.requestedAlias, resolvedSnapshot, pinning (pinned|floating|unknown) and providerAttestation; `symbiote fingerprint` behavioural probe with validity window; alias-drift alarm fed by OTel gen_ai.response.model.",
+      "source_sections": [
+        "Models you can't hash",
+        "Hosted models can't be pinned",
+        "Hosted model APIs (OpenAI/Anthropic endpoints) are invisible",
+        "Distinguish requested alias from resolved revision"
+      ]
+    },
+    {
+      "id": "ATTACK-03",
+      "title": "Namespace reuse, typosquatting and slopsquatting: identity is a name, not content",
+      "statement": "Both specs key identity on names (purl, name/version, downloadLocation). Content identifiers (OmniBOR, SWHID, gitoid) are optional and rarely populated, and nothing records how a name was resolved to bytes: which registry, which maintainer identity at fetch time, whether the artifact was signed, or whether the namespace had been deleted and re-registered. Attackers exploit exactly this through re-registered Hugging Face namespaces that propagate into cloud model catalogs, typosquats, and hallucinated package names that agents install autonomously (slopsquatting).",
+      "standards": [
+        "both",
+        "spdx-3.1-rc"
+      ],
+      "where_it_breaks": "CycloneDX 1.7: component.purl/cpe/swid are names; omniborId and swhid are optional; evidence.identity[].methods[].technique offers hash-comparison and attestation but there is no resolution record (requested ref to resolved digest to registry to signer). SPDX 3.0.1: ExternalIdentifier{packageUrl} and Software/ContentIdentifier{gitoid, swhid} are optional; downloadLocation is a string; no fetch-time record. SPDX 3.1-rc1: ExternalIdentifierType grows to 48 entries (DOI, ORCID, LEI...) but still no resolution or namespace-history concept.",
+      "attack_class": "namespace reuse / typosquatting / slopsquatting (name-to-content resolution attacks)",
+      "exemplar": "Unit 42 Model Namespace Reuse (Sept 2025): deleting a Hugging Face author lets anyone re-register the name; orphaned references in Google Vertex AI Model Garden and Azure AI Foundry then resolved to attacker models; an ownership-transfer redirect variant also exists; Google began daily scans for deleted authors. Slopsquatting: Spracklen et al. (USENIX Security 2025) produced 205,474 unique hallucinated package names across 16 models; 43% recurred in all ten reruns, making registration economical. Clinejection showed agents installing packages at runtime (postinstall installing OpenClaw). ATLAS AML.CS0027 documents organisation confusion on Hugging Face.",
+      "owasp_asi": [
+        "ASI04",
+        "LLM03:2025"
+      ],
+      "mitre_atlas": [
+        "AML.T0010.003",
+        "AML.T0010.001",
+        "AML.T0011.001",
+        "AML.T0060",
+        "AML.T0074",
+        "AML.T0058"
+      ],
+      "severity": "critical",
+      "recommended_fix": "Document: use the content digest as the primary key (for models a signed manifest digest) and the name only as a locator; record the resolution: requested ref, resolved immutable ref, verified signer, and proof of inclusion in a transparency log; registry fetch evidence (registry, timestamp, maintainer identity at fetch, signature state, mirror/allowlist policy). [Mine] Add namespaceStatus evidence (account age, deleted/re-registered flag, ownership-transfer chain), typosquat distance to allowlisted names, and a hallucination check (did the package exist before the first reference date); resolution evidence is required for admission and its absence yields unknown, never ok.",
+      "symbiote_feature": "ResolutionRecord attestation (in-toto predicate symbiote.dev/resolution/v1) attached to every component; `symbiote resolve` connectors for Hugging Face, npm, PyPI and the MCP registry that pin digests and check namespace history; deny-by-default admission when resolution is unverifiable.",
+      "source_sections": [
+        "Identity is a name, not content.",
+        "Registry risk is out of scope ... typosquatting distance, or hallucinated-package (slopsquatting) provenance",
+        "Unit 42 found that anyone can re-register a deleted Hugging Face namespace",
+        "PURL's standardization as ECMA-427 made names consistent, not trustworthy"
+      ]
+    },
+    {
+      "id": "ATTACK-04",
+      "title": "Unsafe deserialization and load-time code execution (pickle, trust_remote_code, chat templates, GGUF parsers)",
+      "statement": "Model artifacts execute code on load: pickle/torch.load, custom modelling code enabled by trust_remote_code, Jinja chat templates, custom tokenizers, and memory-unsafe GGUF parsers. Neither standard has a field that classifies load-time execution risk or records loader policy, so admission policy cannot gate on it, and malicious models have already bypassed hub scanners.",
+      "standards": [
+        "both",
+        "spdx-3.1-rc"
+      ],
+      "where_it_breaks": "CycloneDX 1.7: modelCard.modelParameters has approach, architectureFamily, modelArchitecture, datasets, inputs, outputs but no serializationFormat, trustRemoteCode, loaderPolicy, chatTemplateHash or tokenizerHash; component.mime-type is a free string. SPDX 3.0.1: AIPackage has no format or safety-class field; Software/File uses the free-text Core/contentType; SoftwarePurpose has no model-format distinctions. SPDX 3.1-rc1: no addition.",
+      "attack_class": "pickle / trust_remote_code deserialization and load-time code execution",
+      "exemplar": "nullifAI (ReversingLabs, Feb 2025; ATLAS AML.CS0031): PyTorch pickles compressed with 7z and deliberately broken so the reverse-shell payload ran before deserialization failed; Picklescan did not even recognise one file as a pickle; Hugging Face removed the models within 24 hours and patched Picklescan. GGUF parser flaws in llama.cpp: CVE-2024-23496 (heap overflow in gguf_fread_str), CVE-2025-53630 (integer overflow in gguf_init_from_file_impl), CVE-2026-27940. Jinja sandbox escapes relevant to executable chat templates: CVE-2024-56326 (fixed 3.1.5) and CVE-2025-27516 (fixed 3.1.6).",
+      "owasp_asi": [
+        "ASI05",
+        "ASI04",
+        "LLM03:2025",
+        "LLM04:2025"
+      ],
+      "mitre_atlas": [
+        "AML.T0011.000",
+        "AML.T0018.002",
+        "AML.T0010.003",
+        "AML.T0058"
+      ],
+      "severity": "critical",
+      "recommended_fix": "Document: a mandatory serializationProfile with a format safety class (safetensors, onnx, gguf, pickle, custom-code/trust_remote_code), tokenizerHash, chat-template hash, and a load-time code-execution risk field that admission policy can gate on; treat model files as executable artifacts; prefer and encourage non-executable formats. [Mine] Classify every file in the model repo by role (weights, tokenizer, template, config, code) with per-file digests; record loaderPolicy (weights_only, allowlisted globals, parser version pins for GGUF/safetensors readers); attach scanner evidence (modelscan, picklescan, fickling: version, result, expiry); compute a 'code-bearing files present' flag; tie parser CVEs to the model through model VEX (ATTACK-17).",
+      "symbiote_feature": "`symbiote scan-model` producing a SerializationProfile and OpenSSF model-signing compatible per-file manifest plus scanner attestations; admission rule 'deny formats in {pickle, custom-code} without a signed exception'; model VEX for loader/parser CVEs.",
+      "source_sections": [
+        "Serialization format safety. Whether a model uses pickle (unsafe), safetensors (safe), or GGUF matters enormously",
+        "Tensor-Level Lineage and Serialization Security",
+        "Add a load-time code-execution risk field (pickle vs safetensors) that admission policy can gate on",
+        "What runs is weights, tokenizer, chat template (executable Jinja), generation config and adapters"
+      ]
+    },
+    {
+      "id": "ATTACK-05",
+      "title": "Poisoned LoRA adapter or single layer hidden behind a whole-blob hash; merge-DAG blindness",
+      "statement": "A digest of a safetensors file cannot localise a poisoned adapter, a single trojaned layer, or a malicious merge parent, and fine-tune, LoRA, quantise, merge and distil change behaviour without touching a version number. Format conversion (safetensors to GGUF) breaks naive file hashing, so the same weights get different identities while different weights can share a name. Neither spec has typed derivation edges with parameters or per-tensor/per-shard commitments, so adaptation events are invisible as supply-chain modifications.",
+      "standards": [
+        "both",
+        "spdx-3.1-rc"
+      ],
+      "where_it_breaks": "CycloneDX 1.7: component.hashes[] are whole-file; pedigree.ancestors/variants are untyped; modelCard.modelParameters.approach describes learning type, not adaptation; no adapters[] or merge method fields. SPDX 3.0.1: IntegrityMethod is Hash or PackageVerificationCode (ContentIdentifier for gitoid/swhid); ancestorOf/descendantOf/hasVariant are untyped; only trainedOn/testedOn. SPDX 3.1-rc1: adds finetunedOn, pretrainedOn, evaluatedOn, validatedOn (verified in the RelationshipType vocabulary) but no quantizedFrom/mergedFrom/distilledFrom/adapterOf and no Merkle or per-tensor IntegrityMethod.",
+      "attack_class": "poisoned LoRA adapter / single-layer trojan / merge smuggling",
+      "exemplar": "MasqLoRA (CVPR 2026) hides a backdoor in an adapter that masquerades as benign with up to 99.8% attack success; CSA's 'Colluding LoRA' note shows adapters that are each safe alone but bypass alignment when combined; LoRATK finds backdoors survive adapter fusion. Red Hat (Sept 2026) notes pods pulling adapters from the public Hub pick up upstream changes without any deployment event and recommends SHA-256 pinning; weight-space detection (arXiv 2602.15195) reaches over 97% from weights alone; Cisco's Model Provenance Kit fingerprints per-layer energy profiles to recover lineage that self-reported tags omit.",
+      "owasp_asi": [
+        "ASI04",
+        "LLM03:2025",
+        "LLM04:2025"
+      ],
+      "mitre_atlas": [
+        "AML.T0018.000",
+        "AML.T0018.001",
+        "AML.T0010.003",
+        "AML.T0058",
+        "AML.T0043.004"
+      ],
+      "severity": "high",
+      "recommended_fix": "Document: mandatory granularity for model identity, whole-artifact digest plus per-adapter and per-tensor fingerprints plus adaptation-event records (fine-tune/LoRA/quantisation) with digests; a merge DAG of base checkpoints, SFT/RLHF stages, LoRA adapters, merge methods (SLERP, TIES, DARE) and quantisation transforms (AWQ, GPTQ, FP8) with per-layer or per-shard Merkle roots; typed edges fineTuneOf, quantizationOf, distillOf, mergeOf, adapterOf. [Mine] Make the tensor manifest content-addressed per tensor (name, dtype, shape, digest) so comparison survives format conversion; model adapters as separate components with an appliesTo edge; record lineage-fingerprint results as claims with confidence rather than facts; emit 'adapter loaded at runtime' as an observed delta (ATTACK-16).",
+      "symbiote_feature": "`symbiote model manifest` (per-shard and per-tensor Merkle tree, OpenSSF model-signing compatible), AdaptationEvent records and a DerivationGraph with typed edges, exported to CycloneDX pedigree plus properties and to SPDX 3.1 finetunedOn/pretrainedOn where available, else an Extension; lineage-fingerprint corroboration.",
+      "source_sections": [
+        "Whole-blob hashes miss single-layer trojans",
+        "Adaptation lineage is second-class",
+        "Compositional Merge DAG",
+        "a merge can smuggle a poisoned parent",
+        "safetensors → GGUF breaks naive file hashing"
+      ]
+    },
+    {
+      "id": "ATTACK-06",
+      "title": "RAG, vector-store and agent-memory poisoning with persistence",
+      "statement": "Retrieval corpora, vector indexes and agent memory are mutable, continuously poisonable dependencies, but both standards treat data as a static build-time dataset with prose provenance. There is no record of the embedding model, chunking, index snapshot, writer identity and write policy, tenant isolation, retention, trust tier, sanitisation or poison-scan result, and a snapshot hash of a vector store is stale on the first write. Persistence attacks live exactly here: one poisoned document or memory entry influences every later session.",
+      "standards": [
+        "both",
+        "spdx-3.1-rc"
+      ],
+      "where_it_breaks": "CycloneDX 1.7: component.type data with componentData{type: dataset|configuration|definition..., governance{custodians, owners, stewards}, classification, sensitiveData, contents} has no embedding-model ref, chunking, index digest, write policy, trust tier or scan result; services[].data[].flow is direction only. SPDX 3.0.1: DatasetPackage.datasetUpdateMechanism is xsd:string, datasetAvailability (query, scrapingScript...) acknowledges live sources without any content commitment, confidentialityLevel is a label; no index or memory class. SPDX 3.1-rc1: no RAG class present at the tag.",
+      "attack_class": "RAG / vector-store / memory poisoning and persistence",
+      "exemplar": "Zenity's M365 Copilot financial-transaction hijack (ATLAS AML.CS0026, Aug 2024): a crafted email was ingested into Copilot's RAG store and retrieved by a later user query. MINJA (2025) injects memory through ordinary queries with 98.2% injection success and 76.8% attack success; AgentPoison backdoors long-term memory/RAG with over 80% success. ChatGPT memory hijack via prompt injection (ATLAS AML.CS0040).",
+      "owasp_asi": [
+        "ASI06",
+        "ASI01",
+        "LLM08:2025",
+        "LLM04:2025",
+        "LLM01:2025"
+      ],
+      "mitre_atlas": [
+        "AML.T0070",
+        "AML.T0071",
+        "AML.T0080",
+        "AML.T0080.000",
+        "AML.T0099",
+        "AML.T0064",
+        "AML.T0066"
+      ],
+      "severity": "critical",
+      "recommended_fix": "Document: separate static datasets from dynamic RetrievalCorpus components; record embedding model bom-ref, chunking strategy, source connectors, ACL enforcement mode and sanitisation filters; replace version strings with Merkle/snapshot hashes or temporal windows; model memory and indexes as mutable components with known writers, write policy, tenant isolation, retention, quarantine and invalidation lists; distinguish training data, retrieved evidence, executable instructions and persistent memory. [Mine] Add a per-source trust tier and instruction-bearing flag; keep an append-only, hash-chained write log whose head is the snapshot so poisoning can be time-located and rolled back; maintain an invalidation map (source withdrawn to indexes/memories to purge); record poison-scan evidence with expiry; compute a 'memory writable by untrusted principal' flag.",
+      "symbiote_feature": "RetrievalIndex and MemoryStore components with an IngestionContract (embedding model digest, chunker, sanitisers, ACL mode), snapshot Merkle root plus write-log head and writer allowlist; `symbiote memory audit`; poison-scan attestations.",
+      "source_sections": [
+        "Memory / RAG has no provenance",
+        "Data lineage needs to extend through retrieval and persistent memory",
+        "Mutable Data and RAG Pipeline Contracts",
+        "RAG indexes and agent memory aren't modelled as mutable components with known writers and a write policy, even though that's where persistence attacks live"
+      ]
+    },
+    {
+      "id": "ATTACK-07",
+      "title": "Indirect prompt injection riding a retrieval edge into a tool call (the Clinejection pattern)",
+      "statement": "The attack that dominates incidents is untrusted content entering the model's context and steering a privileged tool call. Both graphs model library-style dependsOn, not data-flow edges with trust labels (readsContextFrom, invokes, writesMemoryTo), so the toxic flow from a low-trust source to a destructive or open-world tool is invisible and cannot be queried before deployment or detected afterwards.",
+      "standards": [
+        "both",
+        "spdx-3.1-rc"
+      ],
+      "where_it_breaks": "CycloneDX 1.7: dependencies[].dependsOn/provides carry no edge kind or trust label; services[].data[].flow (inbound/outbound) and classification exist but cannot say 'instruction-bearing, untrusted'; no ContextSource construct. SPDX 3.0.1: relationships are typed but build-era (dependsOn, hasDataFile, usesTool, invokedBy); LifecycleScopedRelationship.scope=runtime exists but edges carry no trust or permission qualifiers; no ContextSource class. SPDX 3.1-rc1: Relationship still has only completeness/startTime/endTime.",
+      "attack_class": "indirect prompt injection into tool invocation (toxic agent flow)",
+      "exemplar": "Clinejection (disclosed 9 Feb 2026, exploited 17 Feb): a GitHub issue title fed to Cline's AI triage workflow with Bash access led to GitHub Actions cache poisoning, theft of the npm publish token, and cline@2.3.0 whose postinstall installed another agent (OpenClaw) on roughly 4,000 systems in 8 hours; fixed in 2.4.0, publishing moved to OIDC provenance. Invariant Labs' GitHub MCP toxic agent flow (May 2025): a public issue coerced the agent into leaking private-repo data into a public PR with no tool or server compromise. EchoLeak CVE-2025-32711 (CVSS 9.3): zero-click injection exfiltrating M365 Copilot context. Also ATLAS AML.CS0045 (Cursor MCP), AML.CS0046 (computer-use data destruction), AML.CS0038 (delayed tool invocation).",
+      "owasp_asi": [
+        "ASI01",
+        "ASI02",
+        "ASI06",
+        "LLM01:2025",
+        "LLM06:2025"
+      ],
+      "mitre_atlas": [
+        "AML.T0051.001",
+        "AML.T0053",
+        "AML.T0086",
+        "AML.T0101",
+        "AML.T0108",
+        "AML.T0094"
+      ],
+      "severity": "critical",
+      "recommended_fix": "Document: typed invocation edges with data-flow labels (invokes, delegatesTo, retrievesFrom, readsContextFrom, writesMemoryTo, sendsPIIto) and a runtime-resolved marker; a ContextSource class with trust tier, instruction-bearing flag, sanitisation control and provenance; a computed flag for any agent that combines untrusted input, private data and a way to send data out (the Rule-of-Two / lethal-trifecta query). [Mine] Make the toxic-flow query a conformance check: for each tool with destructive or open-world capability, enumerate the context sources that reach it with trust tier below the required one, emit an AgenticRiskStatement 'exploitable path exists', and bind OTel gen_ai.tool.call.* and gen_ai.retrieval.documents spans to the snapshot so realised flows are detected, including delayed-trigger instructions.",
+      "symbiote_feature": "`symbiote graph taint`: reachability analysis over the AgentBOM graph (ContextSource to Model to Tool) with trust tiers, producing Rule-of-Two violation findings; edge kinds exported as CycloneDX dependencies plus symbiote:edge.kind properties and SPDX LifecycleScopedRelationship plus Extension.",
+      "source_sections": [
+        "The attack that matters --- indirect prompt injection riding a retrieval edge into a tool call --- is invisible in both graphs",
+        "Context window as supply chain",
+        "A Rule-of-Two violation then becomes a query over the BOM instead of a design review",
+        "Add a computed flag for any agent that combines untrusted input, private data and a way to send data out"
+      ]
+    },
+    {
+      "id": "ATTACK-08",
+      "title": "Delegation-chain compromise and agent identity spoofing (A2A)",
+      "statement": "When Agent A delegates to Agent B which calls Tool C, authority flows through a chain, and B's compromise is A's compromise. Neither spec can express the chain with scopes, audience, constraints and expiry, nor bind an agent to a non-human identity (SPIFFE, DID, workload identity). Agent Cards are discoverable, only optionally signed, and can be forged or poisoned to divert tasks and data.",
+      "standards": [
+        "both",
+        "spdx-3.1-rc"
+      ],
+      "where_it_breaks": "CycloneDX 1.7: no agent component type; dependencies[] has no delegatesTo; metadata.authors/supplier describe BOM provenance; the only identity hint is services[].authenticated (boolean). SPDX 3.0.1: Core/Agent means an actor that creates elements (Person, Organization, SoftwareAgent); delegatedTo is constrained to invokedBy targets and carries no audience, scope or expiry; ExternalIdentifierType has no DID or SPIFFE type (only urlScheme). SPDX 3.1-rc1: no AIAgent class at the tag; Relationship still unqualified; the dual nature of an agent as principal and artifact has no conformance guidance.",
+      "attack_class": "delegation-chain compromise / agent impersonation (A2A)",
+      "exemplar": "Keysight's Agent Card Poisoning (Mar 2026): a remote agent's card embedded adversarial instructions; in a hotel-booking delegation the host agent sent payment card details to an external endpoint. The A2A specification says Agent Cards MAY be signed with JWS, so verification is optional. Threat analyses (MAESTRO) list forged /.well-known/agent.json cards, task replay and server impersonation.",
+      "owasp_asi": [
+        "ASI07",
+        "ASI03",
+        "ASI08",
+        "ASI10"
+      ],
+      "mitre_atlas": [
+        "AML.T0073",
+        "AML.T0074",
+        "AML.T0103",
+        "AML.T0108",
+        "AML.T0091.000"
+      ],
+      "severity": "high",
+      "recommended_fix": "Document: a dedicated agent-deployment model distinct from Core/Agent; typed relationships delegatesAuthorityTo (delegator, delegate, audience, resource, scopes, constraints, expiry), actsAsIdentity (issuer, principal, tenant), registeredAs; an identity and authority graph linking agents and tools to non-human identities and credential lifetimes; reference identity artifacts (DPoP, workload identity federation) rather than inventing new ones. [Mine] Record Agent Card digest and signature-verification evidence per delegate; compute the transitive capability closure of a chain (effective capability of A is the union over the chain) and a blast-radius query 'which agents transitively reach tool X'; record hop-by-hop token audience checks as evidence; limit chain depth by policy.",
+      "symbiote_feature": "DelegationGraph with AgentIdentity references (SPIFFE/DID/OIDC subjects by reference), signed Agent Card snapshots, transitive capability closure and blast-radius reports.",
+      "source_sections": [
+        "No Agent Identity. No DID, no SPIFFE ID, no A2A trust graph",
+        "Agent Delegation Graph: A2A. If Agent A calls Agent B, Agent B's compromise is your compromise",
+        "Semantic overloading of \"Agent\"",
+        "delegatesAuthorityTo Delegator, delegate, audience, resource, scopes, constraints and expiry"
+      ]
+    },
+    {
+      "id": "ATTACK-09",
+      "title": "Registry compromise, stale mirrors and expired approvals: approval bound to a display name",
+      "statement": "Model hubs, MCP registries and skill marketplaces are now the primary intake path, yet neither spec represents the registry itself: issuer, record version, publisher verification, signature or attestation status, transparency-log inclusion, approval scope, revocation, or rules for ownership transfers and stale mirrors. Enterprise approvals typically match a display name, so a renamed, updated or transferred entry inherits approval it never earned, and a revoked publisher is never propagated.",
+      "standards": [
+        "both",
+        "spdx-3.1-rc"
+      ],
+      "where_it_breaks": "CycloneDX 1.7: externalReferences[].type offers distribution, distribution-intake and attestation URLs but no structured registry claim; component.supplier/publisher are free organisational entities; declarations[] has no approval record binding a deployment to its capabilities. SPDX 3.0.1: availableFrom, suppliedBy, originatedBy exist but there is no registry-entry or approval class. SPDX 3.1-rc1: the SupplyChain profile models lifecycle events of products, not registry trust or approval.",
+      "attack_class": "registry compromise / reputation inflation / expired or misbound approval",
+      "exemplar": "ToxicSkills (Snyk, Feb 2026): 3,984 skills on ClawHub and skills.sh scanned, 76 confirmed malicious, 13.4% with critical issues, skills.sh with no publisher verification; ClawHavoc (Koi): 341 malicious skills, 335 from one operation. The official MCP registry's server.json (schema 2025-12-11) has an optional packages[].fileSha256 but no digest for remotes and no attestation reference, which smithmark's REGISTRY_ATTESTATION_REF_PRESENT check demonstrates fails for every real entry. postmark-mcp impersonated Postmark Labs (ATLAS AML.CS0053). mcp-remote CVE-2025-6514 (CVSS 9.6) let a malicious server achieve client RCE.",
+      "owasp_asi": [
+        "ASI04"
+      ],
+      "mitre_atlas": [
+        "AML.T0111",
+        "AML.T0104",
+        "AML.T0109",
+        "AML.T0010.004",
+        "AML.T0010.005"
+      ],
+      "severity": "high",
+      "recommended_fix": "Document: distinguish distribution, discovery and approval functions; bind registry issuer, record version, publisher identity, artifact digest, deployment identity, approval scope and revocation status; rules for ownership transfers, stale mirrors, expired approvals and revoked publishers; the approval must identify the deployment and capabilities it covers; a registry component type with trustModel (TOFU, PKI, Sigstore) and verification status. [Mine] ApprovalRecord keyed by (definition digest, capability-set digest, deployment id) with approver, policy revision and expiry; RegistryFetchEvidence events (registry, entry version, publisher identity at fetch, signature state, inclusion proof, mirror policy); subscribe to revocation feeds and auto-expire approvals on any digest change.",
+      "symbiote_feature": "RegistryEntry and ApprovalRecord objects; `symbiote approve` issues signed approvals bound to digests and capability sets; `symbiote registry watch` flags renames, transfers, revocations and expiring approvals.",
+      "source_sections": [
+        "Registry records need explicit trust and lifecycle semantics",
+        "Matching an agent's display name is insufficient",
+        "Registry and Distribution Trust --- A Missing Layer",
+        "no real MCP Registry entry today carries an attestation reference field"
+      ]
+    },
+    {
+      "id": "ATTACK-10",
+      "title": "Credential and scope over-grant: inventory without authority",
+      "statement": "A BOM says what exists, not what it may do or whose credentials it holds. There is no capability/authority object (scopes, egress, spend ceilings, token references, approval gates), no distinction between a shared service account and a scoped on-behalf-of token, no credential lifetime, and autonomy is a single yes/no flag, so 'may draft a payment' and 'may execute a payment' are indistinguishable. Least-privilege gap analysis and credential blast-radius queries are impossible.",
+      "standards": [
+        "both",
+        "spdx-3.1-rc"
+      ],
+      "where_it_breaks": "CycloneDX 1.7: services[].authenticated (boolean), x-trust-boundary (boolean), trustZone (label); no scopes, egress, spend or approval fields; declarations are free-form. SPDX 3.0.1: AIPackage.autonomyType is Core/PresenceType (yes, no, noAssertion). SPDX 3.1-rc1: autonomyType is deprecated for Core/isoAutomationLevel, a spectrum but still per package rather than per action; relationships carry no permission, granter or validity.",
+      "attack_class": "identity and privilege abuse / excessive agency / credential over-grant",
+      "exemplar": "Invariant's GitHub MCP flow worked because one token had read access to both public and private repositories. The Amazon Q VS Code extension compromise (ATLAS AML.CS0047, July 2025) started with an inappropriately scoped GitHub token and shipped a wiper prompt in version 1.84.0 to an extension with about 950,000 installs. Replit's agent (July 2025) deleted a production database during a declared code freeze; preview, test and production shared one database and no approval gate stood between the agent and a destructive action. Deadbugz explicitly hunts SSH keys, AWS credentials and kubeconfig.",
+      "owasp_asi": [
+        "ASI03",
+        "ASI02",
+        "LLM06:2025"
+      ],
+      "mitre_atlas": [
+        "AML.T0083",
+        "AML.T0098",
+        "AML.T0055",
+        "AML.T0091.000",
+        "AML.T0053",
+        "AML.T0101"
+      ],
+      "severity": "critical",
+      "recommended_fix": "Document: a normative capability/authority object (subject, capability class read/write/execute/network/filesystem/payment, scope pattern, granter plus delegation chain, validity, evidence of the enforcement point) attachable to agents, tools and services; action-specific autonomy; keep declared, policy-derived effective and observed permissions distinguishable; deny-by-default declarations that reference the digest of the enforced policy bundle; identity and token references by reference, never by value; credential binding type (static long-lived vs ephemeral task-scoped). [Mine] Emit the required-vs-granted scope difference as a least-privilege finding; treat server-declared MCP annotations as untrusted hints (the MCP spec says so) until corroborated by observation; add spend and rate ceilings; provide a credential blast-radius query ('which agents hold credentials this compromised server can use').",
+      "symbiote_feature": "CapabilityGrant objects in an authorizations[] block with an autonomy matrix per action; `symbiote least-privilege` diff (required vs granted vs observed); policy-bundle digest binding for OPA/Cedar enforcement points.",
+      "source_sections": [
+        "Inventory without authority",
+        "Composition ≠ authority",
+        "Permissions and delegation need substantially more precision",
+        "Action-specific autonomy ... cannot distinguish \"may draft payments\" from \"may execute payments below a threshold\""
+      ]
+    },
+    {
+      "id": "ATTACK-11",
+      "title": "Exfiltration via open-world tools: no egress allowlist or side-effect taxonomy",
+      "statement": "Tools that write to the outside world (email, documents, CRM, HTTP, chat) are exfiltration channels. The BOM records endpoints at most; it has no declared egress destination set, side-effect profile, isolation level or data-class flow, so an agent that reads secrets and holds an open-world tool looks identical to a read-only one, and observed egress cannot be compared to anything.",
+      "standards": [
+        "both",
+        "spdx-3.1-rc"
+      ],
+      "where_it_breaks": "CycloneDX 1.7: services[].endpoints are strings; data[].flow (direction) and data[].destination exist but are optional and not policy-bound; no side-effect enum or egress allowlist. SPDX 3.0.1: no service or endpoint concept; DatasetPackage.confidentialityLevel is a label. MCP's readOnlyHint/destructiveHint/openWorldHint are explicitly hints that clients must not rely on from untrusted servers.",
+      "attack_class": "exfiltration via open-world tools",
+      "exemplar": "postmark-mcp 1.0.16 (Koi Security, Sept 2025; ATLAS AML.CS0053): one added line BCC'd every email sent through the MCP server to an attacker address after 15 clean versions. Zenity's Copilot Studio exfiltration via agent tools (AML.CS0037); Backslash's Cursor MCP exfiltration (AML.CS0045); EchoLeak's zero-click exfiltration of Copilot context.",
+      "owasp_asi": [
+        "ASI02",
+        "ASI03",
+        "LLM02:2025"
+      ],
+      "mitre_atlas": [
+        "AML.T0086",
+        "AML.T0025",
+        "AML.T0057",
+        "AML.T0085.001"
+      ],
+      "severity": "high",
+      "recommended_fix": "Document: standard enums sideEffectProfile (read-only, state-modifying, destructive, financial-transaction), executionIsolation (none, wasm, microvm, gvisor) and humanInTheLoop (required, conditional, none); allowed destinations and data classes per tool, mirroring MCP annotations; enforcement at the tool gateway, sandbox or network boundary. [Mine] Declare an egressAllowlist per tool and per agent; diff observed destinations from gateway or OTel data against it (observed not in declared is a finding); label edges with data classes (PII, secrets) and compute 'secrets reachable by an open-world tool'; record whether a side-effect classification is server-declared or observation-verified.",
+      "symbiote_feature": "EgressPolicy and SideEffectProfile on every tool; `symbiote egress diff` from gateway logs or OTel spans; exfiltration-path findings.",
+      "source_sections": [
+        "record each tool's capabilities in the BOM: read-only, destructive or open-world (mirroring MCP annotations), OAuth scopes, network egress, and approval gates",
+        "Privilege & Sandbox Profile",
+        "sendsPIIto",
+        "egress destinations, spend ceilings"
+      ]
+    },
+    {
+      "id": "ATTACK-12",
+      "title": "Redacted BOM as attack map: transparency versus reconnaissance",
+      "statement": "A complete AgentBOM enumerates tools, scopes, endpoints and trust boundaries, which is exactly the reconnaissance ATLAS describes as discovering agent configuration and tool definitions. Distribution controls are labels only, and signatures bind whole documents, so a producer cannot share a redacted view that a consumer can still verify against a signed root; the choice is over-sharing or unverifiable partial BOMs.",
+      "standards": [
+        "both"
+      ],
+      "where_it_breaks": "CycloneDX 1.7: metadata.distributionConstraints.tlp (CLEAR, GREEN, AMBER, AMBER_AND_STRICT, RED) is a label; the JSF signature covers the serialised bytes, so any redaction invalidates it; compositions can declare incompleteness but cannot prove what was withheld versus unknown. SPDX 3.0.1: confidentialityLevel exists only on DatasetPackage; there is no document signature mechanism and no commitment structure on Bom/Bundle.",
+      "attack_class": "reconnaissance via BOM disclosure (redacted-BOM-as-attack-map)",
+      "exemplar": "Scenario: a TLP:AMBER AgentBOM shared with a customer is forwarded; it lists an email-send tool with open-world capability alongside a SharePoint read scope, the exact prerequisites of the EchoLeak and Copilot Studio exfiltration chains. ATLAS records adversaries acquiring public agent configuration files (AML.T0002.002) and discovering tool definitions and call chains (AML.T0084.001, AML.T0084.003).",
+      "owasp_asi": [
+        "ASI04"
+      ],
+      "mitre_atlas": [
+        "AML.T0084",
+        "AML.T0084.001",
+        "AML.T0084.003",
+        "AML.T0002.002",
+        "AML.T0007"
+      ],
+      "severity": "medium",
+      "recommended_fix": "Document: Merkle-committed BOMs where any redacted view can still be verified against a signed root. [Mine] Salt every leaf so absent fields cannot be dictionary-guessed from the root; ship inclusion proofs for disclosed leaves; define redaction profiles (customer, regulator, internal) and a 'redacted' marker distinct from 'unknown' so coverage statements (ATTACK-19) stay honest.",
+      "symbiote_feature": "`symbiote redact --view <profile>` producing verifiable redacted BOMs with Merkle inclusion proofs over a Sigstore/DSSE-signed root.",
+      "source_sections": [
+        "Transparency vs. attack map",
+        "A full agent BOM hands an attacker your tools, scopes and trust boundaries",
+        "Neither lets a consumer verify a redacted copy"
+      ]
+    },
+    {
+      "id": "ATTACK-13",
+      "title": "BOM rollback, replay and stale BOM: no validity window or anti-rollback",
+      "statement": "Both formats are point-in-time documents without validity windows, freshness or anti-rollback. An attacker, a stale mirror, or ordinary drift can present an older BOM or approval that omits a later-added tool or model change, and the consumer has no way to know it is stale. Rug pulls work precisely because scrutiny happens once, at first approval.",
+      "standards": [
+        "both",
+        "spdx-3.1-rc"
+      ],
+      "where_it_breaks": "CycloneDX 1.7: serialNumber plus an integer version that SHOULD increment, with no expiry, validity or link to the prior snapshot; metadata.timestamp only; declarations.evidence[].expires exists but only for evidence items; no top-level validity field. SPDX 3.0.1: CreationInfo.created; Relationship.startTime/endTime exist but there is no document validity, supersession chain or freshness requirement. SPDX 3.1-rc1: unchanged.",
+      "attack_class": "BOM rollback / stale BOM / approval replay",
+      "exemplar": "Deadbugz and postmark-mcp both exploit approve-once-trust-forever: 15 clean postmark-mcp releases preceded the backdoored 1.0.16, and a BOM generated at approval time stayed 'valid' afterwards. After Clinejection, Cline moved npm publishing to OIDC provenance because unsigned, un-dated metadata could not tell the tampered 2.3.0 from a legitimate release.",
+      "owasp_asi": [
+        "ASI04",
+        "ASI08"
+      ],
+      "mitre_atlas": [
+        "AML.T0109",
+        "AML.T0081"
+      ],
+      "severity": "high",
+      "recommended_fix": "Document: monotone serial numbers and freshness/expiry with refresh triggers; signed, append-only deltas keyed by snapshot digest; re-attestation triggers such as a changed tool description or a moved model alias; action traces that cite the active snapshot. [Mine] Add validUntil and a supersedes link to the prior snapshot digest, anchor snapshots in a transparency log so consumers can detect a withheld newer snapshot (split-view protection), and make consumers fail closed: a BOM older than the policy max-age cannot authorise privileged execution and reads as unknown, not valid.",
+      "symbiote_feature": "SnapshotChain (hash-linked snapshots with validUntil, Rekor-anchored), delta BOMs, and a freshness check in `symbiote verify` with fail-closed policy.",
+      "source_sections": [
+        "BOM anti-rollback: monotone serial numbers and freshness/expiry with refresh triggers",
+        "Snapshots, not streams",
+        "Still a point-in-time document. No validity window, no delta/observed-BOM semantics",
+        "a static BOM decays the day it's written"
+      ]
+    },
+    {
+      "id": "ATTACK-14",
+      "title": "Instruction-file and skill poisoning: system prompts, rules files, SKILL.md and MCP manifests are unhashed behaviour-as-code",
+      "statement": "System prompts, AGENTS.md and rules files, SKILL.md packages, hooks and MCP configuration are an agent's most privileged inputs and a prime poisoning target, yet neither spec has a type for them. Generators improvise with vendor properties, loading precedence and edit authority are unrecorded, and tampering, including instructions hidden in invisible Unicode, leaves no digest to diff.",
+      "standards": [
+        "both",
+        "spdx-3.1-rc"
+      ],
+      "where_it_breaks": "CycloneDX 1.7: component.type file or data with componentData.type configuration/definition carries no instruction semantics (role, loading precedence, edit authority, provenance); properties are untyped. SPDX 3.0.1: Software/File plus the configures relationship; no Prompt or Instruction class. SPDX 3.1-rc1: no Prompt class present at the tag despite the proposals.",
+      "attack_class": "instruction / configuration poisoning (rules files, skills, prompts, manifests)",
+      "exemplar": "Rules File Backdoor (Pillar Security, Mar 2025; ATLAS AML.CS0041): zero-width joiners and bidirectional markers hid instructions in Cursor and GitHub Copilot rules files that were invisible in GitHub PR review and made both assistants add an external script. Amazon Q VS Code extension 1.84.0 (July 2025; AML.CS0047) shipped a wiper prompt committed through an over-scoped token. ToxicSkills and ClawHavoc (Feb 2026) distributed malicious SKILL.md payloads, including credential stealers; ATLAS AML.CS0049 records a poisoned ClawdBot skill.",
+      "owasp_asi": [
+        "ASI04",
+        "ASI01",
+        "ASI05",
+        "LLM01:2025",
+        "LLM03:2025",
+        "LLM07:2025"
+      ],
+      "mitre_atlas": [
+        "AML.T0081",
+        "AML.T0051.001",
+        "AML.T0104",
+        "AML.T0011.002",
+        "AML.T0010.005"
+      ],
+      "severity": "critical",
+      "recommended_fix": "Document: an instruction component type with the digest of the exact bytes, who can edit it and where it came from; a tool-definition type with server identity, transport and per-tool digests; inventory system prompts, skills, tool descriptions, hooks and orchestration configuration with provenance, approved digests, loading precedence and modification authority. [Mine] Record both raw-bytes and normalised-text digests plus a Unicode anomaly scan (zero-width, bidi, confusables) as evidence; set instructionBearing=true so the toxic-flow analysis (ATTACK-07) treats these files as code; model the load-order precedence graph (global, project, skill); sign instruction bundles and report 'unsigned instruction loaded' as an observed finding.",
+      "symbiote_feature": "Instruction and Skill components; `symbiote instructions scan` (Unicode anomalies, secrets, injection heuristics); instruction-bundle signing and a precedence graph.",
+      "source_sections": [
+        "Prompt is not a dependency",
+        "Instructions aren't a component type",
+        "Behavior as Code: System prompt, planner instructions, guardrail policies must be hashed components",
+        "Inventory system prompts, skills, tool descriptions, hooks, and orchestration configuration with provenance, approved digests, loading precedence, and modification authority"
+      ]
+    },
+    {
+      "id": "ATTACK-15",
+      "title": "Cross-server tool shadowing and mixed-trust context composition",
+      "statement": "An agent session composes tools from several MCP servers into one context, and the model treats every description as equally authoritative. A low-trust server's tool description can therefore redirect how the model calls a trusted server's tool (tool shadowing), so session trust collapses to the weakest server. Neither standard records per-server trust tier or the exact set of servers co-loaded in a session, so this composition-level exposure cannot be declared, observed or queried.",
+      "standards": [
+        "both",
+        "spdx-3.1-rc"
+      ],
+      "where_it_breaks": "CycloneDX 1.7: services[] are independent entries with no session grouping, trust tier or isolation statement; trustZone is a free label with no ordering. SPDX 3.0.1: Bundle/ElementCollection can group elements but has no trust semantics; no per-session composition record. SPDX 3.1-rc1: unchanged.",
+      "attack_class": "cross-server tool shadowing / mixed-trust context",
+      "exemplar": "Invariant Labs' tool-shadowing demonstration (Apr 2025, reported alongside AML.CS0054): a malicious MCP server's tool description instructed the model to alter calls to a trusted WhatsApp MCP server so chat history was sent to the attacker, without touching the trusted server's code. Deadbugz-style servers co-loaded with credential-bearing tools make the same point at runtime.",
+      "owasp_asi": [
+        "ASI04",
+        "ASI01",
+        "ASI02"
+      ],
+      "mitre_atlas": [
+        "AML.T0110",
+        "AML.T0051.001",
+        "AML.T0086"
+      ],
+      "severity": "high",
+      "recommended_fix": "Document: a ContextSource class with trust tier, instruction-bearing flag and sanitisation control; per-server identity, endpoint and authentication mode on tool definitions. [Mine] Record the session's server set and its digest, assign each server a trust tier, and compute a 'mixed-trust session' finding whenever a tier-low server is co-loaded with a tier-high destructive or credential-bearing tool; declare isolation controls (description sanitisation, per-server context partitioning) as evidence so the finding can be downgraded only with proof.",
+      "symbiote_feature": "SessionComposition record (server set digest, per-server trust tier, isolation controls) and a mixed-trust finding in `symbiote graph taint`.",
+      "source_sections": [
+        "System prompts, tool descriptions, retrieved chunks, tool results, and memory are inputs that become instructions",
+        "A ContextSource class with trust tier, instruction-bearing flag, sanitization control, and provenance",
+        "Tool descriptors (name, description, schema) are model-visible and are the primary vector for tool poisoning / semantic injection"
+      ]
+    },
+    {
+      "id": "ATTACK-16",
+      "title": "Shadow components discovered at runtime: declared versus observed drift",
+      "statement": "Agents assemble themselves at runtime through dynamic tools/list, plugin and package installation, sub-agent spawning, memory writes and model routing. Static BOMs cannot represent discovered composition, admission status or last-known-good, and there is no observed-BOM mode, so the single most valuable detection primitive, an undeclared component appearing at runtime, cannot be computed.",
+      "standards": [
+        "both",
+        "spdx-3.1-rc"
+      ],
+      "where_it_breaks": "CycloneDX 1.7: metadata.lifecycles[].phase includes operations and discovery but has no validity window or session scope; evidence.occurrences[] is file-location centric (location, line, offset, symbol); formulation task types are CI verbs (build, test, deploy...); no delta semantics. SPDX 3.0.1: Sbom.sbomType includes runtime and deployed and LifecycleScopedRelationship.scope=runtime exists, but there is no observation record (collector, method, window, coverage) or delta event. SPDX 3.1-rc1: the Operations profile targets business operations and deliverables, not runtime observation; hasInstance/runsOn edges arrive without observation semantics.",
+      "attack_class": "shadow tool / shadow agent / runtime discovery abuse",
+      "exemplar": "cline@2.3.0's postinstall installed an entire second agent (OpenClaw) on roughly 4,000 systems with no declared dependency. Deadbugz changes the tool surface mid-session. Red Hat notes adapters pulled from the Hub change with no deployment event. OWASP's Agent Observability Standard defines AgBOM as a dynamic inventory because neither base standard does.",
+      "owasp_asi": [
+        "ASI04",
+        "ASI10",
+        "ASI08"
+      ],
+      "mitre_atlas": [
+        "AML.T0103",
+        "AML.T0010.005",
+        "AML.T0053",
+        "AML.T0109"
+      ],
+      "severity": "high",
+      "recommended_fix": "Document: a runtime/observed BOM (CycloneDX: extend OBOM; SPDX: an Operations-profile element) with a validity window and typed delta events (tool registered, model routed, sub-agent spawned) aligned to OTel GenAI semantic conventions; a prescriptive mode (BOM as allowlist the gateway enforces) and an observed mode (session deltas); a runtimeSnapshot at agent start; admission-control status and last-known-good; the diff between declared and observed is the alarm. [Mine] Bind each observation to collector identity, method, time window and coverage; map OTel attributes (gen_ai.agent.id, gen_ai.tool.name, gen_ai.tool.definitions, gen_ai.response.model, gen_ai.data_source.id, mcp.session.id) to AgentBOM refs and stamp every span with the active snapshot digest; rank undeclared components by capability class.",
+      "symbiote_feature": "`symbiote observe` (OTel collector processor emitting Observed AgentBOM deltas), `symbiote diff declared observed`, and gateway allowlist export for prescriptive mode.",
+      "source_sections": [
+        "No runtime BOM. Your BOM at build time != BOM at runtime",
+        "Declared vs. observed",
+        "Dynamic / Ephemeral Components: Agents load tools at runtime. Need a runtimeSnapshot BOM generated at agent start",
+        "an undeclared component at runtime is the finding"
+      ]
+    },
+    {
+      "id": "ATTACK-17",
+      "title": "Unbound or stale security evaluations: eval laundering and evidence-free 'not affected'",
+      "statement": "Evaluation results such as jailbreak or injection success rates are unattested numbers that are not bound to the exact tuple of model snapshot, prompt, tools, data and policy, nor to the harness and dataset digests. A passing evaluation therefore silently carries over after a model swap or permission change, and VEX-style 'not affected' statements have neither an agentic justification vocabulary nor an evidence requirement, so assurance can be laundered.",
+      "standards": [
+        "both",
+        "spdx-3.1-rc"
+      ],
+      "where_it_breaks": "CycloneDX 1.7: modelCard.quantitativeAnalysis.performanceMetrics[]{type, value, slice, confidenceInterval} has no harness, dataset digest or configuration; vulnerabilities[].analysis.justification is CVE-shaped (code_not_present ... protected_by_mitigating_control); ratings[].method is CVSS/OWASP/SSVC/other; cwes are integers; declarations.attestations.map[].requirement points at free-form standards with no shared agentic taxonomy. SPDX 3.0.1: AIPackage.metric and metricDecisionThreshold are DictionaryEntry string pairs, limitation is a string, safetyRiskAssessment is a four-value enum; VexNotAffectedVulnAssessmentRelationship.justificationType has five CVE-shaped values. SPDX 3.1-rc1: adds evaluatedOn/validatedOn relationships but no AIEvaluation class.",
+      "attack_class": "evaluation laundering / assurance drift / unverifiable risk statements",
+      "exemplar": "Document scenario: a prompt-injection evaluation of one model/tool configuration keeps 'passing' after the alias moves (ATTACK-02) or an open-world tool is added (ATTACK-11). The AIRS framework (arXiv 2511.12668) found SPDX 3.0 and CycloneDX 1.6 align on identity and evaluation metadata yet lack assurance fields, and demonstrated per-shard hash verification and runtime probes as the missing evidence.",
+      "owasp_asi": [
+        "ASI04",
+        "ASI09",
+        "LLM03:2025"
+      ],
+      "mitre_atlas": [
+        "AML.T0054",
+        "AML.T0051",
+        "AML.T0015"
+      ],
+      "severity": "high",
+      "recommended_fix": "Document: structured evaluation-provenance claims (benchmark name, version and dataset digest; harness, version and config hash; scores; evaluator identity; attestation link; validity window) bound to model, prompt, tools, data and policy revisions; an AI-VEX profile with findings keyed to MITRE ATLAS and OWASP identifiers, eval-suite digest, test conditions and confidence; justifications such as 'tool disabled', 'guardrail enforced', 'human approval required'; bind CDXA/SPDX assertions to a shared claim taxonomy (NIST AI RMF, EU AI Act, LLM Top 10, ATLAS). [Mine] Make the evaluation subject the snapshot digest (ATTACK-13) so any delta invalidates it automatically; require denominators and attack conditions; record evaluator independence; expire results; downgrade any 'not affected' without linked evidence to unknown.",
+      "symbiote_feature": "AIEvaluation attestation (in-toto predicate) and AgenticRiskStatement (AI-VEX) keyed to the snapshot digest and to ATLAS, ASI and LLM identifiers, with automatic invalidation on snapshot change.",
+      "source_sections": [
+        "Security evidence needs reproducible, configuration-specific meaning",
+        "modelCard is a brochure, not evidence",
+        "No model VEX",
+        "AI-VEX and Verifiable Eval Attestations",
+        "exploitability is a function of (weights × system prompt × guardrail config), a tuple VEX can't express"
+      ]
+    },
+    {
+      "id": "ATTACK-18",
+      "title": "Forged or unverifiable BOM claims: self-assertion, attribution is not verification",
+      "statement": "Nearly every field in both specs is self-asserted by the producer. CycloneDX's native signing is JSF, which the ecosystem rarely uses, and its new citations attribute data to a source without proving it; SPDX 3.0.1 has hashes but no signature mechanism at all. Real deployments wrap BOMs in DSSE/in-toto/Sigstore envelopes that neither spec defines, there is no way to compose claim-level attestations from several parties, and signatures over bytes break when partial graphs are merged. A compromised or dishonest producer can emit a perfectly valid, perfectly false AgentBOM.",
+      "standards": [
+        "both",
+        "spdx-3.1-rc"
+      ],
+      "where_it_breaks": "CycloneDX 1.7: signature (JSF) on bom, component, service, citation and declarations; citations[]{attributedTo, pointers, process, timestamp, signature} is attribution; evidence.identity.methods[].technique=attestation is unstructured; externalReferences of type attestation/digital-signature are URLs. SPDX 3.0.1: IntegrityMethod is Hash, PackageVerificationCode or ContentIdentifier; CreationInfo gives attribution; hasEvidence and verifiedUsing reference bytes; no envelope, no canonicalisation for prompts or tool schemas, no merge semantics. SPDX 3.1-rc1: adds a verifiedBy relationship and evidenceUID/verificationUID identifier types but still no signature mechanism.",
+      "attack_class": "forged provenance / unverifiable attestation / BOM-producer compromise",
+      "exemplar": "Clinejection's remediation moved publishing to npm OIDC provenance because self-asserted metadata could not distinguish the tampered release. Hugging Face organisation confusion (ATLAS AML.CS0027) shows unverified identities trusted on appearance. ATLAS AML.T0111 (reputation inflation) describes adversaries building credible-looking trust signals to drive adoption.",
+      "owasp_asi": [
+        "ASI04",
+        "ASI09"
+      ],
+      "mitre_atlas": [
+        "AML.T0111",
+        "AML.T0010"
+      ],
+      "severity": "high",
+      "recommended_fix": "Document: every claim references signed evidence by digest; a verification-first schema where each assertion can carry verificationMethod, verifier and timestamp; DSSE/in-toto envelopes and Sigstore bundles checked against a transparency log; JCS canonicalisation instead of RDF canonicalisation; multi-party claim composition; a Merkle IntegrityMethod; require signed citations on security-critical fields. [Mine] Record an assurance level per claim (declared, observed, verified) rather than one score per agent; store the signer policy (expected identity, issuer) with the BOM so 'signed' means 'signed by whom we expected'; let the consumer counter-sign at admission; publish a detached attestation-bundle format usable with both specs.",
+      "symbiote_feature": "`symbiote attest` (DSSE/in-toto statements, Sigstore keyless signing, Rekor anchoring) and `symbiote verify --policy` with signer-identity policy; per-claim assurance annotations; JCS canonical forms for every signed object.",
+      "source_sections": [
+        "The BOM's own claims rest on the producer's word",
+        "Assertion vs. verification",
+        "Signing is bytes-level and single-party",
+        "attribution isn't verification"
+      ]
+    },
+    {
+      "id": "ATTACK-19",
+      "title": "Coverage laundering: 'no shadow agents found' from a failed or partial scan",
+      "statement": "Completeness claims have no scope. A scanner that could not query a registry, lacked permission to a tenant, or failed to parse a model file can still emit 'complete', turning a collection failure into a false negative that approvals then rely on. Missing information must remain distinguishable from a verified absence, and conformance must say which surfaces were actually inspected.",
+      "standards": [
+        "both",
+        "spdx-3.1-rc"
+      ],
+      "where_it_breaks": "CycloneDX 1.7: compositions[].aggregate (complete, incomplete_*, unknown, not_specified) over assemblies, dependencies and vulnerabilities, with no surfaces, tenant, time window, sources queried, permission failures or truncation. SPDX 3.0.1: Relationship.completeness (complete, incomplete, noAssertion) per relationship; no coverage statement on Bom/Sbom; profile conformance is optional and non-composable (ProfileIdentifierType), so 'SPDX-conformant' says nothing about AI, Dataset and Security together. SPDX 3.1-rc1: unchanged in this respect.",
+      "attack_class": "evasion through inventory blind spots / coverage laundering",
+      "exemplar": "Document example: a failed registry query must produce unknown, not 'no shadow agents'. nullifAI's broken-pickle models were ones Picklescan did not even recognise as pickles, so a scanner reporting 'clean' on unparseable input was the failure. Hub-pulled adapters invisible to deployment scans (Red Hat) are another blind surface.",
+      "owasp_asi": [
+        "ASI04",
+        "ASI08"
+      ],
+      "mitre_atlas": [],
+      "severity": "high",
+      "recommended_fix": "Document: a coverage contract stating deployment environment, tenant and time window; surfaces covered (code, registry, identity, model gateway, tools, data, runtime, network); sources successfully queried; permission failures, truncation and excluded environments; whether results are declared, observed or independently verified; named conformance levels, semantic validation and reference-resolution checks; consumers must report unsupported security-critical semantics and refuse to let such records authorise privileged execution. [Mine] Use a tri-state per surface (verified-absent, present, unknown) and a per-component parse status; include the coverage digest in the signed root; policy: privileged approval requires every security-critical surface to be verified.",
+      "symbiote_feature": "A mandatory CoverageStatement in every Symbiote BOM; `symbiote verify` refuses 'complete' without coverage; tri-state surface reporting; conformance levels L0-L3.",
+      "source_sections": [
+        "Completeness and interoperability need stronger conformance requirements",
+        "Strengthen completeness from a declaration into a coverage contract",
+        "A failed registry query should produce unknown, not \"no shadow agents.\"",
+        "an inventory that quietly skips inputs it couldn't parse is wrong, not just incomplete"
+      ]
+    },
+    {
+      "id": "ATTACK-20",
+      "title": "Lossy conversion and vendor-property fragmentation silently drop security semantics",
+      "statement": "Agentic facts live today in vendor property namespaces (brox.*, cdxgen, the OWASP AIBOM generator, agent-harness-aibom) that do not interoperate, CycloneDX-to-SPDX conversion loses VEX entries and license expressions, and SPDX profiles are optional and non-composable. A consumer can receive a valid BOM from which the tool digests or authority fields were stripped in transit and never know, which makes downgrade-by-conversion an attack as well as a quality problem. Note: the document's claim that modelCard.properties validates in JSON but is rejected by the 1.7 XML schema does not hold against the current 1.7.2 XSD, where modelCardType includes a properties element; treat it as a fixed early-1.7 defect.",
+      "standards": [
+        "both",
+        "spdx-3.1-rc"
+      ],
+      "where_it_breaks": "CycloneDX 1.7: properties[]{name, value} are untyped at every level (components, services, modelCard); no shared agentic taxonomy; no pkg:mcp purl type exists (pkg:huggingface and pkg:mlflow do). SPDX 3.0.1: Extension/CdxPropertiesExtension carries CycloneDX properties as opaque entries; profile conformance is optional (ProfileIdentifierType); JSON-LD plus SHACL validation is heavy for CI. SPDX 3.1-rc1: more vocabulary but no round-trip mapping or loss disclosure.",
+      "attack_class": "semantic stripping / downgrade through conversion and fragmentation",
+      "exemplar": "Document: native CycloneDX VEX entries may not survive conversion to SPDX, and SPDX license expressions flatten into plain strings in CycloneDX; brox encodes MCP servers in its own brox.* properties; cdxgen emits categories and counts of instruction files rather than content. OWASP's AgBOM lists its CycloneDX mapper as a working draft and SPDX/SWID as 'help wanted', so three dialects already diverge.",
+      "owasp_asi": [
+        "ASI04"
+      ],
+      "mitre_atlas": [],
+      "severity": "medium",
+      "recommended_fix": "Document: one shared semantic model, explicit format mappings and a lossless round-trip conformance test suite; exporters must disclose information lost during conversion; a documented property taxonomy with a validated companion schema rather than invented top-level fields; purl types for MCP servers, agents and skills; do not fork a third standard. [Mine] Hash a manifest of security-critical fields into the signed root so stripping is detectable; emit a conversionLoss record from every converter; consumers refuse privileged authorisation when the loss touches authority or integrity fields.",
+      "symbiote_feature": "One canonical AgentBOM model (JSON Schema) with deterministic exporters to CycloneDX 1.7 (symbiote:* property taxonomy plus companion schema) and SPDX 3.0.1 (Extension classes) with a 3.1-rc mapping; round-trip conformance tests; conversionLoss report; a proposed pkg:mcp purl type.",
+      "source_sections": [
+        "Custom properties don't interoperate between tools",
+        "Ecosystem fragmentation",
+        "Interoperability by design",
+        "Require exporters to disclose any information lost during conversion",
+        "Its modelCard.properties field exists in JSON but not XML"
+      ]
+    },
+    {
+      "id": "ATTACK-21",
+      "title": "Training and fine-tuning data poisoning through mutable or expired dataset sources",
+      "statement": "Datasets are named, not committed to. 'CommonCrawl slice from date X' or 'internal KB' is not actionable: there is no Merkle root over shards, no per-source fetch time, licence or opt-out record, no transformation lineage (filter, dedupe, augment) and no integrity check, so poisoning through expired dataset URLs or re-registered domains is undetectable from the BOM and a fine-tune on a poisoned slice looks identical to a clean one.",
+      "standards": [
+        "both",
+        "spdx-3.1-rc"
+      ],
+      "where_it_breaks": "CycloneDX 1.7: componentData{type: dataset, contents{url, attachment}, governance, classification} and modelCard.modelParameters.datasets[] references carry no per-source digest or fetch time. SPDX 3.0.1: DatasetPackage.dataCollectionProcess, dataPreprocessing and datasetUpdateMechanism are xsd:string; downloadLocation is a URL; integrity is a file Hash at best; trainedOn/testedOn carry no parameters. SPDX 3.1-rc1: adds pretrainedOn/finetunedOn but provenance stays prose.",
+      "attack_class": "training-data poisoning via mutable sources",
+      "exemplar": "Carlini et al., 'Poisoning Web-Scale Training Datasets is Practical' (2023), showed expired domains referenced by crawl-derived datasets can be bought to control a meaningful fraction of a corpus at trivial cost. ATLAS AML.T0019/AML.T0020 describe publishing and poisoning datasets as supply-chain entry points; the document notes most RAG and training datasets lack verifiable snapshots.",
+      "owasp_asi": [
+        "ASI04",
+        "LLM04:2025"
+      ],
+      "mitre_atlas": [
+        "AML.T0020",
+        "AML.T0019",
+        "AML.T0010.002",
+        "AML.T0059"
+      ],
+      "severity": "high",
+      "recommended_fix": "Document: a datasetLineage structure with source URIs plus integrity hashes, transformation steps, consent and licensing status per source, collection date ranges and integrity verification method; content commitments and source manifests (Merkle root over shards); dataset deltas on derivation edges. [Mine] Record per-source fetchEvidence (time, digest, domain-ownership snapshot), attach poisoning-indicator scans as attestations, and type derived-dataset edges (filteredFrom, dedupedFrom, augmentedFrom) with parameters so a poisoned slice can be traced forward to every model trained on it.",
+      "symbiote_feature": "DatasetManifest (per-shard Merkle root plus per-source fetch evidence) and DataLineage typed edges, exported to CycloneDX data components and SPDX DatasetPackage with an Extension.",
+      "source_sections": [
+        "Dataset Provenance --- Underspecified in Both",
+        "Data provenance stops at prose",
+        "poisoning via expired dataset URLs",
+        "Most real training/RAG datasets lack verifiable snapshots"
+      ]
+    },
+    {
+      "id": "ATTACK-22",
+      "title": "Implementation drift behind an unchanged tool interface (backend swap with stable schema)",
+      "statement": "A tool whose definition digest is unchanged can still change behaviour through a new package version, a server redeploy or a provider backend swap, so interface digests alone miss implementation-level backdoors. The BOM must bind each tool contract to its implementation artifact digest or provider deployment attestation and to an authenticated endpoint identity, and keep provider-declared behaviour distinct from independently observed behaviour.",
+      "standards": [
+        "both",
+        "spdx-3.1-rc"
+      ],
+      "where_it_breaks": "CycloneDX 1.7: services[] cannot be linked to the component digest that implements them except by convention; dependencies[].provides is unqualified; services[].endpoints carry no TLS or workload identity. SPDX 3.0.1: no Service class. SPDX 3.1-rc1: an implementedBy relationship appears in the vocabulary but without digest or endpoint-identity qualifiers.",
+      "attack_class": "rug pull via implementation change behind a stable interface",
+      "exemplar": "postmark-mcp 1.0.16 (ATLAS AML.CS0053): the tool interface was identical to the 15 earlier clean versions; one added line BCC'd every email to giftshop.club. A definition-hash check passes; a package-digest plus observed-egress check fails.",
+      "owasp_asi": [
+        "ASI04",
+        "ASI02"
+      ],
+      "mitre_atlas": [
+        "AML.T0109",
+        "AML.T0110",
+        "AML.T0086"
+      ],
+      "severity": "high",
+      "recommended_fix": "Document: bind each tool capability to its interface digest, implementation artifact or provider deployment attestation, authenticated endpoint identity, permitted side effects, resource constraints and allowed destinations; enforcement still belongs at the gateway, authorisation service, sandbox or network boundary. [Mine] For local servers record package digest, lockfile digest and the npx/uvx resolution record; for remote servers record TLS or SPIFFE identity plus a provider attestation (SLSA provenance of the deployment) and observed egress; require re-approval when the implementation digest changes even if the interface did not.",
+      "symbiote_feature": "ToolContract = {definitionDigest, implementationDigest or deploymentAttestation, endpointIdentity, sideEffectProfile, egressAllowlist}; `symbiote verify` checks all parts and `symbiote egress diff` corroborates behaviour.",
+      "source_sections": [
+        "Tool interfaces need a connection to implementation and permitted effects",
+        "A schema hash alone cannot detect a backend that starts exfiltrating data while preserving the same interface",
+        "Provider-declared behavior and independently observed behavior must remain distinguishable"
+      ]
+    }
+  ],
+  "themes": [
+    {
+      "name": "Model-visible surfaces are code (tool definitions, instructions, context)",
+      "gap_ids": [
+        "ATTACK-01",
+        "ATTACK-14",
+        "ATTACK-15",
+        "ATTACK-07"
+      ]
+    },
+    {
+      "name": "Identity must be content, not names (models, adapters, datasets, packages)",
+      "gap_ids": [
+        "ATTACK-03",
+        "ATTACK-02",
+        "ATTACK-05",
+        "ATTACK-04",
+        "ATTACK-21"
+      ]
+    },
+    {
+      "name": "Authority, credentials and blast radius",
+      "gap_ids": [
+        "ATTACK-10",
+        "ATTACK-11",
+        "ATTACK-08",
+        "ATTACK-22"
+      ]
+    },
+    {
+      "name": "Mutable runtime dependencies and drift",
+      "gap_ids": [
+        "ATTACK-06",
+        "ATTACK-16",
+        "ATTACK-13"
+      ]
+    },
+    {
+      "name": "Registry trust and approval lifecycle",
+      "gap_ids": [
+        "ATTACK-09",
+        "ATTACK-13",
+        "ATTACK-03"
+      ]
+    },
+    {
+      "name": "Evidence, assurance and anti-laundering",
+      "gap_ids": [
+        "ATTACK-17",
+        "ATTACK-18",
+        "ATTACK-19",
+        "ATTACK-12",
+        "ATTACK-20"
+      ]
+    }
+  ],
+  "notes": "Verification basis (all checked on 2026-11-01): CycloneDX bom-1.7.schema.json and bom-1.7.xsd (XSD declares version 1.7.2); SPDX 3.0.1 spdx-model-3.0.1.jsonld plus model markdown; SPDX spdx-3-model tag 3.1-rc1 and branch develop via raw.githubusercontent.com; MITRE ATLAS dist/ATLAS.yaml v5.6.0; MCP schema 2025-06-18 and draft; MCP registry /v0/servers and server.json docs; OpenTelemetry semantic-conventions registry (gen-ai, mcp); purl-spec type definitions; PyPI metadata for model-signing 1.1.1, modelscan 0.8.8, picklescan 1.0.5, fickling 0.1.12. Corrections to the source document: (1) modelCard.properties IS present in the current 1.7 XSD (modelCardType has a properties element), so the 'JSON-only' claim is outdated; (2) SPDX 3.1-rc1 does NOT contain AIAgent, Prompt or RAG classes (no such files under model/AI/Classes at the tag or on develop); the document asserts both that 3.1 adds them and that the RC1 changelog shows none, and only the latter is correct; 3.1-rc1 has 77 RelationshipType entries (develop now 83) and adds finetunedOn, pretrainedOn, evaluatedOn, validatedOn, implementedBy, runsOn, hasInstance, verifiedBy; autonomyType is deprecated for Core/isoAutomationLevel; AIPackage/DatasetPackage requirements were relaxed; Service, Operations, SupplyChain and Hardware profiles exist on develop but Service is a summary stub and Operations targets business operations; (3) the 'Oxford/Cisco March 2026 paper' could not be confirmed; nearest matches are arXiv 2605.19755 (Oxford, CycloneDX 1.5 extension) and the AIRS paper arXiv 2511.12668 (which the document's AIRS quote comes from); treat the citation as unverified; (4) CycloneDX discussion #973 has zero replies, issue #895 (Agent BOM proposal) and issue #1015 (tool-manifest and policy-bundle digest anchors) are open, none adopted; a CycloneDX 2.0 'declared behaviour' model for agents could not be confirmed from sources; (5) Deadbugz is runtime-gated metadata poisoning (hostile on the third call), so approval-time hashing alone is insufficient and per-session plus list_changed re-verification is required; (6) the MCP registry server.json supports an optional packages[].fileSha256 but no digest for remotes and no attestation reference field; (7) no pkg:mcp purl type exists. Field conventions: owasp_asi lists OWASP Top 10 for Agentic Applications 2026 IDs (ASI01-ASI10) and, prefixed 'LLM', OWASP Top 10 for LLM Applications 2025 IDs; mitre_atlas uses ATLAS v5.6.0 technique IDs, left empty where no confident mapping exists (ATTACK-19, ATTACK-20); ATLAS case-study IDs (AML.CS00xx) are cited inside exemplar text; recommended_fix separates the document's proposal from additions marked [Mine]. ATLAS IDs used and their v5.6.0 names: AML.T0010 AI Supply Chain Compromise (.001 AI Software, .002 Data, .003 Model, .004 Container Registry, .005 AI Agent Tool); AML.T0011 User Execution (.000 Unsafe AI Artifacts, .001 Malicious Package, .002 Poisoned AI Agent Tool); AML.T0015 Evade AI Model; AML.T0018 Manipulate AI Model (.000 Poison, .001 Modify Architecture, .002 Embed Malware); AML.T0019 Publish Poisoned Datasets; AML.T0020 Poison Training Data; AML.T0025 Exfiltration via Cyber Means; AML.T0043.004 Insert Backdoor Trigger; AML.T0051 LLM Prompt Injection (.001 Indirect); AML.T0053 AI Agent Tool Invocation; AML.T0054 LLM Jailbreak; AML.T0055 Unsecured Credentials; AML.T0057 LLM Data Leakage; AML.T0058 Publish Poisoned Models; AML.T0059 Erode Dataset Integrity; AML.T0060 Publish Hallucinated Entities; AML.T0064 Gather RAG-Indexed Targets; AML.T0066 Retrieval Content Crafting; AML.T0070 RAG Poisoning; AML.T0071 False RAG Entry Injection; AML.T0073 Impersonation; AML.T0074 Masquerading; AML.T0080 AI Agent Context Poisoning (.000 Memory); AML.T0081 Modify AI Agent Configuration; AML.T0083 Credentials from AI Agent Configuration; AML.T0084 Discover AI Agent Configuration (.001 Tool Definitions, .003 Call Chains); AML.T0085.001 Data from AI Agent Tools; AML.T0086 Exfiltration via AI Agent Tool Invocation; AML.T0091.000 Application Access Token; AML.T0094 Delay Execution of LLM Instructions; AML.T0098 AI Agent Tool Credential Harvesting; AML.T0099 AI Agent Tool Data Poisoning; AML.T0101 Data Destruction via AI Agent Tool Invocation; AML.T0103 Deploy AI Agent; AML.T0104 Publish Poisoned AI Agent Tool; AML.T0108 AI Agent (C2); AML.T0109 AI Supply Chain Rug Pull; AML.T0110 AI Agent Tool Poisoning; AML.T0111 AI Supply Chain Reputation Inflation; AML.T0002.002 AI Agent Configuration; AML.T0007 Discover AI Artifacts."
+}
