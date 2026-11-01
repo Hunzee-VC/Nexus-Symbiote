@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import cast
 
 from symbiote.digest.merkle import redact as redact_commitment
 from symbiote.model.document import COLLECTIONS, AgentBOM
@@ -59,7 +60,7 @@ def redact_entities(
     changes["redacted"] = placeholders
     changes["redactions"] = [*bom.redactions, record]
     changes["merkle"] = redact_commitment(bom.merkle, keys).model_dump(mode="python")
-    return bom.replace(**changes)
+    return cast("AgentBOM", bom.replace(**changes))
 
 
 __all__ = ["redact_entities"]

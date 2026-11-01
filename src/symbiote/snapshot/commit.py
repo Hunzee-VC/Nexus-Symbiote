@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from symbiote.digest.merkle import MerkleBuilder, verify_commitment
 from symbiote.model.common import Validity
@@ -17,7 +17,7 @@ PLACEHOLDER_DIGEST = "sha256:" + "0" * 64
 
 def entity_body(entity: Any) -> dict[str, Any]:
     """Canonical leaf body of an entity: its companion JSON form."""
-    return entity.to_json_dict()
+    return cast("dict[str, Any]", entity.to_json_dict())
 
 
 def collect_leaves(bom: AgentBOM) -> list[tuple[str, str, Any]]:
@@ -119,8 +119,11 @@ def finalize(
         approvals=approvals if approvals is not None else old.approvals,
         policy_bundle=old.policy_bundle,
     )
-    return sorted_bom.replace(
-        snapshot=header.model_dump(mode="python"), merkle=commitment.model_dump(mode="python")
+    return cast(
+        "AgentBOM",
+        sorted_bom.replace(
+            snapshot=header.model_dump(mode="python"), merkle=commitment.model_dump(mode="python")
+        ),
     )
 
 
