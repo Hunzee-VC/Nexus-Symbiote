@@ -77,9 +77,7 @@ class MCPScanner(Scanner):
 
                 host_app = self._detect_host_from_config(config_name)
                 if host_app:
-                    client_comp = self._create_mcp_client(
-                        host_app, config_path, server_names
-                    )
+                    client_comp = self._create_mcp_client(host_app, config_path, server_names)
                     result.components.append(client_comp)
 
         self._scan_code_mcp_clients(project_root, result)
