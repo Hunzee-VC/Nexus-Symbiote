@@ -6,20 +6,20 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-from symbote.core.aibom import AIBOM
-from symbote.core.enums import RiskSeverity, SerializationSafety, TrustTier
-from symbote.core.models import (
+from symbiote.core.aibom import AIBOM
+from symbiote.core.enums import RiskSeverity, SerializationSafety, TrustTier
+from symbiote.core.models import (
     AIBOMMetadata,
     CompletenessClaim,
     ModelComponent,
     RiskAssessment,
     ToolComponent,
 )
-from symbote.diff.differ import AIBOMDiffer
-from symbote.scanners.model import ModelScanner
-from symbote.utils.crypto import verify_sigstore_bundle
-from symbote.validators.integrity import IntegrityValidator
-from symbote.validators.risk import RiskScorer
+from symbiote.diff.differ import AIBOMDiffer
+from symbiote.scanners.model import ModelScanner
+from symbiote.utils.crypto import verify_sigstore_bundle
+from symbiote.validators.integrity import IntegrityValidator
+from symbiote.validators.risk import RiskScorer
 
 
 def test_signature_filename_does_not_promote_trust(tmp_path: Path) -> None:

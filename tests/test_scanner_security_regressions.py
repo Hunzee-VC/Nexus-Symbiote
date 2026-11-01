@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from symbote.scanners.base import read_regular_text
-from symbote.scanners.mcp import MCPScanner
-from symbote.scanners.rag import RAGScanner
+from symbiote.scanners.base import read_regular_text
+from symbiote.scanners.mcp import MCPScanner
+from symbiote.scanners.rag import RAGScanner
 
 
 def test_mcp_redacts_args_and_url_from_components_and_findings(tmp_path: Path) -> None:

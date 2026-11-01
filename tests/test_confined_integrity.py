@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from symbote.core.aibom import AIBOM
-from symbote.core.models import ModelComponent, PromptComponent
-from symbote.utils.confined import hash_confined_file
-from symbote.validators.integrity import IntegrityValidator
+from symbiote.core.aibom import AIBOM
+from symbiote.core.models import ModelComponent, PromptComponent
+from symbiote.utils.confined import hash_confined_file
+from symbiote.validators.integrity import IntegrityValidator
 
 
 def digest(content: bytes) -> str:
@@ -76,7 +76,7 @@ def test_hash_limit_and_algorithm_are_enforced(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     (tmp_path / "model.bin").write_bytes(b"data")
-    monkeypatch.setattr("symbote.utils.confined.MAX_HASH_BYTES", 3)
+    monkeypatch.setattr("symbiote.utils.confined.MAX_HASH_BYTES", 3)
     with pytest.raises(OSError):
         hash_confined_file(tmp_path, "model.bin")
     with pytest.raises(OSError):

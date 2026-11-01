@@ -7,8 +7,8 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from symbote.cli import main
-from symbote.core.aibom import AIBOM
+from symbiote.cli import main
+from symbiote.core.aibom import AIBOM
 
 
 def _create_full_project(root: Path) -> Path:

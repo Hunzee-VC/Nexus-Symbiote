@@ -12,7 +12,7 @@ inputs:
     default: json
   output-file:
     description: BOM output path
-    default: symbote-aibom.json
+    default: symbiote-aibom.json
   scanners:
     description: Comma-separated scanner names
     default: ""
@@ -63,7 +63,7 @@ runs:
         set -euo pipefail
         case "$OUTPUT_FORMAT" in json|cyclonedx|spdx|sarif) ;; *) echo "::error::Invalid output format"; exit 1;; esac
         case "$OUTPUT_FILE" in *$'\n'*|*$'\r'*|"") echo "::error::Invalid output path"; exit 1;; esac
-        workdir="$(mktemp -d "$RUNNER_TEMP/symbote.XXXXXXXX")"
+        workdir="$(mktemp -d "$RUNNER_TEMP/symbiote.XXXXXXXX")"
         echo "workdir=$workdir" >> "$GITHUB_OUTPUT"
         args=("$SCAN_PATH" -f json -o "$workdir/native.json")
         if [[ -n "$SCANNERS" ]]; then
@@ -74,14 +74,14 @@ runs:
             args+=(--scanner "$name")
           done
         fi
-        symbote scan "${args[@]}"
+        symbiote scan "${args[@]}"
         NATIVE_BOM="$workdir/native.json" SARIF_FILE="$workdir/results.sarif" python - <<'PY'
         import os
         from pathlib import Path
-        from symbote.core.aibom import AIBOM
-        from symbote.generators.cyclonedx import CycloneDXGenerator
-        from symbote.generators.spdx import SPDXGenerator
-        from symbote.generators.sarif import SARIFGenerator
+        from symbiote.core.aibom import AIBOM
+        from symbiote.generators.cyclonedx import CycloneDXGenerator
+        from symbiote.generators.spdx import SPDXGenerator
+        from symbiote.generators.sarif import SARIFGenerator
 
         bom = AIBOM.load(Path(os.environ["NATIVE_BOM"]))
         generators = {"cyclonedx": CycloneDXGenerator, "spdx": SPDXGenerator, "sarif": SARIFGenerator}
@@ -100,7 +100,7 @@ runs:
       env:
         NATIVE_BOM: ${{ steps.scan.outputs.workdir }}/native.json
         SCAN_PATH: ${{ inputs.scan-path }}
-      run: symbote validate "$NATIVE_BOM" --project "$SCAN_PATH"
+      run: symbiote validate "$NATIVE_BOM" --project "$SCAN_PATH"
     - name: Risk gate
       id: risk
       if: inputs.risk-check == 'true' && inputs.risk-threshold != '0'
@@ -110,7 +110,7 @@ runs:
         RISK_THRESHOLD: ${{ inputs.risk-threshold }}
       run: |
         set -uo pipefail
-        result="$(symbote risk "$NATIVE_BOM" --threshold "$RISK_THRESHOLD" --json-output)"
+        result="$(symbiote risk "$NATIVE_BOM" --threshold "$RISK_THRESHOLD" --json-output)"
         status=$?
         score="$(printf '%s' "$result" | python -c 'import json,sys; print(json.load(sys.stdin)["overall_score"])')" || exit 1
         printf 'risk_score=%s\n' "$score" >> "$GITHUB_OUTPUT"
@@ -125,10 +125,10 @@ runs:
       uses: github/codeql-action/upload-sarif@4bfa242aa49c5f7c6770b98670d354a7dfac05f8 # v3
       with:
         sarif_file: ${{ steps.scan.outputs.workdir }}/results.sarif
-        category: symbote
+        category: symbiote
     - name: Upload AIBOM artifact
       if: steps.scan.outcome == 'success' && always()
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
       with:
-        name: symbote-aibom
+        name: symbiote-aibom
         path: ${{ inputs.output-file }}
