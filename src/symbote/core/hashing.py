@@ -9,9 +9,9 @@ from __future__ import annotations
 import hashlib
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-import jcs
+import jcs  # type: ignore[import-untyped]
 
 
 def canonical_json(data: Any) -> str:
@@ -20,7 +20,7 @@ def canonical_json(data: Any) -> str:
     Hashes made by releases before this correction may differ. Do not compare
     old and new fingerprints without re-collecting both snapshots.
     """
-    return jcs.canonicalize(data).decode("utf-8")
+    return cast(bytes, jcs.canonicalize(data)).decode("utf-8")
 
 
 def hash_canonical(data: dict[str, Any], algorithm: str = "sha256") -> str:
