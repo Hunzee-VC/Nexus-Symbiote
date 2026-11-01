@@ -24,7 +24,7 @@ from symbiote.core.models import (
     SkillPackageComponent,
     ToolComponent,
 )
-from symbiote.generators.base import Generator
+from symbiote.generators.base import Generator, validate_references, wire_hashes
 
 COMPONENT_TYPE_MAP: dict[ComponentType, str] = {
     ComponentType.AGENT: "application",
@@ -46,6 +46,7 @@ class CycloneDXGenerator(Generator):
 
     def generate(self, aibom: AIBOM) -> dict[str, Any]:
         aibom.finalize()
+        validate_references(aibom)
         metadata = self._metadata(aibom)
         # CycloneDX dependency objects do not carry typed edge semantics.
         # Keep the original edges as documented metadata properties.
@@ -112,18 +113,17 @@ class CycloneDXGenerator(Generator):
             result["description"] = comp.description
         if comp.hashes:
             result["hashes"] = [
-                {"alg": alg.upper().replace("SHA", "SHA-"), "content": val.split(":", 1)[-1]}
-                for alg, val in comp.hashes.items()
-                if val
+                {"alg": alg, "content": val} for alg, val in wire_hashes(comp.hashes, spdx=False)
             ]
 
-        props = self._extension_properties(comp)
+        props = self.component_properties(comp)
         if props:
             result["properties"] = props
 
         return result
 
-    def _extension_properties(self, comp: AnyComponent) -> list[dict[str, str]]:
+    @staticmethod
+    def component_properties(comp: AnyComponent) -> list[dict[str, str]]:
         props: list[dict[str, str]] = []
 
         def _add(name: str, value: Any) -> None:
