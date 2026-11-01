@@ -18,6 +18,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_declared_variant_and_published_schema_agree():
+    from jsonschema import Draft202012Validator
+
     schema = json.loads((ROOT / "schemas/symbiote-aibom-1.0.schema.json").read_text())
     assert schema["$defs"]["ComponentVariants"] == TypeAdapter(AnyComponent).json_schema(
         ref_template="#/$defs/ComponentVariants/$defs/{model}"
@@ -26,6 +28,12 @@ def test_declared_variant_and_published_schema_agree():
         {"serialization_safety": "safe-ish", "trust_remote_code": True},
         {"signning_status": "verified"},
     ):
+        assert not Draft202012Validator(schema).is_valid(
+            {
+                "metadata": {"spec_version": "1.0.0"},
+                "components": [{"component_type": "model", "bom_ref": "m", "name": "m", **fields}],
+            }
+        )
         with pytest.raises(ValidationError):
             AIBOM.model_validate(
                 {"components": [{"component_type": "model", "bom_ref": "m", "name": "m", **fields}]}
