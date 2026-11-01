@@ -7,6 +7,7 @@ and standalone file-hash verification against known digests.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import logging
 from dataclasses import dataclass
 from importlib import import_module
@@ -14,6 +15,9 @@ from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# Kept identical to utils.confined.ALLOWED_HASHES so every digest path agrees.
+ALLOWED_HASHES = {"sha256", "sha384", "sha512"}
 
 
 @dataclass
@@ -43,6 +47,22 @@ def verify_file_hash(
         algorithm = algorithm or "sha256"
         expected_digest = expected_hash
 
+    algorithm = algorithm.strip().lower()
+    expected_digest = expected_digest.strip().lower()
+
+    if algorithm not in ALLOWED_HASHES:
+        try:
+            hashlib.new(algorithm)
+        except (ValueError, TypeError):
+            return VerificationResult(
+                verified=False,
+                error=f"Unsupported hash algorithm: {algorithm}",
+            )
+        return VerificationResult(
+            verified=False,
+            error=f"Algorithm not permitted for integrity verification: {algorithm}",
+        )
+
     try:
         h = hashlib.new(algorithm)
     except ValueError:
@@ -59,7 +79,7 @@ def verify_file_hash(
         return VerificationResult(verified=False, error=f"Failed to read file: {e}")
 
     actual_digest = h.hexdigest()
-    if actual_digest == expected_digest:
+    if hmac.compare_digest(actual_digest, expected_digest):
         return VerificationResult(
             verified=True,
             details={"algorithm": algorithm, "digest": actual_digest},
@@ -102,7 +122,9 @@ def verify_sigstore_digest(
         verifier = import_module("sigstore.verify").Verifier.production(offline=True)
         verifier.verify_artifact(hashed, bundle, policy)
     except ImportError:
-        return VerificationResult(False, error="Sigstore unavailable. Install nexus-symbiote[sigstore].")
+        return VerificationResult(
+            False, error="Sigstore unavailable. Install nexus-symbiote[sigstore]."
+        )
     except Exception as exc:
         return VerificationResult(False, error=f"Sigstore verification failed: {exc}")
     return VerificationResult(True, identity=expected_identity, issuer=expected_issuer)

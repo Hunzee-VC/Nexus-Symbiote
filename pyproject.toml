@@ -39,13 +39,12 @@ dependencies = [
     "click>=8.1,<9",
     "pydantic>=2.5,<3",
     "rich>=13.0,<14",
-    "tomli>=2.0; python_version<'3.11'",
     "rfc8785>=0.1.4,<1",
 ]
 
 [project.optional-dependencies]
 cyclonedx = [
-    "cyclonedx-python-lib>=11.12,<12",
+    "cyclonedx-python-lib[json-validation]>=11.12,<12",
 ]
 sigstore = [
     "sigstore>=3.6.7,<4",
@@ -68,10 +67,10 @@ dev = [
 nexus-symbiote = "nexus_symbiote.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/aisecnomad/nexus-symbiote"
-Repository = "https://github.com/aisecnomad/nexus-symbiote"
-Issues = "https://github.com/aisecnomad/nexus-symbiote/issues"
-Documentation = "https://github.com/aisecnomad/nexus-symbiote/tree/main/docs"
+Homepage = "https://github.com/aisecnomad/symbiote"
+Repository = "https://github.com/aisecnomad/symbiote"
+Issues = "https://github.com/aisecnomad/symbiote/issues"
+Documentation = "https://github.com/aisecnomad/symbiote/tree/main/docs"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/nexus_symbiote"]

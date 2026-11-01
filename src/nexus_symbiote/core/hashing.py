@@ -72,7 +72,8 @@ def hash_bytes(data: bytes, algorithm: str = "sha256") -> str:
     return f"{algorithm}:{h.hexdigest()}"
 
 
-_RANGE_PREFIX = re.compile(r"^[~^>=<!]+")
+_RANGE_SPEC = re.compile(r"(?:[><!~]=|[><]|\^|~)\s*\d")
+_EXACT_PIN = re.compile(r"(?:^|[^=<>!~])(?:===|==)(\d+\.\d+(?:\.\d+)?(?:[-+][a-zA-Z0-9.]+)?)\s*$")
 _VERSION_PATTERN = re.compile(
     r"(?:^|[/@:])(\d+\.\d+(?:\.\d+)?(?:[-+][a-zA-Z0-9.]+)?)(?:$|[/?#,;\s])"
 )
@@ -82,18 +83,15 @@ def extract_version_pin(reference: str) -> str | None:
     """Extract a pinned version from a package reference or URL.
 
     Returns None for range specifiers (^, ~, >=, etc.) and floating/latest.
-    Returns the version only for exact pins (@1.2.3, ==1.2.3, bare 1.2.3).
+    Returns the version only for exact pins (==1.2.3, @1.2.3, bare 1.2.3).
     """
     stripped = reference.strip()
     if stripped in ("*", "latest") or stripped.endswith("@latest") or stripped.endswith(":latest"):
         return None
-    if _RANGE_PREFIX.match(stripped):
-        prefix = _RANGE_PREFIX.match(stripped)
-        if prefix and prefix.group(0) not in ("==",):
-            return None
-        if prefix and prefix.group(0) == "==":
-            rest = stripped[prefix.end() :]
-            m = re.match(r"(\d+\.\d+(?:\.\d+)?(?:[-+][a-zA-Z0-9.]+)?)", rest)
-            return m.group(1) if m else None
+    if _RANGE_SPEC.search(stripped):
+        return None
+    m = _EXACT_PIN.search(stripped)
+    if m:
+        return m.group(1)
     m = _VERSION_PATTERN.search(stripped)
     return m.group(1) if m else None
