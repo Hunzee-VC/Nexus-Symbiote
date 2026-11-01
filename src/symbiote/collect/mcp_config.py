@@ -23,7 +23,6 @@ from symbiote.collect._common import (
     locator,
     names_from_mapping,
     parse_structured,
-    read_bounded,
     redact_args,
     secretish_name,
     url_facts,
@@ -336,12 +335,14 @@ def parse_client_config(
 # --------------------------------------------------------------------------------------------- client-level trust settings
 
 
-def _claude_code_settings(paths: Iterable[tuple[Path, str]], max_bytes: int) -> dict[str, dict[str, str]]:
+def _claude_code_settings(
+    paths: Iterable[tuple[Path, str]], ctx: CollectContext
+) -> dict[str, dict[str, str]]:
     """Per-server Claude Code trust flags from ``permissions.allow`` / ``defaultMode`` / project-server opt-ins."""
     per_server: dict[str, dict[str, str]] = {}
     global_flags: dict[str, str] = {}
     for path, scope in paths:
-        outcome = read_bounded(path, max_bytes)
+        outcome = ctx.read_config(path)
         if not outcome.ok or outcome.data is None:
             continue
         try:
@@ -371,10 +372,10 @@ def _claude_code_settings(paths: Iterable[tuple[Path, str]], max_bytes: int) -> 
     return per_server
 
 
-def _vscode_settings(paths: Iterable[Path], max_bytes: int) -> dict[str, str]:
+def _vscode_settings(paths: Iterable[Path], ctx: CollectContext) -> dict[str, str]:
     flags: dict[str, str] = {}
     for path in paths:
-        outcome = read_bounded(path, max_bytes)
+        outcome = ctx.read_config(path)
         if not outcome.ok or outcome.data is None:
             continue
         try:
@@ -453,10 +454,10 @@ class McpConfigCollector(BaseCollector):
                 if path is None:
                     continue
                 checked += 1
-                if not path.is_file():
+                outcome = ctx.read_config(path)
+                if outcome.error_class == "not-found":
                     continue
                 display = ctx.display(path)
-                outcome = read_bounded(path, ctx.max_file_bytes)
                 if not outcome.ok or outcome.data is None:
                     result.add_source(
                         Surface.TOOLS,
@@ -491,8 +492,8 @@ class McpConfigCollector(BaseCollector):
             result.add_source(Surface.TOOLS, "user-scope", ok=False, error_class="not-attempted")
         result.add_source(Surface.TOOLS, "locations-checked", ok=True, items=0, locator=str(checked))
 
-        claude_flags = _claude_code_settings(self._claude_settings_paths(ctx), ctx.max_file_bytes)
-        vscode_flags = _vscode_settings(self._vscode_settings_paths(ctx), ctx.max_file_bytes)
+        claude_flags = _claude_code_settings(self._claude_settings_paths(ctx), ctx)
+        vscode_flags = _vscode_settings(self._vscode_settings_paths(ctx), ctx)
         client_globals.setdefault("vscode", {}).update(vscode_flags)
 
         used_ids: set[str] = set()

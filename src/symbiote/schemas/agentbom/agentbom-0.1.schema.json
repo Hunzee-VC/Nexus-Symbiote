@@ -3594,6 +3594,8 @@
         "registry-status-changed",
         "signer-changed",
         "data-source-added",
+        "data-source-changed",
+        "data-source-removed",
         "trust-status-changed"
       ],
       "title": "DeltaEventType",

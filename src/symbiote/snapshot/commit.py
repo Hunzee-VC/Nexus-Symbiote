@@ -131,7 +131,27 @@ def verify_document(bom: AgentBOM) -> bool:
     """Recompute the Merkle root from the document's leaves (disclosed with salts, redacted by hash) and compare."""
     if bom.merkle is None:
         return False
-    bodies = {(k, i): b for k, i, b in collect_leaves(bom)}
+    opaque = {(leaf.kind, leaf.id): leaf.leaf_hash for leaf in bom.merkle.leaves if leaf.salt is None}
+    placeholders = {(r.kind, r.id): r.leaf_hash for r in bom.redacted}
+    if opaque != placeholders or len(placeholders) != len(bom.redacted):
+        return False
+    committed = {(leaf.kind, leaf.id) for leaf in bom.merkle.leaves}
+    # Disclosure records are added after sealing. They may describe only exact placeholders;
+    # their author and time are assertions by the discloser, outside the original commitment.
+    disclosures = {(r.id, r.redaction_class) for r in bom.redacted}
+    bodies: dict[tuple[str, str], Any] = {}
+    for kind, eid, body in collect_leaves(bom):
+        key = (kind, eid)
+        if kind == "redaction" and key not in committed:
+            ids = body.get("ids", [])
+            if not ids or len(set(ids)) != len(ids) or body["count"] != len(ids):
+                return False
+            if any((rid, body["redactionClass"]) not in disclosures for rid in ids):
+                return False
+            continue
+        if key in bodies:
+            return False
+        bodies[key] = body
     return verify_commitment(bom.merkle, bodies) and bom.snapshot.digest == bom.merkle.root
 
 

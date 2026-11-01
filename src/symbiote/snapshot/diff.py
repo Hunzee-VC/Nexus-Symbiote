@@ -69,6 +69,8 @@ DEFAULT_EVENT_SEVERITY: dict[DeltaEventType, Severity] = {
     DeltaEventType.REGISTRY_STATUS_CHANGED: Severity.HIGH,
     DeltaEventType.SIGNER_CHANGED: Severity.HIGH,
     DeltaEventType.DATA_SOURCE_ADDED: Severity.MEDIUM,
+    DeltaEventType.DATA_SOURCE_CHANGED: Severity.HIGH,
+    DeltaEventType.DATA_SOURCE_REMOVED: Severity.HIGH,
     DeltaEventType.TRUST_STATUS_CHANGED: Severity.HIGH,
 }
 
@@ -425,21 +427,40 @@ def _diff_data_sources(c: _Collector, a: Mapping[str, DataSource], b: Mapping[st
             assurance=_assurance(source, c.default_assurance),
             detail="untrusted and instruction-bearing" if risky else None,
         )
+    for did in sorted(a.keys() - b.keys()):
+        c.emit(DeltaEventType.DATA_SOURCE_REMOVED, did, before=comparison_digest(a[did]))
     for did in sorted(a.keys() & b.keys()):
         old, new = a[did], b[did]
-        if new.data_kind is not DataSourceKind.MEMORY_STORE:
+        before, after = comparison_digest(old), comparison_digest(new)
+        if before == after:
             continue
-        old_writers = set(old.writers.value or []) if old.writers else set()
-        new_writers = set(new.writers.value or []) if new.writers else set()
-        added = sorted(new_writers - old_writers)
-        if added:
-            c.emit(
-                DeltaEventType.MEMORY_WRITER_ADDED,
-                did,
-                severity=Severity.HIGH,
-                assurance=_assurance(new, c.default_assurance),
-                detail="new memory writers: " + ", ".join(added),
-            )
+        if new.data_kind is DataSourceKind.MEMORY_STORE:
+            old_writers = set(old.writers.value or []) if old.writers else set()
+            new_writers = set(new.writers.value or []) if new.writers else set()
+            added = sorted(new_writers - old_writers)
+            if added:
+                c.emit(
+                    DeltaEventType.MEMORY_WRITER_ADDED,
+                    did,
+                    before=before,
+                    after=after,
+                    assurance=_assurance(new, c.default_assurance),
+                    detail="new memory writers: " + ", ".join(added),
+                )
+                # Preserve the specific event for a pure addition. A concurrent revocation or
+                # other data change must still be visible.
+                if (
+                    not old_writers - new_writers
+                    and comparison_digest(new.replace(writers=old.writers)) == before
+                ):
+                    continue
+        c.emit(
+            DeltaEventType.DATA_SOURCE_CHANGED,
+            did,
+            before=before,
+            after=after,
+            assurance=_assurance(new, c.default_assurance),
+        )
 
 
 def _diff_edges(c: _Collector, a: AgentBOM, b: AgentBOM) -> None:

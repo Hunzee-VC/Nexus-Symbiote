@@ -50,12 +50,14 @@ def redact_entities(
     missing = entity_ids - {p.id for p in placeholders}
     if missing:
         raise KeyError(f"unknown entity ids: {sorted(missing)}")
+    if not keys:
+        return bom
     record = Redaction(
         redaction_class=redaction_class,
         count=len(keys),
         applied_by=applied_by,
         applied_at=applied_at,
-        ids=sorted(entity_ids),
+        ids=sorted(eid for _, eid in keys),
     )
     changes["redacted"] = placeholders
     changes["redactions"] = [*bom.redactions, record]
