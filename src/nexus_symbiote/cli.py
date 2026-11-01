@@ -228,27 +228,7 @@ def import_shadowscan(report_path: str, output: str, output_format: str) -> None
     except (ValueError, OSError, UnicodeError, RecursionError) as exc:
         raise click.ClickException("Failed to safely import the ShadowScan report") from exc
 
-    aibom = AIBOM(metadata=AIBOMMetadata(authors=[]))
-    for comp in imported.components:
-        aibom.add_component(comp)
-
-    aibom.metadata.completeness = CompletenessClaim(
-        scope="shadowscan-imported",
-        surfaces_scanned=["shadowscan:report"],
-        surfaces_excluded=imported.limitations,
-        scan_failures=(
-            []
-            if imported.source_status == "complete"
-            else ["ShadowScan source report is incomplete or has unknown status"]
-        ),
-        scanner_status={"shadowscan": "partial"},
-        source_report_digest=imported.digest,
-        source_report_format=imported.source_format,
-        source_report_status=imported.source_status,
-        source_unmapped_count=imported.unmapped_count,
-        source_unmapped_indexes=imported.unmapped_indexes,
-        assurance_level=AssuranceLevel.DECLARED,
-    )
+    aibom = imported.to_native_bom()
 
     if output_format in ("spdx", "sarif"):
         raise click.ClickException(
@@ -352,10 +332,25 @@ def verify_artifact(
 
 
 @main.command("verify-discovery")
-@click.argument("aibom_path", type=click.Path(exists=True))
-@click.argument("report_path", type=click.Path(exists=True))
-def verify_discovery(aibom_path: str, report_path: str) -> None:
-    """Compare a ShadowScan report to the digest recorded in a native BOM."""
+@click.argument("aibom_path", type=click.Path(exists=True, dir_okay=False))
+@click.argument("report_path", type=click.Path(exists=True, dir_okay=False))
+@click.option("--projection", is_flag=True, help="Rebuild and compare the direct native import.")
+@click.option(
+    "--bundle",
+    type=click.Path(exists=True, dir_okay=False),
+    help="Verify the report producer's Sigstore bundle and the direct native projection.",
+)
+@click.option("--signer-identity", help="Expected report signer from operator policy.")
+@click.option("--issuer", help="Expected OIDC issuer from operator policy.")
+def verify_discovery(
+    aibom_path: str,
+    report_path: str,
+    projection: bool,
+    bundle: str | None,
+    signer_identity: str | None,
+    issuer: str | None,
+) -> None:
+    """Verify source bytes and optionally their native projection and producer."""
     import hashlib
     import hmac
     import re
@@ -363,30 +358,68 @@ def verify_discovery(aibom_path: str, report_path: str) -> None:
     from nexus_symbiote.scanners.base import read_regular_text
     from nexus_symbiote.scanners.shadowscan import (
         MAX_REPORT_BYTES,
+        ShadowScanImporter,
         _object_no_duplicates,
         _reject_constant,
     )
+    from nexus_symbiote.utils.crypto import verify_sigstore_digest
 
+    if any(x is not None for x in (bundle, signer_identity, issuer)) and not all(
+        (bundle, signer_identity, issuer)
+    ):
+        raise click.UsageError("--bundle, --signer-identity and --issuer must be supplied together")
     try:
-        raw_bom = read_regular_text(Path(aibom_path), max_bytes=MAX_REPORT_BYTES)
-        bom = AIBOM.model_validate(
-            json.loads(
-                raw_bom, object_pairs_hook=_object_no_duplicates, parse_constant=_reject_constant
-            )
+        doc = json.loads(
+            read_regular_text(Path(aibom_path), max_bytes=MAX_REPORT_BYTES),
+            object_pairs_hook=_object_no_duplicates,
+            parse_constant=_reject_constant,
         )
-        raw_report = read_regular_text(Path(report_path), max_bytes=MAX_REPORT_BYTES)
+        bom = AIBOM.model_validate(doc)
+        text = read_regular_text(Path(report_path), max_bytes=MAX_REPORT_BYTES)
     except (OSError, ValueError, UnicodeError, RecursionError) as exc:
         raise click.ClickException("Cannot safely read the BOM or discovery report") from exc
     claim = bom.metadata.completeness
     expected = claim.source_report_digest if claim else None
     if not isinstance(expected, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", expected):
         raise click.ClickException("BOM does not contain a valid ShadowScan report digest")
-    actual = "sha256:" + hashlib.sha256(raw_report.encode("utf-8")).hexdigest()
+    actual = "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
     if not hmac.compare_digest(actual, expected):
         raise click.ClickException("Discovery report digest mismatch")
-    click.echo(
-        "Report bytes match the recorded digest. Source identity, signature, and truth were not verified."
-    )
+    if projection or bundle:
+        try:
+            projected = ShadowScanImporter().parse_report(text).to_native_bom().to_dict()
+            # Import time and UUID are generated on each run. Everything else,
+            # including unknown fields in the original JSON, must match.
+            for field in ("timestamp", "serial_number"):
+                projected["metadata"].pop(field)
+                if not isinstance(doc["metadata"].pop(field, None), str):
+                    raise ValueError("missing generated metadata")
+            if json.dumps(projected, sort_keys=True) != json.dumps(doc, sort_keys=True):
+                raise ValueError("projection differs")
+        except (KeyError, TypeError, ValueError, RecursionError) as exc:
+            raise click.ClickException(
+                "BOM does not match the direct native ShadowScan projection"
+            ) from exc
+    if bundle and signer_identity and issuer:
+        try:
+            bundle_bytes = read_regular_text(Path(bundle)).encode("utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise click.ClickException("Cannot safely read the Sigstore bundle") from exc
+        if not verify_sigstore_digest(actual, bundle_bytes, signer_identity, issuer).verified:
+            raise click.ClickException(
+                "ShadowScan report signature or signer policy verification failed"
+            )
+        click.echo(
+            "Report signer and direct native projection verified. Discovery claims retain declared assurance."
+        )
+    elif projection:
+        click.echo(
+            "Report bytes and direct native projection match. Producer identity is unverified."
+        )
+    else:
+        click.echo(
+            "Report bytes match the recorded digest. Source identity, signature, and truth were not verified."
+        )
 
 
 @main.command()
