@@ -9,6 +9,7 @@ Discovers A2A agent cards, client configurations, and server endpoints from:
 
 from __future__ import annotations
 
+from importlib import import_module
 from pathlib import Path
 from typing import Any
 
@@ -53,7 +54,10 @@ class A2AScanner(Scanner):
     def _scan_agent_cards(self, root: Path, result: ScanResult) -> None:
         for rel_path in AGENT_CARD_FILES:
             card_path = root / rel_path
-            if not card_path.exists() or card_path.is_symlink():
+            if card_path.is_symlink():
+                result.scan_failures.append(f"Refusing symlink agent card {card_path}")
+                continue
+            if not card_path.exists():
                 continue
 
             result.surfaces_scanned.append(str(card_path))
@@ -82,7 +86,8 @@ class A2AScanner(Scanner):
             elif isinstance(skill, str):
                 skills.append(skill)
 
-        auth_required = data.get("authentication") is not None
+        # A card is a publisher declaration; it cannot prove live endpoint enforcement.
+        auth_declared = bool(data.get("authentication") or data.get("security"))
 
         risks: list[RiskAssessment] = []
 
@@ -96,12 +101,12 @@ class A2AScanner(Scanner):
                 )
             )
 
-        if not auth_required:
+        if not auth_declared:
             risks.append(
                 RiskAssessment(
                     severity=RiskSeverity.MEDIUM,
                     category="authentication",
-                    detail=f"A2A agent '{name}' has no authentication configured.",
+                    detail=f"A2A agent '{name}' has no authentication declaration; runtime authentication is unknown.",
                     recommendation="Require authentication for agent-to-agent communication.",
                 )
             )
@@ -124,20 +129,35 @@ class A2AScanner(Scanner):
             endpoint_url=sanitized_origin(endpoint) if endpoint else None,
             supported_protocols=protocols,
             skills_declared=skills,
-            authentication_required=auth_required,
+            authentication_required=None,
             source_path=str(card_path),
-            trust_tier=TrustTier.INTERNAL_UNVERIFIED,
+            trust_tier=TrustTier.UNKNOWN,
             risks=risks,
         )
 
     def _scan_a2a_configs(self, root: Path, result: ScanResult) -> None:
         for config_name in A2A_CONFIG_FILES:
             config_path = root / config_name
-            if not config_path.exists() or config_path.is_symlink():
+            if config_path.is_symlink():
+                result.scan_failures.append(f"Refusing symlink A2A config {config_path}")
+                continue
+            if not config_path.exists():
                 continue
 
             result.surfaces_scanned.append(str(config_path))
-            data = self._safe_read_json(config_path)
+            if config_path.suffix.lower() in (".yaml", ".yml"):
+                try:
+                    yaml = import_module("yaml")
+                except ImportError:
+                    result.scan_failures.append(f"YAML support unavailable for {config_path}")
+                    continue
+                try:
+                    data = yaml.safe_load(read_regular_text(config_path))
+                except (yaml.YAMLError, OSError, UnicodeError):
+                    result.scan_failures.append(f"Failed to parse {config_path}")
+                    continue
+            else:
+                data = self._safe_read_json(config_path)
             if not isinstance(data, dict):
                 result.scan_failures.append(f"Failed to parse {config_path}")
                 continue
@@ -186,7 +206,7 @@ class A2AScanner(Scanner):
             agent_card_url=sanitized_origin(card_url) if card_url else None,
             authentication_methods=auth_methods if isinstance(auth_methods, list) else [],
             source_path=str(config_path),
-            trust_tier=TrustTier.THIRD_PARTY_UNSIGNED,
+            trust_tier=TrustTier.UNKNOWN,
             risks=risks,
         )
 
@@ -205,23 +225,28 @@ class A2AScanner(Scanner):
         py_files = sorted(root.glob("*.py"))
         py_files.extend(sorted((root / "src").glob("*.py")) if (root / "src").is_dir() else [])
 
+        if len(py_files) > 20:
+            result.surfaces_excluded.append("a2a code (more than 20 Python files)")
+
         for py_file in py_files[:20]:
             if py_file.is_symlink():
+                result.scan_failures.append(f"Refusing symlink A2A source {py_file}")
                 continue
             try:
                 content = read_regular_text(py_file)
             except (OSError, UnicodeError):
+                result.scan_failures.append(f"Failed to read A2A source {py_file}")
                 continue
 
+            result.surfaces_scanned.append(str(py_file))
             if any(p.search(content) for p in a2a_patterns):
-                result.surfaces_scanned.append(str(py_file))
                 if not any(c.bom_ref.startswith("a2a-") for c in result.components):
                     result.components.append(
                         A2AClientComponent(
                             bom_ref="a2a-client:code-detected",
                             name="a2a-client (code-detected)",
                             source_path=str(py_file),
-                            trust_tier=TrustTier.INTERNAL_UNVERIFIED,
+                            trust_tier=TrustTier.UNKNOWN,
                             risks=[
                                 RiskAssessment(
                                     severity=RiskSeverity.INFO,
@@ -234,4 +259,3 @@ class A2AScanner(Scanner):
                             ],
                         )
                     )
-                break

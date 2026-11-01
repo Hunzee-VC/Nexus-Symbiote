@@ -30,7 +30,8 @@ class TestA2AScanner:
         servers = [c for c in result.components if c.component_type == ComponentType.A2A_SERVER]
         assert len(servers) == 1
         assert servers[0].name == "travel-agent"
-        assert servers[0].authentication_required is True
+        # A card's declaration is not evidence that the live endpoint enforces it.
+        assert servers[0].authentication_required is None
         assert "book-flight" in servers[0].skills_declared
         assert servers[0].version == "1.0.0"
 
