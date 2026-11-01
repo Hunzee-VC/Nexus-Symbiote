@@ -44,34 +44,54 @@ def test_verify_requires_both_trust_constraints(
 def test_sigstore_verifier_applies_identity_and_checks_artifact(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    import hashlib
+
     artifact = tmp_path / "model"
     bundle = tmp_path / "bundle"
     artifact.write_bytes(b"artifact")
-    bundle.write_text("bundle")
-    calls = []
+    bundle.write_bytes(b"bundle")
+    expected_digest = hashlib.sha256(b"artifact").digest()
+    calls: list[tuple[str, str]] = []
 
     class Identity:
         def __init__(self, *, identity: str, issuer: str) -> None:
             calls.append((identity, issuer))
 
+    class Hashed:
+        def __init__(self, *, algorithm: object, digest: bytes) -> None:
+            self.digest = digest
+
+    class HashAlgorithm:
+        SHA2_256 = "sha256"
+
     class Verifier:
         @staticmethod
-        def production() -> "Verifier":
+        def production(offline: bool = False) -> "Verifier":
             return Verifier()
 
-        def verify_artifact(self, data: bytes, _bundle: object, _policy: object) -> None:
-            if data != b"artifact":
+        def verify_artifact(self, hashed: object, _bundle: object, _policy: object) -> None:
+            if getattr(hashed, "digest", None) != expected_digest:
                 raise ValueError("signature does not match")
 
     pkg = ModuleType("sigstore")
     models = ModuleType("sigstore.models")
     verify = ModuleType("sigstore.verify")
+    verify_policy = ModuleType("sigstore.verify.policy")
+    hashes = ModuleType("sigstore.hashes")
+    protobuf_common = ModuleType("sigstore_protobuf_specs.dev.sigstore.common.v1")
     models.Bundle = SimpleNamespace(from_json=lambda _: object())
     verify.Verifier = Verifier
-    verify.policy = SimpleNamespace(Identity=Identity)
+    verify_policy.Identity = Identity
+    hashes.Hashed = Hashed
+    protobuf_common.HashAlgorithm = HashAlgorithm
     monkeypatch.setitem(sys.modules, "sigstore", pkg)
     monkeypatch.setitem(sys.modules, "sigstore.models", models)
     monkeypatch.setitem(sys.modules, "sigstore.verify", verify)
+    monkeypatch.setitem(sys.modules, "sigstore.verify.policy", verify_policy)
+    monkeypatch.setitem(sys.modules, "sigstore.hashes", hashes)
+    monkeypatch.setitem(
+        sys.modules, "sigstore_protobuf_specs.dev.sigstore.common.v1", protobuf_common
+    )
     result = verify_sigstore_bundle(artifact, bundle, "trusted", "issuer")
     assert result.verified
     assert calls == [("trusted", "issuer")]
