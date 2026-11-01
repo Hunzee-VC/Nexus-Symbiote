@@ -42,49 +42,51 @@ A classic SBOM inventories packages. An agent's supply chain is different in kin
 Symbiote closes these gaps with four planes — **Composition** (what was declared), **Authorization** (what is
 permitted), **Observability** (what is deployed and what it actually did) and **Assurance** (why each claim should
 be trusted) — and with content addressing, per-claim assurance, declared-vs-observed diffs and signed evidence.
-The full analysis of where CycloneDX 1.7 and SPDX 3.0.1 fall short for agents, and how Symbiote addresses each
-gap, is in [`docs/research/`](docs/research/README.md) (gap register, design brief, architecture proposals).
+
+**Read the gap analysis:** [`docs/gap-analysis.md`](docs/gap-analysis.md) — why CycloneDX 1.7 and SPDX 3.0.1 are
+not enough for agents (field-exact, citing the schemas), the 22-gap register mapped to OWASP ASI and MITRE ATLAS,
+the minimum viable AgentBOM, how Symbiote closes each gap, and the corrections to the analysis it grew out of.
+The design inputs behind it are in [`docs/research/`](docs/research/README.md).
 
 ## What works today
 
-The foundation is in place and tested (offline test suite):
+Every command below was run against [`examples/triage-agent`](examples/triage-agent) while writing this README;
+the [CLI reference](docs/reference/cli.md) shows the real output of each one.
 
 ```bash
 uv tool install symbiote            # or: pipx install symbiote   (from a checkout: uv pip install -e ".[dev]")
 
-# Zero-config: collect from MCP client configs etc.; write agentbom.json, agentbom.cdx.json (CycloneDX 1.7), agentbom.spdx.json (SPDX 3.0.1)
-symbiote scan examples/triage-agent -o out/
+# Zero-config: collect from MCP client configs; write agentbom.json, agentbom.cdx.json (CycloneDX 1.7), agentbom.spdx.json (SPDX 3.0.1)
+symbiote scan examples/triage-agent -o out/ --deterministic
+
+# Policy, conformance and completeness over the companion document (SARIF for code scanning)
+symbiote policy check out/agentbom.json --sarif out/agentbom.sarif        # exit 1 on `fail` findings at or above --fail-on
+symbiote conformance out/agentbom.json --level minimal                      # pass / fail / unknown per requirement
+symbiote score out/agentbom.json                                            # completeness, never a trust score
+
+# Validate against the official schemas; recompute the salted Merkle root
+symbiote validate out/agentbom.json out/agentbom.cdx.json out/agentbom.spdx.json
+symbiote merkle verify out/agentbom.json
 
 # Content-address the model-visible surface of an MCP tool exactly as a gateway would (fail-closed)
 symbiote digest tooldef tool.json --json
 
-# Validate a companion AgentBOM document against the committed schema
-symbiote validate agentbom.json
-
-# Recompute the salted Merkle root of a (possibly redacted) document
-symbiote merkle verify agentbom.json
-
-# Policy, conformance and completeness over the companion document (SARIF for code scanning)
-symbiote policy check out/agentbom.json --sarif out/agentbom.sarif
-symbiote conformance out/agentbom.json --level standard
-symbiote score out/agentbom.json
-
 # The diff is the finding: compare any two snapshots (declared vs observed, approved vs deployed)
-symbiote diff approved/agentbom.json observed/agentbom.json --fail-on-change tool-definition-changed
+symbiote diff v1/agentbom.json v2/agentbom.json --fail-on-change tool-definition-changed
 
-# Sign the snapshot as an in-toto statement (DSSE key-based or Sigstore keyless) and verify the binding
+# Sign the snapshot as an in-toto statement (key-based DSSE or Sigstore keyless) and verify the binding and the chain
 symbiote attest snapshot out/agentbom.json --key key.pem -o snapshot.dsse.json
 symbiote verify snapshot.dsse.json --public-key key.pub --companion out/agentbom.json --store .symbiote/store
 
 # Export the Gateway Allowlist Bundle a tool gateway enforces, and check served tools against it
-symbiote allowlist export out/agentbom.json --format gab -o gab.json
-symbiote allowlist check gab.json server:claude-code-github served-tools.json
+symbiote allowlist export approved.agentbom.json --format gab -o gab.json
+symbiote allowlist check gab.json server:github served-tools.json          # allow / block (rug-pull signal) / drop
 ```
 
 ```python
 from symbiote.digest import tooldef_digest, toolset_digest
 from symbiote.model import AgentBOM
-from symbiote.snapshot import finalize, new_document, redact_entities, verify_document
+from symbiote.snapshot import diff, finalize, new_document, redact_entities, verify_document
 ```
 
 | Capability | Status |
@@ -92,20 +94,22 @@ from symbiote.snapshot import finalize, new_document, redact_entities, verify_do
 | Semantic model with per-claim assurance (`declared / observed / verified`) and explicit `unknown` | ✅ |
 | Typed, fail-closed digests (RFC 8785) for tool definitions, tool sets, server identity, prompts, agents | ✅ |
 | OpenSSF model-signing compatible directory manifests; per-tensor safetensors manifests | ✅ |
-| Salted Merkle commitment, inclusion proofs, verifiable redaction | ✅ |
-| Companion document + generated JSON Schema | ✅ |
+| Salted Merkle commitment, verifiable redaction (`merkle verify`); inclusion proofs (`merkle prove`) | ✅ · 🚧 |
+| Companion document + generated JSON Schema (CI checks it is up to date) | ✅ |
 | in-toto statements, key-based DSSE signing and verification | ✅ |
+| Sigstore keyless signing and verification with identity-constraint policies (`[sign]` extra) | ✅ |
 | Hidden-Unicode / external-`$ref` / cross-tool-directive lints over model-visible text | ✅ |
 | Model identity: serialization-risk sniffing (pickle, torch, joblib, GGUF, safetensors, chat templates), Hugging Face directory analysis | ✅ |
 | CycloneDX 1.7 exporter (direct JSON, validated against the official schema and cyclonedx-python-lib) | ✅ exporter · 🚧 importer |
-| SPDX 3.0.1 JSON-LD exporter (native classes + typed extensions + `CdxPropertiesExtension` mirror, validated against the official schema and round-tripped through spdx-python-model) | ✅ exporter · 🚧 importer |
-| Collectors: MCP client configs (Claude Code, Claude Desktop, Cursor, VS Code, Windsurf, Codex, Gemini CLI) | ✅ |
-| Collectors: skills, instructions, frameworks, models, A2A cards, registry, live `tools/list`, OTel traces, k8s-aibom import | 🚧 WP9 / WP10 |
-| Policy checks (`SYM-*`), computed flags (lethal trifecta, unpinned tools, floating aliases, unsafe serialization…), conformance levels, completeness score, SARIF | ✅ |
-| Snapshot diff and typed deltas; chain store with monotone serials, prev links and anti-rollback | ✅ |
-| Sigstore keyless signing with identity-constraint policies; Gateway Allowlist Bundle + reference served-tool check | ✅ |
-| Trust-status lists (CLI), incident index, CycloneDX/SPDX importers, live MCP and OTel collectors | 🚧 |
-| `symbiote scan .` zero-config: companion + CycloneDX 1.7 + SPDX 3.0.1 from a repository | ✅ (coverage grows with each collector) |
+| SPDX 3.0.1 JSON-LD exporter (native classes + typed extensions + `CdxPropertiesExtension` mirror, validated against the official schema, round-tripped through spdx-python-model) | ✅ exporter · 🚧 importer |
+| Collector: MCP client configs (Claude Code, Claude Desktop, Cursor, VS Code, Windsurf, Codex, Gemini CLI), launcher pinning, credential names, client trust settings | ✅ |
+| Collectors: instructions, skills, frameworks, hosted and local models, A2A cards, identity, SBOM merge | 🚧 WP9 (specified; land as modules) |
+| Observed layer: live `tools/list` over stdio (raw JSON-RPC), OpenTelemetry GenAI traces, MCP registry resolution, k8s-aibom import | ✅ Python API · 🚧 `scan --live/--registry` CLI wiring |
+| Policy checks (60 `SYM-*`, incl. the Clinejection CI pattern), computed flags, conformance levels, completeness score, SARIF 2.1.0 | ✅ |
+| Snapshot diff with typed deltas; chain store with monotone serials, `prev` links and anti-rollback (exit 7) | ✅ |
+| Gateway Allowlist Bundle (`gab`, `opa-data`, `mcp-gateway-generic`) + reference served-tool check | ✅ |
+| Trust-status lists (CLI), incident index, generic CycloneDX/SPDX importers, `attest` for the other predicates, GitHub Action | 🚧 |
+| `symbiote scan .` zero-config: companion + CycloneDX 1.7 + SPDX 3.0.1 + loss reports from a repository | ✅ (coverage grows with each collector; unexamined surfaces are reported `not-attempted`, never clean) |
 
 Progress and ownership: [`docs/development/work-packages.md`](docs/development/work-packages.md).
 
@@ -116,8 +120,8 @@ Progress and ownership: [`docs/development/work-packages.md`](docs/development/w
   collectors ──► │  AgentBOM semantic model (Pydantic v2)     │ ──► companion document  (structured truth, JSON Schema)
   MCP configs    │  entities · claims · edges · snapshots      │ ──► CycloneDX 1.7        (native constructs + agentbom:* properties)
   live tools/list│  grants · evidence · coverage · Merkle root │ ──► SPDX 3.0.1 JSON-LD   (native classes + typed extensions)
-  skills, prompts│                                            │ ──► in-toto / DSSE / Sigstore attestations
-  models, traces └────────────────────────────────────────────┘ ──► Gateway Allowlist Bundle, OPA input, SARIF
+  OTel traces    │                                            │ ──► in-toto / DSSE / Sigstore attestations
+  k8s-aibom      └────────────────────────────────────────────┘ ──► Gateway Allowlist Bundle, OPA input, SARIF
 ```
 
 - **CycloneDX 1.7** — agents, tools, instructions, models and data stores are `application`, `data`, `file`,
@@ -125,15 +129,23 @@ Progress and ownership: [`docs/development/work-packages.md`](docs/development/w
   `declarations`, `citations`, `compositions` and `formulation`; AI weaknesses use `vulnerabilities[]` keyed to
   MITRE ATLAS / OWASP ASI ids; everything else is an `agentbom:` property with a closed vocabulary. Output is
   emitted directly as JSON and validated against the official `bom-1.7` schema. See
-  [`spec/cyclonedx-mapping.md`](spec/cyclonedx-mapping.md) and [`spec/taxonomy.md`](spec/taxonomy.md).
+  [`docs/formats/cyclonedx.md`](docs/formats/cyclonedx.md), [`spec/cyclonedx-mapping.md`](spec/cyclonedx-mapping.md)
+  and [`spec/taxonomy.md`](spec/taxonomy.md).
 - **SPDX 3.0.1** — `ai_AIPackage`, `dataset_DatasetPackage`, `software_Package/File`, `SoftwareAgent`,
   `LifecycleScopedRelationship(runtime)`, `usesTool`/`invokedBy`/`delegatedTo`, VEX classes, and
   `NoneElement`/`NoAssertionElement` to distinguish verified absence from unknown; agent qualifiers are typed
   extension classes, mirrored into `CdxPropertiesExtension` for lossless round trips. See
-  [`spec/spdx-mapping.md`](spec/spdx-mapping.md).
-- **Interoperability** — imports k8s-aibom (Google), cdxgen and agent-harness-aibom documents with explicit
-  confidence mappings; consumes OpenSSF model-signing manifests; signs with Sigstore; reads OpenTelemetry GenAI
-  traces as the observed source; exports Rego-ready policy input. Every conversion emits a **loss report**.
+  [`docs/formats/spdx.md`](docs/formats/spdx.md) and [`spec/spdx-mapping.md`](spec/spdx-mapping.md).
+- **Interoperability** — Symbiote imports Google's [k8s-aibom](https://github.com/GoogleCloudPlatform/k8s-aibom)
+  documents and `AIBOM` custom resources as an *observed* source, mapping its per-attribute confidence
+  (`declared / inferred / unresolved / verified`) onto per-claim assurance and never laundering a `verified` that
+  lacks a recorded signer constraint; it accepts cdxgen and agent-harness-aibom property dialects on import and
+  keeps unknown properties verbatim. It follows the
+  [OWASP AIBOM Foundations Guide](https://owaspaibom.org/) (September 2026) in building on CycloneDX ML-BOM and
+  the SPDX AI profile rather than a third format, consumes OpenSSF model-signing manifests, signs with Sigstore,
+  reads OpenTelemetry GenAI traces as the observed source, and exports Rego-ready policy input. Every
+  conversion emits a **loss report**, and every extension is listed in the
+  [divergence register](spec/divergences.md).
 
 ## Design principles
 
@@ -156,10 +168,12 @@ Progress and ownership: [`docs/development/work-packages.md`](docs/development/w
 
 | | |
 |---|---|
+| [`docs/gap-analysis.md`](docs/gap-analysis.md) | The gap analysis: four planes, CycloneDX 1.7 and SPDX 3.0.1 field by field, the 22-gap register, the minimum viable AgentBOM, the Symbiote mapping, corrections (also exported as [`docs/research/gap-analysis.docx`](docs/research/gap-analysis.docx)) |
+| [`docs/`](docs/index.md) | Site: [quickstart](docs/quickstart.md), concepts (incl. the [trust model](docs/concepts/trust-model.md)), guides ([collectors](docs/guides/collectors.md), [policy and conformance](docs/guides/policy-and-conformance.md), [attestation and enforcement](docs/guides/attestation-and-enforcement.md), [CI](docs/guides/ci.md)), [formats](docs/formats/cyclonedx.md), [CLI reference](docs/reference/cli.md) |
 | [`spec/`](spec/README.md) | Normative AgentBOM profile: semantic model, digests, CycloneDX/SPDX mappings, taxonomy, conformance levels, checks, attestation, collectors, CLI, divergence register, ADRs |
-| [`docs/research/`](docs/research/README.md) | Gap analysis inputs: design brief, three architecture proposals, 22-gap attack-lens register |
+| [`docs/research/`](docs/research/README.md) | Design inputs: brief, three architecture proposals, 22-gap attack-lens register, 64 verified claims |
 | [`docs/development/work-packages.md`](docs/development/work-packages.md) | Work packages, owners and integration order |
-| [`CHANGELOG.md`](CHANGELOG.md) · [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`SECURITY.md`](SECURITY.md) | Project process |
+| [`CHANGELOG.md`](CHANGELOG.md) · [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`SECURITY.md`](SECURITY.md) · [`THREAT-MODEL.md`](THREAT-MODEL.md) | Project process and threat model |
 
 ## Development
 
@@ -168,6 +182,7 @@ git clone https://github.com/aisecnomad/symbiote && cd symbiote
 uv venv .venv && source .venv/bin/activate && uv pip install -e ".[dev]"
 ruff check src tests && pytest -q
 symbiote version
+mkdocs build --strict
 ```
 
 Tests run offline. Every emitted field change touches the model, the taxonomy, the divergence register, the
@@ -175,17 +190,19 @@ generated companion schema and the goldens in the same pull request (`spec/versi
 
 ## Status and roadmap
 
-Symbiote is **alpha**. The foundation (model, digests, Merkle, companion, attestation, CLI skeleton) is
-implemented and tested; exporters, collectors, policy and the end-to-end `scan` are being built in parallel
-work packages toward `0.1.0`. Interfaces under `symbiote.model` and `symbiote.digest` are frozen for the 0.1
-line; everything else may change before the first release.
+Symbiote is **alpha**. The model, digests, Merkle commitment, companion document, both exporters, the MCP
+configuration collector, the observed-layer modules, the policy engine, the snapshot chain, attestation and the
+enforcement exports are implemented and tested; the static collectors, the importers, the trust-status CLI and
+the remaining `scan` options are being built in parallel work packages toward `0.1.0`. Interfaces under
+`symbiote.model` and `symbiote.digest` are frozen for the 0.1 line; everything else may change before the first
+release.
 
 ## Acknowledgements
 
 Symbiote stands on OWASP CycloneDX, SPDX, the Model Context Protocol, OpenSSF model-signing, Sigstore, in-toto,
-OpenTelemetry GenAI semantic conventions, MITRE ATLAS, the OWASP Top 10 for Agentic Applications, and Google's
-k8s-aibom, whose confidence-and-evidence conventions it adopts. The gap analysis behind the design is
-Emmanuel Dahunsi's *The Supply Chain of Agency*.
+OpenTelemetry GenAI semantic conventions, MITRE ATLAS, the OWASP Top 10 for Agentic Applications, the OWASP AIBOM
+project, and Google's k8s-aibom, whose confidence-and-evidence conventions it adopts. The gap analysis behind
+the design is Emmanuel Dahunsi's *The Supply Chain of Agency*.
 
 ## License
 
