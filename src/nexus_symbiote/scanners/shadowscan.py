@@ -105,7 +105,10 @@ class ShadowScanImporter(Scanner):
                         properties={"shadowscan:raw": f},
                     )
                 )
-            elif kind in {"local-model", "model"} or "model" in str(f.get("resource_type", "")).lower():
+            elif (
+                kind in {"local-model", "model"}
+                or "model" in str(f.get("resource_type", "")).lower()
+            ):
                 components.append(
                     ModelComponent(
                         bom_ref=bom_ref,
