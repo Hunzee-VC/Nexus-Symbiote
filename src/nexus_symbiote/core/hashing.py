@@ -155,66 +155,6 @@ def hash_bytes(data: bytes, algorithm: str = "sha256") -> str:
     return f"{algorithm}:{h.hexdigest()}"
 
 
-def safetensors_fingerprint(path: Path) -> dict[str, str] | None:
-    """Per-tensor fingerprint for a safetensors file.
-
-    A whole-file digest cannot distinguish a legitimate reload from a single
-    poisoned tensor. This parses the safetensors header (little-endian u64
-    length prefix + JSON) and derives two digests: the header itself and the
-    sorted tensor inventory (names + dtypes + byte ranges). Any single-layer
-    trojan, weight swap, or tensor addition changes the inventory digest.
-    """
-    import struct
-
-    try:
-        with open(path, "rb") as f:
-            header_len_bytes = f.read(8)
-            if len(header_len_bytes) != 8:
-                return None
-            header_len = struct.unpack("<Q", header_len_bytes)[0]
-            if header_len <= 0 or header_len > 64 * 1024 * 1024:
-                return None
-            header_raw = f.read(header_len)
-            if len(header_raw) != header_len:
-                return None
-    except OSError:
-        return None
-
-    try:
-        header = json.loads(header_raw)
-    except (ValueError, UnicodeError):
-        return None
-    if not isinstance(header, dict):
-        return None
-
-    tensors: list[dict[str, str]] = []
-    for name, meta in header.items():
-        if name == "__metadata__" or not isinstance(meta, dict):
-            continue
-        offsets = meta.get("data_offsets", [0, 0])
-        tensors.append(
-            {
-                "name": name,
-                "dtype": str(meta.get("dtype", "")),
-                "shape": json.dumps(meta.get("shape", []), separators=(",", ":")),
-                "offsets": f"{offsets[0]}:{offsets[1]}",
-            }
-        )
-    if not tensors:
-        return None
-    tensors.sort(key=lambda t: t["name"])
-
-    header_digest = hash_bytes(header_raw)
-    inventory_raw = json.dumps(tensors, separators=(",", ":"), sort_keys=False)
-    inventory_digest = hash_bytes(inventory_raw.encode("utf-8"))
-
-    return {
-        "safetensors_header_sha256": header_digest,
-        "tensor_inventory_sha256": inventory_digest,
-        "tensor_count": str(len(tensors)),
-    }
-
-
 _RANGE_PREFIX = re.compile(r"^[~^>=<!]+")
 _VERSION_PATTERN = re.compile(
     r"(?:^|[/@:])(\d+\.\d+(?:\.\d+)?(?:[-+][a-zA-Z0-9.]+)?)(?:$|[/?#,;\s])"

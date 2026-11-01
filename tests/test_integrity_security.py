@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -49,6 +51,80 @@ def test_valid_nonexecuting_tensor_container_has_structural_evidence(tmp_path):
     assert comp.trust_tier != TrustTier.THIRD_PARTY_SIGNED
 
 
+def test_model_replacement_cannot_bind_safe_structure_to_other_bytes(tmp_path, monkeypatch):
+    from nexus_symbiote.scanners import model
+
+    path = tmp_path / "model.safetensors"
+    write_safetensors(path)
+    inspect = model.inspect_model_format
+
+    def replace_after_inspection(path, *, stream=None):
+        observation = inspect(path, stream=stream)
+        replacement = tmp_path / "replacement"
+        replacement.write_bytes(b"not a tensor container")
+        replacement.replace(path)
+        return observation
+
+    monkeypatch.setattr(model, "inspect_model_format", replace_after_inspection)
+    result = ModelScanner().scan(tmp_path)
+    component = result.components[0]
+    assert component.serialization_safety == SerializationSafety.UNKNOWN
+    assert component.hashes == {}
+    assert result.scan_failures
+
+
+def test_path_replacement_between_opens_preserves_the_inspected_digest(tmp_path, monkeypatch):
+    from nexus_symbiote.utils.confined import ConfinedCollection
+
+    path = tmp_path / "model.safetensors"
+    write_safetensors(path)
+    inspected_digest = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+    open_regular = ConfinedCollection.open_regular
+
+    @contextmanager
+    def replace_after_close(collection, source, **kwargs):
+        with open_regular(collection, source, **kwargs) as stream:
+            yield stream
+        if Path(source).suffix == ".safetensors":
+            replacement = tmp_path / "replacement"
+            replacement.write_bytes(b"not a tensor container")
+            replacement.replace(path)
+
+    monkeypatch.setattr(ConfinedCollection, "open_regular", replace_after_close)
+    result = ModelScanner().scan(tmp_path)
+    component = result.components[0]
+    assert component.serialization_safety == SerializationSafety.SAFE
+    assert component.hashes == {"sha256": inspected_digest}
+    assert path.read_bytes() == b"not a tensor container"
+
+
+def test_validator_format_evidence_must_match_the_hashed_subject(tmp_path, monkeypatch):
+    from nexus_symbiote.validators import integrity
+
+    path = tmp_path / "model.safetensors"
+    write_safetensors(path)
+    replacement = b"not a tensor container"
+    component = ModelComponent(
+        bom_ref="model:substitution",
+        name="model",
+        source_path=str(path),
+        serialization_safety=SerializationSafety.SAFE,
+        hashes={"sha256": "sha256:" + hashlib.sha256(replacement).hexdigest()},
+    )
+    verify = integrity.verify_file_hash
+
+    def replace_before_hash(path, expected, algorithm):
+        path.write_bytes(replacement)
+        return verify(path, expected, algorithm)
+
+    monkeypatch.setattr(integrity, "verify_file_hash", replace_before_hash)
+    report = IntegrityValidator(require_model_signatures=False).validate(
+        AIBOM(components=[component]), tmp_path
+    )
+    assert not report.is_valid
+    assert any(issue.category == "format_subject_mismatch" for issue in report.issues)
+
+
 @pytest.mark.parametrize(
     ("header", "data"),
     [
@@ -72,6 +148,47 @@ def test_oversize_header_and_duplicate_keys_are_rejected(tmp_path):
     duplicate = b'{"__metadata__":{},"__metadata__":{}}'
     path.write_bytes(len(duplicate).to_bytes(8, "little") + duplicate)
     assert inspect_model_format(path)[0] == SerializationSafety.UNKNOWN
+
+
+@pytest.mark.parametrize("protocol", [2, 3, 4, 5])
+def test_binary_pickle_disguised_as_safetensors_is_unsafe(tmp_path, protocol):
+    path = tmp_path / "weights.safetensors"
+    content = bytes((0x80, protocol)) + b"N."
+    path.write_bytes(content)
+    result = ModelScanner().scan(tmp_path)
+    component = result.components[0]
+    assert component.serialization_safety == SerializationSafety.UNSAFE_CODE_EXECUTION
+    assert component.hashes == {"sha256": "sha256:" + hashlib.sha256(content).hexdigest()}
+    assert any(
+        risk.category == "serialization_format" and risk.severity.value == "critical"
+        for risk in component.risks
+    )
+    assert "pickle" in component.properties["format_inspection"]
+
+
+def test_pickle_inspection_does_not_resolve_globals_or_run_reducers(tmp_path):
+    path = tmp_path / "weights.safetensors"
+    path.write_bytes(b"\x80\x02csymbiote_nonexistent_module\nexecute\n)R.")
+    assert inspect_model_format(path)[0] == SerializationSafety.UNSAFE_CODE_EXECUTION
+
+
+@pytest.mark.parametrize("content", [b"arbitrary bytes", b"\x80\x04.", b"\x80\x04N", b"\x80\x06N."])
+def test_malformed_or_unsupported_pickle_remains_unknown(tmp_path, content):
+    path = tmp_path / "weights.safetensors"
+    path.write_bytes(content)
+    assert inspect_model_format(path)[0] == SerializationSafety.UNKNOWN
+
+
+@pytest.mark.parametrize("header_length", [128, 640, 1152, 1408])
+def test_tensor_header_length_resembling_pickle_prefix_remains_safe(tmp_path, header_length):
+    path = tmp_path / "weights.safetensors"
+    header = b'{"x":{"dtype":"U8","shape":[1],"data_offsets":[0,1]}}'
+    header += b" " * (header_length - len(header))
+    content = header_length.to_bytes(8, "little") + header + b"a"
+    path.write_bytes(content)
+    component = ModelScanner().scan(tmp_path).components[0]
+    assert component.serialization_safety == SerializationSafety.SAFE
+    assert component.hashes == {"sha256": "sha256:" + hashlib.sha256(content).hexdigest()}
 
 
 @pytest.mark.parametrize("suffix", ["onnx", "ggml", "gguf"])

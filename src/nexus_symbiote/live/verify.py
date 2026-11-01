@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass, field
 from typing import Any
 
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
+
 from nexus_symbiote.core.aibom import AIBOM
-from nexus_symbiote.core.hashing import hash_tool_definition
+from nexus_symbiote.core.hashing import (
+    TOOL_DEFINITION_HASH_VERSION,
+    hash_canonical,
+    hash_tool_definition,
+    normalize_digest,
+)
 from nexus_symbiote.core.models import MCPServerComponent, ToolComponent
+from nexus_symbiote.graph import validate_graph
 from nexus_symbiote.live.stdio import list_pinned_tools
 
 
@@ -33,7 +41,7 @@ class ServerVerifyResult:
 
     @property
     def rug_pull_detected(self) -> bool:
-        return any(f.status in ("changed", "new", "missing") for f in self.tool_findings)
+        return any(f.status != "match" for f in self.tool_findings)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -112,6 +120,15 @@ def verify_mcp_servers(
 ) -> LiveVerifyReport:
     """Bind collection to the exact server reference in an independent launch policy."""
     report = LiveVerifyReport()
+    if validate_graph(bom):
+        report.results.append(
+            ServerVerifyResult(
+                server_name="[inventory]",
+                server_ref="[inventory]",
+                error="Inventory relationships are invalid",
+            )
+        )
+        return report
     for server in bom.components:
         if not isinstance(server, MCPServerComponent):
             continue
@@ -135,6 +152,13 @@ def verify_mcp_servers(
                     annotations is not None and not isinstance(annotations, dict)
                 ):
                     raise ValueError("invalid descriptor")
+                schema = tool.get("inputSchema")
+                if not isinstance(schema, dict) or schema.get("type") != "object":
+                    raise ValueError("MCP tools require an object input schema")
+                Draft202012Validator.check_schema(schema)
+                for hint in ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"):
+                    if annotations and hint in annotations and type(annotations[hint]) is not bool:
+                        raise ValueError("invalid MCP annotation hint")
                 live[tool["name"]] = hash_tool_definition(
                     tool["name"], desc, tool["inputSchema"], annotations or None
                 )
@@ -146,8 +170,8 @@ def verify_mcp_servers(
             by_name = {t.name: t for t in approved}
             if len(by_name) != len(approved):
                 raise ValueError("ambiguous tool references")
-        except (OSError, ValueError, TypeError, RecursionError) as exc:
-            result.error = str(exc)
+        except (OSError, ValueError, TypeError, RecursionError, SchemaError):
+            result.error = "Pinned MCP discovery refused or incomplete; review launch policy and protocol limits"
             continue
         result.reachable = True
         report.servers_reachable += 1
@@ -156,17 +180,93 @@ def verify_mcp_servers(
             old = by_name.get(name)
             if old is None:
                 status = "new"
-            elif old.definition_hash_version != "rfc8785-jcs-v1" or not old.definition_hash:
+            elif (
+                old.definition_hash_version != TOOL_DEFINITION_HASH_VERSION
+                or not old.definition_hash
+            ):
                 status = "unverifiable"
             else:
-                status = "match" if old.definition_hash == live[name] else "changed"
+                try:
+                    algorithm, expected = normalize_digest(old.definition_hash, "sha256")
+                    status = "match" if f"{algorithm}:{expected}" == live[name] else "changed"
+                except ValueError:
+                    status = "unverifiable"
             result.tool_findings.append(LiveToolFinding(name, live[name], status, tool))
         for old in approved:
             if old.name not in live:
                 result.tool_findings.append(
                     LiveToolFinding(old.name, old.definition_hash, "missing")
                 )
-        result.live_schema_hash = (
-            "sha256:" + hashlib.sha256("".join(sorted(live.values())).encode()).hexdigest()
+        result.live_schema_hash = hash_canonical(
+            {"profile": TOOL_DEFINITION_HASH_VERSION, "tools": dict(sorted(live.items()))}
         )
     return report
+
+
+def record_candidate(bom: AIBOM, report: LiveVerifyReport) -> None:
+    """Update a separate unsigned candidate; observations confer no authority."""
+    from datetime import UTC, datetime
+    from urllib.parse import quote
+
+    from nexus_symbiote.core.aibom import DependencyEdge
+    from nexus_symbiote.core.enums import AssuranceLevel
+    from nexus_symbiote.core.models import ClaimEvidence
+
+    if not report.complete or any(
+        finding.status == "missing" for result in report.results for finding in result.tool_findings
+    ):
+        raise ValueError("incomplete inventory; candidate cannot be emitted")
+    for result in report.results:
+        for finding in result.tool_findings:
+            descriptor = finding.descriptor
+            if descriptor is None:
+                raise ValueError("candidate requires an observed descriptor")
+            tool = next(
+                (
+                    component
+                    for component in bom.components
+                    if isinstance(component, ToolComponent)
+                    and component.mcp_server_ref == result.server_ref
+                    and component.name == finding.name
+                ),
+                None,
+            )
+            if tool is None:
+                tool = ToolComponent(
+                    bom_ref=f"tool:{quote(result.server_ref, safe='')}/{quote(finding.name, safe='')}",
+                    name=finding.name,
+                    mcp_server_ref=result.server_ref,
+                )
+                bom.add_component(tool)
+                bom.add_dependency(
+                    DependencyEdge(
+                        source_ref=result.server_ref,
+                        target_ref=tool.bom_ref,
+                        relationship="provides-tool",
+                        assurance_level="observed",
+                        conditions="served descriptor observed; backend behavior and authorization unverified",
+                    )
+                )
+            tool.definition_hash = finding.definition_hash
+            tool.definition_hash_version = TOOL_DEFINITION_HASH_VERSION
+            tool.description_text = descriptor.get("description", "")
+            tool.input_schema = descriptor["inputSchema"]
+            tool.annotations = descriptor.get("annotations") or {}
+            tool.assurance_level = AssuranceLevel.OBSERVED
+            tool.claims["tool_definition"] = ClaimEvidence(
+                assurance=AssuranceLevel.OBSERVED,
+                method="operator-pinned-stdio-tools-list",
+                scope="served-descriptor",
+                collector="nexus-symbiote-live-stdio",
+                observed_at=datetime.now(UTC),
+            )
+        server = bom.get_component(result.server_ref)
+        if isinstance(server, MCPServerComponent):
+            server.schema_hash = result.live_schema_hash
+            server.tool_refs = [
+                component.bom_ref
+                for component in bom.components
+                if isinstance(component, ToolComponent)
+                and component.mcp_server_ref == result.server_ref
+            ]
+            server.tool_count = len(server.tool_refs)

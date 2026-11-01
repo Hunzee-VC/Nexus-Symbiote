@@ -15,7 +15,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from nexus_symbiote.scanners.base import _open_regular
+from nexus_symbiote.core.hashing import open_regular_file, parse_json_strict
 
 PROTOCOL = "2025-06-18"
 MAX_LINE = 1024 * 1024
@@ -47,11 +47,16 @@ def _frames(fd: int, deadline: float) -> Iterator[dict[str, Any]]:
     buf = bytearray()
     total = 0
     for _ in range(1024):
+        if time.monotonic() >= deadline:
+            raise OSError("MCP session deadline exceeded")
         while b"\n" not in buf:
             if len(buf) > MAX_LINE:
                 raise ValueError("MCP frame exceeds size limit")
             _ready(fd, selectors.EVENT_READ, deadline)
-            chunk = os.read(fd, 65536)
+            try:
+                chunk = os.read(fd, 65536)
+            except BlockingIOError:
+                continue
             total += len(chunk)
             if not chunk or total > MAX_BYTES:
                 raise ValueError("MCP stream ended or exceeded its byte limit")
@@ -59,7 +64,7 @@ def _frames(fd: int, deadline: float) -> Iterator[dict[str, Any]]:
         raw, _, buf = buf.partition(b"\n")
         if len(raw) > MAX_LINE:
             raise ValueError("MCP frame exceeds size limit")
-        message = json.loads(raw.decode("utf-8"), object_pairs_hook=strict_object)
+        message = parse_json_strict(bytes(raw), max_bytes=MAX_LINE)
         if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
             raise ValueError("invalid JSON-RPC envelope")
         yield message
@@ -87,14 +92,24 @@ def _capture(binary: Path, work: Path) -> list[dict[str, Any]]:
             data = memoryview(json.dumps({"jsonrpc": "2.0", **message}).encode() + b"\n")
             while data:
                 _ready(inbox, selectors.EVENT_WRITE, deadline)
-                data = data[os.write(inbox, data) :]
+                try:
+                    written = os.write(inbox, data)
+                except BlockingIOError:
+                    continue
+                if written <= 0:
+                    raise OSError("MCP input stream closed")
+                data = data[written:]
 
         def call(request_id: int, method: str, params: dict[str, Any]) -> dict[str, Any]:
             send({"id": request_id, "method": method, "params": params})
             for msg in frames:
                 if "id" not in msg and isinstance(msg.get("method"), str):
                     continue
-                if type(msg.get("id")) is not int or msg["id"] != request_id or "error" in msg:
+                if (
+                    set(msg) != {"jsonrpc", "id", "result"}
+                    or type(msg.get("id")) is not int
+                    or msg["id"] != request_id
+                ):
                     raise ValueError("unexpected MCP response")
                 result = msg.get("result")
                 if not isinstance(result, dict):
@@ -104,6 +119,7 @@ def _capture(binary: Path, work: Path) -> list[dict[str, Any]]:
 
         try:
             os.set_blocking(inbox, False)
+            os.set_blocking(proc.stdout.fileno(), False)
             hello = call(
                 1,
                 "initialize",
@@ -115,6 +131,14 @@ def _capture(binary: Path, work: Path) -> list[dict[str, Any]]:
             )
             if hello.get("protocolVersion") != PROTOCOL:
                 raise ValueError("unsupported MCP protocol version")
+            capabilities, info = hello.get("capabilities"), hello.get("serverInfo")
+            if (
+                not isinstance(capabilities, dict)
+                or not isinstance(capabilities.get("tools"), dict)
+                or not isinstance(info, dict)
+                or not all(isinstance(info.get(k), str) for k in ("name", "version"))
+            ):
+                raise ValueError("MCP tool listing was not negotiated")
             send({"method": "notifications/initialized"})
             tools: list[dict[str, Any]] = []
             names: set[str] = set()
@@ -173,8 +197,10 @@ def list_pinned_tools(command: str, digest: str) -> list[dict[str, Any]]:
         staged = work / "server"
         hasher = hashlib.sha256()
         budget = 128 * 1024 * 1024
-        with _open_regular(Path(command), budget) as fd, staged.open("xb") as out:
-            while chunk := os.read(fd, 1024 * 1024):
+        with open_regular_file(Path(command)) as source, staged.open("xb") as out:
+            if os.fstat(source.fileno()).st_size > budget:
+                raise OSError("launcher exceeds byte budget")
+            while chunk := source.read(1024 * 1024):
                 budget -= len(chunk)
                 if budget < 0:
                     raise OSError("launcher exceeds byte budget")

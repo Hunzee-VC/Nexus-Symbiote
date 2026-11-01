@@ -20,6 +20,7 @@ from nexus_symbiote.core.models import (
     ToolComponent,
 )
 from nexus_symbiote.graph import assemble_repository_agent, blast_radius, validate_graph
+from nexus_symbiote.scanner_catalog import BUILTIN_SCANNER_NAMES
 from nexus_symbiote.scanners.base import ScanResult
 from nexus_symbiote.validators.risk import RiskScorer
 
@@ -106,7 +107,7 @@ def test_critical_gate_independent_of_score_and_explicit_ignore():
         completeness=CompletenessClaim(
             scope="fixture",
             surfaces_scanned=["fixture"],
-            scanner_status=dict.fromkeys(["mcp", "model", "prompt", "rag", "registry"], "complete"),
+            scanner_status=dict.fromkeys(BUILTIN_SCANNER_NAMES, "complete"),
         )
     )
     passed, report = RiskScorer(ignore_categories=["unsafe"]).passes_gate(bom)
@@ -213,7 +214,7 @@ def test_risk_policy_ignored_categories_and_warning_are_honored(tmp_path):
         completeness=CompletenessClaim(
             scope="fixture",
             surfaces_scanned=["fixture"],
-            scanner_status=dict.fromkeys(["mcp", "model", "prompt", "rag", "registry"], "complete"),
+            scanner_status=dict.fromkeys(BUILTIN_SCANNER_NAMES, "complete"),
         )
     )
     path = tmp_path / "bom.json"
@@ -253,3 +254,139 @@ def test_repository_claim_without_collection_evidence_is_incomplete():
 
     bom = AIBOM(metadata=AIBOMMetadata(completeness=CompletenessClaim(scope="repository")))
     assert not CompletenessValidator().validate(bom).is_complete
+
+
+def test_agent_manifest_records_instructions_models_and_declared_autonomy(tmp_path):
+    import hashlib
+
+    (tmp_path / "instructions.md").write_bytes(b"Read-only triage instructions.\n")
+    (tmp_path / "models").mkdir()
+    (tmp_path / "models/weights.safetensors").write_bytes(b"collected model fixture")
+    (tmp_path / "agent.yaml").write_text("""
+id: acme:triager
+name: triager
+version: '1.0'
+purpose: Security triage
+owner: security
+framework: custom
+autonomy_level: L3-autonomous
+instructions: [instructions.md]
+models:
+  local:
+    path: models
+  hosted:
+    provider: openai
+    requested_ref: example-model-alias
+""")
+    bom = AIBOM(
+        components=[
+            ModelComponent(
+                bom_ref="model:local", name="local", source_path="models/weights.safetensors"
+            )
+        ]
+    )
+    agent = assemble_repository_agent(bom, tmp_path)
+    assert agent.autonomy_level is None
+    assert agent.properties["declared_autonomy_level"] == "L3-autonomous"
+    assert agent.claims["autonomy_level"].assurance.value == "declared"
+    assert agent.deployment_status == "unknown"
+    assert len(agent.prompt_refs) == 1
+    prompt = bom.get_component(agent.prompt_refs[0])
+    assert (
+        prompt.content_hash
+        == "sha256:" + hashlib.sha256(b"Read-only triage instructions.\n").hexdigest()
+    )
+    assert prompt.claims["content_hash"].assurance.value == "observed"
+    assert "model:local" in agent.model_refs
+    hosted = next(
+        comp
+        for comp in bom.components
+        if isinstance(comp, ModelComponent) and comp.model_type == "hosted"
+    )
+    assert hosted.bom_ref in agent.model_refs
+    assert hosted.requested_alias == "example-model-alias"
+    assert hosted.provider == "openai"
+    assert hosted.resolved_revision is None
+    assert hosted.signing_status is None
+    assert hosted.trust_tier.value == "unknown"
+    assert hosted.assurance_level.value == "declared"
+    assert not validate_graph(bom)
+
+
+@pytest.mark.parametrize(
+    "instruction",
+    ["../outside.md", "/outside.md", "missing.md", "linked.md", "symlink-dir/instructions.md"],
+)
+def test_agent_manifest_instruction_refs_fail_closed_without_partial_bom(tmp_path, instruction):
+    from nexus_symbiote.policy import PolicyError
+
+    outside = tmp_path.parent / "outside.md"
+    outside.write_text("outside")
+    (tmp_path / "linked.md").symlink_to(outside)
+    (tmp_path / "symlink-dir").symlink_to(tmp_path.parent, target_is_directory=True)
+    (tmp_path / "valid.md").write_text("valid instruction")
+    (tmp_path / "agent.yaml").write_text(f"name: test\ninstructions: [valid.md, {instruction}]\n")
+    bom = AIBOM()
+    before = bom.to_json()
+    with pytest.raises(PolicyError):
+        assemble_repository_agent(bom, tmp_path)
+    assert bom.to_json() == before
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        "path: ../outside",
+        "path: /outside",
+        "path: missing",
+        "provider: example",
+        "requested_ref: alias",
+        "path: local\n    provider: example\n    requested_ref: alias",
+    ],
+)
+def test_agent_manifest_model_declarations_fail_closed(tmp_path, declaration):
+    from nexus_symbiote.policy import PolicyError
+
+    (tmp_path / "agent.yaml").write_text(
+        "name: test\nmodels:\n  invalid:\n    " + declaration + "\n"
+    )
+    bom = AIBOM()
+    with pytest.raises(PolicyError):
+        assemble_repository_agent(bom, tmp_path)
+    assert not bom.components and not bom.dependencies
+
+
+def test_agent_manifest_rejects_symlinked_local_model(tmp_path):
+    from nexus_symbiote.policy import PolicyError
+
+    outside = tmp_path.parent / "weight-file"
+    outside.write_bytes(b"outside model")
+    (tmp_path / "local.bin").symlink_to(outside)
+    (tmp_path / "agent.yaml").write_text("name: test\nmodels: {local: {path: local.bin}}\n")
+    bom = AIBOM(components=[ModelComponent(bom_ref="m", name="m", source_path="local.bin")])
+    with pytest.raises(PolicyError):
+        assemble_repository_agent(bom, tmp_path)
+    assert len(bom.components) == 1
+    assert not bom.dependencies
+
+
+def test_agent_manifest_reuses_instruction_digest_and_rejects_changed_bytes(tmp_path):
+    import hashlib
+
+    from nexus_symbiote.policy import PolicyError
+
+    (tmp_path / "instruction.txt").write_bytes(b"approved bytes")
+    (tmp_path / "agent.yaml").write_text("name: test\ninstructions: [instruction.txt]\n")
+    prompt = PromptComponent(
+        bom_ref="p",
+        name="p",
+        source_path="instruction.txt",
+        content_hash="sha256:" + hashlib.sha256(b"approved bytes").hexdigest(),
+    )
+    bom = AIBOM(components=[prompt])
+    agent = assemble_repository_agent(bom, tmp_path)
+    assert agent.prompt_refs == ["p"]
+    assert len(bom.components) == 2
+    (tmp_path / "instruction.txt").write_bytes(b"changed bytes")
+    with pytest.raises(PolicyError, match="changed"):
+        assemble_repository_agent(AIBOM(components=[prompt]), tmp_path)

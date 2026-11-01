@@ -1,128 +1,314 @@
-"""Static, literal MCP tool registrations in TypeScript; never execute package code."""
+"""Bounded static MCP names from lexically bound TypeScript SDK registrations.
+
+This records source declarations, never evaluated tool descriptors or runtime
+registration. Dynamic names and unsupported bindings remain
+explicit collection gaps. No source module or package code is executed.
+"""
 
 from __future__ import annotations
 
 import re
+import time
+import warnings
+from collections.abc import Iterator, Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import quote
 
-from tree_sitter import Language, Node, Parser, Query, QueryCursor
-from tree_sitter_typescript import language_typescript
+if TYPE_CHECKING:
+    from tree_sitter import Node
 
 from nexus_symbiote.core.hashing import hash_bytes
-from nexus_symbiote.core.models import MCPServerComponent, ToolComponent
-from nexus_symbiote.scanners.base import ScanResult, read_regular_text
+from nexus_symbiote.core.models import ClaimEvidence, MCPServerComponent, ToolComponent
+from nexus_symbiote.scanners.base import ScanResult
+from nexus_symbiote.utils.confined import ConfinedCollection
 
-_LANGUAGE = Language(language_typescript())
-_IMPORT = Query(
-    _LANGUAGE,
-    """
-(import_statement (import_clause (named_imports (import_specifier) @binding)) source: (string) @module)
-""",
-)
-_CTOR = Query(
-    _LANGUAGE,
-    """
-(lexical_declaration "const" (variable_declarator name: (identifier) @receiver value:
-    (new_expression constructor: (identifier) @ctor))) @decl
-""",
-)
-_CALL = Query(
-    _LANGUAGE,
-    """
-(call_expression function: (member_expression object: (identifier) @receiver property:
-    (property_identifier) @method) arguments: (arguments . (_) @name)) @call
-""",
-)
 _MODULES = {"@modelcontextprotocol/server", "@modelcontextprotocol/sdk/server/mcp.js"}
-_IGNORED = {".git", "node_modules", ".venv", "dist", "build", "__tests__", "tests", "test"}
+_IGNORED = {"dist", "build", "__tests__", "tests", "test"}
+MAX_SOURCE_FILES = 50
+MAX_SOURCE_BYTES = 262_144
+MAX_AST_NODES = 20_000
+MAX_REGISTRATIONS = 1_000
+MAX_PARSE_SECONDS = 0.25
 
 
-def _value(node: Node) -> str:
-    return (node.text or b"").decode("utf-8")
+def _value(node: Node | None) -> str:
+    return ((node.text or b"") if node is not None else b"").decode("utf-8")
 
 
-def _block(node: Node) -> int | None:
-    while node.parent:
+def _nodes(root: Node) -> Iterator[Node]:
+    pending = [root]
+    count = 0
+    while pending:
+        node = pending.pop()
+        count += 1
+        if count > MAX_AST_NODES:
+            raise ValueError("TypeScript AST node limit exceeded")
+        yield node
+        pending.extend(reversed(node.named_children))
+
+
+_FUNCTIONS = {
+    "function_declaration",
+    "function_expression",
+    "arrow_function",
+    "method_definition",
+    "generator_function_declaration",
+    "generator_function",
+}
+_SCOPES = {"program", "statement_block", "catch_clause", *_FUNCTIONS}
+
+
+def _scope(node: Node | None) -> Node | None:
+    while node is not None and node.type not in _SCOPES:
         node = node.parent
-        if node.type in {"program", "statement_block"}:
-            return node.id
+    return node
+
+
+def _pattern_names(node: Node | None) -> list[str]:
+    if node is None:
+        return []
+    return [
+        _value(n)
+        for n in _nodes(node)
+        if n.type in {"identifier", "shorthand_property_identifier_pattern"}
+    ]
+
+
+def _bindings(nodes: Sequence[Node], root: Node) -> dict[tuple[int, str], object]:
+    bindings: dict[tuple[int, str], object] = {}
+
+    def bind(scope: Node | None, name: str, value: object) -> None:
+        if scope is not None and name:
+            key = (scope.id, name)
+            bindings[key] = "ambiguous" if key in bindings else value
+
+    for node in nodes:
+        if node.type == "import_statement" and node.parent == root:
+            sdk = _value(node.child_by_field_name("source"))[1:-1] in _MODULES and not any(
+                child.type == "type" for child in node.children
+            )
+            for spec in _nodes(node):
+                if spec.type == "import_specifier":
+                    name = spec.child_by_field_name("name")
+                    bind(
+                        root,
+                        _value(spec.child_by_field_name("alias") or name),
+                        "sdk"
+                        if sdk
+                        and _value(name) == "McpServer"
+                        and not any(child.type == "type" for child in spec.children)
+                        else "other",
+                    )
+                elif spec.type in {"namespace_import", "import_clause"}:
+                    for child in spec.named_children:
+                        if child.type == "identifier":
+                            bind(root, _value(child), "other")
+        elif node.type == "variable_declarator":
+            for declared_name in _pattern_names(node.child_by_field_name("name")):
+                bind(_scope(node.parent), declared_name, node.id)
+        elif node.type in _FUNCTIONS:
+            name = node.child_by_field_name("name")
+            if name is not None:
+                bind(
+                    _scope(node.parent) if "declaration" in node.type else node,
+                    _value(name),
+                    "other",
+                )
+            parameters = node.child_by_field_name("parameters") or node.child_by_field_name(
+                "parameter"
+            )
+            for parameter in _pattern_names(parameters):
+                bind(node, parameter, "other")
+        elif node.type in {"class_declaration", "enum_declaration"}:
+            bind(_scope(node.parent), _value(node.child_by_field_name("name")), "other")
+        elif node.type == "catch_clause":
+            for caught_name in _pattern_names(node.child_by_field_name("parameter")):
+                bind(node, caught_name, "other")
+    return bindings
+
+
+def _lookup(bindings: dict[tuple[int, str], object], name: str, node: Node) -> object:
+    scope = _scope(node.parent)
+    while scope is not None:
+        key = (scope.id, name)
+        if key in bindings:
+            return bindings[key]
+        scope = _scope(scope.parent)
     return None
 
 
-def collect_typescript(root: Path, result: ScanResult) -> None:
-    parser = Parser(_LANGUAGE)
-    for path in sorted(root.rglob("*.ts")):
-        rel = path.relative_to(root)
-        if _IGNORED.intersection(rel.parts) or path.name.endswith(
-            (".d.ts", ".spec.ts", ".test.ts")
-        ):
+def collect_typescript(
+    files: ConfinedCollection, result: ScanResult, sources: Sequence[Path]
+) -> None:
+    """Use the scanner's existing pinned root, exclusions and shared I/O budgets."""
+    paths = [
+        path
+        for path in sources
+        if path.suffix == ".ts"
+        and not _IGNORED.intersection(path.parts)
+        and not path.name.endswith((".d.ts", ".spec.ts", ".test.ts"))
+    ]
+    if len(paths) > MAX_SOURCE_FILES:
+        result.scan_failures.append("TypeScript MCP source file collection limit exceeded")
+    for path in paths[:MAX_SOURCE_FILES]:
+        content = files.read_bytes(path)
+        if content is None:
             continue
+        if len(content) > MAX_SOURCE_BYTES:
+            result.scan_failures.append(f"{path}: TypeScript syntax collection size limit exceeded")
+            continue
+        if b"@modelcontextprotocol/" not in content or b"McpServer" not in content:
+            continue
+        result.surfaces_scanned.append(path.as_posix())
         try:
-            source = read_regular_text(path)
-        except (OSError, ValueError):
-            result.scan_failures.append(f"Cannot inspect TypeScript source {rel}")
+            _collect_source(content, path, result)
+        except ImportError:
+            result.scan_failures.append(f"{path}: TypeScript MCP parser dependency unavailable")
+        except (ValueError, UnicodeError):
+            result.scan_failures.append(f"{path}: TypeScript source parsing or AST limit refused")
+
+
+def _collect_source(content: bytes, path: Path, result: ScanResult) -> None:
+    from tree_sitter import Language, Parser
+    from tree_sitter_typescript import language_typescript
+
+    content.decode("utf-8")
+    deadline = time.monotonic() + MAX_PARSE_SECONDS
+    # The pinned 0.25 binding's callback parse path crashes for this grammar.
+    # Its supported native timeout bounds parsing without invoking callbacks.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        parser = Parser(
+            Language(language_typescript()),
+            timeout_micros=max(1, int(MAX_PARSE_SECONDS * 1_000_000)),
+        )
+    tree = parser.parse(content)
+    if tree is None or time.monotonic() >= deadline:
+        raise ValueError("TypeScript parsing deadline exceeded")
+    root = tree.root_node
+    if root.has_error:
+        raise ValueError("invalid TypeScript syntax")
+    nodes = list(_nodes(root))
+    bindings = _bindings(nodes, root)
+    if "sdk" not in bindings.values():
+        return
+    servers: dict[int, tuple[MCPServerComponent, int]] = {}
+    for node in nodes:
+        if node.type != "new_expression":
             continue
-        if "@modelcontextprotocol/" not in source or "McpServer" not in source:
+        constructor = _value(node.child_by_field_name("constructor"))
+        if _lookup(bindings, constructor, node) != "sdk":
             continue
-        tree = parser.parse(source.encode())
-        result.surfaces_scanned.append(str(rel))
-        if tree.root_node.has_error:
-            result.scan_failures.append(f"Invalid TypeScript syntax in {rel}")
-            continue
-        aliases = set()
-        for _, match in QueryCursor(_IMPORT).matches(tree.root_node):
-            binding = match["binding"][0]
-            import_name = binding.child_by_field_name("name")
-            if (
-                import_name
-                and _value(import_name) == "McpServer"
-                and _value(match["module"][0])[1:-1] in _MODULES
-            ):
-                aliases.add(_value(binding.child_by_field_name("alias") or import_name))
-        servers: dict[tuple[int | None, str], MCPServerComponent] = {}
-        for _, match in QueryCursor(_CTOR).matches(tree.root_node):
-            if _value(match["ctor"][0]) not in aliases:
-                continue
-            receiver = _value(match["receiver"][0])
-            line = match["decl"][0].start_point.row + 1
-            key = f"mcp-source:{quote(rel.as_posix(), safe='')}:{receiver}:{line}"
-            server = MCPServerComponent(
-                bom_ref=key,
-                name=receiver,
-                source_path=rel.as_posix(),
-                properties={"declaration_line": line, "method": "typescript-ast"},
+        variable = node.parent
+        declaration = variable.parent if variable is not None else None
+        identifier = variable.child_by_field_name("name") if variable is not None else None
+        receiver = _value(identifier)
+        scope = _scope(declaration.parent) if declaration is not None else None
+        direct_scope = declaration.parent if declaration is not None else None
+        if direct_scope is not None and direct_scope.type == "export_statement":
+            direct_scope = direct_scope.parent
+        if (
+            variable is None
+            or variable.type != "variable_declarator"
+            or declaration is None
+            or declaration.type != "lexical_declaration"
+            or not declaration.children
+            or declaration.children[0].type != "const"
+            or direct_scope is None
+            or direct_scope.type not in {"program", "statement_block"}
+            or scope is None
+            or identifier is None
+            or identifier.type != "identifier"
+            or not re.fullmatch(r"[A-Za-z_$][A-Za-z0-9_$]{0,127}", receiver)
+            or bindings.get((scope.id, receiver)) != variable.id
+        ):
+            result.surfaces_excluded.append(
+                f"{path}:{node.start_point.row + 1} (unsupported MCP constructor binding or scope)"
             )
-            servers[(_block(match["decl"][0]), receiver)] = server
-            result.components.append(server)
-        for _, match in QueryCursor(_CALL).matches(tree.root_node):
-            call = match["call"][0]
-            bound_server = servers.get((_block(call), _value(match["receiver"][0])))
-            if not bound_server or _value(match["method"][0]) not in {"registerTool", "tool"}:
-                continue
-            arg = match["name"][0]
-            name = _value(arg)[1:-1] if arg.type == "string" else ""
-            if not re.fullmatch(r"[a-zA-Z0-9_.-]{1,128}", name):
-                result.surfaces_excluded.append(
-                    f"{rel}:{call.start_point.row + 1} (unresolved MCP tool name)"
-                )
-                continue
-            tool = ToolComponent(
-                bom_ref=f"tool:{bound_server.bom_ref}/{name}",
-                name=name,
-                mcp_server_ref=bound_server.bom_ref,
-                source_path=rel.as_posix(),
-                properties={
-                    "declaration_line": call.start_point.row + 1,
-                    "method": "typescript-ast",
-                    "registration_source_sha256": hash_bytes(call.text or b""),
-                },
+            continue
+        line = declaration.start_point.row + 1
+        ref = f"mcp-source:{quote(path.as_posix(), safe='')}:{receiver}:{line}:{node.start_byte}"
+        server = MCPServerComponent(
+            bom_ref=ref,
+            name=receiver,
+            source_path=path.as_posix(),
+            properties={
+                "declaration_line": line,
+                "method": "typescript-ast",
+                "collection_mode": "static-source-declaration",
+                "runtime_registration": "unknown",
+            },
+        )
+        bindings[(scope.id, receiver)] = (server, node.end_byte)
+        servers[node.id] = (server, node.end_byte)
+    components: list[MCPServerComponent | ToolComponent] = [s for s, _ in servers.values()]
+    registrations = 0
+    for node in nodes:
+        if node.type != "call_expression":
+            continue
+        member = node.child_by_field_name("function")
+        if member is None or member.type != "member_expression":
+            continue
+        receiver = _value(member.child_by_field_name("object"))
+        if _value(member.child_by_field_name("property")) not in {"registerTool", "tool"}:
+            continue
+        binding = _lookup(bindings, receiver, node)
+        if not isinstance(binding, tuple):
+            result.surfaces_excluded.append(
+                f"{path}:{node.start_point.row + 1} (unresolved MCP registration receiver)"
             )
-            if tool.bom_ref in bound_server.tool_refs:
-                result.scan_failures.append(
-                    f"Duplicate tool registration {name!r} at {rel}:{call.start_point.row + 1}"
+            continue
+        registrations += 1
+        if registrations > MAX_REGISTRATIONS:
+            raise ValueError("TypeScript registration limit exceeded")
+        server, declared_at = binding
+        statement = node.parent
+        if (
+            statement is None
+            or statement.type != "expression_statement"
+            or statement.parent is None
+            or statement.parent.type not in {"program", "statement_block"}
+            or node.start_byte < declared_at
+        ):
+            result.surfaces_excluded.append(
+                f"{path}:{node.start_point.row + 1} (unsupported MCP registration scope or ordering)"
+            )
+            continue
+        arguments = node.child_by_field_name("arguments")
+        arg = arguments.named_children[0] if arguments and arguments.named_children else None
+        name = _value(arg)[1:-1] if arg is not None and arg.type == "string" else ""
+        if not re.fullmatch(r"[a-zA-Z0-9_.-]{1,128}", name):
+            result.surfaces_excluded.append(
+                f"{path}:{node.start_point.row + 1} (unresolved MCP tool name)"
+            )
+            continue
+        ref = f"tool:{server.bom_ref}/{name}"
+        if ref in server.tool_refs:
+            result.scan_failures.append(
+                f"{path}:{node.start_point.row + 1} (duplicate MCP tool registration)"
+            )
+            continue
+        tool = ToolComponent(
+            bom_ref=ref,
+            name=name,
+            mcp_server_ref=server.bom_ref,
+            source_path=path.as_posix(),
+            properties={
+                "declaration_line": node.start_point.row + 1,
+                "method": "typescript-ast",
+                "collection_mode": "static-source-declaration",
+                "registration_source_sha256": hash_bytes(node.text or b""),
+            },
+            claims={
+                "tool_definition": ClaimEvidence(
+                    method="not-collected",
+                    scope="source-declaration",
+                    unknown_reason="Only the literal registration name was collected; the effective descriptor is unobserved",
                 )
-                continue
-            bound_server.tool_refs.append(tool.bom_ref)
-            bound_server.tool_count += 1
-            result.components.append(tool)
+            },
+        )
+        server.tool_refs.append(ref)
+        server.tool_count += 1
+        components.append(tool)
+    result.components.extend(components)

@@ -88,8 +88,29 @@ def validate_spdx(document: dict[str, Any]) -> list[str]:
             values = node.get(field, [])
             values = values if isinstance(values, list) else [values]
             for value in values:
-                if isinstance(value, str) and value not in known:
+                # SPDX's predefined NoAssertion license is a vocabulary individual,
+                # not an artifact that the exporting producer can redefine.
+                standard_license = (
+                    field == "to"
+                    and node.get("relationshipType")
+                    in {"hasDeclaredLicense", "hasConcludedLicense"}
+                    and value == "https://spdx.org/rdf/3.0.1/terms/Licensing/NoAssertion"
+                )
+                if isinstance(value, str) and value not in known and not standard_license:
                     errors.append(f"unresolved SPDX {field}: {value}")
+    for package in graph:
+        if package.get("type") not in {"ai_AIPackage", "dataset_DatasetPackage"}:
+            continue
+        for kind in ("hasDeclaredLicense", "hasConcludedLicense"):
+            relations = [
+                node
+                for node in graph
+                if node.get("type") == "Relationship"
+                and node.get("from") == package.get("spdxId")
+                and node.get("relationshipType") == kind
+            ]
+            if len(relations) != 1 or len(relations[0].get("to", [])) != 1:
+                errors.append(f"SPDX {package.get('spdxId')} requires exactly one {kind} target")
     return errors
 
 

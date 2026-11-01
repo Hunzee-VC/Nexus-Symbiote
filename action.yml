@@ -16,12 +16,6 @@ inputs:
   scanners:
     description: Comma-separated scanner names including shadowscan, a2a, ide_agents; empty means all
     default: ""
-  model-signer:
-    description: Authorized model signer identity
-    default: ""
-  model-issuer:
-    description: Authorized model signer OIDC issuer
-    default: ""
   validate:
     description: Fail the action when completeness or integrity validation fails
     default: "true"

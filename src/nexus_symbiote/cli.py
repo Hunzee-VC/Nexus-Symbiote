@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import click
 from rich.console import Console
@@ -15,10 +14,11 @@ from nexus_symbiote import __version__
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import AssuranceLevel
 from nexus_symbiote.core.models import AIBOMMetadata, CompletenessClaim
+from nexus_symbiote.live_cli import register_live_commands
 from nexus_symbiote.policy import Policy
-
-if TYPE_CHECKING:
-    from nexus_symbiote.live import LiveVerifyReport
+from nexus_symbiote.runtime_cli import register_runtime_commands
+from nexus_symbiote.supply_chain_cli import register_supply_chain_commands
+from nexus_symbiote.utils.files import write_output_file
 
 console = Console(stderr=True)
 
@@ -70,67 +70,6 @@ def main() -> None:
     """Nexus SymBiote — Agent Bill of Materials for AI supply chain security."""
 
 
-def _collect_aibom(root: Path, selected: tuple[str, ...] | None = None) -> AIBOM:
-    """Run scanners over root and return the assembled AIBOM with completeness metadata."""
-    aibom = AIBOM(metadata=AIBOMMetadata(authors=[]))
-    all_scanners = _get_scanners()
-
-    if selected:
-        chosen = selected
-    else:
-        from nexus_symbiote.policy import load_policy
-
-        try:
-            policy = load_policy(root)
-        except ValueError as exc:
-            raise click.ClickException(str(exc)) from exc
-        chosen = tuple(policy.scan.scanners) if policy else tuple(all_scanners.keys())
-
-    surfaces_scanned: list[str] = []
-    surfaces_excluded: list[str] = []
-    scan_failures: list[str] = []
-    scanner_status: dict[str, str] = dict.fromkeys(all_scanners, "unknown")
-
-    for name in chosen:
-        if name not in all_scanners:
-            scan_failures.append(f"Unknown scanner: {name}")
-            scanner_status[name] = "failed"
-            continue
-
-        scanner_cls = all_scanners[name]
-        scanner = scanner_cls()
-
-        try:
-            result = scanner.scan(root)
-            for comp in result.components:
-                aibom.add_component(comp)
-            surfaces_scanned.extend(result.surfaces_scanned)
-            surfaces_excluded.extend(result.surfaces_excluded)
-            scan_failures.extend(result.scan_failures)
-            scanner_status[name] = (
-                "failed"
-                if result.scan_failures
-                else "partial"
-                if result.surfaces_excluded
-                else "complete"
-            )
-        except Exception as e:
-            err_console.print(f"  [red]Scanner '{name}' failed:[/] {e}")
-            scan_failures.append(f"{name}: {e}")
-            scanner_status[name] = "failed"
-
-    aibom.metadata.completeness = CompletenessClaim(
-        scope="local-static-project",
-        surfaces_scanned=surfaces_scanned,
-        surfaces_excluded=surfaces_excluded,
-        scan_failures=scan_failures,
-        scanner_status=scanner_status,
-        assurance_level=AssuranceLevel.OBSERVED,
-    )
-
-    return aibom
-
-
 @main.command()
 @click.argument("project_path", type=click.Path(exists=True), default=".")
 @click.option("-o", "--output", type=click.Path(), help="Output file path")
@@ -156,9 +95,6 @@ def _collect_aibom(root: Path, selected: tuple[str, ...] | None = None) -> AIBOM
     type=click.Path(exists=True, path_type=Path),
     help="Explicit operator signer policy JSON",
 )
-@click.option("--no-project-policy", is_flag=True, help="Ignore the scanned repository’s policy.")
-@click.option("--model-signer", help="Authorized model signer identity.")
-@click.option("--model-issuer", help="Authorized model signer OIDC issuer.")
 def scan(
     project_path: str,
     output: str | None,
@@ -203,6 +139,11 @@ def scan(
     surfaces_excluded: list[str] = []
     scan_failures: list[str] = []
     completed: list[str] = []
+    source_report_digest = None
+    source_report_format = None
+    source_report_status = None
+    source_unmapped_count = 0
+    source_unmapped_indexes: list[int] = []
     scanner_status: dict[str, str] = dict.fromkeys(all_scanners, "unknown")
     for name in selected:
         scanner = (
@@ -219,15 +160,24 @@ def scan(
                 raise ValueError("scanner does not support configured exclude_paths")
             failure_count = len(scan_failures)
             result = scanner.scan(root)
+            if name == "shadowscan":
+                source_report_digest = result.source_report_digest
+                source_report_format = result.source_report_format
+                source_report_status = result.source_report_status
+                source_unmapped_count = result.source_unmapped_count
+                source_unmapped_indexes = result.source_unmapped_indexes
             for comp in result.components:
                 # Discovery of a file/configuration does not verify every supplier assertion.
-                comp.claims["repository_presence"] = ClaimEvidence(
-                    assurance=AssuranceLevel.OBSERVED,
-                    method="filesystem-inventory",
-                    scope="repository",
-                    collector=name,
-                    locator=comp.source_path,
-                    observed_at=aibom.metadata.timestamp,
+                imported = name == "shadowscan"
+                comp.claims["discovery_report_entry" if imported else "repository_presence"] = (
+                    ClaimEvidence(
+                        assurance=AssuranceLevel.DECLARED if imported else AssuranceLevel.OBSERVED,
+                        method="imported-discovery-report" if imported else "filesystem-inventory",
+                        scope="source-report" if imported else "repository",
+                        collector=name,
+                        locator=comp.source_path,
+                        observed_at=aibom.metadata.timestamp,
+                    )
                 )
                 if comp.assurance_level is AssuranceLevel.VERIFIED:
                     comp.assurance_level = AssuranceLevel.DECLARED
@@ -259,7 +209,12 @@ def scan(
         raise click.ClickException(str(exc)) from exc
     scan_failures.extend(validate_graph(aibom))
     aibom.metadata.completeness = CompletenessClaim(
-        scope="repository",
+        scope="repository+shadowscan" if source_report_digest else "repository",
+        source_report_digest=source_report_digest,
+        source_report_format=source_report_format,
+        source_report_status=source_report_status,
+        source_unmapped_count=source_unmapped_count,
+        source_unmapped_indexes=source_unmapped_indexes,
         surfaces_scanned=sorted(set(surfaces_scanned)),
         surfaces_excluded=sorted(set(surfaces_excluded)),
         scan_failures=scan_failures,
@@ -285,6 +240,10 @@ def scan(
     ).passes_gate(aibom)
     report_mode = report_only or policy.scan.failure_mode == "report-only"
 
+    if source_report_digest and output_format == "sarif":
+        raise click.ClickException(
+            "SARIF cannot preserve imported discovery coverage; use native JSON, CycloneDX or SPDX."
+        )
     if output_format == "cyclonedx":
         from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
 
@@ -301,8 +260,6 @@ def scan(
         out_data = aibom.to_json()
 
     if output:
-        from nexus_symbiote.utils.files import write_output_file
-
         write_output_file(Path(output), out_data)
         console.print(f"[bold green]Saved[/] {output}")
     else:
@@ -340,27 +297,17 @@ def import_shadowscan(
     policy = _policy(Path(report_path).parent)
     importer = ShadowScanImporter()
     try:
-        components = importer.import_report(Path(report_path))
-    except Exception as exc:
-        raise click.ClickException(f"Failed to import ShadowScan report: {exc}") from exc
+        imported = importer.read_report(Path(report_path))
+    except (ValueError, TypeError, OSError, UnicodeError, RecursionError) as exc:
+        raise click.ClickException("Failed to safely import the ShadowScan report") from exc
 
-    aibom = AIBOM(metadata=AIBOMMetadata(authors=[]))
+    aibom = imported.to_native_bom()
     aibom.finalize()
-    for comp in components:
-        comp.assurance_level = AssuranceLevel.DECLARED
-        aibom.add_component(comp)
 
-    aibom.metadata.completeness = CompletenessClaim(
-        scope="shadowscan-imported",
-        surfaces_scanned=[report_path],
-        assurance_level=AssuranceLevel.DECLARED,
-        scanner_status={"shadowscan": "complete"},
-        collectors_requested=["shadowscan"],
-        collectors_completed=["shadowscan"],
-        unobserved_surfaces=["runtime", "effective-identity", "effective-authorization"],
-        timestamp=aibom.metadata.timestamp,
-    )
-
+    if output_format == "sarif":
+        raise click.ClickException(
+            "SARIF cannot preserve imported discovery coverage; use native JSON, CycloneDX or SPDX."
+        )
     if output_format == "cyclonedx":
         from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
 
@@ -376,10 +323,15 @@ def import_shadowscan(
     else:
         out_data = aibom.to_json()
 
-    from nexus_symbiote.utils.files import write_output_file
-
-    write_output_file(Path(output), out_data)
-    console.print(f"[bold green]Imported {len(components)} components and saved[/] {output}")
+    try:
+        write_output_file(Path(output), out_data, overwrite=False)
+    except OSError as exc:
+        raise click.ClickException("Cannot create output; choose a new output path") from exc
+    console.print(
+        f"Imported {len(imported.components)} components and saved {output}; discovery coverage remains partial."
+    )
+    if imported.source_status != "complete" and not report_only:
+        raise click.ClickException("ShadowScan source report is incomplete; the BOM is partial")
 
     from nexus_symbiote.validators.risk import RiskScorer
 
@@ -392,6 +344,161 @@ def import_shadowscan(
     if not passed and not (report_only or policy.scan.failure_mode == "report-only"):
         err_console.print("[red]Imported claims do not establish complete verified coverage[/]")
         raise click.exceptions.Exit(1)
+
+
+@main.command("verify-artifact")
+@click.argument("artifact_path")
+@click.option(
+    "--project",
+    required=True,
+    type=click.Path(exists=True, file_okay=False),
+    help="Trusted project root",
+)
+@click.option(
+    "--sha256", "expected_digest", required=True, help="Expected sha256:<hex> from a trusted source"
+)
+@click.option(
+    "--bundle", type=click.Path(exists=True, dir_okay=False), help="Optional Sigstore bundle"
+)
+@click.option("--signer-identity", help="Expected Sigstore signing identity")
+@click.option("--issuer", help="Expected Sigstore OIDC issuer")
+def verify_artifact(
+    artifact_path: str,
+    project: str,
+    expected_digest: str,
+    bundle: str | None,
+    signer_identity: str | None,
+    issuer: str | None,
+) -> None:
+    """Verify a local artifact's digest and optionally its Sigstore bundle."""
+    import hmac
+    import re
+
+    from nexus_symbiote.scanners.base import read_regular_text
+    from nexus_symbiote.utils.confined import hash_confined_file
+    from nexus_symbiote.utils.crypto import verify_sigstore_digest
+
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", expected_digest):
+        raise click.ClickException(
+            "Expected SHA-256 must be sha256:<64 lowercase hexadecimal characters>"
+        )
+    if bool(bundle) != bool(signer_identity and issuer) or (
+        not bundle and (signer_identity or issuer)
+    ):
+        raise click.ClickException("Bundle verification requires both signer identity and issuer")
+    try:
+        digest = hash_confined_file(Path(project), artifact_path)
+    except OSError as exc:
+        raise click.ClickException(
+            "Cannot safely hash the artifact within the project root"
+        ) from exc
+    if not hmac.compare_digest(digest, expected_digest):
+        raise click.ClickException("Artifact digest mismatch")
+    if bundle:
+        try:
+            bundle_bytes = read_regular_text(Path(bundle)).encode("utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise click.ClickException("Cannot safely read the Sigstore bundle") from exc
+        if signer_identity is None or issuer is None:
+            raise click.ClickException(
+                "Bundle verification requires both signer identity and issuer"
+            )
+        verified = verify_sigstore_digest(digest, bundle_bytes, signer_identity, issuer)
+        if not verified.verified:
+            raise click.ClickException("Sigstore signature or signer policy verification failed")
+        click.echo(
+            "Artifact digest and Sigstore signer policy verified. This does not establish artifact safety or a deployment binding."
+        )
+    else:
+        click.echo(
+            "Artifact bytes match the expected digest. Signer, artifact safety, and deployment binding were not verified."
+        )
+
+
+@main.command("verify-discovery")
+@click.argument("aibom_path", type=click.Path(exists=True, dir_okay=False))
+@click.argument("report_path", type=click.Path(exists=True, dir_okay=False))
+@click.option("--projection", is_flag=True, help="Rebuild and compare the direct native import.")
+@click.option(
+    "--bundle",
+    type=click.Path(exists=True, dir_okay=False),
+    help="Verify the report producer's Sigstore bundle and the direct native projection.",
+)
+@click.option("--signer-identity", help="Expected report signer from operator policy.")
+@click.option("--issuer", help="Expected OIDC issuer from operator policy.")
+def verify_discovery(
+    aibom_path: str,
+    report_path: str,
+    projection: bool,
+    bundle: str | None,
+    signer_identity: str | None,
+    issuer: str | None,
+) -> None:
+    """Verify source bytes and optionally their native projection and producer."""
+    import hashlib
+    import hmac
+    import re
+
+    from nexus_symbiote.core.hashing import parse_json_strict
+    from nexus_symbiote.scanners.base import read_regular_text
+    from nexus_symbiote.scanners.shadowscan import MAX_REPORT_BYTES, ShadowScanImporter
+    from nexus_symbiote.utils.crypto import verify_sigstore_digest
+
+    if any(x is not None for x in (bundle, signer_identity, issuer)) and not all(
+        (bundle, signer_identity, issuer)
+    ):
+        raise click.UsageError("--bundle, --signer-identity and --issuer must be supplied together")
+    try:
+        doc = parse_json_strict(
+            read_regular_text(Path(aibom_path), max_bytes=MAX_REPORT_BYTES),
+            max_bytes=MAX_REPORT_BYTES,
+        )
+        bom = AIBOM.model_validate(doc)
+        text = read_regular_text(Path(report_path), max_bytes=MAX_REPORT_BYTES)
+    except (OSError, ValueError, UnicodeError, RecursionError) as exc:
+        raise click.ClickException("Cannot safely read the BOM or discovery report") from exc
+    claim = bom.metadata.completeness
+    expected = claim.source_report_digest if claim else None
+    if not isinstance(expected, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", expected):
+        raise click.ClickException("BOM does not contain a valid ShadowScan report digest")
+    actual = "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+    if not hmac.compare_digest(actual, expected):
+        raise click.ClickException("Discovery report digest mismatch")
+    if projection or bundle:
+        try:
+            projected = ShadowScanImporter().parse_report(text).to_native_bom().to_dict()
+            # Import time and UUID are generated on each run. Everything else,
+            # including unknown fields in the original JSON, must match.
+            for field in ("timestamp", "serial_number"):
+                projected["metadata"].pop(field)
+                if not isinstance(doc["metadata"].pop(field, None), str):
+                    raise ValueError("missing generated metadata")
+            if json.dumps(projected, sort_keys=True) != json.dumps(doc, sort_keys=True):
+                raise ValueError("projection differs")
+        except (KeyError, TypeError, ValueError, RecursionError) as exc:
+            raise click.ClickException(
+                "BOM does not match the direct native ShadowScan projection"
+            ) from exc
+    if bundle and signer_identity and issuer:
+        try:
+            bundle_bytes = read_regular_text(Path(bundle)).encode("utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise click.ClickException("Cannot safely read the Sigstore bundle") from exc
+        if not verify_sigstore_digest(actual, bundle_bytes, signer_identity, issuer).verified:
+            raise click.ClickException(
+                "ShadowScan report signature or signer policy verification failed"
+            )
+        click.echo(
+            "Report signer and direct native projection verified. Discovery claims retain declared assurance."
+        )
+    elif projection:
+        click.echo(
+            "Report bytes and direct native projection match. Producer identity is unverified."
+        )
+    else:
+        click.echo(
+            "Report bytes match the recorded digest. Source identity, signature, and truth were not verified."
+        )
 
 
 @main.command()
@@ -674,216 +781,14 @@ def init(force: bool, path: str) -> None:
         err_console.print(f"[yellow]Warning:[/] {target} already exists. Use --force to overwrite.")
         sys.exit(1)
 
-    target.write_text(DEFAULT_POLICY_YAML, encoding="utf-8")
+    write_output_file(target, DEFAULT_POLICY_YAML, overwrite=force)
     console.print(f"[bold green]Created[/] {target}")
     console.print("  Edit this file to customize scan, risk, and validation policies.")
 
 
-@main.command("verify-live")
-@click.argument("aibom_path", type=click.Path(exists=True))
-@click.option(
-    "--project",
-    type=click.Path(exists=True),
-    default=".",
-    help="Untrusted project root; launch policy must be outside this tree.",
-)
-@click.option(
-    "--launch-policy",
-    required=True,
-    type=click.Path(exists=True, dir_okay=False),
-    help="Operator-owned JSON mapping exact server references to absolute commands and SHA-256 pins.",
-)
-@click.option("--json-output", is_flag=True, help="Output the verification report as JSON")
-@click.option("--record", is_flag=True, help="Emit a candidate BOM to stdout for separate review.")
-def verify_live(
-    aibom_path: str, project: str, launch_policy: str, json_output: bool, record: bool
-) -> None:
-    """Compare live descriptors from independently approved launchers to the inventory."""
-    from nexus_symbiote.live import verify_mcp_servers
-    from nexus_symbiote.live.stdio import strict_object
-    from nexus_symbiote.scanners.base import read_regular_text
-
-    policy_path = Path(launch_policy)
-    if policy_path.resolve().is_relative_to(Path(project).resolve()):
-        raise click.UsageError("launch policy must be provisioned outside the untrusted project")
-    if record and json_output:
-        raise click.UsageError("choose a candidate BOM or a JSON verification report")
-    try:
-        policy = json.loads(read_regular_text(policy_path), object_pairs_hook=strict_object)
-        if not isinstance(policy, dict):
-            raise ValueError("expected a policy object")
-        bom = AIBOM.model_validate(
-            json.loads(
-                read_regular_text(Path(aibom_path), max_bytes=32 * 1024 * 1024),
-                object_pairs_hook=strict_object,
-            )
-        )
-    except (ValueError, OSError, RecursionError) as exc:
-        raise click.ClickException("invalid BOM or launch policy") from exc
-    report = verify_mcp_servers(bom, trusted_launchers=policy)
-    if record:
-        if not report.complete or any(
-            f.status == "missing" for r in report.results for f in r.tool_findings
-        ):
-            raise click.ClickException("incomplete inventory; candidate not emitted")
-        _record_live_tools(bom, report)
-        click.echo(bom.to_json())
-        return
-
-    if json_output:
-        click.echo(json.dumps(report.to_dict(), indent=2))
-    else:
-        for result in report.results:
-            if not result.reachable:
-                console.print(f"  [yellow]unreachable[/] {result.server_name}: {result.error}")
-                continue
-            for finding in result.tool_findings:
-                if finding.status == "match":
-                    console.print(f"  [green]match[/]    {result.server_name}/{finding.name}")
-                elif finding.status == "changed":
-                    console.print(
-                        f"  [red]CHANGED[/]  {result.server_name}/{finding.name} — "
-                        "tool definition differs from the approved BOM (rug-pull)"
-                    )
-                elif finding.status == "new":
-                    console.print(
-                        f"  [red]NEW[/]      {result.server_name}/{finding.name} — "
-                        "tool not present in the approved BOM"
-                    )
-                elif finding.status == "missing":
-                    console.print(f"  [yellow]missing[/]  {result.server_name}/{finding.name}")
-
-    if not report.complete or report.has_drift:
-        raise click.exceptions.Exit(1)
-
-
-def _record_live_tools(bom: AIBOM, report: LiveVerifyReport) -> int:
-    """Update the in-memory candidate after a complete observation."""
-    from urllib.parse import quote
-
-    from nexus_symbiote.core.enums import TrustTier
-    from nexus_symbiote.core.models import MCPServerComponent, ToolComponent
-
-    recorded = 0
-    for result in report.results:
-        if not result.reachable:
-            continue
-        for finding in result.tool_findings:
-            if finding.status not in ("new", "changed"):
-                continue
-            descriptor = finding.descriptor
-            assert descriptor is not None
-            existing = next(
-                (
-                    c
-                    for c in bom.components
-                    if isinstance(c, ToolComponent)
-                    and c.mcp_server_ref == result.server_ref
-                    and c.name == finding.name
-                ),
-                None,
-            )
-            if existing is None:
-                existing = ToolComponent(
-                    bom_ref=f"tool:{quote(result.server_ref, safe='')}/{quote(finding.name, safe='')}",
-                    name=finding.name,
-                    mcp_server_ref=result.server_ref,
-                    trust_tier=TrustTier.THIRD_PARTY_UNSIGNED,
-                )
-                bom.add_component(existing)
-            existing.definition_hash = finding.definition_hash
-            existing.definition_hash_version = "rfc8785-jcs-v1"
-            existing.description_text = descriptor.get("description", "")
-            existing.input_schema = descriptor["inputSchema"]
-            existing.annotations = descriptor.get("annotations") or {}
-            recorded += 1
-        server = bom.get_component(result.server_ref)
-        if isinstance(server, MCPServerComponent):
-            server.schema_hash = result.live_schema_hash
-            server.tool_refs = [
-                c.bom_ref
-                for c in bom.components
-                if isinstance(c, ToolComponent) and c.mcp_server_ref == result.server_ref
-            ]
-            server.tool_count = len(server.tool_refs)
-    return recorded
-
-
-@main.command()
-@click.argument("project_path", type=click.Path(exists=True), default=".")
-@click.option(
-    "-o",
-    "--baseline-path",
-    type=click.Path(),
-    default=".symbiote-baseline.json",
-    help="Where to write the baseline",
-)
-def baseline(project_path: str, baseline_path: str) -> None:
-    """Create a signed-drift baseline from the current project state.
-
-    The baseline is the approved snapshot. `symbiote diff baseline current`
-    in CI then fails on trust downgrades, tool mutations, or pin removals.
-    """
-    root = Path(project_path).resolve()
-    console.print(f"[bold]Creating baseline[/] from {root}")
-
-    aibom = _collect_aibom(root)
-    target = Path(baseline_path)
-    target.write_text(aibom.to_json(), encoding="utf-8")
-
-    console.print(f"[bold green]Baseline written[/] {target}")
-    console.print("  Commit this file; diff against it in CI to gate drift.")
-
-
-@main.command()
-@click.argument("aibom_path", type=click.Path(exists=True))
-@click.option("-o", "--output", type=click.Path(), help="Output file path")
-def vex(aibom_path: str, output: str | None) -> None:
-    """Generate a CycloneDX VEX document from AIBOM risk findings.
-
-    Statements are keyed to artifact digests and adaptation events (fine-tune,
-    LoRA, quantization), so a finding tracks the exact weight revision it
-    was observed on.
-    """
-    from nexus_symbiote.generators.vex import VEXGenerator
-
-    bom = AIBOM.load(Path(aibom_path))
-    vex_doc = VEXGenerator().generate_json(bom)
-
-    if output:
-        Path(output).write_text(vex_doc, encoding="utf-8")
-        console.print(f"[bold green]VEX written[/] {output}")
-    else:
-        click.echo(vex_doc)
-
-
-@main.command()
-@click.argument("aibom_path", type=click.Path(exists=True))
-@click.option("-o", "--output", type=click.Path(), help="Output file path")
-def advisories(aibom_path: str, output: str | None) -> None:
-    """Query OSV.dev for known vulnerabilities in discovered registry packages.
-
-    Network use is explicit: this command contacts api.osv.dev. Static `scan`
-    never does.
-    """
-    from nexus_symbiote.advisories import fetch_advisories
-
-    bom = AIBOM.load(Path(aibom_path))
-    report = fetch_advisories(bom)
-
-    if output:
-        Path(output).write_text(json.dumps(report.to_dict(), indent=2), encoding="utf-8")
-        console.print(f"[bold green]Advisory report written[/] {output}")
-    else:
-        click.echo(json.dumps(report.to_dict(), indent=2))
-
-    for adv in report.advisories:
-        cves = ", ".join(adv.aliases) if adv.aliases else "no CVE aliases"
-        console.print(f"  [red]{adv.advisory_id}[/] {adv.component_name}@{adv.version} ({cves})")
-    if report.errors:
-        for err in report.errors:
-            console.print(f"  [yellow]lookup error:[/] {err}")
-
+register_runtime_commands(main)
+register_live_commands(main)
+register_supply_chain_commands(main)
 
 if __name__ == "__main__":
     main()

@@ -30,8 +30,7 @@ class TestA2AScanner:
         servers = [c for c in result.components if c.component_type == ComponentType.A2A_SERVER]
         assert len(servers) == 1
         assert servers[0].name == "travel-agent"
-        # A card's declaration is not evidence that the live endpoint enforces it.
-        assert servers[0].authentication_required is None
+        assert servers[0].authentication_required is True
         assert "book-flight" in servers[0].skills_declared
         assert servers[0].version == "1.0.0"
 
@@ -244,10 +243,8 @@ class TestMCPClientDetection:
         clients = [c for c in result.components if c.component_type == ComponentType.MCP_CLIENT]
         assert len(clients) == 1
         assert clients[0].host_application == "claude-code"
-        assert any(
-            c.bom_ref in clients[0].server_refs and c.name == "filesystem"
-            for c in result.components
-        )
+        server = next(c for c in result.components if c.component_type == ComponentType.MCP_SERVER)
+        assert clients[0].server_refs == [server.bom_ref]
 
     def test_mcp_client_from_cursor_config(self, tmp_path):
         cursor_dir = tmp_path / ".cursor"
@@ -420,20 +417,26 @@ class TestNewCollectorBoundaries:
             for component in result.components
             if component.component_type == ComponentType.MCP_CLIENT
         }
-        assert clients["claude-code"].server_refs == ["mcp-server:claude-only"]
-        assert clients["cursor"].server_refs == ["mcp-server:cursor-only"]
+        servers = {
+            c.name: c for c in result.components if c.component_type == ComponentType.MCP_SERVER
+        }
+        assert clients["claude-code"].server_refs == [servers["claude-only"].bom_ref]
+        assert clients["cursor"].server_refs == [servers["cursor-only"].bom_ref]
 
     def test_mcp_same_host_settings_merge_without_duplicate_client_identity(self, tmp_path):
         (tmp_path / ".mcp.json").write_text('{"mcpServers":{"one":{}}}')
         (tmp_path / ".claude").mkdir()
         (tmp_path / ".claude/mcp.json").write_text('{"mcpServers":{"two":{}}}')
+        result = MCPScanner().scan(tmp_path)
         clients = [
             component
-            for component in MCPScanner().scan(tmp_path).components
+            for component in result.components
             if component.component_type == ComponentType.MCP_CLIENT
         ]
         assert len(clients) == 1
-        assert clients[0].server_refs == ["mcp-server:one", "mcp-server:two"]
+        assert clients[0].server_refs == sorted(
+            c.bom_ref for c in result.components if c.component_type == ComponentType.MCP_SERVER
+        )
 
     def test_mcp_python_comments_are_not_sdk_evidence(self, tmp_path):
         (tmp_path / "agent.py").write_text('# from mcp import Client\nmessage = "MCPClient()"\n')
@@ -471,10 +474,11 @@ class TestNewCollectorBoundaries:
         from nexus_symbiote.core.enums import AssuranceLevel, TrustTier
         from nexus_symbiote.scanners.shadowscan import ShadowScanImporter
 
-        report = [
+        findings = [
             {
                 "id": "agent:one",
                 "kind": "agent",
+                "surface": "code",
                 "title": "demo",
                 "resource": "https://user:CANARY@agent.example/private/CANARY?token=CANARY",
                 "shadow": True,
@@ -483,24 +487,34 @@ class TestNewCollectorBoundaries:
                 "command": "echo CANARY",
             }
         ]
+        report = {
+            "version": "0.1.4",
+            "findings": findings,
+            "summary": {"complete": True, "declared_omissions": 0, "tolerated_gaps": 0},
+            "stats": [
+                {"errors": [], "skipped": False, "incomplete": False, "declared_omissions": 0}
+            ],
+        }
         (tmp_path / "shadowscan-report.json").write_text(json.dumps(report))
         result = ShadowScanImporter().scan(tmp_path)
         assert not result.scan_failures
         component = result.components[0]
-        assert component.bom_ref == "agent:one"
+        assert component.bom_ref.startswith("shadowscan:")
         assert component.assurance_level == AssuranceLevel.DECLARED
         assert component.trust_tier == TrustTier.UNKNOWN
-        assert component.source_path == "https://agent.example"
-        assert component.properties["shadowscan:report_hash"].startswith("sha256:")
-        assert component.properties["shadowscan:raw_payload_omitted"] is True
+        assert component.source_path is None
+        assert component.properties["shadowscan:report-sha256"].startswith("sha256:")
+        assert component.autonomy_level is None
         assert "CANARY" not in repr(result)
-        assert any(risk.category == "shadow-agent" for risk in component.risks)
+        assert any(risk.category == "shadowscan-inventory-unmatched" for risk in component.risks)
 
     def test_shadowscan_cyclonedx_mapping_preserves_kind_without_raw_properties(self, tmp_path):
         from nexus_symbiote.scanners.shadowscan import ShadowScanImporter
 
         report = {
             "bomFormat": "CycloneDX",
+            "specVersion": "1.7",
+            "metadata": {"properties": [{"name": "shadowscan:scan:status", "value": "complete"}]},
             "components": [
                 {
                     "bom-ref": "mcp:one",

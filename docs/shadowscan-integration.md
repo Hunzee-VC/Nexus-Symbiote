@@ -6,8 +6,8 @@ retention controls. For example, following the ShadowScan version's own CLI help
 
 ```sh
 shadowscan code /path/to/repository --format json -o shadowscan.json
-nexus-symbiote import-shadowscan shadowscan.json -o agentbom.json
-nexus-symbiote import-shadowscan shadowscan.json --format cyclonedx -o agentbom.cdx.json
+nexus-symbiote import-shadowscan shadowscan.json -o agentbom.json --report-only
+nexus-symbiote import-shadowscan shadowscan.json --format cyclonedx -o agentbom.cdx.json --report-only
 nexus-symbiote verify-discovery agentbom.json shadowscan.json
 nexus-symbiote verify-artifact model.safetensors --project /path/to/repository --sha256 "$TRUSTED_SHA256"
 nexus-symbiote validate agentbom.json --project /path/to/repository
@@ -46,9 +46,29 @@ sensitive and must be handled accordingly.
 At present the bridge does not resolve agents across tenants or reports, verify
 live MCP identities, or map every ShadowScan finding type, model association or
 dependency. A complete ShadowScan run is only complete for its configured scope;
-Nexus SymBiote records the imported BOM coverage as partial. SPDX and SARIF are not
-available for imported discovery until their coverage and provenance mappings
-are validated.
+Nexus SymBiote records the imported BOM coverage as partial. SARIF is not available
+for imported discovery because its finding projection does not retain complete
+coverage and provenance.
+
+## Import and policy gates
+
+Imported coverage remains partial even when the source report claims a completed
+scan. The normal import command writes the evidence and returns a failing inventory
+gate; use `--report-only` explicitly to inspect a report without treating it as
+approval. Incomplete source reports remain recorded as incomplete in either mode.
+Existing output files are never overwritten by `import-shadowscan`.
+
+Native JSON, CycloneDX and SPDX preserve report provenance, source status and
+unmapped indexes. Portable formats embed a digest-bound native inventory extension;
+its round trip preserves the imported limitations without authenticating the
+producer. CycloneDX also declares an incomplete composition. SARIF imports remain
+unavailable because a finding-only projection does not preserve this evidence.
+
+The importer API returns `ImportedReport`, including `components`, coverage and
+provenance, rather than a bare component list. It rejects bare finding arrays that
+cannot carry source coverage. Unknown finding kinds remain unmapped. Imported
+assets are not automatically linked to the repository agent or asserted present
+on the local filesystem.
 
 ### Verify the native import and its producer
 

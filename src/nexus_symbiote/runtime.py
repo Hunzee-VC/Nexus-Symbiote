@@ -1,0 +1,501 @@
+"""Signed, operation-bound authorization for integrations that mediate tool calls.
+
+The adapter must authenticate the workload and obtain the served descriptor from
+the actual endpoint. This module authorizes only calls routed through its gateway;
+it does not sandbox a process or establish the truth of provider declarations.
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+import sqlite3
+from collections.abc import Callable, Mapping
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any, Generic, Literal, TypeVar
+
+import rfc8785
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+from jsonschema import Draft202012Validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from referencing import Registry
+
+PAYLOAD_TYPE: Literal["application/vnd.in-toto+json"] = "application/vnd.in-toto+json"
+STATEMENT_TYPE = "https://in-toto.io/Statement/v1"
+PREDICATES = {
+    "snapshot": "https://github.com/aisecnomad/nexus-symbiote/attestation/approved-snapshot/v1",
+    "approval": "https://github.com/aisecnomad/nexus-symbiote/attestation/action-approval/v1",
+    "trust": "https://github.com/aisecnomad/nexus-symbiote/attestation/trust-status/v1",
+    "model": "https://github.com/aisecnomad/nexus-symbiote/attestation/hosted-model/v1",
+}
+T = TypeVar("T")
+
+
+class AuthorizationError(ValueError):
+    """The operation lacks complete, valid authorization evidence."""
+
+
+def canonical_bytes(value: Any) -> bytes:
+    try:
+        return rfc8785.dumps(value)
+    except (TypeError, ValueError) as exc:
+        raise AuthorizationError("value is outside the canonical JSON domain") from exc
+
+
+def digest(value: Any) -> str:
+    return "sha256:" + hashlib.sha256(canonical_bytes(value)).hexdigest()
+
+
+def strict_json(raw: str | bytes) -> Any:
+    def pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        for key, value in items:
+            if key in out:
+                raise AuthorizationError("duplicate JSON key")
+            out[key] = value
+        return out
+
+    def invalid(_: str) -> Any:
+        raise AuthorizationError("nonfinite JSON value")
+
+    value = json.loads(raw, object_pairs_hook=pairs, parse_constant=invalid)
+    canonical_bytes(value)
+    return value
+
+
+class Contract(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
+
+
+class ValidWindow(Contract):
+    not_before: datetime
+    not_after: datetime
+
+    @field_validator("not_before", "not_after")
+    @classmethod
+    def aware(cls, value: datetime) -> datetime:
+        if value.utcoffset() is None:
+            raise ValueError("timestamps must include a timezone")
+        return value.astimezone(UTC)
+
+    @model_validator(mode="after")
+    def ordered(self) -> ValidWindow:
+        if self.not_before >= self.not_after:
+            raise ValueError("not_after must follow not_before")
+        return self
+
+
+class ToolGrant(Contract):
+    definition_profile: Literal["rfc8785-jcs-v2"] = "rfc8785-jcs-v2"
+    server_id: str = Field(min_length=1)
+    endpoint_identity: str = Field(min_length=1)
+    tool_name: str = Field(min_length=1)
+    definition_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    actions: tuple[str, ...] = Field(min_length=1)
+    resources: tuple[str, ...] = Field(min_length=1)
+    require_approval: bool = True
+
+
+class ApprovedSnapshot(ValidWindow):
+    version: Literal["1"] = "1"
+    kind: Literal["approved"] = "approved"
+    agent_id: str = Field(min_length=1)
+    deployment_id: str = Field(min_length=1)
+    tenant: str = Field(min_length=1)
+    workload_identity: str = Field(min_length=1)
+    serial: int = Field(gt=0)
+    bom_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    policy_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    tools: tuple[ToolGrant, ...]
+
+    @model_validator(mode="after")
+    def unique_tools(self) -> ApprovedSnapshot:
+        keys = [(g.server_id, g.tool_name) for g in self.tools]
+        if len(keys) != len(set(keys)):
+            raise ValueError("duplicate tool grants")
+        return self
+
+
+class TrustStatus(ValidWindow):
+    version: Literal["1"] = "1"
+    tenant: str = Field(min_length=1)
+    serial: int = Field(gt=0)
+    revoked_snapshots: tuple[str, ...] = ()
+    revoked_tools: tuple[str, ...] = ()
+    revoked_endpoints: tuple[str, ...] = ()
+    revoked_signers: tuple[str, ...] = ()
+
+
+class ExecutionContext(Contract):
+    agent_id: str
+    deployment_id: str
+    tenant: str
+    workload_identity: str
+    policy_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+
+
+class HostedModelAttestation(ValidWindow):
+    provider: str
+    endpoint: str
+    requested_alias: str
+    resolved_revision: str = Field(min_length=1)
+
+
+class ToolCall(Contract):
+    server_id: str
+    tool_name: str
+    action: str
+    resource: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
+class ServedTool(Contract):
+    endpoint_identity: str
+    definition: dict[str, Any]
+
+
+class ActionApproval(ValidWindow):
+    version: Literal["1"] = "1"
+    snapshot_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    context_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    request_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    nonce: str = Field(min_length=16, max_length=256)
+    actor: str = Field(min_length=1)
+
+
+class EnvelopeSignature(Contract):
+    key_id: str = Field(alias="keyid")
+    signature: str = Field(alias="sig")
+
+
+class Envelope(Contract):
+    payload_type: Literal["application/vnd.in-toto+json"] = Field(
+        default=PAYLOAD_TYPE, alias="payloadType"
+    )
+    payload: str = Field(max_length=24 * 1024 * 1024)
+    signatures: tuple[EnvelopeSignature, ...] = Field(max_length=32)
+
+
+def key_id(key: Ed25519PublicKey) -> str:
+    raw = key.public_bytes(
+        serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _pae(payload: bytes) -> bytes:
+    kind = PAYLOAD_TYPE.encode()
+    return b" ".join(
+        [b"DSSEv1", str(len(kind)).encode(), kind, str(len(payload)).encode(), payload]
+    )
+
+
+def sign_contract(
+    contract: ApprovedSnapshot | ActionApproval | TrustStatus | HostedModelAttestation,
+    kind: Literal["snapshot", "approval", "trust", "model"],
+    keys: tuple[Ed25519PrivateKey, ...],
+) -> Envelope:
+    expected = {
+        "snapshot": ApprovedSnapshot,
+        "approval": ActionApproval,
+        "trust": TrustStatus,
+        "model": HostedModelAttestation,
+    }[kind]
+    if not isinstance(contract, expected) or not keys:
+        raise AuthorizationError("contract type and nonempty signing keys must match purpose")
+    body = contract.model_dump(mode="json")
+    statement = {
+        "_type": STATEMENT_TYPE,
+        "predicateType": PREDICATES[kind],
+        "subject": [{"name": kind, "digest": {"sha256": digest(body).split(":", 1)[1]}}],
+        "predicate": body,
+    }
+    payload = canonical_bytes(statement)
+    signatures = tuple(
+        EnvelopeSignature(
+            key_id=key_id(k.public_key()),
+            signature=base64.b64encode(k.sign(_pae(payload))).decode(),
+        )
+        for k in keys
+    )
+    return Envelope(payload=base64.b64encode(payload).decode(), signatures=signatures)
+
+
+def verify_contract(
+    envelope: Envelope,
+    kind: Literal["snapshot", "approval", "trust", "model"],
+    trusted_keys: Mapping[str, Ed25519PublicKey],
+    *,
+    threshold: int = 1,
+) -> tuple[ApprovedSnapshot | ActionApproval | TrustStatus | HostedModelAttestation, set[str]]:
+    if threshold < 1 or not trusted_keys:
+        raise AuthorizationError("positive threshold and purpose-specific trusted keys required")
+    try:
+        payload = base64.b64decode(envelope.payload, validate=True)
+        if len(payload) > 16 * 1024 * 1024:
+            raise AuthorizationError("statement exceeds limit")
+        accepted: set[str] = set()
+        for signature in envelope.signatures:
+            public = trusted_keys.get(signature.key_id)
+            if public is None or key_id(public) != signature.key_id:
+                continue
+            try:
+                public.verify(base64.b64decode(signature.signature, validate=True), _pae(payload))
+                accepted.add(signature.key_id)
+            except InvalidSignature:
+                continue
+        if len(accepted) < threshold:
+            raise AuthorizationError("insufficient distinct trusted signers")
+        statement = strict_json(payload)
+        if not isinstance(statement, dict) or set(statement) != {
+            "_type",
+            "predicateType",
+            "subject",
+            "predicate",
+        }:
+            raise AuthorizationError("invalid in-toto statement")
+        if statement["_type"] != STATEMENT_TYPE or statement["predicateType"] != PREDICATES[kind]:
+            raise AuthorizationError("statement purpose mismatch")
+        contract: ApprovedSnapshot | ActionApproval | TrustStatus | HostedModelAttestation
+        if kind == "snapshot":
+            contract = ApprovedSnapshot.model_validate(statement["predicate"])
+        elif kind == "approval":
+            contract = ActionApproval.model_validate(statement["predicate"])
+        elif kind == "trust":
+            contract = TrustStatus.model_validate(statement["predicate"])
+        else:
+            contract = HostedModelAttestation.model_validate(statement["predicate"])
+        subject = [
+            {"name": kind, "digest": {"sha256": digest(statement["predicate"]).split(":", 1)[1]}}
+        ]
+        if statement["subject"] != subject:
+            raise AuthorizationError("subject digest mismatch")
+        return contract, accepted
+    except (ValueError, TypeError, KeyError) as exc:
+        raise AuthorizationError(str(exc)) from exc
+
+
+def _window(contract: ValidWindow, now: datetime, maximum: timedelta) -> None:
+    if now.utcoffset() is None:
+        raise AuthorizationError("verification time must include timezone")
+    if not contract.not_before <= now < contract.not_after:
+        raise AuthorizationError("contract is future-dated or expired")
+    if contract.not_after - contract.not_before > maximum:
+        raise AuthorizationError("contract validity exceeds local policy")
+
+
+def _validate_arguments(schema: Any, arguments: dict[str, Any]) -> None:
+    if not isinstance(schema, dict):
+        raise AuthorizationError("served tool requires an object input schema")
+
+    try:
+        Draft202012Validator.check_schema(schema)
+        Draft202012Validator(schema, registry=Registry()).validate(arguments)
+    except Exception as exc:
+        raise AuthorizationError("tool arguments or offline input schema are invalid") from exc
+
+
+class StateStore:
+    """Durable check-and-record state; the operator must protect the database path."""
+
+    def __init__(self, path: Path) -> None:
+        if path.is_symlink():
+            raise AuthorizationError("state database cannot be a symlink")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.path = path
+        with self._connect() as connection:
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS heads (scope TEXT PRIMARY KEY, serial INTEGER NOT NULL, digest TEXT NOT NULL)"
+            )
+            connection.execute("CREATE TABLE IF NOT EXISTS nonces (nonce TEXT PRIMARY KEY)")
+        path.chmod(0o600)
+
+    def _connect(self) -> sqlite3.Connection:
+        return sqlite3.connect(self.path, timeout=10, isolation_level=None)
+
+    def record(self, heads: tuple[tuple[str, int, str], ...], nonce: str | None = None) -> None:
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            for scope, serial, value in heads:
+                old = connection.execute(
+                    "SELECT serial, digest FROM heads WHERE scope=?", (scope,)
+                ).fetchone()
+                if old and (serial < old[0] or (serial == old[0] and value != old[1])):
+                    raise AuthorizationError("snapshot or trust-status rollback/fork")
+            if nonce is not None:
+                try:
+                    connection.execute("INSERT INTO nonces(nonce) VALUES (?)", (nonce,))
+                except sqlite3.IntegrityError as exc:
+                    raise AuthorizationError("approval nonce has already been used") from exc
+            for scope, serial, value in heads:
+                connection.execute(
+                    "INSERT OR REPLACE INTO heads(scope,serial,digest) VALUES (?,?,?)",
+                    (scope, serial, value),
+                )
+            connection.execute("COMMIT")
+        except Exception:
+            if connection.in_transaction:
+                connection.execute("ROLLBACK")
+            raise
+        finally:
+            connection.close()
+
+
+class ReferenceGateway(Generic[T]):
+    """Authorize and execute one call through authenticated, operator-owned adapters."""
+
+    def __init__(
+        self,
+        *,
+        snapshot_keys: Mapping[str, Ed25519PublicKey],
+        approval_keys: Mapping[str, Ed25519PublicKey],
+        trust_keys: Mapping[str, Ed25519PublicKey],
+        state: StateStore,
+        authenticate: Callable[[], ExecutionContext],
+        describe: Callable[[str, str], ServedTool],
+        resolve_scope: Callable[[ToolCall], tuple[str, str]],
+        execute: Callable[[ToolCall], T],
+        approval_actors: Mapping[str, str] | None = None,
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
+        self.snapshot_keys = dict(snapshot_keys)
+        self.approval_keys = dict(approval_keys)
+        self.trust_keys = dict(trust_keys)
+        self.state = state
+        self.authenticate = authenticate
+        self.describe = describe
+        self.resolve_scope = resolve_scope
+        self.execute = execute
+        self.approval_actors = dict(approval_actors or {})
+        self.clock = clock or (lambda: datetime.now(UTC))
+
+    def invoke(
+        self,
+        call: ToolCall,
+        *,
+        snapshot: Envelope,
+        trust: Envelope,
+        bom: Mapping[str, Any],
+        approval: Envelope | None = None,
+    ) -> T:
+        from nexus_symbiote.core.hashing import hash_tool_definition
+
+        call = ToolCall.model_validate(strict_json(canonical_bytes(call.model_dump(mode="json"))))
+        timestamp = self.clock()
+        context = self.authenticate()
+        statuses, trust_signers = verify_contract(trust, "trust", self.trust_keys)
+        if not isinstance(statuses, TrustStatus):
+            raise AuthorizationError("unexpected contract")
+        _window(statuses, timestamp, timedelta(hours=1))
+        if statuses.tenant != context.tenant or trust_signers & set(statuses.revoked_signers):
+            raise AuthorizationError("trust status tenant or signer mismatch")
+        trust_head = (
+            "trust:" + context.tenant,
+            statuses.serial,
+            digest(statuses.model_dump(mode="json")),
+        )
+        self.state.record((trust_head,))
+        approved, snapshot_signers = verify_contract(snapshot, "snapshot", self.snapshot_keys)
+        if not isinstance(approved, ApprovedSnapshot):
+            raise AuthorizationError("unexpected snapshot")
+        _window(approved, timestamp, timedelta(hours=24))
+        expected = ExecutionContext(
+            **{name: getattr(approved, name) for name in ExecutionContext.model_fields}
+        )
+        if context != expected or statuses.tenant != context.tenant:
+            raise AuthorizationError("workload, deployment, tenant, or policy mismatch")
+        snapshot_digest = digest(approved.model_dump(mode="json"))
+        if digest(dict(bom)) != approved.bom_digest:
+            raise AuthorizationError("companion BOM does not match approved digest")
+        if snapshot_digest in statuses.revoked_snapshots:
+            raise AuthorizationError("snapshot is revoked")
+        if (snapshot_signers | trust_signers) & set(statuses.revoked_signers):
+            raise AuthorizationError("signer is revoked")
+        effective_action, effective_resource = self.resolve_scope(call)
+        if (effective_action, effective_resource) != (call.action, call.resource):
+            raise AuthorizationError("operation labels do not match the actual tool arguments")
+        grant = next(
+            (
+                g
+                for g in approved.tools
+                if (g.server_id, g.tool_name) == (call.server_id, call.tool_name)
+            ),
+            None,
+        )
+        if (
+            grant is None
+            or call.action not in grant.actions
+            or call.resource not in grant.resources
+        ):
+            raise AuthorizationError("action/resource is outside approved capability")
+        served = self.describe(call.server_id, call.tool_name)
+        definition = served.definition
+        if (
+            definition.get("name") != call.tool_name
+            or served.endpoint_identity != grant.endpoint_identity
+        ):
+            raise AuthorizationError("served tool name or authenticated endpoint changed")
+        unsupported = set(definition) - {"name", "description", "inputSchema", "annotations"}
+        if unsupported:
+            raise AuthorizationError("descriptor uses fields unsupported by digest profile v1")
+        actual = hash_tool_definition(
+            call.tool_name,
+            definition.get("description", ""),
+            definition.get("inputSchema"),
+            definition.get("annotations"),
+        )
+        if actual != grant.definition_digest:
+            raise AuthorizationError("served descriptor changed since approval")
+        _validate_arguments(definition.get("inputSchema"), call.arguments)
+        if (
+            actual in statuses.revoked_tools
+            or served.endpoint_identity in statuses.revoked_endpoints
+        ):
+            raise AuthorizationError("tool or endpoint is revoked")
+        nonce = None
+        consent: ActionApproval | None = None
+        if grant.require_approval:
+            if approval is None:
+                raise AuthorizationError("operation-bound approval required")
+            verified_approval, signers = verify_contract(approval, "approval", self.approval_keys)
+            if not isinstance(verified_approval, ActionApproval):
+                raise AuthorizationError("unexpected approval")
+            consent = verified_approval
+            _window(consent, timestamp, timedelta(minutes=5))
+            if signers & set(statuses.revoked_signers):
+                raise AuthorizationError("approver is revoked")
+            if any(self.approval_actors.get(signer) != consent.actor for signer in signers):
+                raise AuthorizationError(
+                    "approval actor is not bound to its authorized signing key"
+                )
+            if (consent.snapshot_digest, consent.context_digest, consent.request_digest) != (
+                snapshot_digest,
+                digest(context.model_dump(mode="json")),
+                digest(call.model_dump(mode="json")),
+            ):
+                raise AuthorizationError("approval does not cover this operation")
+            nonce = consent.nonce
+        self.state.record(
+            (
+                (
+                    "snapshot:" + digest([context.tenant, context.deployment_id, context.agent_id]),
+                    approved.serial,
+                    snapshot_digest,
+                ),
+                trust_head,
+            ),
+            nonce,
+        )
+        if self.authenticate() != context:
+            raise AuthorizationError("execution identity changed during authorization")
+        final_time = self.clock()
+        _window(approved, final_time, timedelta(hours=24))
+        _window(statuses, final_time, timedelta(hours=1))
+        if consent is not None:
+            _window(consent, final_time, timedelta(minutes=5))
+        return self.execute(call)

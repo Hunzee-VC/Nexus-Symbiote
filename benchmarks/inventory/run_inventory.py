@@ -1,0 +1,167 @@
+"""Run the versioned, labeled inventory cases locally with the public CLI."""
+
+import hashlib
+import json
+import sys
+import tempfile
+from collections import Counter
+from pathlib import Path
+
+from click.testing import CliRunner
+
+from nexus_symbiote.cli import main
+from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote.core.hashing import parse_json_strict
+from nexus_symbiote.core.models import (
+    CompletenessClaim,
+    MCPServerComponent,
+    ModelComponent,
+    ToolComponent,
+)
+from nexus_symbiote.scanners.base import read_regular_text
+from nexus_symbiote.scanners.mcp import MCPScanner
+from nexus_symbiote.scanners.model import ModelScanner
+from nexus_symbiote.validators.risk import RiskScorer
+
+DIRECTORY = Path(__file__).resolve().parent
+
+
+def run() -> dict:
+    manifest = parse_json_strict(read_regular_text(DIRECTORY / "manifest.json"))
+    rows = []
+    totals = Counter()
+    for case in manifest["cases"]:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = root / "input"
+            project.mkdir()
+            files = {k: v.encode() for k, v in case.get("files", {}).items()}
+            files.update({k: bytes.fromhex(v) for k, v in case.get("hex_files", {}).items()})
+            if "fixture" in case:
+                relative = Path(case["fixture"])
+                if relative.is_absolute() or ".." in relative.parts:
+                    raise ValueError("Fixture path must stay in the committed corpus")
+                source = read_regular_text(DIRECTORY / "fixtures" / relative).encode("utf-8")
+                if hashlib.sha256(source).hexdigest() != case["sha256"]:
+                    raise ValueError("Reference source does not match its pinned digest")
+                files[case["file"]] = source
+            for name, data in files.items():
+                relative = Path(name)
+                if relative.is_absolute() or ".." in relative.parts:
+                    raise ValueError("Case input paths must be relative and confined")
+                path = project / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+            bom = AIBOM()
+            failures, exclusions = [], []
+            statuses = {}
+            for scanner in (MCPScanner(), ModelScanner()):
+                collected = scanner.scan(project)
+                for component in collected.components:
+                    try:
+                        bom.add_component(component)
+                    except ValueError:
+                        failures.append("conflicting scanner component identity")
+                failures.extend(collected.scan_failures)
+                exclusions.extend(collected.surfaces_excluded)
+                statuses[scanner.name] = (
+                    "failed"
+                    if collected.scan_failures
+                    else "partial"
+                    if collected.surfaces_excluded
+                    else "complete"
+                )
+            bom.metadata.completeness = CompletenessClaim(
+                scope="inventory-regression",
+                scanner_status=statuses,
+                scan_failures=failures,
+                surfaces_excluded=exclusions,
+            )
+            output = root / "result.json"
+            output.write_text(bom.to_json())
+            tools = [c for c in bom.components if isinstance(c, ToolComponent)]
+            servers = [c for c in bom.components if isinstance(c, MCPServerComponent)]
+            models = [c for c in bom.components if isinstance(c, ModelComponent)]
+            predicted = {t.name for t in tools}
+            expected = set(case["tools"])
+            checks = {}
+            for name in case.get("checks", []):
+                if name == "distinct_scoped_edges":
+                    by_ref = {s.bom_ref: s for s in servers}
+                    ok = len(by_ref) == 2 and all(
+                        t.mcp_server_ref in by_ref
+                        and t.bom_ref in by_ref[t.mcp_server_ref].tool_refs
+                        for t in tools
+                    )
+                elif name == "origin_only":
+                    ok = {s.endpoint_url for s in servers} == {
+                        "http://localhost.attacker.invalid",
+                        "https://trusted.invalid",
+                    }
+                elif name == "no_secret_in_bom":
+                    ok = "SECRET_BENCH_MARKER" not in output.read_text()
+                elif name == "deceptive_localhost_flagged":
+                    ok = any(r.category == "transport_security" for s in servers for r in s.risks)
+                elif name in {"unsafe_format", "safe_format", "unknown_format"}:
+                    expected_format = {
+                        "unsafe_format": "unsafe-code-execution",
+                        "safe_format": "safe",
+                        "unknown_format": "unknown",
+                    }[name]
+                    ok = (
+                        len(models) == 1 and models[0].serialization_safety.value == expected_format
+                    )
+                elif name in {"unsigned", "signer_unverified"}:
+                    ok = (
+                        len(models) == 1
+                        and not models[0].signing_identity
+                        and models[0].signing_status != "sigstore-signed"
+                        and models[0].assurance_level.value != "verified"
+                    )
+                elif name in {"critical_gate", "unknown_coverage_gate"}:
+                    passed, report = RiskScorer().passes_gate(bom)
+                    ok = not passed and (
+                        name != "critical_gate" or report.severity_counts.get("critical", 0) > 0
+                    )
+                elif name == "policy_rejected":
+                    ok = CliRunner().invoke(main, ["scan", str(project)]).exit_code != 0
+                elif name == "operator_policy_isolated":
+                    ok = bool(models)
+                else:
+                    raise ValueError(f"Unknown benchmark assertion {name}")
+                checks[name] = ok
+            misses, extras = sorted(expected - predicted), sorted(predicted - expected)
+            totals.update(
+                tp=len(expected & predicted),
+                fp=len(extras),
+                fn=len(misses),
+                tn=len(set(case["decoys"]) - predicted),
+            )
+            rows.append(
+                {
+                    "case": case["id"],
+                    "tools": sorted(predicted),
+                    "missing": misses,
+                    "unexpected": extras,
+                    "checks": checks,
+                    "collection_failures": failures,
+                    "passed": not misses and not extras and not failures and all(checks.values()),
+                }
+            )
+    return {
+        "corpus_version": manifest["version"],
+        "counts": dict(totals),
+        "denominators": {
+            "expected_tools": totals["tp"] + totals["fn"],
+            "explicit_decoys": totals["tn"] + totals["fp"],
+        },
+        "scope": "finite labeled MCP inventory regressions; model and policy checks are separate controls",
+        "cases": rows,
+        "passed": all(r["passed"] for r in rows),
+    }
+
+
+if __name__ == "__main__":
+    report = run()
+    print(json.dumps(report, indent=2))
+    sys.exit(0 if report["passed"] else 1)

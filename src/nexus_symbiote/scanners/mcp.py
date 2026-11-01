@@ -18,7 +18,7 @@ import ipaddress
 import re
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, urlsplit
+from urllib.parse import urlsplit
 
 from nexus_symbiote.core.enums import (
     CapabilityClass,
@@ -29,6 +29,7 @@ from nexus_symbiote.core.enums import (
 from nexus_symbiote.core.hashing import (
     TOOL_DEFINITION_HASH_VERSION,
     extract_version_pin,
+    hash_canonical,
     hash_tool_definition,
 )
 from nexus_symbiote.core.models import (
@@ -140,14 +141,19 @@ class MCPScanner(Scanner):
         # to enumerate every application's secret flags, retain positions only.
         # Environment names remain credential references; values never leave.
         secrets = [value for value in env.values() if isinstance(value, str) and value]
+        assert self._files is not None
+        config_scope = config_path.relative_to(self._files.root).as_posix()
+        server_ref = (
+            "mcp-server:" + hash_canonical({"config": config_scope, "name": name}).split(":", 1)[1]
+        )
         name = redact_text(name, secrets)
         safe_endpoint = (
             redact_text(sanitized_origin(endpoint_url), secrets) if endpoint_url else None
         )
 
         package_ref = self._extract_package_ref(command, args)
-        version = None
         version_pinned: bool | None = None
+        version = None
         if package_ref:
             version = extract_version_pin(package_ref)
             version_pinned = version is not None
@@ -185,7 +191,7 @@ class MCPScanner(Scanner):
             )
 
         server_comp = MCPServerComponent(
-            bom_ref=f"mcp-server:{name}",
+            bom_ref=server_ref,
             name=name,
             version=version,
             transport=transport,
@@ -208,7 +214,7 @@ class MCPScanner(Scanner):
             },
         )
 
-        tools = self._extract_tools(name, config, secrets)
+        tools = self._extract_tools(name, config, secrets, server_ref=server_ref)
         server_comp.tool_count = len(tools)
         server_comp.tool_refs = [tool.bom_ref for tool in tools]
         return server_comp, tools
@@ -246,7 +252,12 @@ class MCPScanner(Scanner):
         return None
 
     def _extract_tools(
-        self, server_name: str, config: dict[str, Any], secrets: list[str] | None = None
+        self,
+        server_name: str,
+        config: dict[str, Any],
+        secrets: list[str] | None = None,
+        *,
+        server_ref: str,
     ) -> list[ToolComponent]:
         tools_config = config.get("tools", [])
         tool_comps = []
@@ -267,6 +278,10 @@ class MCPScanner(Scanner):
                         raise ValueError("invalid tool fields")
 
                     def_hash = hash_tool_definition(t_name, t_desc, t_schema, t_annotations)
+                    tool_ref = (
+                        "tool:"
+                        + hash_canonical({"server": server_ref, "name": t_name}).split(":", 1)[1]
+                    )
 
                     side_effect = self._classify_side_effects(t_annotations, t_name)
                     caps = self._infer_capabilities(t_name, t_desc, t_annotations)
@@ -288,9 +303,9 @@ class MCPScanner(Scanner):
 
                     tool_comps.append(
                         ToolComponent(
-                            bom_ref=f"tool:{server_name}/{t_name}",
+                            bom_ref=tool_ref,
                             name=t_name,
-                            mcp_server_ref=f"mcp-server:{server_name}",
+                            mcp_server_ref=server_ref,
                             description_text=redact_text(t_desc, secrets or []),
                             input_schema=redact_metadata(t_schema, secrets or []),
                             definition_hash=def_hash,
@@ -345,6 +360,9 @@ class MCPScanner(Scanner):
     def _scan_code_mcp_clients(self, root: Path, result: ScanResult) -> None:
         assert self._files is not None
         sources = list(self._files.iter_files())
+        from nexus_symbiote.scanners.ts_tools import collect_typescript
+
+        collect_typescript(self._files, result, sources)
         detected: list[str] = []
         for suffix in (".py", ".ts", ".js"):
             paths = [path for path in sources if len(path.parts) == 1 and path.suffix == suffix]

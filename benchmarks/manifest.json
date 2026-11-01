@@ -1,121 +1,297 @@
 {
-  "version": 1,
-  "upstream": {
-    "repository": "modelcontextprotocol/servers",
-    "commit": "194cc86e3ae6400958555bd4116849d822d69263",
-    "path": "src/filesystem/server.ts",
-    "label_source": "src/filesystem/__tests__/server-tools.test.ts#L28-L43",
-    "blob_sha1": "a5127f8dbff059342467c2709020fbe1b6543e34"
-  },
+  "schema_version": 1,
+  "name": "symbiote-synthetic-security-regressions",
+  "scope": "Finite hand-authored regression fixtures; not representative efficacy evidence.",
   "cases": [
     {
-      "id": "reference-filesystem",
-      "fixture": "upstream/server.ts.fixture",
-      "file": "src/filesystem/server.ts",
-      "sha256": "672a909d31499e7ffde523705a31c90eb8d2a69f3b135ff0a1d5c23bf98083fc",
-      "tools": [
-        "read_file",
-        "read_text_file",
-        "read_media_file",
-        "read_multiple_files",
-        "write_file",
-        "edit_file",
-        "create_directory",
-        "list_directory",
-        "list_directory_with_sizes",
-        "directory_tree",
-        "move_file",
-        "search_files",
-        "get_file_info",
-        "list_allowed_directories"
+      "id": "model-signature-decoy",
+      "kind": "model_signature",
+      "task": "detection",
+      "truth": true,
+      "rationale": "A text sidecar is not a verified artifact signature.",
+      "directory": "fixtures/model-signature-decoy",
+      "references": [
+        {
+          "path": "project/model.safetensors",
+          "sha256": "644faaaa1df330b3fabac700043410414c9e4a5a502388136a16bd14b92c1fd6"
+        },
+        {
+          "path": "project/model.sigstore",
+          "sha256": "ccd8038e29219a77ef26e16eb38c8f2c0d04b43858d6dda4ebc32962a613a7d8"
+        }
       ],
-      "decoys": []
+      "parameters": {}
     },
     {
-      "id": "registration-decoys",
-      "files": {
-        "src/server.ts": "import { McpServer as S } from \"@modelcontextprotocol/server\";\nconst service = new S({});\nservice.registerTool(\"active_tool\", {}, () => {});\n// service.registerTool(\"in_comment\", {}, fn);\nconst help = `service.registerTool(\"in_string\", {}, fn)`;\nunrelated.registerTool(\"wrong_receiver\", {}, fn);\nservice.registerTool(nameFromRuntime, {}, fn);\n",
-        "tests/server.ts": "import { McpServer } from \"@modelcontextprotocol/server\";\nconst server = new McpServer({});\nserver.registerTool(\"test_only\", {}, fn);\n",
-        "src/other.ts": "import { McpServer } from \"different-package\";\nconst service = new McpServer({});\nservice.registerTool(\"unrelated_package\", {}, fn);\n"
-      },
-      "tools": [
-        "active_tool"
+      "id": "model-format-disguised",
+      "kind": "model_format",
+      "task": "detection",
+      "truth": true,
+      "rationale": "Arbitrary bytes behind a SafeTensors suffix require a format anomaly finding.",
+      "directory": "fixtures/model-format-disguised",
+      "references": [
+        {
+          "path": "project/model.safetensors",
+          "sha256": "a24fe321fc571ae30bec4550c98bec4560edc69e30c548397eccc3ef4862cd3e"
+        }
       ],
-      "decoys": [
-        "in_comment",
-        "in_string",
-        "wrong_receiver",
-        "test_only",
-        "unrelated_package"
-      ]
+      "parameters": {}
     },
     {
-      "id": "scoped-servers",
-      "files": {
-        ".mcp.json": "{\"mcpServers\": {\"desk\": {\"url\": \"http://localhost.attacker.invalid/SECRET_BENCH_MARKER?token=SECRET_BENCH_MARKER\", \"tools\": [{\"name\": \"list_cases\"}]}}}",
-        ".cursor/mcp.json": "{\"mcpServers\": {\"desk\": {\"url\": \"https://person:SECRET_BENCH_MARKER@trusted.invalid/SECRET_BENCH_MARKER\", \"args\": [\"--token\", \"SECRET_BENCH_MARKER\"], \"tools\": [{\"name\": \"update_case\"}]}}}"
-      },
-      "tools": [
-        "list_cases",
-        "update_case"
+      "id": "model-format-valid-unsigned",
+      "kind": "model_format",
+      "task": "detection",
+      "truth": false,
+      "rationale": "A genuine tiny tensor is structurally valid; unsigned is a separate provenance condition.",
+      "directory": "fixtures/model-format-valid-unsigned",
+      "references": [
+        {
+          "path": "project/model.safetensors",
+          "sha256": "644faaaa1df330b3fabac700043410414c9e4a5a502388136a16bd14b92c1fd6"
+        }
       ],
-      "decoys": [],
-      "checks": [
-        "distinct_scoped_edges",
-        "origin_only",
-        "no_secret_in_bom",
-        "deceptive_localhost_flagged"
-      ]
+      "parameters": {}
     },
     {
-      "id": "forged-signer-and-format",
-      "files": {
-        "model.sig": ""
-      },
-      "hex_files": {
-        "weights.safetensors": "80044e2e"
-      },
-      "tools": [],
-      "decoys": [],
-      "checks": [
-        "unsafe_format",
-        "signer_unverified",
-        "critical_gate"
-      ]
+      "id": "model-pickle-loader",
+      "kind": "model_format",
+      "task": "detection",
+      "truth": true,
+      "rationale": "Pickle is a potentially code-executing loader format even when this specimen is inert.",
+      "directory": "fixtures/model-pickle-loader",
+      "references": [
+        {
+          "path": "project/model.pkl",
+          "sha256": "9c298d589a2158eb513cb52191144518a2acab2cb0c04f1df14fca0f712fa4a1"
+        }
+      ],
+      "parameters": {}
     },
     {
-      "id": "valid-safe-tensor",
-      "tools": [],
-      "decoys": [],
-      "checks": [
-        "safe_format",
-        "unsigned"
+      "id": "prompt-zero-width",
+      "kind": "hidden_unicode",
+      "task": "detection",
+      "truth": true,
+      "rationale": "A zero-width character is present in executable instruction content.",
+      "directory": "fixtures/prompt-zero-width",
+      "references": [
+        {
+          "path": "project/CLAUDE.md",
+          "sha256": "e47cab5f027c731fe2257140f2b1181e7b41a798c4846f3ea819be9ac1bf6cf2"
+        }
       ],
-      "hex_files": {
-        "weights.safetensors": "38000000000000007b2278223a7b226474797065223a225538222c227368617065223a5b315d2c22646174615f6f666673657473223a5b302c315d7d7d20202000"
+      "parameters": {}
+    },
+    {
+      "id": "prompt-bidi",
+      "kind": "hidden_unicode",
+      "task": "detection",
+      "truth": true,
+      "rationale": "A bidi override is present in the instruction artifact.",
+      "directory": "fixtures/prompt-bidi",
+      "references": [
+        {
+          "path": "project/CLAUDE.md",
+          "sha256": "c72449b814281026d4857c3130366c95f135a1530881aef1ec6a6e5b5156e0de"
+        }
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "prompt-ascii",
+      "kind": "hidden_unicode",
+      "task": "detection",
+      "truth": false,
+      "rationale": "Plain visible instructions contain none of the tested hidden characters.",
+      "directory": "fixtures/prompt-ascii",
+      "references": [
+        {
+          "path": "project/CLAUDE.md",
+          "sha256": "9c03fb75d8cfa5d5fcf07a077089fe5c7929638693dc47f1441cbe821b2f99eb"
+        }
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "prompt-escaped-unicode-text",
+      "kind": "hidden_unicode",
+      "task": "detection",
+      "truth": false,
+      "rationale": "The literal visible escape sequence is not an invisible codepoint.",
+      "directory": "fixtures/prompt-escaped-unicode-text",
+      "references": [
+        {
+          "path": "project/CLAUDE.md",
+          "sha256": "a672d9e8e6a10efcf6653807e83348e0d84dc3729e745ebdb6ca2a2cf15e2b94"
+        }
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "mcp-floating-latest",
+      "kind": "mcp_pinning",
+      "task": "detection",
+      "truth": true,
+      "rationale": "The npm latest locator is mutable.",
+      "directory": "fixtures/mcp-floating-latest",
+      "references": [
+        {
+          "path": "project/.mcp.json",
+          "sha256": "e16b31fe3af366dd3755230aed4a7dd915cec6b822b3291c8beaac4d70b0e562"
+        }
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "mcp-unversioned",
+      "kind": "mcp_pinning",
+      "task": "detection",
+      "truth": true,
+      "rationale": "An unversioned npm reference is not immutable.",
+      "directory": "fixtures/mcp-unversioned",
+      "references": [
+        {
+          "path": "project/.mcp.json",
+          "sha256": "d9d4b905ba9d1d065b68561a5dd8a6a69eb80f86fa39e35705de313e48331d9f"
+        }
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "mcp-exact-version",
+      "kind": "mcp_pinning",
+      "task": "detection",
+      "truth": false,
+      "rationale": "An exact package version meets this version-pinning predicate, not artifact authenticity.",
+      "directory": "fixtures/mcp-exact-version",
+      "references": [
+        {
+          "path": "project/.mcp.json",
+          "sha256": "8594f95f7584b8e03b724ceed581b5854bcad284f46a67eb058b04976061e3f1"
+        }
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "mcp-container-floating",
+      "kind": "mcp_pinning",
+      "task": "detection",
+      "truth": true,
+      "rationale": "A container latest tag is mutable.",
+      "directory": "fixtures/mcp-container-floating",
+      "references": [
+        {
+          "path": "project/.mcp.json",
+          "sha256": "eef8f4d44da7f93d80e248cf232d983b95e8e1c0dde965da4f3e5ef4f679bfc5"
+        }
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "mcp-container-digest",
+      "kind": "mcp_pinning",
+      "task": "detection",
+      "truth": false,
+      "rationale": "A syntactically valid sha256 container digest is an immutable locator.",
+      "directory": "fixtures/mcp-container-digest",
+      "references": [
+        {
+          "path": "project/.mcp.json",
+          "sha256": "18c7bb78a45e0d71cc695fa6825d1488799c0c4f3d79cfc2ab00031541e485e1"
+        }
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "tool-description-change",
+      "kind": "tool_drift",
+      "task": "detection",
+      "truth": true,
+      "rationale": "Compare the approved descriptor digest with the observed descriptor, preserving absent annotations.",
+      "directory": "fixtures/tool-description-change",
+      "references": [
+        {
+          "path": "observed-tool.json",
+          "sha256": "817c2ff1d46d4be17460f173eeaca0c48adcc52f0ed3b009de4fc7e35e7cf47c"
+        },
+        {
+          "path": "project/.mcp.json",
+          "sha256": "256890578d424b015ae4fc6b1662147aef6b4f916bc4d704ad9b60a5eee674de"
+        }
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "tool-unchanged-no-annotations",
+      "kind": "tool_drift",
+      "task": "detection",
+      "truth": false,
+      "rationale": "Compare the approved descriptor digest with the observed descriptor, preserving absent annotations.",
+      "directory": "fixtures/tool-unchanged-no-annotations",
+      "references": [
+        {
+          "path": "observed-tool.json",
+          "sha256": "51a62f6e1d737f6d062d2b957dde64d1d4b29d3081f22bf766c46b109aa0d934"
+        },
+        {
+          "path": "project/.mcp.json",
+          "sha256": "256890578d424b015ae4fc6b1662147aef6b4f916bc4d704ad9b60a5eee674de"
+        }
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "tool-key-order-only",
+      "kind": "tool_drift",
+      "task": "detection",
+      "truth": false,
+      "rationale": "Compare the approved descriptor digest with the observed descriptor, preserving absent annotations.",
+      "directory": "fixtures/tool-key-order-only",
+      "references": [
+        {
+          "path": "observed-tool.json",
+          "sha256": "f66abeefcd99312a5ae434f530241ff3f5d6668f2ffd922373429c25d8a405f7"
+        },
+        {
+          "path": "project/.mcp.json",
+          "sha256": "256890578d424b015ae4fc6b1662147aef6b4f916bc4d704ad9b60a5eee674de"
+        }
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "credential-export-redaction",
+      "kind": "credential_export",
+      "task": "control",
+      "truth": false,
+      "rationale": "The public test sentinel in configuration must not appear literally in any exported format.",
+      "directory": "fixtures/credential-export-redaction",
+      "references": [
+        {
+          "path": "project/.mcp.json",
+          "sha256": "e726c1cd0c3d5e9edd2a2804ee1f1d0f7adaf663abebe389bc310d5a0f2299fb"
+        }
+      ],
+      "parameters": {
+        "forbidden_literals": [
+          "SYMBIOTE_PUBLIC_SYNTHETIC_SECRET_SENTINEL_00"
+        ]
       }
     },
     {
-      "id": "empty-inventory",
-      "tools": [],
-      "decoys": [],
-      "checks": [
-        "unknown_coverage_gate"
-      ]
-    },
-    {
-      "id": "disabled-repository-policy",
-      "files": {
-        ".nexus-symbiote.yaml": "scan:\n  scanners: []\n",
-        "weights.safetensors": "invalid"
-      },
-      "tools": [],
-      "decoys": [],
-      "checks": [
-        "policy_rejected",
-        "operator_policy_isolated",
-        "unknown_format"
-      ]
+      "id": "mcp-malformed-coverage",
+      "kind": "parse_coverage",
+      "task": "control",
+      "truth": null,
+      "rationale": "Malformed JSON cannot establish absence; a collection failure must be reported.",
+      "directory": "fixtures/mcp-malformed-coverage",
+      "references": [
+        {
+          "path": "project/.mcp.json",
+          "sha256": "6bda422120bb29dca64dc84b509d63883dca127121361ccd3ff2bc9e924a6ccb"
+        }
+      ],
+      "parameters": {}
     }
   ]
 }

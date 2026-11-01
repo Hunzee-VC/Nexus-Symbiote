@@ -8,7 +8,7 @@ from click.testing import CliRunner
 
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
-from nexus_symbiote.core.enums import AssuranceLevel, AutonomyLevel, ComponentType, TrustTier
+from nexus_symbiote.core.enums import AssuranceLevel, ComponentType, TrustTier
 from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
 from nexus_symbiote.scanners.shadowscan import ShadowScanImporter
 from nexus_symbiote.validators.completeness import CompletenessValidator
@@ -62,7 +62,7 @@ def test_native_import_has_source_digest_loss_and_no_raw_secrets(tmp_path):
     assert len(imported.components) == 2
     assert "CANARY" not in repr(imported)
     agent = next(c for c in imported.components if c.component_type == ComponentType.AGENT)
-    assert agent.autonomy_level == AutonomyLevel.UNKNOWN
+    assert agent.autonomy_level is None
     assert (
         agent.assurance_level == AssuranceLevel.DECLARED and agent.trust_tier == TrustTier.UNKNOWN
     )
@@ -72,7 +72,9 @@ def test_native_import_has_source_digest_loss_and_no_raw_secrets(tmp_path):
 def test_cli_bom_preserves_uncertainty_and_confines_sensitive_data(tmp_path):
     path, out = tmp_path / "report.json", tmp_path / "bom.json"
     path.write_text(json.dumps(_report()))
-    result = CliRunner().invoke(main, ["import-shadowscan", str(path), "-o", str(out)])
+    result = CliRunner().invoke(
+        main, ["import-shadowscan", str(path), "-o", str(out), "--report-only"]
+    )
     assert result.exit_code == 0, result.output
     assert "CANARY" not in out.read_text()
     bom = AIBOM.load(out)
@@ -112,7 +114,12 @@ def test_verify_discovery_checks_exact_bytes_without_claiming_authenticity(tmp_p
     report, bom = tmp_path / "report.json", tmp_path / "bom.json"
     report.write_text(json.dumps(_report()))
     runner = CliRunner()
-    assert runner.invoke(main, ["import-shadowscan", str(report), "-o", str(bom)]).exit_code == 0
+    assert (
+        runner.invoke(
+            main, ["import-shadowscan", str(report), "-o", str(bom), "--report-only"]
+        ).exit_code
+        == 0
+    )
     result = runner.invoke(main, ["verify-discovery", str(bom), str(report)])
     assert result.exit_code == 0
     assert "Source identity, signature, and truth were not verified" in result.output
@@ -181,13 +188,13 @@ def test_verify_artifact_signature_policy_is_required(tmp_path, monkeypatch):
     assert "does not establish artifact safety" in result.output
 
 
-@pytest.mark.parametrize("fmt", ["spdx", "sarif"])
+@pytest.mark.parametrize("fmt", ["sarif"])
 def test_lossy_outputs_fail_closed(tmp_path, fmt):
     path, out = tmp_path / "report.json", tmp_path / "bom.json"
     path.write_text(json.dumps(_report()))
     result = CliRunner().invoke(main, ["import-shadowscan", str(path), "-f", fmt, "-o", str(out)])
     assert result.exit_code != 0 and not out.exists()
-    assert "cannot yet preserve discovery coverage" in result.output
+    assert "cannot preserve imported discovery coverage" in result.output
 
 
 @pytest.mark.parametrize("content", ['{"version":"a","version":"b"}', '{"x":NaN}', "[]"])
@@ -231,7 +238,7 @@ def test_conventional_scan_carries_source_fingerprint(tmp_path):
     path, out = directory / "report.json", tmp_path / "bom.json"
     path.write_text(json.dumps(_report()))
     result = CliRunner().invoke(
-        main, ["scan", str(tmp_path), "--scanner", "shadowscan", "-o", str(out)]
+        main, ["scan", str(tmp_path), "--scanner", "shadowscan", "-o", str(out), "--report-only"]
     )
     assert result.exit_code == 0, result.output
     claim = AIBOM.load(out).metadata.completeness
@@ -239,12 +246,93 @@ def test_conventional_scan_carries_source_fingerprint(tmp_path):
     assert claim.scanner_status["shadowscan"] == "partial"
 
 
+@pytest.mark.parametrize("fmt", ["cyclonedx", "spdx"])
+def test_portable_import_preserves_native_coverage_and_provenance(tmp_path, fmt):
+    from nexus_symbiote.generators.spdx import SPDXGenerator
+
+    source, output = tmp_path / "report.json", tmp_path / "export.json"
+    raw = json.dumps(_report(), ensure_ascii=False, indent=2).replace("\n", "\r\n").encode()
+    source.write_bytes(raw)
+    result = CliRunner().invoke(
+        main,
+        [
+            "import-shadowscan",
+            str(source),
+            "-f",
+            fmt,
+            "-o",
+            str(output),
+            "--report-only",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    document = json.loads(output.read_text())
+    generator = CycloneDXGenerator if fmt == "cyclonedx" else SPDXGenerator
+    recovered = generator.recover(document)
+    claim = recovered.metadata.completeness
+    assert claim.source_report_digest == "sha256:" + hashlib.sha256(raw).hexdigest()
+    assert claim.source_unmapped_indexes == [2]
+    assert claim.scanner_status == {"shadowscan": "partial"}
+    assert claim.surfaces_excluded
+    if fmt == "cyclonedx":
+        assert document["compositions"] == [{"aggregate": "incomplete"}]
+
+
+def test_bare_findings_do_not_claim_report_coverage(tmp_path):
+    source = tmp_path / "report.json"
+    source.write_text(json.dumps(_report()["findings"]))
+    with pytest.raises(ValueError, match="report object"):
+        ShadowScanImporter().read_report(source)
+
+
+def test_imported_findings_do_not_create_local_artifact_or_dependency_claims(tmp_path):
+    source = tmp_path / "shadowscan.json"
+    source.write_text(json.dumps(_report()))
+    out = tmp_path / "bom.json"
+    result = CliRunner().invoke(
+        main,
+        [
+            "scan",
+            str(tmp_path),
+            "--scanner",
+            "shadowscan",
+            "-o",
+            str(out),
+            "--report-only",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    bom = AIBOM.load(out)
+    imported = [c for c in bom.components if c.bom_ref.startswith("shadowscan:")]
+    assert imported
+    for component in imported:
+        assert "repository_presence" not in component.claims
+        assert component.claims["discovery_report_entry"].assurance == AssuranceLevel.DECLARED
+        assert not component.source_path
+    imported_refs = {c.bom_ref for c in imported}
+    assert not any(e.target_ref in imported_refs for e in bom.dependencies)
+
+
+def test_complete_source_import_cannot_pass_inventory_gate(tmp_path):
+    source, output = tmp_path / "report.json", tmp_path / "bom.json"
+    source.write_text(json.dumps(_report()))
+    result = CliRunner().invoke(main, ["import-shadowscan", str(source), "-o", str(output)])
+    assert result.exit_code != 0
+    assert output.exists()
+    assert not RiskScorer().passes_gate(AIBOM.load(output))[0]
+
+
 def test_verify_direct_projection_rejects_copied_digest_and_ignored_fields(tmp_path):
     report, target = tmp_path / "report.json", tmp_path / "bom.json"
     # Include CRLF so a reader normalizing newlines would fail the digest check.
     report.write_bytes(json.dumps(_report(), indent=2).replace("\n", "\r\n").encode())
     runner = CliRunner()
-    assert runner.invoke(main, ["import-shadowscan", str(report), "-o", str(target)]).exit_code == 0
+    assert (
+        runner.invoke(
+            main, ["import-shadowscan", str(report), "-o", str(target), "--report-only"]
+        ).exit_code
+        == 0
+    )
     original = target.read_text()
     args = ["verify-discovery", str(target), str(report), "--projection"]
     assert runner.invoke(main, args).exit_code == 0
@@ -274,7 +362,12 @@ def test_report_signer_is_external_policy_and_applies_to_exact_report(tmp_path, 
     expected = "sha256:" + hashlib.sha256(report.read_bytes()).hexdigest()
     bundle.write_bytes(b"test-bundle")
     runner = CliRunner()
-    assert runner.invoke(main, ["import-shadowscan", str(report), "-o", str(target)]).exit_code == 0
+    assert (
+        runner.invoke(
+            main, ["import-shadowscan", str(report), "-o", str(target), "--report-only"]
+        ).exit_code
+        == 0
+    )
     cmd = ["verify-discovery", str(target), str(report)]
     for partial in (
         ["--bundle", str(bundle)],
@@ -329,3 +422,55 @@ def test_offline_production_sigstore_policy_on_upstream_release_fixture():
     assert not verify_sigstore_digest(digest, data, "wrong-identity", issuer).verified
     assert not verify_sigstore_digest(digest, data, signer, "https://wrong.invalid").verified
     assert not verify_sigstore_digest("sha256:" + "0" * 64, data, signer, issuer).verified
+
+
+def test_spdx_ai_and_dataset_license_relationship_cardinality():
+    from nexus_symbiote.core.models import ModelComponent, RAGSourceComponent
+    from nexus_symbiote.generators.spdx import NO_ASSERTION_LICENSE, SPDXGenerator
+
+    bom = AIBOM(
+        components=[
+            ModelComponent(bom_ref="model:m", name="model"),
+            RAGSourceComponent(bom_ref="data:d", name="data"),
+        ]
+    )
+    graph = SPDXGenerator().generate(bom)["@graph"]
+    packages = [n for n in graph if n["type"] in {"ai_AIPackage", "dataset_DatasetPackage"}]
+    assert len(packages) == 2
+    for package in packages:
+        for kind in ("hasDeclaredLicense", "hasConcludedLicense"):
+            matches = [
+                n
+                for n in graph
+                if n.get("from") == package["spdxId"] and n.get("relationshipType") == kind
+            ]
+            assert len(matches) == 1
+            assert matches[0]["to"] == [NO_ASSERTION_LICENSE]
+
+
+def test_spdx_license_validation_rejects_omitted_duplicate_or_forged_target():
+    import copy
+
+    from nexus_symbiote.core.models import ModelComponent
+    from nexus_symbiote.generators.spdx import SPDXGenerator
+    from nexus_symbiote.generators.validation import validate_spdx
+
+    document = SPDXGenerator().generate(AIBOM(components=[ModelComponent(bom_ref="m", name="m")]))
+    index = next(
+        i
+        for i, n in enumerate(document["@graph"])
+        if n.get("relationshipType") == "hasDeclaredLicense"
+    )
+    missing = copy.deepcopy(document)
+    relation = missing["@graph"].pop(index)
+    missing["@graph"][0]["element"].remove(relation["spdxId"])
+    assert any("requires exactly one" in e for e in validate_spdx(missing))
+    forged = copy.deepcopy(document)
+    forged["@graph"][index]["to"] = ["https://malicious.invalid/license"]
+    assert any("unresolved" in e for e in validate_spdx(forged))
+    duplicate = copy.deepcopy(document)
+    relation = copy.deepcopy(duplicate["@graph"][index])
+    relation["spdxId"] += "/duplicate"
+    duplicate["@graph"].append(relation)
+    duplicate["@graph"][0]["element"].append(relation["spdxId"])
+    assert any("requires exactly one" in e for e in validate_spdx(duplicate))

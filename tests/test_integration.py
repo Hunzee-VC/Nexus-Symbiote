@@ -103,14 +103,14 @@ class TestFullPipeline:
         assert "has_changes" in diff_data
 
     def test_all_output_formats(self, tmp_path: Path) -> None:
-        """Verify supported output formats produce valid JSON."""
+        """Verify all three output formats produce valid JSON."""
         project = tmp_path / "project"
         project.mkdir()
         _create_full_project(project)
 
         runner = CliRunner()
 
-        for fmt, key in [("json", "components"), ("cyclonedx", "bomFormat")]:
+        for fmt, key in [("json", "components"), ("cyclonedx", "bomFormat"), ("spdx", "@context")]:
             out = tmp_path / f"out-{fmt}.json"
             result = runner.invoke(
                 main, ["scan", "--report-only", str(project), "-f", fmt, "-o", str(out)]
