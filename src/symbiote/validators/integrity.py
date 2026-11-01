@@ -124,6 +124,16 @@ class IntegrityValidator:
         project_root: Path | None,
         report: IntegrityReport,
     ) -> None:
+        if comp.unverified_safetensors:
+            report.is_valid = False
+            report.issues.append(
+                IntegrityIssue(
+                    component_ref=comp.bom_ref,
+                    category="invalid_safetensors",
+                    detail="SafeTensors format could not be established from the file content.",
+                    severity="error",
+                )
+            )
         if hasattr(comp, "serialization_safety"):
             if comp.serialization_safety == SerializationSafety.UNSAFE_CODE_EXECUTION:
                 report.issues.append(

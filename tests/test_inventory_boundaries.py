@@ -142,3 +142,37 @@ def test_benchmark_statement_binds_outputs_and_materials(tmp_path, monkeypatch):
     (target / "results.json").write_bytes(b"{}")
     with pytest.raises(ValueError, match="bind"):
         evidence.verify(target, "signer", "authority")
+
+
+def test_security_facts_cannot_be_cleared_by_omitting_findings(tmp_path):
+    from symbiote.core.models import CompletenessClaim, ModelComponent
+    from symbiote.validators.integrity import IntegrityValidator
+    from symbiote.validators.risk import RiskScorer
+
+    for fields in [
+        {"serialization_safety": "unsafe-code-execution"},
+        {"trust_remote_code": True},
+        {"serialization_format": "safe-tensors", "serialization_safety": "unknown"},
+    ]:
+        bom = AIBOM(components=[ModelComponent(bom_ref="m", name="m", risks=[], **fields)])
+        bom.metadata.completeness = CompletenessClaim(
+            scope="local-static-project",
+            surfaces_scanned=["all"],
+            scanner_status=dict.fromkeys(
+                ("mcp", "model", "prompt", "rag", "registry", "a2a", "ide_agents", "shadowscan"),
+                "complete",
+            ),
+        )
+        ok, report = RiskScorer(fail_threshold=1000).passes_gate(bom)
+        assert report.coverage_status == "reported" and not ok
+        assert not IntegrityValidator().validate(bom).is_valid
+
+
+def test_dynamic_mcp_declaration_leaves_coverage_partial(tmp_path):
+    from symbiote.scanners.mcp import MCPScanner
+
+    (tmp_path / "server.ts").write_text(
+        'import {McpServer} from "@modelcontextprotocol/server"; const server=new McpServer({}); server.registerTool(runtimeName, {}, fn);'
+    )
+    result = MCPScanner().scan(tmp_path)
+    assert any("unresolved MCP tool name" in item for item in result.surfaces_excluded)

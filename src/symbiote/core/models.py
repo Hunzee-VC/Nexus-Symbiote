@@ -199,6 +199,13 @@ class ModelComponent(ComponentBase):
     )
     risks: list[RiskAssessment] = Field(default_factory=list)
 
+    @property
+    def unverified_safetensors(self) -> bool:
+        return (
+            self.serialization_format in {"safetensors", "safe-tensors"}
+            and self.serialization_safety == SerializationSafety.UNKNOWN
+        )
+
 
 class PromptComponent(ComponentBase):
     """A system prompt, instruction template, or behavior-shaping artifact."""

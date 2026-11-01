@@ -31,7 +31,7 @@ _CALL = Query(
     _LANGUAGE,
     """
 (call_expression function: (member_expression object: (identifier) @receiver property:
-    (property_identifier) @method) arguments: (arguments . (string) @name)) @call
+    (property_identifier) @method) arguments: (arguments . (_) @name)) @call
 """,
 )
 _MODULES = {"@modelcontextprotocol/server", "@modelcontextprotocol/sdk/server/mcp.js"}
@@ -100,8 +100,12 @@ def collect_typescript(root: Path, result: ScanResult) -> None:
             bound_server = servers.get((_block(call), _value(match["receiver"][0])))
             if not bound_server or _value(match["method"][0]) not in {"registerTool", "tool"}:
                 continue
-            name = _value(match["name"][0])[1:-1]
+            arg = match["name"][0]
+            name = _value(arg)[1:-1] if arg.type == "string" else ""
             if not re.fullmatch(r"[a-zA-Z0-9_.-]{1,128}", name):
+                result.surfaces_excluded.append(
+                    f"{rel}:{call.start_point.row + 1} (unresolved MCP tool name)"
+                )
                 continue
             tool = ToolComponent(
                 bom_ref=f"tool:{bound_server.bom_ref}/{name}",
