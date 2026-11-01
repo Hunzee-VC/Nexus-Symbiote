@@ -35,6 +35,10 @@ SPDX_TYPE_MAP: dict[ComponentType, str] = {
 }
 
 
+class SPDXExportUnavailableError(ValueError):
+    """The legacy projection is not a verified SPDX document."""
+
+
 class SPDXGenerator(Generator):
     format_name = "spdx-3.0"
 
@@ -42,6 +46,14 @@ class SPDXGenerator(Generator):
         self._namespace = namespace
 
     def generate(self, aibom: AIBOM) -> dict[str, Any]:
+        """Fail closed until the exporter satisfies SPDX 3.0.1 conformance."""
+        raise SPDXExportUnavailableError(
+            "SPDX export is unavailable: the current projection has not passed "
+            "SPDX 3.0.1 schema and profile validation. Use native JSON or CycloneDX."
+        )
+
+    def _generate_unvalidated(self, aibom: AIBOM) -> dict[str, Any]:
+        """Legacy projection retained for reimplementation; never expose as SPDX output."""
         aibom.finalize()
         doc_id = f"urn:spdx:document:{uuid.uuid4()}"
 

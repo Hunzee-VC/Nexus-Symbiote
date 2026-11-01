@@ -151,9 +151,12 @@ def scan(
 
         out_data = CycloneDXGenerator().generate_json(aibom)
     elif output_format == "spdx":
-        from symbiote.generators.spdx import SPDXGenerator
+        from symbiote.generators.spdx import SPDXExportUnavailableError, SPDXGenerator
 
-        out_data = SPDXGenerator().generate_json(aibom)
+        try:
+            out_data = SPDXGenerator().generate_json(aibom)
+        except SPDXExportUnavailableError as exc:
+            raise click.ClickException(str(exc)) from exc
     elif output_format == "sarif":
         from symbiote.generators.sarif import SARIFGenerator
 
