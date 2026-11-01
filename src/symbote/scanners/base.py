@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import stat
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -13,10 +16,12 @@ from urllib.parse import urlsplit
 from symbote.core.models import AnyComponent
 
 MAX_CONFIG_BYTES = 4 * 1024 * 1024
+MAX_MODEL_BYTES = 1024 * 1024 * 1024
 
 
-def read_regular_text(path: Path, *, max_bytes: int = MAX_CONFIG_BYTES) -> str:
-    """Read bounded UTF-8 text without traversing links or opening special files.
+@contextmanager
+def _open_regular(path: Path, max_bytes: int) -> Iterator[int]:
+    """Open a regular file without following links and check for read-time changes.
 
     Fail closed if descriptor-relative no-follow opens are unavailable. This protects
     scanner reads on POSIX; callers must surface failures as incomplete coverage.
@@ -40,8 +45,7 @@ def read_regular_text(path: Path, *, max_bytes: int = MAX_CONFIG_BYTES) -> str:
             info = os.fstat(fd)
             if not stat.S_ISREG(info.st_mode) or info.st_size > max_bytes:
                 raise OSError("not a regular file or exceeds scanner size limit")
-            with os.fdopen(fd, "rb", closefd=False) as stream:
-                data = stream.read(max_bytes + 1)
+            yield fd
             after = os.fstat(fd)
             if (info.st_size, info.st_mtime_ns, info.st_ctime_ns) != (
                 after.st_size,
@@ -49,13 +53,36 @@ def read_regular_text(path: Path, *, max_bytes: int = MAX_CONFIG_BYTES) -> str:
                 after.st_ctime_ns,
             ):
                 raise OSError("file changed during scanner read")
-            if len(data) > max_bytes:
-                raise OSError("file exceeds scanner size limit")
-            return data.decode("utf-8")
         finally:
             os.close(fd)
     finally:
         os.close(directory)
+
+
+def read_regular_text(path: Path, *, max_bytes: int = MAX_CONFIG_BYTES) -> str:
+    """Read bounded UTF-8 text without following symlinks."""
+    with _open_regular(path, max_bytes) as fd:
+        with os.fdopen(fd, "rb", closefd=False) as stream:
+            data = stream.read(max_bytes + 1)
+        if len(data) > max_bytes:
+            raise OSError("file exceeds scanner size limit")
+        return data.decode("utf-8")
+
+
+def hash_regular_file(path: Path, *, max_bytes: int = MAX_MODEL_BYTES) -> str:
+    """Hash a bounded regular file incrementally without following symlinks."""
+    with _open_regular(path, max_bytes) as fd:
+        digest = hashlib.sha256()
+        remaining = max_bytes + 1
+        while remaining:
+            chunk = os.read(fd, min(1024 * 1024, remaining))
+            if not chunk:
+                break
+            digest.update(chunk)
+            remaining -= len(chunk)
+        if remaining == 0:
+            raise OSError("file exceeds scanner size limit")
+        return "sha256:" + digest.hexdigest()
 
 
 def sanitized_origin(value: str) -> str:
