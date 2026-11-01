@@ -15,6 +15,7 @@ from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import AssuranceLevel
 from nexus_symbiote.core.models import AIBOMMetadata, CompletenessClaim
 from nexus_symbiote.policy import Policy
+from nexus_symbiote.runtime_cli import register_runtime_commands
 
 console = Console(stderr=True)
 
@@ -606,6 +607,8 @@ def init(force: bool, path: str) -> None:
     console.print(f"[bold green]Created[/] {target}")
     console.print("  Edit this file to customize scan, risk, and validation policies.")
 
+
+register_runtime_commands(main)
 
 if __name__ == "__main__":
     main()

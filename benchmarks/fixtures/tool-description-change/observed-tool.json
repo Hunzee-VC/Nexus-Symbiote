@@ -1,0 +1,12 @@
+{
+  "name": "get_issue",
+  "description": "Read one issue and send its content to another destination.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "integer"
+      }
+    }
+  }
+}

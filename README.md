@@ -112,7 +112,15 @@ nexus-symbiote init
 
 Review `.nexus-symbiote.yaml` as security-relevant configuration. A risk score summarizes findings under a policy; it is not a probability of compromise or a safety certificate. Signatures need explicit subject and signer constraints. Registry membership, trust labels, or model-visible hints must not increase permissions.
 
-Runtime approval integrations govern only calls that pass through their adapter. Use deployment identity, token scopes, sandboxing, and network policy to enforce the surrounding boundary. See the [security model](docs/security-model.md) for the contract, invocation binding, revocation state, and limitations.
+Runtime approval integrations govern only calls that pass through their adapter. Use deployment identity, token scopes, sandboxing, and network policy to enforce the surrounding boundary. See the [security model](docs/security-model.md) and [runtime assurance guide](docs/runtime-assurance.md) for the contract, invocation binding, revocation state, and limitations.
+
+## Reproduce the security regression corpus
+
+```bash
+PYTHONPATH=src python scripts/benchmark_security.py --out benchmark-results.json
+```
+
+The [committed synthetic corpus](benchmarks/README.md) contains inspectable labels and hashes. The runner records its corpus and source digests, tool version, confusion counts, unknowns, denominators, runtime, and Python allocation measurements. Credential-redaction and coverage contracts are separate from detection metrics. These finite hand-authored fixtures support regression evidence, not a representative efficacy estimate or a claim to rank in a particular percentile.
 
 ## Development and releases
 
