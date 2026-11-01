@@ -4,7 +4,7 @@
     "serial_number": "urn:uuid:a47f3e2b-8d91-4c05-b6ef-2e9d8a7c3f10",
     "version": 1,
     "timestamp": "2026-10-15T09:30:00Z",
-    "tool_name": "symbiote",
+    "tool_name": "nexus-symbiote",
     "tool_version": "0.1.0",
     "tool_vendor": "aisecnomad",
     "authors": ["platform-team@acme.corp"],

@@ -15,7 +15,7 @@ def action_steps() -> dict[str, dict]:
 def test_scan_inputs_are_data_not_shell(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    symbiote = bin_dir / "symbiote"
+    symbiote = bin_dir / "nexus-symbiote"
     symbiote.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$ARG_LOG"\n')
     symbiote.chmod(0o755)
     fake_python = bin_dir / "python"
@@ -51,7 +51,7 @@ def test_scan_inputs_are_data_not_shell(tmp_path: Path) -> None:
 def test_validation_failure_is_not_suppressed(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    command = bin_dir / "symbiote"
+    command = bin_dir / "nexus-symbiote"
     command.write_text("#!/bin/sh\nexit 7\n")
     command.chmod(0o755)
     env = {
