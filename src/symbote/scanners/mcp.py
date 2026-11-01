@@ -14,6 +14,7 @@ and detects unpinned versions, missing transport security, and rug-pull risk.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from symbote.core.enums import (
     CapabilityClass,
@@ -167,7 +168,7 @@ class MCPScanner(Scanner):
         return None
 
     def _extract_tools(
-        self, server_name: str, config: dict
+        self, server_name: str, config: dict[str, Any]
     ) -> list[ToolComponent]:
         tools_config = config.get("tools", [])
         tool_comps = []
@@ -221,7 +222,7 @@ class MCPScanner(Scanner):
         return tool_comps
 
     def _classify_side_effects(
-        self, annotations: dict, tool_name: str
+        self, annotations: dict[str, Any], tool_name: str
     ) -> SideEffectProfile:
         if annotations.get("destructiveHint"):
             return SideEffectProfile.DESTRUCTIVE
@@ -237,7 +238,7 @@ class MCPScanner(Scanner):
         return SideEffectProfile.UNKNOWN
 
     def _infer_capabilities(
-        self, tool_name: str, description: str, annotations: dict
+        self, tool_name: str, description: str, annotations: dict[str, Any]
     ) -> list[CapabilityClass]:
         caps = []
         combined = f"{tool_name} {description}".lower()
