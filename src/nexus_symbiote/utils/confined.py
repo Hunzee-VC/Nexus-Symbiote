@@ -7,7 +7,9 @@ import os
 import stat
 from pathlib import Path
 
-MAX_HASH_BYTES = 1024 * 1024 * 1024
+from nexus_symbiote.utils.fsio import MAX_MODEL_BYTES
+
+MAX_HASH_BYTES = MAX_MODEL_BYTES
 ALLOWED_HASHES = {"sha256", "sha384", "sha512"}
 
 

@@ -16,6 +16,11 @@ Do not execute discovered MCP servers, model code, hooks or other artifacts simp
 - Model, registry and signature metadata are assertions until their source and subject are verified under an explicit trust policy.
 - The generated BOM and findings are inputs to a decision; they do not provide runtime isolation, authorization or enforcement.
 - CI and artifact publishing have separate trust boundaries. Never expose release credentials to workflows processing untrusted repository content.
+- A policy file inside a scanned repository is controlled by that repository. Load the gate policy from a trusted location and pass it explicitly.
+
+## Supported versions
+
+The alpha line receives security fixes on the default branch only. Earlier revisions are not patched separately.
 
 ## Reporting a vulnerability
 

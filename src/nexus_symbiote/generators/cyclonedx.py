@@ -25,20 +25,52 @@ from nexus_symbiote.core.models import (
     ToolComponent,
 )
 from nexus_symbiote.generators.base import Generator
+from nexus_symbiote.validators.coverage import assess_coverage
 
+# Every ComponentType maps to a CycloneDX 1.7 component.type value. The original type is kept
+# in the nexus-symbiote:componentType property.
 COMPONENT_TYPE_MAP: dict[ComponentType, str] = {
     ComponentType.AGENT: "application",
     ComponentType.MODEL: "machine-learning-model",
-    ComponentType.TOOL: "library",
+    ComponentType.TOOL: "application",
     ComponentType.MCP_SERVER: "application",
-    ComponentType.PROMPT_TEMPLATE: "data",
-    ComponentType.GUARDRAIL_POLICY: "library",
+    ComponentType.MCP_CLIENT: "application",
+    ComponentType.PROMPT_TEMPLATE: "file",
+    ComponentType.GUARDRAIL_POLICY: "file",
     ComponentType.MEMORY_STORE: "data",
     ComponentType.RAG_SOURCE: "data",
     ComponentType.DATA_SOURCE: "data",
-    ComponentType.REGISTRY_ENTRY: "platform",
-    ComponentType.SKILL_PACKAGE: "library",
+    ComponentType.REGISTRY_ENTRY: "application",
+    ComponentType.SKILL_PACKAGE: "application",
+    ComponentType.A2A_CLIENT: "application",
+    ComponentType.A2A_SERVER: "application",
+    ComponentType.IDE_AGENT: "application",
+    ComponentType.VERIFIED_EXTENSION: "application",
 }
+
+_HASH_ALGORITHMS: dict[str, str] = {
+    "sha1": "SHA-1",
+    "sha256": "SHA-256",
+    "sha384": "SHA-384",
+    "sha512": "SHA-512",
+}
+
+
+def _property_value(value: Any) -> str:
+    """Property values are strings. Booleans become true or false, containers become JSON."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (list, tuple, dict)):
+        return json.dumps(value, sort_keys=True, default=str)
+    return str(value)
+
+
+def _property(name: str, value: Any) -> dict[str, str]:
+    return {"name": name, "value": _property_value(value)}
+
+
+def _hash_algorithm(alg: str) -> str:
+    return _HASH_ALGORITHMS.get(alg.lower(), alg.upper().replace("SHA", "SHA-"))
 
 
 class CycloneDXGenerator(Generator):
@@ -46,24 +78,31 @@ class CycloneDXGenerator(Generator):
 
     def generate(self, aibom: AIBOM) -> dict[str, Any]:
         aibom.finalize()
+        refs = {component.bom_ref for component in aibom.components}
+        # An edge is kept only when both of its ends are components. The rest are counted.
+        edges = [e for e in aibom.dependencies if e.source_ref in refs and e.target_ref in refs]
+        grouped: dict[str, set[str]] = {}
+        for edge in edges:
+            grouped.setdefault(edge.source_ref, set()).add(edge.target_ref)
+
         metadata = self._metadata(aibom)
         # CycloneDX dependency objects do not carry typed edge semantics.
         # Keep the original edges as documented metadata properties.
-        if aibom.dependencies:
-            metadata["properties"] = [
-                {
-                    "name": "nexus-symbiote:dependency:relationship",
-                    "value": json.dumps(
-                        {"from": edge.source_ref, "to": edge.target_ref, "type": edge.relationship},
-                        sort_keys=True,
-                        separators=(",", ":"),
-                    ),
-                }
-                for edge in aibom.dependencies
-            ]
-        grouped: dict[str, set[str]] = {}
-        for edge in aibom.dependencies:
-            grouped.setdefault(edge.source_ref, set()).add(edge.target_ref)
+        metadata["properties"] = [
+            {
+                "name": "nexus-symbiote:dependency:relationship",
+                "value": json.dumps(
+                    {"from": edge.source_ref, "to": edge.target_ref, "type": edge.relationship},
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            }
+            for edge in edges
+        ]
+        metadata["properties"].extend(self._completeness_properties(aibom))
+        metadata["properties"].append(
+            _property("nexus-symbiote:dependency:dropped", len(aibom.dependencies) - len(edges))
+        )
         return {
             "bomFormat": "CycloneDX",
             "specVersion": "1.7",
@@ -72,8 +111,8 @@ class CycloneDXGenerator(Generator):
             "metadata": metadata,
             "components": [self._component(c) for c in aibom.components],
             "dependencies": [
-                {"ref": ref, "dependsOn": sorted(targets)}
-                for ref, targets in sorted(grouped.items())
+                {"ref": ref, "dependsOn": sorted(grouped.get(ref, set()))}
+                for ref in sorted(refs)
             ],
         }
 
@@ -97,8 +136,20 @@ class CycloneDXGenerator(Generator):
             meta["authors"] = [{"name": a} for a in aibom.metadata.authors]
         return meta
 
+    def _completeness_properties(self, aibom: AIBOM) -> list[dict[str, str]]:
+        claim = aibom.metadata.completeness
+        assessment = assess_coverage(claim)
+        props = [
+            _property("nexus-symbiote:coverage", assessment.state),
+            _property("nexus-symbiote:coverage-reasons", list(assessment.reasons)),
+        ]
+        if claim is not None:
+            props.append(_property("nexus-symbiote:scope", claim.scope))
+            props.append(_property("nexus-symbiote:scanner-status", claim.scanner_status))
+        return props
+
     def _component(self, comp: AnyComponent) -> dict[str, Any]:
-        cdx_type = COMPONENT_TYPE_MAP.get(comp.component_type, "library")
+        cdx_type = COMPONENT_TYPE_MAP.get(comp.component_type, "application")
         result: dict[str, Any] = {
             "type": cdx_type,
             "bom-ref": comp.bom_ref,
@@ -110,12 +161,9 @@ class CycloneDXGenerator(Generator):
             result["supplier"] = {"name": comp.supplier}
         if comp.description:
             result["description"] = comp.description
-        if comp.hashes:
-            result["hashes"] = [
-                {"alg": alg.upper().replace("SHA", "SHA-"), "content": val.split(":", 1)[-1]}
-                for alg, val in comp.hashes.items()
-                if val
-            ]
+        hashes = self._hashes(comp)
+        if hashes:
+            result["hashes"] = hashes
 
         props = self._extension_properties(comp)
         if props:
@@ -123,12 +171,25 @@ class CycloneDXGenerator(Generator):
 
         return result
 
+    def _hashes(self, comp: AnyComponent) -> list[dict[str, str]]:
+        hashes = [
+            {"alg": _hash_algorithm(alg), "content": val.split(":", 1)[-1]}
+            for alg, val in comp.hashes.items()
+            if val
+        ]
+        if isinstance(comp, PromptComponent) and comp.content_hash:
+            algorithm, _, digest = comp.content_hash.partition(":")
+            already_listed = any(h["alg"] == "SHA-256" for h in hashes)
+            if algorithm.lower() == "sha256" and digest and not already_listed:
+                hashes.append({"alg": "SHA-256", "content": digest})
+        return hashes
+
     def _extension_properties(self, comp: AnyComponent) -> list[dict[str, str]]:
         props: list[dict[str, str]] = []
 
         def _add(name: str, value: Any) -> None:
             if value is not None and value != "":
-                props.append({"name": f"nexus-symbiote:{name}", "value": str(value)})
+                props.append(_property(f"nexus-symbiote:{name}", value))
 
         _add("componentType", comp.component_type.value)
         _add("trustTier", comp.trust_tier.value)
@@ -176,6 +237,14 @@ class CycloneDXGenerator(Generator):
             _add("publisherVerified", comp.publisher_verified)
         elif isinstance(comp, SkillPackageComponent):
             _add("skillType", comp.skill_type)
+
+        for risk in comp.risks:
+            props.append(
+                _property(
+                    "nexus-symbiote:risk",
+                    f"{risk.severity.value} {risk.category}: {risk.detail}",
+                )
+            )
 
         return props
 

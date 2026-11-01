@@ -2,9 +2,18 @@
 
 Prior versions used a serializer that was not RFC 8785 compliant. The corrected
 serializer may produce different SHA-256 digests for the same tool definition,
-particularly for floating point numbers and non-BMP property names. New scanner findings record `definition_hash_version: rfc8785-jcs-v1`.
-An absent or unsupported version is not treated as verified. A bare
-`sha256:` digest does not identify which serializer produced it.
+particularly for floating point numbers and non-BMP property names. New scanner
+findings record `definition_hash_version: rfc8785-jcs-v1`. An absent or unsupported
+version is not treated as verified. A bare `sha256:` digest does not identify which
+serializer produced it.
+
+Validation recomputes each tool definition from the same values the scanner hashed:
+the name, the description text, the input schema, and the annotations. A BOM written
+by the previous version that had annotations `{}` now validates. A tool whose
+`description_text` is null but that has a definition hash now fails validation with
+`unverifiable_definition`, because its definition cannot be recomputed. Hashes are not
+re-computed for existing BOMs: stored digests stay as written. Re-scan to obtain
+fingerprints under the current rules.
 
 Before using the corrected version for drift or policy decisions, re-collect
 and re-approve both baseline and observed tool definitions under the same

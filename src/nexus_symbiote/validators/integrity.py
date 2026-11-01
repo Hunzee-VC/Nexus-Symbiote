@@ -6,9 +6,24 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from nexus_symbiote.core.aibom import AIBOM
-from nexus_symbiote.core.enums import ComponentType, SerializationSafety
+from nexus_symbiote.core.enums import SerializationSafety
 from nexus_symbiote.core.hashing import hash_tool_definition
+from nexus_symbiote.core.models import (
+    ComponentBase,
+    MCPServerComponent,
+    ModelComponent,
+    PromptComponent,
+    ToolComponent,
+)
+from nexus_symbiote.core.vocab import (
+    SIGNING_NOT_FOUND,
+    SIGNING_PRESENT_UNVERIFIED,
+    SIGNING_VERIFIED,
+    normalize_signing_status,
+)
 from nexus_symbiote.utils.confined import hash_confined_file
+
+_DEFINITION_HASH_VERSION = "rfc8785-jcs-v1"
 
 
 @dataclass
@@ -56,90 +71,112 @@ class IntegrityValidator:
         for comp in bom.components:
             report.components_checked += 1
 
-            if comp.component_type == ComponentType.TOOL:
+            if isinstance(comp, ToolComponent):
                 self._check_tool_hash(comp, report)
-            elif comp.component_type == ComponentType.MODEL:
+            elif isinstance(comp, ModelComponent):
                 self._check_model_integrity(comp, project_root, report)
-            elif comp.component_type == ComponentType.PROMPT_TEMPLATE:
+            elif isinstance(comp, PromptComponent):
                 self._check_prompt_hash(comp, project_root, report)
-            elif comp.component_type == ComponentType.MCP_SERVER:
+            elif isinstance(comp, MCPServerComponent):
                 self._check_mcp_version_pin(comp, report)
 
             self._check_file_hash(comp, project_root, report)
 
         return report
 
-    def _check_tool_hash(self, comp, report: IntegrityReport) -> None:  # type: ignore[no-untyped-def]
-        if not hasattr(comp, "definition_hash") or not comp.definition_hash:
+    def _check_tool_hash(self, comp: ToolComponent, report: IntegrityReport) -> None:
+        if not comp.definition_hash:
+            substantive = bool(comp.description_text) or comp.input_schema is not None
             report.issues.append(
                 IntegrityIssue(
                     component_ref=comp.bom_ref,
                     category="missing_hash",
-                    detail=f"Tool '{comp.name}' has no definition hash — rug-pull detection disabled.",
-                    severity="warning",
+                    detail=(
+                        f"Tool '{comp.name}' has no definition hash — rug-pull detection disabled."
+                    ),
+                    severity="error" if substantive else "warning",
                 )
             )
+            if substantive:
+                report.is_valid = False
             return
 
-        if getattr(comp, "definition_hash_version", None) != "rfc8785-jcs-v1":
+        if comp.description_text is None:
             report.issues.append(
                 IntegrityIssue(
                     component_ref=comp.bom_ref,
-                    category="fingerprint_version_unknown",
-                    detail=f"Tool '{comp.name}' fingerprint version is unknown or unsupported; re-collect and re-approve.",
+                    category="unverifiable_definition",
+                    detail=(
+                        f"Tool '{comp.name}' has a definition hash but no description text "
+                        "to verify it against."
+                    ),
                     severity="error",
                 )
             )
             report.is_valid = False
             return
 
-        if hasattr(comp, "description_text") and comp.description_text is not None:
-            recomputed = hash_tool_definition(
-                comp.name,
-                comp.description_text,
-                getattr(comp, "input_schema", None),
-                getattr(comp, "annotations", None) or None,
-            )
-            if recomputed != comp.definition_hash:
-                report.issues.append(
-                    IntegrityIssue(
-                        component_ref=comp.bom_ref,
-                        category="hash_mismatch",
-                        detail=(
-                            f"Tool '{comp.name}' definition hash mismatch: "
-                            f"declared={comp.definition_hash}, computed={recomputed}. "
-                            "Possible rug-pull — tool definition changed post-approval."
-                        ),
-                        severity="error",
-                    )
+        if comp.definition_hash_version != _DEFINITION_HASH_VERSION:
+            report.issues.append(
+                IntegrityIssue(
+                    component_ref=comp.bom_ref,
+                    category="fingerprint_version_unknown",
+                    detail=(
+                        f"Tool '{comp.name}' fingerprint version is unknown or unsupported; "
+                        "re-collect and re-approve."
+                    ),
+                    severity="error",
                 )
-                report.hashes_failed += 1
-                report.is_valid = False
-            else:
-                report.hashes_verified += 1
+            )
+            report.is_valid = False
+            return
 
-    def _check_model_integrity(  # type: ignore[no-untyped-def]
+        recomputed = hash_tool_definition(
+            comp.name,
+            comp.description_text,
+            comp.input_schema,
+            comp.annotations,
+        )
+        if recomputed != comp.definition_hash:
+            report.issues.append(
+                IntegrityIssue(
+                    component_ref=comp.bom_ref,
+                    category="hash_mismatch",
+                    detail=(
+                        f"Tool '{comp.name}' definition hash mismatch: "
+                        f"declared={comp.definition_hash}, computed={recomputed}. "
+                        "Possible rug-pull — tool definition changed post-approval."
+                    ),
+                    severity="error",
+                )
+            )
+            report.hashes_failed += 1
+            report.is_valid = False
+        else:
+            report.hashes_verified += 1
+
+    def _check_model_integrity(
         self,
-        comp,
+        comp: ModelComponent,
         project_root: Path | None,
         report: IntegrityReport,
     ) -> None:
-        if hasattr(comp, "serialization_safety"):
-            if comp.serialization_safety == SerializationSafety.UNSAFE_CODE_EXECUTION:
-                report.issues.append(
-                    IntegrityIssue(
-                        component_ref=comp.bom_ref,
-                        category="unsafe_format",
-                        detail=(
-                            f"Model '{comp.name}' uses an unsafe serialization "
-                            "format that allows arbitrary code execution."
-                        ),
-                        severity="critical",
-                    )
+        if comp.serialization_safety == SerializationSafety.UNSAFE_CODE_EXECUTION:
+            report.issues.append(
+                IntegrityIssue(
+                    component_ref=comp.bom_ref,
+                    category="unsafe_format",
+                    detail=(
+                        f"Model '{comp.name}' uses an unsafe serialization "
+                        "format that allows arbitrary code execution."
+                    ),
+                    severity="critical",
                 )
-                report.is_valid = False
+            )
+            report.is_valid = False
 
-        if hasattr(comp, "signing_status") and comp.signing_status == "unsigned":
+        status = normalize_signing_status(comp.signing_status)
+        if status == SIGNING_NOT_FOUND:
             report.issues.append(
                 IntegrityIssue(
                     component_ref=comp.bom_ref,
@@ -148,8 +185,26 @@ class IntegrityValidator:
                     severity="warning",
                 )
             )
+        elif status == SIGNING_PRESENT_UNVERIFIED:
+            report.issues.append(
+                IntegrityIssue(
+                    component_ref=comp.bom_ref,
+                    category="unverified_signature",
+                    detail=f"Model '{comp.name}' has a signature that was not verified.",
+                    severity="info",
+                )
+            )
+        elif status is not None and status != SIGNING_VERIFIED:
+            report.issues.append(
+                IntegrityIssue(
+                    component_ref=comp.bom_ref,
+                    category="unknown_signing_status",
+                    detail=f"Model '{comp.name}' has an unrecognized signing status.",
+                    severity="warning",
+                )
+            )
 
-        if hasattr(comp, "trust_remote_code") and comp.trust_remote_code:
+        if comp.trust_remote_code:
             report.issues.append(
                 IntegrityIssue(
                     component_ref=comp.bom_ref,
@@ -163,13 +218,13 @@ class IntegrityValidator:
             )
             report.is_valid = False
 
-    def _check_prompt_hash(  # type: ignore[no-untyped-def]
+    def _check_prompt_hash(
         self,
-        comp,
+        comp: PromptComponent,
         project_root: Path | None,
         report: IntegrityReport,
     ) -> None:
-        if not hasattr(comp, "content_hash") or not comp.content_hash:
+        if not comp.content_hash:
             report.issues.append(
                 IntegrityIssue(
                     component_ref=comp.bom_ref,
@@ -211,8 +266,8 @@ class IntegrityValidator:
                 report.hashes_failed += 1
                 report.is_valid = False
 
-    def _check_mcp_version_pin(self, comp, report: IntegrityReport) -> None:  # type: ignore[no-untyped-def]
-        if hasattr(comp, "version_pinned") and not comp.version_pinned:
+    def _check_mcp_version_pin(self, comp: MCPServerComponent, report: IntegrityReport) -> None:
+        if not comp.version_pinned:
             report.issues.append(
                 IntegrityIssue(
                     component_ref=comp.bom_ref,
@@ -225,9 +280,9 @@ class IntegrityValidator:
                 )
             )
 
-    def _check_file_hash(  # type: ignore[no-untyped-def]
+    def _check_file_hash(
         self,
-        comp,
+        comp: ComponentBase,
         project_root: Path | None,
         report: IntegrityReport,
     ) -> None:

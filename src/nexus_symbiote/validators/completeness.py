@@ -7,8 +7,8 @@ from pathlib import Path
 
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import AssuranceLevel, ComponentType
-
-REQUIRED_SCANNERS = frozenset({"mcp", "model", "prompt", "rag", "registry"})
+from nexus_symbiote.core.vocab import REQUIRED_SCANNERS
+from nexus_symbiote.validators.coverage import assess_coverage
 
 EXPECTED_SURFACES = {
     "mcp-config": "MCP server configuration (.mcp.json etc.)",
@@ -42,6 +42,8 @@ class CompletenessReport:
     assurance_level: AssuranceLevel = AssuranceLevel.DECLARED
     component_type_coverage: dict[str, int] = field(default_factory=dict)
     total_components: int = 0
+    coverage_state: str = "unknown"
+    coverage_reasons: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -55,6 +57,8 @@ class CompletenessReport:
             "assurance_level": self.assurance_level.value,
             "component_type_coverage": self.component_type_coverage,
             "total_components": self.total_components,
+            "coverage_state": self.coverage_state,
+            "coverage_reasons": list(self.coverage_reasons),
         }
 
 
@@ -71,49 +75,24 @@ class CompletenessValidator:
             type_counts[key] = type_counts.get(key, 0) + 1
         report.component_type_coverage = type_counts
 
-        if bom.metadata.completeness:
-            report.surfaces_covered = list(bom.metadata.completeness.surfaces_scanned)
-            report.surfaces_missing = list(bom.metadata.completeness.surfaces_excluded)
-            report.assurance_level = bom.metadata.completeness.assurance_level
-        else:
+        claim = bom.metadata.completeness
+        if claim is not None:
+            report.surfaces_covered = list(claim.surfaces_scanned)
+            report.surfaces_missing = list(claim.surfaces_excluded)
+            report.assurance_level = claim.assurance_level
+
+        assessment = assess_coverage(claim, REQUIRED_SCANNERS)
+        report.coverage_state = assessment.state
+        report.coverage_reasons = list(assessment.reasons)
+        report.is_complete = assessment.is_complete
+        for reason in assessment.reasons:
             report.issues.append(
                 CompletenessIssue(
-                    surface="metadata",
-                    description="AIBOM has no completeness claim — cannot assess coverage.",
+                    surface=_reason_surface(reason),
+                    description=reason,
                     severity="error",
                 )
             )
-            report.is_complete = False
-
-        if bom.metadata.completeness:
-            claim = bom.metadata.completeness
-            if claim.scan_failures:
-                report.is_complete = False
-                for failure in claim.scan_failures:
-                    report.issues.append(CompletenessIssue("collection", failure, "error"))
-            missing = REQUIRED_SCANNERS - claim.scanner_status.keys()
-            if missing:
-                report.is_complete = False
-                report.issues.append(
-                    CompletenessIssue(
-                        "coverage",
-                        "Missing scanner coverage: " + ", ".join(sorted(missing)),
-                        "error",
-                    )
-                )
-            if claim.surfaces_excluded:
-                report.is_complete = False
-                report.issues.append(
-                    CompletenessIssue(
-                        "coverage", "Excluded surfaces leave coverage incomplete.", "error"
-                    )
-                )
-            for scanner, state in claim.scanner_status.items():
-                if state != "complete":
-                    report.is_complete = False
-                    report.issues.append(
-                        CompletenessIssue(scanner, f"Scanner coverage is {state}.", "error")
-                    )
 
         for c in bom.components:
             if not c.hashes and c.component_type in (
@@ -241,3 +220,13 @@ class CompletenessValidator:
                     orphans.append((ref, f"{c.bom_ref}.{ref_field}"))
 
         return orphans
+
+
+def _reason_surface(reason: str) -> str:
+    """Name the surface a coverage reason refers to: a scanner, an excluded surface, or the claim."""
+    kind, _, subject = reason.partition(": ")
+    if kind == "scan failure":
+        return "collection"
+    if kind == "surface excluded":
+        return subject
+    return subject or "metadata"

@@ -72,28 +72,40 @@ def hash_bytes(data: bytes, algorithm: str = "sha256") -> str:
     return f"{algorithm}:{h.hexdigest()}"
 
 
-_RANGE_PREFIX = re.compile(r"^[~^>=<!]+")
-_VERSION_PATTERN = re.compile(
-    r"(?:^|[/@:])(\d+\.\d+(?:\.\d+)?(?:[-+][a-zA-Z0-9.]+)?)(?:$|[/?#,;\s])"
+_SEMVER = re.compile(
+    r"[0-9]+\.[0-9]+\.[0-9]+"
+    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+)
+_DIGEST_PIN = re.compile(r"[^@\s]+@(sha256:[0-9a-f]{64})")
+_PEP508_EXACT = re.compile(
+    r"[A-Za-z0-9][A-Za-z0-9._-]*(?:\[[^\]]*\])?\s*==\s*([0-9][0-9A-Za-z.!+_-]*)"
 )
 
 
 def extract_version_pin(reference: str) -> str | None:
-    """Extract a pinned version from a package reference or URL.
+    """Return the exact version or digest that a package reference pins, or None.
 
-    Returns None for range specifiers (^, ~, >=, etc.) and floating/latest.
-    Returns the version only for exact pins (@1.2.3, ==1.2.3, bare 1.2.3).
+    Recognises npm (name@1.2.3, scoped names included), PEP 508 (name==1.2.3) and Docker
+    digests (image@sha256:...). Ranges, tags, URLs and bare versions are not pins.
     """
-    stripped = reference.strip()
-    if stripped in ("*", "latest") or stripped.endswith("@latest") or stripped.endswith(":latest"):
+    value = reference.strip()
+    if not value or value in ("*", "latest") or value.endswith(("@latest", ":latest")):
         return None
-    if _RANGE_PREFIX.match(stripped):
-        prefix = _RANGE_PREFIX.match(stripped)
-        if prefix and prefix.group(0) not in ("==",):
-            return None
-        if prefix and prefix.group(0) == "==":
-            rest = stripped[prefix.end() :]
-            m = re.match(r"(\d+\.\d+(?:\.\d+)?(?:[-+][a-zA-Z0-9.]+)?)", rest)
-            return m.group(1) if m else None
-    m = _VERSION_PATTERN.search(stripped)
-    return m.group(1) if m else None
+    if "://" in value:
+        return None
+
+    digest = _DIGEST_PIN.fullmatch(value)
+    if digest:
+        return digest.group(1)
+
+    exact = _PEP508_EXACT.fullmatch(value.split(";", 1)[0].strip())
+    if exact:
+        return exact.group(1)
+
+    name, separator, spec = value.rpartition("@")
+    if separator and name:
+        version = spec.removeprefix("v")
+        if _SEMVER.fullmatch(version):
+            return version
+    return None

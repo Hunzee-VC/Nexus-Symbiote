@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import uuid
 from typing import Any
+from urllib.parse import quote
 
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.enums import ComponentType
@@ -20,11 +21,13 @@ from nexus_symbiote.core.models import (
 )
 from nexus_symbiote.generators.base import Generator
 
+# Every ComponentType has an SPDX 3.0 class. Types with no dedicated class are software packages.
 SPDX_TYPE_MAP: dict[ComponentType, str] = {
     ComponentType.AGENT: "ai_AIPackage",
     ComponentType.MODEL: "ai_AIPackage",
     ComponentType.TOOL: "software_Package",
     ComponentType.MCP_SERVER: "software_Package",
+    ComponentType.MCP_CLIENT: "software_Package",
     ComponentType.PROMPT_TEMPLATE: "software_Snippet",
     ComponentType.GUARDRAIL_POLICY: "software_Package",
     ComponentType.MEMORY_STORE: "dataset_Dataset",
@@ -32,7 +35,45 @@ SPDX_TYPE_MAP: dict[ComponentType, str] = {
     ComponentType.DATA_SOURCE: "dataset_Dataset",
     ComponentType.REGISTRY_ENTRY: "software_Package",
     ComponentType.SKILL_PACKAGE: "software_Package",
+    ComponentType.A2A_CLIENT: "software_Package",
+    ComponentType.A2A_SERVER: "software_Package",
+    ComponentType.IDE_AGENT: "software_Package",
+    ComponentType.VERIFIED_EXTENSION: "software_Package",
 }
+
+# SPDX 3.0 RelationshipType values. Edge types not listed here become "other". The original
+# type is kept in the nexus-symbiote:relationship property.
+SPDX_RELATIONSHIP_MAP: dict[str, str] = {
+    "depends-on": "dependsOn",
+    "invokes": "dependsOn",
+    "delegates-to": "dependsOn",
+    "retrieves-from": "dependsOn",
+    "trained-on": "trainedOn",
+    "fine-tuned-from": "derivedFrom",
+    "quantized-from": "derivedFrom",
+    "merged-from": "derivedFrom",
+}
+
+_SPEC_VERSION = "3.0.1"
+_CREATION_INFO_ID = "_:creationinfo"
+_PROFILES = ("core", "software", "ai", "dataset")
+
+
+def _component_iri(bom_ref: str) -> str:
+    # Quoting encodes every colon, so these IRIs never match the prefixed IRIs below.
+    return "urn:spdx:" + quote(bom_ref, safe="")
+
+
+def _agent_iri(name: str) -> str:
+    return "urn:spdx:agent:" + quote(name, safe="")
+
+
+def _tool_iri(label: str) -> str:
+    return "urn:spdx:tool:" + quote(label, safe="")
+
+
+def _org_iri(name: str) -> str:
+    return "urn:spdx:org:" + quote(name, safe="")
 
 
 class SPDXGenerator(Generator):
@@ -43,68 +84,85 @@ class SPDXGenerator(Generator):
 
     def generate(self, aibom: AIBOM) -> dict[str, Any]:
         aibom.finalize()
-        doc_id = f"urn:spdx:document:{uuid.uuid4()}"
+        timestamp = aibom.metadata.timestamp
+        serial = aibom.metadata.serial_number
+        if timestamp is None or serial is None:
+            raise ValueError("finalize() did not set the AIBOM timestamp and serial number")
 
-        elements: list[dict[str, Any]] = []
-        for comp in aibom.components:
-            elements.append(self._element(comp))
-        for dep in aibom.dependencies:
-            elements.append(self._relationship(dep))
+        tool_name = aibom.metadata.tool_name
+        tool_label = f"{tool_name}-{aibom.metadata.tool_version or 'unknown'}"
+        agent_id = _agent_iri(tool_name)
+        tool_id = _tool_iri(tool_label)
+        creation_info: dict[str, Any] = {
+            "type": "CreationInfo",
+            "@id": _CREATION_INFO_ID,
+            "specVersion": _SPEC_VERSION,
+            "created": timestamp.isoformat(),
+            "createdBy": [agent_id],
+            "createdUsing": [tool_id],
+        }
+
+        nodes: list[dict[str, Any]] = [
+            {"type": "SoftwareAgent", "spdxId": agent_id, "name": tool_name},
+            {"type": "Tool", "spdxId": tool_id, "name": tool_label},
+        ]
+        suppliers = sorted({c.supplier for c in aibom.components if c.supplier})
+        nodes.extend(
+            {"type": "Organization", "spdxId": _org_iri(name), "name": name} for name in suppliers
+        )
+        nodes.extend(self._element(c) for c in aibom.components)
+
+        refs = {c.bom_ref for c in aibom.components}
+        seen: set[tuple[str, str, str]] = set()
+        for edge in aibom.dependencies:
+            key = (edge.source_ref, edge.relationship, edge.target_ref)
+            if edge.source_ref not in refs or edge.target_ref not in refs or key in seen:
+                continue
+            seen.add(key)
+            nodes.append(self._relationship(edge))
+
+        for node in nodes:
+            node["creationInfo"] = _CREATION_INFO_ID
+
+        root = next(
+            (c for c in aibom.components if c.component_type == ComponentType.AGENT),
+            aibom.components[0] if aibom.components else None,
+        )
+        document: dict[str, Any] = {
+            "type": "SpdxDocument",
+            "spdxId": f"urn:spdx:document:{uuid.uuid5(uuid.NAMESPACE_URL, serial)}",
+            "name": f"nexus-symbiote-aibom-{serial}",
+            "specVersion": _SPEC_VERSION,
+            "creationInfo": _CREATION_INFO_ID,
+            "profileConformance": list(_PROFILES),
+            "element": [node["spdxId"] for node in nodes],
+            "rootElement": [_component_iri(root.bom_ref)] if root is not None else [],
+        }
 
         return {
             "@context": "https://spdx.org/rdf/3.0.1/spdx-context.jsonld",
-            "@graph": [
-                {
-                    "type": "SpdxDocument",
-                    "spdxId": doc_id,
-                    "name": f"nexus-symbiote-aibom-{aibom.metadata.serial_number or 'unknown'}",
-                    "specVersion": "3.0.1",
-                    "creationInfo": self._creation_info(aibom),
-                    "element": [e["spdxId"] for e in elements],
-                    "rootElement": [
-                        e["spdxId"]
-                        for e in elements
-                        if e.get("type") in ("ai_AIPackage", "software_Package")
-                    ][:1],
-                },
-                *elements,
-            ],
-        }
-
-    def _creation_info(self, aibom: AIBOM) -> dict[str, Any]:
-        return {
-            "specVersion": "3.0.1",
-            "created": (
-                aibom.metadata.timestamp.isoformat()
-                if aibom.metadata.timestamp
-                else "1970-01-01T00:00:00Z"
-            ),
-            "createdBy": [f"urn:spdx:agent:{aibom.metadata.tool_name}"],
-            "createdUsing": [
-                f"urn:spdx:tool:{aibom.metadata.tool_name}-{aibom.metadata.tool_version or 'unknown'}"
-            ],
+            "@graph": [document, creation_info, *nodes],
         }
 
     def _element(self, comp: AnyComponent) -> dict[str, Any]:
         spdx_type = SPDX_TYPE_MAP.get(comp.component_type, "software_Package")
-        spdx_id = f"urn:spdx:{comp.bom_ref.replace(':', '-')}"
 
         element: dict[str, Any] = {
             "type": spdx_type,
-            "spdxId": spdx_id,
+            "spdxId": _component_iri(comp.bom_ref),
             "name": comp.name,
         }
         if comp.version:
             element["packageVersion"] = comp.version
         if comp.supplier:
-            element["suppliedBy"] = f"urn:spdx:agent:{comp.supplier}"
+            element["suppliedBy"] = _org_iri(comp.supplier)
         if comp.description:
             element["description"] = comp.description
         if comp.hashes:
             element["verifiedUsing"] = [
                 {
                     "type": "Hash",
-                    "algorithm": alg,
+                    "algorithm": alg.lower(),
                     "hashValue": val.split(":", 1)[-1] if ":" in val else val,
                 }
                 for alg, val in comp.hashes.items()
@@ -148,22 +206,14 @@ class SPDXGenerator(Generator):
         ]
 
     def _relationship(self, edge: DependencyEdge) -> dict[str, Any]:
-        rel_map = {
-            "invokes": "DEPENDS_ON",
-            "delegates-to": "DEPENDS_ON",
-            "retrieves-from": "DEPENDS_ON",
-            "trained-on": "TRAINED_ON",
-            "fine-tuned-from": "DERIVED_FROM",
-            "quantized-from": "DERIVED_FROM",
-            "merged-from": "DERIVED_FROM",
-            "depends-on": "DEPENDS_ON",
-        }
+        # Deterministic: the same edge always gets the same id, and no random ids are used.
+        key = f"{edge.source_ref}|{edge.relationship}|{edge.target_ref}"
         return {
             "type": "Relationship",
-            "spdxId": f"urn:spdx:rel:{uuid.uuid4()}",
-            "relationshipType": rel_map.get(edge.relationship, "OTHER"),
-            "from": f"urn:spdx:{edge.source_ref.replace(':', '-')}",
-            "to": [f"urn:spdx:{edge.target_ref.replace(':', '-')}"],
+            "spdxId": f"urn:spdx:rel:{uuid.uuid5(uuid.NAMESPACE_URL, key)}",
+            "relationshipType": SPDX_RELATIONSHIP_MAP.get(edge.relationship, "other"),
+            "from": _component_iri(edge.source_ref),
+            "to": [_component_iri(edge.target_ref)],
             "extension": [
                 {
                     "type": "Extension",

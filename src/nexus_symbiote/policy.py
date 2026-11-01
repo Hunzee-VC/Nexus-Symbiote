@@ -1,30 +1,52 @@
-"""Policy configuration — .nexus-symbiote.yaml loading and defaults."""
+"""Policy configuration — explicit policy files, discovery, and defaults."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
+from pydantic_core import PydanticCustomError
+
+from nexus_symbiote.core.vocab import SCANNER_NAMES
+from nexus_symbiote.scanners.base import DEFAULT_EXCLUDE_PATHS
+from nexus_symbiote.utils.fsio import MAX_CONFIG_BYTES, read_regular_text
+
+_POLICY_FILE_NAMES = (".nexus-symbiote.yaml", ".nexus-symbiote.yml")
+_MAX_DISCOVERY_LEVELS = 20
+
+
+class PolicyError(ValueError):
+    """A policy file could not be read, parsed, or validated. Messages never quote its contents."""
 
 
 class ScanPolicy(BaseModel):
     model_config = {"extra": "forbid"}
 
-    scanners: list[str] = Field(
-        default=["mcp", "model", "prompt", "rag", "registry"],
-    )
-    exclude_paths: list[str] = Field(
-        default=["node_modules", ".git", "__pycache__", ".venv"],
-    )
+    scanners: list[str] = Field(default_factory=lambda: list(SCANNER_NAMES))
+    exclude_paths: list[str] = Field(default_factory=lambda: list(DEFAULT_EXCLUDE_PATHS))
+
+    @field_validator("scanners")
+    @classmethod
+    def known_scanners(cls, value: list[str]) -> list[str]:
+        if any(name not in SCANNER_NAMES for name in value):
+            raise PydanticCustomError("unknown_scanner", "scanner name is not registered")
+        return value
 
 
 class RiskPolicy(BaseModel):
     model_config = {"extra": "forbid"}
 
-    fail_threshold: float = 50.0
-    warn_threshold: float = 25.0
+    fail_threshold: float = Field(default=50.0, ge=0, le=100)
+    warn_threshold: float = Field(default=25.0, ge=0, le=100)
     ignore_categories: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def warn_within_fail(self) -> RiskPolicy:
+        if self.warn_threshold > self.fail_threshold:
+            raise PydanticCustomError("threshold_order", "warn_threshold exceeds fail_threshold")
+        return self
 
 
 class ValidatePolicy(BaseModel):
@@ -32,13 +54,13 @@ class ValidatePolicy(BaseModel):
 
     require_completeness: bool = True
     require_integrity: bool = True
-    minimum_assurance_level: str = "declared"
+    minimum_assurance_level: Literal["declared", "observed", "verified"] = "declared"
 
 
 class OutputPolicy(BaseModel):
     model_config = {"extra": "forbid"}
 
-    default_format: str = "json"
+    default_format: Literal["json", "cyclonedx", "spdx", "sarif"] = "json"
 
 
 class Policy(BaseModel):
@@ -55,35 +77,58 @@ def default_policy() -> Policy:
     return Policy()
 
 
-def load_policy(project_root: Path) -> Policy | None:
-    current = project_root.resolve()
-    for _ in range(20):
-        candidate = current / ".nexus-symbiote.yaml"
-        if candidate.exists():
-            return _parse_policy(candidate)
-        candidate = current / ".nexus-symbiote.yml"
-        if candidate.exists():
-            return _parse_policy(candidate)
-        parent = current.parent
-        if parent == current:
-            break
-        current = parent
-    return None
-
-
-def _parse_policy(path: Path) -> Policy:
-    """Parse a configured policy strictly; never fall back to defaults on failure."""
+def load_policy_file(path: Path) -> Policy:
+    """Load an explicit policy file. Symbolic links and oversized files are refused."""
     try:
         import yaml
     except ImportError as exc:
-        raise ValueError("Policy file requires PyYAML; install nexus-symbiote[yaml]") from exc
+        raise PolicyError("requires PyYAML: install nexus-symbiote[yaml]") from exc
+
     try:
-        data: Any = yaml.safe_load(path.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            raise ValueError("policy must be a mapping")
+        text = read_regular_text(path, max_bytes=MAX_CONFIG_BYTES)
+    except (OSError, UnicodeError):
+        raise PolicyError(
+            f"cannot read policy file {path}: not a regular UTF-8 file within the size limit"
+        ) from None
+
+    try:
+        data: Any = yaml.safe_load(text)
+    except yaml.YAMLError:
+        raise PolicyError(f"policy file {path} is not valid YAML") from None
+    if not isinstance(data, dict):
+        raise PolicyError(f"policy file {path} must contain a mapping at the top level")
+
+    try:
         return Policy.model_validate(data)
-    except Exception as exc:
-        raise ValueError(f"Invalid policy {path}: {exc}") from exc
+    except ValidationError as exc:
+        failures = "; ".join(_describe_error(error) for error in exc.errors())
+        raise PolicyError(f"invalid policy file {path}: {failures}") from None
+
+
+def discover_policy(start: Path) -> Path | None:
+    """Return the nearest policy file at or above start. The file is not loaded."""
+    current = start.resolve()
+    for _ in range(_MAX_DISCOVERY_LEVELS):
+        for name in _POLICY_FILE_NAMES:
+            candidate = current / name
+            if _is_regular_file(candidate):
+                return candidate
+        if current.parent == current:
+            break
+        current = current.parent
+    return None
+
+
+def _is_regular_file(path: Path) -> bool:
+    try:
+        return not path.is_symlink() and path.is_file()
+    except OSError:
+        return False
+
+
+def _describe_error(error: Mapping[str, Any]) -> str:
+    location = ".".join(str(part) for part in error.get("loc", ())) or "policy"
+    return f"{location}: {error.get('type', 'invalid')}"
 
 
 DEFAULT_POLICY_YAML = """\
@@ -92,7 +137,7 @@ DEFAULT_POLICY_YAML = """\
 version: "1.0"
 
 scan:
-  scanners: ["mcp", "model", "prompt", "rag", "registry"]
+  scanners: ["a2a", "ide_agents", "mcp", "model", "prompt", "rag", "registry", "shadowscan"]
   exclude_paths: ["node_modules", ".git", "__pycache__", ".venv"]
 
 risk:

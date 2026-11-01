@@ -175,9 +175,10 @@
     "ComponentType": {
       "type": "string",
       "enum": [
-        "agent", "mcp-server", "tool", "model", "prompt-template",
+        "agent", "mcp-server", "mcp-client", "tool", "model", "prompt-template",
         "guardrail-policy", "memory-store", "rag-source", "data-source",
-        "registry-entry", "skill-package"
+        "registry-entry", "skill-package", "a2a-client", "a2a-server",
+        "ide-agent", "verified-extension"
       ]
     },
     "TrustTier": {
@@ -607,7 +608,10 @@
           "type": "string",
           "enum": ["safe", "unsafe-code-execution", "unsafe-template-injection", "unknown"]
         },
-        "signing_status": { "type": "string" },
+        "signing_status": {
+          "type": "string",
+          "description": "Signing evidence: signature-not-found, signature-present-unverified, or signature-verified (core/vocab.py). Scanners report only the first two. signature-verified requires a cryptographic verification under an explicit identity and issuer. Legacy values are accepted: unsigned maps to signature-not-found, and sigstore-signed or pgp-signed map to signature-present-unverified. No legacy value means verified."
+        },
         "signing_identity": { "type": "string" },
         "derivation_type": { "type": "string" },
         "quantization_method": { "type": "string" },

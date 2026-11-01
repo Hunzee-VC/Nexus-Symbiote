@@ -9,13 +9,22 @@ Discovers RAG pipeline configurations from common frameworks:
 
 from __future__ import annotations
 
+import os
 import re
 from importlib import import_module
 from pathlib import Path
+from typing import Any
 
 from nexus_symbiote.core.enums import RiskSeverity, TrustTier
 from nexus_symbiote.core.models import RAGSourceComponent, RiskAssessment
-from nexus_symbiote.scanners.base import Scanner, ScanResult, read_regular_text, sanitized_origin
+from nexus_symbiote.scanners.base import (
+    Scanner,
+    ScanResult,
+    matched_exclusion,
+    read_regular_text,
+    relative_posix,
+    sanitized_origin,
+)
 
 RAG_CONFIG_PATTERNS = [
     "rag_config.json",
@@ -41,107 +50,153 @@ class RAGScanner(Scanner):
 
     def scan(self, project_root: Path) -> ScanResult:
         result = ScanResult(scanner_name=self.name)
+        configs, sources = self._walk(project_root, result)
 
-        for pattern in RAG_CONFIG_PATTERNS:
-            for config_path in project_root.rglob(pattern):
-                if ".git" in config_path.parts or "node_modules" in config_path.parts:
-                    continue
-                result.surfaces_scanned.append(str(config_path))
-                comps = self._scan_rag_config(config_path, result)
-                result.components.extend(comps)
+        components: list[RAGSourceComponent] = []
+        for config_path in configs:
+            result.surfaces_scanned.append(relative_posix(config_path, project_root))
+            components.extend(self._scan_rag_config(config_path, project_root, result))
+        if not configs:
+            result.record_absent("rag-config", RAG_CONFIG_PATTERNS)
 
-        env_comps = self._scan_env_files(project_root, result)
-        if env_comps:
-            result.components.extend(env_comps)
-
-        py_comps = self._scan_python_imports(project_root, result)
-        if py_comps:
-            result.components.extend(py_comps)
-
-        if not result.components and not result.scan_failures:
-            result.surfaces_excluded.append("rag (no RAG configuration found)")
-
+        components.extend(self._scan_env_files(project_root, result))
+        components.extend(self._scan_python_imports(sources, project_root, result))
+        _make_refs_unique(components)
+        result.components.extend(components)
         return result
 
-    def _scan_rag_config(self, config_path: Path, result: ScanResult) -> list[RAGSourceComponent]:
+    def _walk(self, root: Path, result: ScanResult) -> tuple[list[Path], list[Path]]:
+        """Collect RAG config files and Python sources in sorted order.
+
+        Excluded content is never read. Each excluded root that holds relevant content is
+        recorded once, so a large excluded tree does not flood the coverage record.
+        """
+        configs: list[Path] = []
+        sources: list[Path] = []
+        excluded_roots: set[str] = set()
+
+        def on_error(error: OSError) -> None:
+            location = relative_posix(Path(error.filename), root) if error.filename else "."
+            result.record_failure(f"Failed to read directory {location}")
+
+        for folder, dirnames, filenames in os.walk(root, onerror=on_error):
+            dirnames.sort()
+            for name in sorted(filenames):
+                if name not in RAG_CONFIG_PATTERNS and not name.endswith(".py"):
+                    continue
+                path = Path(folder) / name
+                blocked = _excluded_root(path, root, self.exclude_paths)
+                if blocked is not None:
+                    excluded_roots.add(relative_posix(blocked, root))
+                elif name in RAG_CONFIG_PATTERNS:
+                    configs.append(path)
+                else:
+                    sources.append(path)
+
+        for rel in sorted(excluded_roots):
+            result.record_excluded(rel, "excluded by policy")
+        return configs, sources
+
+    def _scan_rag_config(
+        self, config_path: Path, root: Path, result: ScanResult
+    ) -> list[RAGSourceComponent]:
+        rel = relative_posix(config_path, root)
         if config_path.suffix.lower() in (".yaml", ".yml"):
             try:
                 yaml = import_module("yaml")
             except ImportError:
-                result.scan_failures.append(f"YAML support unavailable for {config_path}")
+                result.record_failure(f"YAML support unavailable for {rel}")
                 return []
             try:
                 data = yaml.safe_load(read_regular_text(config_path))
             except (yaml.YAMLError, OSError, UnicodeError):
-                result.scan_failures.append(f"Failed to parse {config_path}")
+                result.record_failure(f"Failed to parse {rel}")
                 return []
         else:
             data = self._safe_read_json(config_path)
         if not isinstance(data, dict):
-            result.scan_failures.append(f"Failed to parse object from {config_path}")
+            result.record_failure(f"Failed to parse object from {rel}")
+            return []
+
+        raw_sources: Any = data.get("sources", data.get("knowledge_bases", [data]))
+        if isinstance(raw_sources, dict):
+            raw_sources = [raw_sources]
+        if not isinstance(raw_sources, list):
+            result.record_failure(f"'sources' in {rel} is not a list or object")
             return []
 
         components: list[RAGSourceComponent] = []
-        sources = data.get("sources", data.get("knowledge_bases", [data]))
-
-        if isinstance(sources, dict):
-            sources = [sources]
-        if not isinstance(sources, list):
-            return []
-
-        for i, source in enumerate(sources):
+        for index, source in enumerate(raw_sources):
             if not isinstance(source, dict):
+                result.record_failure(f"RAG source {index} in {rel} is not an object")
                 continue
+            components.append(self._source_component(source, index, rel, result))
+        return components
 
-            name = source.get("name", f"rag-source-{i}")
-            corpus_type = source.get("type", source.get("store_type", "unknown"))
-            embedding = source.get("embedding_model", source.get("embeddings", {}).get("model"))
-            chunking = source.get("chunking_strategy", source.get("chunk_size"))
+    def _source_component(
+        self, source: dict[str, Any], index: int, rel: str, result: ScanResult
+    ) -> RAGSourceComponent:
+        name = _as_text(source.get("name"), "name", rel, result) or f"rag-source-{index}"
+        corpus_type = (
+            _as_text(source.get("type", source.get("store_type")), "type", rel, result)
+            or "unknown"
+        )
+        embeddings = source.get("embeddings")
+        nested_model: object = None
+        if isinstance(embeddings, dict):
+            nested_model = embeddings.get("model")
+        elif embeddings is not None:
+            result.record_failure(f"'embeddings' in {rel} is not an object")
+        embedding = _as_text(
+            source.get("embedding_model", nested_model), "embedding_model", rel, result
+        )
+        chunking = source.get("chunking_strategy", source.get("chunk_size"))
 
-            risks: list[RiskAssessment] = []
-            source_uris_raw = source.get("source_uris", source.get("documents", []))
-            if isinstance(source_uris_raw, str):
-                source_uris_list = [source_uris_raw]
-            elif isinstance(source_uris_raw, list):
-                source_uris_list = source_uris_raw
-            else:
-                source_uris_list = []
+        raw_uris: object = source.get("source_uris", source.get("documents", []))
+        uris: list[Any]
+        if isinstance(raw_uris, str):
+            uris = [raw_uris]
+        elif isinstance(raw_uris, list):
+            uris = raw_uris
+        else:
+            uris = []
+            if raw_uris is not None:
+                result.record_failure(f"'source_uris' in {rel} is not a string or list")
 
-            for uri in source_uris_list:
-                if isinstance(uri, str) and ("http://" in uri or "ftp://" in uri):
-                    risks.append(
-                        RiskAssessment(
-                            severity=RiskSeverity.HIGH,
-                            category="data_integrity",
-                            detail=f"RAG source '{name}' ingests from unencrypted URI: {sanitized_origin(uri)}",
-                            recommendation="Use HTTPS for all data source connections.",
-                        )
-                    )
-
-            if not source.get("sanitization") and not source.get("content_filter"):
+        risks: list[RiskAssessment] = []
+        for uri in uris:
+            if isinstance(uri, str) and any(
+                scheme in uri.lower() for scheme in ("http://", "ftp://")
+            ):
                 risks.append(
                     RiskAssessment(
-                        severity=RiskSeverity.MEDIUM,
+                        severity=RiskSeverity.HIGH,
                         category="data_integrity",
-                        detail=f"RAG source '{name}' has no configured content sanitization.",
-                        recommendation="Add input sanitization to prevent indirect prompt injection via ingested documents.",
+                        detail=f"RAG source '{name}' ingests from unencrypted URI: {sanitized_origin(uri)}",
+                        recommendation="Use HTTPS for all data source connections.",
                     )
                 )
 
-            components.append(
-                RAGSourceComponent(
-                    bom_ref=f"rag:{name}",
-                    name=name,
-                    corpus_type=corpus_type,
-                    embedding_model_name=embedding,
-                    chunking_strategy=str(chunking) if chunking else None,
-                    source_uris=[sanitized_origin(str(u)) for u in source_uris_list if u],
-                    trust_tier=TrustTier.UNKNOWN,
-                    risks=risks,
+        if not source.get("sanitization") and not source.get("content_filter"):
+            risks.append(
+                RiskAssessment(
+                    severity=RiskSeverity.MEDIUM,
+                    category="data_integrity",
+                    detail=f"RAG source '{name}' has no configured content sanitization.",
+                    recommendation="Add input sanitization to prevent indirect prompt injection via ingested documents.",
                 )
             )
 
-        return components
+        return RAGSourceComponent(
+            bom_ref=f"rag:{name}",
+            name=name,
+            corpus_type=corpus_type,
+            embedding_model_name=embedding,
+            chunking_strategy=str(chunking) if chunking else None,
+            source_uris=[sanitized_origin(str(u)) for u in uris if u],
+            trust_tier=TrustTier.UNKNOWN,
+            risks=risks,
+        )
 
     def _scan_env_files(self, project_root: Path, result: ScanResult) -> list[RAGSourceComponent]:
         components: list[RAGSourceComponent] = []
@@ -149,13 +204,13 @@ class RAGScanner(Scanner):
 
         for env_name in env_files:
             env_path = project_root / env_name
-            if not env_path.exists():
+            if not (env_path.exists() or env_path.is_symlink()):
                 continue
 
             try:
                 content = read_regular_text(env_path)
             except (OSError, UnicodeError):
-                result.scan_failures.append(f"Failed to read {env_path}")
+                result.record_failure(f"Failed to read {env_name}")
                 continue
 
             detected_stores: set[str] = set()
@@ -169,14 +224,14 @@ class RAGScanner(Scanner):
                         store_name = key.split("_")[0].lower()
                         detected_stores.add(store_name)
 
-            for store in detected_stores:
+            for store in sorted(detected_stores):
                 components.append(
                     RAGSourceComponent(
-                        bom_ref=f"rag:env-{store}",
+                        bom_ref=f"rag:env-{store}:{env_name}",
                         name=f"{store} (from env)",
                         corpus_type="vector-store",
                         trust_tier=TrustTier.UNKNOWN,
-                        source_path=str(env_path),
+                        source_path=env_name,
                         risks=[
                             RiskAssessment(
                                 severity=RiskSeverity.INFO,
@@ -191,9 +246,8 @@ class RAGScanner(Scanner):
         return components
 
     def _scan_python_imports(
-        self, project_root: Path, result: ScanResult
+        self, sources: list[Path], project_root: Path, result: ScanResult
     ) -> list[RAGSourceComponent]:
-        components: list[RAGSourceComponent] = []
         store_imports = {
             "chromadb": "chroma",
             "pinecone": "pinecone",
@@ -206,24 +260,19 @@ class RAGScanner(Scanner):
         }
         detected: set[str] = set()
 
-        for py_file in project_root.rglob("*.py"):
-            if (
-                ".git" in py_file.parts
-                or "node_modules" in py_file.parts
-                or "__pycache__" in py_file.parts
-            ):
-                continue
+        for py_file in sources:
             try:
                 content = read_regular_text(py_file)
             except (OSError, UnicodeError):
-                result.scan_failures.append(f"Failed to read {py_file}")
+                result.record_failure(f"Failed to read {relative_posix(py_file, project_root)}")
                 continue
 
             for import_name, store_name in store_imports.items():
                 if f"import {import_name}" in content or f"from {import_name}" in content:
                     detected.add(store_name)
 
-        for store in detected:
+        components: list[RAGSourceComponent] = []
+        for store in sorted(detected):
             components.append(
                 RAGSourceComponent(
                     bom_ref=f"rag:import-{store}",
@@ -242,3 +291,34 @@ class RAGScanner(Scanner):
             )
 
         return components
+
+
+def _as_text(value: object, label: str, rel: str, result: ScanResult) -> str | None:
+    if value is None or isinstance(value, str):
+        return value
+    result.record_failure(f"'{label}' in {rel} is not a string; ignored")
+    return None
+
+
+def _excluded_root(path: Path, root: Path, patterns: tuple[str, ...]) -> Path | None:
+    """Return the shallowest directory, or the file itself, that a policy pattern excludes."""
+    parts = path.relative_to(root).parts
+    for depth in range(1, len(parts) + 1):
+        candidate = root.joinpath(*parts[:depth])
+        if matched_exclusion(candidate, root, patterns):
+            return candidate
+    return None
+
+
+def _make_refs_unique(components: list[RAGSourceComponent]) -> None:
+    """Suffix repeated references so one scan never emits duplicate bom_refs."""
+    seen: set[str] = set()
+    for component in components:
+        base = component.bom_ref
+        ref = base
+        suffix = 2
+        while ref in seen:
+            ref = f"{base}#{suffix}"
+            suffix += 1
+        seen.add(ref)
+        component.bom_ref = ref

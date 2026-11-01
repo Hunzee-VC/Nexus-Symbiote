@@ -8,12 +8,23 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 from dataclasses import dataclass
 from importlib import import_module
 from pathlib import Path
 from typing import Any
 
+from nexus_symbiote.utils.fsio import (
+    MAX_CONFIG_BYTES,
+    MAX_MODEL_BYTES,
+    hash_regular_file,
+    open_regular,
+)
+
 logger = logging.getLogger(__name__)
+
+_ALLOWED_ALGORITHMS = frozenset({"sha256", "sha384", "sha512"})
+_CHUNK_BYTES = 1024 * 1024
 
 
 @dataclass
@@ -43,22 +54,16 @@ def verify_file_hash(
         algorithm = algorithm or "sha256"
         expected_digest = expected_hash
 
-    try:
-        h = hashlib.new(algorithm)
-    except ValueError:
-        return VerificationResult(
-            verified=False,
-            error=f"Unsupported hash algorithm: {algorithm}",
-        )
+    if algorithm not in _ALLOWED_ALGORITHMS:
+        return VerificationResult(verified=False, error="Unsupported hash algorithm")
+    if path.is_symlink():
+        return VerificationResult(verified=False, error="Refusing to follow a symbolic link")
 
     try:
-        with open(path, "rb") as f:
-            while chunk := f.read(8192):
-                h.update(chunk)
-    except OSError as e:
+        actual_digest = _digest_file(path, algorithm)
+    except (OSError, ValueError, TypeError) as e:
         return VerificationResult(verified=False, error=f"Failed to read file: {e}")
 
-    actual_digest = h.hexdigest()
     if actual_digest == expected_digest:
         return VerificationResult(
             verified=True,
@@ -118,9 +123,8 @@ def verify_sigstore_bundle(
     if not expected_identity or not expected_issuer:
         return VerificationResult(False, error="Both an expected identity and issuer are required")
     try:
-        with artifact_path.open("rb") as artifact:
-            digest = hashlib.file_digest(artifact, "sha256").hexdigest()
-        bundle = bundle_path.read_bytes()
+        digest = hash_regular_file(artifact_path)
+        bundle = _read_bounded_bytes(bundle_path, MAX_CONFIG_BYTES)
     except OSError as exc:
         return VerificationResult(False, error=f"Cannot read verification input: {exc}")
     return verify_sigstore_digest(digest, bundle, expected_identity, expected_issuer)
@@ -128,13 +132,11 @@ def verify_sigstore_bundle(
 
 def compute_file_hash(path: Path, algorithm: str = "sha256") -> str | None:
     """Compute a file's hash, returning None on failure."""
+    if algorithm not in _ALLOWED_ALGORITHMS or path.is_symlink():
+        return None
     try:
-        h = hashlib.new(algorithm)
-        with open(path, "rb") as f:
-            while chunk := f.read(8192):
-                h.update(chunk)
-        return f"{algorithm}:{h.hexdigest()}"
-    except (OSError, ValueError):
+        return f"{algorithm}:{_digest_file(path, algorithm)}"
+    except (OSError, ValueError, TypeError):
         return None
 
 
@@ -145,3 +147,28 @@ def verify_hash_consistency(hashes: dict[str, str], path: Path) -> list[Verifica
         full_expected = expected if ":" in expected else f"{algo}:{expected}"
         results.append(verify_file_hash(path, full_expected))
     return results
+
+
+def _digest_file(path: Path, algorithm: str) -> str:
+    """Stream a regular file through the digest. Symbolic links and oversized files raise OSError."""
+    digest = hashlib.new(algorithm)
+    remaining = MAX_MODEL_BYTES + 1
+    with open_regular(path, MAX_MODEL_BYTES) as fd:
+        while remaining:
+            chunk = os.read(fd, min(_CHUNK_BYTES, remaining))
+            if not chunk:
+                break
+            digest.update(chunk)
+            remaining -= len(chunk)
+    if remaining == 0:
+        raise OSError("file exceeds the size limit")
+    return digest.hexdigest()
+
+
+def _read_bounded_bytes(path: Path, max_bytes: int) -> bytes:
+    with open_regular(path, max_bytes) as fd:
+        with os.fdopen(fd, "rb", closefd=False) as stream:
+            data = stream.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        raise OSError("file exceeds the size limit")
+    return data

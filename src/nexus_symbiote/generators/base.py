@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote.utils.fsio import write_text_safely
 
 
 class Generator(ABC):
@@ -26,5 +27,5 @@ class Generator(ABC):
         return json.dumps(self.generate(bom), indent=indent, default=str)
 
     def save(self, bom: AIBOM, path: Path, indent: int = 2) -> None:
-        """Write the generated AIBOM to a file."""
-        path.write_text(self.generate_json(bom, indent=indent), encoding="utf-8")
+        """Write the generated AIBOM to a file, refusing to write through a symbolic link."""
+        write_text_safely(path, self.generate_json(bom, indent=indent))

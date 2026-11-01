@@ -1,7 +1,7 @@
 - id: nexus-symbiote-scan
   name: Nexus SymBiote AIBOM Scan
   description: Scan for AI supply chain components and generate AIBOM
-  entry: nexus-symbiote scan . --format json -o .nexus-symbiote-aibom.json
+  entry: bash -c 'tmp="$(mktemp -d)" && trap "rm -rf -- \"$tmp\"" EXIT && nexus-symbiote scan . --policy none -f json -o "$tmp/aibom.json"'
   language: python
   always_run: true
   pass_filenames: false
@@ -10,7 +10,7 @@
 - id: nexus-symbiote-risk
   name: Nexus SymBiote Risk Gate
   description: Check AI supply chain risk score against threshold
-  entry: bash -c 'nexus-symbiote scan . -o /tmp/.nexus-symbiote-check.json && nexus-symbiote risk /tmp/.nexus-symbiote-check.json'
+  entry: bash -c 'tmp="$(mktemp -d)" && trap "rm -rf -- \"$tmp\"" EXIT && nexus-symbiote scan . --policy none -o "$tmp/check.json" && nexus-symbiote risk "$tmp/check.json" --policy none --threshold 50'
   language: system
   always_run: true
   pass_filenames: false

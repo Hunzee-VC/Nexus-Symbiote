@@ -15,3 +15,6 @@ build/
 venv/
 .coverage
 htmlcov/
+.nexus-symbiote-aibom.json
+*.sarif
+.nexus-symbiote-check.json

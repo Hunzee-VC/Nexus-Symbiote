@@ -1,5 +1,5 @@
 name: Nexus SymBiote AIBOM Scanner
-description: Generate and validate an agent BOM
+description: "Generate and validate an agent BOM. Callers need contents: read, plus security-events: write when sarif-upload is true."
 branding:
   icon: shield
   color: blue
@@ -14,10 +14,16 @@ inputs:
     description: BOM output path
     default: nexus-symbiote-aibom.json
   scanners:
-    description: Comma-separated scanner names
+    description: "Comma-separated scanner names: a2a, ide_agents, mcp, model, prompt, rag, registry, shadowscan. Empty runs all of them."
+    default: ""
+  policy-file:
+    description: "Policy file in the workspace, passed as --policy. Empty passes --policy none, so the scanned repository cannot choose the gate."
     default: ""
   validate:
     description: Run completeness and integrity validation
+    default: "true"
+  fail-on-validation-error:
+    description: Fail the job when validation fails
     default: "true"
   risk-check:
     description: Run risk gate
@@ -27,6 +33,9 @@ inputs:
     default: "50"
   sarif-upload:
     description: Upload SARIF to GitHub Security
+    default: "true"
+  upload-artifact:
+    description: Upload the AIBOM as a workflow artifact
     default: "true"
   python-version:
     description: Python version
@@ -48,6 +57,8 @@ runs:
       uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
       with:
         python-version: ${{ inputs.python-version }}
+    # Installs the revision of this action that the caller referenced. Python dependencies
+    # are resolved from version ranges at install time; this action does not pin them.
     - name: Install this action's Nexus SymBiote revision
       shell: bash
       run: python -m pip install -- "${GITHUB_ACTION_PATH}[yaml]"
@@ -59,6 +70,7 @@ runs:
         OUTPUT_FILE: ${{ inputs.output-file }}
         OUTPUT_FORMAT: ${{ inputs.format }}
         SCANNERS: ${{ inputs.scanners }}
+        POLICY_FILE: ${{ inputs.policy-file }}
       run: |
         set -euo pipefail
         case "$OUTPUT_FORMAT" in json|cyclonedx|spdx|sarif) ;; *) echo "::error::Invalid output format"; exit 1;; esac
@@ -66,11 +78,12 @@ runs:
         workdir="$(mktemp -d "$RUNNER_TEMP/nexus-symbiote.XXXXXXXX")"
         echo "workdir=$workdir" >> "$GITHUB_OUTPUT"
         args=("$SCAN_PATH" -f json -o "$workdir/native.json")
+        if [[ -n "${POLICY_FILE:-}" ]]; then args+=(--policy "$POLICY_FILE"); else args+=(--policy none); fi
         if [[ -n "$SCANNERS" ]]; then
           IFS=',' read -ra names <<< "$SCANNERS"
           for name in "${names[@]}"; do
             name="${name//[[:space:]]/}"
-            case "$name" in mcp|model|prompt|rag|registry) ;; *) echo "::error::Invalid scanner"; exit 1;; esac
+            case "$name" in a2a|ide_agents|mcp|model|prompt|rag|registry|shadowscan) ;; *) echo "::error::Invalid scanner"; exit 1;; esac
             args+=(--scanner "$name")
           done
         fi
@@ -82,25 +95,32 @@ runs:
         from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
         from nexus_symbiote.generators.spdx import SPDXGenerator
         from nexus_symbiote.generators.sarif import SARIFGenerator
+        from nexus_symbiote.utils.fsio import write_text_safely
 
-        bom = AIBOM.load(Path(os.environ["NATIVE_BOM"]))
+        native = Path(os.environ["NATIVE_BOM"])
+        bom = AIBOM.load(native)
         generators = {"cyclonedx": CycloneDXGenerator, "spdx": SPDXGenerator, "sarif": SARIFGenerator}
         fmt = os.environ["OUTPUT_FORMAT"]
         output = Path(os.environ["OUTPUT_FILE"])
         if fmt == "json":
-            output.write_bytes(Path(os.environ["NATIVE_BOM"]).read_bytes())
+            write_text_safely(output, native.read_text(encoding="utf-8"))
         else:
-            output.write_text(generators[fmt]().generate_json(bom), encoding="utf-8")
-        Path(os.environ["SARIF_FILE"]).write_text(SARIFGenerator().generate_json(bom), encoding="utf-8")
+            write_text_safely(output, generators[fmt]().generate_json(bom))
+        write_text_safely(Path(os.environ["SARIF_FILE"]), SARIFGenerator().generate_json(bom))
         PY
         printf 'aibom_path=%s\n' "$OUTPUT_FILE" >> "$GITHUB_OUTPUT"
     - name: Validate
       if: inputs.validate == 'true'
+      continue-on-error: ${{ inputs.fail-on-validation-error != 'true' }}
       shell: bash
       env:
         NATIVE_BOM: ${{ steps.scan.outputs.workdir }}/native.json
         SCAN_PATH: ${{ inputs.scan-path }}
-      run: nexus-symbiote validate "$NATIVE_BOM" --project "$SCAN_PATH"
+        POLICY_FILE: ${{ inputs.policy-file }}
+      run: |
+        set -euo pipefail
+        if [[ -n "${POLICY_FILE:-}" ]]; then policy=(--policy "$POLICY_FILE"); else policy=(--policy none); fi
+        nexus-symbiote validate "$NATIVE_BOM" --project "$SCAN_PATH" "${policy[@]}"
     - name: Risk gate
       id: risk
       if: inputs.risk-check == 'true' && inputs.risk-threshold != '0'
@@ -108,9 +128,11 @@ runs:
       env:
         NATIVE_BOM: ${{ steps.scan.outputs.workdir }}/native.json
         RISK_THRESHOLD: ${{ inputs.risk-threshold }}
+        POLICY_FILE: ${{ inputs.policy-file }}
       run: |
         set -uo pipefail
-        result="$(nexus-symbiote risk "$NATIVE_BOM" --threshold "$RISK_THRESHOLD" --json-output)"
+        if [[ -n "${POLICY_FILE:-}" ]]; then policy=(--policy "$POLICY_FILE"); else policy=(--policy none); fi
+        result="$(nexus-symbiote risk "$NATIVE_BOM" --threshold "$RISK_THRESHOLD" "${policy[@]}" --json-output)"
         status=$?
         score="$(printf '%s' "$result" | python -c 'import json,sys; print(json.load(sys.stdin)["overall_score"])')" || exit 1
         printf 'risk_score=%s\n' "$score" >> "$GITHUB_OUTPUT"
@@ -127,7 +149,7 @@ runs:
         sarif_file: ${{ steps.scan.outputs.workdir }}/results.sarif
         category: nexus-symbiote
     - name: Upload AIBOM artifact
-      if: steps.scan.outcome == 'success' && always()
+      if: inputs.upload-artifact == 'true' && steps.scan.outcome == 'success' && always()
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
       with:
         name: nexus-symbiote-aibom

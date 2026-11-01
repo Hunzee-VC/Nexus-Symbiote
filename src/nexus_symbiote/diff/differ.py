@@ -10,7 +10,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from nexus_symbiote.core.aibom import AIBOM
-from nexus_symbiote.core.enums import TrustTier
+from nexus_symbiote.core.enums import ComponentType, TrustTier
+from nexus_symbiote.core.models import AnyComponent
+from nexus_symbiote.core.vocab import signing_rank
+
+SEVERITY_ORDER: tuple[str, ...] = ("critical", "high", "medium", "low", "info")
 
 TRUST_TIER_ORDER = {
     TrustTier.INTERNAL_VERIFIED: 0,
@@ -20,6 +24,35 @@ TRUST_TIER_ORDER = {
     TrustTier.UNTRUSTED_PUBLIC: 4,
     TrustTier.UNKNOWN: 5,
 }
+
+# Removing one of these types can remove a control or a trust decision. Other removals are medium.
+SECURITY_RELEVANT_TYPES: frozenset[ComponentType] = frozenset(
+    {
+        ComponentType.MCP_SERVER,
+        ComponentType.TOOL,
+        ComponentType.MODEL,
+        ComponentType.GUARDRAIL_POLICY,
+        ComponentType.PROMPT_TEMPLATE,
+        ComponentType.A2A_CLIENT,
+        ComponentType.A2A_SERVER,
+        ComponentType.IDE_AGENT,
+        ComponentType.SKILL_PACKAGE,
+    }
+)
+
+# Compared with getattr, so components of different types are compared safely. Only field
+# names are reported, never values, because endpoints and arguments can carry credentials.
+_HIGH_FIELDS: tuple[str, ...] = (
+    "transport",
+    "command",
+    "args",
+    "tokenizer_hash",
+    "chat_template_hash",
+)
+_MEDIUM_FIELDS: tuple[str, ...] = ("endpoint_url", "endpoint", "agent_card_url", "mcp_server_ref")
+_MEDIUM_REF_LISTS: tuple[str, ...] = ("model_refs", "tool_refs")
+# Skipped when the definition hash changed, because that change is already reported as critical.
+_DEFINITION_FIELDS: tuple[str, ...] = ("capabilities", "annotations", "input_schema")
 
 
 @dataclass
@@ -60,6 +93,28 @@ class DiffReport:
             + len(self.dependencies_removed)
         )
 
+    def highest_severity(self) -> str | None:
+        """Highest severity over all changes, or None when nothing changed.
+
+        Dependency changes carry no severity of their own and count as info.
+        """
+        if self.total_changes == 0:
+            return None
+        present = {
+            change.severity
+            for change in (
+                *self.components_added,
+                *self.components_removed,
+                *self.components_modified,
+            )
+        }
+        if self.dependencies_added or self.dependencies_removed:
+            present.add("info")
+        for level in SEVERITY_ORDER:
+            if level in present:
+                return level
+        return "info"
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "has_changes": self.has_changes,
@@ -91,14 +146,39 @@ class DiffReport:
         return d
 
 
+def _snapshot_map(bom: AIBOM) -> dict[str, AnyComponent]:
+    """Index one snapshot by bom_ref. Duplicates raise rather than overwrite silently."""
+    index: dict[str, AnyComponent] = {}
+    for component in bom.components:
+        if component.bom_ref in index:
+            raise ValueError(f"duplicate bom_ref in one AIBOM snapshot: {component.bom_ref}")
+        index[component.bom_ref] = component
+    return index
+
+
+def _env_detail(old_env: dict[str, str], new_env: dict[str, str]) -> str:
+    """Describe environment changes by variable name only. Values are never reported."""
+    added = sorted(set(new_env) - set(old_env))
+    removed = sorted(set(old_env) - set(new_env))
+    changed = sorted(key for key in set(old_env) & set(new_env) if old_env[key] != new_env[key])
+    parts: list[str] = []
+    if added:
+        parts.append(f"added {', '.join(added)}")
+    if removed:
+        parts.append(f"removed {', '.join(removed)}")
+    if changed:
+        parts.append(f"value changed for {', '.join(changed)}")
+    return "env changed: " + "; ".join(parts) + "."
+
+
 class AIBOMDiffer:
     """Compares two AIBOMs and reports supply chain changes."""
 
     def diff(self, old: AIBOM, new: AIBOM) -> DiffReport:
         report = DiffReport()
 
-        old_map = {c.bom_ref: c for c in old.components}
-        new_map = {c.bom_ref: c for c in new.components}
+        old_map = _snapshot_map(old)
+        new_map = _snapshot_map(new)
 
         old_refs = set(old_map.keys())
         new_refs = set(new_map.keys())
@@ -117,12 +197,13 @@ class AIBOMDiffer:
 
         for ref in sorted(old_refs - new_refs):
             comp = old_map[ref]
+            severity = "high" if comp.component_type in SECURITY_RELEVANT_TYPES else "medium"
             change = ComponentChange(
                 bom_ref=ref,
                 name=comp.name,
                 change_type="removed",
                 component_type=comp.component_type.value,
-                severity="info",
+                severity=severity,
                 details=[f"{comp.component_type.value} component removed."],
             )
             report.components_removed.append(change)
@@ -228,8 +309,10 @@ class AIBOMDiffer:
                     "severity": "medium",
                 }
             )
+        elif old_content and not new_content:
+            modifications.append({"detail": "evidence removed: content_hash", "severity": "high"})
 
-        for hash_key in set(old.hashes.keys()) | set(new.hashes.keys()):
+        for hash_key in sorted(set(old.hashes.keys()) | set(new.hashes.keys())):
             old_h = old.hashes.get(hash_key)
             new_h = new.hashes.get(hash_key)
             if old_h and new_h and old_h != new_h:
@@ -238,6 +321,10 @@ class AIBOMDiffer:
                         "detail": f"File hash ({hash_key}) changed.",
                         "severity": "high",
                     }
+                )
+            elif old_h and not new_h:
+                modifications.append(
+                    {"detail": f"evidence removed: hashes.{hash_key}", "severity": "high"}
                 )
 
         old_pinned = getattr(old, "version_pinned", None)
@@ -249,6 +336,8 @@ class AIBOMDiffer:
                     "severity": "high",
                 }
             )
+        elif old_pinned is True and new_pinned is None:
+            modifications.append({"detail": "evidence removed: version_pinned", "severity": "high"})
 
         old_safety = getattr(old, "serialization_safety", None)
         new_safety = getattr(new, "serialization_safety", None)
@@ -259,17 +348,51 @@ class AIBOMDiffer:
                     "severity": "high",
                 }
             )
+        elif old_safety and not new_safety:
+            modifications.append(
+                {"detail": "evidence removed: serialization_safety", "severity": "high"}
+            )
 
         old_signing = getattr(old, "signing_status", None)
         new_signing = getattr(new, "signing_status", None)
-        if old_signing != new_signing:
-            sev = "high" if old_signing in {"sigstore-signed", "pgp-signed"} else "info"
+        if old_signing and not new_signing:
             modifications.append(
-                {
-                    "detail": f"Signing status changed: {old_signing} → {new_signing}",
-                    "severity": sev,
-                }
+                {"detail": f"signing evidence removed: {old_signing}", "severity": "high"}
             )
+        elif old_signing or new_signing:
+            old_rank_signing = signing_rank(old_signing) or 0
+            new_rank_signing = signing_rank(new_signing) or 0
+            transition = f"{old_signing or 'absent'} → {new_signing or 'absent'}"
+            if new_rank_signing < old_rank_signing:
+                modifications.append(
+                    {"detail": f"signing evidence regressed: {transition}", "severity": "high"}
+                )
+            elif new_rank_signing > old_rank_signing:
+                modifications.append(
+                    {"detail": f"signing evidence strengthened: {transition}", "severity": "info"}
+                )
+
+        definition_changed = bool(old_hash and new_hash and old_hash != new_hash)
+        if not definition_changed:
+            for name in _DEFINITION_FIELDS:
+                if getattr(old, name, None) != getattr(new, name, None):
+                    modifications.append({"detail": f"{name} changed.", "severity": "high"})
+
+        for name in _HIGH_FIELDS:
+            if getattr(old, name, None) != getattr(new, name, None):
+                modifications.append({"detail": f"{name} changed.", "severity": "high"})
+
+        old_env: dict[str, str] = getattr(old, "env", None) or {}
+        new_env: dict[str, str] = getattr(new, "env", None) or {}
+        if old_env != new_env:
+            modifications.append({"detail": _env_detail(old_env, new_env), "severity": "high"})
+
+        for name in _MEDIUM_FIELDS:
+            if getattr(old, name, None) != getattr(new, name, None):
+                modifications.append({"detail": f"{name} changed.", "severity": "medium"})
+        for name in _MEDIUM_REF_LISTS:
+            if set(getattr(old, name, None) or []) != set(getattr(new, name, None) or []):
+                modifications.append({"detail": f"{name} changed.", "severity": "medium"})
 
         return modifications
 
@@ -299,13 +422,27 @@ class AIBOMDiffer:
 
     def _generate_security_alerts(self, report: DiffReport) -> None:
         for change in report.components_modified:
-            if change.severity == "critical":
+            if change.severity in ("critical", "high"):
                 report.security_alerts.append(
                     {
-                        "severity": "critical",
+                        "severity": change.severity,
                         "component": change.bom_ref,
                         "alert": (
-                            f"Critical change in '{change.name}': {'; '.join(change.details)}"
+                            f"{change.severity.capitalize()} change in '{change.name}': "
+                            f"{'; '.join(change.details)}"
+                        ),
+                    }
+                )
+
+        for change in report.components_removed:
+            if change.severity in ("critical", "high"):
+                report.security_alerts.append(
+                    {
+                        "severity": change.severity,
+                        "component": change.bom_ref,
+                        "alert": (
+                            f"Security-relevant {change.component_type} component "
+                            f"'{change.name}' removed from supply chain."
                         ),
                     }
                 )
