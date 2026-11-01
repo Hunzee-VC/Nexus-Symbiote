@@ -15,7 +15,14 @@ ENTRY = {
         "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
         "name": "io.github.acme/github-tools",
         "version": "1.4.2",
-        "packages": [{"registryType": "npm", "identifier": "@acme/github-tools", "version": "1.4.2"}],
+        "packages": [
+            {
+                "registryType": "npm",
+                "identifier": "@acme/github-tools",
+                "version": "1.4.2",
+                "fileSha256": "a" * 64,
+            }
+        ],
         "remotes": [],
     },
     "_meta": {"io.modelcontextprotocol.registry/official": {"status": "active", "isLatest": True}},
@@ -41,19 +48,18 @@ def test_match_by_package_identifier() -> None:
                 "server_id": "server:github",
                 "name": "github-tools",
                 "package_purl": "pkg:npm/%40acme/github-tools@1.4.2",
+                "package_digest": "sha256:" + "a" * 64,
             }
         ],
         lambda url: (200, {"servers": [ENTRY]}),
     )
     res = result.entities[0]
     assert res.resolved.state == "present"
-    assert res.resolved.immutable_ref == "@acme/github-tools@1.4.2"
+    assert res.resolved.immutable_ref == "sha256:" + "a" * 64
     assert res.registry is not None and res.registry.entry_id == "io.github.acme/github-tools"
-    assert res.publisher is not None and res.publisher.verification is PublisherVerification.GITHUB_OIDC
+    assert res.publisher is not None and res.publisher.verification is PublisherVerification.UNKNOWN
     assert res.alias_policy is AliasPinning.PINNED
-    assert (
-        res.signer is not None and res.signer.status.value == "unsigned"
-    )  # registry has no attestation fields
+    assert res.signer is None
     assert result.evidence and result.evidence[0].evidence_kind.value == "registry-record"
     assert any(e.type.value == "resolvedFrom" for e in result.edges)
 
@@ -82,3 +88,24 @@ def test_levenshtein_bounds() -> None:
     assert levenshtein("github", "glthub") == 1
     assert levenshtein("a", "a") == 0
     assert levenshtein("short", "a-very-long-name") > 6
+
+
+def test_conflicting_identity_or_incomplete_registry_never_resolves() -> None:
+    target = {
+        "name": "tools",
+        "server_id": "server:x",
+        "package_purl": "pkg:npm/%40acme/github-tools@1.4.2",
+        "package_digest": "sha256:" + "a" * 64,
+    }
+    for changed, response in [
+        ({"package_purl": "pkg:npm/%40other/unrelated@1.4.2"}, {"servers": [ENTRY]}),
+        ({"remote_url": "https://unrelated.invalid"}, {"servers": [ENTRY]}),
+        ({"package_purl": "pkg:pypi/github-tools@1.4.2"}, {"servers": [ENTRY]}),
+        ({"package_purl": "pkg:npm/%40acme/github-tools@2.0.0"}, {"servers": [ENTRY]}),
+        ({"package_digest": "sha256:" + "b" * 64}, {"servers": [ENTRY]}),
+        ({}, {"servers": [ENTRY, ENTRY]}),
+        ({}, {"servers": [ENTRY], "metadata": {"nextCursor": "more"}}),
+    ]:
+        result = run([{**target, **changed}], lambda url, payload=response: (200, payload))
+        assert result.entities[0].resolved.state == "unknown"
+        assert result.entities[0].alias_policy is not AliasPinning.PINNED

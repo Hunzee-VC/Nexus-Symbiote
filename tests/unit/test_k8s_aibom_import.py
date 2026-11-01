@@ -88,13 +88,13 @@ def test_verified_without_constraint_downgrades_and_records_the_fact() -> None:
         now=NOW,
     )
     claim = result.models[0].weights
-    assert claim is not None and claim.assurance is AssuranceLevel.OBSERVED  # laundering refused
+    assert claim is not None and claim.assurance is AssuranceLevel.DECLARED  # unauthenticated producer claim
     assert VERIFIED_WITHOUT_CONSTRAINT in result.facts
     # a "verified" signature with no identity is downgraded to claimed (I3)
     assert result.models[0].signature is not None and result.models[0].signature.status.value == "claimed"
 
 
-def test_verified_with_constrained_signer_upgrades() -> None:
+def test_self_asserted_signer_and_bundle_digest_do_not_verify() -> None:
     result = import_k8s_aibom(
         bom(
             confidence="verified",
@@ -109,8 +109,10 @@ def test_verified_with_constrained_signer_upgrades() -> None:
         now=NOW,
     )
     claim = result.models[0].weights
-    assert claim is not None and claim.assurance is AssuranceLevel.VERIFIED
-    assert claim.evidence and claim.evidence[0].verification.value == "verified-constrained"
+    assert claim is not None and claim.assurance is AssuranceLevel.DECLARED
+    assert not claim.evidence
+    assert result.models[0].signature.status.value == "claimed"
+    assert result.models[0].signature.outcome.value == "none"
 
 
 def test_hosted_component_without_hash_becomes_hosted_model() -> None:
@@ -129,3 +131,24 @@ def test_url_referenced_bom_is_rejected_with_guidance() -> None:
 def test_non_aibom_input_is_rejected() -> None:
     with pytest.raises(K8sAibomError):
         extract_bom_document({"hello": "world"})
+
+
+def test_model_identity_survives_same_name_and_duplicate_components() -> None:
+    payload = bom()
+    base = payload["components"][0]
+    payload["components"] += [
+        base.copy(),
+        {**base, "bom-ref": "model-2", "hashes": [{"alg": "SHA-256", "content": "cd" * 32}]},
+    ]
+    left = import_k8s_aibom(payload, now=NOW)
+    payload["components"].reverse()
+    right = import_k8s_aibom(payload, now=NOW)
+    assert len({model.id for model in left.models}) == len(left.models) == 2
+    assert {model.id for model in left.models} == {model.id for model in right.models}
+
+
+def test_conflicting_subjects_at_duplicate_bom_ref_rejected():
+    payload = bom()
+    payload["components"].append({**payload["components"][0], "version": "new"})
+    with pytest.raises(K8sAibomError, match="conflicting components"):
+        import_k8s_aibom(payload, now=NOW)

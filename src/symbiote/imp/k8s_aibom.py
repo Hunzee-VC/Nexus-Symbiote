@@ -10,9 +10,8 @@ Confidence mapping (normative, ``agentbom-profile.md §5``):
 * ``declared``   → ``assurance=declared``
 * ``inferred``   → ``assurance=observed`` with ``method=heuristic`` and ``confidence=0.5``
 * ``unresolved`` → ``state=unknown``
-* ``verified``   → ``verified`` **only** when the document also carries a signer identity and a
-  non-empty constraint record; otherwise ``observed`` plus the recorded fact
-  ``imported-verified-without-constraint`` — signature laundering is invariant I3.
+* ``verified`` → a supplier declaration. Signature properties describe the supplier's claim.
+  A separate verifier must authenticate the artifact and signer under the consumer's policy.
 
 Every unmapped ``aibom.*`` / ``k8s-aibom:*`` property is preserved verbatim as a
 ``ForeignProperty`` (dialect ``k8s-aibom``), and ``aibom.redaction.applied`` becomes a
@@ -23,13 +22,15 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import json
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from symbiote.model.common import Claim, EvidenceRef
+from symbiote.model.common import Claim
 from symbiote.model.entities import (
     Deployment,
     Environment,
@@ -43,10 +44,8 @@ from symbiote.model.entities import (
 )
 from symbiote.model.enums import (
     AliasPinning,
-    AssuranceLevel,
     ClaimMethod,
     EnvironmentKind,
-    EvidenceVerification,
     ModelKind,
     SignatureOutcome,
     SignatureStatus,
@@ -125,8 +124,6 @@ def _confidence_claim(
     confidence: str | None,
     *,
     locator: str,
-    signature: SignatureFacts | None,
-    constrained: bool,
     facts: list[str],
 ) -> Claim[Any]:
     tier = (confidence or "declared").lower()
@@ -135,64 +132,27 @@ def _confidence_claim(
     if tier == "unresolved":
         return Claim.unknown(UnknownReason.PROVIDER_UNDISCLOSED, locator=locator)
     if tier == "verified":
-        if constrained and signature is not None and signature.bundle_digest:
-            return Claim(
-                value=value,
-                assurance=AssuranceLevel.VERIFIED,
-                method=ClaimMethod.SIGNATURE_VERIFICATION,
-                locator=locator,
-                evidence=[
-                    EvidenceRef(
-                        digest=signature.bundle_digest,
-                        media_type="application/vnd.dev.sigstore.bundle+json",
-                        verification=EvidenceVerification.VERIFIED_CONSTRAINED,
-                        signer_identity=signature.identity,
-                        signer_issuer=signature.issuer,
-                    )
-                ],
-            )
         facts.append(VERIFIED_WITHOUT_CONSTRAINT)
-        return Claim.observed(value, locator=locator, method=ClaimMethod.SIGNATURE_VERIFICATION)
     return Claim.declared(value, locator=locator)
 
 
-def _signature_facts(props: list[tuple[str, str]]) -> tuple[SignatureFacts | None, bool]:
+def _signature_facts(props: list[tuple[str, str]]) -> SignatureFacts | None:
+    """Keep upstream signature metadata as a claim. Raw producer fields remain in foreign_properties."""
+    prefixes = ("signature.", "k8s-aibom:signature:")
     raw = {
-        name.split(".", 1)[1].split(":", 1)[-1]: value
-        for name, value in props
-        if name.startswith("signature.") or name.startswith("k8s-aibom:signature:")
+        name[len(prefix) :]: value for name, value in props for prefix in prefixes if name.startswith(prefix)
     }
     if not raw:
-        return None, False
-    status_raw = raw.get("status", "unsigned").lower().replace("_", "-")
-    outcome_raw = raw.get("outcome", "none").lower().replace("_", "-")
-    status = (
-        SignatureStatus(status_raw)
-        if status_raw in SignatureStatus._value2member_map_
-        else SignatureStatus.CLAIMED
-    )
-    outcome = (
-        SignatureOutcome(outcome_raw)
-        if outcome_raw in SignatureOutcome._value2member_map_
-        else SignatureOutcome.NONE
-    )
-    identity = raw.get("identity")
-    issuer = raw.get("issuer")
-    if status is SignatureStatus.VERIFIED and not identity:
-        status = SignatureStatus.CLAIMED  # I3: a verified signature records its constrained signer
+        return None
     bundle = raw.get("bundleDigest") or raw.get("bundle-digest")
-    constrained = (
-        bool(identity) and outcome is SignatureOutcome.VERIFIED and status is SignatureStatus.VERIFIED
-    )
-    facts = SignatureFacts(
-        status=status,
-        outcome=outcome,
-        identity=identity,
-        issuer=issuer,
+    return SignatureFacts(
+        status=SignatureStatus.UNSIGNED if raw.get("status") == "unsigned" else SignatureStatus.CLAIMED,
+        outcome=SignatureOutcome.NONE,
+        identity=raw.get("identity"),
+        issuer=raw.get("issuer"),
         log_entry=raw.get("logEntry") or raw.get("log-entry"),
-        bundle_digest=bundle if isinstance(bundle, str) and bundle.startswith("sha256:") else None,
+        bundle_digest=bundle if bundle and re.fullmatch(r"sha256:[0-9a-f]{64}", bundle) else None,
     )
-    return facts, constrained
 
 
 def import_k8s_aibom(
@@ -206,6 +166,8 @@ def import_k8s_aibom(
     document, _ = extract_bom_document(payload)
     result = K8sAibomImport(source_serial_number=document.get("serialNumber"))
     workload: dict[str, str] = {}
+    seen_components: dict[str, Model] = {}
+    model_refs: dict[str, str] = {}
     namespace = None
     for component in [
         document.get("metadata", {}).get("component"),
@@ -238,24 +200,38 @@ def import_k8s_aibom(
             continue
         name = str(component.get("name", "model"))
         confidence = _dialect_value(props, "aibom.confidence", "k8s-aibom:confidence")
-        signature, constrained = _signature_facts(props)
+        signature = _signature_facts(props)
         source = _dialect_value(props, "aibom.model.source", "k8s-aibom:model:source")
         digest = None
         for hash_entry in component.get("hashes", []) or []:
             if isinstance(hash_entry, Mapping) and hash_entry.get("alg") == "SHA-256":
                 digest = "sha256:" + str(hash_entry.get("content", "")).lower()
+        if digest and not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+            raise K8sAibomError(f"invalid SHA-256 for model {bom_ref}")
         locator = f"cdx:{bom_ref}"
+        # A display name can cover many weight revisions, endpoints and BOM subjects.
+        subject = [
+            agent_id,
+            document.get("serialNumber"),
+            bom_ref,
+            source,
+            name,
+            component.get("version"),
+            digest,
+        ]
+        key = hashlib.sha256(json.dumps(subject, ensure_ascii=False).encode()).hexdigest()
+        model_id = make_id("model", name, key)
+        if component.get("bom-ref") and model_refs.setdefault(bom_ref, model_id) != model_id:
+            raise K8sAibomError(f"conflicting components at model reference {bom_ref}")
         if digest:
             identity_claim = _confidence_claim(
                 WeightsIdentity(manifest_root=digest, file_count=1, formats=[]),
                 confidence,
                 locator=locator,
-                signature=signature,
-                constrained=constrained,
                 facts=result.facts,
             )
             model = Model(
-                id=make_id("model", name),
+                id=model_id,
                 name=name,
                 model_kind=ModelKind.WEIGHTS,
                 weights=identity_claim,
@@ -272,20 +248,21 @@ def import_k8s_aibom(
                 ),
                 confidence,
                 locator=locator,
-                signature=signature,
-                constrained=constrained,
                 facts=result.facts,
             )
             model = Model(
-                id=make_id("model", name),
+                id=model_id,
                 name=name,
                 model_kind=ModelKind.HOSTED,
                 hosted=identity_claim,
                 signature=signature,
             )
-        if signature is not None and signature.outcome is SignatureOutcome.SIGNATURE_VALID_UNCONSTRAINED:
-            result.facts.append(VERIFIED_WITHOUT_CONSTRAINT)
-        result.models.append(model)
+        previous = seen_components.get(model.id)
+        if previous is not None and previous != model:
+            raise K8sAibomError(f"conflicting assertions for model {bom_ref}")
+        if previous is None:
+            seen_components[model.id] = model
+            result.models.append(model)
         if ns := _dialect_value(props, "aibom.workload.namespace", "k8s-aibom:workload:namespace"):
             namespace = ns
     if workload:
