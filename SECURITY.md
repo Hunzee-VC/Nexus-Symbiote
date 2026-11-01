@@ -21,7 +21,7 @@ rejects secret-shaped strings in identity fields, and emitted documents are scan
 they are written. If you find a path that leaks a secret, treat it as a vulnerability and report it.
 
 ## Threat model
-See [`THREAT-MODEL.md`](THREAT-MODEL.md) for the per-feature threat model: what each control detects or
+See [`THREAT-MODEL.md`](https://github.com/aisecnomad/Nexus-symbiote/blob/claude/symbiote-foundation/THREAT-MODEL.md) for the per-feature threat model: what each control detects or
 prevents, how an attacker would evade it, and the residual risk.
 
 ## Verifying releases

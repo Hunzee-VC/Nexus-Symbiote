@@ -25,7 +25,7 @@ jobs:
         run: |
           uv venv .venv --python ${{ matrix.python }}
           . .venv/bin/activate
-          uv pip install -e ".[dev]"
+          uv pip install -e ".[dev,sign]"
       - name: Lint and format
         run: |
           . .venv/bin/activate

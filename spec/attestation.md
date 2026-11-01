@@ -58,11 +58,8 @@ and `externalReferences[type=attestation|evidence].hashes`; SPDX via `software_F
 
 ## 5. Gateway Allowlist Bundle (GAB)
 `symbiote allowlist export --format gab` produces `{gabVersion: "1", agent, snapshot: {kind: approved, digest, serial, prev, notBefore, notAfter}, policy: {maxStaleness, failClosedOnExpiredTrustStatus, requireAnnotationsForDestructive}, servers: {<server-id>: {identity: {digest, transport, endpointOrigin, package, instructionsDigest, signer}, toolset, tools: {<name>: {digest, gate, capabilities}}, deniedTools: []}}, models: {<id>: {provider, alias, resolvedRef, aliasPinned}}, instructions: {<id>: digest}, trustStatus: {serial, expires, revoked: [], quarantined: [], revokedPublishers: []}, attestations: [paths]}`.
-Rules a gateway applies (reference implementation `symbiote.enforce.verify_gab`): verify the attestations under
-its identity policy; at `tools/list` compute `tooldef/v1` per served tool from the raw JSON and block any tool
-whose digest ∉ allowlist (a known name with a new digest is the **rug-pull signal**); refuse the server if its
-identity differs; enforce `gate` at `tools/call`; refuse when the snapshot expired, the serial regressed, or the
-trust status expired or revoked. Re-verification runs per session, per `tools/list`, on
-`notifications/tools/list_changed` and per call, which closes time-gated poisoning (the Deadbugz pattern).
-Other formats: `opa-data`, `envoy-ext-authz-json`, `mcp-gateway-generic`. Conformance vectors
-(`tests/vectors/tooldef/*.json`) ship so other implementations can prove digest agreement.
+The descriptor comparator checks served tool definitions, including digest drift, revocation and quarantine.
+Use the signed [gateway admission protocol](gateway-admission.md) for execution decisions, exact-resource grants,
+time bounds, persistent rollback protection, per-call approvals and signed audit receipts. An authenticated
+gateway must derive the request principal, resource and observed peer from its own transport and adapter.
+The GAB and OPA projection preserve grants. The generic projection rejects grants it cannot represent.

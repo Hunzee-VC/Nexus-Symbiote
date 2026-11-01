@@ -38,15 +38,15 @@ namespace (verified to validate with zero errors: `extension_Extension` accepts 
 | Evidence | `software_File` (`primaryPurpose: evidence`, `verifiedUsing Hash`), `externalRef` (`secureSoftwareAttestation`, `runtimeAnalysisReport`, `securityThreatModel`, `riskAssessment`, `dynamicAnalysisReport`, `securityPenTestReport`) | | `hasEvidence` subject → Evidence |
 | Evaluation | `software_File` (`primaryPurpose: evidence`) + ext `Evaluation{subjectConfigDigest, threatModel[], harnessName, harnessVersion, harnessDigest, datasetDigest, attackConditions, results[], assessor, thirdParty, performedAt, expires, invalidatedBy[]}` | | `testedOn` Model → eval DatasetPackage; `hasEvidence` AIPackage → Evaluation |
 | VexStatement | `security_Vulnerability` + `externalIdentifier(securityOther, identifier = "AML.T0110" / "ASI04")`; `security_VexNotAffectedVulnAssessmentRelationship` (`justificationType`: guardrail-enforced→`inlineMitigationsAlreadyExist`, tool-disabled / approval-required→`vulnerableCodeNotInExecutePath`, not-reachable / egress-denied→`vulnerableCodeCannotBeControlledByAdversary`, component-not-present→`componentNotPresent`; `impactStatement`) or `security_VexAffected…` / `security_VexUnderInvestigation…` / `security_VexFixed…`; ext `VexScope{configDigest, justification, expires}` on the relationship | | `doesNotAffect` / `affects` / `underInvestigationFor` / `fixedIn` |
-| Coverage | ext `Coverage` on the `software_Sbom`; `RelationshipCompleteness` (`complete|incomplete|noAssertion`) on every relationship; `to = [NoneElement]` for **verified absence**, `to = [NoAssertionElement]` for **unknown** | native idiom | |
+| Coverage | ext `Coverage` on the `software_Sbom`; `RelationshipCompleteness` (`complete|incomplete|noAssertion`) on every relationship; `to = [NoAssertionElement]` for **unknown** | native idiom | |
 | TrustStatus | ext `TrustStatus{status, reason, decidedBy, decidedAt, expires, serial}` on the subject; revoked publisher as `Organization`/`SoftwareAgent` with ext | | `hasEvidence` → trust-status attestation File |
 | Software layer | `software_Package`/`software_File` from the merged SBOM, `dependsOn` | foreign properties via `CdxPropertiesExtension` | |
 | Property bridge | `extension_CdxPropertiesExtension{cdxProperty: [CdxPropertyEntry{cdxPropName, cdxPropValue}]}` on every element carrying `agentbom:*` properties | lossless | |
 
 ## 3. Unknown vs absence
-A surface that was queried and found empty is a relationship whose `to` is `NoneElement` with
-`completeness: complete`. A surface that could not be queried is `to: NoAssertionElement` with
-`completeness: noAssertion`, and the `Coverage` extension names the failure class.
+An empty collection uses `to: NoAssertionElement` with `completeness: noAssertion` for its runtime
+relationship. The coverage extension distinguishes a completed source query from a failed or skipped one.
+Absence from the declared files or sampled traces does not establish absence from the running deployment.
 
 ## 4. Round trip and loss
 `import(export(M))` must reproduce the model digest. Everything structured lives in extensions; everything
