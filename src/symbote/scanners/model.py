@@ -7,6 +7,7 @@ checks for model signing, and computes weight hashes.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from symbote.core.enums import (
     SERIALIZATION_FORMAT_SAFETY,
@@ -139,7 +140,7 @@ class ModelScanner(Scanner):
 
         return components
 
-    def _read_model_config(self, model_dir: Path) -> dict | None:
+    def _read_model_config(self, model_dir: Path) -> dict[str, Any] | None:
         for cfg_name in MODEL_CONFIG_FILES:
             cfg_path = model_dir / cfg_name
             if cfg_path.exists():
@@ -165,7 +166,7 @@ class ModelScanner(Scanner):
                     pass
         return None
 
-    def _hash_chat_template(self, model_dir: Path, config: dict | None) -> str | None:
+    def _hash_chat_template(self, model_dir: Path, config: dict[str, Any] | None) -> str | None:
         if config and "chat_template" in config:
             from symbote.core.hashing import hash_bytes
             template = config["chat_template"]
@@ -179,7 +180,7 @@ class ModelScanner(Scanner):
                 pass
         return None
 
-    def _infer_model_type(self, config: dict | None, path: Path) -> str:
+    def _infer_model_type(self, config: dict[str, Any] | None, path: Path) -> str:
         if config:
             if config.get("peft_type") or config.get("adapter_config"):
                 return "adapter"
@@ -194,7 +195,7 @@ class ModelScanner(Scanner):
 
     def _assess_model_risks(
         self, path: Path, fmt_key: str, safety: SerializationSafety,
-        signing_status: str, config: dict | None,
+        signing_status: str, config: dict[str, Any] | None,
     ) -> list[RiskAssessment]:
         risks: list[RiskAssessment] = []
 

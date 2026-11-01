@@ -41,7 +41,7 @@ class CompletenessReport:
     component_type_coverage: dict[str, int] = field(default_factory=dict)
     total_components: int = 0
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, object]:
         return {
             "is_complete": self.is_complete,
             "surfaces_covered": self.surfaces_covered,
