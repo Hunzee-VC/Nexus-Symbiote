@@ -7,8 +7,7 @@ from pathlib import Path
 
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import AssuranceLevel, ComponentType
-
-REQUIRED_SCANNERS = frozenset({"mcp", "model", "prompt", "rag", "registry"})
+from nexus_symbiote.policy import DEFAULT_SCANNERS
 
 EXPECTED_SURFACES = {
     "mcp-config": "MCP server configuration (.mcp.json etc.)",
@@ -91,7 +90,7 @@ class CompletenessValidator:
                 report.is_complete = False
                 for failure in claim.scan_failures:
                     report.issues.append(CompletenessIssue("collection", failure, "error"))
-            missing = REQUIRED_SCANNERS - claim.scanner_status.keys()
+            missing = set(DEFAULT_SCANNERS).difference(claim.scanner_status)
             if missing:
                 report.is_complete = False
                 report.issues.append(

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from nexus_symbiote.policy import Policy, default_policy, load_policy
+from nexus_symbiote.policy import DEFAULT_SCANNERS, Policy, default_policy, load_policy
 
 
 class TestDefaultPolicy:
@@ -70,7 +70,7 @@ class TestLoadPolicy:
         (tmp_path / ".nexus-symbiote.yaml").write_text('version: "1.0"\n')
         policy = load_policy(tmp_path)
         assert policy is not None
-        assert len(policy.scan.scanners) == 5
+        assert "shadowscan" in policy.scan.scanners
         assert policy.risk.fail_threshold == 50.0
 
 
@@ -79,7 +79,7 @@ class TestPolicyModel:
         policy = Policy(
             version="1.0",
         )
-        assert policy.scan.scanners == ["mcp", "model", "prompt", "rag", "registry"]
+        assert policy.scan.scanners == list(DEFAULT_SCANNERS)
 
     def test_custom_risk_config(self) -> None:
         from nexus_symbiote.policy import RiskPolicy

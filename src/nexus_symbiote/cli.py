@@ -220,7 +220,7 @@ def import_shadowscan(report_path: str, output: str, output_format: str) -> None
     """Import a Nexus-ShadowScan report and generate a declared AIBOM.
 
     This is the recommended primary workflow: run ShadowScan for discovery,
-    then SymBiote for verification, integrity, and BOM emission.
+    then Nexus SymBiote for verification, integrity, and BOM emission.
     """
     from nexus_symbiote.scanners.shadowscan import ShadowScanImporter
 

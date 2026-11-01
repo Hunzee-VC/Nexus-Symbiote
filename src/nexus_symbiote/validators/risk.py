@@ -11,7 +11,7 @@ from nexus_symbiote.core.models import ModelComponent, RiskAssessment
 
 # The complete built-in collection scope; do not infer completeness from a
 # caller-provided subset. Update alongside the CLI scanner registry.
-REQUIRED_SCANNERS = frozenset({"mcp", "model", "prompt", "rag", "registry"})
+from nexus_symbiote.policy import DEFAULT_SCANNERS
 
 SEVERITY_WEIGHTS: dict[RiskSeverity, float] = {
     RiskSeverity.CRITICAL: 10.0,
@@ -93,7 +93,7 @@ class RiskScorer:
             # omitted or unselected surfaces were assessed.
             statuses = getattr(coverage, "scanner_status", None)
             if statuses and (
-                not REQUIRED_SCANNERS.issubset(statuses)
+                not set(DEFAULT_SCANNERS).issubset(statuses)
                 or any(state != "complete" for state in statuses.values())
             ):
                 report.coverage_status = "partial"
