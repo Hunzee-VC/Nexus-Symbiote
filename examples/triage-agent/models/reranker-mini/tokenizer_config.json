@@ -1,0 +1,4 @@
+{
+  "tokenizer_class": "BertTokenizer",
+  "chat_template": "{% for m in messages %}{{ m.content }}{% endfor %}"
+}

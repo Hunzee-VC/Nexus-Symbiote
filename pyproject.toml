@@ -82,7 +82,7 @@ ignore = ["PLR0913", "PLR2004", "PLR0912", "PLR0915", "PLR0911", "S101", "RUF012
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S", "PL", "T20"]
-"src/symbiote/cli/**" = ["T20"]
+"src/symbiote/cli/**" = ["T20", "PLR0917"]
 
 [tool.mypy]
 python_version = "3.11"

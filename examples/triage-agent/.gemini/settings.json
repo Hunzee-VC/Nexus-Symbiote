@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "filesystem": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem@latest", "./workspace"], "trust": false, "excludeTools": ["write_file"] }
+  }
+}

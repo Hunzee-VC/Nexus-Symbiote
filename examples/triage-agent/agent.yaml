@@ -1,0 +1,29 @@
+# Symbiote agent declaration (framework-neutral)
+name: triage-agent
+version: 2.3.1
+purpose: Label and acknowledge incoming GitHub issues for acme/widgets
+owner: { kind: organization, name: Acme Platform Security, url: https://acme.example }
+framework: { name: claude-agent-sdk, version: "0.9.4" }
+models:
+  primary: { provider: anthropic, requested_ref: claude-sonnet-4-5 }          # floating alias on purpose
+  reranker: { path: ./models/reranker-mini }
+instructions:
+  - AGENTS.md
+  - CLAUDE.md
+  - prompts/system.md
+data_sources:
+  - id: issues-index
+    kind: rag-index
+    location: https://vectors.acme.example/collections/widgets-issues
+    sources: [ https://api.github.com/repos/acme/widgets/issues ]
+    trust_tier: 3-untrusted-public
+    instruction_bearing: true
+    embedding_model: reranker
+  - id: triage-memory
+    kind: memory-store
+    location: redis://memory.acme.example/0
+    writers: [ agent:triage-agent ]
+sub_agents:
+  - card: agent-card.json
+identity:
+  workload: spiffe://acme.example/ns/triage/sa/triage-agent

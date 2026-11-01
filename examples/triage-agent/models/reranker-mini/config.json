@@ -1,0 +1,9 @@
+{
+  "architectures": [
+    "BertForSequenceClassification"
+  ],
+  "model_type": "bert",
+  "auto_map": {
+    "AutoModel": "modeling_custom.CustomModel"
+  }
+}

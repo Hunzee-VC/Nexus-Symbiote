@@ -1,0 +1,10 @@
+{
+  "peft_type": "LORA",
+  "r": 8,
+  "lora_alpha": 16,
+  "base_model_name_or_path": "bert-base-uncased",
+  "target_modules": [
+    "query",
+    "value"
+  ]
+}

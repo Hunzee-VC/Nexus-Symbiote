@@ -247,11 +247,24 @@ def merkle_verify(companion: Path, as_json: JsonFlag = False) -> None:
 @attest_app.command("snapshot")
 def attest_snapshot(
     companion: Path,
-    key: Annotated[Path, typer.Option("--key", help="PEM private key (ECDSA P-256 or Ed25519).")],
-    out: Annotated[Path, typer.Option("-o", "--out")] = Path("snapshot.dsse.json"),
+    key: Annotated[
+        Path | None,
+        typer.Option("--key", help="PEM private key (ECDSA P-256 or Ed25519) for key-based DSSE."),
+    ] = None,
+    keyless: Annotated[
+        bool, typer.Option("--keyless", help="Sign with Sigstore (OIDC identity); writes a Sigstore bundle.")
+    ] = False,
+    staging: Annotated[bool, typer.Option("--staging", help="Use the Sigstore staging instance.")] = False,
+    identity_token: Annotated[
+        str | None, typer.Option("--identity-token", help="OIDC identity token for keyless signing.")
+    ] = None,
+    issuer_url: Annotated[
+        str | None, typer.Option("--issuer-url", help="OIDC issuer to obtain a token from interactively.")
+    ] = None,
+    out: Annotated[Path | None, typer.Option("-o", "--out")] = None,
     as_json: JsonFlag = False,
 ) -> None:
-    """Sign an agentbom-snapshot/v1 statement over a finalised companion document (key-based DSSE)."""
+    """Sign an agentbom-snapshot/v1 statement over a finalised companion document (key-based DSSE or Sigstore keyless)."""
     from symbiote.attest import PAYLOAD_TYPE, load_private_key, sign_envelope, snapshot_statement
     from symbiote.attest.statements import statement_bytes
     from symbiote.digest import bytes_digest
@@ -260,7 +273,28 @@ def attest_snapshot(
     raw = companion.read_bytes()
     bom = load_companion(raw)
     stmt = snapshot_statement(bom, companion_digest=bytes_digest(raw))
+    if keyless:
+        from symbiote.attest.sigstore_backend import sign_keyless
+
+        bundle = sign_keyless(stmt, staging=staging, identity_token=identity_token, issuer_url=issuer_url)
+        out = out or Path("snapshot.sigstore.json")
+        out.write_text(bundle.to_json() + "\n", encoding="utf-8")
+        emit(
+            {
+                "out": str(out),
+                "predicateType": stmt["predicateType"],
+                "subjects": stmt["subject"],
+                "mode": "sigstore-keyless",
+            },
+            as_json,
+            f"signed {stmt['predicateType']} (Sigstore) -> {out}",
+        )
+        return
+    if key is None:
+        console.print("[red]pass --key for key-based signing or --keyless for Sigstore[/red]")
+        raise typer.Exit(exit_codes.USAGE)
     env = sign_envelope(statement_bytes(stmt), PAYLOAD_TYPE, load_private_key(key))
+    out = out or Path("snapshot.dsse.json")
     out.write_text(json.dumps(env.to_json(), indent=2) + "\n", encoding="utf-8")
     emit(
         {
@@ -268,62 +302,113 @@ def attest_snapshot(
             "predicateType": stmt["predicateType"],
             "subjects": stmt["subject"],
             "signatures": [s.keyid for s in env.signatures],
+            "mode": "key-based",
         },
         as_json,
         f"signed {stmt['predicateType']} -> {out}",
     )
 
 
+def _check_bindings(stmt: dict[str, Any], companion: Path) -> tuple[bool, list[dict[str, Any]]]:
+    from symbiote.digest import bytes_digest
+    from symbiote.export.companion import load_companion
+    from symbiote.snapshot import verify_document
+
+    raw = companion.read_bytes()
+    bom = load_companion(raw)
+    subjects = {s["name"]: s["digest"]["sha256"] for s in stmt.get("subject", [])}
+    root_ok = subjects.get(f"snapshot:{bom.subject}") == bom.snapshot.digest.split(":", 1)[1]
+    companion_ok = subjects.get("companion") in (None, bytes_digest(raw).split(":", 1)[1])
+    merkle_ok = verify_document(bom)
+    return root_ok and companion_ok and merkle_ok, [
+        {"subject": "snapshot", "ok": root_ok},
+        {"subject": "companion", "ok": companion_ok},
+        {"subject": "merkle", "ok": merkle_ok},
+    ]
+
+
 @app.command()
 def verify(
     envelope: Path,
-    public_key: Annotated[list[Path], typer.Option("--public-key", help="Trusted PEM public key(s).")],
+    public_key: Annotated[
+        list[Path] | None,
+        typer.Option("--public-key", help="Trusted PEM public key(s) for key-based DSSE envelopes."),
+    ] = None,
+    policy: Annotated[
+        Path | None,
+        typer.Option(
+            "--policy", help="YAML verification policy (identities, issuer, staging) for Sigstore bundles."
+        ),
+    ] = None,
     companion: Annotated[
         Path | None, typer.Option(help="Companion document the statement must bind to.")
     ] = None,
+    insecure_unconstrained: Annotated[
+        bool,
+        typer.Option(
+            "--insecure-unconstrained",
+            help="Accept a Sigstore signature without identity constraints (outcome: signature-valid-unconstrained).",
+        ),
+    ] = False,
     as_json: JsonFlag = False,
 ) -> None:
-    """Verify a key-based DSSE envelope and, when given, its binding to a companion document."""
-    from cryptography.exceptions import InvalidSignature
-
-    from symbiote.attest import Envelope, KeyRing, load_public_key, verify_envelope
-    from symbiote.digest import bytes_digest
-    from symbiote.snapshot import verify_document
-
-    env = Envelope.model_validate(json.loads(envelope.read_text(encoding="utf-8")))
-    ring = KeyRing.from_public_keys([load_public_key(p) for p in public_key])
+    """Verify a DSSE envelope (key-based) or a Sigstore bundle (keyless) and its binding to a companion document."""
     result: dict[str, Any] = {"envelope": str(envelope), "outcome": "failed", "bindings": [], "warnings": []}
-    try:
-        payload, accepted = verify_envelope(env, ring)
-    except InvalidSignature as exc:
-        result["reason"] = str(exc)
-        emit(result, as_json, f"[red]signature failed[/red]: {exc}")
-        raise typer.Exit(exit_codes.VERIFICATION) from None
-    stmt = json.loads(payload)
+    stmt: dict[str, Any] | None = None
+    if policy is not None:
+        from symbiote.attest.sigstore_backend import VerifyPolicySpec, verify_bundle
+        from symbiote.model.enums import SignatureOutcome
+
+        spec = VerifyPolicySpec.from_yaml(policy)
+        if insecure_unconstrained:
+            spec = spec.replace(insecure_unconstrained=True)
+        res = verify_bundle(envelope, spec)
+        result.update(
+            {
+                "outcome": res.outcome.value,
+                "identity": res.identity,
+                "issuer": res.issuer,
+                "logIndex": res.log_index,
+                "reason": res.reason,
+            }
+        )
+        if res.outcome not in (SignatureOutcome.VERIFIED, SignatureOutcome.SIGNATURE_VALID_UNCONSTRAINED):
+            emit(result, as_json, f"[red]{res.outcome.value}[/red]: {res.reason}")
+            raise typer.Exit(exit_codes.VERIFICATION)
+        if res.outcome is SignatureOutcome.SIGNATURE_VALID_UNCONSTRAINED:
+            result["warnings"].append("SYM-ATT-001 signature-valid-unconstrained: assurance stays observed")
+        stmt = res.statement
+    elif public_key:
+        from cryptography.exceptions import InvalidSignature
+
+        from symbiote.attest import Envelope, KeyRing, load_public_key, verify_envelope
+
+        env = Envelope.model_validate(json.loads(envelope.read_text(encoding="utf-8")))
+        ring = KeyRing.from_public_keys([load_public_key(p) for p in public_key])
+        try:
+            payload, accepted = verify_envelope(env, ring)
+        except InvalidSignature as exc:
+            result["reason"] = str(exc)
+            emit(result, as_json, f"[red]signature failed[/red]: {exc}")
+            raise typer.Exit(exit_codes.VERIFICATION) from None
+        stmt = json.loads(payload)
+        result["acceptedKeyIds"] = accepted
+        result["outcome"] = "verified-constrained"
+    else:
+        console.print("[red]pass --public-key (key-based) or --policy (Sigstore)[/red]")
+        raise typer.Exit(exit_codes.USAGE)
+    assert stmt is not None
     result["predicateType"] = stmt.get("predicateType")
-    result["acceptedKeyIds"] = accepted
     ok = True
     if companion is not None:
-        from symbiote.export.companion import load_companion
-
-        raw = companion.read_bytes()
-        bom = load_companion(raw)
-        subjects = {s["name"]: s["digest"]["sha256"] for s in stmt.get("subject", [])}
-        root_ok = subjects.get(f"snapshot:{bom.subject}") == bom.snapshot.digest.split(":", 1)[1]
-        companion_ok = subjects.get("companion") in (None, bytes_digest(raw).split(":", 1)[1])
-        merkle_ok = verify_document(bom)
-        result["bindings"] = [
-            {"subject": "snapshot", "ok": root_ok},
-            {"subject": "companion", "ok": companion_ok},
-            {"subject": "merkle", "ok": merkle_ok},
-        ]
-        ok = root_ok and companion_ok and merkle_ok
-    result["outcome"] = "verified-constrained" if ok else "digest-mismatch"
+        ok, result["bindings"] = _check_bindings(stmt, companion)
+        if not ok:
+            result["outcome"] = "digest-mismatch"
     emit(
         result,
         as_json,
-        ("[green]verified[/green] " if ok else "[red]digest mismatch[/red] ")
-        + f"{result['predicateType']} by {', '.join(k[:12] for k in accepted)}",
+        ("[green]" + result["outcome"] + "[/green] " if ok else "[red]digest mismatch[/red] ")
+        + str(result["predicateType"]),
     )
     if not ok:
         raise typer.Exit(exit_codes.VERIFICATION)

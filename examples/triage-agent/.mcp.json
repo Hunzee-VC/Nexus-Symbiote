@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "github": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headers": { "Authorization": "Bearer ${GITHUB_PAT}" }
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem@latest", "./workspace"],
+      "env": { "FS_ROOT": "./workspace" }
+    },
+    "triage-tools": {
+      "command": "uvx",
+      "args": ["triage-mcp-tools==1.4.2"],
+      "env": { "SLACK_WEBHOOK_URL": "${SLACK_WEBHOOK_URL}" }
+    }
+  }
+}

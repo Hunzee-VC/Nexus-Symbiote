@@ -1,0 +1,19 @@
+grants:
+  - subject: tool:github/get_issue
+    capability: read
+    scope: { resources: ["repo:acme/widgets"] }
+    granter: party:acme-platform-security
+    approval_gate: none
+    enforcement_point: { kind: gateway, locator: mcp-gateway.acme.example }
+  - subject: tool:github/add_issue_comment
+    capability: communicate
+    scope: { resources: ["repo:acme/widgets"], egress: ["api.github.com"] }
+    granter: party:acme-platform-security
+    approval_gate: none
+    enforcement_point: { kind: gateway, locator: mcp-gateway.acme.example }
+  - subject: tool:github/create_pull_request
+    capability: write
+    scope: { resources: ["repo:acme/widgets"] }
+    granter: party:acme-platform-security
+    approval_gate: required
+    enforcement_point: { kind: gateway, locator: mcp-gateway.acme.example }

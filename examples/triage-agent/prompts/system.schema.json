@@ -1,0 +1,1 @@
+{ "type": "object", "required": ["agent_name", "repository"], "properties": { "agent_name": {"type": "string"}, "repository": {"type": "string"}, "language": {"type": "string"} } }

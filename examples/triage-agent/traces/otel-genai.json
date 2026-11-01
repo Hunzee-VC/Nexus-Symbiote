@@ -1,0 +1,11 @@
+{
+  "resourceSpans": [ {
+    "resource": { "attributes": [
+      { "key": "service.name", "value": { "stringValue": "triage-agent" } },
+      { "key": "agentbom.snapshot.digest", "value": { "stringValue": "sha256:0000000000000000000000000000000000000000000000000000000000000000" } } ] },
+    "scopeSpans": [ { "scope": { "name": "symbiote-example" }, "spans": [
+      { "name": "invoke_agent triage-agent", "attributes": [ { "key": "gen_ai.operation.name", "value": { "stringValue": "invoke_agent" } }, { "key": "gen_ai.agent.name", "value": { "stringValue": "triage-agent" } }, { "key": "gen_ai.request.model", "value": { "stringValue": "claude-sonnet-4-5" } }, { "key": "gen_ai.response.model", "value": { "stringValue": "claude-sonnet-4-5-20250929" } }, { "key": "gen_ai.provider.name", "value": { "stringValue": "anthropic" } } ] },
+      { "name": "execute_tool get_issue", "attributes": [ { "key": "gen_ai.operation.name", "value": { "stringValue": "execute_tool" } }, { "key": "gen_ai.tool.name", "value": { "stringValue": "get_issue" } }, { "key": "gen_ai.tool.type", "value": { "stringValue": "extension" } } ] },
+      { "name": "execute_tool add_issue_comment", "attributes": [ { "key": "gen_ai.operation.name", "value": { "stringValue": "execute_tool" } }, { "key": "gen_ai.tool.name", "value": { "stringValue": "add_issue_comment" } } ] },
+      { "name": "execute_tool search_code", "attributes": [ { "key": "gen_ai.operation.name", "value": { "stringValue": "execute_tool" } }, { "key": "gen_ai.tool.name", "value": { "stringValue": "search_code" } } ] }
+    ] } ] } ] }

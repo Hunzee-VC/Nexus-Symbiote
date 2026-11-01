@@ -1,0 +1,11 @@
+model = "o4-mini"
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+
+[mcp_servers.github]
+url = "https://api.githubcopilot.com/mcp/"
+bearer_token_env_var = "GITHUB_PAT"
+
+[mcp_servers.triage-tools]
+command = "uvx"
+args = ["triage-mcp-tools==1.4.2"]

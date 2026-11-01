@@ -1,0 +1,5 @@
+---
+description: Triage conventions
+alwaysApply: true
+---
+Label severity with `sev:1`..`sev:4`. Do not mention internal ticket numbers in public comments.

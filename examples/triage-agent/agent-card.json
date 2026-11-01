@@ -1,0 +1,10 @@
+{
+  "name": "release-notes-writer",
+  "description": "Drafts release notes from merged pull requests.",
+  "url": "https://agents.acme.example/release-notes/",
+  "version": "1.0.3",
+  "protocolVersion": "0.3.0",
+  "capabilities": { "streaming": true, "pushNotifications": false },
+  "securitySchemes": { "oauth": { "type": "oauth2" } },
+  "skills": [ { "id": "draft-notes", "name": "Draft release notes", "tags": ["docs"] } ]
+}
