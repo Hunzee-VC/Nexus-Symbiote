@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from symbiote.policy import Policy, default_policy, load_policy
+from nexus_symbiote.policy import Policy, PolicyError, default_policy, load_policy
 
 
 class TestDefaultPolicy:
@@ -31,7 +31,7 @@ class TestLoadPolicy:
         content = (
             'version: "1.0"\nscan:\n  scanners: ["mcp", "prompt"]\nrisk:\n  fail_threshold: 75.0\n'
         )
-        (tmp_path / ".symbiote.yaml").write_text(content)
+        (tmp_path / ".nexus-symbiote.yaml").write_text(content)
         policy = load_policy(tmp_path)
         assert policy is not None
         assert policy.scan.scanners == ["mcp", "prompt"]
@@ -39,7 +39,7 @@ class TestLoadPolicy:
 
     def test_load_yml_extension(self, tmp_path: Path) -> None:
         content = 'version: "1.0"\nrisk:\n  fail_threshold: 30.0\n'
-        (tmp_path / ".symbiote.yml").write_text(content)
+        (tmp_path / ".nexus-symbiote.yml").write_text(content)
         policy = load_policy(tmp_path)
         assert policy is not None
         assert policy.risk.fail_threshold == 30.0
@@ -48,29 +48,29 @@ class TestLoadPolicy:
         assert load_policy(tmp_path) is None
 
     def test_load_invalid_yaml_returns_none(self, tmp_path: Path) -> None:
-        (tmp_path / ".symbiote.yaml").write_text("{{invalid yaml:::")
-        with pytest.raises(ValueError):
+        (tmp_path / ".nexus-symbiote.yaml").write_text("{{invalid yaml:::")
+        with pytest.raises(PolicyError):
             load_policy(tmp_path)
 
     def test_load_empty_file_returns_none(self, tmp_path: Path) -> None:
-        (tmp_path / ".symbiote.yaml").write_text("")
-        with pytest.raises(ValueError):
+        (tmp_path / ".nexus-symbiote.yaml").write_text("")
+        with pytest.raises(PolicyError):
             load_policy(tmp_path)
 
     def test_load_searches_parent_dirs(self, tmp_path: Path) -> None:
-        content = 'version: "2.0"\n'
-        (tmp_path / ".symbiote.yaml").write_text(content)
+        content = 'version: "1.0"\n'
+        (tmp_path / ".nexus-symbiote.yaml").write_text(content)
         subdir = tmp_path / "subproject" / "src"
         subdir.mkdir(parents=True)
         policy = load_policy(subdir)
         assert policy is not None
-        assert policy.version == "2.0"
+        assert policy.version == "1.0"
 
     def test_defaults_for_missing_sections(self, tmp_path: Path) -> None:
-        (tmp_path / ".symbiote.yaml").write_text('version: "1.0"\n')
+        (tmp_path / ".nexus-symbiote.yaml").write_text('version: "1.0"\n')
         policy = load_policy(tmp_path)
         assert policy is not None
-        assert len(policy.scan.scanners) == 5
+        assert len(policy.scan.scanners) == 8
         assert policy.risk.fail_threshold == 50.0
 
 
@@ -79,11 +79,41 @@ class TestPolicyModel:
         policy = Policy(
             version="1.0",
         )
-        assert policy.scan.scanners == ["mcp", "model", "prompt", "rag", "registry"]
+        assert policy.scan.scanners == [
+            "mcp",
+            "model",
+            "prompt",
+            "rag",
+            "registry",
+            "shadowscan",
+            "a2a",
+            "ide_agents",
+        ]
 
     def test_custom_risk_config(self) -> None:
-        from symbiote.policy import RiskPolicy
+        from nexus_symbiote.policy import RiskPolicy
 
         risk = RiskPolicy(fail_threshold=80.0, ignore_categories=["signing_status"])
         assert risk.fail_threshold == 80.0
         assert "signing_status" in risk.ignore_categories
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "scan: {scanners: [unknown]}",
+        "output: {default_format: html}",
+        "risk: {fail_threshold: -1}",
+        "risk: {fail_threshold: .nan}",
+        "risk: {warn_threshold: 99}",
+        'validate: {require_integrity: "false"}',
+        "validate: {typo: false}",
+        'version: "2.0"',
+        "risk: {}\nrisk: {}",
+        'scan: {exclude_paths: ["../escape"]}',
+    ],
+)
+def test_invalid_settings_fail_closed(tmp_path, text):
+    (tmp_path / ".nexus-symbiote.yaml").write_text(text)
+    with pytest.raises(PolicyError):
+        load_policy(tmp_path)
