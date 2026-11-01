@@ -16,7 +16,38 @@ from nexus_symbiote.core.enums import (
     TrustTier,
 )
 from nexus_symbiote.core.models import ModelComponent, RiskAssessment
-from nexus_symbiote.scanners.base import Scanner, ScanResult, hash_regular_file
+from nexus_symbiote.scanners.base import (
+    Scanner,
+    ScanResult,
+    hash_regular_file,
+    read_regular_prefix,
+    safe_rglob,
+)
+
+_SAFETY_RANK = {
+    SerializationSafety.SAFE: 0,
+    SerializationSafety.UNKNOWN: 1,
+    SerializationSafety.UNSAFE_TEMPLATE_INJECTION: 2,
+    SerializationSafety.UNSAFE_CODE_EXECUTION: 3,
+}
+
+
+def _sniff_format(path: Path) -> SerializationSafety | None:
+    """Best-effort content sniff for a dangerous serialization, independent of
+    the file extension, so a pickle renamed to .safetensors/.onnx is still
+    caught (NS-11). Never asserts SAFE from content (avoids false assurance)."""
+    try:
+        head = read_regular_prefix(path, 8)
+    except OSError:
+        return None
+    if head[:1] == b"\x80":  # pickle PROTO opcode
+        return SerializationSafety.UNSAFE_CODE_EXECUTION
+    if head[:4] == b"PK\x03\x04":  # zip container (PyTorch .pt wraps pickle)
+        return SerializationSafety.UNSAFE_CODE_EXECUTION
+    if head[:4] == b"GGUF":
+        return SerializationSafety.UNSAFE_TEMPLATE_INJECTION
+    return None
+
 
 MODEL_EXTENSIONS = {
     ".safetensors": ("safetensors", "safe-tensors"),
@@ -70,7 +101,7 @@ class ModelScanner(Scanner):
     def _find_model_directories(self, root: Path) -> list[Path]:
         dirs: set[Path] = set()
         for ext in MODEL_EXTENSIONS:
-            for f in root.rglob(f"*{ext}"):
+            for f in safe_rglob(root, f"*{ext}"):
                 if ".git" in f.parts or "node_modules" in f.parts or "__pycache__" in f.parts:
                     continue
                 dirs.add(f.parent)
@@ -92,6 +123,12 @@ class ModelScanner(Scanner):
 
             fmt_key, fmt_name = MODEL_EXTENSIONS[ext]
             safety = SERIALIZATION_FORMAT_SAFETY.get(fmt_key, SerializationSafety.UNKNOWN)
+            # Content overrides a benign extension so a disguised/renamed
+            # payload cannot pass as safe (NS-11).
+            sniffed = _sniff_format(path)
+            format_mismatch = sniffed is not None and _SAFETY_RANK[sniffed] > _SAFETY_RANK[safety]
+            if sniffed is not None and format_mismatch:
+                safety = sniffed
 
             weight_hash = None
             try:
@@ -100,6 +137,19 @@ class ModelScanner(Scanner):
                 result.scan_failures.append(f"Failed to hash {path}")
 
             risks = self._assess_model_risks(path, fmt_key, safety, signing_status, config)
+            if format_mismatch:
+                risks.insert(
+                    0,
+                    RiskAssessment(
+                        severity=RiskSeverity.CRITICAL,
+                        category="format_mismatch",
+                        detail=(
+                            f"Model '{path.name}' has a '{fmt_name}' extension but its bytes are a "
+                            f"{safety.value} serialization — possible disguised/renamed payload."
+                        ),
+                        recommendation="Treat as untrusted; verify the true format and provenance.",
+                    ),
+                )
 
             # A signature filename and serialization format do not establish trust.
             trust_tier = TrustTier.UNKNOWN

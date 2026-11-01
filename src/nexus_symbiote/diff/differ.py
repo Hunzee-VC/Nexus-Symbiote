@@ -146,9 +146,54 @@ class AIBOMDiffer:
 
         self._diff_dependencies(old, new, report)
         self._generate_security_alerts(report)
+        self._detect_identity_rugpull(old_map, new_map, report)
 
         report.has_changes = report.total_changes > 0
         return report
+
+    @staticmethod
+    def _identity(comp: Any) -> tuple[str, str, str | None]:
+        """Stable identity independent of the (attacker-controlled) bom_ref."""
+        return (
+            comp.component_type.value,
+            comp.name,
+            getattr(comp, "mcp_server_ref", None) or comp.source_path,
+        )
+
+    def _detect_identity_rugpull(
+        self, old_map: dict[str, Any], new_map: dict[str, Any], report: DiffReport
+    ) -> None:
+        """Catch a rug-pull hidden behind a bom_ref change (NS-08).
+
+        An attacker who both mutates a tool definition and renames its bom_ref
+        makes the change look like a benign remove+add. Correlate removed and
+        added components by stable identity (type + name + server/source) and
+        flag a changed definition/content hash as a high-severity alert.
+        """
+        new_by_identity: dict[tuple[str, str, str | None], list[Any]] = {}
+        for change in report.components_added:
+            comp = new_map[change.bom_ref]
+            new_by_identity.setdefault(self._identity(comp), []).append(comp)
+
+        for change in report.components_removed:
+            old_comp = old_map[change.bom_ref]
+            for new_comp in new_by_identity.get(self._identity(old_comp), []):
+                for attr in ("definition_hash", "content_hash"):
+                    old_hash = getattr(old_comp, attr, None)
+                    new_hash = getattr(new_comp, attr, None)
+                    if old_hash and new_hash and old_hash != new_hash:
+                        report.security_alerts.append(
+                            {
+                                "severity": "high",
+                                "component": new_comp.bom_ref,
+                                "alert": (
+                                    f"Component '{new_comp.name}' reappeared under a new "
+                                    f"bom-ref ({old_comp.bom_ref} -> {new_comp.bom_ref}) with a "
+                                    f"changed {attr} — possible rug-pull disguised as remove+add."
+                                ),
+                            }
+                        )
+                        break
 
     def _compare_components(self, old: Any, new: Any) -> list[dict[str, str]]:
         modifications: list[dict[str, str]] = []
@@ -299,13 +344,14 @@ class AIBOMDiffer:
 
     def _generate_security_alerts(self, report: DiffReport) -> None:
         for change in report.components_modified:
-            if change.severity == "critical":
+            if change.severity in ("critical", "high"):
                 report.security_alerts.append(
                     {
-                        "severity": "critical",
+                        "severity": change.severity,
                         "component": change.bom_ref,
                         "alert": (
-                            f"Critical change in '{change.name}': {'; '.join(change.details)}"
+                            f"{change.severity.title()} change in '{change.name}': "
+                            f"{'; '.join(change.details)}"
                         ),
                     }
                 )

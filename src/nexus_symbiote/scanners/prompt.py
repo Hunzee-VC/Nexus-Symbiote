@@ -8,7 +8,7 @@ from pathlib import Path
 from nexus_symbiote.core.enums import RiskSeverity, TrustTier
 from nexus_symbiote.core.hashing import hash_bytes
 from nexus_symbiote.core.models import PromptComponent, RiskAssessment, SkillPackageComponent
-from nexus_symbiote.scanners.base import Scanner, ScanResult, read_regular_text
+from nexus_symbiote.scanners.base import Scanner, ScanResult, read_regular_text, safe_rglob
 
 INVISIBLE_CHARS: dict[str, str] = {
     "​": "ZERO WIDTH SPACE",
@@ -183,7 +183,7 @@ class PromptScanner(Scanner):
         self, skill_dir: Path, result: ScanResult
     ) -> list[SkillPackageComponent]:
         skills: list[SkillPackageComponent] = []
-        for path in sorted(skill_dir.rglob("*")):
+        for path in sorted(safe_rglob(skill_dir, "*")):
             if path.name.startswith("."):
                 continue
             if path.suffix.lower() not in (".md", ".txt", ".yaml", ".yml", ".json"):

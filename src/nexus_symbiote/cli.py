@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 import click
 from pydantic import ValidationError
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from nexus_symbiote import __version__
@@ -297,7 +298,7 @@ def validate(aibom_path: str, project: str | None, policy_path: str | None) -> N
     for ci in c_report.issues:
         color = {"error": "red", "warning": "yellow", "info": "blue"}.get(ci.severity, "white")
         sev = ci.severity.upper()
-        console.print(f"  [{color}]{sev}[/] [{ci.surface}] {ci.description}")
+        console.print(f"  [{color}]{sev}[/] [{escape(ci.surface)}] {escape(ci.description)}")
 
     console.print("\n[bold]Integrity check[/]")
     iv = IntegrityValidator()
@@ -311,7 +312,7 @@ def validate(aibom_path: str, project: str | None, policy_path: str | None) -> N
         sev_colors = {"critical": "red", "error": "red", "warning": "yellow"}
         color = sev_colors.get(ii.severity, "white")
         sev = ii.severity.upper()
-        console.print(f"  [{color}]{sev}[/] [{ii.component_ref}] {ii.detail}")
+        console.print(f"  [{color}]{sev}[/] [{escape(ii.component_ref)}] {escape(ii.detail)}")
 
     # Enforce the validate policy (NS-06: these fields were previously parsed but ignored).
     vpol = policy.validation if policy else None
@@ -408,9 +409,9 @@ def risk(
             )
             table.add_row(
                 f"[{sev_color}]{finding.severity.value}[/]",
-                finding.component_name[:30],
-                finding.category,
-                finding.detail[:50],
+                escape(finding.component_name[:30]),
+                escape(finding.category),
+                escape(finding.detail[:50]),
             )
         console.print(table)
 
@@ -420,6 +421,76 @@ def risk(
         console.print(f"  [yellow]Coverage:[/] {report.coverage_status}")
 
     if not passed:
+        sys.exit(1)
+
+
+@main.command()
+@click.argument("aibom_path", type=click.Path(exists=True))
+@click.option(
+    "--project",
+    type=click.Path(exists=True),
+    required=True,
+    help="Project root holding the model artifacts and their signature bundles",
+)
+@click.option("--identity", required=True, help="Expected Sigstore signer identity (SAN)")
+@click.option("--issuer", required=True, help="Expected OIDC issuer URL")
+@click.option("-o", "--output", type=click.Path(), help="Write a BOM with verified assurance")
+def verify(aibom_path: str, project: str, identity: str, issuer: str, output: str | None) -> None:
+    """Cryptographically verify model signatures against an explicit signer policy.
+
+    Binds each signed model artifact to its Sigstore bundle under the given
+    identity/issuer (fail-closed: missing/mismatched/unverifiable all fail). Only
+    a bundle that verifies promotes a model's signing_status and assurance to
+    'verified' — presence of a signature file alone never does. (NS-04)
+    """
+    from nexus_symbiote.core.enums import ComponentType
+    from nexus_symbiote.scanners.model import SIGNING_FILES
+    from nexus_symbiote.utils.crypto import verify_sigstore_bundle
+
+    bom = _load_bom(aibom_path)
+    root = Path(project).resolve()
+    checked = verified = failed = 0
+
+    for comp in bom.components:
+        if comp.component_type != ComponentType.MODEL or not comp.source_path:
+            continue
+        artifact = root / comp.source_path
+        try:
+            artifact.resolve().relative_to(root)
+        except ValueError:
+            failed += 1
+            console.print(f"  [red]SKIP[/] {escape(comp.name)}: source path escapes project root")
+            continue
+        model_dir = artifact.parent
+        bundle = next((model_dir / s for s in SIGNING_FILES if (model_dir / s).exists()), None)
+        if bundle is None:
+            console.print(f"  [yellow]NO BUNDLE[/] {escape(comp.name)}")
+            continue
+
+        checked += 1
+        res = verify_sigstore_bundle(
+            artifact, bundle, expected_identity=identity, expected_issuer=issuer
+        )
+        if res.verified:
+            verified += 1
+            comp.signing_status = "verified"
+            comp.signing_identity = res.identity
+            comp.assurance_level = AssuranceLevel.VERIFIED
+            console.print(
+                f"  [green]VERIFIED[/] {escape(comp.name)} ({escape(res.identity or '')})"
+            )
+        else:
+            failed += 1
+            console.print(
+                f"  [red]FAILED[/] {escape(comp.name)}: {escape(res.error or 'unverified')}"
+            )
+
+    console.print(f"\nVerified [green]{verified}[/]/{checked} signed model(s); {failed} failed.")
+    if output:
+        Path(output).write_text(bom.to_json(), encoding="utf-8")
+        console.print(f"[bold green]Saved[/] {output}")
+
+    if failed:
         sys.exit(1)
 
 
@@ -456,20 +527,20 @@ def diff(old_path: str, new_path: str, json_output: bool, fail_on: str) -> None:
         if result.security_alerts:
             console.print("\n[bold red]Security Alerts:[/]")
             for alert in result.security_alerts:
-                console.print(f"  [{alert['severity'].upper()}] {alert['alert']}")
+                console.print(f"  [{alert['severity'].upper()}] {escape(alert['alert'])}")
 
         if result.components_added:
             console.print(f"\n[green]+{len(result.components_added)} added[/]")
             for c in result.components_added:
-                console.print(f"  + {c.name} ({c.component_type})")
+                console.print(f"  + {escape(c.name)} ({c.component_type})")
         if result.components_removed:
             console.print(f"\n[red]-{len(result.components_removed)} removed[/]")
             for c in result.components_removed:
-                console.print(f"  - {c.name} ({c.component_type})")
+                console.print(f"  - {escape(c.name)} ({c.component_type})")
         if result.components_modified:
             console.print(f"\n[yellow]~{len(result.components_modified)} modified[/]")
             for c in result.components_modified:
-                console.print(f"  ~ {c.name}: {'; '.join(c.details)}")
+                console.print(f"  ~ {escape(c.name)}: {escape('; '.join(c.details))}")
 
     # Drift gate: exit non-zero when a change meets the --fail-on severity (NS-03).
     if fail_on != "none":

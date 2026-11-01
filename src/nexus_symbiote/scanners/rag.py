@@ -15,7 +15,13 @@ from pathlib import Path
 
 from nexus_symbiote.core.enums import RiskSeverity, TrustTier
 from nexus_symbiote.core.models import RAGSourceComponent, RiskAssessment
-from nexus_symbiote.scanners.base import Scanner, ScanResult, read_regular_text, sanitized_origin
+from nexus_symbiote.scanners.base import (
+    Scanner,
+    ScanResult,
+    read_regular_text,
+    safe_rglob,
+    sanitized_origin,
+)
 
 RAG_CONFIG_PATTERNS = [
     "rag_config.json",
@@ -43,7 +49,7 @@ class RAGScanner(Scanner):
         result = ScanResult(scanner_name=self.name)
 
         for pattern in RAG_CONFIG_PATTERNS:
-            for config_path in project_root.rglob(pattern):
+            for config_path in safe_rglob(project_root, pattern):
                 if ".git" in config_path.parts or "node_modules" in config_path.parts:
                     continue
                 result.surfaces_scanned.append(str(config_path))
@@ -206,7 +212,7 @@ class RAGScanner(Scanner):
         }
         detected: set[str] = set()
 
-        for py_file in project_root.rglob("*.py"):
+        for py_file in safe_rglob(project_root, "*.py"):
             if (
                 ".git" in py_file.parts
                 or "node_modules" in py_file.parts

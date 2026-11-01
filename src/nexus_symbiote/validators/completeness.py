@@ -159,6 +159,7 @@ class CompletenessValidator:
     def validate_against_project(self, bom: AIBOM, project_root: Path) -> CompletenessReport:
         report = self.validate(bom)
 
+        from nexus_symbiote.scanners.base import safe_rglob
         from nexus_symbiote.scanners.mcp import MCP_CONFIG_FILES
         from nexus_symbiote.scanners.prompt import INSTRUCTION_FILES
 
@@ -166,7 +167,7 @@ class CompletenessValidator:
         has_prompt = any((project_root / f).exists() for f in INSTRUCTION_FILES)
         has_models = any(
             f.suffix.lower() in (".safetensors", ".pt", ".pth", ".gguf", ".onnx", ".pkl")
-            for f in project_root.rglob("*")
+            for f in safe_rglob(project_root)
             if ".git" not in f.parts
         )
 

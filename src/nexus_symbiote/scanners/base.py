@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import os
 import stat
@@ -17,6 +18,23 @@ from nexus_symbiote.core.models import AnyComponent
 
 MAX_CONFIG_BYTES = 4 * 1024 * 1024
 MAX_MODEL_BYTES = 1024 * 1024 * 1024
+MAX_WALK_ENTRIES = 200_000
+
+
+def safe_rglob(root: Path, pattern: str = "*") -> Iterator[Path]:
+    """Yield files under ``root`` recursively WITHOUT following directory
+    symlinks, bounding traversal to avoid symlink-loop / huge-tree DoS during
+    discovery (NS-14). Matching is on the file name via fnmatch, mirroring the
+    basename semantics the scanners relied on with Path.rglob.
+    """
+    seen = 0
+    for dirpath, _dirnames, filenames in os.walk(root, followlinks=False):
+        for name in filenames:
+            seen += 1
+            if seen > MAX_WALK_ENTRIES:
+                return
+            if fnmatch.fnmatch(name, pattern):
+                yield Path(dirpath) / name
 
 
 @contextmanager
@@ -83,6 +101,12 @@ def hash_regular_file(path: Path, *, max_bytes: int = MAX_MODEL_BYTES) -> str:
         if remaining == 0:
             raise OSError("file exceeds scanner size limit")
         return "sha256:" + digest.hexdigest()
+
+
+def read_regular_prefix(path: Path, n: int, *, max_bytes: int = MAX_MODEL_BYTES) -> bytes:
+    """Read the first n bytes of a regular file without following symlinks."""
+    with _open_regular(path, max_bytes) as fd:
+        return os.read(fd, n)
 
 
 def sanitized_origin(value: str) -> str:
