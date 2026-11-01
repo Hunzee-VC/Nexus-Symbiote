@@ -79,8 +79,8 @@ AI_PACKAGE_PATTERNS = [
 
 DOCKER_AI_KEYWORDS = ("vllm", "ollama", "triton", "tgi", "llama", "model")
 
-# Each pattern below is anchored to a line start and uses no nested quantifiers, so it runs
-# in linear time on untrusted input.
+# None of these patterns has a nested quantifier, so each runs in linear time on untrusted input.
+# The Dockerfile and compose patterns are also anchored to line starts.
 _NAME_SEPARATORS = re.compile(r"[-_.]+")
 _REQUIREMENT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _DOCKER_FROM = re.compile(r"^[ \t]*FROM[ \t]+(?:--\S+[ \t]+)*(\S+)", re.IGNORECASE | re.MULTILINE)

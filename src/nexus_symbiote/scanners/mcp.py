@@ -6,6 +6,7 @@ Discovers MCP server configurations from:
   - mcp.json
   - .cursor/mcp.json
   - .claude/mcp.json
+  - .windsurf/mcp.json and .cline/mcp.json (the IDE scanner references these servers)
 
 For each server, extracts tool definitions, computes canonical hashes,
 and detects unpinned versions, missing transport security, and rug-pull risk.
@@ -54,6 +55,8 @@ MCP_CONFIG_FILES = [
     "claude_desktop_config.json",
     ".cursor/mcp.json",
     ".claude/mcp.json",
+    ".windsurf/mcp.json",
+    ".cline/mcp.json",
 ]
 
 # Launchers whose package argument can carry an exact version pin.
@@ -181,7 +184,10 @@ def _basename(value: str) -> str:
 
 def _launcher_name(command: str) -> str:
     name = _basename(command).lower()
-    return name[: -len(".exe")] if name.endswith(".exe") else name
+    for suffix in (".exe", ".cmd", ".bat"):
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    return name
 
 
 def _first_positional(args: list[str]) -> str | None:

@@ -357,10 +357,12 @@ def _skill_names(value: object, surface: str, result: ScanResult) -> list[str]:
     for skill in value:
         if isinstance(skill, str):
             names.append(skill)
-        elif isinstance(skill, dict) and isinstance(
-            skill.get("name", skill.get("id", "unknown")), str
-        ):
-            names.append(skill.get("name", skill.get("id", "unknown")))
+            continue
+        candidate: object = None
+        if isinstance(skill, dict):
+            candidate = skill.get("name", skill.get("id", "unknown"))
+        if isinstance(candidate, str):
+            names.append(candidate)
         else:
             skipped += 1
     if skipped:
