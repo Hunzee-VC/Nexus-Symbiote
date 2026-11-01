@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import click
 from rich.console import Console
@@ -122,29 +122,6 @@ def _collect_aibom(root: Path, selected: tuple[str, ...] | None = None) -> AIBOM
     )
 
     return aibom
-
-
-def _load_mcp_configs(root: Path) -> dict[str, dict[str, Any]]:
-    """Read the project's MCP server configs, returning name -> raw server config."""
-    from nexus_symbiote.scanners.mcp import MCP_CONFIG_FILES
-
-    configs: dict[str, dict[str, Any]] = {}
-    for config_name in MCP_CONFIG_FILES:
-        path = root / config_name
-        if not path.exists():
-            continue
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        if not isinstance(data, dict):
-            continue
-        servers = data.get("mcpServers", data.get("servers", {}))
-        if isinstance(servers, dict):
-            for name, cfg in servers.items():
-                if isinstance(cfg, dict):
-                    configs[name] = cfg
-    return configs
 
 
 @main.command()
@@ -543,44 +520,50 @@ def init(force: bool, path: str) -> None:
     "--project",
     type=click.Path(exists=True),
     default=".",
-    help="Project root containing the MCP configs to launch",
+    help="Untrusted project root; launch policy must be outside this tree.",
 )
-@click.option("--json-output", is_flag=True, help="Output as JSON")
 @click.option(
-    "--record",
-    is_flag=True,
-    help="Write live-observed tool fingerprints into the BOM for approval. "
-    "Use once after human review; subsequent runs verify against them.",
+    "--launch-policy",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Operator-owned JSON mapping exact server references to absolute commands and SHA-256 pins.",
 )
-def verify_live(aibom_path: str, project: str, json_output: bool, record: bool) -> None:
-    """Connect to running MCP servers and detect rug-pull drift.
-
-    Launches each configured MCP server, lists its live tool definitions,
-    recomputes canonical fingerprints, and compares them against the approved
-    BOM. A changed or new tool definition is a rug-pull: the server altered
-    its behavior after approval.
-
-    Static scans often cannot enumerate tools (they exist only at runtime).
-    Run once with --record after human review to capture the approved
-    definitions; every later run verifies against them.
-    """
+@click.option("--json-output", is_flag=True, help="Output the verification report as JSON")
+@click.option("--record", is_flag=True, help="Emit a candidate BOM to stdout for separate review.")
+def verify_live(
+    aibom_path: str, project: str, launch_policy: str, json_output: bool, record: bool
+) -> None:
+    """Compare live descriptors from independently approved launchers to the inventory."""
     from nexus_symbiote.live import verify_mcp_servers
+    from nexus_symbiote.live.stdio import strict_object
+    from nexus_symbiote.scanners.base import read_regular_text
 
-    bom = AIBOM.load(Path(aibom_path))
-    root = Path(project).resolve()
-
-    console.print(f"[bold]Live verification[/] against {root}")
-    config_lookup = _load_mcp_configs(root)
-    report = verify_mcp_servers(bom, config_lookup)
-
-    if record:
-        recorded = _record_live_tools(bom, report)
-        if recorded:
-            Path(aibom_path).write_text(bom.to_json(), encoding="utf-8")
-            console.print(
-                f"[bold green]Recorded[/] {recorded} live tool definition(s) "
-                f"into {aibom_path} — review the diff before committing."
+    policy_path = Path(launch_policy)
+    if policy_path.resolve().is_relative_to(Path(project).resolve()):
+        raise click.UsageError("launch policy must be provisioned outside the untrusted project")
+    if record and json_output:
+        raise click.UsageError("choose a candidate BOM or a JSON verification report")
+    try:
+        policy = json.loads(read_regular_text(policy_path), object_pairs_hook=strict_object)
+        if not isinstance(policy, dict):
+            raise ValueError("expected a policy object")
+        bom = AIBOM.model_validate(
+            json.loads(
+                read_regular_text(Path(aibom_path), max_bytes=32 * 1024 * 1024),
+                object_pairs_hook=strict_object,
             )
+        )
+    except (ValueError, OSError, RecursionError) as exc:
+        raise click.ClickException("invalid BOM or launch policy") from exc
+    report = verify_mcp_servers(bom, trusted_launchers=policy)
+    if record:
+        if not report.complete or any(
+            f.status == "missing" for r in report.results for f in r.tool_findings
+        ):
+            raise click.ClickException("incomplete inventory; candidate not emitted")
+        _record_live_tools(bom, report)
+        click.echo(bom.to_json())
+        return
 
     if json_output:
         click.echo(json.dumps(report.to_dict(), indent=2))
@@ -605,14 +588,14 @@ def verify_live(aibom_path: str, project: str, json_output: bool, record: bool) 
                 elif finding.status == "missing":
                     console.print(f"  [yellow]missing[/]  {result.server_name}/{finding.name}")
 
-    if report.has_drift:
-        console.print("\n[bold red]Rug-pull drift detected.[/]")
-        if not record:
-            sys.exit(1)
+    if not report.complete or report.has_drift:
+        raise click.exceptions.Exit(1)
 
 
 def _record_live_tools(bom: AIBOM, report: LiveVerifyReport) -> int:
-    """Write live-observed tool definitions into the BOM. Returns count recorded."""
+    """Update the in-memory candidate after a complete observation."""
+    from urllib.parse import quote
+
     from nexus_symbiote.core.enums import TrustTier
     from nexus_symbiote.core.models import MCPServerComponent, ToolComponent
 
@@ -623,32 +606,41 @@ def _record_live_tools(bom: AIBOM, report: LiveVerifyReport) -> int:
         for finding in result.tool_findings:
             if finding.status not in ("new", "changed"):
                 continue
-            bom_ref = f"tool:{result.server_name}/{finding.name}"
-            existing = next((c for c in bom.components if c.bom_ref == bom_ref), None)
-            if isinstance(existing, ToolComponent):
-                existing.definition_hash = finding.definition_hash
-                existing.definition_hash_version = "rfc8785-jcs-v1"
-                recorded += 1
-            else:
-                bom.add_component(
-                    ToolComponent(
-                        bom_ref=bom_ref,
-                        name=finding.name,
-                        mcp_server_ref=f"mcp-server:{result.server_name}",
-                        definition_hash=finding.definition_hash,
-                        definition_hash_version="rfc8785-jcs-v1",
-                        trust_tier=TrustTier.THIRD_PARTY_UNSIGNED,
-                        source_path=f"live:{result.server_name}",
-                    )
+            descriptor = finding.descriptor
+            assert descriptor is not None
+            existing = next(
+                (
+                    c
+                    for c in bom.components
+                    if isinstance(c, ToolComponent)
+                    and c.mcp_server_ref == result.server_ref
+                    and c.name == finding.name
+                ),
+                None,
+            )
+            if existing is None:
+                existing = ToolComponent(
+                    bom_ref=f"tool:{quote(result.server_ref, safe='')}/{quote(finding.name, safe='')}",
+                    name=finding.name,
+                    mcp_server_ref=result.server_ref,
+                    trust_tier=TrustTier.THIRD_PARTY_UNSIGNED,
                 )
-                recorded += 1
-
-        for comp in bom.components:
-            if isinstance(comp, MCPServerComponent) and comp.name == result.server_name:
-                if result.live_schema_hash:
-                    comp.schema_hash = result.live_schema_hash
-                break
-
+                bom.add_component(existing)
+            existing.definition_hash = finding.definition_hash
+            existing.definition_hash_version = "rfc8785-jcs-v1"
+            existing.description_text = descriptor.get("description", "")
+            existing.input_schema = descriptor["inputSchema"]
+            existing.annotations = descriptor.get("annotations") or {}
+            recorded += 1
+        server = bom.get_component(result.server_ref)
+        if isinstance(server, MCPServerComponent):
+            server.schema_hash = result.live_schema_hash
+            server.tool_refs = [
+                c.bom_ref
+                for c in bom.components
+                if isinstance(c, ToolComponent) and c.mcp_server_ref == result.server_ref
+            ]
+            server.tool_count = len(server.tool_refs)
     return recorded
 
 
