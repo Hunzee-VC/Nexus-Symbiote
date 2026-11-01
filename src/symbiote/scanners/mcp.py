@@ -27,11 +27,12 @@ from symbiote.core.enums import (
 from symbiote.core.hashing import extract_version_pin, hash_tool_definition
 from symbiote.core.models import (
     CapabilityDeclaration,
+    MCPClientComponent,
     MCPServerComponent,
     RiskAssessment,
     ToolComponent,
 )
-from symbiote.scanners.base import Scanner, ScanResult, sanitized_origin
+from symbiote.scanners.base import Scanner, ScanResult, read_regular_text, sanitized_origin
 
 MCP_CONFIG_FILES = [
     ".mcp.json",
@@ -48,6 +49,7 @@ class MCPScanner(Scanner):
     def scan(self, project_root: Path) -> ScanResult:
         result = ScanResult(scanner_name=self.name)
         found_any = False
+        server_names: list[str] = []
 
         for config_name in MCP_CONFIG_FILES:
             config_path = project_root / config_name
@@ -71,6 +73,16 @@ class MCPScanner(Scanner):
                     )
                     result.components.append(mcp_comp)
                     result.components.extend(tool_comps)
+                    server_names.append(server_name)
+
+                host_app = self._detect_host_from_config(config_name)
+                if host_app:
+                    client_comp = self._create_mcp_client(
+                        host_app, config_path, server_names
+                    )
+                    result.components.append(client_comp)
+
+        self._scan_code_mcp_clients(project_root, result)
 
         if not found_any:
             result.surfaces_excluded.append("mcp-config (no config files found)")
@@ -241,6 +253,70 @@ class MCPScanner(Scanner):
                         )
                     )
         return tool_comps
+
+    @staticmethod
+    def _detect_host_from_config(config_name: str) -> str | None:
+        mapping = {
+            ".mcp.json": "claude-code",
+            ".claude/mcp.json": "claude-code",
+            "claude_desktop_config.json": "claude-desktop",
+            ".cursor/mcp.json": "cursor",
+        }
+        return mapping.get(config_name)
+
+    def _create_mcp_client(
+        self,
+        host_app: str,
+        config_path: Path,
+        server_names: list[str],
+    ) -> MCPClientComponent:
+        return MCPClientComponent(
+            bom_ref=f"mcp-client:{host_app}",
+            name=f"{host_app} MCP client",
+            host_application=host_app,
+            server_refs=[f"mcp-server:{s}" for s in server_names],
+            config_path=str(config_path),
+            source_path=str(config_path),
+            trust_tier=TrustTier.INTERNAL_UNVERIFIED,
+        )
+
+    def _scan_code_mcp_clients(self, root: Path, result: ScanResult) -> None:
+        """Detect MCP client SDK usage in Python/TypeScript entrypoints."""
+        import re
+
+        patterns = [
+            re.compile(r"from\s+mcp\b.*import.*Client"),
+            re.compile(r"MCPClient\s*\("),
+            re.compile(r"new\s+Client\s*\("),
+            re.compile(r'require\s*\(\s*["\']@modelcontextprotocol/sdk["\']'),
+            re.compile(r"from\s+['\"]@modelcontextprotocol/sdk['\"]"),
+        ]
+
+        for ext in ("*.py", "*.ts", "*.js"):
+            for source in sorted(root.glob(ext))[:10]:
+                if source.is_symlink():
+                    continue
+                try:
+                    content = read_regular_text(source)
+                except (OSError, UnicodeError):
+                    continue
+                if any(p.search(content) for p in patterns):
+                    if not any(
+                        getattr(c, "host_application", None) == "sdk"
+                        for c in result.components
+                        if hasattr(c, "host_application")
+                    ):
+                        result.surfaces_scanned.append(str(source))
+                        result.components.append(
+                            MCPClientComponent(
+                                bom_ref="mcp-client:sdk",
+                                name="MCP SDK client (code-detected)",
+                                host_application="sdk",
+                                source_path=str(source),
+                                trust_tier=TrustTier.INTERNAL_UNVERIFIED,
+                            )
+                        )
+                    break
 
     def _classify_side_effects(
         self, annotations: dict[str, Any], tool_name: str

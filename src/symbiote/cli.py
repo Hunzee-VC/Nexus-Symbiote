@@ -23,6 +23,8 @@ SCANNER_REGISTRY: dict[str, type] = {}
 
 def _get_scanners() -> dict[str, type]:
     if not SCANNER_REGISTRY:
+        from symbiote.scanners.a2a import A2AScanner
+        from symbiote.scanners.ide_agents import IDEAgentScanner
         from symbiote.scanners.mcp import MCPScanner
         from symbiote.scanners.model import ModelScanner
         from symbiote.scanners.prompt import PromptScanner
@@ -36,6 +38,8 @@ def _get_scanners() -> dict[str, type]:
                 "prompt": PromptScanner,
                 "rag": RAGScanner,
                 "registry": RegistryScanner,
+                "a2a": A2AScanner,
+                "ide_agents": IDEAgentScanner,
             }
         )
     return SCANNER_REGISTRY
