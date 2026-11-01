@@ -50,8 +50,11 @@ cyclonedx = [
 sigstore = [
     "sigstore>=3.0,<4",
 ]
+yaml = [
+    "pyyaml>=6.0,<7",
+]
 all = [
-    "symbote[cyclonedx,sigstore]",
+    "symbote[cyclonedx,sigstore,yaml]",
 ]
 dev = [
     "pytest>=8.0,<9",

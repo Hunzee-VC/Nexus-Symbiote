@@ -26,6 +26,9 @@ pip install -e ".[dev]"
 ## Quick Start
 
 ```bash
+# Initialize a policy config
+symbote init
+
 # Scan a project and generate an AIBOM
 symbote scan /path/to/agent-project -o aibom.json
 
@@ -34,6 +37,9 @@ symbote scan . -f cyclonedx -o aibom.cdx.json
 
 # Generate SPDX 3.0 output
 symbote scan . -f spdx -o aibom.spdx.json
+
+# Generate SARIF for GitHub Security tab
+symbote scan . -f sarif -o results.sarif
 
 # Validate an existing AIBOM
 symbote validate aibom.json --project /path/to/project
