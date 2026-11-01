@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -16,6 +18,17 @@ from nexus_symbiote.core.models import (
     AIBOMMetadata,
     AnyComponent,
 )
+
+
+def _document_timestamp() -> datetime:
+    """Return a UTC timestamp, honoring SOURCE_DATE_EPOCH for reproducibility."""
+    epoch = os.environ.get("SOURCE_DATE_EPOCH")
+    if epoch:
+        try:
+            return datetime.fromtimestamp(int(epoch), tz=UTC)
+        except (ValueError, OSError, OverflowError):
+            pass
+    return datetime.now(UTC)
 
 
 class DependencyEdge(BaseModel):
@@ -85,11 +98,31 @@ class AIBOM(BaseModel):
         return results
 
     def finalize(self) -> None:
-        now = datetime.now(UTC)
-        self.metadata.timestamp = now
-        self.metadata.tool_version = __version__
+        """Stamp document metadata once; idempotent so repeated emits are stable.
+
+        Honors SOURCE_DATE_EPOCH for a reproducible timestamp and derives a
+        content-addressed serial number in deterministic mode, so the same
+        inventory produces byte-identical output across runs (NS-13).
+        """
+        if self.metadata.tool_version is None:
+            self.metadata.tool_version = __version__
+        if self.metadata.timestamp is None:
+            self.metadata.timestamp = _document_timestamp()
         if self.metadata.serial_number is None:
-            self.metadata.serial_number = f"urn:uuid:{uuid.uuid4()}"
+            self.metadata.serial_number = self._document_serial()
+
+    def _document_serial(self) -> str:
+        """urn:uuid serial — deterministic (content-addressed) under SOURCE_DATE_EPOCH."""
+        if os.environ.get("SOURCE_DATE_EPOCH"):
+            payload = json.dumps(
+                [c.model_dump(mode="json", exclude_none=True) for c in self.components],
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            )
+            digest = hashlib.sha256(payload.encode("utf-8")).digest()
+            return f"urn:uuid:{uuid.UUID(bytes=digest[:16], version=5)}"
+        return f"urn:uuid:{uuid.uuid4()}"
 
     def to_dict(self) -> dict[str, Any]:
         self.finalize()

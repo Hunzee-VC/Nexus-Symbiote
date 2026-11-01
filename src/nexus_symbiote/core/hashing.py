@@ -72,28 +72,44 @@ def hash_bytes(data: bytes, algorithm: str = "sha256") -> str:
     return f"{algorithm}:{h.hexdigest()}"
 
 
-_RANGE_PREFIX = re.compile(r"^[~^>=<!]+")
-_VERSION_PATTERN = re.compile(
-    r"(?:^|[/@:])(\d+\.\d+(?:\.\d+)?(?:[-+][a-zA-Z0-9.]+)?)(?:$|[/?#,;\s])"
-)
+_SEMVER = r"\d+(?:\.\d+){0,3}(?:[-+][0-9A-Za-z.]+)?"
+_DIGEST = re.compile(r"(?:sha1|sha256|sha384|sha512):[0-9a-fA-F]{32,128}")
+_EXACT_PIP = re.compile(r"(?:^|[^=!<>~^ ])==\s*(" + _SEMVER + r")$")
+_EXACT_GITSHA = re.compile(r"[@:]([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$")
+_EXACT_SUFFIX = re.compile(r"[@:]v?(" + _SEMVER + r")$")
+_EXACT_BARE = re.compile(r"^v?(" + _SEMVER + r")$")
+_RANGE_CHARS = frozenset("^~<>*")
 
 
 def extract_version_pin(reference: str) -> str | None:
-    """Extract a pinned version from a package reference or URL.
+    """Return an exact version/digest pin, or None for ranges/floating refs.
 
-    Returns None for range specifiers (^, ~, >=, etc.) and floating/latest.
-    Returns the version only for exact pins (@1.2.3, ==1.2.3, bare 1.2.3).
+    Treated as PINNED (returns the concrete token):
+      - exact pip pins ``pkg==1.2.3`` / ``==1.2.3``
+      - npm / OCI tag pins ``pkg@1.2.3`` / ``image:1.2.3`` / ``v1.2.3``
+      - content digests ``...@sha256:<hex>`` or a bare ``sha256:<hex>``
+      - git commit / bare digest pins ``...@<40 or 64 hex>``
+      - bare versions ``1.2.3``
+    Treated as NOT pinned (returns None):
+      - range specifiers ``^ ~ >= <= > < != *``
+      - comma / ``||`` / hyphen constraint lists
+      - floating tags ``latest`` / ``*`` / ``x``
     """
-    stripped = reference.strip()
-    if stripped in ("*", "latest") or stripped.endswith("@latest") or stripped.endswith(":latest"):
+    s = reference.strip()
+    if not s:
         return None
-    if _RANGE_PREFIX.match(stripped):
-        prefix = _RANGE_PREFIX.match(stripped)
-        if prefix and prefix.group(0) not in ("==",):
-            return None
-        if prefix and prefix.group(0) == "==":
-            rest = stripped[prefix.end() :]
-            m = re.match(r"(\d+\.\d+(?:\.\d+)?(?:[-+][a-zA-Z0-9.]+)?)", rest)
-            return m.group(1) if m else None
-    m = _VERSION_PATTERN.search(stripped)
-    return m.group(1) if m else None
+    low = s.lower()
+    if low in ("*", "x", "latest") or low.endswith(("@latest", ":latest")):
+        return None
+    digest = _DIGEST.search(s)
+    if digest:
+        return digest.group(0)
+    if "," in s or "||" in s or " - " in s:
+        return None
+    if any(c in _RANGE_CHARS for c in s) or "!=" in s:
+        return None
+    for pattern in (_EXACT_PIP, _EXACT_GITSHA, _EXACT_SUFFIX, _EXACT_BARE):
+        m = pattern.search(s)
+        if m:
+            return m.group(1)
+    return None

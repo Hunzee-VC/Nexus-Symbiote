@@ -53,6 +53,23 @@ def _get_scanners() -> dict[str, type]:
     return SCANNER_REGISTRY
 
 
+def _render_output(aibom: AIBOM, output_format: str) -> str:
+    """Render an AIBOM to the requested output format as a string."""
+    if output_format == "cyclonedx":
+        from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
+
+        return CycloneDXGenerator().generate_json(aibom)
+    if output_format == "spdx":
+        from nexus_symbiote.generators.spdx import SPDXGenerator
+
+        return SPDXGenerator().generate_json(aibom)
+    if output_format == "sarif":
+        from nexus_symbiote.generators.sarif import SARIFGenerator
+
+        return SARIFGenerator().generate_json(aibom)
+    return aibom.to_json()
+
+
 @click.group()
 @click.version_option(version=__version__, prog_name="nexus-symbiote")
 def main() -> None:
@@ -158,20 +175,7 @@ def scan(
         assurance_level=AssuranceLevel.OBSERVED,
     )
 
-    if output_format == "cyclonedx":
-        from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
-
-        out_data = CycloneDXGenerator().generate_json(aibom)
-    elif output_format == "spdx":
-        from nexus_symbiote.generators.spdx import SPDXGenerator
-
-        out_data = SPDXGenerator().generate_json(aibom)
-    elif output_format == "sarif":
-        from nexus_symbiote.generators.sarif import SARIFGenerator
-
-        out_data = SARIFGenerator().generate_json(aibom)
-    else:
-        out_data = aibom.to_json()
+    out_data = _render_output(aibom, output_format)
 
     if output:
         Path(output).write_text(out_data, encoding="utf-8")
@@ -199,7 +203,7 @@ def import_shadowscan(report_path: str, output: str, output_format: str) -> None
     This is the recommended primary workflow: run ShadowScan for discovery,
     then SymBiote for verification, integrity, and BOM emission.
     """
-    from symbiote.scanners.shadowscan import ShadowScanImporter
+    from nexus_symbiote.scanners.shadowscan import ShadowScanImporter
 
     importer = ShadowScanImporter()
     try:
@@ -217,20 +221,7 @@ def import_shadowscan(report_path: str, output: str, output_format: str) -> None
         assurance_level=AssuranceLevel.DECLARED,
     )
 
-    if output_format == "cyclonedx":
-        from symbiote.generators.cyclonedx import CycloneDXGenerator
-
-        out_data = CycloneDXGenerator().generate_json(aibom)
-    elif output_format == "spdx":
-        from symbiote.generators.spdx import SPDXGenerator
-
-        out_data = SPDXGenerator().generate_json(aibom)
-    elif output_format == "sarif":
-        from symbiote.generators.sarif import SARIFGenerator
-
-        out_data = SARIFGenerator().generate_json(aibom)
-    else:
-        out_data = aibom.to_json()
+    out_data = _render_output(aibom, output_format)
 
     Path(output).write_text(out_data, encoding="utf-8")
     console.print(f"[bold green]Imported {len(components)} components and saved[/] {output}")
