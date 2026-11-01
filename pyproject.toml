@@ -1,0 +1,93 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "symbote"
+version = "0.1.0"
+description = "Agent Bill of Materials (AgentBOM) — generate, validate, and manage AIBOMs for production AI agent systems"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.11"
+authors = [
+    { name = "Emmanuel Dahunsi", email = "immanueldahunsi@gmail.com" },
+]
+keywords = [
+    "aibom",
+    "sbom",
+    "ai-security",
+    "supply-chain",
+    "cyclonedx",
+    "spdx",
+    "mcp",
+    "agent-security",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Topic :: Software Development :: Quality Assurance",
+    "Typing :: Typed",
+]
+dependencies = [
+    "click>=8.1,<9",
+    "pydantic>=2.5,<3",
+    "rich>=13.0,<14",
+    "tomli>=2.0; python_version<'3.11'",
+    "jcs>=0.2,<1",
+]
+
+[project.optional-dependencies]
+cyclonedx = [
+    "cyclonedx-python-lib>=7.0,<8",
+]
+sigstore = [
+    "sigstore>=3.0,<4",
+]
+yaml = [
+    "pyyaml>=6.0,<7",
+]
+all = [
+    "symbote[cyclonedx,sigstore,yaml]",
+]
+dev = [
+    "pytest>=8.0,<9",
+    "pytest-cov>=5.0,<6",
+    "ruff>=0.4,<1",
+    "mypy>=1.10,<2",
+]
+
+[project.scripts]
+symbote = "symbote.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/aisecnomad/SymBiote"
+Repository = "https://github.com/aisecnomad/SymBiote"
+Issues = "https://github.com/aisecnomad/SymBiote/issues"
+Documentation = "https://github.com/aisecnomad/SymBiote/tree/main/docs"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/symbote"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "S", "B", "A", "C4", "SIM"]
+ignore = ["S101", "UP042", "E501", "SIM102", "SIM105"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"

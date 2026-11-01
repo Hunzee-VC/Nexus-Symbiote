@@ -1,0 +1,17 @@
+- id: symbote-scan
+  name: SymBiote AIBOM Scan
+  description: Scan for AI supply chain components and generate AIBOM
+  entry: symbote scan . --format json -o .symbote-aibom.json
+  language: python
+  always_run: true
+  pass_filenames: false
+  types: [file]
+
+- id: symbote-risk
+  name: SymBiote Risk Gate
+  description: Check AI supply chain risk score against threshold
+  entry: bash -c 'symbote scan . -o /tmp/.symbote-check.json && symbote risk /tmp/.symbote-check.json'
+  language: system
+  always_run: true
+  pass_filenames: false
+  types: [file]

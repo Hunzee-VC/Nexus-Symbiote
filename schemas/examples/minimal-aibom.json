@@ -1,0 +1,145 @@
+{
+  "metadata": {
+    "spec_version": "1.0.0",
+    "serial_number": "urn:uuid:550e8400-e29b-41d4-a716-446655440000",
+    "version": 1,
+    "timestamp": "2024-11-01T12:00:00Z",
+    "tool_name": "symbote",
+    "tool_version": "0.1.0",
+    "tool_vendor": "aisecnomad",
+    "completeness": {
+      "scope": "full-agent",
+      "surfaces_scanned": [
+        ".mcp.json",
+        "CLAUDE.md",
+        "models/",
+        "requirements.txt"
+      ],
+      "surfaces_excluded": [
+        "rag (no RAG configuration found)"
+      ],
+      "assurance_level": "declared"
+    }
+  },
+  "components": [
+    {
+      "bom_ref": "agent:customer-support",
+      "component_type": "agent",
+      "name": "customer-support-agent",
+      "version": "2.1.0",
+      "autonomy_level": "L2-agent",
+      "framework": "LangGraph",
+      "trust_tier": "internal-verified",
+      "model_refs": ["model:gpt-4o"],
+      "tool_refs": ["tool:ticket-service/create_ticket", "tool:ticket-service/get_ticket"],
+      "prompt_refs": ["prompt:CLAUDE.md"],
+      "capabilities": {
+        "capabilities": ["read", "write", "network"],
+        "egress_domains": ["api.ticketservice.internal"],
+        "side_effect_profile": "state-modifying",
+        "human_in_the_loop": "conditional"
+      }
+    },
+    {
+      "bom_ref": "mcp-server:ticket-service",
+      "component_type": "mcp-server",
+      "name": "ticket-service",
+      "version": "1.3.2",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@acme/ticket-mcp@1.3.2"],
+      "env": { "API_KEY": "***" },
+      "version_pinned": true,
+      "schema_hash": "sha256:a1b2c3d4e5f6...",
+      "trust_tier": "third-party-signed",
+      "tool_refs": ["tool:ticket-service/create_ticket", "tool:ticket-service/get_ticket"]
+    },
+    {
+      "bom_ref": "tool:ticket-service/create_ticket",
+      "component_type": "tool",
+      "name": "create_ticket",
+      "mcp_server_ref": "mcp-server:ticket-service",
+      "description_text": "Create a new support ticket with subject and body",
+      "definition_hash": "sha256:deadbeef...",
+      "trust_tier": "third-party-signed",
+      "capabilities": {
+        "capabilities": ["write", "network"],
+        "side_effect_profile": "state-modifying"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false
+      }
+    },
+    {
+      "bom_ref": "tool:ticket-service/get_ticket",
+      "component_type": "tool",
+      "name": "get_ticket",
+      "mcp_server_ref": "mcp-server:ticket-service",
+      "description_text": "Retrieve a ticket by ID",
+      "definition_hash": "sha256:cafebabe...",
+      "trust_tier": "third-party-signed",
+      "capabilities": {
+        "capabilities": ["read", "network"],
+        "side_effect_profile": "read-only"
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    },
+    {
+      "bom_ref": "model:gpt-4o",
+      "component_type": "model",
+      "name": "gpt-4o",
+      "model_type": "foundation",
+      "provider": "openai",
+      "endpoint": "https://api.openai.com/v1",
+      "trust_tier": "third-party-signed"
+    },
+    {
+      "bom_ref": "prompt:CLAUDE.md",
+      "component_type": "prompt-template",
+      "name": "CLAUDE.md",
+      "prompt_type": "system-prompt",
+      "content_hash": "sha256:11223344...",
+      "trust_tier": "internal-unverified",
+      "source_path": "CLAUDE.md"
+    },
+    {
+      "bom_ref": "registry:npm/@acme/ticket-mcp",
+      "component_type": "registry-entry",
+      "name": "@acme/ticket-mcp",
+      "version": "1.3.2",
+      "registry_type": "npm",
+      "registry_uri": "https://registry.npmjs.org",
+      "trust_tier": "third-party-unsigned"
+    }
+  ],
+  "dependencies": [
+    {
+      "source_ref": "agent:customer-support",
+      "target_ref": "mcp-server:ticket-service",
+      "relationship": "invokes"
+    },
+    {
+      "source_ref": "agent:customer-support",
+      "target_ref": "model:gpt-4o",
+      "relationship": "depends-on"
+    },
+    {
+      "source_ref": "mcp-server:ticket-service",
+      "target_ref": "tool:ticket-service/create_ticket",
+      "relationship": "invokes"
+    },
+    {
+      "source_ref": "mcp-server:ticket-service",
+      "target_ref": "tool:ticket-service/get_ticket",
+      "relationship": "invokes"
+    },
+    {
+      "source_ref": "mcp-server:ticket-service",
+      "target_ref": "registry:npm/@acme/ticket-mcp",
+      "relationship": "registered-as"
+    }
+  ]
+}
