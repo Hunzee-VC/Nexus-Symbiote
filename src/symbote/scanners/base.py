@@ -21,7 +21,11 @@ def read_regular_text(path: Path, *, max_bytes: int = MAX_CONFIG_BYTES) -> str:
     Fail closed if descriptor-relative no-follow opens are unavailable. This protects
     scanner reads on POSIX; callers must surface failures as incomplete coverage.
     """
-    if not hasattr(os, "O_NOFOLLOW") or os.open not in os.supports_dir_fd:
+    if (
+        not hasattr(os, "O_NOFOLLOW")
+        or not hasattr(os, "O_DIRECTORY")
+        or os.open not in os.supports_dir_fd
+    ):
         raise OSError("secure descriptor-relative file access is unavailable")
     absolute = Path(os.path.abspath(path))
     flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
@@ -38,6 +42,13 @@ def read_regular_text(path: Path, *, max_bytes: int = MAX_CONFIG_BYTES) -> str:
                 raise OSError("not a regular file or exceeds scanner size limit")
             with os.fdopen(fd, "rb", closefd=False) as stream:
                 data = stream.read(max_bytes + 1)
+            after = os.fstat(fd)
+            if (info.st_size, info.st_mtime_ns, info.st_ctime_ns) != (
+                after.st_size,
+                after.st_mtime_ns,
+                after.st_ctime_ns,
+            ):
+                raise OSError("file changed during scanner read")
             if len(data) > max_bytes:
                 raise OSError("file exceeds scanner size limit")
             return data.decode("utf-8")

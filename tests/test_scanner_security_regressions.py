@@ -70,6 +70,14 @@ def test_malformed_rag_config_reports_failure_not_absence(tmp_path: Path) -> Non
     assert not result.surfaces_excluded
 
 
+def test_malformed_rag_yaml_reports_failure(tmp_path: Path) -> None:
+    pytest.importorskip("yaml")
+    (tmp_path / "rag_config.yaml").write_text("sources: [", encoding="utf-8")
+    result = RAGScanner().scan(tmp_path)
+    assert result.scan_failures
+    assert not result.surfaces_excluded
+
+
 @pytest.mark.skipif(not hasattr(os, "O_NOFOLLOW"), reason="POSIX no-follow opens required")
 def test_bounded_reader_rejects_symlinks_and_large_files(tmp_path: Path) -> None:
     target = tmp_path / "target"
