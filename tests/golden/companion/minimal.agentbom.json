@@ -51,6 +51,7 @@
       "operatorRef": null,
       "automationLevel": null,
       "autonomyProfile": [],
+      "autonomyAssessment": null,
       "identities": [],
       "instructions": [],
       "entrypoint": null,

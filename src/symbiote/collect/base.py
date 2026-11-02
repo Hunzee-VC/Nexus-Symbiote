@@ -75,6 +75,7 @@ BUILTIN_COLLECTORS: tuple[str, ...] = (
     "symbiote.collect.mcp_live:McpLiveCollector",
     "symbiote.collect.otel:OtelTracesCollector",
     "symbiote.collect.registry:McpRegistryCollector",
+    "symbiote.collect.shadowscan:ShadowScanReportCollector",
 )
 
 #: Default directory exclusions for repository walks (vendored code, environments, VCS metadata).
@@ -190,6 +191,13 @@ class CollectionResult:
     status: CollectorStatus = CollectorStatus.OK
     reason: str | None = None
     elapsed_ms: int | None = None
+    #: Computed flags a collector can assert directly (merged with the policy engine's flags by the runner).
+    flags: list[Any] = field(default_factory=list)
+    #: Document-level foreign properties (importer passthrough of observation-only records).
+    foreign_properties: list[Any] = field(default_factory=list)
+    #: Field updates for the **root agent** (``autonomy_assessment``, ``tags``, ``foreign`` …): a collector
+    #: cannot replace the root entity the scan created, so it hands facts about it back to the runner.
+    root_updates: dict[str, Any] = field(default_factory=dict)
 
     def add_source(
         self,

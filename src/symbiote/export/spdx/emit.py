@@ -320,6 +320,26 @@ class _Emitter:
                     else None,
                     autonomyProfile=[f"{ap.capability.value}:{ap.mode.value}" for ap in a.autonomy_profile]
                     or None,
+                    autonomyAssessmentScale=a.autonomy_assessment.scale if a.autonomy_assessment else None,
+                    autonomyFloor=a.autonomy_assessment.floor if a.autonomy_assessment else None,
+                    autonomyCeiling=a.autonomy_assessment.ceiling if a.autonomy_assessment else None,
+                    autonomyFloorLevel=a.autonomy_assessment.floor_level.value
+                    if a.autonomy_assessment
+                    else None,
+                    autonomyCeilingLevel=a.autonomy_assessment.ceiling_level.value
+                    if a.autonomy_assessment
+                    else None,
+                    autonomyOversight=a.autonomy_assessment.oversight.value
+                    if a.autonomy_assessment
+                    else None,
+                    autonomyInitiation=a.autonomy_assessment.initiation.value
+                    if a.autonomy_assessment
+                    else None,
+                    autonomyDeclared=a.autonomy_assessment.declared if a.autonomy_assessment else None,
+                    autonomyAssessor=a.autonomy_assessment.assessor if a.autonomy_assessment else None,
+                    autonomyBasis=[f"{b.bound}:{b.rule}={b.value}" for b in a.autonomy_assessment.basis]
+                    if a.autonomy_assessment and a.autonomy_assessment.basis
+                    else None,
                     policyBundleDigest=a.policy_bundle.value
                     if a.policy_bundle and a.policy_bundle.value
                     else None,
@@ -438,7 +458,7 @@ class _Emitter:
             f = m.software_File()
             f.name = i.path or i.uri or i.id
             f.software_primaryPurpose = m.software_SoftwarePurpose.configuration
-            f.software_contentType = i.media_type
+            f.contentType = i.media_type
             f.verifiedUsing = _hash(i.digest)
             self.register(i.id, f)
             self.finish_element(
@@ -762,7 +782,7 @@ class _Emitter:
             f = m.software_File()
             f.name = ev.name or ev.id
             f.software_primaryPurpose = m.software_SoftwarePurpose.evidence
-            f.software_contentType = ev.media_type
+            f.contentType = ev.media_type
             f.verifiedUsing = _hash(ev.digest)
             self.register(ev.id, f)
             self.finish_element(

@@ -71,7 +71,9 @@ def test_entities_carry_wire_exact_digests() -> None:
     [("description", True), ("schema", True), ("annotations", True), ("order", False), ("pagination", False)],
 )
 def test_drift_modes_change_exactly_the_right_digests(drift: str, changed: bool) -> None:
-    base_server, base_tools, *_ = capture_to_entities(spec(), capture(), collector_ref="collector:mcp-live@0.1.0", ctx=ctx())
+    base_server, base_tools, *_ = capture_to_entities(
+        spec(), capture(), collector_ref="collector:mcp-live@0.1.0", ctx=ctx()
+    )
     drift_server, drift_tools, *_ = capture_to_entities(
         spec(drift), capture(drift), collector_ref="collector:mcp-live@0.1.0", ctx=ctx()
     )
@@ -95,7 +97,9 @@ def test_drift_modes_change_exactly_the_right_digests(drift: str, changed: bool)
 
 
 def test_unicode_drift_sets_text_flags() -> None:
-    _, tools, *_ = capture_to_entities(spec("unicode"), capture("unicode"), collector_ref="collector:mcp-live@0.1.0", ctx=ctx())
+    _, tools, *_ = capture_to_entities(
+        spec("unicode"), capture("unicode"), collector_ref="collector:mcp-live@0.1.0", ctx=ctx()
+    )
     get_issue = {t.tool_name: t for t in tools}["get_issue"]
     assert any(f.value == "hidden-unicode" for f in get_issue.text_flags)
 

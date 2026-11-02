@@ -79,6 +79,23 @@ class AutonomyMode(StrEnum):
     FORBIDDEN = "forbidden"
 
 
+class AutonomyOversight(StrEnum):
+    """Whether a person approves an agent's side-effecting actions (ShadowScan ``oversight`` vocabulary)."""
+
+    BYPASSED = "bypassed"
+    GATED = "gated"
+    UNKNOWN = "unknown"
+
+
+class AutonomyInitiation(StrEnum):
+    """What starts a run: a schedule, an event, a person, or unknown."""
+
+    SCHEDULE = "schedule"
+    EVENT = "event"
+    HUMAN = "human"
+    UNKNOWN = "unknown"
+
+
 class CapabilityClass(StrEnum):
     READ = "read"
     WRITE = "write"

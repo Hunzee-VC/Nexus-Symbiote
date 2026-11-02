@@ -32,6 +32,9 @@ app.add_typer(merkle_app, name="merkle")
 app.add_typer(attest_app, name="attest")
 policy_app = typer.Typer(help="Built-in policy checks (SYM-*), SARIF output and check documentation.")
 app.add_typer(policy_app, name="policy")
+from symbiote.cli.shadowscan_cmd import shadowscan_app  # noqa: E402
+
+app.add_typer(shadowscan_app, name="shadowscan")
 
 console = Console(stderr=True)
 JsonFlag = Annotated[bool, typer.Option("--json", help="Machine-readable JSON on stdout.")]
@@ -217,6 +220,19 @@ def scan(
             "--no-policy", help="Skip the built-in policy checks (derived flags/findings stay empty)."
         ),
     ] = False,
+    shadowscan_report: Annotated[
+        Path | None,
+        typer.Option(
+            "--shadowscan-report",
+            help="Fold a Nexus ShadowScan report (JSON or CycloneDX) into the scan: observed tool servers, autonomy interval, coverage.",
+        ),
+    ] = None,
+    shadowscan_scope: Annotated[
+        str,
+        typer.Option(
+            "--shadowscan-scope", help="root (findings about this repository) | estate (every finding)."
+        ),
+    ] = "root",
     as_json: JsonFlag = False,
 ) -> None:
     """Zero-config collection: produce a declared AgentBOM snapshot (companion, CycloneDX 1.7, SPDX 3.0.1) from a repository."""
@@ -237,6 +253,10 @@ def scan(
             include_text=include_text,
             policy=not no_policy,
             store=store,
+            options={
+                **({"shadowscan_report": str(shadowscan_report.resolve())} if shadowscan_report else {}),
+                "shadowscan_scope": shadowscan_scope,
+            },
         )
     except ChainConflictError as exc:
         console.print(f"[red]anti-rollback conflict[/red]: {exc}")

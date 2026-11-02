@@ -408,6 +408,24 @@ class _Builder:
         for i, ap in enumerate(a.autonomy_profile):
             props.add(f"agentbom:agent:autonomy:{i}:capability", ap.capability)
             props.add(f"agentbom:agent:autonomy:{i}:mode", ap.mode)
+        if a.autonomy_assessment is not None:
+            aa = a.autonomy_assessment
+            props.add("agentbom:agent:autonomy-assessment:scale", aa.scale)
+            props.add("agentbom:agent:autonomy-assessment:floor", aa.floor)
+            props.add("agentbom:agent:autonomy-assessment:ceiling", aa.ceiling)
+            props.add("agentbom:agent:autonomy-assessment:floor-level", aa.floor_level)
+            props.add("agentbom:agent:autonomy-assessment:ceiling-level", aa.ceiling_level)
+            props.add("agentbom:agent:autonomy-assessment:oversight", aa.oversight)
+            props.add("agentbom:agent:autonomy-assessment:initiation", aa.initiation)
+            props.add("agentbom:agent:autonomy-assessment:declared", aa.declared)
+            props.add("agentbom:agent:autonomy-assessment:declared-source", aa.declared_source)
+            props.add("agentbom:agent:autonomy-assessment:assessor", aa.assessor)
+            props.add("agentbom:agent:autonomy-assessment:assurance", aa.assurance)
+            props.add_many(
+                "agentbom:agent:autonomy-assessment:basis",
+                (f"{b.bound}:{b.rule}={b.value}" for b in aa.basis),
+            )
+            props.add_many("agentbom:agent:autonomy-assessment:evidence", (e.digest for e in aa.evidence))
         props.add("agentbom:agent:entrypoint", a.entrypoint)
         props.add("agentbom:agent:parent", a.parent_ref)
         props.claim("agentbom:agent:policy-bundle-digest", a.policy_bundle)

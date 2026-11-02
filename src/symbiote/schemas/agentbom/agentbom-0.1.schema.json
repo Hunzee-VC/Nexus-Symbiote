@@ -133,6 +133,17 @@
           ],
           "default": null
         },
+        "autonomyAssessment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AutonomyAssessment"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "autonomyProfile": {
           "items": {
             "$ref": "#/$defs/AutonomyEntry"
@@ -665,6 +676,147 @@
       "title": "Authentication",
       "type": "object"
     },
+    "AutonomyAssessment": {
+      "additionalProperties": false,
+      "description": "An evidence **interval** of autonomy on a named scale (``spec/shadowscan-mapping.md \u00a73``).\n\nA scanner can prove that a capability exists but rarely that one is absent, so an assessment carries a\n``floor`` (the lowest level the evidence proves) and a ``ceiling`` (the highest level positive evidence has\nnot ruled out) instead of one number. ``floor_level`` / ``ceiling_level`` are the ISO/IEC 22989 projections\nof the two bounds; ``automation_level`` on the agent summarises the floor. ``declared`` is the level an\ninventory or declaration asserted, kept separately so an understated declaration stays visible.",
+      "properties": {
+        "assessor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Tool and version that produced the interval",
+          "title": "Assessor"
+        },
+        "assurance": {
+          "$ref": "#/$defs/AssuranceLevel",
+          "default": "observed"
+        },
+        "basis": {
+          "items": {
+            "$ref": "#/$defs/AutonomyBasis"
+          },
+          "title": "Basis",
+          "type": "array"
+        },
+        "ceiling": {
+          "maximum": 6,
+          "minimum": 0,
+          "title": "Ceiling",
+          "type": "integer"
+        },
+        "ceilingLevel": {
+          "$ref": "#/$defs/IsoAutomationLevel"
+        },
+        "declared": {
+          "anyOf": [
+            {
+              "maximum": 6,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Declared"
+        },
+        "declaredSource": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Declaredsource"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/EvidenceRef"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "floor": {
+          "maximum": 6,
+          "minimum": 0,
+          "title": "Floor",
+          "type": "integer"
+        },
+        "floorLevel": {
+          "$ref": "#/$defs/IsoAutomationLevel"
+        },
+        "initiation": {
+          "$ref": "#/$defs/AutonomyInitiation",
+          "default": "unknown"
+        },
+        "observedAt": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observedat"
+        },
+        "oversight": {
+          "$ref": "#/$defs/AutonomyOversight",
+          "default": "unknown"
+        },
+        "scale": {
+          "description": "Scale identifier, e.g. 'shadowscan.autonomy/v1'",
+          "title": "Scale",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scale",
+        "floor",
+        "ceiling",
+        "floorLevel",
+        "ceilingLevel"
+      ],
+      "title": "AutonomyAssessment",
+      "type": "object"
+    },
+    "AutonomyBasis": {
+      "additionalProperties": false,
+      "description": "One rule that set a bound of an :class:`AutonomyAssessment` (``bound``, closed rule id, value).",
+      "properties": {
+        "bound": {
+          "title": "Bound",
+          "type": "string"
+        },
+        "rule": {
+          "title": "Rule",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "bound",
+        "rule",
+        "value"
+      ],
+      "title": "AutonomyBasis",
+      "type": "object"
+    },
     "AutonomyEntry": {
       "additionalProperties": false,
       "properties": {
@@ -682,6 +834,17 @@
       "title": "AutonomyEntry",
       "type": "object"
     },
+    "AutonomyInitiation": {
+      "description": "What starts a run: a schedule, an event, a person, or unknown.",
+      "enum": [
+        "schedule",
+        "event",
+        "human",
+        "unknown"
+      ],
+      "title": "AutonomyInitiation",
+      "type": "string"
+    },
     "AutonomyMode": {
       "enum": [
         "autonomous",
@@ -689,6 +852,16 @@
         "forbidden"
       ],
       "title": "AutonomyMode",
+      "type": "string"
+    },
+    "AutonomyOversight": {
+      "description": "Whether a person approves an agent's side-effecting actions (ShadowScan ``oversight`` vocabulary).",
+      "enum": [
+        "bypassed",
+        "gated",
+        "unknown"
+      ],
+      "title": "AutonomyOversight",
       "type": "string"
     },
     "CapabilityClass": {
