@@ -33,13 +33,25 @@ _CROSS_TOOL_PATTERNS = [
 MAX_DESCRIPTION_BYTES = 4096
 
 
+def _is_variation_selector(cp: int) -> bool:
+    return 0xFE00 <= cp <= 0xFE0F or 0xE0100 <= cp <= 0xE01EF or 0x180B <= cp <= 0x180F
+
+
 def hidden_code_points(text: str) -> list[str]:
     """Code points in ``text`` that are invisible or direction-altering (Cf/Co/Cn, bidi controls, tag characters)."""
     found: list[str] = []
+    prev: str | None = None
     for ch in text:
         cp = ord(ch)
-        if cp in _BIDI or cp in _TAGS or 0xFE00 <= cp <= 0xFE0F or 0xE0100 <= cp <= 0xE01EF:
-            # variation selectors (Mn) are invisible and can smuggle data through otherwise plain text
+        if _is_variation_selector(cp):
+            # One selector after a visible base is ordinary text (emoji presentation, ideographic variants);
+            # a run of selectors, or one with no base, is invisible data smuggled through plain text.
+            if prev is None or prev.isspace() or _is_variation_selector(ord(prev)):
+                found.append(f"U+{cp:04X}")
+            prev = ch
+            continue
+        prev = ch
+        if cp in _BIDI or cp in _TAGS:
             found.append(f"U+{cp:04X}")
             continue
         if cp in _ALLOWED_FORMAT:

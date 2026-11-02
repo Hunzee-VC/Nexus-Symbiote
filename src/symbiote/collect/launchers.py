@@ -94,6 +94,29 @@ def _npm_version_is_local(version: str) -> bool:
     )
 
 
+def index_identity(url: str) -> str | None:
+    """``scheme://host[:port]/path`` of a package index — never userinfo, query or fragment.
+
+    Index URLs often carry a token in the username or password position. Only the credential-free location
+    may reach a purl, a digest, a message or a log; a digest over the raw URL would let anyone holding the BOM
+    confirm a guessed credential offline.
+    """
+    from urllib.parse import urlsplit, urlunsplit
+
+    try:
+        parts = urlsplit(url.strip())
+        host = parts.hostname
+        port = parts.port
+    except ValueError:
+        return None
+    if not parts.scheme or not host:
+        return None
+    netloc = host.lower() if ":" not in host else f"[{host.lower()}]"
+    if port is not None:
+        netloc += f":{port}"
+    return urlunsplit((parts.scheme.lower(), netloc, parts.path or "/", "", ""))
+
+
 def _with_registry_override(facts: LaunchFacts, flag: str, value: str | None) -> LaunchFacts:
     """A package resolved through an operator-chosen index is not the public-registry package of that name.
 
@@ -102,12 +125,12 @@ def _with_registry_override(facts: LaunchFacts, flag: str, value: str | None) ->
     """
     if facts.purl is None or facts.package_name is None:
         return facts
-    from dataclasses import replace
-
     purl = PackageURL.from_string(facts.purl)
     qualifiers = dict(purl.qualifiers or {})
     if value and flag in ("--index-url", "--index", "--default-index", "-i", "--registry"):
-        qualifiers["repository_url"] = value
+        index = index_identity(value)
+        if index:
+            qualifiers["repository_url"] = index
     return replace(
         facts,
         purl=PackageURL(
@@ -675,11 +698,17 @@ def _unwrap_shell(base: str, argv: list[str]) -> list[str] | None:
 
     A wrapper must not hide the package behind a ``binary`` launcher: the inner command is what runs.
     """
+    if base == "env":
+        rest = list(argv)
+        while rest and (re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", rest[0]) or rest[0] in ("-i", "-", "--")):
+            rest.pop(0)
+        return rest or None
     switches = _SHELLS.get(base)
     if not switches:
         return None
     for i, arg in enumerate(argv):
-        if arg.lower() in switches and i + 1 < len(argv):
+        posix_combined = base != "cmd" and re.fullmatch(r"-[a-zA-Z]*c", arg) is not None
+        if (arg.lower() in switches or posix_combined) and i + 1 < len(argv):
             rest = argv[i + 1 :]
             if len(rest) == 1 and " " in rest[0]:
                 import shlex

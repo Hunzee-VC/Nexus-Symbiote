@@ -471,3 +471,29 @@ def test_forward_serial_jump_must_chain_onto_the_admitted_snapshot(tmp_path):
     assert decide(jump, "2").reason == "rollback-or-equivocation"
     successor = fixture_bom(serial=2, trust_serial=2, prev=first.snapshot.digest)
     assert decide(successor, "3").decision == "allow"  # the legitimate chain still advances
+
+
+def test_serial_steps_are_bounded(tmp_path):
+    """Even with a correct prev link, one admission cannot jump the snapshot or trust serial out of reach."""
+    from symbiote.enforce.admission import MAX_SERIAL_STEP
+
+    signer, gateway = [generate_signing_key("ed25519") for _ in range(2)]
+
+    def decide(doc, request_id):
+        rec = admit_call(
+            sign_gateway_bundle(doc, BINDING, signer),
+            intent("dev", request_id),
+            RAW2,
+            bundle_keys=ring(signer),
+            receipt_key=gateway,
+            state_db=tmp_path / "steps.sqlite",
+            now=NOW,
+        )
+        return verify_receipt(rec, ring(gateway))
+
+    first = fixture_bom()
+    assert decide(first, "1").decision == "allow"
+    huge = fixture_bom(serial=2, trust_serial=MAX_SERIAL_STEP + 5, prev=first.snapshot.digest)
+    assert decide(huge, "2").reason == "rollback-or-equivocation"  # trust serial step too large
+    far = fixture_bom(serial=MAX_SERIAL_STEP + 5, trust_serial=2, prev=first.snapshot.digest)
+    assert decide(far, "3").reason == "rollback-or-equivocation"  # snapshot serial step too large

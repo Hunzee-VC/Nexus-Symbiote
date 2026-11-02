@@ -282,6 +282,10 @@ def _evaluate(
     return verdict, reason
 
 
+#: Largest serial increase (snapshot and trust status) one admission may make, and the largest first serial.
+MAX_SERIAL_STEP = 2**20
+
+
 def _advance(db: sqlite3.Connection, scope: str, policy: SignedPolicy) -> bool:
     """Reject snapshot and trust rollback and equivocation under the same deployment scope."""
     snap, trust = policy.gab["snapshot"], policy.gab["trustStatus"]
@@ -289,6 +293,12 @@ def _advance(db: sqlite3.Connection, scope: str, policy: SignedPolicy) -> bool:
     signed_config = {k: v for k, v in policy.gab.items() if k != "trustStatus"}
     row = (snap["serial"], _digest([signed_config, policy.policy_digest]), trust["serial"], _digest(trust))
     old = db.execute("SELECT sn, sd, tn, td FROM heads WHERE scope=?", (scope,)).fetchone()
+    if any(type(v) is not int or v < 1 or v >= 2**53 for v in (row[0], row[2])):
+        return False
+    if old and (row[0] - old[0] > MAX_SERIAL_STEP or row[2] - old[2] > MAX_SERIAL_STEP):
+        return False  # a bounded step: even a compromised signer cannot push the scope out of reach
+    if not old and (row[0] > MAX_SERIAL_STEP or row[2] > MAX_SERIAL_STEP):
+        return False
     if old and (
         row[0] < old[0]
         or row[2] < old[2]

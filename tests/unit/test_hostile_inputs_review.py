@@ -142,7 +142,13 @@ def test_cli_output_neutralises_markup_and_control_characters() -> None:
 def test_variation_selectors_are_hidden() -> None:
     from symbiote.digest.textflags import hidden_code_points
 
-    assert hidden_code_points("a️b\U000e0101c") == ["U+FE0F", "U+E0101"]
+    assert (
+        hidden_code_points("I \u2764\ufe0f it") == []
+    )  # one selector after a visible base is ordinary emoji
+    assert hidden_code_points("\u8fbb\U000e0100") == []  # ideographic variation sequence
+    assert hidden_code_points("x\ufe0f\ufe0f") == ["U+FE0F"]  # a run smuggles data
+    assert hidden_code_points("\U000e0101 hidden") == ["U+E0101"]  # no base
+    assert hidden_code_points("a\u180b\u180b") == ["U+180B"]  # Mongolian free variation selectors
 
 
 # (5) shell wrappers and repeated packages do not hide the package identity
@@ -194,3 +200,64 @@ def test_dirmanifest_non_utf8_name_fails_closed(tmp_path: Path) -> None:
         build_dir_manifest(target)
     result = CliRunner().invoke(app, ["digest", "dir", str(target)])
     assert result.exit_code == 3
+
+
+# re-verification follow-ups
+
+
+@pytest.mark.parametrize(
+    ("command", "args", "secret"),
+    [
+        (
+            "npx",
+            ["--registry", "https://ghp_S3CR3TUSERTOKEN123@npm.pkg.github.com/", "-y", "w@2.0.0"],
+            "ghp_S3CR3T",
+        ),
+        ("uvx", ["--index-url", "https://bob:PASSWORD-AAAA@h.example/simple?token=q#f", "p==1"], "PASSWORD"),
+    ],
+)
+def test_index_credentials_never_reach_purl_or_identity(command: str, args: list[str], secret: str) -> None:
+    from symbiote.collect.launchers import parse_launch
+    from symbiote.digest import server_identity_digest
+
+    facts = parse_launch(command, args)
+    assert secret not in (facts.purl or "") and "token=" not in (facts.purl or "")
+    other = parse_launch(command, [a.replace("AAAA", "BBBB").replace("S3CR3T", "OTHER1") for a in args])
+
+    def ident(f):
+        return server_identity_digest(
+            kind="mcp", transport="stdio", endpoint=None, package={"purl": f.purl, "digest": None}
+        ).value
+
+    assert ident(facts) == ident(other)  # no offline credential oracle
+
+
+@pytest.mark.parametrize(
+    ("command", "args"),
+    [("bash", ["-lc", "npx -y pkg"]), ("sh", ["-ec", "npx -y pkg"]), ("env", ["FOO=1", "npx", "-y", "pkg"])],
+)
+def test_more_wrappers_are_unwrapped(command: str, args: list[str]) -> None:
+    from symbiote.collect.launchers import parse_launch
+
+    facts = parse_launch(command, args)
+    assert facts.purl == "pkg:npm/pkg" and not facts.pinned
+
+
+def test_canonical_bytes_fails_closed_on_deep_documents() -> None:
+    from symbiote.digest.jcs import UndigestableError, canonical_bytes
+
+    doc: dict = {}
+    cur = doc
+    for _ in range(20_000):
+        cur["a"] = {}
+        cur = cur["a"]
+    with pytest.raises(UndigestableError, match="too-deep"):
+        canonical_bytes(doc)
+
+
+def test_click_is_a_declared_dependency() -> None:
+    import tomllib
+
+    pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    deps = tomllib.loads(pyproject.read_text())["project"]["dependencies"]
+    assert any(d.startswith("click") for d in deps)  # cli/update_cmd.py imports click directly
