@@ -2,24 +2,29 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from nexus_symbiote.core.aibom import AIBOM
-from nexus_symbiote.core.enums import AssuranceLevel, ComponentType
+from nexus_symbiote.core.enums import AssuranceLevel, ComponentType, TrustTier
 from nexus_symbiote.core.hashing import canonical_json
 from nexus_symbiote.core.models import (
+    AgentComponent,
     AnyComponent,
     ClaimEvidence,
     MCPServerComponent,
+    ModelComponent,
     RegistryEntryComponent,
+    ToolComponent,
 )
 from nexus_symbiote.scanner_catalog import BUILTIN_SCANNER_NAMES
 
 if TYPE_CHECKING:
     from nexus_symbiote.scanners.base import ScanResult
+    from nexus_symbiote.utils.crypto import SigstoreArtifactPolicy
 
 REQUIRED_SCANNERS = BUILTIN_SCANNER_NAMES
 
@@ -55,6 +60,7 @@ class CompletenessReport:
     assurance_level: AssuranceLevel = AssuranceLevel.DECLARED
     component_type_coverage: dict[str, int] = field(default_factory=dict)
     total_components: int = 0
+    local_subjects: int | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -199,7 +205,12 @@ class CompletenessValidator:
         return report
 
     def validate_against_project(
-        self, bom: AIBOM, project_root: Path, *, exclude_paths: Sequence[str] = ()
+        self,
+        bom: AIBOM,
+        project_root: Path,
+        *,
+        exclude_paths: Sequence[str] = (),
+        signature_policies: Sequence[SigstoreArtifactPolicy] = (),
     ) -> CompletenessReport:
         """Recollect the supported static inventory under caller-selected scope.
 
@@ -208,18 +219,22 @@ class CompletenessValidator:
         remote discovery. Integrity and signer policy are checked separately.
         """
         from nexus_symbiote.graph import assemble_repository_agent
-        from nexus_symbiote.scanners import ALL_SCANNERS
+        from nexus_symbiote.scanners import ALL_SCANNERS, ModelScanner
 
         report = self.validate(bom)
         root = project_root.absolute()
         observed: dict[str, AnyComponent] = {}
 
-        def incomplete(surface: str, description: str) -> None:
+        def incomplete(surface: str, description: str, severity: str = "error") -> None:
             report.is_complete = False
-            report.issues.append(CompletenessIssue(surface, description, "error"))
+            report.issues.append(CompletenessIssue(surface, description, severity))
 
         for scanner_type in ALL_SCANNERS:
-            scanner = scanner_type()
+            scanner = (
+                ModelScanner(signature_policies=signature_policies)
+                if scanner_type is ModelScanner
+                else scanner_type()
+            )
             scanner.configure(exclude_paths=exclude_paths)
             try:
                 local = scanner.scan(root)
@@ -248,10 +263,33 @@ class CompletenessValidator:
                 # An inferred, checkout-specific root is not itself a project artifact.
                 expected.components.remove(agent)
 
+        report.local_subjects = sum(
+            c.properties.get("collection_mode") != "imported-unverified-report"
+            for c in expected.components
+        )
         supplied = {c.bom_ref: c for c in bom.components}
         for actual in expected.components:
-            declared = supplied.get(actual.bom_ref)
-            if declared is None or not self._same_subject(root, declared, actual):
+            declared = supplied.pop(actual.bom_ref, None)
+            if (
+                isinstance(actual, MCPServerComponent)
+                and actual.properties.get("collection_mode") == "static-config"
+                and isinstance(declared, MCPServerComponent)
+                and (
+                    not declared.properties.get("static_config_hash")
+                    or declared.properties.get("static_config_hash_profile")
+                    != actual.properties["static_config_hash_profile"]
+                )
+            ):
+                incomplete(
+                    actual.bom_ref,
+                    "Static MCP source binding is unknown in this snapshot; re-collect it before reconciliation.",
+                    "unknown",
+                )
+            if (
+                declared is None
+                or not self._same_subject(root, declared, actual)
+                or not self._retains_local_evidence(declared, actual)
+            ):
                 source_kind = {
                     ComponentType.PROMPT_TEMPLATE: "instruction files",
                     ComponentType.MODEL: "model files",
@@ -262,7 +300,88 @@ class CompletenessValidator:
                     actual.bom_ref,
                     f"Missing or mismatched local component from {source_kind}: {actual.bom_ref}",
                 )
+        for extra in supplied.values():
+            if (
+                isinstance(extra, AgentComponent)
+                and extra.properties.get("identity_source") == "repository-path"
+            ):
+                continue
+            # Supplementary runtime observations have their own provenance. Missing
+            # repository subjects cannot be explained by an unrelated observation.
+            local_path = extra.source_path is not None and "://" not in extra.source_path
+            local_claim = any(
+                claim.scope in {"repository", "source-declaration", "dependency-resolution"}
+                for claim in extra.claims.values()
+            )
+            if local_path or local_claim or not extra.claims:
+                incomplete(
+                    extra.bom_ref,
+                    f"Supplied component has no matching local evidence: {extra.bom_ref}",
+                )
         return report
+
+    @staticmethod
+    def _retains_local_evidence(supplied: AnyComponent, local: AnyComponent) -> bool:
+        """Compare the fields populated by the collector, independently of supplier claims."""
+        if local.properties.get("collection_mode") == "imported-unverified-report":
+            return True  # _discovery_mismatches checks the entire source projection.
+        fields = (local.model_fields_set | {"trust_tier", "assurance_level"}) - {
+            "source_path",
+            "risks",
+            "claims",
+            "properties",
+        }
+        if (
+            isinstance(supplied, ToolComponent)
+            and supplied.assurance_level == AssuranceLevel.OBSERVED
+        ):
+            served = supplied.claims.get("tool_definition")
+            if (
+                served
+                and served.scope == "served-descriptor"
+                and served.method == "operator-pinned-stdio-tools-list"
+            ):
+                # The served descriptor is a separate observation. Static declarations still match below.
+                fields.discard("assurance_level")
+        if isinstance(local, MCPServerComponent) and isinstance(supplied, MCPServerComponent):
+            # A served descriptor can add tools beyond the static declarations.
+            fields -= {"tool_refs", "tool_count"}
+            if (
+                not set(local.tool_refs) <= set(supplied.tool_refs)
+                or supplied.tool_count < local.tool_count
+            ):
+                return False
+        if (
+            isinstance(local, ModelComponent)
+            and isinstance(supplied, ModelComponent)
+            and local.signing_status == "sigstore-signed"
+            and supplied.signing_status != "sigstore-signed"
+            and supplied.trust_tier == TrustTier.UNKNOWN
+        ):
+            # A newly supplied operator policy may corroborate an initially unsigned inventory.
+            fields -= {"signing_status", "signing_identity", "trust_tier"}
+        if canonical_json(local.model_dump(mode="json", include=fields)) != canonical_json(
+            supplied.model_dump(mode="json", include=fields)
+        ):
+            return False
+        if any(
+            key not in supplied.properties
+            or canonical_json(supplied.properties[key]) != canonical_json(value)
+            for key, value in local.properties.items()
+        ):
+            return False
+        for name, evidence in local.claims.items():
+            if evidence.method == "not-collected":
+                continue  # A separate observation can fill a gap in the static inventory.
+            claim = supplied.claims.get(name)
+            if claim is None or evidence.model_dump(exclude={"observed_at"}) != claim.model_dump(
+                exclude={"observed_at"}
+            ):
+                return False
+        # Preserve multiplicity. Independent findings and revised remediation text may be added.
+        return Counter((r.severity, r.category, r.detail) for r in local.risks) <= Counter(
+            (r.severity, r.category, r.detail) for r in supplied.risks
+        )
 
     @staticmethod
     def _discovery_mismatches(bom: AIBOM, local: ScanResult) -> list[str]:
@@ -369,14 +488,51 @@ class CompletenessValidator:
             isinstance(local, MCPServerComponent)
             and local.properties.get("collection_mode") == "static-config"
         ):
-            # Compare only the transport, redacted launcher and endpoint origin
-            # actually available from static configuration. A live observation
-            # can supply extra descriptor evidence without changing this subject.
-            return isinstance(supplied, MCPServerComponent) and (
-                supplied.transport,
-                supplied.command,
-                supplied.endpoint_url,
-            ) == (local.transport, local.command, local.endpoint_url)
+            # Redaction hides executable arguments and endpoint paths. Compare the
+            # declared launcher identity and the original, versioned source binding;
+            # a legacy record missing either cannot bind the subject. No live
+            # observation can supply missing static source evidence.
+            return (
+                isinstance(supplied, MCPServerComponent)
+                and (
+                    supplied.transport,
+                    supplied.command,
+                    supplied.endpoint_url,
+                    supplied.launcher_package,
+                    supplied.version,
+                    supplied.version_pinned,
+                )
+                == (
+                    local.transport,
+                    local.command,
+                    local.endpoint_url,
+                    local.launcher_package,
+                    local.version,
+                    local.version_pinned,
+                )
+                and all(
+                    supplied.properties.get(field) == local.properties[field]
+                    for field in ("static_config_hash", "static_config_hash_profile")
+                )
+            )
+        if (
+            isinstance(local, ToolComponent)
+            and local.properties.get("collection_mode") == "static-config"
+        ):
+            # IntegrityValidator checks the supplied descriptor's consistency
+            # with its own digest. Reconciliation must independently compare
+            # that digest to the original descriptor freshly read from config.
+            # A served descriptor is a different observation scope and cannot
+            # replace this source binding merely by asserting live provenance.
+            return isinstance(supplied, ToolComponent) and (
+                supplied.mcp_server_ref,
+                supplied.definition_hash_version,
+                supplied.definition_hash,
+            ) == (
+                local.mcp_server_ref,
+                local.definition_hash_version,
+                local.definition_hash,
+            )
         return True
 
     def _find_orphan_refs(self, bom: AIBOM) -> list[tuple[str, str]]:

@@ -6,7 +6,7 @@ import hashlib
 import json
 import uuid
 from datetime import UTC, datetime
-from typing import Annotated, Any, get_args, get_origin
+from typing import Any
 
 from nexus_symbiote import __version__
 from nexus_symbiote.core.aibom import AIBOM
@@ -153,6 +153,19 @@ def loss_report(bom: AIBOM, target: str) -> dict[str, Any]:
     }
 
 
+def unordered_projection(value: Any) -> Any:
+    """The arrays emitted by our standard projections are unordered collections.
+
+    Native JSON in extension strings stays opaque, including ordered arguments
+    and authority conditions. Sorting never drops duplicate entries or fields.
+    """
+    if isinstance(value, list):
+        return sorted((unordered_projection(item) for item in value), key=json_text)
+    if isinstance(value, dict):
+        return {key: unordered_projection(item) for key, item in value.items()}
+    return value
+
+
 def document_properties(bom: AIBOM, target: str) -> list[dict[str, str]]:
     document = native_document(bom)
     return [
@@ -198,6 +211,8 @@ def recover_document(properties: list[dict[str, str]]) -> AIBOM:
         "nexus-symbiote:lossReport",
     }
     native_properties = [p for p in properties if p["name"] in required]
+    if any("value" not in p for p in native_properties):
+        raise ValueError("missing native document property value")
     props = {p["name"]: p["value"] for p in native_properties}
     if len(props) != len(native_properties):
         raise ValueError("duplicate native document property names")
@@ -206,15 +221,4 @@ def recover_document(properties: list[dict[str, str]]) -> AIBOM:
     document = json.loads(props["nexus-symbiote:document"])
     if props["nexus-symbiote:documentDigest"] != content_digest(document):
         raise ValueError("embedded native document digest mismatch")
-    # Older native-model versions use an untagged union, which can reinterpret a prompt as an agent.
-    union: Any = AnyComponent
-    if get_origin(union) is Annotated:
-        union = get_args(union)[0]
-    models = {
-        model.model_fields["component_type"].default.value: model for model in get_args(union)
-    }
-    document["components"] = [
-        models[component["component_type"]].model_validate(component)
-        for component in document["components"]
-    ]
     return AIBOM.model_validate(document)

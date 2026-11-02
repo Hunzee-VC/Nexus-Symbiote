@@ -31,11 +31,12 @@ as described below.
    - PyPI: <https://pypi.org/manage/account/publishing/>
    - TestPyPI: <https://test.pypi.org/manage/account/publishing/>
 
-   Use project name `nexus-symbiote`, owner `aisecnomad`, repository
+   Use project name `nexus-symbiote`, owner `Hunzee-VC`, repository
    `Nexus-Symbiote`, workflow `release.yml`, and environment `pypi` or `testpypi`
    respectively. Always set the environment: without it, any job in the workflow
    holding an OIDC token could publish. No API token is needed or stored.
-4. **Protect `main`** and require `Verified CI` and reviewed changes, following
+4. **Protect `main`** and require `Verified CI` (including the CodeQL and
+   dependency-advisory jobs) and reviewed changes, following
    [repository controls](repository-controls.md). The workflow cannot create these
    controls itself.
 
@@ -45,7 +46,8 @@ as described below.
    agree; `scripts/check_repository_hygiene.py` fails CI otherwise. Move the
    changelog's *Unreleased* entries under the new version.
 2. Dispatch with `publish=none`. Inspect the run's wheel, source distribution, SBOM,
-   installed-distribution inventory, checksums and build attestation. Test the wheel
+   exact source record, installed-distribution inventory, dependency advisory report,
+   checksums, and build and evidence attestations. Test the wheel
    in an isolated environment outside the checkout.
 3. Dispatch with `publish=testpypi` and approve the `testpypi` environment. Install
    the rehearsal in a fresh environment, taking dependencies from PyPI:
@@ -63,7 +65,7 @@ as described below.
 4. Dispatch with `publish=pypi` and approve the `pypi` environment. Review the
    artifacts of this exact run at the approval gate.
 5. Verify the published files against this run's checksums and provenance, for
-   example with `gh attestation verify <file> --repo aisecnomad/Nexus-Symbiote`.
+   example with `gh attestation verify <file> --repo Hunzee-VC/Nexus-Symbiote`.
    Create a matching signed tag `v<version>` and release notes. Do not claim
    publication succeeded until the package index and the source revision agree.
 
@@ -79,14 +81,16 @@ reach the source distribution. Two local builds of the same commit produced
 identical files; reproducibility across runners is not attested. The job then
 checks that there is exactly one wheel and one sdist, runs `twine check --strict`,
 and uploads them **before** anything runs tests, writes evidence or resolves
-dependencies without hashes. The attest and publish jobs use those uploaded bytes,
-so a dependency that misbehaves during a later step cannot change what is attested
-or published.
+dependencies. It passes the artifacts' immutable IDs to later jobs. The
+compatibility, attest and publish jobs download those uploaded bytes by ID, so a
+dependency that misbehaves during a later step cannot change what is attested or
+published.
 
-**Locked build tools.** The release build uses `--no-isolation` after installing
-`requirements-ci.lock` with hash verification. The build frontend, backend and
-their dependencies come from the reviewed environment instead of a fresh, unpinned
-one.
+**Locked build tools.** The CI distribution build and the release build use
+`--no-isolation` after installing `requirements-ci.lock` with hash verification. The
+build frontend, backend and their dependencies come from the reviewed environment
+instead of a fresh, unpinned one. Locking the backend does not authenticate the
+runner.
 
 **Acceptance against the exact wheel.** The `distribution` CI job and the release
 build install the exact candidate wheel into the locked test environment. The
@@ -97,21 +101,33 @@ inventory omitting a project file, an MCP endpoint substitution, supplier-contro
 policy discovery, a revoked trust signer, and distinct SPDX revision identities. A
 failed or skipped acceptance case blocks the candidate before attestation.
 
-**Public dependency ranges.** A separate clean installation resolves the wheel's
-runtime dependencies from PyPI, as users will, and exercises it. Its
-installed-distribution inventory is part of the release evidence. Because that
-resolution is not hash-locked, it runs only after the distributions are uploaded.
+**Public dependency ranges.** The build job collects its evidence with the wheel
+installed over hash-checked binaries from `requirements-action.lock`. A separate
+`compatibility` job then downloads the candidate wheel by ID onto a fresh runner,
+resolves its runtime dependencies from PyPI, as users will, and exercises it. Its
+token has no repository or OIDC permissions and it must pass before attestation.
+Files it modifies cannot replace the candidate.
 
 **Evidence.** `project.cdx.json` is a static inventory of the checked-out project,
 not a guarantee of complete runtime or build dependency coverage.
-`installed-distributions.json` records the smoke-test environment. `SHA256SUMS`
-covers the release distributions and evidence files. GitHub's build attestation
-binds the distribution bytes to the workflow identity and source revision. Every
+`installed-distributions.json` records the locked environment used to generate the
+release evidence. `source-revision.json` requires the actual clean checkout to match
+the workflow's exact `GITHUB_SHA` and records the repository, ref and run identity.
+`SHA256SUMS` covers that source record, the release distributions and evidence
+files. The workflow bundles all candidate evidence, including the checksums, in
+`release-evidence.tar.gz` and attests that archive as well as the distributions.
+GitHub's build attestation binds the distribution bytes to the workflow identity
+and source revision. Every candidate rechecks its installed locked dependencies
+against current OSV data and retains that report even on failure. Every
 candidate also runs the committed per-case security-regression gate and keeps its
 complete `security-regressions.json` report, including failures. Passing those
 finite fixture contracts is a release prerequisite, not an estimate of production
 efficacy. The normal CI `Verified CI` check also requires statement and branch
-coverage floors (90% and 75%) and every verification job to succeed.
+coverage floors (90% and 75%), complete dependency advisory lookups with no known
+advisories, a successful CodeQL analysis with no high/critical security results, and
+every verification job to succeed. Publication checks those security job results
+for the exact source. See the acceptance policy and its knowledge limits in
+[repository controls](repository-controls.md).
 
 **Privilege separation.** The build job reads repository content and Actions run
 metadata only. A separate attest job holds OIDC and attestation-write permissions,
@@ -124,3 +140,9 @@ The composite GitHub Action uses a separate hashed runtime and build lock and an
 isolated environment, then installs its reviewed source with dependency resolution
 and build isolation disabled. This fixes its dependency input set without claiming
 byte-identical builds.
+
+A configured workflow is not execution evidence. At this review, no release run,
+signed source tag, project release attestation or published package was verified.
+Hosted runners and account features must be made operational before any such
+claim. The workflow remains manually dispatched with `publish=none` by default;
+local changes do not publish a release or configure remote protection.

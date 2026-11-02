@@ -121,8 +121,14 @@ class IDEAgentScanner(Scanner):
                         RiskAssessment(
                             severity=RiskSeverity.MEDIUM,
                             category="permission_scope",
-                            detail=f"IDE agent '{ide_type}' declares broad tool permissions.",
-                            recommendation="Review effective permissions and enforce resource-scoped authority.",
+                            detail=(
+                                f"IDE agent '{ide_type}' declares unscoped tool allowances; "
+                                "effective approval remains unverified."
+                            ),
+                            recommendation=(
+                                "Review deny/ask rules, workspace trust, user and managed "
+                                "settings, and runtime controls; enforce resource-scoped authority."
+                            ),
                         )
                     )
                 layered = (
@@ -159,6 +165,15 @@ class IDEAgentScanner(Scanner):
                         properties={
                             "collection_mode": "static-project-configuration",
                             "mcp_config_paths": mcp_configs,
+                            "permission_evidence": "declaration-only",
+                            "effective_authorization_verified": False,
+                            "permission_policy_limitations": [
+                                "User and managed settings, workspace trust, per-session flags "
+                                "and runtime controls were not observed.",
+                                "Deny and ask rules may narrow declared allow rules.",
+                                "Project/local starting-mode declarations may be ignored "
+                                "by the host or version.",
+                            ],
                         },
                     )
                 )
@@ -178,12 +193,36 @@ class IDEAgentScanner(Scanner):
             "codex": [".codex/config.json"],
         }
         merged: dict[str, Any] = {}
-        # Keep evidence from both Claude settings layers. A shallow merge is only
-        # a discovery summary; it is not an implementation of IDE permission rules.
+        # Keep declared allowances from every collected Claude settings layer.
+        # This summary does not resolve effective permissions across trust,
+        # user/managed policy, ask/deny rules, flags or product versions.
         for relative in settings_paths.get(ide_type, []):
             if relative in available:
                 data = self._read_mapping(root / relative, result)
                 if data is not None:
+                    if ide_type == "claude-code" and "permissions" in data:
+                        permissions = data["permissions"]
+                        if not isinstance(permissions, dict):
+                            result.scan_failures.append(
+                                f"{relative}: invalid permission settings object"
+                            )
+                            continue
+                        previous = merged.get("permissions", {})
+                        combined = {**previous, **permissions}
+                        for key in ("allow", "ask", "deny"):
+                            earlier, current = previous.get(key, []), permissions.get(key, [])
+                            if not all(
+                                isinstance(values, list)
+                                and all(isinstance(value, str) for value in values)
+                                for values in (earlier, current)
+                            ):
+                                result.scan_failures.append(
+                                    f"{relative}: invalid declared permission {key}-list"
+                                )
+                                combined.pop(key, None)
+                            else:
+                                combined[key] = list(dict.fromkeys([*earlier, *current]))
+                        data = {**data, "permissions": combined}
                     merged.update(data)
         return merged or None
 
@@ -191,7 +230,7 @@ class IDEAgentScanner(Scanner):
         self, settings: dict[str, Any], ide_type: str, result: ScanResult
     ) -> str | None:
         key = "permissions" if ide_type == "claude-code" else "agent"
-        mode_key = "mode" if ide_type == "claude-code" else "permissionMode"
+        mode_key = "defaultMode" if ide_type == "claude-code" else "permissionMode"
         values = settings.get(key, {})
         if not isinstance(values, dict):
             result.scan_failures.append(f"{ide_type}: invalid permission settings object")
@@ -204,6 +243,7 @@ class IDEAgentScanner(Scanner):
             return None
         if mode not in {
             "default",
+            "manual",
             "plan",
             "acceptEdits",
             "bypassPermissions",
@@ -234,7 +274,10 @@ class IDEAgentScanner(Scanner):
         if not isinstance(allowed, list) or not all(isinstance(value, str) for value in allowed):
             result.scan_failures.append(f"{ide_type}: invalid declared permission allow-list")
             return False
-        return any(value in allowed for value in ("Bash(*)", "Edit(*)", "Write(*)", "*"))
+        return any(
+            value in allowed
+            for value in ("Bash", "Edit", "Write", "Bash(*)", "Edit(*)", "Write(*)", "*")
+        )
 
     def _scan_extensions(self, root: Path, result: ScanResult, available: set[str]) -> None:
         relative = ".vscode/extensions.json"

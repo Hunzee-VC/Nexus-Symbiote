@@ -7,6 +7,7 @@ attestation occurs here. Report bytes remain a separate sensitive artifact.
 from __future__ import annotations
 
 import hashlib
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,7 @@ from nexus_symbiote.core.models import (
     MCPServerComponent,
     ModelComponent,
     RiskAssessment,
+    ToolComponent,
 )
 from nexus_symbiote.scanners.base import Scanner, ScanResult
 from nexus_symbiote.utils.confined import ConfinedCollection
@@ -29,7 +31,7 @@ from nexus_symbiote.utils.confined import ConfinedCollection
 MAX_REPORT_BYTES = 16 * 1024 * 1024
 MAX_FINDINGS = 10_000
 MAX_DEPENDENCIES = 10_000
-PROJECTION_PROFILE = "nexus-symbiote/shadowscan-projection/v1"
+PROJECTION_PROFILE = "nexus-symbiote/shadowscan-projection/v2"
 _ALLOWED_SURFACES = frozenset(
     {"code", "identity", "gateway", "lowcode", "saas", "cloud", "endpoint", "network", "runtime"}
 )
@@ -115,7 +117,15 @@ def _make_component(
     *,
     cdx_model: bool = False,
     cdx_mcp: bool = False,
+    resource_type: Any = None,
 ) -> AnyComponent | None:
+    # ShadowScan's endpoint connector emits an MCP tool as kind=mcp-server
+    # and resource_type=mcp-tool. The latter is an observation type, not
+    # proof that the tool is itself a server or linked to a particular server.
+    # Conflicting claims are not projected as either kind.
+    if resource_type == "mcp-tool" and (kind != "mcp-server" or cdx_model):
+        return None
+    is_mcp_tool = kind == "mcp-server" and resource_type == "mcp-tool"
     identity_hash = _short_hash(source_id)
     ref = "shadowscan:" + identity_hash
     props: dict[str, Any] = {
@@ -132,7 +142,13 @@ def _make_component(
     if isinstance(shadow, bool):
         props["shadowscan:inventory-unmatched"] = shadow
     risks = _risks(level, shadow)
-    safe_kind = kind if kind in {"agent", "mcp-server", "local-model", "model"} else "component"
+    safe_kind = (
+        "mcp-tool"
+        if is_mcp_tool
+        else kind
+        if kind in {"agent", "mcp-server", "local-model", "model"}
+        else "component"
+    )
     common: dict[str, Any] = {
         "bom_ref": ref,
         "name": "ShadowScan " + safe_kind + " " + identity_hash[:12],
@@ -141,6 +157,9 @@ def _make_component(
         "properties": props,
         "risks": risks,
     }
+    if is_mcp_tool:
+        props["shadowscan:resource-type"] = "mcp-tool"
+        return ToolComponent(**common)
     if kind == "mcp-server" or cdx_mcp:
         return MCPServerComponent(**common)
     if kind in {"local-model", "model"} or cdx_model:
@@ -257,7 +276,15 @@ class ShadowScanImporter(Scanner):
             raise ValueError("invalid ShadowScan report envelope")
         if not isinstance(stats, list) or not isinstance(summary, dict):
             raise ValueError("ShadowScan report must include stats and summary")
+        # The producer's summary describes the final, filtered findings. Connector
+        # statistics can legitimately count observations before merging/filtering.
+        if "total" in summary or "finding_identity_schema" in data:
+            total = summary.get("total")
+            if type(total) is not int or total != len(findings):
+                raise ValueError("ShadowScan summary total disagrees with findings")
         complete = summary.get("complete") is True and bool(stats)
+        if "status" in summary and summary["status"] != "complete":
+            complete = False
         for stat in stats:
             if (
                 not isinstance(stat, dict)
@@ -299,13 +326,30 @@ class ShadowScanImporter(Scanner):
             risk = finding.get("risk")
             level = risk.get("level") if isinstance(risk, dict) else None
             comp = _make_component(
-                kind, source_id, index, digest, surface, level, finding.get("shadow")
+                kind,
+                source_id,
+                index,
+                digest,
+                surface,
+                level,
+                finding.get("shadow"),
+                resource_type=finding.get("resource_type"),
             )
             if comp is None:
                 result.unmapped_count += 1
                 result.unmapped_indexes.append(index)
             else:
                 result.components.append(comp)
+        for key, field_name in (("by_surface", "surface"), ("by_kind", "kind")):
+            if key not in summary:
+                continue
+            counts = summary[key]
+            if (
+                not isinstance(counts, dict)
+                or any(type(count) is not int for count in counts.values())
+                or counts != dict(Counter(finding[field_name] for finding in findings))
+            ):
+                raise ValueError(f"ShadowScan summary {key} disagrees with findings")
         return result
 
     @staticmethod
@@ -429,6 +473,7 @@ class ShadowScanImporter(Scanner):
                 shadow,
                 cdx_model=entry.get("type") == "machine-learning-model",
                 cdx_mcp=entry.get("group") == "mcp-server",
+                resource_type=p.get("shadowscan:resource-type"),
             )
             if comp is None:
                 result.unmapped_count += 1

@@ -355,11 +355,33 @@ class ModelScanner(Scanner):
         return components
 
     def _read_model_config(self, model_dir: Path) -> dict[str, Any] | None:
+        assert self._files is not None
         for cfg_name in MODEL_CONFIG_FILES:
             cfg_path = model_dir / cfg_name
             if cfg_path in self._discovered_paths:
-                data = self._safe_read_json(cfg_path)
+                data = self._files.read_json(cfg_path)
+                if data is not None and not isinstance(data, dict):
+                    self._files._fail(cfg_path, "model configuration must be an object")
+                    continue
                 if isinstance(data, dict):
+                    invalid_fields = [
+                        key
+                        for key in ("peft_type", "quantization_method", "quant_method")
+                        if data.get(key) is not None and not isinstance(data[key], str)
+                    ]
+                    if data.get("trust_remote_code") is not None and not isinstance(
+                        data["trust_remote_code"], bool
+                    ):
+                        invalid_fields.append("trust_remote_code")
+                    if invalid_fields:
+                        self._files._fail(
+                            cfg_path,
+                            "invalid model configuration field type: "
+                            + ", ".join(sorted(invalid_fields)),
+                        )
+                        # Retain the artifact inventory while refusing the invalid
+                        # claims. Diagnostics contain schema field names only.
+                        data = {k: v for k, v in data.items() if k not in invalid_fields}
                     return data
         return None
 

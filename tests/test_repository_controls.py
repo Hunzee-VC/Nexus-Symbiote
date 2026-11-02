@@ -21,7 +21,7 @@ def branch():
             "required_status_checks": {
                 "enforcement_level": "everyone",
                 "contexts": ["Verified CI"],
-                "checks": [],
+                "checks": [{"context": "Verified CI", "app_id": 15368}],
             },
         },
     }
@@ -31,7 +31,9 @@ def test_required_verified_ci_applies_to_everyone():
     assert controls.evaluate(branch()) == []
     metadata = branch()
     metadata["protection"]["required_status_checks"]["contexts"] = []
-    metadata["protection"]["required_status_checks"]["checks"] = [{"context": "Verified CI"}]
+    metadata["protection"]["required_status_checks"]["checks"] = [
+        {"context": "Verified CI", "app_id": 15368}
+    ]
     assert controls.evaluate(metadata) == []
 
 
@@ -49,6 +51,7 @@ def test_checks_cannot_be_bypassed_by_administrator():
 def test_missing_aggregate_context_fails_even_with_other_green_checks():
     metadata = branch()
     metadata["protection"]["required_status_checks"]["contexts"] = ["quality", "Tests Python 3.12"]
+    metadata["protection"]["required_status_checks"]["checks"] = []
     assert controls.evaluate(metadata)
 
 
@@ -67,3 +70,12 @@ def test_no_network_request_without_credentials():
 def test_no_arbitrary_network_origin():
     with pytest.raises(ValueError, match="owner/name"):
         controls.fetch_branch("https://evil.example", "main", "unused")
+
+
+@pytest.mark.parametrize(
+    "checks", [[], [{"context": "Verified CI"}], [{"context": "Verified CI", "app_id": 1}]]
+)
+def test_unbound_or_impostor_check_source_cannot_supply_required_verification(checks):
+    metadata = branch()
+    metadata["protection"]["required_status_checks"]["checks"] = checks
+    assert controls.evaluate(metadata)

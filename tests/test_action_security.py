@@ -176,12 +176,10 @@ def test_workflow_pins_structure_and_release_privilege_separation():
 
     upload = index(lambda s: s.get("name") == "Upload distributions")
     # The attested bytes are uploaded before anything runs tests, writes evidence
-    # or resolves unpinned dependencies for the wheel smoke test.
+    # or installs dependencies for the wheel smoke test.
     assert upload < index(lambda s: s.get("run") == "python -m pytest")
     assert upload < index(lambda s: "evidence/" in s.get("run", ""))
-    assert upload < index(
-        lambda s: 'release-smoke/bin/python" -m pip install dist' in s.get("run", "")
-    )
+    assert upload < index(lambda s: 'release-smoke/bin/python" -m pip install' in s.get("run", ""))
     assert jobs["publish"]["environment"]["name"] == "${{ inputs.publish }}"
     assert jobs["publish"]["if"].startswith("inputs.publish != 'none'")
     publish_step = next(s for s in jobs["publish"]["steps"] if "pypi-publish" in s["uses"])
@@ -193,6 +191,47 @@ def test_workflow_pins_structure_and_release_privilege_separation():
         downloads = [s for s in jobs[name]["steps"] if "download-artifact" in s.get("uses", "")]
         assert downloads
         assert all(s["with"]["digest-mismatch"] == "error" for s in downloads)
+
+
+def test_release_floating_dependencies_cannot_replace_attestation_or_publication_inputs():
+    path = Path(__file__).parents[1] / ".github/workflows/release.yml"
+    jobs = yaml.safe_load(path.read_text())["jobs"]
+    build = jobs["build"]
+    compatibility = jobs["compatibility"]
+    assert compatibility["needs"] == "build"
+    assert compatibility["permissions"] == {}
+    assert "outputs" not in compatibility
+    assert set(jobs["attest"]["needs"]) == {"build", "compatibility"}
+
+    for step in build["steps"]:
+        for command in step.get("run", "").splitlines():
+            if "pip install" in command:
+                assert "--require-hashes" in command or "--no-deps" in command
+    assert any("pip install dist/*.whl" in step.get("run", "") for step in compatibility["steps"])
+
+    for output, step_id in [("distributions_id", "distributions"), ("evidence_id", "evidence")]:
+        assert build["outputs"][output] == "${{ steps." + step_id + ".outputs.artifact-id }}"
+        upload = next(s for s in build["steps"] if s.get("id") == step_id)
+        assert upload["uses"].startswith("actions/upload-artifact@")
+        assert upload["with"]["if-no-files-found"] == "error"
+
+    for job, paths in [
+        ("compatibility", ["dist"]),
+        ("attest", ["dist", "evidence"]),
+        ("publish", ["dist"]),
+    ]:
+        downloads = [
+            s["with"]
+            for s in jobs[job]["steps"]
+            if s.get("uses", "").startswith("actions/download-artifact@")
+        ]
+        assert [d["path"] for d in downloads] == paths
+        for download in downloads:
+            output = "distributions_id" if download["path"] == "dist" else "evidence_id"
+            # The pinned downloader selects *all* artifacts for an empty ID.
+            assert (
+                download["artifact-ids"] == "${{ needs.build.outputs." + output + " || 'missing' }}"
+            )
 
 
 @pytest.mark.parametrize("validate", [True, False])

@@ -1,0 +1,47 @@
+# Normalize line endings
+* text=auto eol=lf
+
+# Source code
+*.py text diff=python
+*.pyi text diff=python
+
+# Data and config
+*.json text diff
+*.yaml text diff
+*.yml text diff
+*.toml text diff
+*.cfg text diff
+*.ini text diff
+*.lock text diff
+
+# Documentation
+*.md text diff=markdown
+*.txt text diff
+*.rst text diff
+
+# Shell scripts
+*.sh text eol=lf
+*.bash text eol=lf
+
+# CI and GitHub
+*.yml text eol=lf
+Dockerfile text eol=lf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.whl binary
+*.tar.gz binary
+*.zip binary
+*.gz binary
+
+# Vendored schemas — track but don't normalize
+src/nexus_symbiote/generators/schemas/vendor/** -text -diff linguist-vendored
+
+# Evidence and parser fixtures must retain their exact recorded bytes.
+benchmarks/fixtures/** -text
+benchmarks/inventory/fixtures/** -text
+tests/fixtures/** -text

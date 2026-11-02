@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
+from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import ComponentType
 from nexus_symbiote.core.models import (
     AgentComponent,
@@ -31,6 +31,7 @@ from nexus_symbiote.generators._common import (
     normalize_hash,
     prepare,
     recover_document,
+    unordered_projection,
 )
 from nexus_symbiote.generators.base import Generator
 from nexus_symbiote.generators.package_identifiers import (
@@ -63,10 +64,12 @@ class CycloneDXGenerator(Generator):
     format_name = "cyclonedx-1.7"
 
     def generate(self, aibom: AIBOM) -> dict[str, Any]:
+        document = self._projection(aibom)
+        require_valid(document, "cyclonedx")
+        return document
+
+    def _projection(self, aibom: AIBOM) -> dict[str, Any]:
         prepare(aibom)
-        adjacency: dict[str, set[str]] = {}
-        for edge in aibom.dependencies:
-            adjacency.setdefault(edge.source_ref, set()).add(edge.target_ref)
         document = {
             "bomFormat": "CycloneDX",
             "specVersion": "1.7",
@@ -76,21 +79,56 @@ class CycloneDXGenerator(Generator):
             "components": [
                 self._component(c) for c in sorted(aibom.components, key=lambda c: c.bom_ref)
             ],
-            "dependencies": [
-                {"ref": ref, "dependsOn": sorted(targets)}
-                for ref, targets in sorted(adjacency.items())
-            ],
+            "dependencies": self._dependencies(aibom),
         }
         claim = aibom.metadata.completeness
         if claim and claim.source_report_digest:
             document["compositions"] = [{"aggregate": "incomplete"}]
-        require_valid(document, "cyclonedx")
         return document
 
     @staticmethod
-    def recover(document: dict[str, Any]) -> AIBOM:
+    def _dependencies(aibom: AIBOM, *, historical: bool = False) -> list[dict[str, Any]]:
+        adjacency: dict[str, set[str]] = {}
+        for edge in aibom.dependencies:
+            # The standard dependency graph cannot convey conditions, offered
+            # capabilities, lineage or authority. Preserve those in the typed
+            # extension only. The historical exporter flattened *every* edge.
+            if historical or (edge.relationship == "depends-on" and not edge.conditions):
+                adjacency.setdefault(edge.source_ref, set()).add(edge.target_ref)
+        return [
+            {"ref": ref, "dependsOn": sorted(targets)} for ref, targets in sorted(adjacency.items())
+        ]
+
+    @staticmethod
+    def _public_view(document: dict[str, Any]) -> dict[str, Any]:
+        view = dict(document)
+        # The upstream SDK supplies the schema hint and an extra ref-only row
+        # for known components without emitted edges. Never discard targets.
+        if view.get("$schema") == "http://cyclonedx.org/schema/bom-1.7.schema.json":
+            del view["$schema"]
+        view.setdefault("components", [])
+        view["dependencies"] = [
+            edge for edge in view.get("dependencies", []) if set(edge) != {"ref"}
+        ]
+        return view
+
+    @classmethod
+    def recover(
+        cls, document: dict[str, Any], *, allow_legacy_relationships: bool = False
+    ) -> AIBOM:
+        """Require agreement with the embedded inventory; legacy mode checks the exact old graph."""
         require_valid(document, "cyclonedx")
-        return recover_document(document["metadata"]["properties"])
+        recovered = recover_document(document.get("metadata", {}).get("properties", []))
+        exporter = cls()
+        expected = exporter._projection(recovered)
+        actual = cls._public_view(document)
+        if allow_legacy_relationships and unordered_projection(
+            actual["dependencies"]
+        ) == unordered_projection(cls._dependencies(recovered, historical=True)):
+            expected["dependencies"] = actual["dependencies"]
+        if unordered_projection(actual) != unordered_projection(cls._public_view(expected)):
+            raise ValueError("CycloneDX projection conflicts with the embedded native document")
+        return recovered
 
     def _metadata(self, aibom: AIBOM) -> dict[str, Any]:
         meta: dict[str, Any] = {
@@ -238,9 +276,3 @@ class CycloneDXGenerator(Generator):
         props.extend(package_identifier_properties(comp))
 
         return props
-
-    def _dependency(self, edge: DependencyEdge) -> dict[str, Any]:
-        return {
-            "ref": edge.source_ref,
-            "dependsOn": [edge.target_ref],
-        }

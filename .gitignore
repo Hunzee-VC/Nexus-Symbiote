@@ -1,19 +1,56 @@
+# Python
 __pycache__/
 *.pyc
 *.pyo
 *.egg-info/
+*.egg
+*.so
+.eggs/
+
+# Build and distribution
 dist/
 build/
-.eggs/
-*.egg
-.mypy_cache/
-.pytest_cache/
-.ruff_cache/
-*.so
+
+# Virtual environments
 .env
 .venv/
 venv/
+
+# Quality and testing caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.tox/
+.nox/
+
+# Coverage
 .coverage
 .coverage.*
 coverage.json
 htmlcov/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Security — never commit credentials
+*.pem
+*.key
+
+# Built wheels
+*.whl
+
+# Version managers
+.python-version
+
+# Local outputs
+evidence/
+benchmark-results.json
+security-regressions.json

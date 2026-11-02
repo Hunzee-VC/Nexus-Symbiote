@@ -256,5 +256,8 @@ def invoke_pinned_stdio(
             execute=session.execute,
             approval_actors=gateway.approval_actors,
             clock=gateway.clock,
+            snapshot_threshold=gateway.snapshot_threshold,
+            approval_threshold=gateway.approval_threshold,
+            trust_threshold=gateway.trust_threshold,
         )
         return bound.invoke(call, snapshot=snapshot, trust=trust, bom=bom, approval=approval)

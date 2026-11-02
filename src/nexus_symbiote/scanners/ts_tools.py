@@ -138,6 +138,19 @@ def _lookup(bindings: dict[tuple[int, str], object], name: str, node: Node) -> o
     return None
 
 
+def _called_method(member: Node) -> str | None:
+    """Return the static method name, or None when its spelling needs evaluation."""
+    if member.type == "member_expression":
+        name = _value(member.child_by_field_name("property"))
+        return None if "\\" in name else name
+    index = member.child_by_field_name("index")
+    if index is None or index.type not in {"string", "template_string"}:
+        return None
+    if any(child.type != "string_fragment" for child in index.named_children):
+        return None
+    return _value(index)[1:-1]
+
+
 def collect_typescript(
     files: ConfinedCollection, result: ScanResult, sources: Sequence[Path]
 ) -> None:
@@ -248,12 +261,19 @@ def _collect_source(content: bytes, path: Path, result: ScanResult) -> None:
         if node.type != "call_expression":
             continue
         member = node.child_by_field_name("function")
-        if member is None or member.type != "member_expression":
+        if member is None or member.type not in {"member_expression", "subscript_expression"}:
+            continue
+        method = _called_method(member)
+        if method is not None and method not in {"registerTool", "tool"}:
             continue
         receiver = _value(member.child_by_field_name("object"))
-        if _value(member.child_by_field_name("property")) not in {"registerTool", "tool"}:
-            continue
         binding = _lookup(bindings, receiver, node)
+        if method is None:
+            if isinstance(binding, tuple):
+                result.surfaces_excluded.append(
+                    f"{path}:{node.start_point.row + 1} (unresolved MCP method name)"
+                )
+            continue
         if not isinstance(binding, tuple):
             result.surfaces_excluded.append(
                 f"{path}:{node.start_point.row + 1} (unresolved MCP registration receiver)"

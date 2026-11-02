@@ -2,11 +2,53 @@
 
 From a Nexus SymBiote development install run `python benchmarks/inventory/run_inventory.py`. The command prints per-case predictions, missed and unexpected tool names, control outcomes and counts. It returns nonzero on any mismatch. Run offline. Cases extract declared tools without executing repository code.
 
-The upstream servers and their licenses are in `fixtures/upstream`. The TypeScript filesystem server is pinned to a commit and blob, and its upstream test enumerates the expected tools. The Python SDK quickstart is pinned independently by commit, blob and SHA-256; its `@mcp.tool()` declaration is labeled as a tool and its `@mcp.resource()` and `@mcp.prompt()` declarations as explicit non-tool decoys. Those labels were manually derived from the source, not independently adjudicated. The remaining cases are hand-labeled regression fixtures. These public examples were selected for regression testing and do not establish representative production accuracy or held-out performance.
+The source fixtures in `fixtures/upstream` are unmodified and accompanied by their licenses. Corpus v3 samples three public implementations. The manifest pins the upstream revisions and blobs, and the runner checks each source file's SHA-256 before collection.
+
+| Upstream source | Expected tools | Explicit decoys | Label evidence |
+| --- | ---: | ---: | --- |
+| MCP TypeScript filesystem server | 14 | 0 | Upstream test enumerates the tool names. |
+| MCP Python SDK quickstart | 1 | 2 | Manual review of the tool, resource and prompt decorators. |
+| Microsoft MarkItDown MCP server | 1 | 3 | The upstream README names its sole tool, `convert_to_markdown`. The source defines three undecorated module-level functions that serve as decoys. [Upstream README](https://github.com/microsoft/markitdown/blob/7482c092d9c0074a89803c9fdb63a969e7fe17fc/packages/markitdown-mcp/README.md) |
+
+The MarkItDown fixture exercises a separately maintained application beyond the two reference projects. The remaining seven cases are hand-labeled regressions. One case checks equivalent TypeScript bracket registrations and ensures that prompt and resource registrations remain outside the tool inventory. These are convenience samples of static source. Fourteen of the sixteen upstream tool labels come from the filesystem server. They cannot establish held-out accuracy, deployment behavior or a production error rate.
 
 Tool confusion counts include only explicit expected tools and explicit decoys. A predicted name outside both label sets is reported separately as `unexpected_unlabeled` and fails the case pending review; it is not silently added to the false-positive denominator. The report totals these names under `unlabeled_predictions`. Labels must be unique and disjoint. No assertion that an unlabeled name is a true negative or a false positive is implied. Collection failures or relevant MCP exclusions make unobserved positive and negative labels unknown and exclude them from scored denominators. Per-collector status and relevant exclusions remain visible.
 
 Source-scoped cases explicitly assess source declarations; the routine absence of an MCP config is outside that scope. Other exclusions make collection incomplete. The registration-decoys case intentionally contains two ambiguous registrations; the manifest records those exact expected exclusions and their rationale. The case can pass as a control when those omissions are reported exactly, but its missing labels remain unknown. An additional unexpected exclusion fails the case. A passing regression control therefore does not mean all labels were scored or that collection was complete.
+
+Each case and the aggregate report include `tool_counts` and/or `label_bounds`.
+The recall interval treats every unobserved positive label first as missed, then
+as detected; the specificity interval treats every unobserved negative first as
+incorrectly detected, then as correctly absent. Each interval includes its full
+explicit-label count, observed count, and unknown count. A zero denominator is
+reported as null, not perfect performance. These are worst/best case bounds for
+the selected labels, not statistical confidence intervals. Names with no label
+are still reported separately, not assigned to either bound. Aggregate counts
+are case-label occurrences: repeated names across cases are not distinct real
+deployments. The release statement signs the new results along with existing
+corpus and scanner materials.
+
+The manifest's `version` identifies the corpus and labels, not the result wire
+format; adding these result fields alone does not change it. The additional
+result fields are additive. Consumers that reject unknown JSON fields must update
+their parser. New result bytes require a new evidence statement and signature;
+previously signed results remain verifiable using their original statement.
+
+## Independent effectiveness evaluation
+
+These regression fixtures do not establish a field baseline. To build one,
+independently select a versioned and appropriately licensed sample across agent
+frameworks and sources before examining predictions; record inclusion criteria,
+collection date, source revision, exclusions, and intended deployment population.
+Have reviewers label tool declarations and explicit decoys against a written
+protocol, blinded to scanner results, and record disagreements and adjudication.
+Reserve a held-out set that is not used to tune the scanner or fixture assertions.
+Run a fixed built artifact against each snapshot and retain input hashes, scanner
+revision, configuration, raw outputs, coverage failures and unmapped labels.
+Report per-surface confusion counts and unknowns, as well as the selection
+process and limits; do not treat this regression corpus as that held-out set.
+No representative sample or independently adjudicated performance claim is
+provided by this repository today.
 
 ### Sign and check a result
 
@@ -27,8 +69,7 @@ fixture's project policy to the benchmark runner. Policy rejection is a separate
 CLI control. Tool TP/FP/FN/TN count literal expected tools and explicit decoys;
 model format, signature uncertainty, scoping and secret redaction are reported
 separately as controls. A collection failure makes the case fail and remains
-visible. The two pinned upstream examples do not form a representative real-world
-sample or establish detection performance across frameworks.
+visible. Run the command above to inspect results for each case and its excluded labels.
 
 ## Verify a release candidate's inventory benchmark
 
