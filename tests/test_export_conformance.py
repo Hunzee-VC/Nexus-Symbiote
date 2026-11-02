@@ -326,6 +326,17 @@ def test_security_field_loss_report_tracks_normalized_paths(generator):
     assert report["sourceDigest"] == content_digest(source)
     assert report["itemCoverage"] == "selected-security-fields"
     assert report["nativeSemanticsComplete"] is False
+    assert report["items"][0]["path"] == ""
+    # Each JSON Pointer resolves in the exact sorted document named by sourceDigest.
+    for item in report["items"]:
+        value = source
+        path = item["path"]
+        if path:
+            assert path.startswith("/")
+            for token in path[1:].split("/"):
+                token = token.replace("~1", "/").replace("~0", "~")
+                value = value[int(token)] if isinstance(value, list) else value[token]
+        assert value is not None
     paths = {item["path"] for item in report["items"]}
     assert "/metadata/completeness" in paths
     agent_index = next(

@@ -69,7 +69,7 @@ def loss_report(bom: AIBOM, target: str) -> dict[str, Any]:
     document = native_document(bom)
     items: list[dict[str, Any]] = [
         {
-            "path": "/",
+            "path": "",
             "reason": "agent authority, assurance, and coverage require the Nexus Symbiote extension"
             if preserves_native
             else "finding projection omits the complete source inventory",
