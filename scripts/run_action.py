@@ -17,6 +17,7 @@ It imports nothing from ``symbiote`` so the driver stays independent of the pack
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from collections.abc import Callable, Mapping
@@ -38,6 +39,17 @@ def _boolean(value: str) -> bool:
     if value not in {"true", "false"}:
         raise ValueError("boolean inputs must be true or false")
     return value == "true"
+
+
+_GLOB = re.compile(r"[A-Za-z0-9*?][A-Za-z0-9*?_-]*")
+
+
+def _globs(value: str) -> tuple[str, ...]:
+    """Comma- or space-separated check-id globs (``SYM-COV-*``); anything else is refused, not escaped."""
+    items = tuple(v for v in re.split(r"[,\s]+", value) if v)
+    if any(not _GLOB.fullmatch(v) for v in items):
+        raise ValueError("exclude must list check-id globs such as SYM-COV-*")
+    return items
 
 
 def _within(workspace: Path, value: str) -> Path:
@@ -62,6 +74,7 @@ class Config:
     fail_on_indeterminate: bool
     conformance_level: str
     sarif: bool
+    exclude: tuple[str, ...] = ()
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> Config:
@@ -89,6 +102,7 @@ class Config:
             _boolean(env.get("SYMBIOTE_FAIL_ON_INDETERMINATE", "false")),
             level,
             _boolean(env.get("SYMBIOTE_SARIF", "false")),
+            _globs(env.get("SYMBIOTE_EXCLUDE", "SYM-COV-001")),
         )
 
 
@@ -114,14 +128,31 @@ def emit(outputs: Path | None, **values: str) -> None:
 
 
 def _write(path: Path, root: Path, content: str) -> None:
-    if not path.resolve().is_relative_to(root):
+    if path.is_symlink() or not path.resolve().is_relative_to(root):
         raise ValueError("refusing to write outside the output directory")
     path.write_text(content, encoding="utf-8")
 
 
+def _fresh_output_dir(out: Path) -> None:
+    """The output directory must be created by this run, or exist and be empty.
+
+    The checked-out tree is untrusted (a pull request controls it). A planted symlink at
+    ``agentbom.sarif`` would redirect the CLI's SARIF write outside GITHUB_WORKSPACE, and planted
+    files (a forged ``conformance.json``, a link to ``.git/config``) would ship in the evidence
+    artifact. Refuse to reuse anything that was already there.
+    """
+    if out.is_symlink():
+        raise ValueError("output-dir must not be a symlink")
+    out.mkdir(parents=True, exist_ok=True)
+    if out.is_symlink() or any(out.iterdir()):
+        raise ValueError(
+            f"output-dir {out} already exists and is not empty; the Action only writes into a fresh directory"
+        )
+
+
 def run(config: Config, *, command: Command = _run, outputs: Path | None = None) -> int:
     out = config.output_dir
-    out.mkdir(parents=True, exist_ok=True)
+    _fresh_output_dir(out)
     companion = out / "agentbom.json"
     documents = [companion, out / "agentbom.cdx.json", out / "agentbom.spdx.json"]
     sarif = out / "agentbom.sarif"
@@ -160,6 +191,8 @@ def run(config: Config, *, command: Command = _run, outputs: Path | None = None)
     ]
     if config.fail_on_indeterminate:
         policy_args.append("--fail-on-indeterminate")
+    for pattern in config.exclude:
+        policy_args += ["--exclude", pattern]
     checked = command(policy_args)
     if checked.returncode not in {0, EXIT_FINDINGS}:
         print(checked.stderr or checked.stdout, file=sys.stderr)

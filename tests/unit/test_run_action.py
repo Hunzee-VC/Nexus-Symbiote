@@ -194,8 +194,11 @@ def test_conformance_is_optional_and_maps_exit_codes(tmp_path: Path) -> None:
     assert _outputs(outputs)["conformance_exit_code"] == "5"
     assert json.loads((tmp_path / "agentbom" / "conformance.json").read_text())["requested"] == "verified"
 
+    # each run needs a fresh output directory (the Action never reuses pre-existing content)
+    cfg = _config(tmp_path, SYMBIOTE_CONFORMANCE_LEVEL="verified", SYMBIOTE_OUTPUT_DIR="run2")
     cli = FakeCli(conformance=1)
     assert run_action.run(cfg, command=cli) == 1
+    cfg = _config(tmp_path, SYMBIOTE_CONFORMANCE_LEVEL="verified", SYMBIOTE_OUTPUT_DIR="run3")
     cli = FakeCli(policy=1, conformance=5)
     assert run_action.run(cfg, command=cli) == 1, "findings take precedence over a coverage block"
 
@@ -270,3 +273,80 @@ def test_action_yml_matches_the_driver_contract() -> None:
     for output in action["outputs"].values():
         assert any(f"steps.scan.outputs.{name}" in output["value"] for name in emitted)
     assert sys.version_info >= (3, 11)
+
+
+# --- untrusted output directory, hash-locked install, default gate (phase-2 review blockers) -------------------
+
+
+def test_planted_sarif_symlink_cannot_redirect_writes(tmp_path: Path) -> None:
+    """A PR-planted agentbom/agentbom.sarif -> outside-file must never be written through."""
+    workspace = tmp_path / "ws"
+    victim = tmp_path / "victim.txt"
+    victim.write_text("untouched", encoding="utf-8")
+    (workspace / "agentbom").mkdir(parents=True)
+    (workspace / "agentbom" / "agentbom.sarif").symlink_to(victim)
+    cli = FakeCli()
+    with pytest.raises(ValueError, match="not empty"):
+        run_action.run(_config(workspace), command=cli)
+    assert victim.read_text(encoding="utf-8") == "untouched"
+    assert cli.calls == []  # refused before the CLI ever ran
+
+
+def test_planted_evidence_in_output_dir_is_refused(tmp_path: Path) -> None:
+    (tmp_path / "agentbom").mkdir()
+    (tmp_path / "agentbom" / "conformance.json").write_text('{"status": "pass"}', encoding="utf-8")
+    with pytest.raises(ValueError, match="not empty"):
+        run_action.run(_config(tmp_path), command=FakeCli())
+
+
+def test_symlinked_output_dir_is_refused(tmp_path: Path) -> None:
+    (tmp_path / "real").mkdir()
+    (tmp_path / "agentbom").symlink_to(tmp_path / "real")
+    with pytest.raises(ValueError, match="symlink"):
+        run_action.run(_config(tmp_path), command=FakeCli())
+
+
+def test_empty_existing_output_dir_is_accepted(tmp_path: Path) -> None:
+    (tmp_path / "agentbom").mkdir()
+    assert run_action.run(_config(tmp_path), command=FakeCli()) == 0
+
+
+def test_exclude_reaches_the_policy_gate_and_rejects_non_globs(tmp_path: Path) -> None:
+    cli = FakeCli()
+    run_action.run(_config(tmp_path), command=cli)
+    policy = next(c for c in cli.calls if c[0] == "policy")
+    assert policy[policy.index("--exclude") + 1] == "SYM-COV-001"  # default
+    cli = FakeCli()
+    run_action.run(_config(tmp_path, SYMBIOTE_OUTPUT_DIR="o2", SYMBIOTE_EXCLUDE=""), command=cli)
+    assert "--exclude" not in next(c for c in cli.calls if c[0] == "policy")
+    for bad in ("SYM-COV-001;rm -rf /", "--select", "a/b"):
+        with pytest.raises(ValueError, match="exclude"):
+            _config(tmp_path, SYMBIOTE_EXCLUDE=bad)
+
+
+def test_default_inputs_pass_on_a_clean_repository_with_the_real_cli(tmp_path: Path) -> None:
+    """End to end against the real CLI (no FakeCli): defaults must not fail every repository."""
+    (tmp_path / "README.md").write_text("# nothing agentic here\n", encoding="utf-8")
+    outputs = tmp_path / "gh.out"
+    rc = run_action.run(_config(tmp_path), outputs=outputs)
+    assert rc == 0, (tmp_path / "agentbom" / "findings.json").read_text(encoding="utf-8")
+    assert _outputs(outputs)["policy_exit_code"] == "0"
+
+
+def test_action_installs_only_hash_locked_wheels_and_uploads_exact_files() -> None:
+    import yaml
+
+    action = yaml.safe_load((ROOT / "action.yml").read_text(encoding="utf-8"))
+    steps = action["runs"]["steps"]
+    install = next(s for s in steps if "venv" in s.get("run", ""))["run"]
+    assert "--require-hashes" in install and "--only-binary=:all:" in install
+    assert "--no-deps --no-build-isolation" in install
+    assert "--upgrade pip" not in install
+    lock = (ROOT / "requirements-action.lock").read_text(encoding="utf-8")
+    pinned = [ln for ln in lock.splitlines() if ln and not ln.startswith((" ", "#"))]
+    assert pinned and all("==" in ln for ln in pinned)
+    assert {ln.split("==")[0] for ln in pinned} >= {"pydantic", "typer", "hatchling"}
+    upload = next(s for s in steps if "upload-artifact" in s.get("uses", ""))["with"]["path"]
+    assert upload.strip().count("\n") >= 4 and "agentbom.sarif" in upload
+    assert not upload.strip().endswith("output_dir }}")  # never the whole directory
+    assert action["inputs"]["exclude"]["default"] == "SYM-COV-001"

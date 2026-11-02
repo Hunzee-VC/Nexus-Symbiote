@@ -8,11 +8,14 @@ inputs:
     description: Repository or agent directory to scan, within the checked-out workspace
     default: "."
   output-dir:
-    description: Directory within the workspace that receives agentbom.json, agentbom.cdx.json, agentbom.spdx.json, agentbom.sarif and findings.json. On runners that reuse a workspace, keep it outside scan-path so a later run does not inventory earlier outputs
+    description: Directory within the workspace that receives agentbom.json, agentbom.cdx.json, agentbom.spdx.json, agentbom.sarif and findings.json. It must not exist yet or must be empty (the checked-out tree is untrusted, so the Action never writes into pre-existing content); keep it outside scan-path
     default: agentbom
   fail-on:
     description: "Lowest severity that fails the policy gate: critical, high, medium, low or info"
     default: high
+  exclude:
+    description: "Check-id globs (comma or space separated) the policy gate skips. The default skips SYM-COV-001 because a static scan can never cover the runtime, network or instructions surfaces; set it to an empty string to gate on full coverage"
+    default: SYM-COV-001
   fail-on-indeterminate:
     description: Treat indeterminate findings (unknowns) as failures of the policy gate
     default: "false"
@@ -52,8 +55,9 @@ runs:
       run: |
         action_venv="$(mktemp -d "$RUNNER_TEMP/symbiote-action-XXXXXX")"
         python -I -m venv "$action_venv"
-        "$action_venv/bin/python" -I -m pip install --quiet --upgrade pip
-        "$action_venv/bin/python" -I -m pip install --quiet -- "$SYMBIOTE_ACTION_PATH"
+        "$action_venv/bin/python" -I -m pip install --quiet --require-hashes --only-binary=:all: \
+          -r "$SYMBIOTE_ACTION_PATH/requirements-action.lock"
+        "$action_venv/bin/python" -I -m pip install --quiet --no-deps --no-build-isolation -- "$SYMBIOTE_ACTION_PATH"
         echo "SYMBIOTE_PYTHON=$action_venv/bin/python" >> "$GITHUB_ENV"
     - name: Scan, validate and apply the policy gate
       id: scan
@@ -64,6 +68,7 @@ runs:
         SYMBIOTE_OUTPUT_DIR: ${{ inputs.output-dir }}
         SYMBIOTE_FAIL_ON: ${{ inputs.fail-on }}
         SYMBIOTE_FAIL_ON_INDETERMINATE: ${{ inputs.fail-on-indeterminate }}
+        SYMBIOTE_EXCLUDE: ${{ inputs.exclude }}
         SYMBIOTE_CONFORMANCE_LEVEL: ${{ inputs.conformance-level }}
         SYMBIOTE_SARIF: ${{ inputs.sarif-upload }}
       run: '"$SYMBIOTE_PYTHON" -I "$SYMBIOTE_ACTION_PATH/scripts/run_action.py"'
@@ -78,5 +83,12 @@ runs:
       uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
       with:
         name: agentbom
-        path: ${{ steps.scan.outputs.output_dir }}
+        # Exact files this run wrote, never the whole directory.
+        path: |
+          ${{ steps.scan.outputs.output_dir }}/agentbom.json
+          ${{ steps.scan.outputs.output_dir }}/agentbom.cdx.json
+          ${{ steps.scan.outputs.output_dir }}/agentbom.spdx.json
+          ${{ steps.scan.outputs.output_dir }}/agentbom.sarif
+          ${{ steps.scan.outputs.output_dir }}/findings.json
+          ${{ steps.scan.outputs.output_dir }}/conformance.json
         if-no-files-found: error

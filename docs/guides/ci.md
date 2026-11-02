@@ -31,15 +31,22 @@ jobs:
           output-dir: agentbom
           fail-on: high                         # critical | high | medium | low | info
           fail-on-indeterminate: "false"        # "true": unknowns fail the gate too
+          exclude: SYM-COV-001                  # check-id globs to skip; "" gates on full coverage
           conformance-level: none               # none | minimal | standard | verified
           sarif-upload: "true"
 ```
 
-The Action installs the reviewed source into an isolated virtual environment, then runs
+The Action installs its runtime from `requirements-action.lock` (hash-locked, wheels only, with
+`--require-hashes --only-binary=:all:`) and the reviewed source with `--no-deps --no-build-isolation` into an
+isolated virtual environment, so a compromised or typosquatted dependency release cannot enter your job. It then runs
 `scripts/run_action.py`, which drives the CLI as a subprocess: `symbiote scan` (all three documents) →
 `symbiote validate` → `symbiote policy check --sarif --json` → optional `symbiote conformance`. Every input
 arrives through an environment variable, never through shell source; every path is confined to
-`GITHUB_WORKSPACE`. The documents, `agentbom.sarif`, `findings.json` (and `conformance.json`) are uploaded as the
+`GITHUB_WORKSPACE`. Because the checked-out tree is untrusted (a pull request controls it), `output-dir` must not
+exist yet or must be empty and must not be a symlink: the Action refuses to write through planted links or to ship
+planted files as evidence, and it uploads only the exact files it wrote. The default `exclude: SYM-COV-001` skips
+the "not fully covered" check, which a static scan can never pass (runtime, network and instructions surfaces need
+live collection); `SYM-COV-002` still guards absent-verified claims. The documents, `agentbom.sarif`, `findings.json` (and `conformance.json`) are uploaded as the
 `agentbom` artifact even when the gate fails. Outputs: `agentbom-path`, `sarif-path`, `policy-exit-code`,
 `conformance-exit-code`. The step's own exit code follows the CLI: 1 findings at or above `fail-on` (or a
 failed conformance requirement), 3 an emitted document failed its schema, 5 conformance blocked by unknowns,
