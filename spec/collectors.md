@@ -7,6 +7,8 @@ Collectors are registered through the `symbiote.collectors` entry-point group, s
 plugins. `symbiote scan` runs every collector whose `detect()` fires, each under a time budget (default 20 s;
 whole static scan target < 60 s), and records `symbiote:collector:<name>:status`.
 
+File access: every read goes through `CollectContext.read_config` — a per-component `O_DIRECTORY|O_NOFOLLOW` walk from the scan root, regular files only, size-bounded — so neither a final nor an intermediate symlink can lead outside the root, and devices or FIFOs are refused. A scan root that is itself a symlink is refused too (pass the resolved path). Paths named by the scanned repository (for example `shadowscan.report` in `symbiote.yaml`) must resolve inside the root; only paths the operator passes on the command line may live elsewhere.
+
 Rules for every collector: every fact carries `assurance`, `evidence.source` and an exact `locator`
 (path + JSON Pointer / TOML key path / `file:line`); **secret values are never read into entities** — env-var and
 header *names* are kept, values are replaced and the redaction recorded; a surface that cannot be read yields a
