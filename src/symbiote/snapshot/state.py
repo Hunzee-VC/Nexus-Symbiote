@@ -16,6 +16,7 @@ writers (the CLI); it is not a distributed lock service.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import time
@@ -32,7 +33,6 @@ if TYPE_CHECKING:
 
 STATE_VERSION = 1
 _HISTORY_LIMIT = 50
-_LOCK_STALE_SECONDS = 60.0
 
 
 class StoreLockedError(RuntimeError):
@@ -79,6 +79,7 @@ class ChainStore:
         self.path = self.root / "chains.json"
         self._lock_path = self.root / "chains.lock"
         self._lock_timeout = lock_timeout
+        self._lock_fd: int | None = None
 
     # ------------------------------------------------------------------ io
 
@@ -102,30 +103,40 @@ class ChainStore:
         os.replace(tmp, self.path)
 
     def _acquire_lock(self) -> None:
+        """Take an exclusive kernel lock on a persistent lock file.
+
+        ``flock`` is released by the kernel when the holder exits or crashes, so
+        there is no staleness heuristic and no way for a second writer to
+        "steal" a live holder's lock (the old mtime-based steal allowed two
+        writers into the critical section and a silent chain fork). The lock
+        file is never unlinked: unlinking would let a later opener lock a fresh
+        inode while an earlier holder still holds the old one.
+        """
         self.root.mkdir(parents=True, exist_ok=True)
+        fd = os.open(self._lock_path, os.O_CREAT | os.O_WRONLY, 0o600)
         deadline = time.monotonic() + self._lock_timeout
         while True:
             try:
-                fd = os.open(self._lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                os.write(fd, str(os.getpid()).encode())
-                os.close(fd)
-                return
-            except FileExistsError:
-                try:
-                    age = time.time() - self._lock_path.stat().st_mtime
-                    if age > _LOCK_STALE_SECONDS:
-                        self._lock_path.unlink(missing_ok=True)
-                        continue
-                except FileNotFoundError:
-                    continue
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
                 if time.monotonic() >= deadline:
+                    os.close(fd)
                     raise StoreLockedError(
                         f"could not lock {self._lock_path} within {self._lock_timeout}s"
                     ) from None
                 time.sleep(0.05)
+                continue
+            self._lock_fd = fd
+            return
 
     def _release_lock(self) -> None:
-        self._lock_path.unlink(missing_ok=True)
+        fd = self._lock_fd
+        if fd is not None:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            finally:
+                os.close(fd)
+            self._lock_fd = None
 
     # ------------------------------------------------------------------ queries
 
@@ -283,6 +294,11 @@ def seal_with_chain(
     from symbiote.model.ids import snapshot_id
     from symbiote.snapshot.commit import PLACEHOLDER_DIGEST, finalize
 
+    if bom.redacted:
+        raise ValueError(
+            "refusing to seal a redacted view: its withheld leaves cannot be recommitted; "
+            "seal from the undisclosed source document instead"
+        )
     serial, allocated_prev = store.allocate(bom.snapshot.agent_ref, bom.snapshot.kind)
     working = bom
     if bom.snapshot.serial != serial or bom.merkle is not None:

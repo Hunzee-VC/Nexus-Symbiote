@@ -54,6 +54,10 @@ DIALECT = "k8s-aibom"
 _PROPERTY_PREFIXES = ("aibom.", "k8s-aibom:", "signature.", "model.k8saibom.dev/")
 VERIFIED_WITHOUT_CONSTRAINT = "imported-verified-without-constraint"
 
+#: Documents are specified under 256 KiB; 400k base64 chars (~300 KiB decoded) is a
+#: generous ceiling that still stops a hostile CR from forcing an unbounded decode.
+_MAX_INLINE_B64_CHARS = 400_000
+
 
 class K8sAibomError(ValueError):
     """The input is not a k8s-aibom document this importer understands."""
@@ -81,6 +85,10 @@ def extract_bom_document(payload: Mapping[str, Any]) -> tuple[Mapping[str, Any],
             raise K8sAibomError("AIBOM resource has no status.bomDocument")
         inline = bom_doc.get("inline")
         if isinstance(inline, Mapping) and isinstance(inline.get("data"), str):
+            if len(inline["data"]) > _MAX_INLINE_B64_CHARS:
+                raise K8sAibomError(
+                    f"inline BOM exceeds the {_MAX_INLINE_B64_CHARS}-char inline bound; refusing to decode it"
+                )
             try:
                 decoded = base64.b64decode(inline["data"], validate=True)
                 document = json.loads(decoded)

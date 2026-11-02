@@ -73,3 +73,13 @@ def test_fork_detection_raises(tmp_path) -> None:
             # same serial, different digest
             seal_with_chain(draft("9.9.9"), ChainStore(tmp_path / "other"), nonce=NONCE2)[0].snapshot
         )
+
+
+def test_sealing_a_redacted_view_is_refused(tmp_path) -> None:
+    from symbiote.snapshot import redact_entities
+
+    store = ChainStore(tmp_path)
+    sealed, _ = seal_with_chain(draft(), store, nonce=NONCE1)
+    redacted = redact_entities(sealed, {"agent:triager"}, redaction_class="identity-ref", applied_by="tests")
+    with pytest.raises(ValueError, match="redacted view"):
+        seal_with_chain(redacted, store, nonce=NONCE2)
