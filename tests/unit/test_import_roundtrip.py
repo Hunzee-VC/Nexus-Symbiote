@@ -28,15 +28,12 @@ from symbiote.snapshot import collect_leaves, diff_body, finalize, new_document,
 EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "triage-agent"
 NOW = datetime(2026, 11, 1, 12, 0, tzinfo=UTC)
 
-#: Entity fields the projections do not carry. ``name`` of identities/credential bindings is not an exporter
-#: property (SPDX recovers identity names from the ``SoftwareAgent`` element, CycloneDX cannot); the CycloneDX
-#: model component has no ``description`` field in the exporter; the SPDX
-#: projection has no home for the tool definition text (``--include-text`` attachments are CycloneDX-only), so
-#: the schema/title come back empty while the digests survive.
-NOT_PROJECTED = {
-    "cyclonedx": {"ident": {"name"}, "cred": {"name"}, "model": {"description"}},
-    "spdx": {"cred": {"name"}, "tool": {"inputSchema", "outputSchema", "title"}},
-}
+#: Entity fields the projections do not carry. With ``include_text`` every field of every entity kind now
+#: round-trips exactly through both projections (names, descriptions, frontmatter, manifests, schemas and the
+#: like travel as ``agentbom:*`` properties and SPDX extension fields; see ``spec/taxonomy.md`` and
+#: ``spec/spdx-mapping.md``). A field added here must also be reported in the exporter's loss report, with
+#: the reason given next to it.
+NOT_PROJECTED: dict[str, dict[str, set[str]]] = {"cyclonedx": {}, "spdx": {}}
 
 #: Derived leaves are recomputed by ``symbiote policy check``; findings are not projected at all and flags
 #: lose their subject when it is not a CycloneDX element (reported as ``cardinality-collapsed``).
@@ -109,8 +106,10 @@ def test_cyclonedx_round_trip_example(example_bom: AgentBOM) -> None:
     doc, _ = export_cyclonedx(example_bom, include_text=True)
     imported, loss = import_cyclonedx(doc, now=NOW)
     _compare(example_bom, imported, fmt="cyclonedx")
-    # identities and credential bindings come back from the indexed subject properties
-    assert {c.identity_ref for c in imported.credential_bindings} == {i.id for i in imported.identities}
+    # identities come back from the indexed subject properties: the credential-paired ones and the ones an
+    # element acts as (``actsAs``) without a credential binding
+    assert {c.identity_ref for c in imported.credential_bindings} <= {i.id for i in imported.identities}
+    assert {i.id for i in imported.identities} == {i.id for i in example_bom.identities}
     # flags on components/services come back from declarations.claims with their inputs
     orig_flags = {
         (f.flag, f.subject_ref, f.value)

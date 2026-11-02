@@ -31,7 +31,13 @@ from symbiote.export.cdx.emit import (
     _LIFECYCLE_PHASE,
     _VEX_JUSTIFICATION,
     _VEX_STATE,
+    EVIDENCE_AUTHOR,
+    EVIDENCE_MEDIA_TYPE,
+    EVIDENCE_NAME,
+    EVIDENCE_REDACTION,
+    EVIDENCE_URI,
     PRODUCER_REF,
+    SOURCE_BOM_REF,
 )
 from symbiote.imp._common import (
     DOCUMENT_ELEMENT,
@@ -100,6 +106,7 @@ from symbiote.model.entities import (
     Instruction,
     Model,
     ModelCardFacts,
+    ModelManifest,
     PackageRef,
     Policy,
     PolicyRef,
@@ -172,6 +179,12 @@ _CLAIM_METHOD_BY_SOURCE = {
 _COLLECTOR_UID_RE = re.compile(r"^collector:([a-z0-9][a-z0-9._-]*)@([A-Za-z0-9._+-]+)$")
 _COLLECTOR_REF_RE = re.compile(r"^(?:collector:)?([a-z0-9][a-z0-9._-]*)@([A-Za-z0-9._+-]+)$")
 _COVERAGE_SOURCE_RE = re.compile(r"^(?P<source>[^@=]+)@(?P<locator>.*)=(?P<status>[a-z-]+)$")
+
+
+def _index_of(name: str) -> int:
+    """The trailing ``<i>`` of an indexed property name (``0`` when absent)."""
+    tail = name.rsplit(":", 1)[-1]
+    return int(tail) if tail.isdigit() else 0
 
 
 # ------------------------------------------------------------------------------------------------ draft
@@ -357,6 +370,8 @@ class Inverter:
         self.redaction_classes: list[str] = []
         self.metadata_flags: dict[str, tuple[list[str], list[str]]] = {}
         self.skill_md_digests: dict[str, str] = {}
+        #: entity id -> explicit ``agentbom:name`` / ``agentbom:description`` (applied after the main pass)
+        self.explicit_text: dict[str, dict[str, str]] = {}
 
     # ---------------------------------------------------------------- orchestration
 
@@ -377,6 +392,7 @@ class Inverter:
             self.service(svc)
         self.resolve_credentials()
         self.resolve_skill_links()
+        self.apply_explicit_text()
         self.dependencies(root)
         self.claims_and_flags(root)
         self.evidence()
@@ -687,11 +703,59 @@ class Inverter:
 
     # ---------------------------------------------------------------- common element handling
 
+    def apply_explicit_text(self) -> None:
+        """``agentbom:name`` / ``agentbom:description`` win over what the native fields inverted to."""
+        for entity_id, fields in self.explicit_text.items():
+            entity = self.draft.get(entity_id)
+            if entity is not None:
+                self.draft.replace(entity.replace(**fields))
+
+    def list_claim(
+        self, bag: PropertyBag, name: str, *, path: str, entity: str, facts: list[str]
+    ) -> Claim[list[str]] | None:
+        """Invert ``Props.list_claim()``; documents without the qualifiers keep the old "values or None"."""
+        values = bag.get_all(name)
+        assurance = bag.get(f"{name}:assurance")
+        locator = bag.get(f"{name}:locator")
+        unknown = bag.get(f"{name}:unknown-reason")
+        if unknown is not None and not values:
+            reason = enum_or_none(E.UnknownReason, unknown) or E.UnknownReason.NOT_COLLECTED
+            return Claim.unknown(reason, locator=locator)
+        if not values and assurance is None:
+            return None
+        level = assurance_from(assurance, self.ctx, path=f"{path}/{name}", entity=entity, facts=facts)
+        return Claim(value=values, assurance=level, locator=locator)
+
+    def json_prop(self, bag: PropertyBag, name: str, *, path: str, entity: str) -> Any:
+        raw = bag.get(name)
+        if raw is None:
+            return None
+        value = parse_json(raw)
+        if value is None:
+            self.ctx.lose(
+                f"{path}/{name}",
+                E.LossReason.STRING_FLATTENED,
+                E.LossPreservedIn.DROPPED,
+                entity=entity,
+                field_name=name,
+            )
+        return value
+
     def _finish(self, bag: PropertyBag, entity_id: str, path: str, *, bom_ref: str) -> dict[str, Any]:
         """Consume the cross-cutting properties every element carries; return the common entity fields."""
         ctx = self.ctx
         facts: list[str] = []
         bag.drop("agentbom:kind")
+        explicit = {
+            field_name: value
+            for field_name, value in (
+                ("name", bag.get("agentbom:name")),
+                ("description", bag.get("agentbom:description")),
+            )
+            if value is not None
+        }
+        if explicit:
+            self.explicit_text[entity_id] = explicit
         prov = provenance_from(bag, ctx, path=path, entity=entity_id, facts=facts)
         cit = self.citations.get(bom_ref)
         if cit is not None and (prov.locator is None or prov.collector is None):
@@ -833,6 +897,10 @@ class Inverter:
     ) -> Identity | None:
         kind = enum_or_none(E.IdentityKind, ib.get("kind"))
         ref = ib.get("ref")
+        block_id = ib.get("id")
+        name = ib.get("name")
+        if identity_id is None and block_id and block_id.startswith("ident:") and valid_entity_id(block_id):
+            identity_id = block_id
         if kind is None or not ref:
             for n, v in ib.remaining():
                 self.ctx.foreign_property(identity_id or DOCUMENT_ELEMENT, f"agentbom:identity:{n}", v)
@@ -840,12 +908,12 @@ class Inverter:
         iid = ensure_id("ident", identity_id, ref)
         existing = self.draft.get(iid)
         ident = Identity(
-            id=iid, identity_kind=kind, ref=ref, issuer=ib.get("issuer"), tenant=ib.get("tenant")
+            id=iid, name=name, identity_kind=kind, ref=ref, issuer=ib.get("issuer"), tenant=ib.get("tenant")
         )
         if existing is None:
             self.draft.add(ident)
-        elif isinstance(existing, Identity) and existing.name and not ident.name:
-            pass
+        elif isinstance(existing, Identity) and name and not existing.name:
+            self.draft.replace(existing.replace(name=name))
         return ident
 
     def resolve_credentials(self) -> None:
@@ -907,6 +975,7 @@ class Inverter:
                 ]
                 binding = CredentialBinding(
                     id=ensure_id("cred", cred_id, subject, iid),
+                    name=c.get("name"),
                     subject_ref=subject,
                     identity_ref=iid,
                     credential_kind=enum_or_none(E.CredentialKind, c.get("kind")) or E.CredentialKind.UNKNOWN,
@@ -1060,11 +1129,22 @@ class Inverter:
         card = None
         card_digest = as_digest(bag.get("agentbom:a2a:card-digest"))
         if card_digest:
+            skill_ids = bag.get_all("agentbom:a2a:skill")
+            skills = [
+                A2ASkill(
+                    id=sb.get("id") or "",
+                    name=sb.get("name"),
+                    tags=[v for _, v in sorted((_index_of(n), v) for n, v in sb.consume_prefix("tag:"))],
+                )
+                for sb in bag.indexed("agentbom:a2a:skill").values()
+            ]
+            skills = [sk for sk in skills if sk.id] or [A2ASkill(id=s) for s in skill_ids]
             card = A2ACard(
                 url=bag.get("agentbom:a2a:card-url"),
                 digest=card_digest,
+                version=bag.get("agentbom:a2a:card-version"),
                 protocol_versions=bag.get_all("agentbom:a2a:protocol-version"),
-                skills=[A2ASkill(id=s) for s in bag.get_all("agentbom:a2a:skill")],
+                skills=skills,
                 security_schemes=bag.get_all("agentbom:a2a:security-scheme"),
                 signature_status=bag.get("agentbom:a2a:signature-status") or "none",
             )
@@ -1394,8 +1474,10 @@ class Inverter:
             )
             self.software(comp, bag)
             return
-        editors = bag.get_all("agentbom:instruction:editor")
-        remote = bag.get_all("agentbom:instruction:loads-remote")
+        facts: list[str] = []
+        editors = self.list_claim(bag, "agentbom:instruction:editor", path=path, entity=iid, facts=facts)
+        remote = self.list_claim(bag, "agentbom:instruction:loads-remote", path=path, entity=iid, facts=facts)
+        frontmatter = self.json_prop(bag, "agentbom:instruction:frontmatter:json", path=path, entity=iid)
         source = None
         vcs = next(
             (
@@ -1428,12 +1510,15 @@ class Inverter:
             line_endings=enum_or_none(E.LineEndings, bag.get("agentbom:instruction:line-endings"))
             or E.LineEndings.LF,
             precedence=parse_int(bag.get("agentbom:instruction:precedence")) or 0,
-            editors=Claim(value=editors) if editors else None,
-            loads_remote=Claim(value=remote) if remote else None,
+            editors=editors,
+            loads_remote=remote,
             contains_secret_like=parse_bool(bag.get("agentbom:instruction:secret-like-redacted")) or False,
+            frontmatter=frontmatter if isinstance(frontmatter, dict) else None,
             source=source,
             **self._finish(bag, iid, path, bom_ref=bom_ref),
         )
+        if facts:
+            instr = instr.replace(tags=sorted(set(instr.tags) | set(facts)))
         self.draft.add(instr, bom_ref=bom_ref or None)
         self.instruction_digests[digest] = iid
         self.element_kind[bom_ref] = "instr"
@@ -1461,13 +1546,16 @@ class Inverter:
             status=E.DigestStatus.UNDIGESTABLE,
             reason="no prompt digest in the source document",
         )
-        self.ctx.lose(
-            f"{path}/path",
-            E.LossReason.PRECISION_LOST,
-            E.LossPreservedIn.DROPPED,
-            entity=pid,
-            field_name="path",
-        )
+        prompt_path = bag.get("agentbom:prompt:path")
+        if prompt_path is None:
+            self.ctx.lose(
+                f"{path}/path",
+                E.LossReason.PRECISION_LOST,
+                E.LossPreservedIn.DROPPED,
+                entity=pid,
+                field_name="path",
+            )
+        variables = self.json_prop(bag, "agentbom:prompt:variables-schema:json", path=path, entity=pid)
         prompt = PromptTemplate(
             id=pid,
             name=None,
@@ -1476,8 +1564,9 @@ class Inverter:
             role=enum_or_none(E.PromptRole, bag.get("agentbom:prompt:role")) or E.PromptRole.SYSTEM,
             digest=digest,
             template_digest=template_digest,
+            variables_schema=variables if isinstance(variables, dict) else None,
             variables_schema_digest=as_digest(bag.get("agentbom:prompt:variables-schema-digest")),
-            path=None,
+            path=prompt_path,
             risk_class=enum_or_none(E.TemplateRiskClass, bag.get("agentbom:prompt:risk-class"))
             or E.TemplateRiskClass.NONE,
             **self._finish(bag, pid, path, bom_ref=bom_ref),
@@ -1526,7 +1615,29 @@ class Inverter:
             self.skill_md_digests[sid] = md_digest
         bag.drop("agentbom:skill:file-count")
         bag.drop("agentbom:skill:script-count")
-        for lost in ("path", "manifest", "referenced_servers"):
+        skill_path = bag.get("agentbom:skill:path")
+        manifest = None
+        manifest_raw = self.json_prop(bag, "agentbom:skill:manifest:json", path=path, entity=sid)
+        if isinstance(manifest_raw, dict):
+            try:
+                manifest = DirManifest.model_validate(manifest_raw)
+            except ValueError:
+                manifest = None
+        metadata = self.json_prop(bag, "agentbom:skill:metadata:json", path=path, entity=sid)
+        has_servers = any(n.startswith("agentbom:skill:referenced-server:") for n in bag.names())
+        servers = [
+            v
+            for _, v in sorted(
+                (_index_of(n), v) for n, v in bag.consume_prefix("agentbom:skill:referenced-server:")
+            )
+        ]
+        for lost, present in (
+            ("path", skill_path is not None),
+            ("manifest", manifest is not None),
+            ("referenced_servers", has_servers or manifest is not None),
+        ):
+            if present:
+                continue
             self.ctx.lose(
                 f"{path}/{lost}",
                 E.LossReason.PRECISION_LOST,
@@ -1538,16 +1649,20 @@ class Inverter:
             id=sid,
             name=self._name(comp, sid, skill_name),
             external_refs=self._external_refs(comp),
-            path=skill_name or sid.split(":", 1)[1],
+            path=skill_path or skill_name or sid.split(":", 1)[1],
             digest=digest,
-            manifest=DirManifest(resources=[], root=digest),
+            manifest=manifest or DirManifest(resources=[], root=digest),
             frontmatter=SkillFrontmatter(
                 name=skill_name,
                 description=comp.get("description") if isinstance(comp.get("description"), str) else None,
+                license=bag.get("agentbom:skill:license"),
                 compatibility=bag.get("agentbom:skill:compatibility"),
                 allowed_tools=bag.get_all("agentbom:skill:allowed-tool"),
-                metadata={"version": version} if version else {},
+                metadata=metadata
+                if isinstance(metadata, dict)
+                else ({"version": version} if version else {}),
             ),
+            referenced_servers=servers,
             scripts=scripts,
             has_scripts=parse_bool(bag.get("agentbom:skill:has-scripts"))
             if bag.peek("agentbom:skill:has-scripts") is not None
@@ -1763,6 +1878,19 @@ class Inverter:
                     entity=mid,
                 )
         chat_digest = as_digest(bag.get("agentbom:model:chat-template-digest"))
+        model_manifest = None
+        manifest_raw = self.json_prop(bag, "agentbom:model:manifest:json", path=path, entity=mid)
+        if isinstance(manifest_raw, dict):
+            try:
+                model_manifest = ModelManifest.model_validate(manifest_raw)
+            except ValueError:
+                self.ctx.lose(
+                    f"{path}/manifest",
+                    E.LossReason.STRING_FLATTENED,
+                    E.LossPreservedIn.DROPPED,
+                    entity=mid,
+                    field_name="manifest",
+                )
         artifact = None
         artifact_raw = parse_json(bag.get("agentbom:model:artifact-digest-claim"))
         if isinstance(artifact_raw, dict):
@@ -1792,6 +1920,7 @@ class Inverter:
             artifact_digest=artifact,
             weights=weights,
             hosted=hosted,
+            manifest=model_manifest,
             tensor_manifest_root=as_digest(bag.get("agentbom:model:tensor-manifest-root")),
             serialization=serialization,
             derivations=derivations,
@@ -2004,6 +2133,17 @@ class Inverter:
                 "sw", sid.split(":", 1)[1], collision_seed=bom_ref or json.dumps(comp, sort_keys=True)
             )
         verbatim = {k: v for k, v in comp.items() if k != "bom-ref"}
+        source_ref = bag.get(SOURCE_BOM_REF)
+        if source_ref is not None:
+            props = [
+                p
+                for p in verbatim.get("properties") or []
+                if not (isinstance(p, Mapping) and p.get("name") == SOURCE_BOM_REF)
+            ]
+            verbatim.pop("properties", None)
+            if props:
+                verbatim["properties"] = props
+            verbatim["bom-ref"] = source_ref
         kind = bag.peek("agentbom:kind")
         if kind not in (None, "software"):
             self.ctx.lose(
@@ -2463,10 +2603,18 @@ class Inverter:
             if not isinstance(ev, Mapping):
                 continue
             ref = str(ev.get("bom-ref", ""))
-            data = next((d for d in ev.get("data") or [] if isinstance(d, Mapping)), {})
+            items = [d for d in ev.get("data") or [] if isinstance(d, Mapping)]
+            data = items[0] if items else {}
             contents = data.get("contents") if isinstance(data.get("contents"), Mapping) else {}
             url = contents.get("url") if isinstance(contents.get("url"), str) else None
             digest = as_digest(url)
+            named: dict[str, str] = {}
+            for item in items[1:]:
+                ic = item.get("contents") if isinstance(item.get("contents"), Mapping) else {}
+                att = ic.get("attachment") if isinstance(ic.get("attachment"), Mapping) else {}
+                value = ic.get("url") if isinstance(ic.get("url"), str) else att.get("content")
+                if isinstance(item.get("name"), str) and isinstance(value, str):
+                    named.setdefault(item["name"], value)
             if digest is None:
                 self.ctx.lose(
                     f"/evidence/{ref or 'unknown'}",
@@ -2487,14 +2635,19 @@ class Inverter:
                     field_name="created",
                 )
             kind = enum_or_none(E.EvidenceKind, ev.get("propertyName")) or E.EvidenceKind.OTHER
+            author = named.get(EVIDENCE_AUTHOR)
             entity = Evidence(
                 id="ev:" + digest[len("sha256:") :][:12],
+                name=named.get(EVIDENCE_NAME),
                 description=ev.get("description") if isinstance(ev.get("description"), str) else None,
                 evidence_kind=kind,
-                media_type="application/octet-stream",
+                media_type=named.get(EVIDENCE_MEDIA_TYPE) or "application/octet-stream",
                 digest=digest,
+                uri=named.get(EVIDENCE_URI),
                 created=created,
                 expires=parse_time(ev.get("expires")),
+                author_ref=author if author and valid_entity_id(author) else None,
+                redaction_class=enum_or_none(E.RedactionClass, named.get(EVIDENCE_REDACTION)),
             )
             self.draft.add(entity, bom_ref=ref or None)
 
