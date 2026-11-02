@@ -119,9 +119,12 @@ def reconcile(
         scan_root=scan_root or (report.scan_roots[0] if report.scan_roots else None),
         observed=observed,
     )
-    declared = {s.id: s for s in bom.tool_servers}
+    # ShadowScan inventories MCP and built-in servers; A2A peers (WP9 a2a-cards) are outside what it observes,
+    # so they can be neither matched nor reported missing here
+    comparable = [s for s in bom.tool_servers if s.server_kind is not E.ToolServerKind.A2A]
+    declared = {s.id: s for s in comparable}
     observed_servers = {s.id: s for s in observed.tool_servers if "implemented-server" not in s.tags}
-    by_key = {_server_key(s): s.id for s in bom.tool_servers}
+    by_key = {_server_key(s): s.id for s in comparable}
     seen_declared: set[str] = set()
     for oid, server in sorted(observed_servers.items()):
         if oid in declared:

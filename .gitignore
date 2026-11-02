@@ -28,3 +28,5 @@ agentbom-store/
 !tests/fixtures/**/*.sigstore.json
 !examples/**/*.sigstore.json
 site/
+# the example agent ships a VS Code MCP config
+!examples/triage-agent/.vscode/

@@ -1,0 +1,17 @@
+{
+  "inputs": [
+    { "type": "promptString", "id": "github_token", "description": "GitHub token", "password": true }
+  ],
+  "servers": {
+    "github": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headers": { "Authorization": "Bearer ${input:github_token}" }
+    },
+    "filesystem": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem@2025.8.21", "./workspace"]
+    }
+  }
+}
