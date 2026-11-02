@@ -6,7 +6,7 @@ body:
     attributes:
       value: >
         Thank you for suggesting an improvement. Please check the
-        [roadmap](../../ROADMAP.md) and existing issues before submitting.
+        [roadmap](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/ROADMAP.md) and existing issues before submitting.
 
   - type: textarea
     id: problem
@@ -37,7 +37,7 @@ body:
       label: Area
       description: Which part of the project does this relate to?
       options:
-        - Scanner (new surface or improved detection)
+        - Verification adapter or discovery import (primary discovery is Nexus-ShadowScan)
         - Validator (completeness, integrity, risk)
         - Export format (CycloneDX, SPDX, SARIF, VEX)
         - CLI (new command or option)

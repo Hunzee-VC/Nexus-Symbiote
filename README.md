@@ -1,167 +1,147 @@
-<h1 align="center">
-  Nexus SymBiote
-</h1>
+# Nexus SymBiote
 
-<p align="center">
-  <a href="https://github.com/aisecnomad/nexus-symbiote/actions/workflows/ci.yml"><img src="https://github.com/aisecnomad/nexus-symbiote/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
-  <a href="https://github.com/aisecnomad/nexus-symbiote/actions/workflows/codeql.yml"><img src="https://github.com/aisecnomad/nexus-symbiote/actions/workflows/codeql.yml/badge.svg" alt="CodeQL"></a>
-  <a href="https://pypi.org/project/nexus-symbiote/"><img src="https://img.shields.io/pypi/v/nexus-symbiote?color=blue" alt="PyPI version"></a>
-  <a href="https://pypi.org/project/nexus-symbiote/"><img src="https://img.shields.io/pypi/pyversions/nexus-symbiote" alt="Python versions"></a>
-  <a href="https://github.com/aisecnomad/nexus-symbiote/blob/main/LICENSE"><img src="https://img.shields.io/github/license/aisecnomad/nexus-symbiote" alt="License"></a>
-</p>
+[![CI](https://github.com/aisecnomad/nexus-symbiote/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/aisecnomad/nexus-symbiote/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/aisecnomad/nexus-symbiote/actions/workflows/codeql.yml/badge.svg)](https://github.com/aisecnomad/nexus-symbiote/actions/workflows/codeql.yml)
+[![License](https://img.shields.io/github/license/aisecnomad/nexus-symbiote)](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/LICENSE)
 
-<p align="center">
-  <b>Agent Bill of Materials (AgentBOM) — inventory, verify, and govern the AI agent supply chain.</b>
-</p>
+**Agent Bill of Materials: inventory, integrity evidence, policy checks and standard exports for AI agent supply chains.**
 
-Nexus SymBiote generates, validates, and manages Agent Bills of Materials for production AI agent systems. It inventories MCP servers and tools, model artifacts, prompt and skill files, retrieval configurations, A2A agent cards, IDE extensions, and package dependencies — then checks integrity, scores supply-chain risk, enforces policy, and exports standard BOMs (CycloneDX 1.7, SPDX 3.0.1, SARIF).
+Nexus SymBiote is an alpha toolkit for creating and reviewing an Agent Bill of Materials (AgentBOM). It inventories supported MCP configurations, model artifacts, prompts and skills, retrieval settings, A2A cards, IDE configurations and package declarations. It checks integrity and coverage, scores findings under policy, compares snapshots, and exports reviewable BOMs.
 
----
+[Nexus-ShadowScan](https://github.com/aisecnomad/Nexus-ShadowScan) is the primary multi-surface discovery engine. SymBiote consumes its reports and adds local artifact and supply-chain verification. Imported discovery remains a source claim; it does not establish deployment, effective access or authorization.
 
-## Install
+**A successful scan is an inventory result.** It does not establish that a model is benign, that a tool backend obeys its description, or that every agent action was mediated. Read the [security model](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/security-model.md) and [security policy](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/SECURITY.md) before using results in an approval process.
 
-```bash
-# Recommended: isolated install
-pipx install nexus-symbiote
+## Install from reviewed source
 
-# Or with pip
-pip install nexus-symbiote
+The distribution and command are `nexus-symbiote`; the Python import package is `nexus_symbiote`. Python 3.11 or later is required. Confined file operations and pinned stdio launchers require supported POSIX primitives. The configured hosted matrix targets Ubuntu with Python 3.11–3.13; macOS and Windows are not qualified by that matrix.
 
-# With all optional extras (Sigstore signatures, CycloneDX validation)
-pip install "nexus-symbiote[all]"
-```
-
-The distribution is named `nexus-symbiote`; the Python import package is `nexus_symbiote`. Requires **Python 3.11+**.
-
-For development or review from source:
+Until a published release's ownership, source revision and provenance have been verified, install from a reviewed checkout. Replace `REVIEWED_COMMIT_SHA` with the immutable revision you reviewed:
 
 ```bash
 git clone https://github.com/aisecnomad/nexus-symbiote.git
 cd nexus-symbiote
-python -m venv .venv && . .venv/bin/activate
-pip install -e ".[dev]"
+git checkout --detach REVIEWED_COMMIT_SHA
+python -m venv .venv
+. .venv/bin/activate
+python -m pip install --require-hashes --only-binary=:all: -r requirements-action.lock
+python -m pip install --no-deps --no-build-isolation .
+nexus-symbiote --version
 ```
+
+The core runtime/build lock excludes optional signing and independent consumer libraries. Source extras are `.[sigstore]`, `.[cyclonedx]` and `.[all]`. For the locked development and integration environment, use [CONTRIBUTING.md](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/CONTRIBUTING.md) or `make install-locked` from the reviewed checkout. Publication and trusted-publisher configuration follow the separate [release procedure](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/releasing.md).
 
 ## Quick start
 
 ```bash
-# Scan a project and generate an AgentBOM
-nexus-symbiote scan /path/to/agent-project -o agentbom.json
+# Inspect external discovery without treating the partial import as approval
+nexus-symbiote import-shadowscan shadowscan-report.json -o imported-agentbom.json --report-only
 
-# Validate completeness and integrity
-nexus-symbiote validate agentbom.json --project /path/to/agent-project
+# Collect supported local evidence using built-in policy for an untrusted checkout
+nexus-symbiote scan /path/to/agent-project --no-project-policy -o agentbom.json
 
-# Score supply-chain risk
-nexus-symbiote risk agentbom.json --threshold 50
+# Check completeness and integrity against the project
+nexus-symbiote validate agentbom.json --project /path/to/agent-project --no-project-policy
 
-# Compare snapshots for drift
-nexus-symbiote diff previous.json agentbom.json --fail-on-alert
+# Apply the risk gate
+nexus-symbiote risk agentbom.json --threshold 50 --no-project-policy
 
-# Import a Nexus-ShadowScan discovery report
-nexus-symbiote import-shadowscan shadowscan-report.json -o agentbom.json --report-only
+# Fail CI when snapshot comparison reports a security alert
+nexus-symbiote diff reviewed.json agentbom.json --fail-on-alert
 ```
 
-Exit codes: `0` = gate passed, `1` = gate failed, incomplete collection, or verification mismatch, `2` = usage error or invalid configuration.
+Inspect the exit status and the inventory's coverage, exclusions and failures. A command may write evidence and still return a failing gate. Standalone imports require a new output path and retain partial coverage; `--report-only` is an explicit inspection mode. For trusted local projects, standalone `scan`, `validate` and `risk` load project policy by default. Pass `--no-project-policy` when the scanned checkout must not choose your verification policy.
 
 ## Why Nexus SymBiote
 
-AI agents are composite software systems built from dozens of independently maintained components — MCP servers, model weights, prompt templates, retrieval indexes, skill registries, and package dependencies. Each component carries its own supply-chain risk, and **no single tool existed to inventory the full agent stack and ask: what changed, what is unsigned, and what is risky?**
+Agent composition spans several kinds of evidence: package references, model bytes, tool descriptors, instructions, discovery reports and deployment claims. Those records are useful together only when their subjects, sources, assurance and limits remain clear.
 
-| Problem | What happens today |
+| Review question | Supported evidence |
 | --- | --- |
-| **No agent-level SBOM** | Traditional SBOMs cover packages but miss MCP tools, model artifacts, prompts, and A2A cards. |
-| **Invisible drift** | A renamed MCP server, a swapped model file, or an expanded tool definition slips through unnoticed. |
-| **Trust assumptions** | A model file's extension or a tool descriptor's label is treated as proof of safety. |
-| **Fragmented evidence** | Discovery reports, integrity hashes, signatures, and risk scores live in separate workflows. |
-| **No policy enforcement** | Teams lack a single gate to block a deployment when the agent inventory fails review. |
+| What is declared in this project? | Supported local configurations, artifacts and package manifests, plus imported discovery claims |
+| What changed since review? | Component, capability, endpoint, integrity and dependency drift |
+| Do the bytes match the expected subject? | Confined file hashes, versioned tool fingerprints and optional signer-policy checks |
+| What remains unknown? | Failed or excluded collection, unmapped inputs, unobserved runtime and authorization surfaces |
+| Can this evidence pass a policy gate? | Explicit completeness, integrity and risk decisions under caller-selected policy |
 
-Nexus SymBiote closes these gaps by combining static inventory, integrity verification, risk scoring, drift detection, and standard BOM export into a single CLI and CI pipeline — consuming [Nexus-ShadowScan](https://github.com/aisecnomad/Nexus-ShadowScan) discovery reports as its primary multi-surface input.
+These checks cover supported inputs and mediated adapters. They do not establish complete enterprise discovery, benign model behavior or enforcement of calls that bypass the adapter.
 
 ## How it works
 
-```
-┌──────────────────┐     ┌──────────────────────────────────────────────┐     ┌───────────────────┐
-│                  │     │            Nexus SymBiote                    │     │                   │
-│  Agent Project   │────▶│                                              │────▶│  AgentBOM Output  │
-│                  │     │  ┌────────┐  ┌──────────┐  ┌─────────────┐  │     │                   │
-│  MCP configs     │     │  │Scanners│─▶│Validators│─▶│ Generators  │  │     │  Native JSON      │
-│  Model files     │     │  │        │  │          │  │             │  │     │  CycloneDX 1.7    │
-│  Prompts/skills  │     │  │ MCP    │  │Complete- │  │ CycloneDX   │  │     │  SPDX 3.0.1       │
-│  RAG configs     │     │  │ Model  │  │ness      │  │ SPDX        │  │     │  SARIF             │
-│  A2A cards       │     │  │ Prompt │  │Integrity │  │ SARIF       │  │     │  VEX               │
-│  IDE extensions  │     │  │ RAG    │  │Risk      │  │ VEX         │  │     │                   │
-│  Package deps    │     │  │ A2A    │  │Policy    │  │             │  │     │  + Risk report    │
-│                  │     │  │ IDE    │  │          │  │             │  │     │  + Drift alerts   │
-│  ShadowScan      │     │  │ Reg.   │  │          │  │             │  │     │  + Policy verdict │
-│  report (opt.)   │     │  └────────┘  └──────────┘  └─────────────┘  │     │                   │
-└──────────────────┘     └──────────────────────────────────────────────┘     └───────────────────┘
+```mermaid
+flowchart TD
+    Discovery["Nexus-ShadowScan report"] --> BOM["AgentBOM with attributed claims and local evidence"]
+    Files["Supported repository artifacts"] --> BOM
+    BOM --> Checks["Integrity, coverage and risk checks"]
+    BOM --> Exports["Native JSON and standard exports"]
+    Checks --> Verdict["Policy result and review findings"]
 ```
 
-1. **Scan** — eight pluggable scanners inventory declared components: MCP servers and tools, model artifacts, prompts, retrieval configurations, registries, A2A agent cards, IDE agent extensions. An optional ShadowScan importer consumes external discovery reports.
-2. **Validate** — completeness and integrity validators cross-reference the inventory against the project, verify file hashes, and check Sigstore signatures where available.
-3. **Score** — the risk scorer evaluates every component against configurable severity rules, category weights, and trust tiers. A policy gate passes or fails the pipeline.
-4. **Export** — generators emit standard BOMs (CycloneDX 1.7, SPDX 3.0.1, SARIF, VEX) alongside the native agent-specific model.
+The eight built-in collector names are `shadowscan`, `mcp`, `model`, `prompt`, `rag`, `registry`, `a2a` and `ide_agents`. Use `--scanner` to request a subset explicitly; omitted collectors remain unknown. A completed search can find no matching files, while unsupported declarations and failed reads remain coverage gaps.
 
-Collection is **static by default** — configuration files, manifests, and local artifacts provide evidence of declared composition. A configuration entry does not prove a server is running or that its live tools match the declaration. Use `verify-live` for explicit runtime observations under an operator-provisioned launch policy.
+Collection is static by default and does not execute project modules, model loaders, hooks or MCP launch commands. Configuration presence does not prove that a server is running or that its live tool definitions match the declaration. `verify-live` is a separate explicit execution operation requiring an independently pinned launcher policy and external isolation. `discover-mcp` is an explicit HTTPS observation operation. Neither command calls tools.
 
-## Key capabilities
+## Key capabilities and limits
 
-| Capability | Description |
+| Capability | Evidence and limitation |
 | --- | --- |
-| **Multi-surface inventory** | MCP servers/tools, model weights, prompts/skills, RAG configs, registries, A2A cards, IDE agents, package deps |
-| **ShadowScan integration** | Import Nexus-ShadowScan discovery reports with full provenance tracking and coverage metadata |
-| **Integrity verification** | SHA-256 file hashes, SafeTensors fingerprints, Sigstore bundle verification, RFC 8785 JCS digests for tool definitions |
-| **Risk scoring** | Configurable severity rules, category weights, trust tiers (internal-verified → unknown), policy gates with thresholds |
-| **Drift detection** | Snapshot comparison with security alerts for changed origins, transports, launchers, capabilities, and integrity evidence |
-| **Standard BOM export** | CycloneDX 1.7, SPDX 3.0.1, SARIF, VEX — schema-validated against pinned official schemas |
-| **Runtime contracts** | Ed25519 signing for snapshots, tool approvals, trust status, and hosted-model attestations |
-| **Live observation** | Explicit opt-in MCP endpoint discovery and launcher verification under operator-provisioned policy |
-| **Blast-radius analysis** | Graph-based impact analysis showing which agents and components are affected by a compromise |
-| **Policy configuration** | Project-level `.nexus-symbiote.yaml` controlling scanners, thresholds, formats, and validation rules; pass `--no-project-policy` when evaluating untrusted checkouts |
-| **GitHub Action** | First-party composite Action for CI inventory, validation, risk gating, and SARIF upload |
-| **Pre-commit hooks** | Scan and risk-gate hooks for local development workflows |
+| ShadowScan integration | Exact source-report digest, mapped components and supported declared edges, with unmapped indexes and projection limits; no automatic producer authentication or trust upgrade |
+| MCP and tools | Scoped client/server references and supported source declarations; runtime descriptors and backend behavior need separate evidence |
+| Model integrity | Whole-file hashes, bounded format inspection, SafeTensors metadata fingerprints and optional Sigstore checks; a format, header fingerprint or signature does not prove benignness |
+| Instructions and skills | Source-bound artifacts and suspicious-content findings; detection is limited to supported files and patterns |
+| Retrieval and registries | Declared configuration, package identities and lineage references; presence does not establish actual installation or retrieval ACL enforcement |
+| A2A and IDE declarations | Agent Cards, host settings and extension declarations; supplier labels are not proof of endpoint identity, execution or signature validity |
+| Runtime contracts | Ed25519-signed snapshots, approvals and trust status bound to authenticated context in a reference adapter; deployments must prevent bypass and protect state |
+| Impact analysis | Potential graph reachability through recorded relationships, not proof that an exploit executed |
+| GitHub Action | One collected inventory, caller-owned gates and optional SARIF upload; disabled or skipped gates are visible policy choices |
+
+MCP references include the relative configuration path and declared name. Recollect and review legacy snapshots that used name-only identities. Python source declaration collection has bounded application-file coverage and reports unresolved or dynamic registrations as gaps. See [TypeScript inventory](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/typescript-inventory.md), [ShadowScan integration](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/shadowscan-integration.md) and [runtime assurance](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/runtime-assurance.md) for the exact supported contracts.
 
 ## Commands and exit codes
 
-| Command | Description |
+| Command | Purpose |
 | --- | --- |
-| `scan` | Scan a project and generate an AgentBOM |
-| `import-shadowscan` | Import a Nexus-ShadowScan report into an AgentBOM |
-| `validate` | Check completeness and integrity of an AgentBOM |
-| `risk` | Score supply-chain risks and apply the policy gate |
-| `diff` | Compare two AgentBOM snapshots for drift and security alerts |
-| `summary` | Print a human-readable AgentBOM summary |
-| `blast-radius` | Show components affected by a potential compromise |
-| `baseline` | Stage a reviewed snapshot after scan and risk gates pass |
-| `vex` | Export schema-validated findings as VEX (in triage) |
-| `advisories` | Query OSV for known vulnerabilities in declared packages |
-| `verify-artifact` | Verify a local artifact's digest and optional Sigstore bundle |
-| `verify-discovery` | Verify a ShadowScan report's bytes, projection, and producer |
-| `verify-live` | Observe live MCP launchers under operator-provisioned policy |
-| `discover-mcp` | Observe tools/list from an MCP endpoint without executing tools |
-| `init` | Initialize a `.nexus-symbiote.yaml` policy configuration |
-| `runtime keygen` | Generate Ed25519 signing keys for runtime contracts |
-| `runtime sign` | Sign a snapshot, approval, trust status, or attestation |
-| `runtime verify` | Verify a signed runtime contract |
+| `scan` | Collect supported repository evidence and emit an AgentBOM |
+| `import-shadowscan` | Project an external discovery report with conservative assurance |
+| `validate` | Check graph, completeness and integrity under policy |
+| `risk` | Score findings and apply the risk gate |
+| `diff` | Compare snapshots; use `--fail-on-alert` to fail on security alerts |
+| `summary` | Print an inventory summary |
+| `blast-radius` | Inspect potential impact through recorded graph relationships |
+| `baseline` | Create an unsigned candidate after collection and risk gates pass; review and authenticate it separately |
+| `vex` | Export schema-validated inventory findings as `in_triage` |
+| `advisories` | Explicitly query OSV for supported exact declared package identities |
+| `verify-artifact` | Check selected local bytes against a trusted digest and optional signer policy |
+| `verify-discovery` | Check report bytes/projection; optionally verify its producer under an external signer policy |
+| `verify-live` | Observe independently pinned MCP launchers without calling tools |
+| `discover-mcp` | Observe an explicitly allowed HTTPS MCP origin without calling tools |
+| `init` | Create local policy configuration |
+| `runtime keygen` | Generate Ed25519 keys |
+| `runtime sign` | Sign a supported runtime contract |
+| `runtime verify` | Verify a signed contract under supplied trust constraints |
 
 | Exit code | Meaning |
 | --- | --- |
-| `0` | Success — gate passed, verification succeeded |
-| `1` | Failure — gate failed, security alert, incomplete collection, verification mismatch, or `import-shadowscan` without `--report-only` |
-| `2` | Usage error — invalid arguments, configuration, or missing required mode |
+| `0` | The command completed according to its selected mode; informational commands, report-only output and skipped gates do not establish approval |
+| `1` | A gate failed, verification failed, or another command error occurred; `diff` alerts fail only with `--fail-on-alert` |
+| `2` | CLI usage error, such as invalid arguments |
 
 ## Export formats
 
 ```bash
-nexus-symbiote scan . -f cyclonedx -o agentbom.cdx.json    # CycloneDX 1.7
-nexus-symbiote scan . -f spdx      -o agentbom.spdx.json   # SPDX 3.0.1
-nexus-symbiote scan . -f sarif     -o results.sarif         # SARIF
-nexus-symbiote scan . -f json      -o agentbom.json         # Native JSON (default)
+nexus-symbiote scan . -f json -o agentbom.json
+nexus-symbiote scan . -f cyclonedx -o agentbom.cdx.json
+nexus-symbiote scan . -f spdx -o agentbom.spdx.json
+nexus-symbiote scan . -f sarif -o results.sarif
 ```
 
-Native JSON retains the full agent-specific model. CycloneDX and SPDX exports use supported native structures and documented extension points. Schema validity is necessary but does not establish equivalent semantics or completeness. SARIF carries reviewable findings rather than an admission decision. VEX is available via the `vex` command.
+Native JSON retains the supported agent-specific model. CycloneDX 1.7 and SPDX 3.0.1 exports use supported standard structures and a digest-bound native extension. Consumers must retain that extension to recover full native semantics and inspect the selected-field loss report. A digest detects changes; it does not authenticate the producer. SPDX identities are scoped to each inventory revision.
+
+SARIF contains reviewable findings rather than an admission decision. VEX is available through `vex` and does not assert exploitability. Schema validity alone establishes neither semantic equivalence nor complete collection. Standalone ShadowScan imports support native JSON, CycloneDX and SPDX, not SARIF.
 
 ## GitHub Action
+
+Use a reviewed immutable SymBiote commit in the consuming repository. The checkout action is also pinned:
 
 ```yaml
 name: Agent inventory
@@ -171,86 +151,66 @@ permissions:
 jobs:
   inventory:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      security-events: write
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-      - uses: aisecnomad/nexus-symbiote@<commit-sha>
+      - uses: aisecnomad/nexus-symbiote@<reviewed-40-character-commit-sha>
         with:
           scan-path: .
           output-file: agentbom.json
           validate: 'true'
           risk-check: 'true'
           risk-threshold: '50'
-          sarif-upload: 'true'
+          sarif-upload: 'false'
 ```
 
-The Action installs its own reviewed source, collects once, and derives the requested format and SARIF from that same native inventory. Use a reviewed immutable commit SHA in `uses:`. See the [Action reference](https://github.com/aisecnomad/nexus-symbiote/blob/main/action.yml) for all inputs and outputs.
+The Action installs its reviewed source and derives exports and findings from one native inventory. It ignores policy files supplied by the scanned checkout. Inputs are passed as data; collection failures fail the Action even when later validation is disabled. A risk threshold of `0` disables the Action's risk gate. Disabling `validate` or `risk-check` is not evidence that verification passed.
+
+Enable SARIF upload only when repository code scanning and the event's permissions support it, adding `security-events: write` to the job. Fork PRs may have restricted tokens; retained evidence is the fallback. Treat Action source as executable code and do not use `pull_request_target` to run an untrusted PR checkout with deployment credentials. See [action.yml](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/action.yml) for inputs and outputs.
 
 ## Data handling and safety
 
-- **A successful scan is an inventory result.** It does not establish that a model is benign, a tool backend obeys its description, or that every agent action was mediated.
-- Static collection does not execute project modules, model loaders, repository hooks, or MCP launch commands.
-- Repositories, model files, tool metadata, and imported BOMs are treated as hostile input.
-- Agent inventories can expose infrastructure details — restrict access to exported evidence.
-- A risk score summarizes findings under a policy; it is not a probability of compromise.
-- Signature verification proves bytes were signed under policy, not that content is safe.
-- **Untrusted checkouts**: `scan`, `validate`, and `risk` read project policy (`.nexus-symbiote.yaml`) by default. A pull request can weaken the gate (e.g. set `report-only`). Pass `--no-project-policy` to those commands when evaluating an untrusted checkout.
+Inventories can expose infrastructure, permissions, source references and instruction fingerprints. Restrict evidence access and retention. Static collection reduces secret capture, but consumers must review artifacts before sharing them. Keep credentials, private BOMs and customer data out of public issues.
 
-Read the [security model](https://github.com/aisecnomad/nexus-symbiote/blob/main/docs/security-model.md) and [security policy](https://github.com/aisecnomad/nexus-symbiote/blob/main/SECURITY.md) before using results in an approval process.
+Use independent expected digests and signer/issuer policies. A signature or registry label does not establish content safety. Runtime integrations govern only calls actually mediated by their adapter; surrounding identity, network and sandbox controls are deployment responsibilities.
 
 ## Documentation
 
 | Topic | Link |
 | --- | --- |
-| Security model | [`docs/security-model.md`](https://github.com/aisecnomad/nexus-symbiote/blob/main/docs/security-model.md) |
-| Runtime assurance | [`docs/runtime-assurance.md`](https://github.com/aisecnomad/nexus-symbiote/blob/main/docs/runtime-assurance.md) |
-| ShadowScan integration | [`docs/shadowscan-integration.md`](https://github.com/aisecnomad/nexus-symbiote/blob/main/docs/shadowscan-integration.md) |
-| Deployment evidence | [`docs/deployment-evidence.md`](https://github.com/aisecnomad/nexus-symbiote/blob/main/docs/deployment-evidence.md) |
-| TypeScript inventory | [`docs/typescript-inventory.md`](https://github.com/aisecnomad/nexus-symbiote/blob/main/docs/typescript-inventory.md) |
-| Releasing | [`docs/releasing.md`](https://github.com/aisecnomad/nexus-symbiote/blob/main/docs/releasing.md) |
-| Repository controls | [`docs/repository-controls.md`](https://github.com/aisecnomad/nexus-symbiote/blob/main/docs/repository-controls.md) |
-| Changelog | [`CHANGELOG.md`](https://github.com/aisecnomad/nexus-symbiote/blob/main/CHANGELOG.md) |
-| Roadmap | [`ROADMAP.md`](https://github.com/aisecnomad/nexus-symbiote/blob/main/ROADMAP.md) |
-| Contributing | [`CONTRIBUTING.md`](https://github.com/aisecnomad/nexus-symbiote/blob/main/CONTRIBUTING.md) |
-| Security policy | [`SECURITY.md`](https://github.com/aisecnomad/nexus-symbiote/blob/main/SECURITY.md) |
+| Security model and reporting | [Security model](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/security-model.md) · [SECURITY.md](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/SECURITY.md) |
+| Runtime and deployment evidence | [Runtime assurance](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/runtime-assurance.md) · [Deployment evidence](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/deployment-evidence.md) |
+| Discovery and source inventory | [ShadowScan integration](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/shadowscan-integration.md) · [TypeScript inventory](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/typescript-inventory.md) |
+| Development and controls | [CONTRIBUTING.md](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/CONTRIBUTING.md) · [Repository controls](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/repository-controls.md) |
+| Releases and changes | [Releasing](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/releasing.md) · [CHANGELOG.md](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/CHANGELOG.md) · [ROADMAP.md](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/ROADMAP.md) |
+| Historical reconciliation | [Closed-PR audit](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/audits/closed-pr-review-2026-11-02.md) |
 
 ## Benchmarks
 
-The [security regression corpus](https://github.com/aisecnomad/nexus-symbiote/blob/main/benchmarks/README.md) contains inspectable hand-authored fixtures covering MCP configurations, model formats, prompt injection patterns, and tool drift scenarios. Run the benchmark suite:
-
 ```bash
-PYTHONPATH=src python scripts/benchmark_security.py --out benchmark-results.json
+python scripts/check_security_regressions.py --out security-regressions.json
+python benchmarks/inventory/run_inventory.py
 ```
 
-The runner records corpus and source digests, tool version, confusion counts, unknowns, denominators, runtime, and Python allocation measurements. These are regression fixtures, not representative efficacy estimates.
+The [security corpus](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/benchmarks/README.md) and [inventory corpus](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/benchmarks/inventory/README.md) contain inspectable fixtures, labels and provenance. The security runner records corpus and source digests, unknowns, denominators, elapsed time and Python allocation measurements. Credential-redaction and coverage controls remain separate from detection counts. These finite regression cases establish no representative field accuracy, complete collection or percentile ranking.
 
 ## Project status
 
-Nexus SymBiote is in **alpha**. The API, output formats, and policy semantics may change. There is one active maintainer. Until a published release's provenance has been verified, install from a reviewed checkout or use the CI-attested distributions.
+Nexus SymBiote is **alpha**. APIs, formats and policy semantics may change, and no production SLA or long-term support commitment is offered. Workflows define verification gates, but their presence does not establish that hosted jobs ran or that branch protection is active. The observed hosted verification and enforcement blockers are tracked in [issue #74](https://github.com/aisecnomad/Nexus-Symbiote/issues/74); see the dated [audit](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/audits/closed-pr-review-2026-11-02.md) for local evidence and limits.
 
-**What alpha means:**
-- The core inventory, validation, risk, and export pipeline is functional and CI-gated.
-- Coverage is expanding across agent frameworks and MCP configurations.
-- No long-term support commitment or production SLA while in alpha.
-
-See [`ROADMAP.md`](https://github.com/aisecnomad/nexus-symbiote/blob/main/ROADMAP.md) for near-term goals.
+Package publication requires an explicit maintainer request, successful exact-source verification and the configured publication controls. This README does not establish package-index ownership, active environment protection or a verified release.
 
 ## Community and contributing
 
-| I want to... | Go to |
+| I want to… | Go to |
 | --- | --- |
-| Report a security issue | [`SECURITY.md`](https://github.com/aisecnomad/nexus-symbiote/blob/main/SECURITY.md) |
-| Report a bug | [GitHub Issues](https://github.com/aisecnomad/nexus-symbiote/issues) |
-| Request a feature | [GitHub Issues](https://github.com/aisecnomad/nexus-symbiote/issues) |
-| Contribute code | [`CONTRIBUTING.md`](https://github.com/aisecnomad/nexus-symbiote/blob/main/CONTRIBUTING.md) |
-| Read the governance model | [`GOVERNANCE.md`](https://github.com/aisecnomad/nexus-symbiote/blob/main/GOVERNANCE.md) |
-| Understand support options | [`SUPPORT.md`](https://github.com/aisecnomad/nexus-symbiote/blob/main/SUPPORT.md) |
-| See current maintainers | [`MAINTAINERS.md`](https://github.com/aisecnomad/nexus-symbiote/blob/main/MAINTAINERS.md) |
+| Report a security issue | [SECURITY.md](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/SECURITY.md) |
+| Report a bug or request a feature | [GitHub Issues](https://github.com/aisecnomad/nexus-symbiote/issues) |
+| Contribute code | [CONTRIBUTING.md](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/CONTRIBUTING.md) |
+| Understand governance and ownership | [GOVERNANCE.md](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/GOVERNANCE.md) · [MAINTAINERS.md](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/MAINTAINERS.md) |
+| Find support guidance | [SUPPORT.md](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/SUPPORT.md) |
 
 ## License
 
-[MIT](https://github.com/aisecnomad/nexus-symbiote/blob/main/LICENSE) — Copyright (c) 2026 AISecNomad
+[MIT](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/LICENSE) — Copyright (c) 2026 AISecNomad.

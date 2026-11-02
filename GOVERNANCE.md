@@ -1,62 +1,33 @@
 # Governance
 
-Nexus SymBiote is in alpha and follows a single-maintainer governance model. This document describes how decisions are made, how changes are merged, and what to expect as the project matures.
+Nexus SymBiote is an alpha project with a single maintainer. This document separates decision ownership, review expectations and proposed repository controls from observed enforcement.
 
-## Maintainer
+## Maintainer and decisions
 
-The project is maintained by [Emmanuel Dahunsi (@aisecnomad)](https://github.com/aisecnomad), who holds final authority on merges, releases, and project direction during the alpha phase.
+[Emmanuel Dahunsi (@aisecnomad)](https://github.com/aisecnomad) holds final authority on project direction, architecture, dependency changes, merges and releases during alpha. See [MAINTAINERS.md](MAINTAINERS.md) for ownership and responsibilities.
 
-See [MAINTAINERS.md](MAINTAINERS.md) for the current maintainer table.
+Contributors can propose changes through issues and pull requests. The maintainer evaluates scope, compatibility, security consequences and available evidence. Experimental branches do not replace the supported `nexus_symbiote` package on `main`; useful capabilities require explicit, reviewed ports.
 
-## Decision making
+## Review expectations
 
-During alpha, the maintainer makes final decisions on:
+Use the review contract in [CONTRIBUTING.md](CONTRIBUTING.md): explain the concrete problem, resulting behavior, tests and material limitations. Changes should pass the configured `Verified CI` aggregate, quality checks, coverage floors, distribution checks and committed security contracts.
 
-- Feature scope and roadmap priorities
-- Architecture and security model changes
-- Release timing and distribution
-- Dependency additions and upgrades
-- Breaking changes to CLI, output formats, or policy semantics
+Security-sensitive changes require a stated trust boundary and abuse case, a regression that fails on the vulnerable behavior, and review of the affected security corpus. Record the checks that actually ran and any unavailable verification. Local evidence does not establish a successful hosted matrix or CodeQL run. Any maintainer-authorized alpha exception must state its scope and remaining checks; it must not be described as passing unavailable CI or satisfying inactive protection.
 
-Community input through issues and pull requests is valued and influences decisions, but the maintainer reserves the right to decline changes that conflict with the project's security model or architectural direction.
+## Repository controls and current status
 
-## Merge policy
+The checked-in [protection proposal](config/github-main-protection.json) requires `Verified CI`, up-to-date branches, independent review including the last push, resolved conversations, administrator enforcement, and no force pushes or branch deletion. It permits merge commits; it does not require linear history. The proposed independent approval requires another authorized reviewer beyond the sole maintainer's own changes.
 
-Every change to `main` must:
+This file does not apply GitHub settings. At the 2026-11-02 audit, live `main` metadata reported `protected: false`, and inspected hosted jobs had no recorded runner or steps. Those observations and required remediation are tracked in [issue #74](https://github.com/aisecnomad/Nexus-Symbiote/issues/74). See [repository controls](docs/repository-controls.md) for the actual verification boundary and administrator setup.
 
-1. Pass the full CI pipeline (`Verified CI` aggregation job).
-2. Pass ruff linting and formatting checks.
-3. Pass mypy strict type checking.
-4. Include tests for new behavior and regressions for bug fixes.
-5. Be reviewed by the maintainer before merge.
-
-Security-sensitive changes additionally require:
-
-- A stated trust boundary and abuse case.
-- A regression test that fails on the vulnerable behavior.
-- Review of the security regression corpus after changes.
-
-## Branch protection
-
-The `main` branch enforces:
-
-- Required status checks (Verified CI).
-- No direct pushes — all changes go through pull requests.
-- Linear history (rebase or squash merges only).
-- No force pushes.
-
-See [repository controls](docs/repository-controls.md) for the full configuration.
+Do not claim active merge enforcement from a workflow file, governance statement or local passing suite. Verify live settings and successful checks for the revision being considered.
 
 ## Releases
 
-Releases are manually triggered, environment-gated, and require OIDC trusted publishing. The maintainer must explicitly request publication. See [releasing](docs/releasing.md) for the full procedure including checksums, provenance, and PyPI configuration.
+Publication requires an explicit maintainer request. The release procedure separates read-only build and verification from attestation and OIDC publication. Required repository, environment and package-index settings must be configured and verified before publication; their presence is not established by this document.
+
+Review the exact candidate artifacts, checksums, source revision and provenance. The production publication preflight requires successful canonical CI evidence for the exact source SHA as well as protected-branch settings. See [releasing](docs/releasing.md) and [repository controls](docs/repository-controls.md). A candidate build or successful upload does not establish a production release or package safety.
 
 ## Future governance
 
-As the project matures beyond alpha and gains contributors, governance may evolve to include:
-
-- Additional maintainers with defined areas of responsibility.
-- A documented consensus process for architectural decisions.
-- A formal RFC process for breaking changes.
-
-Until then, this document reflects the current single-maintainer reality.
+Additional maintainers, architectural RFCs and broader decision processes may be introduced as participation grows. Changes to governance should be documented through the same review process, including who owns the decision and which external controls are actually active.

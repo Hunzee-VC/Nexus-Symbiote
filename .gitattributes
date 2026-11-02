@@ -39,4 +39,9 @@ Dockerfile text eol=lf
 *.gz binary
 
 # Vendored schemas — track but don't normalize
-src/nexus_symbiote/generators/schemas/vendor/** -diff linguist-vendored
+src/nexus_symbiote/generators/schemas/vendor/** -text -diff linguist-vendored
+
+# Evidence and parser fixtures must retain their exact recorded bytes.
+benchmarks/fixtures/** -text
+benchmarks/inventory/fixtures/** -text
+tests/fixtures/** -text

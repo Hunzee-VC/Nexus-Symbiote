@@ -17,6 +17,7 @@
 - [ ] `ruff check src tests scripts` passes
 - [ ] `ruff format --check src tests scripts` passes
 - [ ] `mypy src/nexus_symbiote` passes
+- [ ] Workflow and repository hygiene checks pass (`make workflow-check hygiene`)
 - [ ] Documentation updated (if applicable)
 - [ ] CHANGELOG.md updated under Unreleased
 

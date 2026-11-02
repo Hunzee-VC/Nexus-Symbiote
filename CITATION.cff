@@ -7,12 +7,10 @@ type: software
 authors:
   - given-names: Emmanuel
     family-names: Dahunsi
-    alias: aisecnomad
 repository-code: https://github.com/aisecnomad/nexus-symbiote
 url: https://github.com/aisecnomad/nexus-symbiote
 license: MIT
 version: 0.1.0
-date-released: "2026-01-01"
 keywords:
   - aibom
   - agent-bill-of-materials

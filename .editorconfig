@@ -25,9 +25,25 @@ indent_style = tab
 
 # Test fixtures may have intentional formatting
 [benchmarks/fixtures/**]
+charset = unset
+end_of_line = unset
 trim_trailing_whitespace = false
 insert_final_newline = false
 
 [tests/fixtures/**]
+charset = unset
+end_of_line = unset
+trim_trailing_whitespace = false
+insert_final_newline = false
+
+[benchmarks/inventory/fixtures/**]
+charset = unset
+end_of_line = unset
+trim_trailing_whitespace = false
+insert_final_newline = false
+
+[src/nexus_symbiote/generators/schemas/vendor/**]
+charset = unset
+end_of_line = unset
 trim_trailing_whitespace = false
 insert_final_newline = false

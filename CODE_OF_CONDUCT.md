@@ -11,7 +11,7 @@ We pledge to act and interact in ways that contribute to an open, welcoming, div
 Because Nexus SymBiote is security tooling, we additionally pledge to:
 
 - Report security-sensitive defects through private channels, not public issues.
-- Never deliberately introduce vulnerable code, backdoors, or malicious payloads into contributions.
+- Never introduce hidden vulnerabilities or backdoors into production code. Adversarial regression fixtures require review, synthetic or appropriately licensed inputs, isolation and documented expectations; they must not expose real credentials or customer systems.
 - Keep real credentials, private agent inventories, and customer data out of issues, pull requests, and discussion threads.
 - Treat inventory evidence and discovery reports shared for debugging as confidential unless the author explicitly states otherwise.
 
