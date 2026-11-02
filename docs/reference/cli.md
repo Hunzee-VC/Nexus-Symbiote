@@ -103,6 +103,15 @@ $ symbiote version --json
 │                                  anti-rollback.                                          │
 │ --no-policy                      Skip the built-in policy checks (derived flags/findings │
 │                                  stay empty).                                            │
+│ --shadowscan-report      <path>  Fold a Nexus ShadowScan report (JSON or CycloneDX) into │
+│                                  the scan: observed tool servers, autonomy interval,     │
+│                                  coverage.                                               │
+│ --shadowscan-scope       <str>   root (findings about this repository) | estate (every   │
+│                                  finding). [default: root]                               │
+│ --valid-for              <int>   Validity window in days (sets                           │
+│                                  snapshot.validity.not_after; AB-STD-05).                │
+│ --profile                <str>   Evaluate conformance at this level after the scan:      │
+│                                  minimal | standard | verified (exit 5 when not attained).│
 │ --json                           Machine-readable JSON on stdout.                        │
 ╰──────────────────────────────────────────────────────────────────────────────────────────╯
 ```
@@ -117,6 +126,14 @@ built-in policy checks, seals the document with a salted Merkle commitment and w
 | `agentbom.cdx.json` | CycloneDX 1.7, validated against the official `bom-1.7` schema before it is written |
 | `agentbom.spdx.json` | SPDX 3.0.1 JSON-LD, validated against the official 3.0.1 JSON schema |
 | `agentbom.cdx.loss.json`, `agentbom.spdx.loss.json` | loss reports: every model field without a native home in the target format and where it was preserved |
+| `agentbom.validation.json` | validation evidence (`symbiote.validation/v1`): whether each export validated against its official schema, the companion and snapshot digests; `symbiote conformance` reads it automatically |
+
+The companion is written **last**: its `links` bind the CycloneDX document (serial number, `urn:cdx` BOM-Link,
+SHA-256 of the written bytes) and the SPDX document (document IRI, SHA-256), and its `lossReport` carries the
+CycloneDX loss report. The exports reference the companion by its snapshot digest (the Merkle root), so the
+binding has no cycle: `links` and `lossReport` are not committed leaves and adding them after sealing leaves the
+root — and `symbiote verify` — intact. With `--profile minimal` a zero-config scan of `examples/triage-agent`
+attains **Minimal** conformance; `--valid-for 90` satisfies the validity-window requirement of Standard.
 
 ```text
 $ symbiote scan examples/triage-agent -o /tmp/out --deterministic

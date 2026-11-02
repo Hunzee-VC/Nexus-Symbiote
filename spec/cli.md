@@ -21,11 +21,11 @@ stderr when a TTY), `--quiet`, `--store PATH` (default `./.symbiote/store`), `--
 | Command | Purpose |
 |---|---|
 | `symbiote init [--from-cwd] [--framework F]` | write `symbiote.yaml` (agent name/version/owner, sources, identity policy) by scanning the cwd |
-| `symbiote scan [PATH] [--live] [--registry] [--profile minimal|standard|verified] [-o DIR]` | zero-config collection → `declared` (and `observed` with `--live`) snapshot; writes `agentbom.json`, `agentbom.cdx.json`, `agentbom.spdx.json`, loss report, score |
+| `symbiote scan [PATH] [--live] [--registry] [--profile minimal|standard|verified] [--valid-for DAYS] [--shadowscan-report FILE] [-o DIR]` | zero-config collection → `declared` (and `observed` with `--live`) snapshot; writes `agentbom.json` (last, with `links` to the exports by digest and the loss report), `agentbom.cdx.json`, `agentbom.spdx.json`, loss reports, `agentbom.validation.json`; `--profile` evaluates conformance (exit 5 when not attained) |
 | `symbiote collect [--source NAME…] [--live]` | run selected collectors into the store |
 | `symbiote observe mcp --server ID|--all [--watch]`, `symbiote observe otel FILE…` | produce `observed` snapshots and deltas |
 | `symbiote generate [--kind K] [--format cyclonedx|spdx|companion|all] [--cdx-version 1.7|1.6] [--embed-records] [--include-text] [--redact CLASS…] [--jsf-sign]` | export from the store |
-| `symbiote validate FILE… [--cross]` | validate against official + Symbiote schemas; `--cross` triangulates model digests |
+| `symbiote validate FILE… [--cross]` | validate against official + Symbiote schemas (companion, CycloneDX, SPDX, loss reports, validation evidence); `--cross` triangulates model digests |
 | `symbiote import FILE --format cdx|spdx|k8s-aibom|cdxgen|syft|harness-aibom [--as declared|observed|deployed]` | import with loss report and assurance tagging |
 | `symbiote convert IN -o OUT --to cyclonedx|spdx|companion [--loss-report]` | format conversion with loss report |
 | `symbiote diff A B [--fail-on-change EVENT…] [--sarif]` | `Delta` between snapshots/documents of any kind; the diff is the finding |
@@ -33,7 +33,7 @@ stderr when a TTY), `--quiet`, `--store PATH` (default `./.symbiote/store`), `--
 | `symbiote model manifest DIR [--tensors]`, `model risk DIR`, `model sign DIR`, `model verify DIR --bundle B --identity I --issuer U` | model identity, serialization risk, signing (model-signing) |
 | `symbiote registry resolve REF [--live] [--pin]` | name-resolution record; `--pin` writes the immutable ref back |
 | `symbiote policy check FILE [--fail-on SEV] [--select GLOB…] [--exclude GLOB…] [--baseline FILE] [--sarif OUT] [--rego DIR] [--fail-on-indeterminate]`, `policy list`, `policy explain ID`, `policy export-rego DIR` | built-in checks, organisation Rego, SARIF, Rego export (`checks.md §5`), documentation |
-| `symbiote conformance [FILE] --level minimal|standard|verified` | per-requirement pass/fail/unknown |
+| `symbiote conformance [FILE] --level minimal|standard|verified [--evidence agentbom.validation.json]` | per-requirement pass/fail/unknown; validation evidence is read from the companion's sibling `agentbom.validation.json` by default |
 | `symbiote score [FILE]` | completeness score with reasons and assurance distribution |
 | `symbiote attest snapshot|toolset|coverage|evaluation|resolution|delta|trust-status|approval … --out X.sigstore.json [--key KEY] [--staging] [--identity-token T]` | build and sign statements |
 | `symbiote verify FILE… --policy policy.yaml [--live] [--state-file F] [--insecure-unconstrained] [--trust-status-stale-ok]` | verification flow (`attestation.md §3`) |
