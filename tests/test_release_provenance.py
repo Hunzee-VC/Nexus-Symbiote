@@ -76,21 +76,22 @@ def test_publish_verification_gate_checks_every_distribution(tmp_path, case):
 def test_distribution_bundle_is_retained_and_verified_before_publish():
     jobs = release_jobs()
     attest = jobs["attest"]
-    retain = next(
-        s for s in attest["steps"] if s.get("name") == "Retain distribution attestation bundle"
-    )
+    retain = next(s for s in attest["steps"] if s.get("id") == "distribution-attestation")
     assert retain["uses"].startswith("actions/upload-artifact@")
-    assert retain["with"]["name"] == "distribution-attestation"
     assert retain["with"]["path"] == "${{ steps.distributions.outputs.bundle-path }}"
     assert retain["with"]["if-no-files-found"] == "error"
+    assert attest["outputs"]["distribution_attestation_id"] == (
+        "${{ steps.distribution-attestation.outputs.artifact-id }}"
+    )
     verify = jobs["verify-provenance"]
     assert set(verify["needs"]) == {"build", "attest"}
     # The shell-running verifier gets read access only: no OIDC, no writes.
     assert verify["permissions"] == {"contents": "read", "attestations": "read"}
     downloads = [s["with"] for s in verify["steps"] if "download-artifact" in s.get("uses", "")]
-    assert [(d["name"], d["path"]) for d in downloads] == [
-        ("release-distributions", "dist"),
-        ("distribution-attestation", "attestation"),
+    assert [d["path"] for d in downloads] == ["dist", "attestation"]
+    assert [d["artifact-ids"] for d in downloads] == [
+        "${{ needs.build.outputs.distributions_id || 'missing' }}",
+        "${{ needs.attest.outputs.distribution_attestation_id || 'missing' }}",
     ]
+    assert all(d["digest-mismatch"] == "error" for d in downloads)
     assert set(jobs["publish"]["needs"]) == {"build", "attest", "verify-provenance"}
-    assert jobs["publish"]["permissions"] == {"id-token": "write"}

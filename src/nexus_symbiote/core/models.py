@@ -153,6 +153,10 @@ class MCPServerComponent(ComponentBase):
     component_type: Literal[ComponentType.MCP_SERVER] = ComponentType.MCP_SERVER
     transport: str | None = Field(default=None, description="stdio, sse, streamable-http")
     command: str | None = None
+    launcher_package: str | None = Field(
+        default=None,
+        description="Declared ecosystem and package name or image repository, when safely identified",
+    )
     args: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
     endpoint_url: str | None = None
@@ -183,6 +187,10 @@ class ToolComponent(ComponentBase):
     definition_hash: str | None = Field(
         default=None,
         description="JCS canonical hash of (name, description, inputSchema, annotations)",
+    )
+    redacted_definition_hash: str | None = Field(
+        default=None,
+        description="Digest of the displayed descriptor when sensitive content was removed; the original definition_hash remains the source fingerprint",
     )
     capabilities: CapabilityDeclaration | None = None
     annotations: dict[str, Any] = Field(

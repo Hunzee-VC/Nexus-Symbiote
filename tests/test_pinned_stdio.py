@@ -79,6 +79,7 @@ def command(tmp_path: Path, bom: AIBOM, policy):
     policy_path = tmp_path / "operator-policy.json"
     policy_path.write_text(json.dumps(policy))
     return [
+        "--live",
         "verify-live",
         str(target),
         "--project",

@@ -69,6 +69,29 @@ def relevant_mcp_exclusions(case: dict, exclusions: list[str]) -> list[str]:
     )
 
 
+def label_bounds(scores: dict) -> dict:
+    """Bound recall and specificity over explicit labels when collection is incomplete.
+
+    These are deterministic best/worst cases for the unobserved labels, not
+    statistical confidence intervals or estimates for unlabeled predictions.
+    """
+
+    def interval(success: int, failure: int, unknown: int) -> dict:
+        total = success + failure + unknown
+        return {
+            "label_count": total,
+            "observed_count": success + failure,
+            "unknown_count": unknown,
+            "lower": success / total if total else None,
+            "upper": (success + unknown) / total if total else None,
+        }
+
+    return {
+        "recall": interval(scores["tp"], scores["fn"], scores["unknown_positive_labels"]),
+        "specificity": interval(scores["tn"], scores["fp"], scores["unknown_negative_labels"]),
+    }
+
+
 def run() -> dict:
     manifest = parse_json_strict(read_regular_text(DIRECTORY / "manifest.json"))
     rows = []
@@ -185,7 +208,19 @@ def run() -> dict:
             )
             expected_exclusions = sorted(case.get("expected_mcp_exclusions", []))
             exclusions_match = not has_tool_labels or relevant_exclusions == expected_exclusions
-            totals.update({k: scores[k] for k in ("tp", "fp", "fn", "tn")})
+            totals.update(
+                {
+                    k: scores[k]
+                    for k in (
+                        "tp",
+                        "fp",
+                        "fn",
+                        "tn",
+                        "unknown_positive_labels",
+                        "unknown_negative_labels",
+                    )
+                }
+            )
             rows.append(
                 {
                     "case": case["id"],
@@ -193,6 +228,8 @@ def run() -> dict:
                     "missing": misses,
                     "unexpected": extras,
                     "unexpected_unlabeled": scores["unexpected_unlabeled"],
+                    "tool_counts": {k: scores[k] for k in ("tp", "fp", "fn", "tn")},
+                    "label_bounds": label_bounds(scores),
                     "unknown_positive_labels": scores["unknown_positive_labels"],
                     "unknown_negative_labels": scores["unknown_negative_labels"],
                     "checks": checks,
@@ -211,7 +248,7 @@ def run() -> dict:
             )
     return {
         "corpus_version": manifest["version"],
-        "counts": dict(totals),
+        "counts": {key: totals[key] for key in ("tp", "fp", "fn", "tn")},
         "denominators": {
             "expected_tools": totals["tp"] + totals["fn"],
             "explicit_decoys": totals["tn"] + totals["fp"],
@@ -219,6 +256,7 @@ def run() -> dict:
         "unlabeled_predictions": sum(len(row["unexpected_unlabeled"]) for row in rows),
         "unknown_positive_labels": sum(row["unknown_positive_labels"] for row in rows),
         "unknown_negative_labels": sum(row["unknown_negative_labels"] for row in rows),
+        "label_bounds": label_bounds(totals),
         "scope": "finite labeled MCP inventory regressions; model and policy checks are separate controls",
         "cases": rows,
         "passed": all(r["passed"] for r in rows),

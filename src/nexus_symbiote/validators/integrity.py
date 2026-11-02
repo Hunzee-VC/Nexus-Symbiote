@@ -22,6 +22,7 @@ from nexus_symbiote.core.models import (
     PromptComponent,
     ToolComponent,
 )
+from nexus_symbiote.scanners.mcp import MCPScanner
 from nexus_symbiote.scanners.model import inspect_model_artifact
 from nexus_symbiote.utils.crypto import (
     SigstoreArtifactPolicy,
@@ -102,12 +103,27 @@ class IntegrityValidator:
             raise ValueError("Duplicate artifact signature policies")
         self.require_model_signatures = require_model_signatures
 
-    def validate(self, bom: AIBOM, project_root: Path | None = None) -> IntegrityReport:
+    def validate(
+        self,
+        bom: AIBOM,
+        project_root: Path | None = None,
+        *,
+        exclude_paths: Sequence[str] = (),
+    ) -> IntegrityReport:
         report = IntegrityReport()
+        local_tools: dict[str, ToolComponent | None] = {}
+        if project_root is not None and any(isinstance(c, ToolComponent) for c in bom.components):
+            # Resolve configuration only inside the operator's root. Never use a BOM-supplied
+            # descriptor path or launch a server to corroborate omitted instance values.
+            scanner = MCPScanner()
+            scanner.configure(exclude_paths)
+            for local in scanner.scan(project_root, config_only=True).components:
+                if isinstance(local, ToolComponent):
+                    local_tools[local.bom_ref] = None if local.bom_ref in local_tools else local
         for comp in bom.components:
             report.components_checked += 1
             if isinstance(comp, ToolComponent):
-                self._check_tool_hash(comp, report)
+                self._check_tool_hash(comp, report, local_tools)
             elif isinstance(comp, ModelComponent):
                 self._check_model_integrity(comp, project_root, report)
                 self._check_tensor_metadata(comp, project_root, report)
@@ -179,7 +195,12 @@ class IntegrityValidator:
                 )
             )
 
-    def _check_tool_hash(self, comp: ToolComponent, report: IntegrityReport) -> None:
+    def _check_tool_hash(
+        self,
+        comp: ToolComponent,
+        report: IntegrityReport,
+        local_tools: dict[str, ToolComponent | None],
+    ) -> None:
         if not comp.definition_hash:
             report.issues.append(
                 IntegrityIssue(
@@ -211,8 +232,28 @@ class IntegrityValidator:
             recomputed = hash_tool_definition(
                 comp.name, comp.description_text, comp.input_schema, comp.annotations
             )
-            if recomputed != f"{algorithm}:{expected}":
+            raw_hash = f"{algorithm}:{expected}"
+            if recomputed != (comp.redacted_definition_hash or raw_hash):
                 raise ValueError("Tool definition differs from its declared digest")
+            if comp.bom_ref in local_tools:
+                local = local_tools[comp.bom_ref]
+                if (
+                    local is None
+                    or comp.mcp_server_ref != local.mcp_server_ref
+                    or raw_hash != local.definition_hash
+                    or comp.redacted_definition_hash != local.redacted_definition_hash
+                ):
+                    raise ValueError("Tool fingerprint differs from its local configuration")
+            elif comp.redacted_definition_hash is not None:
+                report.issues.append(
+                    IntegrityIssue(
+                        comp.bom_ref,
+                        "descriptor_source_unavailable",
+                        "Redacted representation matches; original descriptor requires matching source evidence",
+                        "unknown",
+                    )
+                )
+                return
         except (ValueError, TypeError, UnicodeError, RecursionError) as exc:
             report.hashes_failed += 1
             report.issues.append(IntegrityIssue(comp.bom_ref, "hash_mismatch", str(exc)))

@@ -9,10 +9,58 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_public_inventory_corpus_has_honest_denominators():
     report = runpy.run_path(str(ROOT / "benchmarks/inventory/run_inventory.py"))["run"]()
     assert report["passed"], report
-    assert report["counts"] == {"tp": 18, "fp": 0, "fn": 0, "tn": 2}
-    assert report["denominators"] == {"expected_tools": 18, "explicit_decoys": 2}
+    assert report["counts"] == {"tp": 21, "fp": 0, "fn": 0, "tn": 7}
+    assert report["denominators"] == {"expected_tools": 21, "explicit_decoys": 7}
     assert report["unknown_negative_labels"] == 5
     assert report["unlabeled_predictions"] == 0
+    assert report["label_bounds"]["recall"] == {
+        "label_count": 21,
+        "observed_count": 21,
+        "unknown_count": 0,
+        "lower": 1.0,
+        "upper": 1.0,
+    }
+    assert report["label_bounds"]["specificity"] == {
+        "label_count": 12,
+        "observed_count": 7,
+        "unknown_count": 5,
+        "lower": 7 / 12,
+        "upper": 1.0,
+    }
+
+
+def test_label_bounds_keep_unknowns_and_empty_denominators_visible():
+    bounds = runpy.run_path(str(ROOT / "benchmarks/inventory/run_inventory.py"))["label_bounds"]
+    scores = {
+        "tp": 2,
+        "fn": 1,
+        "unknown_positive_labels": 2,
+        "tn": 1,
+        "fp": 1,
+        "unknown_negative_labels": 2,
+    }
+    result = bounds(scores)
+    assert result["recall"] == {
+        "label_count": 5,
+        "observed_count": 3,
+        "unknown_count": 2,
+        "lower": 0.4,
+        "upper": 0.8,
+    }
+    assert result["specificity"] == {
+        "label_count": 4,
+        "observed_count": 2,
+        "unknown_count": 2,
+        "lower": 0.25,
+        "upper": 0.75,
+    }
+    assert bounds(dict.fromkeys(scores, 0))["recall"] == {
+        "label_count": 0,
+        "observed_count": 0,
+        "unknown_count": 0,
+        "lower": None,
+        "upper": None,
+    }
 
 
 def test_only_adjudicated_negatives_enter_confusion_counts():

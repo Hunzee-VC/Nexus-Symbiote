@@ -24,13 +24,16 @@ keywords = [
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
+    "Environment :: Console",
     "Intended Audience :: Developers",
     "Intended Audience :: Information Technology",
-    "License :: OSI Approved :: MIT License",
+    "Intended Audience :: System Administrators",
+    "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: Implementation :: CPython",
     "Topic :: Security",
     "Topic :: Software Development :: Quality Assurance",
     "Typing :: Typed",
@@ -41,7 +44,6 @@ dependencies = [
     "packageurl-python>=0.17.6,<1",
     "pydantic>=2.5,<3",
     "rich>=13.0,<14",
-    "tomli>=2.0; python_version<'3.11'",
     "rfc8785>=0.1.4,<1",
     "pyyaml>=6.0,<7",
     "jsonschema>=4.23,<5",
@@ -87,10 +89,12 @@ dev = [
 nexus-symbiote = "nexus_symbiote.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/aisecnomad/nexus-symbiote"
-Repository = "https://github.com/aisecnomad/nexus-symbiote"
-Issues = "https://github.com/aisecnomad/nexus-symbiote/issues"
-Documentation = "https://github.com/aisecnomad/nexus-symbiote/tree/main/docs"
+Homepage = "https://github.com/Hunzee-VC/Nexus-Symbiote"
+Repository = "https://github.com/Hunzee-VC/Nexus-Symbiote"
+Issues = "https://github.com/Hunzee-VC/Nexus-Symbiote/issues"
+Documentation = "https://github.com/Hunzee-VC/Nexus-Symbiote/tree/main/docs"
+Changelog = "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/CHANGELOG.md"
+Security = "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/SECURITY.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/nexus_symbiote"]

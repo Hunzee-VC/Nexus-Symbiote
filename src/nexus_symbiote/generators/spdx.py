@@ -21,6 +21,7 @@ from nexus_symbiote.generators._common import (
     normalize_hash,
     prepare,
     recover_document,
+    unordered_projection,
 )
 from nexus_symbiote.generators.base import Generator
 from nexus_symbiote.generators.package_identifiers import (
@@ -77,6 +78,11 @@ class SPDXGenerator(Generator):
         self._namespace = namespace.rstrip("/")
 
     def generate(self, aibom: AIBOM) -> dict[str, Any]:
+        document = self._projection(aibom)
+        require_valid(document, "spdx")
+        return document
+
+    def _projection(self, aibom: AIBOM) -> dict[str, Any]:
         prepare(aibom)
         # Native refs are BOM-local, and producers can reuse serial numbers across revisions.
         revision = content_digest(native_document(aibom)).removeprefix("sha256:")
@@ -163,12 +169,10 @@ class SPDXGenerator(Generator):
             "profileConformance": ["core", "software", "extension"],
             "extension": _extension(document_properties(aibom, self.format_name)),
         }
-        result = {
+        return {
             "@context": "https://spdx.org/rdf/3.0.1/spdx-context.jsonld",
             "@graph": [doc, *elements, creation],
         }
-        require_valid(result, "spdx")
-        return result
 
     @staticmethod
     def _element(comp: AnyComponent, ids: _DocumentIds) -> dict[str, Any]:
@@ -284,10 +288,28 @@ class SPDXGenerator(Generator):
         docs = [node for node in document["@graph"] if node["type"] == "SpdxDocument"]
         if len(docs) != 1:
             raise ValueError("expected exactly one SPDX document")
-        entries = docs[0]["extension"][0]["extension_cdxProperty"]
-        return recover_document(
-            [
-                {"name": prop["extension_cdxPropName"], "value": prop["extension_cdxPropValue"]}
-                for prop in entries
-            ]
-        )
+        doc = docs[0]
+        namespace, separator, _revision = doc["spdxId"].rpartition("/document/")
+        if not namespace or not separator:
+            raise ValueError("unrecognized SPDX export document identifier")
+        properties = [
+            {"name": prop["extension_cdxPropName"], "value": prop.get("extension_cdxPropValue", "")}
+            for extension in doc.get("extension", [])
+            if isinstance(extension, dict)
+            and extension.get("type") == "extension_CdxPropertiesExtension"
+            for prop in extension.get("extension_cdxProperty", [])
+            if isinstance(prop, dict) and "extension_cdxPropName" in prop
+        ]
+        recovered = recover_document(properties)
+        expected = SPDXGenerator(namespace)._projection(recovered)
+        # A conforming JSON-LD consumer can omit an empty root element set.
+        actual = {
+            **document,
+            "@graph": [
+                {**node, "rootElement": node.get("rootElement", [])} if node is doc else node
+                for node in document["@graph"]
+            ],
+        }
+        if unordered_projection(actual) != unordered_projection(expected):
+            raise ValueError("SPDX projection conflicts with the embedded native document")
+        return recovered

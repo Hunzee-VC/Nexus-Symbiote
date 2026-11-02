@@ -17,6 +17,8 @@ from urllib.parse import quote
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 REQUIRED_CHECKS = frozenset({"Verified CI"})
+GITHUB_ACTIONS_APP_ID = 15368
+REQUIRED_CI_JOBS = frozenset({"Verified CI", "CodeQL policy", "Dependency advisories"})
 CI_WORKFLOW = ".github/workflows/ci.yml"
 MAX_RESPONSE_BYTES = 1024 * 1024
 
@@ -47,6 +49,13 @@ def evaluate(metadata: Any, required: frozenset[str] = REQUIRED_CHECKS) -> list[
     missing = required - present
     if missing:
         errors.append("missing enforced required checks: " + ", ".join(sorted(missing)))
+    bound = {
+        c["context"]
+        for c in checks
+        if type(c.get("app_id")) is int and c["app_id"] == GITHUB_ACTIONS_APP_ID
+    }
+    if required - bound:
+        errors.append("required checks must be bound to the GitHub Actions app")
     return errors
 
 
@@ -150,17 +159,18 @@ def evaluate_verification(
         or any(not isinstance(job, dict) for job in jobs)
     ):
         return [*errors, "CI job evidence is missing, incomplete or malformed"]
-    verified = [job for job in jobs if job.get("name") == "Verified CI"]
-    if len(verified) != 1 or any(
-        job.get("run_id") != run["id"]
-        or type(job.get("run_id")) is not int
-        or job.get("run_attempt") != attempt
-        or type(job.get("run_attempt")) is not int
-        or job.get("status") != "completed"
-        or job.get("conclusion") != "success"
-        for job in verified
-    ):
-        errors.append("Verified CI did not succeed in the latest workflow attempt")
+    for name in sorted(REQUIRED_CI_JOBS):
+        matching = [job for job in jobs if job.get("name") == name]
+        if len(matching) != 1 or any(
+            job.get("run_id") != run["id"]
+            or type(job.get("run_id")) is not int
+            or job.get("run_attempt") != attempt
+            or type(job.get("run_attempt")) is not int
+            or job.get("status") != "completed"
+            or job.get("conclusion") != "success"
+            for job in matching
+        ):
+            errors.append(name + " did not succeed in the latest workflow attempt")
     return errors
 
 

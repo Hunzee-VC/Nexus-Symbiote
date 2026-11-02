@@ -1,0 +1,54 @@
+name: Feature request
+description: Suggest a new feature or improvement
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: >
+        Thank you for suggesting an improvement. Please check the
+        [roadmap](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/ROADMAP.md) and existing issues before submitting.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem description
+      description: What problem does this feature solve? What use case does it address?
+      placeholder: "When I try to inventory an agent that uses X, there is no scanner for..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: How do you think this should work?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What other approaches have you considered or tried?
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of the project does this relate to?
+      options:
+        - Verification adapter or discovery import (primary discovery is Nexus-ShadowScan)
+        - Validator (completeness, integrity, risk)
+        - Export format (CycloneDX, SPDX, SARIF, VEX)
+        - CLI (new command or option)
+        - GitHub Action
+        - Policy and configuration
+        - Runtime contracts
+        - Documentation
+        - Other
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Any other context, examples, or references that help explain the request.

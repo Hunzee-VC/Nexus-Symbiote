@@ -9,10 +9,17 @@ from nexus_symbiote.cli import main
 
 def test_live_discovery_requires_explicit_origin_and_refuses_private_targets():
     runner = CliRunner()
-    missing = runner.invoke(main, ["discover-mcp", "https://127.0.0.1/mcp"])
+    missing = runner.invoke(main, ["--live", "discover-mcp", "https://127.0.0.1/mcp"])
     assert missing.exit_code != 0
     private = runner.invoke(
-        main, ["discover-mcp", "https://127.0.0.1/mcp", "--allowed-origin", "https://127.0.0.1"]
+        main,
+        [
+            "--live",
+            "discover-mcp",
+            "https://127.0.0.1/mcp",
+            "--allowed-origin",
+            "https://127.0.0.1",
+        ],
     )
     assert private.exit_code != 0
     assert json.loads(private.stdout)["complete"] is False

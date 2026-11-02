@@ -125,7 +125,7 @@ class TestIDEAgentScanner:
     def test_scan_claude_code(self, tmp_path):
         claude_dir = tmp_path / ".claude"
         claude_dir.mkdir()
-        settings = {"permissions": {"mode": "default", "allow": ["Read"]}}
+        settings = {"permissions": {"defaultMode": "default", "allow": ["Read"]}}
         (claude_dir / "settings.json").write_text(json.dumps(settings))
         (tmp_path / "CLAUDE.md").write_text("# System prompt")
 
