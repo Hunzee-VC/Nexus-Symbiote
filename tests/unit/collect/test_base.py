@@ -129,3 +129,33 @@ def test_load_collectors_skips_missing_modules() -> None:
     assert names == sorted(names)
     only = load_collectors(["mcp-config"], include_plugins=False)
     assert [c.name for c in only] == ["mcp-config"]
+
+
+def test_failed_source_never_merges_into_queried() -> None:
+    """I2: a fragment carrying a failed source run (e.g. a crashed collector
+    recorded as not-attempted) must degrade the merged surface to partial,
+    not disappear behind another collector's clean 'queried'."""
+    queried = SurfaceCoverage(status=CoverageStatus.QUERIED, sources=[SourceRun(source="ok", ok=True)])
+    crashed = SurfaceCoverage(
+        status=CoverageStatus.NOT_ATTEMPTED,
+        sources=[SourceRun(source="boom", ok=False, error_class="error")],
+    )
+    for first, second in ((queried, crashed), (crashed, queried)):
+        merged = merge_surface(first, second)
+        assert merged.status is CoverageStatus.PARTIAL
+        assert len(merged.sources) == 2
+
+
+def test_crashing_collector_degrades_shared_surface(tmp_path: Path) -> None:
+    class _Crash(BaseCollector):
+        name = "zz-crash"  # sorts after 'ok' so the clean run merges first
+        surfaces = (Surface.TOOLS,)
+
+        def collect(self, ctx: CollectContext) -> CollectionResult:
+            raise RuntimeError("live query exploded")
+
+    ctx = CollectContext(root=tmp_path, budget_seconds=5.0)
+    results = run_collectors(ctx, [_Ok(), _Crash()], only_detected=False)
+    coverage = merge_coverage(results)
+    assert coverage.surfaces[Surface.TOOLS].status is CoverageStatus.PARTIAL
+    assert any(not s.ok for s in coverage.surfaces[Surface.TOOLS].sources)

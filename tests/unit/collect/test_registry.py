@@ -109,3 +109,28 @@ def test_conflicting_identity_or_incomplete_registry_never_resolves() -> None:
         result = run([{**target, **changed}], lambda url, payload=response: (200, payload))
         assert result.entities[0].resolved.state == "unknown"
         assert result.entities[0].alias_policy is not AliasPinning.PINNED
+
+
+def test_crafted_namespace_or_short_identifier_does_not_match() -> None:
+    evil = {
+        "server": {
+            "name": "com.evil/github",
+            "version": "9.9.9",
+            "packages": [{"registryType": "npm", "identifier": "git", "version": "9.9.9"}],
+            "remotes": [],
+        }
+    }
+    result = run(
+        [
+            {
+                "server_id": "server:github",
+                "name": "github",
+                "package_purl": "pkg:npm/%40acme/github-tools@1.4.2",
+            }
+        ],
+        lambda url: (200, {"servers": [evil]}),
+    )
+    res = result.entities[0]
+    # "git" is a substring of the purl and "com.evil/github" ends with the local
+    # name, but neither is an exact identity: the resolution stays unknown.
+    assert res.resolved.state == "unknown"

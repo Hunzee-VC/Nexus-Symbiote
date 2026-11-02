@@ -61,6 +61,19 @@ from symbiote.model.enums import (
 from symbiote.model.ids import evidence_id, make_id, tool_id
 
 _NS = 1_000_000_000
+# Clamp span timestamps to a sane epoch-nanosecond window: a hostile export must
+# not crash aggregation or datetime conversion with astronomical values.
+_MAX_TIME_NS = 4_102_444_800 * _NS  # 2100-01-01
+
+
+def _safe_ns(value: Any) -> int | None:
+    try:
+        ns = int(value)
+    except (TypeError, ValueError):
+        return None
+    if 0 < ns <= _MAX_TIME_NS:
+        return ns
+    return None
 
 
 def _decode_value(value: Any) -> Any:
@@ -113,8 +126,8 @@ def iter_spans(payload: Any) -> Iterator[SpanFacts]:
                         name=str(span.get("name", "")),
                         attributes=_decode_attributes(span.get("attributes", [])),
                         resource=resource,
-                        start_ns=int(span["startTimeUnixNano"]) if span.get("startTimeUnixNano") else None,
-                        end_ns=int(span["endTimeUnixNano"]) if span.get("endTimeUnixNano") else None,
+                        start_ns=_safe_ns(span.get("startTimeUnixNano")),
+                        end_ns=_safe_ns(span.get("endTimeUnixNano")),
                     )
         return
     if isinstance(payload, Mapping):
@@ -122,8 +135,8 @@ def iter_spans(payload: Any) -> Iterator[SpanFacts]:
             name=str(payload.get("name", "")),
             attributes=_decode_attributes(payload.get("attributes", {})),
             resource=_decode_attributes(payload.get("resource", {})),
-            start_ns=int(payload["startTimeUnixNano"]) if payload.get("startTimeUnixNano") else None,
-            end_ns=int(payload["endTimeUnixNano"]) if payload.get("endTimeUnixNano") else None,
+            start_ns=_safe_ns(payload.get("startTimeUnixNano")),
+            end_ns=_safe_ns(payload.get("endTimeUnixNano")),
         )
 
 
@@ -275,7 +288,7 @@ class OtelTracesCollector(BaseCollector):
                         span.attributes.get("mcp.server.id") or span.resource.get("service.instance.id") or ""
                     )
                     groups.setdefault(identity, []).append(span)
-            except (OSError, TypeError, ValueError, AttributeError) as exc:
+            except (OSError, ValueError, TypeError, KeyError, AttributeError, OverflowError) as exc:
                 result.add_source(
                     Surface.RUNTIME, source, ok=False, error_class="unsupported-source", locator=source
                 )

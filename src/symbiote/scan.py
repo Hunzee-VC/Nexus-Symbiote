@@ -15,6 +15,7 @@ from symbiote.collect import CollectContext, CollectionResult, load_collectors, 
 from symbiote.collect._common import read_bounded, url_facts
 from symbiote.model import AgentBOM, Claim, Edge, Party
 from symbiote.model import enums as E
+from symbiote.model.common import Validity
 from symbiote.model.document import COLLECTIONS
 from symbiote.model.entities import (
     Agent,
@@ -209,6 +210,52 @@ def _corroborate(existing: Entity, other: Entity) -> Entity | None:
     )
 
 
+DIGEST_CONFLICT_TAG = "symbiote:digest-conflict"
+
+
+def _entity_digest(entity: Entity) -> str | None:
+    digest = getattr(entity, "digest", None)
+    value = getattr(digest, "value", None)
+    return value if isinstance(value, str) else None
+
+
+def _absorb(
+    existing: Entity,
+    existing_mode: E.CollectorMode,
+    newcomer: Entity,
+    newcomer_mode: E.CollectorMode,
+) -> tuple[Entity, E.CollectorMode, str | None]:
+    """Assurance-ranked merge of two same-id entities from different collectors.
+
+    An observed-mode collector's entity supersedes a declared-mode stub (the live
+    answer is the fact; the config entry corroborates it) - never the reverse, so a
+    benign stub planted in configuration cannot mask what a server actually serves
+    (I2, SYM-TOOL-002). At equal rank with differing digests the first entry stays
+    but is tagged ``symbiote:digest-conflict`` so the conflict survives into the
+    document, not only into scan warnings.
+    """
+    observed = E.CollectorMode.OBSERVED
+    if newcomer_mode is observed and existing_mode is not observed:
+        merged = _corroborate(newcomer, existing) or newcomer
+        return merged, observed, f"observed {newcomer.id} supersedes its declared stub"
+    if existing_mode is observed and newcomer_mode is not observed:
+        merged = _corroborate(existing, newcomer) or existing
+        return merged, observed, None
+    d_existing, d_new = _entity_digest(existing), _entity_digest(newcomer)
+    if d_existing and d_new and d_existing != d_new:
+        tagged = existing.replace(tags=sorted({*existing.tags, DIGEST_CONFLICT_TAG}))
+        return (
+            tagged,
+            existing_mode,
+            f"duplicate entity {newcomer.id} with conflicting digest "
+            f"({d_existing} vs {d_new}); tagged {DIGEST_CONFLICT_TAG}, first wins",
+        )
+    corroborated = _corroborate(existing, newcomer)
+    if corroborated is None:
+        return existing, existing_mode, f"duplicate entity {newcomer.id} with differing content; first wins"
+    return corroborated, existing_mode, None
+
+
 def _merge_flags(doc: AgentBOM, extra: list[Any]) -> AgentBOM:
     """Merge collector-asserted flags with the engine's (a fired flag wins over unknown/false)."""
     from symbiote.model.document import Derived
@@ -241,6 +288,7 @@ def scan(
     policy: bool = True,
     store: Path | None = None,
     options: Mapping[str, Any] | None = None,
+    validity: Validity | None = None,
 ) -> ScanOutcome:
     """Collect declared facts from ``root`` and return a finalised document."""
     root = Path(root).resolve()
@@ -257,13 +305,18 @@ def scan(
         budget_seconds=budget_seconds,
         options={"declaration": declaration, **dict(options or {})},
     )
-    loaded = load_collectors(collectors) if collectors else load_collectors()
+    load_warnings: list[str] = []
+    loaded = (
+        load_collectors(collectors, warnings=load_warnings)
+        if collectors
+        else load_collectors(warnings=load_warnings)
+    )
     results = run_collectors(ctx, loaded)
 
     buckets: dict[str, dict[str, Entity]] = {attr: {} for attr in COLLECTIONS}
     party_map: dict[str, Party] = {p.id: p for p in parties}
     edges: dict[tuple[str, str, str], Edge] = {}
-    warnings: list[str] = []
+    warnings: list[str] = list(load_warnings)
     collector_flags: list[Any] = []
     foreign_properties: list[Any] = []
     for res in results:
@@ -271,21 +324,26 @@ def scan(
         collector_flags.extend(res.flags)
         foreign_properties.extend(res.foreign_properties)
     buckets["agents"][agent.id] = agent
+    entity_modes: dict[str, E.CollectorMode] = {}
     for res in results:
         warnings.extend(f"{res.collector.name}: {w}" for w in res.warnings)
         for ent in res.entities:
             attr = _collection_for(ent)
             existing = buckets[attr].get(ent.id)
             if existing is not None and existing != ent:
-                merged = _corroborate(existing, ent)
-                if merged is None:
-                    warnings.append(
-                        f"{res.collector.name}: duplicate entity {ent.id} with differing content; first wins"
-                    )
-                    continue
-                buckets[attr][ent.id] = merged
+                survivor, mode, note = _absorb(
+                    existing,
+                    entity_modes.get(ent.id, E.CollectorMode.DECLARED),
+                    ent,
+                    res.collector.mode,
+                )
+                if note:
+                    warnings.append(f"{res.collector.name}: {note}")
+                buckets[attr][ent.id] = survivor
+                entity_modes[ent.id] = mode
                 continue
             buckets[attr][ent.id] = ent
+            entity_modes.setdefault(ent.id, res.collector.mode)
         for p in res.parties:
             party_map.setdefault(p.id, p)
         for ev in res.evidence:
@@ -335,6 +393,8 @@ def scan(
         doc = _merge_flags(doc, collector_flags)
     use_nonce = nonce if nonce is not None else (bytes(32) if deterministic else None)
     chain_issues: list[ChainIssue] = []
+    if validity is not None:
+        doc = doc.replace(snapshot=doc.snapshot.replace(validity=validity.model_dump(mode="python")))
     if store is not None:
         bom, chain_issues = seal_with_chain(doc, ChainStore(store), nonce=use_nonce)
     else:

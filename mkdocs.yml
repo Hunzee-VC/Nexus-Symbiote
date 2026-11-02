@@ -46,11 +46,23 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Quickstart: quickstart.md
+  - The gap analysis: gap-analysis.md
   - Concepts:
       - The four planes: concepts/four-planes.md
       - Assurance, claims and unknowns: concepts/assurance.md
       - Snapshots and the diff: concepts/snapshots.md
       - Digests and the Merkle commitment: concepts/digests.md
+      - Trust model: concepts/trust-model.md
+  - Guides:
+      - Collectors: guides/collectors.md
+      - Policy checks and conformance: guides/policy-and-conformance.md
+      - Attestation and enforcement: guides/attestation-and-enforcement.md
+      - Symbiote in CI: guides/ci.md
+  - Formats:
+      - CycloneDX 1.7: formats/cyclonedx.md
+      - SPDX 3.0.1: formats/spdx.md
+  - Reference:
+      - CLI: reference/cli.md
   - Specification:
       - Overview: spec/README.md
       - AgentBOM profile: spec/agentbom-profile.md
@@ -70,16 +82,28 @@ nav:
       - CLI: spec/cli.md
       - Divergence register: spec/divergences.md
       - Versioning: spec/versioning.md
+      - Decision records:
+          - ADR-0001 Python stack: spec/adr/0001-python-stack.md
+          - ADR-0002 agentbom namespace: spec/adr/0002-agentbom-namespace.md
+          - ADR-0003 CycloneDX direct emission: spec/adr/0003-cyclonedx-direct-emission.md
+          - ADR-0004 Typed digest envelopes: spec/adr/0004-typed-digest-envelopes.md
+          - ADR-0005 Assurance and states: spec/adr/0005-assurance-and-states.md
   - Integrations:
       - Nexus ShadowScan: integrations/shadowscan.md
   - Research:
       - Overview: research/README.md
       - Design brief: research/design-brief.md
+      - Exporter notes: research/exporter-notes-ihvm.md
+      - Proposals:
+          - Enforcement-first: research/proposals/enforcement-first.md
+          - Standards-purist: research/proposals/standards-purist.md
+          - Adoption-first: research/proposals/adoption-first.md
   - Development:
       - Work packages: development/work-packages.md
       - Contributing: contributing.md
-      - Security policy: security.md
-      - Threat model: threat-model.md
+      - Security policy: SECURITY.md
+      - Threat model: THREAT-MODEL.md
+      - Code of conduct: CODE_OF_CONDUCT.md
 
 plugins:
   - search
