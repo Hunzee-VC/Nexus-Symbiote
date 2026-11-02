@@ -1,0 +1,1270 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "serialNumber": "urn:uuid:d798cb04-f25d-5826-b85d-b789e0fa372c",
+  "version": 1,
+  "metadata": {
+    "tools": {
+      "components": [
+        {
+          "type": "application",
+          "name": "ShadowScan",
+          "version": "0.1.4",
+          "externalReferences": [
+            {
+              "type": "vcs",
+              "url": "https://github.com/aisecnomad/Nexus-ShadowScan"
+            }
+          ]
+        }
+      ]
+    },
+    "properties": [
+      {
+        "name": "shadowscan:scan:status",
+        "value": "complete"
+      },
+      {
+        "name": "shadowscan:scan:findings",
+        "value": "12"
+      },
+      {
+        "name": "shadowscan:scan:credential-findings-excluded",
+        "value": "0"
+      },
+      {
+        "name": "shadowscan:scan:connectors",
+        "value": "code.filesystem"
+      },
+      {
+        "name": "shadowscan:scan:inventory-size",
+        "value": "0"
+      }
+    ],
+    "timestamp": "2026-11-01T17:00:15Z"
+  },
+  "components": [
+    {
+      "bom-ref": "shadowscan:framework:coding-agent.agent-skills",
+      "type": "framework",
+      "name": "Agent skill instructions",
+      "description": "A SKILL.md file is an instruction artifact, not evidence that its instructions were executed.",
+      "properties": [
+        {
+          "name": "shadowscan:signature",
+          "value": "coding-agent.agent-skills"
+        },
+        {
+          "name": "shadowscan:category",
+          "value": "coding-agent"
+        }
+      ]
+    },
+    {
+      "bom-ref": "shadowscan:framework:coding-agent.agents-md",
+      "type": "framework",
+      "name": "AGENTS.md convention",
+      "description": "Cross-vendor agent instruction file (OpenAI Codex, Jules, Cursor, Copilot, Amp, Factory, Zed...).",
+      "properties": [
+        {
+          "name": "shadowscan:signature",
+          "value": "coding-agent.agents-md"
+        },
+        {
+          "name": "shadowscan:category",
+          "value": "coding-agent"
+        }
+      ]
+    },
+    {
+      "bom-ref": "shadowscan:framework:coding-agent.claude-code",
+      "type": "framework",
+      "name": "Claude Code",
+      "publisher": "Anthropic",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://docs.anthropic.com/en/docs/claude-code"
+        }
+      ],
+      "properties": [
+        {
+          "name": "shadowscan:signature",
+          "value": "coding-agent.claude-code"
+        },
+        {
+          "name": "shadowscan:category",
+          "value": "coding-agent"
+        }
+      ]
+    },
+    {
+      "bom-ref": "shadowscan:framework:coding-agent.cursor",
+      "type": "framework",
+      "name": "Cursor",
+      "publisher": "Anysphere",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://cursor.com"
+        }
+      ],
+      "properties": [
+        {
+          "name": "shadowscan:signature",
+          "value": "coding-agent.cursor"
+        },
+        {
+          "name": "shadowscan:category",
+          "value": "coding-agent"
+        }
+      ]
+    },
+    {
+      "bom-ref": "shadowscan:framework:coding-agent.gemini-cli",
+      "type": "framework",
+      "name": "Gemini CLI / Jules",
+      "publisher": "Google",
+      "properties": [
+        {
+          "name": "shadowscan:signature",
+          "value": "coding-agent.gemini-cli"
+        },
+        {
+          "name": "shadowscan:category",
+          "value": "coding-agent"
+        }
+      ]
+    },
+    {
+      "bom-ref": "shadowscan:framework:coding-agent.openai-codex",
+      "type": "framework",
+      "name": "OpenAI Codex (CLI / cloud agent)",
+      "publisher": "OpenAI",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://openai.com/codex"
+        }
+      ],
+      "properties": [
+        {
+          "name": "shadowscan:signature",
+          "value": "coding-agent.openai-codex"
+        },
+        {
+          "name": "shadowscan:category",
+          "value": "coding-agent"
+        }
+      ]
+    },
+    {
+      "bom-ref": "shadowscan:framework:protocol.a2a",
+      "type": "framework",
+      "name": "Agent2Agent Protocol (A2A)",
+      "publisher": "Google / Linux Foundation",
+      "description": "Open protocol for agent-to-agent communication; agents publish an Agent Card at /.well-known/agent.json (or agent-card.json).",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://a2a-protocol.org"
+        }
+      ],
+      "properties": [
+        {
+          "name": "shadowscan:signature",
+          "value": "protocol.a2a"
+        },
+        {
+          "name": "shadowscan:category",
+          "value": "protocol"
+        }
+      ]
+    },
+    {
+      "bom-ref": "shadowscan:framework:protocol.mcp",
+      "type": "framework",
+      "name": "Model Context Protocol (MCP)",
+      "publisher": "Anthropic / Linux Foundation (Agentic AI Foundation)",
+      "description": "Standard for connecting agents to tools and data. Servers expose tools (often filesystem, shell, SaaS APIs); clients (Claude Desktop, Cursor, VS Code, custom agents) consume them.",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://modelcontextprotocol.io"
+        }
+      ],
+      "properties": [
+        {
+          "name": "shadowscan:signature",
+          "value": "protocol.mcp"
+        },
+        {
+          "name": "shadowscan:category",
+          "value": "protocol"
+        }
+      ]
+    },
+    {
+      "bom-ref": "ss-0460d932df91f767",
+      "type": "application",
+      "name": "OpenAI Codex (CLI / cloud agent) configured in repository root",
+      "group": "code",
+      "description": "agent-config discovered by code.filesystem",
+      "properties": [
+        {
+          "name": "shadowscan:finding-id",
+          "value": "ss-0460d932df91f767"
+        },
+        {
+          "name": "shadowscan:surface",
+          "value": "code"
+        },
+        {
+          "name": "shadowscan:kind",
+          "value": "agent-config"
+        },
+        {
+          "name": "shadowscan:connector",
+          "value": "code.filesystem"
+        },
+        {
+          "name": "shadowscan:resource",
+          "value": "/work/triage-agent"
+        },
+        {
+          "name": "shadowscan:resource-type",
+          "value": "coding-agent-config"
+        },
+        {
+          "name": "shadowscan:provider",
+          "value": "filesystem"
+        },
+        {
+          "name": "shadowscan:heuristic-risk",
+          "value": "medium"
+        },
+        {
+          "name": "shadowscan:heuristic-risk-score",
+          "value": "38"
+        },
+        {
+          "name": "shadowscan:confidence",
+          "value": "0.90"
+        },
+        {
+          "name": "shadowscan:likelihood",
+          "value": "strong"
+        },
+        {
+          "name": "shadowscan:capabilities",
+          "value": "code-exec, tool-use"
+        },
+        {
+          "name": "shadowscan:threats",
+          "value": "maestro-2025:L3, mitre-atlas-2026.09:AML.T0050, owasp-asi-2026:ASI05, owasp-llm-2026:LLM03"
+        },
+        {
+          "name": "shadowscan:controls",
+          "value": "aiuc-1-2026q2:E, iso-iec-42001-2023:A.3.2, nist-ai-rmf-1.0:GOVERN-2.1"
+        }
+      ]
+    },
+    {
+      "bom-ref": "ss-1d12f92fb6f2c7e6",
+      "type": "application",
+      "name": "Agent skill instructions configured in repository root",
+      "group": "code",
+      "description": "agent-config discovered by code.filesystem",
+      "properties": [
+        {
+          "name": "shadowscan:finding-id",
+          "value": "ss-1d12f92fb6f2c7e6"
+        },
+        {
+          "name": "shadowscan:surface",
+          "value": "code"
+        },
+        {
+          "name": "shadowscan:kind",
+          "value": "agent-config"
+        },
+        {
+          "name": "shadowscan:connector",
+          "value": "code.filesystem"
+        },
+        {
+          "name": "shadowscan:resource",
+          "value": "/work/triage-agent"
+        },
+        {
+          "name": "shadowscan:resource-type",
+          "value": "coding-agent-config"
+        },
+        {
+          "name": "shadowscan:provider",
+          "value": "filesystem"
+        },
+        {
+          "name": "shadowscan:heuristic-risk",
+          "value": "low"
+        },
+        {
+          "name": "shadowscan:heuristic-risk-score",
+          "value": "18"
+        },
+        {
+          "name": "shadowscan:confidence",
+          "value": "0.75"
+        },
+        {
+          "name": "shadowscan:likelihood",
+          "value": "likely"
+        },
+        {
+          "name": "shadowscan:threats",
+          "value": "maestro-2025:L3"
+        },
+        {
+          "name": "shadowscan:controls",
+          "value": "aiuc-1-2026q2:E, iso-iec-42001-2023:A.3.2, nist-ai-rmf-1.0:GOVERN-2.1"
+        }
+      ]
+    },
+    {
+      "bom-ref": "ss-742c3b62ae49d966",
+      "type": "application",
+      "name": "Cursor configured in repository root",
+      "group": "code",
+      "description": "agent-config discovered by code.filesystem",
+      "properties": [
+        {
+          "name": "shadowscan:finding-id",
+          "value": "ss-742c3b62ae49d966"
+        },
+        {
+          "name": "shadowscan:surface",
+          "value": "code"
+        },
+        {
+          "name": "shadowscan:kind",
+          "value": "agent-config"
+        },
+        {
+          "name": "shadowscan:connector",
+          "value": "code.filesystem"
+        },
+        {
+          "name": "shadowscan:resource",
+          "value": "/work/triage-agent"
+        },
+        {
+          "name": "shadowscan:resource-type",
+          "value": "coding-agent-config"
+        },
+        {
+          "name": "shadowscan:provider",
+          "value": "filesystem"
+        },
+        {
+          "name": "shadowscan:heuristic-risk",
+          "value": "high"
+        },
+        {
+          "name": "shadowscan:heuristic-risk-score",
+          "value": "51"
+        },
+        {
+          "name": "shadowscan:confidence",
+          "value": "0.90"
+        },
+        {
+          "name": "shadowscan:likelihood",
+          "value": "strong"
+        },
+        {
+          "name": "shadowscan:capabilities",
+          "value": "code-exec, tool-use, multi-agent"
+        },
+        {
+          "name": "shadowscan:threats",
+          "value": "maestro-2025:L3, maestro-2025:L7, mitre-atlas-2026.09:AML.T0050, mitre-atlas-2026.09:AML.T0118, owasp-asi-2026:ASI05, owasp-asi-2026:ASI07, owasp-asi-2026:ASI08, owasp-llm-2026:LLM03"
+        },
+        {
+          "name": "shadowscan:controls",
+          "value": "aiuc-1-2026q2:E, iso-iec-42001-2023:A.3.2, iso-iec-42001-2023:A.6.2.6, nist-ai-rmf-1.0:GOVERN-2.1, nist-ai-rmf-1.0:MANAGE-4.1"
+        }
+      ]
+    },
+    {
+      "bom-ref": "ss-74cc3d6b986d671a",
+      "type": "application",
+      "name": "Gemini CLI / Jules configured in repository root",
+      "group": "code",
+      "description": "agent-config discovered by code.filesystem",
+      "properties": [
+        {
+          "name": "shadowscan:finding-id",
+          "value": "ss-74cc3d6b986d671a"
+        },
+        {
+          "name": "shadowscan:surface",
+          "value": "code"
+        },
+        {
+          "name": "shadowscan:kind",
+          "value": "agent-config"
+        },
+        {
+          "name": "shadowscan:connector",
+          "value": "code.filesystem"
+        },
+        {
+          "name": "shadowscan:resource",
+          "value": "/work/triage-agent"
+        },
+        {
+          "name": "shadowscan:resource-type",
+          "value": "coding-agent-config"
+        },
+        {
+          "name": "shadowscan:provider",
+          "value": "filesystem"
+        },
+        {
+          "name": "shadowscan:heuristic-risk",
+          "value": "medium"
+        },
+        {
+          "name": "shadowscan:heuristic-risk-score",
+          "value": "38"
+        },
+        {
+          "name": "shadowscan:confidence",
+          "value": "0.90"
+        },
+        {
+          "name": "shadowscan:likelihood",
+          "value": "strong"
+        },
+        {
+          "name": "shadowscan:capabilities",
+          "value": "code-exec, tool-use"
+        },
+        {
+          "name": "shadowscan:threats",
+          "value": "maestro-2025:L3, mitre-atlas-2026.09:AML.T0050, owasp-asi-2026:ASI05, owasp-llm-2026:LLM03"
+        },
+        {
+          "name": "shadowscan:controls",
+          "value": "aiuc-1-2026q2:E, iso-iec-42001-2023:A.3.2, nist-ai-rmf-1.0:GOVERN-2.1"
+        }
+      ]
+    },
+    {
+      "bom-ref": "ss-b3b3a0a3cde7f25e",
+      "type": "application",
+      "name": "A2A agent card: release-notes-writer",
+      "group": "code",
+      "description": "agent discovered by code.filesystem",
+      "properties": [
+        {
+          "name": "shadowscan:finding-id",
+          "value": "ss-b3b3a0a3cde7f25e"
+        },
+        {
+          "name": "shadowscan:surface",
+          "value": "code"
+        },
+        {
+          "name": "shadowscan:kind",
+          "value": "agent"
+        },
+        {
+          "name": "shadowscan:connector",
+          "value": "code.filesystem"
+        },
+        {
+          "name": "shadowscan:resource",
+          "value": "/work/triage-agent/agent-card.json"
+        },
+        {
+          "name": "shadowscan:resource-type",
+          "value": "agent-manifest"
+        },
+        {
+          "name": "shadowscan:provider",
+          "value": "filesystem"
+        },
+        {
+          "name": "shadowscan:heuristic-risk",
+          "value": "medium"
+        },
+        {
+          "name": "shadowscan:heuristic-risk-score",
+          "value": "29"
+        },
+        {
+          "name": "shadowscan:confidence",
+          "value": "0.95"
+        },
+        {
+          "name": "shadowscan:likelihood",
+          "value": "strong"
+        },
+        {
+          "name": "shadowscan:capabilities",
+          "value": "multi-agent"
+        },
+        {
+          "name": "shadowscan:threats",
+          "value": "maestro-2025:L3, maestro-2025:L7, mitre-atlas-2026.09:AML.T0118, owasp-asi-2026:ASI07, owasp-asi-2026:ASI08"
+        },
+        {
+          "name": "shadowscan:controls",
+          "value": "aiuc-1-2026q2:E, iso-iec-42001-2023:A.3.2, iso-iec-42001-2023:A.6.2.6, nist-ai-rmf-1.0:GOVERN-2.1, nist-ai-rmf-1.0:MANAGE-4.1"
+        }
+      ]
+    },
+    {
+      "bom-ref": "ss-c3d11ab3bccdb875",
+      "type": "application",
+      "name": "Claude Code configured in repository root",
+      "group": "code",
+      "description": "agent-config discovered by code.filesystem",
+      "properties": [
+        {
+          "name": "shadowscan:finding-id",
+          "value": "ss-c3d11ab3bccdb875"
+        },
+        {
+          "name": "shadowscan:surface",
+          "value": "code"
+        },
+        {
+          "name": "shadowscan:kind",
+          "value": "agent-config"
+        },
+        {
+          "name": "shadowscan:connector",
+          "value": "code.filesystem"
+        },
+        {
+          "name": "shadowscan:resource",
+          "value": "/work/triage-agent"
+        },
+        {
+          "name": "shadowscan:resource-type",
+          "value": "coding-agent-config"
+        },
+        {
+          "name": "shadowscan:provider",
+          "value": "filesystem"
+        },
+        {
+          "name": "shadowscan:heuristic-risk",
+          "value": "medium"
+        },
+        {
+          "name": "shadowscan:heuristic-risk-score",
+          "value": "40"
+        },
+        {
+          "name": "shadowscan:confidence",
+          "value": "0.98"
+        },
+        {
+          "name": "shadowscan:likelihood",
+          "value": "strong"
+        },
+        {
+          "name": "shadowscan:capabilities",
+          "value": "code-exec, tool-use"
+        },
+        {
+          "name": "shadowscan:threats",
+          "value": "maestro-2025:L3, mitre-atlas-2026.09:AML.T0050, owasp-asi-2026:ASI05, owasp-llm-2026:LLM03"
+        },
+        {
+          "name": "shadowscan:controls",
+          "value": "aiuc-1-2026q2:E, iso-iec-42001-2023:A.3.2, nist-ai-rmf-1.0:GOVERN-2.1"
+        }
+      ]
+    },
+    {
+      "bom-ref": "ss-cb041acc846c98aa",
+      "type": "application",
+      "name": "AGENTS.md convention configured in repository root",
+      "group": "code",
+      "description": "agent-config discovered by code.filesystem",
+      "properties": [
+        {
+          "name": "shadowscan:finding-id",
+          "value": "ss-cb041acc846c98aa"
+        },
+        {
+          "name": "shadowscan:surface",
+          "value": "code"
+        },
+        {
+          "name": "shadowscan:kind",
+          "value": "agent-config"
+        },
+        {
+          "name": "shadowscan:connector",
+          "value": "code.filesystem"
+        },
+        {
+          "name": "shadowscan:resource",
+          "value": "/work/triage-agent"
+        },
+        {
+          "name": "shadowscan:resource-type",
+          "value": "coding-agent-config"
+        },
+        {
+          "name": "shadowscan:provider",
+          "value": "filesystem"
+        },
+        {
+          "name": "shadowscan:heuristic-risk",
+          "value": "low"
+        },
+        {
+          "name": "shadowscan:heuristic-risk-score",
+          "value": "19"
+        },
+        {
+          "name": "shadowscan:confidence",
+          "value": "0.85"
+        },
+        {
+          "name": "shadowscan:likelihood",
+          "value": "strong"
+        },
+        {
+          "name": "shadowscan:threats",
+          "value": "maestro-2025:L3"
+        },
+        {
+          "name": "shadowscan:controls",
+          "value": "aiuc-1-2026q2:E, iso-iec-42001-2023:A.3.2, nist-ai-rmf-1.0:GOVERN-2.1"
+        }
+      ]
+    }
+  ],
+  "services": [
+    {
+      "bom-ref": "ss-450127b04d801233",
+      "name": "MCP configuration: .gemini/settings.json",
+      "group": "code",
+      "description": "mcp-server discovered by code.filesystem",
+      "properties": [
+        {
+          "name": "shadowscan:finding-id",
+          "value": "ss-450127b04d801233"
+        },
+        {
+          "name": "shadowscan:surface",
+          "value": "code"
+        },
+        {
+          "name": "shadowscan:kind",
+          "value": "mcp-server"
+        },
+        {
+          "name": "shadowscan:connector",
+          "value": "code.filesystem"
+        },
+        {
+          "name": "shadowscan:resource",
+          "value": "/work/triage-agent/.gemini/settings.json"
+        },
+        {
+          "name": "shadowscan:resource-type",
+          "value": "mcp-config"
+        },
+        {
+          "name": "shadowscan:provider",
+          "value": "filesystem"
+        },
+        {
+          "name": "shadowscan:heuristic-risk",
+          "value": "high"
+        },
+        {
+          "name": "shadowscan:heuristic-risk-score",
+          "value": "59"
+        },
+        {
+          "name": "shadowscan:confidence",
+          "value": "0.95"
+        },
+        {
+          "name": "shadowscan:likelihood",
+          "value": "strong"
+        },
+        {
+          "name": "shadowscan:capabilities",
+          "value": "tool-use, data-access"
+        },
+        {
+          "name": "shadowscan:tags",
+          "value": "mcp-unpinned-package"
+        },
+        {
+          "name": "shadowscan:threats",
+          "value": "maestro-2025:L2, maestro-2025:L3, mitre-atlas-2026.09:AML.T0010.005, mitre-atlas-2026.09:AML.T0109, owasp-asi-2026:ASI04, owasp-llm-2026:LLM04"
+        },
+        {
+          "name": "shadowscan:controls",
+          "value": "aiuc-1-2026q2:E, iso-iec-42001-2023:A.10.3, iso-iec-42001-2023:A.3.2, nist-ai-rmf-1.0:GOVERN-2.1, nist-ai-rmf-1.0:GOVERN-6.1, nist-ai-rmf-1.0:MANAGE-3.1, nist-ai-rmf-1.0:MAP-4.1"
+        }
+      ]
+    },
+    {
+      "bom-ref": "ss-58f2b50bc4a60ac7",
+      "name": "MCP configuration: .vscode/mcp.json",
+      "group": "code",
+      "description": "mcp-server discovered by code.filesystem",
+      "properties": [
+        {
+          "name": "shadowscan:finding-id",
+          "value": "ss-58f2b50bc4a60ac7"
+        },
+        {
+          "name": "shadowscan:surface",
+          "value": "code"
+        },
+        {
+          "name": "shadowscan:kind",
+          "value": "mcp-server"
+        },
+        {
+          "name": "shadowscan:connector",
+          "value": "code.filesystem"
+        },
+        {
+          "name": "shadowscan:resource",
+          "value": "/work/triage-agent/.vscode/mcp.json"
+        },
+        {
+          "name": "shadowscan:resource-type",
+          "value": "mcp-config"
+        },
+        {
+          "name": "shadowscan:provider",
+          "value": "filesystem"
+        },
+        {
+          "name": "shadowscan:heuristic-risk",
+          "value": "high"
+        },
+        {
+          "name": "shadowscan:heuristic-risk-score",
+          "value": "50"
+        },
+        {
+          "name": "shadowscan:confidence",
+          "value": "0.99"
+        },
+        {
+          "name": "shadowscan:likelihood",
+          "value": "strong"
+        },
+        {
+          "name": "shadowscan:capabilities",
+          "value": "tool-use, data-access"
+        },
+        {
+          "name": "shadowscan:threats",
+          "value": "maestro-2025:L2, maestro-2025:L3"
+        },
+        {
+          "name": "shadowscan:controls",
+          "value": "aiuc-1-2026q2:E, iso-iec-42001-2023:A.3.2, nist-ai-rmf-1.0:GOVERN-2.1"
+        }
+      ]
+    },
+    {
+      "bom-ref": "ss-79caa859920ebb98",
+      "name": "MCP configuration: .mcp.json",
+      "group": "code",
+      "description": "mcp-server discovered by code.filesystem",
+      "properties": [
+        {
+          "name": "shadowscan:finding-id",
+          "value": "ss-79caa859920ebb98"
+        },
+        {
+          "name": "shadowscan:surface",
+          "value": "code"
+        },
+        {
+          "name": "shadowscan:kind",
+          "value": "mcp-server"
+        },
+        {
+          "name": "shadowscan:connector",
+          "value": "code.filesystem"
+        },
+        {
+          "name": "shadowscan:resource",
+          "value": "/work/triage-agent/.mcp.json"
+        },
+        {
+          "name": "shadowscan:resource-type",
+          "value": "mcp-config"
+        },
+        {
+          "name": "shadowscan:provider",
+          "value": "filesystem"
+        },
+        {
+          "name": "shadowscan:heuristic-risk",
+          "value": "critical"
+        },
+        {
+          "name": "shadowscan:heuristic-risk-score",
+          "value": "75"
+        },
+        {
+          "name": "shadowscan:confidence",
+          "value": "0.99"
+        },
+        {
+          "name": "shadowscan:likelihood",
+          "value": "strong"
+        },
+        {
+          "name": "shadowscan:capabilities",
+          "value": "tool-use, data-access"
+        },
+        {
+          "name": "shadowscan:tags",
+          "value": "inline-secrets, mcp-unpinned-package"
+        },
+        {
+          "name": "shadowscan:threats",
+          "value": "maestro-2025:L2, maestro-2025:L3, mitre-atlas-2026.09:AML.T0010.005, mitre-atlas-2026.09:AML.T0055, mitre-atlas-2026.09:AML.T0083, mitre-atlas-2026.09:AML.T0109, owasp-asi-2026:ASI03, owasp-asi-2026:ASI04, owasp-llm-2026:LLM02, owasp-llm-2026:LLM04"
+        },
+        {
+          "name": "shadowscan:controls",
+          "value": "aiuc-1-2026q2:B, aiuc-1-2026q2:E, eu-ai-act-2024:Art.15, iso-iec-42001-2023:A.10.3, iso-iec-42001-2023:A.3.2, nist-ai-rmf-1.0:GOVERN-2.1, nist-ai-rmf-1.0:GOVERN-6.1, nist-ai-rmf-1.0:MANAGE-3.1, nist-ai-rmf-1.0:MAP-4.1, nist-ai-rmf-1.0:MEASURE-2.7"
+        }
+      ]
+    },
+    {
+      "bom-ref": "ss-956be771585d4e70",
+      "name": "MCP configuration: .codex/config.toml",
+      "group": "code",
+      "description": "mcp-server discovered by code.filesystem",
+      "properties": [
+        {
+          "name": "shadowscan:finding-id",
+          "value": "ss-956be771585d4e70"
+        },
+        {
+          "name": "shadowscan:surface",
+          "value": "code"
+        },
+        {
+          "name": "shadowscan:kind",
+          "value": "mcp-server"
+        },
+        {
+          "name": "shadowscan:connector",
+          "value": "code.filesystem"
+        },
+        {
+          "name": "shadowscan:resource",
+          "value": "/work/triage-agent/.codex/config.toml"
+        },
+        {
+          "name": "shadowscan:resource-type",
+          "value": "mcp-config"
+        },
+        {
+          "name": "shadowscan:provider",
+          "value": "filesystem"
+        },
+        {
+          "name": "shadowscan:heuristic-risk",
+          "value": "medium"
+        },
+        {
+          "name": "shadowscan:heuristic-risk-score",
+          "value": "40"
+        },
+        {
+          "name": "shadowscan:confidence",
+          "value": "0.99"
+        },
+        {
+          "name": "shadowscan:likelihood",
+          "value": "strong"
+        },
+        {
+          "name": "shadowscan:capabilities",
+          "value": "tool-use"
+        },
+        {
+          "name": "shadowscan:threats",
+          "value": "maestro-2025:L3"
+        },
+        {
+          "name": "shadowscan:controls",
+          "value": "aiuc-1-2026q2:E, iso-iec-42001-2023:A.3.2, nist-ai-rmf-1.0:GOVERN-2.1"
+        }
+      ]
+    },
+    {
+      "bom-ref": "ss-b3b1612c3184a120",
+      "name": "MCP configuration: .cursor/mcp.json",
+      "group": "code",
+      "description": "mcp-server discovered by code.filesystem",
+      "properties": [
+        {
+          "name": "shadowscan:finding-id",
+          "value": "ss-b3b1612c3184a120"
+        },
+        {
+          "name": "shadowscan:surface",
+          "value": "code"
+        },
+        {
+          "name": "shadowscan:kind",
+          "value": "mcp-server"
+        },
+        {
+          "name": "shadowscan:connector",
+          "value": "code.filesystem"
+        },
+        {
+          "name": "shadowscan:resource",
+          "value": "/work/triage-agent/.cursor/mcp.json"
+        },
+        {
+          "name": "shadowscan:resource-type",
+          "value": "mcp-config"
+        },
+        {
+          "name": "shadowscan:provider",
+          "value": "filesystem"
+        },
+        {
+          "name": "shadowscan:heuristic-risk",
+          "value": "medium"
+        },
+        {
+          "name": "shadowscan:heuristic-risk-score",
+          "value": "35"
+        },
+        {
+          "name": "shadowscan:confidence",
+          "value": "0.99"
+        },
+        {
+          "name": "shadowscan:likelihood",
+          "value": "strong"
+        },
+        {
+          "name": "shadowscan:capabilities",
+          "value": "tool-use"
+        },
+        {
+          "name": "shadowscan:threats",
+          "value": "maestro-2025:L3"
+        },
+        {
+          "name": "shadowscan:controls",
+          "value": "aiuc-1-2026q2:E, iso-iec-42001-2023:A.3.2, nist-ai-rmf-1.0:GOVERN-2.1"
+        }
+      ]
+    },
+    {
+      "bom-ref": "shadowscan:mcp:193434b151e2afa4",
+      "name": "filesystem",
+      "group": "mcp-server",
+      "properties": [
+        {
+          "name": "shadowscan:mcp:transport",
+          "value": "stdio"
+        },
+        {
+          "name": "shadowscan:mcp:command",
+          "value": "npx"
+        },
+        {
+          "name": "shadowscan:mcp:disabled",
+          "value": "false"
+        },
+        {
+          "name": "shadowscan:mcp:risks",
+          "value": "mcp-unpinned-package"
+        }
+      ]
+    },
+    {
+      "bom-ref": "shadowscan:mcp:1baea1ef34f59411",
+      "name": "filesystem",
+      "group": "mcp-server",
+      "properties": [
+        {
+          "name": "shadowscan:mcp:transport",
+          "value": "stdio"
+        },
+        {
+          "name": "shadowscan:mcp:command",
+          "value": "npx"
+        },
+        {
+          "name": "shadowscan:mcp:disabled",
+          "value": "false"
+        },
+        {
+          "name": "shadowscan:mcp:risks",
+          "value": "mcp-unpinned-package"
+        }
+      ]
+    },
+    {
+      "bom-ref": "shadowscan:mcp:65ff7af9cf14318b",
+      "name": "filesystem",
+      "group": "mcp-server",
+      "properties": [
+        {
+          "name": "shadowscan:mcp:transport",
+          "value": "stdio"
+        },
+        {
+          "name": "shadowscan:mcp:command",
+          "value": "npx"
+        },
+        {
+          "name": "shadowscan:mcp:disabled",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "bom-ref": "shadowscan:mcp:a92c6cd859f2f8f7",
+      "name": "github",
+      "group": "mcp-server",
+      "endpoints": [
+        "https://api.githubcopilot.com/mcp/"
+      ],
+      "properties": [
+        {
+          "name": "shadowscan:mcp:transport",
+          "value": "http"
+        },
+        {
+          "name": "shadowscan:mcp:disabled",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "bom-ref": "shadowscan:mcp:cc53fe4339d39213",
+      "name": "triage-tools",
+      "group": "mcp-server",
+      "properties": [
+        {
+          "name": "shadowscan:mcp:transport",
+          "value": "stdio"
+        },
+        {
+          "name": "shadowscan:mcp:command",
+          "value": "uvx"
+        },
+        {
+          "name": "shadowscan:mcp:disabled",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "bom-ref": "shadowscan:mcp:e60ae07ec22be150",
+      "name": "github",
+      "group": "mcp-server",
+      "endpoints": [
+        "https://api.githubcopilot.com/mcp/"
+      ],
+      "properties": [
+        {
+          "name": "shadowscan:mcp:transport",
+          "value": "http"
+        },
+        {
+          "name": "shadowscan:mcp:disabled",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "bom-ref": "shadowscan:mcp:e7b91a6556d2322f",
+      "name": "github",
+      "group": "mcp-server",
+      "endpoints": [
+        "https://api.githubcopilot.com/mcp/"
+      ],
+      "properties": [
+        {
+          "name": "shadowscan:mcp:transport",
+          "value": "http"
+        },
+        {
+          "name": "shadowscan:mcp:disabled",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "bom-ref": "shadowscan:mcp:ef6b06879bdc323f",
+      "name": "triage-tools",
+      "group": "mcp-server",
+      "properties": [
+        {
+          "name": "shadowscan:mcp:transport",
+          "value": "stdio"
+        },
+        {
+          "name": "shadowscan:mcp:command",
+          "value": "uvx"
+        },
+        {
+          "name": "shadowscan:mcp:disabled",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "bom-ref": "shadowscan:mcp:fd65dddd61adccb4",
+      "name": "github",
+      "group": "mcp-server",
+      "endpoints": [
+        "https://api.githubcopilot.com/mcp/"
+      ],
+      "properties": [
+        {
+          "name": "shadowscan:mcp:transport",
+          "value": "http"
+        },
+        {
+          "name": "shadowscan:mcp:disabled",
+          "value": "false"
+        }
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "ss-0460d932df91f767",
+      "dependsOn": [
+        "shadowscan:framework:coding-agent.openai-codex"
+      ]
+    },
+    {
+      "ref": "ss-1d12f92fb6f2c7e6",
+      "dependsOn": [
+        "shadowscan:framework:coding-agent.agent-skills"
+      ]
+    },
+    {
+      "ref": "ss-450127b04d801233",
+      "dependsOn": [
+        "shadowscan:framework:protocol.mcp",
+        "shadowscan:mcp:1baea1ef34f59411"
+      ]
+    },
+    {
+      "ref": "ss-58f2b50bc4a60ac7",
+      "dependsOn": [
+        "shadowscan:framework:protocol.mcp",
+        "shadowscan:mcp:65ff7af9cf14318b",
+        "shadowscan:mcp:fd65dddd61adccb4"
+      ]
+    },
+    {
+      "ref": "ss-742c3b62ae49d966",
+      "dependsOn": [
+        "shadowscan:framework:coding-agent.cursor"
+      ]
+    },
+    {
+      "ref": "ss-74cc3d6b986d671a",
+      "dependsOn": [
+        "shadowscan:framework:coding-agent.gemini-cli"
+      ]
+    },
+    {
+      "ref": "ss-79caa859920ebb98",
+      "dependsOn": [
+        "shadowscan:framework:protocol.mcp",
+        "shadowscan:mcp:193434b151e2afa4",
+        "shadowscan:mcp:cc53fe4339d39213",
+        "shadowscan:mcp:e60ae07ec22be150"
+      ]
+    },
+    {
+      "ref": "ss-956be771585d4e70",
+      "dependsOn": [
+        "shadowscan:framework:protocol.mcp",
+        "shadowscan:mcp:a92c6cd859f2f8f7",
+        "shadowscan:mcp:ef6b06879bdc323f"
+      ]
+    },
+    {
+      "ref": "ss-b3b1612c3184a120",
+      "dependsOn": [
+        "shadowscan:framework:protocol.mcp",
+        "shadowscan:mcp:e7b91a6556d2322f"
+      ]
+    },
+    {
+      "ref": "ss-b3b3a0a3cde7f25e",
+      "dependsOn": [
+        "shadowscan:framework:protocol.a2a"
+      ]
+    },
+    {
+      "ref": "ss-c3d11ab3bccdb875",
+      "dependsOn": [
+        "shadowscan:framework:coding-agent.claude-code"
+      ]
+    },
+    {
+      "ref": "ss-cb041acc846c98aa",
+      "dependsOn": [
+        "shadowscan:framework:coding-agent.agents-md"
+      ]
+    }
+  ],
+  "compositions": [
+    {
+      "aggregate": "unknown",
+      "assemblies": [
+        "shadowscan:framework:coding-agent.agent-skills",
+        "shadowscan:framework:coding-agent.agents-md",
+        "shadowscan:framework:coding-agent.claude-code",
+        "shadowscan:framework:coding-agent.cursor",
+        "shadowscan:framework:coding-agent.gemini-cli",
+        "shadowscan:framework:coding-agent.openai-codex",
+        "shadowscan:framework:protocol.a2a",
+        "shadowscan:framework:protocol.mcp",
+        "ss-0460d932df91f767",
+        "ss-1d12f92fb6f2c7e6",
+        "ss-742c3b62ae49d966",
+        "ss-74cc3d6b986d671a",
+        "ss-b3b3a0a3cde7f25e",
+        "ss-c3d11ab3bccdb875",
+        "ss-cb041acc846c98aa",
+        "ss-450127b04d801233",
+        "ss-58f2b50bc4a60ac7",
+        "ss-79caa859920ebb98",
+        "ss-956be771585d4e70",
+        "ss-b3b1612c3184a120"
+      ]
+    }
+  ]
+}

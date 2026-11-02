@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -157,6 +158,74 @@ def root_agent_from(
     return agent, parties
 
 
+def _apply_root_updates(agent: Agent, updates: Mapping[str, Any], warnings: list[str], who: str) -> Agent:
+    """Apply a collector's facts about the root agent (autonomy assessment, tags, foreign facts, framework)."""
+    if not updates:
+        return agent
+    changes: dict[str, Any] = {}
+    for key, value in updates.items():
+        if key == "tags":
+            changes["tags"] = sorted(set(agent.tags) | set(value))
+        elif key == "foreign":
+            changes["foreign"] = {**agent.foreign, **dict(value)}
+        elif key == "autonomy_profile":
+            existing = {(a.capability, a.mode) for a in agent.autonomy_profile}
+            new = [a for a in value if (a.capability, a.mode) not in existing]
+            changes["autonomy_profile"] = [*agent.autonomy_profile, *new]
+        elif key in ("autonomy_assessment", "framework"):
+            if getattr(agent, key) is None:
+                changes[key] = value
+        elif key == "automation_level":
+            current = agent.automation_level
+            # an owner's declaration is kept; the observed interval lives in autonomy_assessment
+            if current is None:
+                changes[key] = value
+        else:
+            warnings.append(f"{who}: ignored root update {key!r}")
+    if not changes:
+        return agent
+    return agent.replace(**changes)
+
+
+def _corroborate(existing: Entity, other: Entity) -> Entity | None:
+    """Merge a second observation of the same entity: union of tags, foreign facts and provenance evidence.
+
+    The first collector's fields stay authoritative (name is locator, digest is identity); the newcomer adds the
+    evidence it cites, so a declared server corroborated by an observed report keeps one id and two citations.
+    ``None`` when the newcomer brings no evidence to add (then the caller keeps the first and warns).
+    """
+    if not other.provenance.evidence:
+        return None
+    seen = {e.digest for e in existing.provenance.evidence}
+    evidence = [
+        *existing.provenance.evidence,
+        *(e for e in other.provenance.evidence if e.digest not in seen),
+    ]
+    provenance = existing.provenance.replace(evidence=evidence)
+    return existing.replace(
+        tags=sorted(set(existing.tags) | set(other.tags)),
+        foreign={**other.foreign, **existing.foreign},
+        provenance=provenance,
+    )
+
+
+def _merge_flags(doc: AgentBOM, extra: list[Any]) -> AgentBOM:
+    """Merge collector-asserted flags with the engine's (a fired flag wins over unknown/false)."""
+    from symbiote.model.document import Derived
+
+    rank = {"true": 2, "false": 1, "unknown": 0}
+    seen: dict[tuple[str, str], Any] = {}
+    for fl in [*doc.derived.flags, *extra]:
+        key = (fl.flag.value, fl.subject_ref)
+        current = seen.get(key)
+        if current is None or rank[fl.value.value] > rank[current.value.value]:
+            seen[key] = fl
+    flags = sorted(seen.values(), key=lambda f: (f.flag.value, f.subject_ref))
+    return doc.replace(
+        derived=Derived(flags=flags, findings=list(doc.derived.findings)).model_dump(mode="python")
+    )
+
+
 def scan(
     root: Path,
     *,
@@ -171,6 +240,7 @@ def scan(
     budget_seconds: float = 20.0,
     policy: bool = True,
     store: Path | None = None,
+    options: Mapping[str, Any] | None = None,
 ) -> ScanOutcome:
     """Collect declared facts from ``root`` and return a finalised document."""
     root = Path(root).resolve()
@@ -185,23 +255,35 @@ def scan(
         deterministic=deterministic,
         include_text=include_text,
         budget_seconds=budget_seconds,
+        options={"declaration": declaration, **dict(options or {})},
     )
     loaded = load_collectors(collectors) if collectors else load_collectors()
     results = run_collectors(ctx, loaded)
 
     buckets: dict[str, dict[str, Entity]] = {attr: {} for attr in COLLECTIONS}
-    buckets["agents"][agent.id] = agent
     party_map: dict[str, Party] = {p.id: p for p in parties}
     edges: dict[tuple[str, str, str], Edge] = {}
     warnings: list[str] = []
+    collector_flags: list[Any] = []
+    foreign_properties: list[Any] = []
+    for res in results:
+        agent = _apply_root_updates(agent, res.root_updates, warnings, res.collector.name)
+        collector_flags.extend(res.flags)
+        foreign_properties.extend(res.foreign_properties)
+    buckets["agents"][agent.id] = agent
     for res in results:
         warnings.extend(f"{res.collector.name}: {w}" for w in res.warnings)
         for ent in res.entities:
             attr = _collection_for(ent)
-            if ent.id in buckets[attr] and buckets[attr][ent.id] != ent:
-                warnings.append(
-                    f"{res.collector.name}: duplicate entity {ent.id} with differing content; first wins"
-                )
+            existing = buckets[attr].get(ent.id)
+            if existing is not None and existing != ent:
+                merged = _corroborate(existing, ent)
+                if merged is None:
+                    warnings.append(
+                        f"{res.collector.name}: duplicate entity {ent.id} with differing content; first wins"
+                    )
+                    continue
+                buckets[attr][ent.id] = merged
                 continue
             buckets[attr][ent.id] = ent
         for p in res.parties:
@@ -222,7 +304,7 @@ def scan(
     producer = Producer(
         version=__version__,
         collectors=[
-            Collector(name=r.collector.name, version=r.collector.version, mode=E.CollectorMode.DECLARED)
+            Collector(name=r.collector.name, version=r.collector.version, mode=r.collector.mode)
             for r in results
         ],
     )
@@ -240,6 +322,7 @@ def scan(
         edges=sorted(kept_edges, key=lambda e: e.key),
         coverage=coverage,
         redactions=redactions,
+        foreign_properties=foreign_properties,
         **collections,
     )
     policy_result = None
@@ -248,6 +331,8 @@ def scan(
 
         policy_result = run_policy(doc, now=now)
         doc = policy_result.apply(doc)
+    if collector_flags:
+        doc = _merge_flags(doc, collector_flags)
     use_nonce = nonce if nonce is not None else (bytes(32) if deterministic else None)
     chain_issues: list[ChainIssue] = []
     if store is not None:

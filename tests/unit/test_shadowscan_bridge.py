@@ -52,8 +52,10 @@ def sealed_bom():
     deploy = Deployment(
         id="deploy:prod",
         agent_ref="agent:claims-assistant",
-        environment=Environment(kind=E.EnvironmentKind.K8S, namespace="claims-prod"),
-        workload_ref=WorkloadRef(namespace="claims-prod", name="claims-assistant", uid="uid-claims-1"),
+        environment=Environment(kind=E.EnvironmentKind.K8S, cluster="prod-eu", namespace="claims-prod"),
+        workload_ref=WorkloadRef(
+            kind="Deployment", namespace="claims-prod", name="claims-assistant", uid="uid-claims-1"
+        ),
     )
     server = ToolServer(
         id="server:github",
@@ -134,11 +136,15 @@ def test_capability_card_carries_identity_autonomy_and_tool_digests() -> None:
 
 
 def test_discovery_resources_match_the_shadowscan_loader_derivation() -> None:
-    resources = discovery_resources(sealed_bom())
-    assert "uid-claims-1" in resources
-    assert "k8s:claims-prod/claims-assistant" in resources
-    assert "https://mcp.claims.example.com/kb" in resources
-    assert "pkg:npm/%40acme/github-tools@1.4.2" in resources
+    """Bindings follow ShadowScan's AgentBOM loader (PR #335): complete k8s identities approve; endpoints,
+    purls and bare workload UIDs are descriptive ``component_resources`` and never approve."""
+    bom = sealed_bom()
+    resources = discovery_resources(bom)
+    assert resources == ["k8s:prod-eu/claims-prod/Deployment/claims-assistant"]
+    card = to_capability_card(bom)
+    assert "https://mcp.claims.example.com/kb" in card["provenance"]["component_resources"]
+    assert "pkg:npm/%40acme/github-tools@1.4.2" in card["provenance"]["component_resources"]
+    assert "uid-claims-1" not in resources
 
 
 def test_unknown_automation_level_exports_no_level() -> None:
@@ -155,7 +161,7 @@ def test_simple_inventory_shape() -> None:
     assert entry["id"] == "agent:claims-assistant"
     assert entry["owner"] == "Claims IT"
     assert entry["autonomy_level"] == 3
-    assert "https://mcp.claims.example.com/kb" in entry["resources"]
+    assert entry["resources"] == ["k8s:prod-eu/claims-prod/Deployment/claims-assistant"]
 
 
 # --------------------------------------------------------------------------- import
@@ -168,15 +174,24 @@ def _report() -> dict:
 def test_import_maps_mcp_findings_autonomy_and_coverage() -> None:
     result = import_shadowscan(_report(), agent_id="agent:claims-assistant", now=NOW)
     assert result.tool_servers, "mcp-server finding becomes an observed ToolServer stub"
-    server = result.tool_servers[0]
-    assert server.transport.is_unknown  # the scan could not establish transport: stays unknown
+    server = next(s for s in result.tool_servers if s.name == "github")
+    assert server.id == "server:claude-code-github"  # same id scheme as the mcp-config collector
+    assert (
+        server.transport.value is E.Transport.STDIO
+    )  # derived from the server's command, declared assurance
+    assert server.provenance.assurance is E.AssuranceLevel.DECLARED
     assert result.automation_level is not None
     assert result.automation_level.value is E.IsoAutomationLevel.HIGH_AUTOMATION  # floor L4
     assert result.automation_level.assurance is E.AssuranceLevel.OBSERVED
     assert result.autonomy_interval is not None and result.autonomy_interval.ceiling == 5
     assert any("ceiling L5" in w for w in result.warnings)  # the interval is never dropped
-    assert result.coverage[Surface.CODE].status is E.CoverageStatus.QUERIED
-    assert any("lowcode" in w for w in result.warnings)  # unmapped surface reported, not force-fitted
+    # the fixture carries no connector stats, so no surface can be called queried: unknown ≠ absent (I2)
+    assert (
+        Surface.CODE not in result.coverage
+        or result.coverage[Surface.CODE].status is not E.CoverageStatus.QUERIED
+    )
+    lowcode = next(a for a in result.detail.agents if a.foreign.get("shadowscan:surface") == "lowcode")
+    assert lowcode.role is E.AgentRole.EXTERNAL_AGENT  # a lowcode agent is an estate agent, not force-fitted
     assert result.evidence and result.evidence[0].evidence_kind is E.EvidenceKind.SCAN_REPORT
     assert any(p.name == "shadow" for p in result.foreign_properties)
 
@@ -186,10 +201,10 @@ def test_import_models_become_unpinned_hosted_stubs() -> None:
     report["findings"][0]["models"] = ["gpt-4o"]
     report["findings"][0]["model_providers"] = ["provider.openai"]
     result = import_shadowscan(report, now=NOW)
-    (model,) = result.models
+    model = next(m for m in result.models if m.name == "gpt-4o")
     assert model.hosted is not None
     hosted = model.hosted.value
-    assert hosted.requested_ref == "gpt-4o" and hosted.provider == "provider.openai"
+    assert hosted.requested_ref == "gpt-4o" and hosted.provider == "openai"
     assert hosted.resolved_ref.is_unknown  # a scan sees names, never snapshots
 
 

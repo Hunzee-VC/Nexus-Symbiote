@@ -26,8 +26,11 @@ from symbiote.model.enums import (
     AgentRole,
     AliasPinning,
     ApprovalGate,
+    AssuranceLevel,
     AuthMode,
+    AutonomyInitiation,
     AutonomyMode,
+    AutonomyOversight,
     CapabilityClass,
     Classification,
     CollectorMode,
@@ -43,6 +46,7 @@ from symbiote.model.enums import (
     EnforcementPointKind,
     EnvironmentKind,
     EvidenceKind,
+    EvidenceVerification,
     FindingState,
     FlagName,
     GrantLayer,
@@ -120,6 +124,60 @@ class AutonomyEntry(SymbioteModel):
     mode: AutonomyMode
 
 
+class AutonomyBasis(SymbioteModel):
+    """One rule that set a bound of an :class:`AutonomyAssessment` (``bound``, closed rule id, value)."""
+
+    bound: str
+    rule: str
+    value: str
+
+
+class AutonomyAssessment(SymbioteModel):
+    """An evidence **interval** of autonomy on a named scale (``spec/shadowscan-mapping.md §3``).
+
+    A scanner can prove that a capability exists but rarely that one is absent, so an assessment carries a
+    ``floor`` (the lowest level the evidence proves) and a ``ceiling`` (the highest level positive evidence has
+    not ruled out) instead of one number. ``floor_level`` / ``ceiling_level`` are the ISO/IEC 22989 projections
+    of the two bounds; ``automation_level`` on the agent summarises the floor. ``declared`` is the level an
+    inventory or declaration asserted, kept separately so an understated declaration stays visible.
+    """
+
+    scale: str = Field(description="Scale identifier, e.g. 'shadowscan.autonomy/v1'")
+    floor: int = Field(ge=0, le=6)
+    ceiling: int = Field(ge=0, le=6)
+    floor_level: IsoAutomationLevel
+    ceiling_level: IsoAutomationLevel
+    oversight: AutonomyOversight = AutonomyOversight.UNKNOWN
+    initiation: AutonomyInitiation = AutonomyInitiation.UNKNOWN
+    basis: list[AutonomyBasis] = Field(default_factory=list)
+    declared: int | None = Field(default=None, ge=0, le=6)
+    declared_source: str | None = None
+    assessor: str | None = Field(default=None, description="Tool and version that produced the interval")
+    assurance: AssuranceLevel = AssuranceLevel.OBSERVED
+    evidence: list[EvidenceRef] = Field(default_factory=list)
+    observed_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def _ordered(self) -> AutonomyAssessment:
+        if self.floor > self.ceiling:
+            raise ValueError("autonomy floor cannot exceed its ceiling")
+        if self.assurance is AssuranceLevel.VERIFIED and not any(
+            e.verification is EvidenceVerification.VERIFIED_CONSTRAINED for e in self.evidence
+        ):
+            raise ValueError("I3: verified assurance requires verified-constrained evidence")
+        return self
+
+    @property
+    def understated(self) -> bool:
+        """The declared level is below what the evidence proves."""
+        return self.declared is not None and self.declared < self.floor
+
+    @property
+    def above_ceiling(self) -> bool:
+        """The declared level exceeds what positive evidence allows."""
+        return self.declared is not None and self.declared > self.ceiling
+
+
 class InstructionRef(SymbioteModel):
     ref: EntityId
     precedence: int = 0
@@ -151,6 +209,7 @@ class Agent(Entity):
     operator_ref: EntityId | None = None
     automation_level: Claim[IsoAutomationLevel] | None = None
     autonomy_profile: list[AutonomyEntry] = Field(default_factory=list)
+    autonomy_assessment: AutonomyAssessment | None = None
     identities: list[EntityId] = Field(default_factory=list)
     instructions: list[InstructionRef] = Field(default_factory=list)
     entrypoint: str | None = None
