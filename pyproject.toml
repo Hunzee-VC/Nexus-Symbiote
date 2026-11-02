@@ -28,7 +28,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "Intended Audience :: Information Technology",
     "Intended Audience :: System Administrators",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: MacOS",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
@@ -45,7 +44,7 @@ dependencies = [
     "packaging>=24,<27",
     "packageurl-python>=0.17.6,<1",
     "pydantic>=2.5,<3",
-    "rich>=13.0,<14",
+    "rich>=13.0,<16",
     "rfc8785>=0.1.4,<1",
     "pyyaml>=6.0,<7",
     "jsonschema>=4.23,<5",
@@ -62,13 +61,9 @@ cyclonedx = [
 sigstore = [
     "sigstore>=3.6.7,<4",
 ]
-yaml = [
-    "pyyaml>=6.0,<7",
-]
 all = [
     "cyclonedx-python-lib[json-validation]>=11.12,<12",
     "sigstore>=3.6.7,<4",
-    "pyyaml>=6.0,<7",
 ]
 dev = [
     "pytest>=8.0,<9",
