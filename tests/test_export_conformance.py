@@ -303,3 +303,98 @@ def test_new_client_server_ide_and_extension_types_round_trip_without_trust_upgr
         }
     assert properties["agentbom:kind"] == "verified-extension"
     assert properties["agentbom:claimsVerifiedByExporter"] == "false"
+
+
+@pytest.mark.parametrize("generator", [CycloneDXGenerator, SPDXGenerator])
+def test_security_field_loss_report_tracks_normalized_paths(generator):
+    from nexus_symbiote.core.evidence import AuthorityClaim, DeploymentProfile
+    from nexus_symbiote.core.models import CompletenessClaim
+    from nexus_symbiote.generators._common import content_digest
+
+    bom = fixture_bom()
+    bom.metadata.completeness = CompletenessClaim(scope="partial")
+    bom.get_component("agent:main").deployment_profile = DeploymentProfile(
+        deployment_id="deployment:one",
+        environment="production",
+        authority=[AuthorityClaim(kind="effective", state="unknown", unknown_reason="no access")],
+    )
+    bom.dependencies[0].assurance_level = "observed"
+    bom.dependencies[0].conditions = "conditional"
+    result = generator().generate_with_report(bom)
+    source = native_document(bom)
+    report = result.loss_report
+    assert report["sourceDigest"] == content_digest(source)
+    assert report["itemCoverage"] == "selected-security-fields"
+    assert report["nativeSemanticsComplete"] is False
+    paths = {item["path"] for item in report["items"]}
+    assert "/metadata/completeness" in paths
+    agent_index = next(
+        i for i, c in enumerate(source["components"]) if c["bom_ref"] == "agent:main"
+    )
+    assert f"/components/{agent_index}/deployment_profile" in paths
+    assert f"/components/{agent_index}/authorizations" in paths
+    edge_index = next(i for i, e in enumerate(source["dependencies"]) if e.get("conditions"))
+    assert f"/dependencies/{edge_index}/relationship" in paths
+    assert f"/dependencies/{edge_index}/conditions" in paths
+    assert f"/dependencies/{edge_index}/assurance_level" in paths
+    # Reports name paths and limitations, not sensitive values.
+    assert "deployment:one" not in json.dumps(report)
+    assert "user:alice" not in json.dumps(report)
+    assert native_document(generator.recover(result.document)) == source
+
+
+@pytest.mark.parametrize("generator", [CycloneDXGenerator, SPDXGenerator])
+def test_missing_native_extension_fails_closed(generator):
+    document = generator().generate(fixture_bom())
+    if generator is CycloneDXGenerator:
+        properties = document["metadata"]["properties"]
+        properties[:] = [p for p in properties if p["name"] != "nexus-symbiote:document"]
+    else:
+        doc = next(n for n in document["@graph"] if n["type"] == "SpdxDocument")
+        properties = doc["extension"][0]["extension_cdxProperty"]
+        properties[:] = [
+            p for p in properties if p["extension_cdxPropName"] != "nexus-symbiote:document"
+        ]
+    with pytest.raises(ValueError, match="missing native document"):
+        generator.recover(document)
+
+
+@pytest.mark.parametrize("generator", [CycloneDXGenerator, SPDXGenerator])
+def test_deployment_profile_survives_independent_consumer(generator):
+    from nexus_symbiote.core.evidence import AuthorityClaim, DeploymentProfile
+
+    original = fixture_bom()
+    original.get_component("agent:main").deployment_profile = DeploymentProfile(
+        deployment_id="deployment:one",
+        environment="production",
+        authority=[AuthorityClaim(kind="effective", state="unknown", unknown_reason="no access")],
+    )
+    document = generator().generate(original)
+    if generator is CycloneDXGenerator:
+        from cyclonedx.model.bom import Bom
+        from cyclonedx.output.json import JsonV1Dot7
+
+        output = json.loads(JsonV1Dot7(Bom.from_json(document)).output_as_string())
+        assert validate_cyclonedx(output) == []
+        properties = output["metadata"]["properties"]
+        report_text = next(
+            p["value"] for p in properties if p["name"] == "nexus-symbiote:lossReport"
+        )
+    else:
+        from spdx_python_model.bindings import v3_0_1 as spdx
+
+        objects = spdx.SHACLObjectSet()
+        spdx.JSONLDDeserializer().read(io.BytesIO(json.dumps(document).encode()), objects)
+        buffer = io.BytesIO()
+        spdx.JSONLDSerializer().write(objects, buffer)
+        output = json.loads(buffer.getvalue())
+        assert validate_spdx(output) == []
+        doc = next(n for n in output["@graph"] if n["type"] == "SpdxDocument")
+        properties = doc["extension"][0]["extension_cdxProperty"]
+        report_text = next(
+            p["extension_cdxPropValue"]
+            for p in properties
+            if p["extension_cdxPropName"] == "nexus-symbiote:lossReport"
+        )
+    assert json.loads(report_text)["itemCoverage"] == "selected-security-fields"
+    assert native_document(generator.recover(output)) == native_document(original)

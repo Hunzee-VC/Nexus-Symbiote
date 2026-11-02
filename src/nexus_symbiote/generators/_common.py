@@ -66,24 +66,69 @@ def native_document(bom: AIBOM) -> dict[str, Any]:
 
 def loss_report(bom: AIBOM, target: str) -> dict[str, Any]:
     preserves_native = target.startswith(("cyclonedx-", "spdx-"))
+    document = native_document(bom)
+    items: list[dict[str, Any]] = [
+        {
+            "path": "/",
+            "reason": "agent authority, assurance, and coverage require the Nexus Symbiote extension"
+            if preserves_native
+            else "finding projection omits the complete source inventory",
+            "preservedIn": "nexus-symbiote:document" if preserves_native else None,
+            "severity": "info" if preserves_native else "warning",
+        }
+    ]
+    if preserves_native:
+        # Paths refer to the sorted native document identified by sourceDigest.
+        # Enumerate selected security-sensitive fields, not every loss.
+        def add(path: str, reason: str) -> None:
+            items.append(
+                {
+                    "path": path,
+                    "reason": reason,
+                    "preservedIn": "nexus-symbiote:document",
+                    "severity": "warning",
+                }
+            )
+
+        if document["metadata"].get("completeness") is not None:
+            add(
+                "/metadata/completeness",
+                "Complete collection coverage and discovery provenance require the extension",
+            )
+        fields = (
+            "deployment_profile",
+            "authorizations",
+            "capabilities",
+            "claims",
+            "trust_tier",
+            "assurance_level",
+        )
+        for index, component in enumerate(document["components"]):
+            for field in fields:
+                if field in component and component[field] not in (None, [], {}):
+                    add(
+                        f"/components/{index}/{field}",
+                        "Full agent-specific field semantics require the extension; "
+                        "the standard projection may omit or normalize them",
+                    )
+        for index, edge in enumerate(document["dependencies"]):
+            for field in ("relationship", "assurance_level", "conditions"):
+                if edge.get(field) is not None:
+                    add(
+                        f"/dependencies/{index}/{field}",
+                        "Complete relationship semantics require the extension; "
+                        "the standard projection may omit or normalize them",
+                    )
     return {
         "profile": "nexus-symbiote-export/v1",
         "target": target,
-        "sourceDigest": content_digest(native_document(bom)),
+        "sourceDigest": content_digest(document),
         "nativeSemanticsComplete": False,
         "extensionRoundTripComplete": preserves_native,
         "admissionAuthority": False,
         "normalizations": ["component and dependency collections sorted for deterministic output"],
-        "items": [
-            {
-                "path": "/",
-                "reason": "agent authority, assurance, and coverage require the Nexus SymBiote extension"
-                if preserves_native
-                else "finding projection omits the complete source inventory",
-                "preservedIn": "nexus-symbiote:document" if preserves_native else None,
-                "severity": "info" if preserves_native else "warning",
-            }
-        ],
+        "itemCoverage": "selected-security-fields" if preserves_native else "summary-only",
+        "items": items,
     }
 
 
@@ -135,6 +180,8 @@ def recover_document(properties: list[dict[str, str]]) -> AIBOM:
     props = {p["name"]: p["value"] for p in native_properties}
     if len(props) != len(native_properties):
         raise ValueError("duplicate native document property names")
+    if required.difference(props):
+        raise ValueError("missing native document properties")
     document = json.loads(props["nexus-symbiote:document"])
     if props["nexus-symbiote:documentDigest"] != content_digest(document):
         raise ValueError("embedded native document digest mismatch")
