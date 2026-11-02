@@ -9,8 +9,35 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_public_inventory_corpus_has_honest_denominators():
     report = runpy.run_path(str(ROOT / "benchmarks/inventory/run_inventory.py"))["run"]()
     assert report["passed"], report
-    assert report["counts"] == {"tp": 17, "fp": 0, "fn": 0, "tn": 5}
-    assert report["denominators"] == {"expected_tools": 17, "explicit_decoys": 5}
+    assert report["counts"] == {"tp": 18, "fp": 0, "fn": 0, "tn": 7}
+    assert report["denominators"] == {"expected_tools": 18, "explicit_decoys": 7}
+    assert report["unlabeled_predictions"] == 0
+
+
+def test_only_adjudicated_negatives_enter_confusion_counts():
+    import pytest
+
+    score = runpy.run_path(str(ROOT / "benchmarks/inventory/run_inventory.py"))["score_tools"]
+    result = score({"tool", "decoy", "unknown"}, ["tool", "missed"], ["decoy", "negative"])
+    assert result == {
+        "tp": 1,
+        "fp": 1,
+        "fn": 1,
+        "tn": 1,
+        "unknown_positive_labels": 0,
+        "unknown_negative_labels": 0,
+        "unexpected_unlabeled": ["unknown"],
+    }
+    incomplete = score(
+        {"tool", "decoy"}, ["tool", "missing"], ["decoy", "negative"], collection_failed=True
+    )
+    assert incomplete["tp"] == incomplete["fp"] == 1
+    assert incomplete["fn"] == incomplete["tn"] == 0
+    assert incomplete["unknown_positive_labels"] == incomplete["unknown_negative_labels"] == 1
+    with pytest.raises(ValueError, match="unique and disjoint"):
+        score(set(), ["tool"], ["tool"])
+    with pytest.raises(ValueError, match="unique and disjoint"):
+        score(set(), ["tool", "tool"], [])
 
 
 def test_inventory_statement_binds_results_and_scanner_materials(tmp_path, monkeypatch):
