@@ -4,84 +4,178 @@ on:
   push:
     branches: [main, "claude/**", "wp-**", "feat/**"]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
     name: Lint, type-check, test (py${{ matrix.python }})
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
         python: ["3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          enable-cache: true
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
       - name: Install
         run: |
-          uv venv .venv --python ${{ matrix.python }}
-          . .venv/bin/activate
-          uv pip install -e ".[dev,sign]"
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,sign]"
       - name: Lint and format
         run: |
-          . .venv/bin/activate
-          ruff format --check src tests
-          ruff check src tests
+          ruff format --check src tests scripts
+          ruff check src tests scripts
       - name: Type-check
-        run: |
-          . .venv/bin/activate
-          mypy src/symbiote || true   # advisory until the public API settles
+        run: mypy src/symbiote || true   # advisory until the public API settles
       - name: Test
-        run: |
-          . .venv/bin/activate
-          pytest -q --cov --cov-report=xml
+        run: pytest -q -p no:cacheprovider --cov --cov-report=xml
       - name: Companion schema is up to date
         run: |
-          . .venv/bin/activate
-          symbiote schema export companion -o /tmp/agentbom.schema.json
-          diff -u src/symbiote/schemas/agentbom/agentbom-0.1.schema.json /tmp/agentbom.schema.json
+          symbiote schema export companion -o "$RUNNER_TEMP/agentbom.schema.json"
+          diff -u src/symbiote/schemas/agentbom/agentbom-0.1.schema.json "$RUNNER_TEMP/agentbom.schema.json"
       - name: Self-check CLI
         run: |
-          . .venv/bin/activate
           symbiote version --json
-          printf '{"name":"echo","inputSchema":{"type":"object"}}' > /tmp/tool.json
-          symbiote digest tooldef /tmp/tool.json --json
+          printf '{"name":"echo","inputSchema":{"type":"object"}}' > "$RUNNER_TEMP/tool.json"
+          symbiote digest tooldef "$RUNNER_TEMP/tool.json" --json
+
+  quality:
+    name: Repository tooling gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Install PyYAML for the workflow linter
+        run: python -m pip install "pyyaml>=6.0"
+      - name: Actions are pinned by commit and expressions never reach shell source
+        run: python scripts/check_workflows.py
+      - name: Conflict markers, inline local links, version agreement, vendored schema digests
+        run: python scripts/check_repository_hygiene.py
+      - name: Action metadata and hook definitions parse
+        run: python -c "import yaml; [yaml.safe_load(open(f)) for f in ('action.yml', '.pre-commit-hooks.yaml')]"
+
+  distribution:
+    name: Build, check and smoke-test the wheel
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Build and check distributions
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[release]"
+          python -m build
+          python -m twine check --strict dist/*
+      - name: Install the wheel in a fresh environment outside the tree and exercise it
+        run: |
+          python -m venv "$RUNNER_TEMP/wheel-smoke"
+          "$RUNNER_TEMP/wheel-smoke/bin/python" -m pip install --quiet dist/*.whl
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/wheel-smoke/bin/symbiote" version --json
+          "$RUNNER_TEMP/wheel-smoke/bin/symbiote" scan "$GITHUB_WORKSPACE/examples/triage-agent" -o "$RUNNER_TEMP/out" --deterministic
+          "$RUNNER_TEMP/wheel-smoke/bin/symbiote" validate "$RUNNER_TEMP/out/agentbom.json" "$RUNNER_TEMP/out/agentbom.cdx.json" "$RUNNER_TEMP/out/agentbom.spdx.json"
+      - name: Keep the distributions
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: distributions
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
 
   rego-parity:
     name: Rego export parity (OPA)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      # Not yet pinned by commit: the maintainers have not verified a SHA for this action offline.
+      # scripts/check_workflows.py carries the explicit exception; replace both together.
       - uses: open-policy-agent/setup-opa@v2
         with:
           version: latest
       - name: Install
         run: |
-          uv venv .venv --python 3.12
-          . .venv/bin/activate
-          uv pip install -e ".[dev]"
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
       - name: Built-in findings equal OPA findings for every exported check
         env:
           SYMBIOTE_REQUIRE_OPA: "1"
         run: |
-          . .venv/bin/activate
           opa version
-          pytest -q -rs tests/unit/policy/test_rego.py
+          pytest -q -p no:cacheprovider -rs tests/unit/policy/test_rego.py
           symbiote policy export-rego "$RUNNER_TEMP/rego"
           opa check "$RUNNER_TEMP/rego"
 
   docs:
     name: Docs build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-      - run: |
-          uv venv .venv --python 3.12 && . .venv/bin/activate
-          uv pip install -e ".[dev]"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Build the documentation site strictly
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
           mkdocs build --strict
+
+  verified:
+    name: Verified CI
+    if: always()
+    needs: [test, quality, distribution, rego-parity, docs]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every verification job to succeed
+        env:
+          CI_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          results = json.loads(os.environ["CI_RESULTS"])
+          expected = {"test", "quality", "distribution", "rego-parity", "docs"}
+          if not isinstance(results, dict) or set(results) != expected:
+              print("Verification metadata does not contain exactly the required jobs")
+              sys.exit(1)
+          failed = [
+              name for name, result in results.items()
+              if not isinstance(result, dict) or result.get("result") != "success"
+          ]
+          if failed:
+              print("Verification did not succeed: " + ", ".join(sorted(failed)))
+          sys.exit(bool(failed))
+          PY

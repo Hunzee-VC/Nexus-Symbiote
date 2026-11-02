@@ -109,7 +109,8 @@ from symbiote.snapshot import diff, finalize, new_document, redact_entities, ver
 | Snapshot diff with typed deltas; chain store with monotone serials, `prev` links and anti-rollback (exit 7) | ✅ |
 | Gateway Allowlist Bundle (`gab`, `opa-data`, `mcp-gateway-generic`) + reference served-tool check | ✅ |
 | Nexus ShadowScan: import discovery reports as observed snapshots (autonomy interval, servers, identities, coverage), export the AgentBOM as the ShadowScan inventory, reconcile declared vs observed (`SYM-SS-*`), fold reports into `symbiote scan` | ✅ |
-| Trust-status lists (CLI), incident index, generic CycloneDX/SPDX importers, `attest` for the other predicates, GitHub Action | 🚧 |
+| GitHub Action (`action.yml`), pre-commit hooks, CodeQL and release workflows | ✅ |
+| Trust-status lists (CLI), incident index, generic CycloneDX/SPDX importers, `attest` for the other predicates | 🚧 |
 | `symbiote scan .` zero-config: companion + CycloneDX 1.7 + SPDX 3.0.1 + loss reports from a repository | ✅ (coverage grows with each collector; unexamined surfaces are reported `not-attempted`, never clean) |
 
 Progress and ownership: [`docs/development/work-packages.md`](docs/development/work-packages.md).

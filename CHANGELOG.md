@@ -7,6 +7,13 @@ schema, predicate types) is versioned independently of the tool; see `spec/versi
 
 ## [Unreleased]
 
+### Changed
+- `main` reconciled onto the foundation implementation; the `nexus_symbiote` package removed; `action.yml`,
+  pre-commit hooks, CodeQL and release workflows ported to the `symbiote` CLI. The CI workflow pins actions
+  by commit, adds `quality` (workflow linter, repository hygiene), `distribution` (wheel build and smoke
+  test) and the `Verified CI` aggregate job; `main`'s small security fixtures live on as
+  `tests/fixtures/security-corpus/` regression tests.
+
 ### Added
 - Initial public foundation: semantic model, canonical digests, CycloneDX 1.7 and SPDX 3.0.1
   exporters, collectors, policy checks, conformance levels, attestations, and the `symbiote` CLI.

@@ -2,10 +2,51 @@
 
 How to run Symbiote in GitHub Actions: generate the AgentBOM on every change, gate on policy findings, upload
 SARIF to code scanning, keep the three documents as build artefacts, and (optionally) sign the snapshot
-keylessly. The steps use the CLI directly; a composite action is specified in [`spec/cli.md`](../spec/cli.md)
-but is not part of this branch yet. Exit codes are listed in the [CLI reference](../reference/cli.md#exit-codes).
+keylessly. Two shapes are shown: the composite Action shipped in this repository (`action.yml`) and the plain
+CLI steps it runs, for runners that cannot use a composite action. Exit codes are listed in the
+[CLI reference](../reference/cli.md#exit-codes).
 
-## A minimal workflow
+## The composite Action
+
+```yaml
+name: AgentBOM
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  security-events: write     # only needed with sarif-upload: true
+
+jobs:
+  agentbom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aisecnomad/symbiote@main          # pin to a tag or commit in production
+        with:
+          scan-path: .
+          output-dir: agentbom
+          fail-on: high                         # critical | high | medium | low | info
+          fail-on-indeterminate: "false"        # "true": unknowns fail the gate too
+          conformance-level: none               # none | minimal | standard | verified
+          sarif-upload: "true"
+```
+
+The Action installs the reviewed source into an isolated virtual environment, then runs
+`scripts/run_action.py`, which drives the CLI as a subprocess: `symbiote scan` (all three documents) →
+`symbiote validate` → `symbiote policy check --sarif --json` → optional `symbiote conformance`. Every input
+arrives through an environment variable, never through shell source; every path is confined to
+`GITHUB_WORKSPACE`. The documents, `agentbom.sarif`, `findings.json` (and `conformance.json`) are uploaded as the
+`agentbom` artifact even when the gate fails. Outputs: `agentbom-path`, `sarif-path`, `policy-exit-code`,
+`conformance-exit-code`. The step's own exit code follows the CLI: 1 findings at or above `fail-on` (or a
+failed conformance requirement), 3 an emitted document failed its schema, 5 conformance blocked by unknowns,
+6 the scan could not read or write. The Action has no `--profile` input yet because `scan` has no profile
+selection on this branch.
+
+## The same pipeline as plain steps
 
 ```yaml
 name: AgentBOM
@@ -132,19 +173,22 @@ it can rewind it.
 
 ## Pre-commit
 
-Until a published hook exists, a local hook runs the fast static scan and the policy gate on each commit:
+This repository publishes two hooks in `.pre-commit-hooks.yaml`: `symbiote-scan` writes the companion document
+to `.symbiote/out/` and `symbiote-policy` runs the `SYM-*` checks over it (exit 1 on findings at or above
+`high`). Order matters: the policy hook reads what the scan hook wrote.
 
 ```yaml
 # .pre-commit-config.yaml
 repos:
-  - repo: local
+  - repo: https://github.com/aisecnomad/symbiote
+    rev: main            # pin to a tag or commit
     hooks:
-      - id: agentbom
-        name: AgentBOM policy check
-        entry: bash -c 'symbiote scan . -o .symbiote/out --format companion >/dev/null && symbiote policy check .symbiote/out/agentbom.json'
-        language: system
-        pass_filenames: false
-        always_run: true
+      - id: symbiote-scan
+      - id: symbiote-policy
+        args: [--fail-on, high]
 ```
 
-Add `.symbiote/out/` to `.gitignore`; keep `.symbiote/store/` if you want anti-rollback locally.
+Add `.symbiote/out/` to `.gitignore` (this repository ignores `.symbiote/` entirely); keep `.symbiote/store/`
+if you want anti-rollback locally. Without the published hook, a `repo: local` entry with
+`entry: bash -c 'symbiote scan . -o .symbiote/out --format companion >/dev/null && symbiote policy check
+.symbiote/out/agentbom.json'` and `language: system` does the same.

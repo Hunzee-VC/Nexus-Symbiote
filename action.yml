@@ -1,0 +1,82 @@
+name: Symbiote AgentBOM
+description: Generate an Agent Bill of Materials, validate it, gate on policy findings and keep SARIF and the documents as evidence
+branding:
+  icon: shield
+  color: purple
+inputs:
+  scan-path:
+    description: Repository or agent directory to scan, within the checked-out workspace
+    default: "."
+  output-dir:
+    description: Directory within the workspace that receives agentbom.json, agentbom.cdx.json, agentbom.spdx.json, agentbom.sarif and findings.json
+    default: agentbom
+  fail-on:
+    description: "Lowest severity that fails the policy gate: critical, high, medium, low or info"
+    default: high
+  fail-on-indeterminate:
+    description: Treat indeterminate findings (unknowns) as failures of the policy gate
+    default: "false"
+  conformance-level:
+    description: "Also evaluate conformance at this level: none, minimal, standard or verified"
+    default: none
+  sarif-upload:
+    description: Upload the SARIF to code scanning (needs security-events write permission)
+    default: "false"
+  python-version:
+    description: Python version used to run Symbiote
+    default: "3.12"
+outputs:
+  agentbom-path:
+    description: Path of the companion document (agentbom.json)
+    value: ${{ steps.scan.outputs.agentbom_path }}
+  sarif-path:
+    description: Path of the SARIF 2.1.0 report written by the policy gate
+    value: ${{ steps.scan.outputs.sarif_path }}
+  policy-exit-code:
+    description: "Exit code of `symbiote policy check`: 0 clean, 1 findings at or above fail-on"
+    value: ${{ steps.scan.outputs.policy_exit_code }}
+  conformance-exit-code:
+    description: "Exit code of `symbiote conformance`: 0 pass, 1 a requirement failed, 5 blocked by unknowns; empty when not requested"
+    value: ${{ steps.scan.outputs.conformance_exit_code }}
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      with:
+        python-version: ${{ inputs.python-version }}
+    - name: Install the reviewed Action source into an isolated environment
+      shell: bash
+      env:
+        SYMBIOTE_ACTION_PATH: ${{ github.action_path }}
+      run: |
+        action_venv="$(mktemp -d "$RUNNER_TEMP/symbiote-action-XXXXXX")"
+        python -I -m venv "$action_venv"
+        "$action_venv/bin/python" -I -m pip install --quiet --upgrade pip
+        "$action_venv/bin/python" -I -m pip install --quiet -- "$SYMBIOTE_ACTION_PATH"
+        echo "SYMBIOTE_PYTHON=$action_venv/bin/python" >> "$GITHUB_ENV"
+    - name: Scan, validate and apply the policy gate
+      id: scan
+      shell: bash
+      env:
+        SYMBIOTE_ACTION_PATH: ${{ github.action_path }}
+        SYMBIOTE_SCAN_PATH: ${{ inputs.scan-path }}
+        SYMBIOTE_OUTPUT_DIR: ${{ inputs.output-dir }}
+        SYMBIOTE_FAIL_ON: ${{ inputs.fail-on }}
+        SYMBIOTE_FAIL_ON_INDETERMINATE: ${{ inputs.fail-on-indeterminate }}
+        SYMBIOTE_CONFORMANCE_LEVEL: ${{ inputs.conformance-level }}
+        SYMBIOTE_SARIF: ${{ inputs.sarif-upload }}
+      run: '"$SYMBIOTE_PYTHON" -I "$SYMBIOTE_ACTION_PATH/scripts/run_action.py"'
+    - name: Upload SARIF to code scanning
+      if: inputs.sarif-upload == 'true' && always() && steps.scan.outputs.sarif_path != ''
+      uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
+      with:
+        sarif_file: ${{ steps.scan.outputs.sarif_path }}
+        category: symbiote
+    - name: Keep the AgentBOM documents
+      if: always() && steps.scan.outputs.agentbom_path != ''
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      with:
+        name: agentbom
+        path: ${{ steps.scan.outputs.output_dir }}
+        if-no-files-found: error

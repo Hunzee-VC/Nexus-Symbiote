@@ -1,0 +1,127 @@
+name: Release candidate and approved publication
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the verified distributions through the protected pypi environment
+        type: boolean
+        required: true
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Install the package with its development and release tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,sign,release]"
+      - name: Lint, format and type-check
+        run: |
+          ruff format --check src tests scripts
+          ruff check src tests scripts
+          mypy src/symbiote
+      - name: Repository tooling gates
+        run: |
+          python scripts/check_workflows.py
+          python scripts/check_repository_hygiene.py
+      - name: Test
+        run: python -m pytest -q -p no:cacheprovider
+      - name: Companion schema is up to date
+        run: |
+          symbiote schema export companion -o "$RUNNER_TEMP/agentbom.schema.json"
+          diff -u src/symbiote/schemas/agentbom/agentbom-0.1.schema.json "$RUNNER_TEMP/agentbom.schema.json"
+      - name: Build distributions
+        run: python -m build
+      - run: python -m twine check --strict dist/*
+      - name: Smoke-test the built wheel outside the source tree
+        run: |
+          python -m venv "$RUNNER_TEMP/release-smoke"
+          "$RUNNER_TEMP/release-smoke/bin/python" -m pip install --quiet dist/*.whl
+          mkdir -p evidence
+          "$RUNNER_TEMP/release-smoke/bin/python" -m pip inspect > evidence/installed-distributions.json
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/release-smoke/bin/symbiote" version --json
+      - name: Collect release evidence (AgentBOM of the example agent, companion + CycloneDX SBOM + SPDX)
+        run: |
+          "$RUNNER_TEMP/release-smoke/bin/symbiote" scan examples/triage-agent -o evidence/agentbom --deterministic
+          "$RUNNER_TEMP/release-smoke/bin/symbiote" validate evidence/agentbom/agentbom.json evidence/agentbom/agentbom.cdx.json evidence/agentbom/agentbom.spdx.json
+          "$RUNNER_TEMP/release-smoke/bin/symbiote" policy check evidence/agentbom/agentbom.json --fail-on critical --sarif evidence/agentbom/agentbom.sarif --json > evidence/agentbom/findings.json || test $? -eq 1
+          python scripts/release_checksums.py
+      - name: Upload distributions
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: release-distributions
+          path: dist/*
+          if-no-files-found: error
+      - name: Upload evidence and checksums
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: release-evidence
+          path: evidence/
+          if-no-files-found: error
+  attest:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: release-distributions
+          path: dist
+      - name: Attest distribution provenance
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: dist/*
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: release-evidence
+          path: evidence
+      - name: Attest the evidence checksum manifest
+        id: evidence
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: evidence/SHA256SUMS
+      - name: Retain the evidence attestation bundle
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: release-evidence-attestation
+          path: ${{ steps.evidence.outputs.bundle-path }}
+          if-no-files-found: error
+  publish:
+    if: inputs.publish && github.ref == 'refs/heads/main'
+    needs: [build, attest]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: pypi
+      url: https://pypi.org/p/symbiote
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: release-distributions
+          path: dist
+      - name: Publish with OIDC trusted publishing
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0
+        with:
+          attestations: true

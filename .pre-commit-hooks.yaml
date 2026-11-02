@@ -1,0 +1,14 @@
+- id: symbiote-scan
+  name: Symbiote AgentBOM scan
+  description: Generate the companion document for review under .symbiote/out; an inventory is not an execution approval
+  entry: symbiote scan . -o .symbiote/out --format companion
+  language: python
+  always_run: true
+  pass_filenames: false
+- id: symbiote-policy
+  name: Symbiote policy gate
+  description: Run the SYM-* checks over the companion written by symbiote-scan; exit 1 on findings at or above high
+  entry: symbiote policy check .symbiote/out/agentbom.json
+  language: python
+  always_run: true
+  pass_filenames: false

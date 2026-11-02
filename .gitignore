@@ -2,6 +2,8 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
+*.egg
+*.so
 .eggs/
 build/
 dist/
@@ -12,10 +14,13 @@ venv/
 .pytest_cache/
 .hypothesis/
 .coverage
+.coverage.*
 coverage.xml
+coverage.json
 htmlcov/
 
 # Tooling
+.env
 .idea/
 .vscode/
 *.swp
@@ -28,3 +33,4 @@ agentbom-store/
 !tests/fixtures/**/*.sigstore.json
 !examples/**/*.sigstore.json
 site/
+evidence/

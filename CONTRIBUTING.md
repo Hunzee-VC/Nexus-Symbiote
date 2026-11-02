@@ -18,11 +18,14 @@ Thank you for helping build the AgentBOM toolkit. This guide covers the mechanic
 ```bash
 uv venv .venv && source .venv/bin/activate
 uv pip install -e ".[dev]"
-ruff format src tests && ruff check src tests
+ruff format src tests scripts && ruff check src tests scripts
 pytest -q
+python scripts/check_workflows.py && python scripts/check_repository_hygiene.py   # what the CI quality job runs
 ```
 Python 3.11+ is required. Optional extras: `[sign]` (Sigstore keyless), `[models]` (OpenSSF model-signing),
-`[mcp]` (live MCP collectors).
+`[mcp]` (live MCP collectors), `[release]` (`build`, `twine`; used by the `distribution` CI job and the release
+workflow). CI requires `Verified CI` to pass: every job, including the workflow linter, repository hygiene, the
+wheel build and the strict docs build (`docs/development/repository-controls.md`).
 
 ## Making a change
 1. Pick or open a work package in `docs/development/work-packages.md`; set yourself as owner.

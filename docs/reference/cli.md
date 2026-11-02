@@ -589,4 +589,4 @@ available yet, and documentation elsewhere that mentions them describes the spec
 | `attest toolset|coverage|evaluation|resolution|delta|trust-status|approval` | only `attest snapshot`; the predicate builders exist in `symbiote.attest.statements` |
 | `merkle prove`, `validate --cross`, `policy export-rego`, `--jsf-sign`, `--cdx-version 1.6`, `--embed-records`, `--redact` | not implemented |
 | global `--quiet`, `--config`, default store `./.symbiote/store` | not implemented; the store is opt-in via `--store` |
-| GitHub Action (`action.yml`) and `.pre-commit-hooks.yaml` | not on this branch; see the [CI guide](../guides/ci.md) for plain-step equivalents |
+| GitHub Action (`action.yml`) and `.pre-commit-hooks.yaml` | available: the composite Action (`scan` → `validate` → `policy check --sarif` → optional `conformance`) and the `symbiote-scan` / `symbiote-policy` hooks; see the [CI guide](../guides/ci.md). Not yet available: a `--profile` input (`scan` has no profile selection) and the optional keyless `attest snapshot` step |
