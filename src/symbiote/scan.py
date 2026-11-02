@@ -256,6 +256,30 @@ def _absorb(
     return corroborated, existing_mode, None
 
 
+#: The collector that owns hosted ``Model`` entities; other collectors' observations of the same id add tags.
+_HOSTED_MODEL_OWNER = "models-hosted"
+
+
+def _merge_hosted_model(existing: Entity, other: Entity) -> Entity | None:
+    """Two collectors observed the same hosted model id (``models-hosted`` from a code literal, ``frameworks``
+    from an agent's config): one entity whose fields come from ``models-hosted`` when it is one of them (it owns
+    hosted models; otherwise the first observation), with the union of both observations' tags and foreign facts.
+    ``None`` when the pair is not two hosted ``Model`` observations."""
+    if not (isinstance(existing, Model) and isinstance(other, Model)):
+        return None
+    if existing.model_kind is not E.ModelKind.HOSTED or other.model_kind is not E.ModelKind.HOSTED:
+        return None
+
+    def owner(entity: Model) -> bool:
+        return entity.provenance.collector.split(":", 1)[-1].split("@", 1)[0] == _HOSTED_MODEL_OWNER
+
+    base, extra = (other, existing) if owner(other) and not owner(existing) else (existing, other)
+    return base.replace(
+        tags=sorted(set(base.tags) | set(extra.tags)),
+        foreign={**extra.foreign, **base.foreign},
+    )
+
+
 def _merge_flags(doc: AgentBOM, extra: list[Any]) -> AgentBOM:
     """Merge collector-asserted flags with the engine's (a fired flag wins over unknown/false)."""
     from symbiote.model.document import Derived
@@ -331,6 +355,10 @@ def scan(
             attr = _collection_for(ent)
             existing = buckets[attr].get(ent.id)
             if existing is not None and existing != ent:
+                hosted = _merge_hosted_model(existing, ent)
+                if hosted is not None:
+                    buckets[attr][ent.id] = hosted
+                    continue
                 survivor, mode, note = _absorb(
                     existing,
                     entity_modes.get(ent.id, E.CollectorMode.DECLARED),
