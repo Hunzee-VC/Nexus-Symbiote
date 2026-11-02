@@ -137,3 +137,10 @@ def test_native_schema_checks_deployment_profile_shape():
     bom["components"][0]["deployment_profile"]["environment"] = ""
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(bom, schema)
+
+
+def test_standalone_deployment_schema_matches_the_runtime_contract():
+    schema = json.loads(
+        (Path(__file__).parents[1] / "schemas/deployment-profile-1.0.schema.json").read_text()
+    )
+    assert schema == DeploymentProfile.model_json_schema()

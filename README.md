@@ -158,4 +158,6 @@ The [committed synthetic corpus](benchmarks/README.md) contains inspectable labe
 
 [CONTRIBUTING.md](CONTRIBUTING.md) describes tests, type checking, exporter validation, and wheel smoke checks. [The release procedure](docs/releasing.md) explains manual candidates, checksums, provenance, PyPI trusted-publisher configuration, and environment approval. Publication is disabled unless a maintainer explicitly requests it and configures the external controls.
 
+The [closed-PR review](docs/audits/closed-pr-review-2026-11-02.md) reconciles historical work with the supported package and records remaining verification blockers.
+
 [CHANGELOG.md](CHANGELOG.md) records changes. See [ROADMAP.md](ROADMAP.md) for near-term maturity and coverage goals. Use [SECURITY.md](SECURITY.md) for sensitive reports. The repository is licensed under [MIT](LICENSE).

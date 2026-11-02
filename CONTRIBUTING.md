@@ -16,6 +16,7 @@ ruff check src tests scripts
 ruff format --check src tests scripts
 mypy src/nexus_symbiote
 python scripts/check_workflows.py
+python scripts/check_repository_hygiene.py
 python scripts/check_security_regressions.py --out security-regressions.json
 python -m pytest --cov=nexus_symbiote --cov-branch --cov-report=json:coverage.json
 python scripts/check_coverage.py coverage.json
@@ -46,5 +47,7 @@ Exporter changes must validate against the pinned official schema and preserve r
 ## Pull requests
 
 Explain the concrete problem, resulting behavior, validation, and material limitations. Keep changes focused and include applicable documentation. Do not claim production enforcement for execution paths that bypass the adapter. Add no network access, executable discovery, or credential collection without an explicit design and tests.
+
+The quality job also checks tracked source for conflict markers, inline local documentation links, package/distribution version agreement and the vendored schemas' recorded SHA-256 digests. These checks are offline and do not authenticate an upstream publisher. Review changes to schema bytes and their provenance manifest together. Keep experimental-branch merges and manually ported changes distinct from ancestry on `main`; the [closed-PR audit](docs/audits/closed-pr-review-2026-11-02.md) records that distinction.
 
 Read [SECURITY.md](SECURITY.md) before reporting security-sensitive defects. This project is licensed under MIT as specified in [LICENSE](LICENSE).

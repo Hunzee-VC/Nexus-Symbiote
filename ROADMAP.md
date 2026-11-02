@@ -25,3 +25,7 @@ Nexus SymBiote is an early alpha focused on Agent Bill of Materials (AgentBOM) g
 - Long-term support commitments while the project remains alpha.
 
 Contributions that advance the items above (especially tested scanner coverage, documentation, and regression fixtures) are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
+
+## Historical experimental work
+
+The [closed-PR audit](docs/audits/closed-pr-review-2026-11-02.md) records what reached the supported package and what remains separate. The experimental foundation's salted Merkle disclosure protocol, full snapshot chain format, OPA/Rego export and parity suite, and Kubernetes/trace import contracts are not supported interfaces on `main`. Evaluate any future port against the current threat model and version its wire format; a merge into an experimental branch does not establish shipped compatibility. Discovery expansion should continue through Nexus-ShadowScan.

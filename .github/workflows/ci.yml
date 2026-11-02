@@ -107,6 +107,7 @@ jobs:
       - run: ruff format --check src tests scripts
       - run: mypy src/nexus_symbiote
       - run: python scripts/check_workflows.py
+      - run: python scripts/check_repository_hygiene.py
   distribution:
     runs-on: ubuntu-latest
     timeout-minutes: 15
