@@ -10,25 +10,21 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
+VERIFY_STEP = "Verify exact distributions and source provenance"
 
 
-@pytest.mark.parametrize("case", ["success", "missing-bundle", "missing-wheel", "bad-subject"])
+def release_jobs() -> dict:
+    return yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())["jobs"]
+
+
+@pytest.mark.parametrize(
+    "case", ["success", "missing-bundle", "extra-bundle", "missing-wheel", "bad-subject"]
+)
 def test_publish_verification_gate_checks_every_distribution(tmp_path, case):
-    workflow = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())
-    publish = workflow["jobs"]["publish"]
-    steps = publish["steps"]
-    verify = next(
-        step
-        for step in steps
-        if step.get("name") == "Verify exact distributions and source provenance"
-    )
-    publish_index = next(
-        i
-        for i, step in enumerate(steps)
-        if step.get("name") == "Publish with OIDC trusted publishing"
-    )
-    assert steps.index(verify) < publish_index
-    assert "attest" in publish["needs"]
+    jobs = release_jobs()
+    verify_job = jobs["verify-provenance"]
+    verify = next(step for step in verify_job["steps"] if step.get("name") == VERIFY_STEP)
+    assert "verify-provenance" in jobs["publish"]["needs"]
     (tmp_path / "dist").mkdir()
     (tmp_path / "attestation").mkdir()
     (tmp_path / "bin").mkdir()
@@ -36,7 +32,9 @@ def test_publish_verification_gate_checks_every_distribution(tmp_path, case):
     if case != "missing-wheel":
         (tmp_path / "dist" / "candidate.whl").write_text("wheel")
     if case != "missing-bundle":
-        (tmp_path / "attestation" / "distribution-attestation.jsonl").write_text("bundle")
+        (tmp_path / "attestation" / "bundle.jsonl").write_text("bundle")
+    if case == "extra-bundle":
+        (tmp_path / "attestation" / "other.jsonl").write_text("bundle")
     gh = tmp_path / "bin" / "gh"
     gh.write_text(
         '#!/bin/bash\nprintf "%s\\n" "$*" >> "$CALLS"\n'
@@ -65,18 +63,34 @@ def test_publish_verification_gate_checks_every_distribution(tmp_path, case):
         rows = calls.read_text().splitlines()
         assert len(rows) == 2
         for row in rows:
-            assert "--bundle attestation/distribution-attestation.jsonl" in row
+            assert "--bundle attestation/bundle.jsonl" in row
             assert "--repo owner/repo" in row
             assert "--signer-workflow owner/repo/.github/workflows/release.yml" in row
             assert "--source-ref refs/heads/main" in row
             assert f"--source-digest {'a' * 40}" in row
             assert "--deny-self-hosted-runners" in row
+    else:
+        assert not calls.exists()
 
 
-def test_distribution_bundle_is_retained_and_downloaded_for_publish():
-    workflow = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())
-    attest = workflow["jobs"]["attest"]["steps"]
-    publish = workflow["jobs"]["publish"]["steps"]
-    assert any(step.get("id") == "distributions" for step in attest)
-    assert any(step.get("with", {}).get("name") == "distribution-attestation" for step in attest)
-    assert any(step.get("with", {}).get("name") == "distribution-attestation" for step in publish)
+def test_distribution_bundle_is_retained_and_verified_before_publish():
+    jobs = release_jobs()
+    attest = jobs["attest"]
+    retain = next(
+        s for s in attest["steps"] if s.get("name") == "Retain distribution attestation bundle"
+    )
+    assert retain["uses"].startswith("actions/upload-artifact@")
+    assert retain["with"]["name"] == "distribution-attestation"
+    assert retain["with"]["path"] == "${{ steps.distributions.outputs.bundle-path }}"
+    assert retain["with"]["if-no-files-found"] == "error"
+    verify = jobs["verify-provenance"]
+    assert set(verify["needs"]) == {"build", "attest"}
+    # The shell-running verifier gets read access only: no OIDC, no writes.
+    assert verify["permissions"] == {"contents": "read", "attestations": "read"}
+    downloads = [s["with"] for s in verify["steps"] if "download-artifact" in s.get("uses", "")]
+    assert [(d["name"], d["path"]) for d in downloads] == [
+        ("release-distributions", "dist"),
+        ("distribution-attestation", "attestation"),
+    ]
+    assert set(jobs["publish"]["needs"]) == {"build", "attest", "verify-provenance"}
+    assert jobs["publish"]["permissions"] == {"id-token": "write"}

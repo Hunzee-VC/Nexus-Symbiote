@@ -102,15 +102,10 @@ jobs:
         with:
           subject-path: dist/*
       - name: Retain distribution attestation bundle
-        env:
-          BUNDLE_PATH: ${{ steps.distributions.outputs.bundle-path }}
-        run: |
-          mkdir -p attestation
-          cp -- "$BUNDLE_PATH" attestation/distribution-attestation.jsonl
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: distribution-attestation
-          path: attestation/distribution-attestation.jsonl
+          path: ${{ steps.distributions.outputs.bundle-path }}
           if-no-files-found: error
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
@@ -127,18 +122,15 @@ jobs:
           name: inventory-benchmark-attestation
           path: ${{ steps.inventory.outputs.bundle-path }}
           if-no-files-found: error
-  publish:
-    if: inputs.publish && github.ref == 'refs/heads/main'
+  # Verify the retained attestation against the exact candidate bytes before any
+  # upload. This job runs shell, so it holds no OIDC or write permissions.
+  verify-provenance:
     needs: [build, attest]
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    environment:
-      name: pypi
-      url: https://pypi.org/p/nexus-symbiote
     permissions:
       contents: read
       attestations: read
-      id-token: write
     steps:
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
@@ -154,19 +146,35 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -s attestation/distribution-attestation.jsonl
           shopt -s nullglob
+          bundles=(attestation/*)
           wheels=(dist/*.whl)
           sdists=(dist/*.tar.gz)
-          (( ${#wheels[@]} == 1 && ${#sdists[@]} == 1 ))
+          (( ${#bundles[@]} == 1 && ${#wheels[@]} == 1 && ${#sdists[@]} == 1 ))
+          test -s "${bundles[0]}"
           for artifact in "${wheels[@]}" "${sdists[@]}"; do
             gh attestation verify "$artifact" \
-              --bundle attestation/distribution-attestation.jsonl \
+              --bundle "${bundles[0]}" \
               --repo "$GITHUB_REPOSITORY" \
               --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
               --source-ref refs/heads/main --source-digest "$GITHUB_SHA" \
               --deny-self-hosted-runners
           done
+  publish:
+    if: inputs.publish && github.ref == 'refs/heads/main'
+    needs: [build, attest, verify-provenance]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: pypi
+      url: https://pypi.org/p/nexus-symbiote
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: release-distributions
+          path: dist
       - name: Publish with OIDC trusted publishing
         uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0
         with:

@@ -164,7 +164,7 @@ def test_workflow_pins_structure_and_release_privilege_separation():
     assert any("--require-hashes -r requirements-ci.lock" in command for command in build_commands)
     assert "python -m build --no-isolation" in build_commands
     assert jobs["publish"]["environment"]["name"] == "pypi"
-    assert set(jobs["publish"]["needs"]) == {"build", "attest"}
+    assert set(jobs["publish"]["needs"]) == {"build", "attest", "verify-provenance"}
     for name in ["attest", "publish"]:
         assert all("run" not in step for step in jobs[name]["steps"])
 
