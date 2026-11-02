@@ -12,6 +12,7 @@ Client formats are data (:data:`CLIENTS`), so supporting a new client is a table
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -79,7 +80,10 @@ Scope = Literal["project", "user"]
 
 @dataclass(frozen=True, slots=True)
 class ConfigLocation:
-    """Where one client keeps MCP servers, and how to find them inside the file."""
+    """Where one client keeps MCP servers, and how to find them inside the file.
+
+    ``relpath`` may contain ``*`` glob segments (profile folders, per-server fragment files, plugin folders).
+    """
 
     scope: Scope
     base: Base
@@ -89,6 +93,12 @@ class ConfigLocation:
     platforms: frozenset[Platform] | None = None
     #: ``~/.claude.json`` also nests per-project servers under ``projects[<abs path>].mcpServers``.
     claude_projects: bool = False
+    #: ``map`` (name -> entry) or ``list`` (entries carrying a ``name``)
+    shape: Literal["map", "list"] = "map"
+    #: dotted paths in the same file whose values are client-wide trust settings
+    global_keys: tuple[tuple[str, ...], ...] = ()
+    #: entry ``type`` values that are not external servers (for example Goose ``builtin`` extensions)
+    skip_types: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,11 +111,18 @@ class ClientSpec:
     url_keys: tuple[str, ...] = ("url",)
     #: per-server keys listing tools the client restricts or auto-approves (become declared tool records)
     tool_list_keys: tuple[str, ...] = ()
+    #: client-specific field names mapped to the canonical ones (``cmd`` -> ``command``, ``envs`` -> ``env``)
+    field_aliases: tuple[tuple[str, str], ...] = ()
 
 
 _ALL: Final[frozenset[Platform]] = frozenset({"linux", "macos", "windows"})
 
-#: Verified client formats (``docs/research/proposals/adoption-first.md`` §5 Appendix B; ``spec/collectors.md``).
+_WIN: Final[frozenset[Platform]] = frozenset({"windows"})
+_UNIX: Final[frozenset[Platform]] = frozenset({"linux", "macos"})
+
+#: Verified client formats (``spec/collectors.md``; adoption-first proposal Appendix B; WP9 format research
+#: 2026-11-01 against each client's official docs or source). ``.mcp.json`` is also read by GitHub Copilot CLI;
+#: it is attributed to Claude Code here.
 CLIENTS: Final[tuple[ClientSpec, ...]] = (
     ClientSpec(
         client="claude-code",
@@ -125,13 +142,22 @@ CLIENTS: Final[tuple[ClientSpec, ...]] = (
         locations=(
             ConfigLocation("project", "root", ".cursor/mcp.json", "json", ("mcpServers",)),
             ConfigLocation("user", "home", ".cursor/mcp.json", "json", ("mcpServers",)),
+            ConfigLocation("user", "home", ".cursor/plugins/local/*/mcp.json", "json", ("mcpServers",)),
         ),
     ),
     ClientSpec(
         client="vscode",
         locations=(
             ConfigLocation("project", "root", ".vscode/mcp.json", "jsonc", ("servers",)),
+            ConfigLocation(
+                "project",
+                "root",
+                ".devcontainer/devcontainer.json",
+                "jsonc",
+                ("customizations", "vscode", "mcp", "servers"),
+            ),
             ConfigLocation("user", "appconfig", "Code/User/mcp.json", "jsonc", ("servers",)),
+            ConfigLocation("user", "appconfig", "Code/User/profiles/*/mcp.json", "jsonc", ("servers",)),
             ConfigLocation("user", "appconfig", "Code - Insiders/User/mcp.json", "jsonc", ("servers",)),
         ),
     ),
@@ -139,6 +165,7 @@ CLIENTS: Final[tuple[ClientSpec, ...]] = (
         client="windsurf",
         locations=(
             ConfigLocation("user", "home", ".codeium/windsurf/mcp_config.json", "json", ("mcpServers",)),
+            ConfigLocation("user", "home", ".codeium/mcp_config.json", "json", ("mcpServers",)),
         ),
         url_keys=("serverUrl", "url"),
         trust_keys=("disabledTools",),
@@ -161,12 +188,201 @@ CLIENTS: Final[tuple[ClientSpec, ...]] = (
     ClientSpec(
         client="gemini-cli",
         locations=(
-            ConfigLocation("project", "root", ".gemini/settings.json", "json", ("mcpServers",)),
-            ConfigLocation("user", "home", ".gemini/settings.json", "json", ("mcpServers",)),
+            ConfigLocation("project", "root", ".gemini/settings.json", "jsonc", ("mcpServers",)),
+            ConfigLocation("user", "home", ".gemini/settings.json", "jsonc", ("mcpServers",)),
+            ConfigLocation(
+                "user", "home", ".gemini/extensions/*/gemini-extension.json", "json", ("mcpServers",)
+            ),
         ),
         url_keys=("httpUrl", "url"),
         trust_keys=("trust", "includeTools", "excludeTools", "timeout"),
         tool_list_keys=("includeTools",),
+    ),
+    ClientSpec(
+        client="github-copilot-cli",
+        locations=(
+            ConfigLocation("project", "root", ".github/mcp.json", "json", ("mcpServers",)),
+            ConfigLocation("user", "home", ".copilot/mcp-config.json", "json", ("mcpServers",)),
+        ),
+        trust_keys=("tools",),
+    ),
+    ClientSpec(
+        client="cline",
+        locations=(
+            ConfigLocation(
+                "user", "home", ".cline/data/settings/cline_mcp_settings.json", "json", ("mcpServers",)
+            ),
+            ConfigLocation(
+                "user",
+                "appconfig",
+                "Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json",
+                "json",
+                ("mcpServers",),
+            ),
+            ConfigLocation(
+                "user", "home", "Documents/Cline/MCP/cline_mcp_settings.json", "json", ("mcpServers",)
+            ),
+        ),
+        trust_keys=("autoApprove", "alwaysAllow", "timeout"),
+        tool_list_keys=("autoApprove",),
+    ),
+    ClientSpec(
+        client="roo",
+        locations=(
+            ConfigLocation("project", "root", ".roo/mcp.json", "json", ("mcpServers",)),
+            ConfigLocation(
+                "user",
+                "appconfig",
+                "Code/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json",
+                "json",
+                ("mcpServers",),
+            ),
+        ),
+        trust_keys=("alwaysAllow",),
+        tool_list_keys=("alwaysAllow",),
+    ),
+    ClientSpec(
+        client="kiro",
+        locations=(
+            ConfigLocation("project", "root", ".kiro/settings/mcp.json", "json", ("mcpServers",)),
+            ConfigLocation("user", "home", ".kiro/settings/mcp.json", "json", ("mcpServers",)),
+        ),
+        trust_keys=("autoApprove", "disabledTools"),
+        tool_list_keys=("autoApprove",),
+    ),
+    ClientSpec(
+        client="continue",
+        locations=(
+            ConfigLocation("user", "home", ".continue/config.yaml", "yaml", ("mcpServers",), shape="list"),
+            ConfigLocation(
+                "project", "root", ".continue/mcpServers/*.yaml", "yaml", ("mcpServers",), shape="list"
+            ),
+            ConfigLocation("project", "root", ".continue/mcpServers/*.json", "json", ("mcpServers",)),
+            ConfigLocation("user", "home", ".continue/mcpServers/*.json", "json", ("mcpServers",)),
+        ),
+    ),
+    ClientSpec(
+        client="zed",
+        locations=(
+            ConfigLocation("project", "root", ".zed/settings.json", "jsonc", ("context_servers",)),
+            ConfigLocation(
+                "user",
+                "home",
+                ".config/zed/settings.json",
+                "jsonc",
+                ("context_servers",),
+                platforms=_UNIX,
+                global_keys=(
+                    ("agent", "tool_permissions", "default"),
+                    ("agent", "always_allow_tool_actions"),
+                ),
+            ),
+            ConfigLocation(
+                "user",
+                "appconfig",
+                "Zed/settings.json",
+                "jsonc",
+                ("context_servers",),
+                platforms=_WIN,
+                global_keys=(
+                    ("agent", "tool_permissions", "default"),
+                    ("agent", "always_allow_tool_actions"),
+                ),
+            ),
+        ),
+    ),
+    ClientSpec(
+        client="junie",
+        locations=(
+            ConfigLocation("project", "root", ".junie/mcp/mcp.json", "json", ("mcpServers",)),
+            ConfigLocation("user", "home", ".junie/mcp/mcp.json", "json", ("mcpServers",)),
+        ),
+    ),
+    ClientSpec(
+        client="amazon-q",
+        locations=(
+            ConfigLocation("project", "root", ".amazonq/mcp.json", "json", ("mcpServers",)),
+            ConfigLocation(
+                "project",
+                "root",
+                ".amazonq/cli-agents/*.json",
+                "json",
+                ("mcpServers",),
+                global_keys=(("allowedTools",),),
+            ),
+            ConfigLocation("user", "home", ".aws/amazonq/mcp.json", "json", ("mcpServers",)),
+            ConfigLocation(
+                "user",
+                "home",
+                ".aws/amazonq/cli-agents/*.json",
+                "json",
+                ("mcpServers",),
+                global_keys=(("allowedTools",),),
+            ),
+        ),
+    ),
+    ClientSpec(
+        client="opencode",
+        locations=(
+            ConfigLocation(
+                "project", "root", "opencode.json", "jsonc", ("mcp",), global_keys=(("permission",),)
+            ),
+            ConfigLocation(
+                "project", "root", "opencode.jsonc", "jsonc", ("mcp",), global_keys=(("permission",),)
+            ),
+            ConfigLocation(
+                "user",
+                "home",
+                ".config/opencode/opencode.json",
+                "jsonc",
+                ("mcp",),
+                global_keys=(("permission",),),
+            ),
+            ConfigLocation(
+                "user",
+                "home",
+                ".config/opencode/opencode.jsonc",
+                "jsonc",
+                ("mcp",),
+                global_keys=(("permission",),),
+            ),
+        ),
+        field_aliases=(("environment", "env"),),
+    ),
+    ClientSpec(
+        client="goose",
+        locations=(
+            ConfigLocation(
+                "user",
+                "home",
+                ".config/goose/config.yaml",
+                "yaml",
+                ("extensions",),
+                platforms=_UNIX,
+                global_keys=(("GOOSE_MODE",),),
+                skip_types=frozenset({"builtin", "platform", "frontend"}),
+            ),
+            ConfigLocation(
+                "user",
+                "appconfig",
+                "Block/goose/config/config.yaml",
+                "yaml",
+                ("extensions",),
+                platforms=_WIN,
+                global_keys=(("GOOSE_MODE",),),
+                skip_types=frozenset({"builtin", "platform", "frontend"}),
+            ),
+        ),
+        field_aliases=(("cmd", "command"), ("envs", "env"), ("uri", "url")),
+        trust_keys=("available_tools",),
+    ),
+    ClientSpec(
+        client="lm-studio",
+        locations=(ConfigLocation("user", "home", ".lmstudio/mcp.json", "json", ("mcpServers",)),),
+    ),
+    ClientSpec(
+        client="openclaw",
+        locations=(ConfigLocation("user", "home", ".openclaw/openclaw.json", "jsonc", ("mcp", "servers")),),
     ),
 )
 
@@ -250,6 +466,10 @@ def _server_entries(
             for name, entry in servers.items()
             if isinstance(entry, Mapping)
         )
+    elif isinstance(servers, list):
+        for i, entry in enumerate(servers):
+            if isinstance(entry, Mapping):
+                out.append(((*loc.servers_path, i), str(entry.get("name") or f"server-{i}"), entry))
     if loc.claude_projects:
         projects = _dig(data, ("projects",))
         if isinstance(projects, Mapping):
@@ -267,12 +487,31 @@ def _server_entries(
     return out
 
 
+def _normalize_entry(entry: Mapping[str, Any], aliases: tuple[tuple[str, str], ...]) -> dict[str, Any]:
+    """Map client-specific field names to canonical ones and unnest Zed's ``command: {path, args, env}``."""
+    out = dict(entry)
+    for alias, canonical in aliases:
+        if alias in out and canonical not in out:
+            out[canonical] = out[alias]
+    command = out.get("command")
+    if isinstance(command, Mapping):
+        out["command"] = command.get("path") or command.get("command")
+        if "args" in command and "args" not in entry:
+            out["args"] = command["args"]
+        if "env" in command and "env" not in entry:
+            out["env"] = command["env"]
+    return out
+
+
 def parse_client_config(
     spec: ClientSpec, loc: ConfigLocation, data: object, display: str, root: Path
 ) -> list[ServerDecl]:
     """Turn one parsed client config into server declarations (pure function; no filesystem access)."""
     decls: list[ServerDecl] = []
-    for pointer, name, entry in _server_entries(data, loc, root):
+    for pointer, name, raw_entry in _server_entries(data, loc, root):
+        if str(raw_entry.get("type", "")).lower() in loc.skip_types:
+            continue
+        entry = _normalize_entry(raw_entry, spec.field_aliases)
         transport, rule, url = _transport(entry, spec.url_keys)
         command = entry.get("command")
         args_raw = entry.get("args", [])
@@ -389,6 +628,26 @@ def _vscode_settings(paths: Iterable[Path], ctx: CollectContext) -> dict[str, st
     return flags
 
 
+def _global_flags(client: str, loc: ConfigLocation, data: object) -> dict[str, str]:
+    """Client-wide trust settings declared in the same file (``loc.global_keys``)."""
+    flags: dict[str, str] = {}
+    for path in loc.global_keys:
+        value = _dig(data, path)
+        if value is None:
+            continue
+        rendered = (
+            str(value).lower()
+            if isinstance(value, bool)
+            else ",".join(as_str_list(value))
+            if isinstance(value, list)
+            else json.dumps(value, sort_keys=True)
+            if isinstance(value, Mapping)
+            else str(value)
+        )
+        flags[f"{client}.{'.'.join(path)}"] = rendered
+    return flags
+
+
 def _codex_globals(data: object) -> dict[str, str]:
     if not isinstance(data, Mapping):
         return {}
@@ -433,15 +692,21 @@ class McpConfigCollector(BaseCollector):
         del ctx
         return True  # absence of every config is itself a fact worth recording (queried, 0 items)
 
-    def _location_path(self, ctx: CollectContext, loc: ConfigLocation) -> Path | None:
+    def _location_paths(self, ctx: CollectContext, loc: ConfigLocation) -> list[Path] | None:
+        """Concrete files for a location (glob segments expanded); ``None`` when the scope is not in reach."""
         if loc.platforms is not None and ctx.platform not in loc.platforms:
             return None
         if loc.base == "root":
-            return ctx.root / loc.relpath
-        if loc.base == "home":
-            return ctx.home / loc.relpath if ctx.home is not None else None
-        app = ctx.user_config_dir()
-        return app / loc.relpath if app is not None else None
+            base: Path | None = ctx.root
+        elif loc.base == "home":
+            base = ctx.home
+        else:
+            base = ctx.user_config_dir()
+        if base is None:
+            return None
+        if "*" in loc.relpath:
+            return sorted(p for p in base.glob(loc.relpath) if p.is_file() and not p.is_symlink())
+        return [base / loc.relpath]
 
     def collect(self, ctx: CollectContext) -> CollectionResult:
         result = self.new_result()
@@ -450,44 +715,32 @@ class McpConfigCollector(BaseCollector):
         checked = 0
         for spec in self.clients:
             for loc in spec.locations:
-                path = self._location_path(ctx, loc)
-                if path is None:
+                paths = self._location_paths(ctx, loc)
+                if paths is None:
                     continue
                 checked += 1
-                outcome = ctx.read_config(path)
-                if outcome.error_class == "not-found":
-                    continue
-                display = ctx.display(path)
-                if not outcome.ok or outcome.data is None:
+                for path in paths:
+                    if not path.is_file():
+                        continue
+                    data = self._read(ctx, result, spec, loc, path)
+                    if data is None:
+                        continue
+                    display = ctx.display(path)
+                    found = parse_client_config(spec, loc, data, display, ctx.root)
+                    decls.extend(found)
                     result.add_source(
                         Surface.TOOLS,
                         f"{spec.client}:{loc.scope}",
                         locator=display,
-                        ok=False,
-                        error_class=outcome.error_class,
+                        ok=True,
+                        items=len(found),
                     )
-                    continue
-                try:
-                    data = parse_structured(outcome.data, loc.fmt)
-                except (ValueError, UnicodeDecodeError) as exc:
-                    result.add_source(
-                        Surface.TOOLS,
-                        f"{spec.client}:{loc.scope}",
-                        locator=display,
-                        ok=False,
-                        error_class="parse-error",
-                    )
-                    result.warnings.append(f"{display}: {type(exc).__name__}: {str(exc)[:120]}")
-                    continue
-                found = parse_client_config(spec, loc, data, display, ctx.root)
-                decls.extend(found)
-                result.add_source(
-                    Surface.TOOLS, f"{spec.client}:{loc.scope}", locator=display, ok=True, items=len(found)
-                )
-                if spec.client == "codex":
-                    client_globals.setdefault("codex", {}).update(_codex_globals(data))
-                if spec.client == "gemini-cli":
-                    client_globals.setdefault("gemini-cli", {}).update(_gemini_globals(data))
+                    flags = client_globals.setdefault(spec.client, {})
+                    flags.update(_global_flags(spec.client, loc, data))
+                    if spec.client == "codex":
+                        flags.update(_codex_globals(data))
+                    if spec.client == "gemini-cli":
+                        flags.update(_gemini_globals(data))
         if ctx.home is None:
             result.add_source(Surface.TOOLS, "user-scope", ok=False, error_class="not-attempted")
         result.add_source(Surface.TOOLS, "locations-checked", ok=True, items=0, locator=str(checked))
@@ -520,6 +773,35 @@ class McpConfigCollector(BaseCollector):
                 )
             )
         return result
+
+    @staticmethod
+    def _read(
+        ctx: CollectContext, result: CollectionResult, spec: ClientSpec, loc: ConfigLocation, path: Path
+    ) -> object | None:
+        display = ctx.display(path)
+        outcome = ctx.read_config(path)  # confined beneath the scan root, home or user config dir
+        if not outcome.ok or outcome.data is None:
+            result.add_source(
+                Surface.TOOLS,
+                f"{spec.client}:{loc.scope}",
+                locator=display,
+                ok=False,
+                error_class=outcome.error_class,
+            )
+            return None
+        try:
+            parsed: object = parse_structured(outcome.data, loc.fmt)
+        except (ValueError, UnicodeDecodeError) as exc:
+            result.add_source(
+                Surface.TOOLS,
+                f"{spec.client}:{loc.scope}",
+                locator=display,
+                ok=False,
+                error_class="parse-error",
+            )
+            result.warnings.append(f"{display}: {type(exc).__name__}: {str(exc)[:120]}")
+            return None
+        return parsed
 
     @staticmethod
     def _claude_settings_paths(ctx: CollectContext) -> list[tuple[Path, str]]:

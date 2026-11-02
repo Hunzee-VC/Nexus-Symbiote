@@ -300,6 +300,10 @@ ci_privileged(identity) if {
 
 ci_privileged(identity) if has_tag(identity, "permissions:default")
 
+ci_privileged(identity) if has_tag(identity, "secrets:all")
+
+ci_privileged(identity) if has_tag(identity, "secrets:inherit")
+
 ci_privileged(identity) if count(ci_secrets(identity)) > 0
 
 ci_privileged(identity) if count(tag_values(identity, "cache")) > 0

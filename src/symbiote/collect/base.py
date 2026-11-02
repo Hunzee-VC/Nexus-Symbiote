@@ -18,6 +18,7 @@ from __future__ import annotations
 import importlib
 import importlib.metadata
 import os
+import stat
 import sys
 import time
 from collections.abc import Iterable, Mapping, Sequence
@@ -51,6 +52,7 @@ __all__ = [
     "CollectionResult",
     "Collector",
     "Platform",
+    "WalkReport",
     "load_collectors",
     "merge_coverage",
     "merge_surface",
@@ -102,6 +104,25 @@ def _detect_platform() -> Platform:
     if sys.platform.startswith("win"):
         return "windows"
     return "linux"
+
+
+#: Symlink locations a walk reports back (beyond this only the count is kept).
+MAX_REPORTED_SYMLINKS = 1000
+
+
+@dataclass(slots=True)
+class WalkReport:
+    """What :meth:`CollectContext.walk` skipped; turned into coverage facts by :meth:`CollectionResult.record_walk`."""
+
+    unreadable: list[str] = field(default_factory=list)
+    too_deep: list[str] = field(default_factory=list)
+    non_utf8: int = 0
+    non_regular: int = 0
+    non_regular_paths: list[str] = field(default_factory=list)
+    symlinks: int = 0
+    symlink_paths: list[str] = field(default_factory=list)
+    excluded: int = 0
+    truncated_at: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,25 +182,66 @@ class CollectContext:
                 pass
         return path.as_posix()
 
-    def walk(self, *, max_depth: int = 12) -> Iterable[Path]:
-        """Yield files under ``root`` in sorted order, pruning excluded directories and never following symlinks."""
+    def walk(
+        self, *, max_depth: int = 12, report: WalkReport | None = None, keep_within: Iterable[str] = ()
+    ) -> Iterable[Path]:
+        """Yield regular files under ``root`` in sorted order, never following symlinks.
+
+        Excluded (vendor) directories are pruned, except inside a directory named in ``keep_within`` (client
+        configuration trees such as ``.claude``, where a skill named ``build`` is not an artefact); anything skipped
+        for another
+        reason (unreadable or too-deep directories, non-regular files, names that are not valid UTF-8, the file
+        limit) is counted in ``report`` so collectors can state their coverage truthfully instead of
+        presenting a partial walk as complete.
+        """
+        rep = report if report is not None else WalkReport()
+        kept = frozenset(keep_within)
         count = 0
-        stack: list[tuple[Path, int]] = [(self.root, 0)]
+        stack: list[tuple[Path, int, bool]] = [(self.root, 0, False)]
         while stack:
-            directory, depth = stack.pop()
+            directory, depth, inside = stack.pop()
             try:
                 entries = sorted(directory.iterdir(), key=lambda p: p.name, reverse=True)
+            except FileNotFoundError:  # nothing to walk (a missing root, or removed mid-walk)
+                continue
             except OSError:
+                rep.unreadable.append(self.display(directory))
                 continue
             for entry in entries:
-                if entry.is_symlink():
+                try:
+                    entry.name.encode("utf-8")
+                except UnicodeEncodeError:  # POSIX allows it; RFC 8785 canonicalisation of the BOM does not
+                    rep.non_utf8 += 1
                     continue
-                if entry.is_dir():
-                    if entry.name not in self.exclude_dirs and depth < max_depth:
-                        stack.append((entry, depth + 1))
+                try:
+                    info = entry.lstat()
+                except OSError:
+                    rep.unreadable.append(self.display(entry))
+                    continue
+                if stat.S_ISLNK(
+                    info.st_mode
+                ):  # never followed here; collectors that need them resolve within bounds
+                    rep.symlinks += 1
+                    if len(rep.symlink_paths) < MAX_REPORTED_SYMLINKS:
+                        rep.symlink_paths.append(self.display(entry))
+                    continue
+                if stat.S_ISDIR(info.st_mode):
+                    within = inside or entry.name in kept
+                    if entry.name in self.exclude_dirs and (entry.name == ".git" or not inside):
+                        rep.excluded += 1
+                    elif depth >= max_depth:
+                        rep.too_deep.append(self.display(entry))
+                    else:
+                        stack.append((entry, depth + 1, within))
+                    continue
+                if not stat.S_ISREG(info.st_mode):
+                    # FIFOs, sockets and devices would block or mislead readers
+                    rep.non_regular += 1
+                    rep.non_regular_paths.append(self.display(entry))
                     continue
                 count += 1
                 if count > self.max_files:
+                    rep.truncated_at = self.max_files
                     return
                 yield entry
 
@@ -223,6 +285,20 @@ class CollectionResult:
         self.coverage[surface] = current.model_copy(
             update={"sources": [*current.sources, run], "items_seen": current.items_seen + items}
         )
+
+    def record_walk(self, surface: Surface, report: WalkReport, *, source: str = "repo-walk") -> None:
+        """Record a repository walk honestly: skipped directories and files become failed sources (partial)."""
+        for display in report.unreadable[:50]:
+            self.add_source(surface, source, locator=display, ok=False, error_class="permission-denied")
+        for display in report.too_deep[:50]:
+            self.add_source(surface, source, locator=display, ok=False, error_class="too-deep")
+        for display in report.non_regular_paths[:50]:
+            self.add_source(surface, source, locator=display, ok=False, error_class="not-a-regular-file")
+        if report.non_utf8:
+            self.add_source(surface, source, ok=False, error_class="non-utf8-name", items=report.non_utf8)
+        if report.truncated_at is not None:
+            self.set_status(surface, CoverageStatus.TRUNCATED, truncated_at=report.truncated_at)
+        self.add_source(surface, source, locator=".", ok=True)
 
     def set_status(
         self, surface: Surface, status: CoverageStatus, *, truncated_at: int | None = None
