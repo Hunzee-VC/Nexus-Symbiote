@@ -522,8 +522,11 @@ class AIBOMDiffer:
                 )
 
     def _generate_security_alerts(self, report: DiffReport) -> None:
+        # An in-place change is at least as consequential as an addition, which
+        # always alerts: a version bump, a swapped lockfile integrity value or a
+        # replaced tool body is rated medium, and must still fail the CI gate.
         for change in report.components_modified:
-            if change.severity in {"high", "critical"}:
+            if change.severity in {"medium", "high", "critical"}:
                 report.security_alerts.append(
                     {
                         "severity": change.severity,
