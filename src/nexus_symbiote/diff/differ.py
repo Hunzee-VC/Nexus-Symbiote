@@ -6,10 +6,11 @@ unauthorized component additions, and trust tier downgrades.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.enums import TrustTier
 from nexus_symbiote.core.hashing import TOOL_DEFINITION_HASH_VERSION
 from nexus_symbiote.core.models import MCPServerComponent
@@ -22,6 +23,111 @@ TRUST_TIER_ORDER = {
     TrustTier.UNTRUSTED_PUBLIC: 4,
     TrustTier.UNKNOWN: 5,
 }
+
+
+_SECURITY_FIELDS = {
+    "component_type",
+    "capabilities",
+    "authorizations",
+    "trust_remote_code",
+    "assurance_level",
+    "claims",
+    "endpoint",
+    "endpoint_url",
+    "command",
+    "args",
+    "env",
+    "transport",
+    "autonomy_level",
+    "workload_identity",
+    "tenant",
+    "deployment_id",
+    "deployment_status",
+    "deployment_profile",
+    "signing_identity",
+    "publisher_verified",
+    "publisher_identity",
+    "attestation_status",
+    "execution_isolation",
+    "human_in_the_loop",
+    "permission_mode",
+    "authentication_required",
+    "package_url",
+    "registry_uri",
+    "registry_source",
+    "registry_type",
+    "source_uris",
+    "resolved_revision",
+    "requested_alias",
+    "tokenizer_hash",
+    "chat_template_hash",
+    "tensor_inventory_hash",
+    "safetensors_header_hash",
+    "index_snapshot_hash",
+    "schema_hash",
+    "config_hash",
+    "write_authority",
+    "tenant_isolated",
+    "encryption_at_rest",
+    "modification_authority",
+    "authentication_methods",
+    "version_pinned",
+    "definition_hash_version",
+    "supplier",
+}
+_SET_LISTS = {
+    "capabilities",
+    "oauth_scopes",
+    "egress_domains",
+    "filesystem_paths",
+    "authorizations",
+    "conditions",
+    "evidence_refs",
+    "source_uris",
+    "supported_protocols",
+    "authentication_methods",
+    "skills_declared",
+    "config_files",
+    "authors",
+    "surfaces_scanned",
+    "surfaces_excluded",
+    "scan_failures",
+    "collectors_requested",
+    "collectors_completed",
+    "unobserved_surfaces",
+    "exclusions",
+    "source_unmapped_indexes",
+}
+
+
+def _semantic_value(value: Any, path: tuple[str, ...]) -> Any:
+    """Ignore set ordering and fresh claim observation times, never arbitrary JSON arrays."""
+    if isinstance(value, dict):
+        return {
+            key: _semantic_value(item, (*path, key))
+            for key, item in sorted(value.items())
+            if not (len(path) == 2 and path[0] == "claims" and key == "observed_at")
+        }
+    if isinstance(value, list):
+        items = [_semantic_value(item, (*path, "[]")) for item in value]
+        opaque = any(
+            part in {"properties", "input_schema", "annotations", "variable_schema"}
+            for part in path
+        )
+        key = path[-1]
+        if not opaque and key == "risks":
+            # Risk scoring counts each occurrence, so preserve multiplicity.
+            return sorted(json.dumps(item, sort_keys=True, separators=(",", ":")) for item in items)
+        if not opaque and (key in _SET_LISTS or key.endswith("_refs")):
+            return sorted(
+                {json.dumps(item, sort_keys=True, separators=(",", ":")) for item in items}
+            )
+        return items
+    return value
+
+
+def _edge_key(edge: DependencyEdge) -> str:
+    return json.dumps(edge.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
 
 
 @dataclass
@@ -40,6 +146,8 @@ class DependencyChange:
     target_ref: str
     relationship: str
     change_type: str  # added, removed
+    assurance_level: str | None = None
+    conditions: str | None = None
 
 
 @dataclass
@@ -51,6 +159,7 @@ class DiffReport:
     dependencies_added: list[DependencyChange] = field(default_factory=list)
     dependencies_removed: list[DependencyChange] = field(default_factory=list)
     security_alerts: list[dict[str, str]] = field(default_factory=list)
+    metadata_changes: list[dict[str, str]] = field(default_factory=list)
 
     @property
     def total_changes(self) -> int:
@@ -60,6 +169,7 @@ class DiffReport:
             + len(self.components_modified)
             + len(self.dependencies_added)
             + len(self.dependencies_removed)
+            + len(self.metadata_changes)
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -70,14 +180,27 @@ class DiffReport:
             "components_removed": [self._change_dict(c) for c in self.components_removed],
             "components_modified": [self._change_dict(c) for c in self.components_modified],
             "dependencies_added": [
-                {"source": d.source_ref, "target": d.target_ref, "relationship": d.relationship}
+                {
+                    "source": d.source_ref,
+                    "target": d.target_ref,
+                    "relationship": d.relationship,
+                    "assurance_level": d.assurance_level,
+                    "conditions": d.conditions,
+                }
                 for d in self.dependencies_added
             ],
             "dependencies_removed": [
-                {"source": d.source_ref, "target": d.target_ref, "relationship": d.relationship}
+                {
+                    "source": d.source_ref,
+                    "target": d.target_ref,
+                    "relationship": d.relationship,
+                    "assurance_level": d.assurance_level,
+                    "conditions": d.conditions,
+                }
                 for d in self.dependencies_removed
             ],
             "security_alerts": self.security_alerts,
+            "metadata_changes": self.metadata_changes,
         }
 
     def _change_dict(self, c: ComponentChange) -> dict[str, Any]:
@@ -146,6 +269,7 @@ class AIBOMDiffer:
                 )
                 report.components_modified.append(change)
 
+        self._diff_metadata(old, new, report)
         self._diff_dependencies(old, new, report)
         self._generate_security_alerts(report)
 
@@ -241,31 +365,38 @@ class AIBOMDiffer:
 
         old_content = getattr(old, "content_hash", None)
         new_content = getattr(new, "content_hash", None)
-        if old_content and new_content and old_content != new_content:
+        if old_content != new_content:
             modifications.append(
                 {
-                    "detail": "Prompt content hash changed.",
-                    "severity": "medium",
+                    "detail": "Content hash removed — content integrity is unknown."
+                    if old_content and not new_content
+                    else "Content hash changed."
+                    if old_content
+                    else "Content hash became available.",
+                    "severity": "high" if old_content else "info",
                 }
             )
 
         for hash_key in set(old.hashes.keys()) | set(new.hashes.keys()):
             old_h = old.hashes.get(hash_key)
             new_h = new.hashes.get(hash_key)
-            if old_h and new_h and old_h != new_h:
+            if old_h != new_h:
                 modifications.append(
                     {
-                        "detail": f"File hash ({hash_key}) changed.",
-                        "severity": "high",
+                        "detail": f"File hash ({hash_key}) "
+                        + (
+                            "removed — integrity is unknown." if old_h and not new_h else "changed."
+                        ),
+                        "severity": "high" if old_h else "info",
                     }
                 )
 
         old_pinned = getattr(old, "version_pinned", None)
         new_pinned = getattr(new, "version_pinned", None)
-        if old_pinned is True and new_pinned is False:
+        if old_pinned is True and new_pinned is not True:
             modifications.append(
                 {
-                    "detail": "Version pin removed — now floating.",
+                    "detail": "Version pin removed — now floating or unknown.",
                     "severity": "high",
                 }
             )
@@ -291,41 +422,114 @@ class AIBOMDiffer:
                 }
             )
 
+        # Cover every remaining model field, rather than silently accepting a new
+        # security field until somebody remembers to add a special-case comparison.
+        handled = {
+            "trust_tier",
+            "version",
+            "definition_hash",
+            "content_hash",
+            "hashes",
+            "serialization_safety",
+            "signing_status",
+        }
+        # These special cases cover only some transitions; retain the generic
+        # comparison for all other version/profile changes.
+        if old_pinned is True and new_pinned is not True:
+            handled.add("version_pinned")
+        if old_hash or new_hash:
+            handled.add("definition_hash_version")
+        old_fields = old.model_dump(mode="json")
+        new_fields = new.model_dump(mode="json")
+        for key in sorted((old_fields.keys() | new_fields.keys()) - handled):
+            old_value = old_fields.get(key)
+            new_value = new_fields.get(key)
+            if _semantic_value(old_value, (key,)) == _semantic_value(new_value, (key,)):
+                continue
+            severity = "medium"
+            if key in _SECURITY_FIELDS or key.endswith("_refs") or key.endswith("_ref"):
+                severity = "high"
+            if (key == "trust_remote_code" and new_value is True) or key in {
+                "input_schema",
+                "description_text",
+                "annotations",
+            }:
+                severity = "critical"
+            modifications.append({"detail": f"{key} changed.", "severity": severity})
         return modifications
 
-    def _diff_dependencies(self, old: AIBOM, new: AIBOM, report: DiffReport) -> None:
-        old_deps = {(d.source_ref, d.target_ref, d.relationship) for d in old.dependencies}
-        new_deps = {(d.source_ref, d.target_ref, d.relationship) for d in new.dependencies}
+    def _diff_metadata(self, old: AIBOM, new: AIBOM, report: DiffReport) -> None:
+        old_metadata = old.metadata.model_dump(mode="json")
+        new_metadata = new.metadata.model_dump(mode="json")
+        for metadata in (old_metadata, new_metadata):
+            # These identify a collection event, rather than its composition.
+            metadata.pop("serial_number", None)
+            metadata.pop("timestamp", None)
+            if metadata.get("completeness") is not None:
+                metadata["completeness"].pop("timestamp", None)
+        for key in sorted(old_metadata.keys() | new_metadata.keys()):
+            if _semantic_value(old_metadata.get(key), (key,)) == _semantic_value(
+                new_metadata.get(key), (key,)
+            ):
+                continue
+            severity = "high" if key in {"completeness", "spec_version"} else "medium"
+            change = {
+                "field": key,
+                "severity": severity,
+                "detail": f"Snapshot metadata {key} changed.",
+            }
+            report.metadata_changes.append(change)
+            report.security_alerts.append(
+                {"severity": severity, "component": "metadata", "alert": change["detail"]}
+            )
 
-        for src, tgt, rel in sorted(new_deps - old_deps):
+    def _diff_dependencies(self, old: AIBOM, new: AIBOM, report: DiffReport) -> None:
+        old_deps = {_edge_key(edge): edge for edge in old.dependencies}
+        new_deps = {_edge_key(edge): edge for edge in new.dependencies}
+        for key in sorted(new_deps.keys() - old_deps.keys()):
+            edge = new_deps[key]
             report.dependencies_added.append(
                 DependencyChange(
-                    source_ref=src,
-                    target_ref=tgt,
-                    relationship=rel,
+                    source_ref=edge.source_ref,
+                    target_ref=edge.target_ref,
+                    relationship=edge.relationship,
                     change_type="added",
+                    assurance_level=edge.assurance_level,
+                    conditions=edge.conditions,
                 )
             )
-
-        for src, tgt, rel in sorted(old_deps - new_deps):
+        for key in sorted(old_deps.keys() - new_deps.keys()):
+            edge = old_deps[key]
             report.dependencies_removed.append(
                 DependencyChange(
-                    source_ref=src,
-                    target_ref=tgt,
-                    relationship=rel,
+                    source_ref=edge.source_ref,
+                    target_ref=edge.target_ref,
+                    relationship=edge.relationship,
                     change_type="removed",
+                    assurance_level=edge.assurance_level,
+                    conditions=edge.conditions,
                 )
             )
+        old_bindings = {(e.source_ref, e.target_ref, e.relationship) for e in old.dependencies}
+        for change in report.dependencies_added:
+            if (change.source_ref, change.target_ref, change.relationship) in old_bindings:
+                report.security_alerts.append(
+                    {
+                        "severity": "high",
+                        "component": change.source_ref,
+                        "alert": "Dependency assurance or conditions changed; review the full edge records.",
+                    }
+                )
 
     def _generate_security_alerts(self, report: DiffReport) -> None:
         for change in report.components_modified:
-            if change.severity == "critical":
+            if change.severity in {"high", "critical"}:
                 report.security_alerts.append(
                     {
-                        "severity": "critical",
+                        "severity": change.severity,
                         "component": change.bom_ref,
                         "alert": (
-                            f"Critical change in '{change.name}': {'; '.join(change.details)}"
+                            f"{change.severity.capitalize()} change in '{change.name}': {'; '.join(change.details)}"
                         ),
                     }
                 )

@@ -9,7 +9,7 @@ from typing import Any
 from urllib.parse import unquote
 
 from nexus_symbiote.core.aibom import AIBOM
-from nexus_symbiote.core.hashing import parse_json_strict
+from nexus_symbiote.core.hashing import extract_version_pin, parse_json_strict
 from nexus_symbiote.core.models import RegistryEntryComponent
 from nexus_symbiote.scanners.live_mcp import DiscoveryTransport, PinnedHTTPTransport
 
@@ -17,7 +17,6 @@ OSV_QUERY_URL = "https://api.osv.dev/v1/query"
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 MAX_COMPONENTS = 500
 TOTAL_TIMEOUT_SECONDS = 60.0
-_VERSION = re.compile(r"[0-9][A-Za-z0-9.+!_-]{0,199}")
 
 
 @dataclass
@@ -53,14 +52,28 @@ def package_identity(component: RegistryEntryComponent) -> tuple[str, str, str]:
         if kind == "pypi"
         else re.fullmatch(r"(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*", name)
     )
-    if valid_name is None or _VERSION.fullmatch(version) is None:
+    version_pin = extract_version_pin(
+        "package==" + version if kind == "pypi" else name + "@" + version,
+        ecosystem="python" if kind == "pypi" else "npm",
+    )
+    if valid_name is None or len(version) > 200 or version_pin != version:
         raise ValueError("package URL name or exact version is invalid")
     normalize = (
         (lambda value: re.sub(r"[-_.]+", "-", value).lower())
         if kind == "pypi"
         else (lambda value: value)
     )
-    declared_version = (component.version or "").removeprefix("==")
+    declared_version = component.version or ""
+    if kind == "pypi":
+        declared_version = (
+            extract_version_pin(
+                "package" + declared_version
+                if declared_version.startswith("==")
+                else "package==" + declared_version,
+                ecosystem="python",
+            )
+            or ""
+        )
     if (
         component.registry_type != kind
         or normalize(component.name) != normalize(name)

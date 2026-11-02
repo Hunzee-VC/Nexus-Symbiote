@@ -62,7 +62,7 @@ class TestModels:
     def test_agent_component_defaults(self):
         agent = AgentComponent(bom_ref="agent:main", name="my-agent")
         assert agent.component_type == ComponentType.AGENT
-        assert agent.autonomy_level == AutonomyLevel.L2_AGENT
+        assert agent.autonomy_level is None
         assert agent.trust_tier == TrustTier.UNKNOWN
 
     def test_tool_component(self):
