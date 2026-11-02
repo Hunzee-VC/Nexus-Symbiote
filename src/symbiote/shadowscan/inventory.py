@@ -50,8 +50,17 @@ def literal_pattern(resource: str) -> str:
     return _GLOB.sub(lambda m: f"[{m.group(0)}]", resource)
 
 
+def agent_identifier(agent: Agent) -> str:
+    """The inventory ``agent_id``: the full Symbiote entity id (``agent:<slug>``).
+
+    ShadowScan's own AgentBOM loader (``shadowscan/agentbom.py``) binds the same identifier, so a card written
+    here and an AgentBOM passed to ``--inventory`` directly register a finding to one and the same agent id.
+    """
+    return agent.id
+
+
 def agent_slug(agent: Agent) -> str:
-    """The inventory ``agent_id``: the Symbiote entity id without its ``agent:`` prefix."""
+    """The id without its ``agent:`` prefix (file names, review suggestions)."""
     return agent.id.split(":", 1)[1]
 
 
@@ -106,14 +115,74 @@ def discovery_resources(
             if pattern not in patterns:
                 patterns.append(pattern)
     for dep in bom.deployments:
-        if dep.agent_ref != agent.id or dep.workload_ref is None:
+        if (
+            dep.agent_ref != agent.id
+            or dep.workload_ref is None
+            or dep.environment.kind is not E.EnvironmentKind.K8S
+        ):
             continue
         wl = dep.workload_ref
-        if wl.namespace and wl.name:
-            pattern = literal_pattern(f"k8s:{wl.namespace}/{wl.kind or 'workload'}/{wl.name}".lower())
+        namespace = wl.namespace or dep.environment.namespace
+        parts = [dep.environment.cluster, namespace, wl.kind, wl.name]
+        # ShadowScan's AgentBOM loader binds only a complete cluster/namespace/kind/name identity; an
+        # incomplete one would be a guess, and a guess is not an approval.
+        if all(parts) and not any("/" in p for p in parts if p):
+            pattern = literal_pattern("k8s:" + "/".join(p for p in parts if p))
             if pattern not in patterns:
                 patterns.append(pattern)
+    if agent.a2a_card is not None and agent.a2a_card.url:
+        pattern = literal_pattern(agent.a2a_card.url)
+        if pattern not in patterns:
+            patterns.append(pattern)
     return patterns
+
+
+def component_resources(bom: AgentBOM, agent: Agent) -> list[str]:
+    """Endpoints and purls of the agent's tool servers: **descriptive** provenance, never approval bindings."""
+    linked = {e.to_ref for e in bom.edges if e.from_ref == agent.id}
+    out: list[str] = []
+    for server in sorted(bom.tool_servers, key=lambda s: s.id):
+        if agent.role is not E.AgentRole.ROOT and server.id not in linked:
+            continue
+        if server.endpoint is not None and server.endpoint.value:
+            out.append(server.endpoint.value)
+        if server.package is not None and server.package.value and server.package.value.purl:
+            out.append(server.package.value.purl)
+    return list(dict.fromkeys(out))
+
+
+#: Symbiote data trust tiers → ShadowScan card zones (1 internal, 2 partner, 3 untrusted public).
+ZONE_FROM_TIER = {
+    E.TrustTier.INTERNAL_VERIFIED: 1,
+    E.TrustTier.INTERNAL: 1,
+    E.TrustTier.PARTNER: 2,
+    E.TrustTier.UNTRUSTED_PUBLIC: 3,
+}
+
+
+def data_trust_zones(bom: AgentBOM, agent: Agent) -> dict[str, list[dict[str, int]]] | None:
+    """``data_trust_zones`` from the data sources the agent reads or writes (unknown tiers claim no zone)."""
+    sources = {d.id: d for d in bom.data_sources}
+    read: list[int] = []
+    write: list[int] = []
+    for edge in bom.edges:
+        if edge.from_ref != agent.id or edge.to_ref not in sources:
+            continue
+        zone = ZONE_FROM_TIER.get(sources[edge.to_ref].trust_tier)
+        if zone is None:
+            continue
+        if edge.type in (E.EdgeType.READS_CONTEXT_FROM, E.EdgeType.READS_MEMORY_FROM):
+            read.append(zone)
+        elif edge.type is E.EdgeType.WRITES_MEMORY_TO:
+            write.append(zone)
+    if not read and not write:
+        return None
+    out: dict[str, list[dict[str, int]]] = {}
+    if read:
+        out["read_access"] = [{"zone": z} for z in sorted(set(read))]
+    if write:
+        out["write_access"] = [{"zone": z} for z in sorted(set(write))]
+    return out
 
 
 def _authorized_tools(bom: AgentBOM, agent: Agent) -> list[dict[str, str]]:
@@ -175,7 +244,7 @@ def card_for(
     """One ``schema_version: 2`` Agent Capability Card for ``agent``."""
     level, source = declared_level(agent)
     metadata: dict[str, Any] = {
-        "agent_id": agent_slug(agent),
+        "agent_id": agent_identifier(agent),
         "name": agent.name or agent_slug(agent),
         "version": agent.version,
     }
@@ -202,23 +271,42 @@ def card_for(
     servers = _tool_servers(bom, agent)
     if tools or servers:
         card["capability_surface"] = {"authorized_tools": tools, "tool_servers": servers}
-    card["symbiote"] = {
+    zones = data_trust_zones(bom, agent)
+    if zones is not None:
+        card["data_trust_zones"] = zones
+    spiffe = next(
+        (
+            i.ref
+            for i in bom.identities
+            if i.id in agent.identities and i.identity_kind is E.IdentityKind.SPIFFE
+        ),
+        None,
+    )
+    if spiffe:
+        card["identity_and_delegation"] = {"spiffe_id": spiffe}
+    card["provenance"] = {
+        "schema": "symbiote-agentbom",
+        "generator": f"symbiote {__version__}",
         "agentbom_ref": agent.id,
+        "spec_version": bom.spec_version,
+        "snapshot_id": bom.snapshot.id,
         "snapshot_digest": bom.snapshot.digest,
         "snapshot_kind": bom.snapshot.kind.value,
         "snapshot_serial": bom.snapshot.serial,
-        "spec_version": bom.spec_version,
         "autonomy_level_source": source,
-        "generated_by": f"symbiote {__version__}",
+        "verification": "not-verified",
+        "component_resources": component_resources(bom, agent),
     }
-    names = [agent.name] if agent.name else []
+    names = [agent_slug(agent)]
+    if agent.name:
+        names.append(agent.name)
     if agent.a2a_card is not None:
         names.extend(s.name for s in agent.a2a_card.skills if s.name)
     discovery: dict[str, Any] = {
         "resources": discovery_resources(bom, agent, extra=resources, scan_root=scan_root)
     }
     if names:
-        discovery["names"] = sorted(dict.fromkeys(n.strip() for n in names if n.strip()))
+        discovery["names"] = list(dict.fromkeys(n.strip() for n in names if n.strip()))
     if agent.framework is not None and agent.framework.value:
         discovery["frameworks"] = [f"framework.{slugify(agent.framework.value.name)}"]
     card["discovery"] = discovery
@@ -258,7 +346,7 @@ def _simple_entries(
     entries: list[dict[str, Any]] = []
     for agent in selected_agents(bom, include_external=include_external):
         level, _ = declared_level(agent)
-        entry: dict[str, Any] = {"id": agent_slug(agent), "name": agent.name or agent_slug(agent)}
+        entry: dict[str, Any] = {"id": agent_identifier(agent), "name": agent.name or agent_slug(agent)}
         owner = _owner(bom, agent)
         if owner:
             entry["owner"] = owner
@@ -266,8 +354,7 @@ def _simple_entries(
         entry["resources"] = discovery_resources(
             bom, agent, extra=resources if root else (), scan_root=scan_root if root else None
         )
-        if agent.name:
-            entry["names"] = [agent.name]
+        entry["names"] = list(dict.fromkeys([agent_slug(agent), *([agent.name] if agent.name else [])]))
         if level is not None:
             entry["autonomy_level"] = level
         entries.append(entry)
@@ -329,9 +416,13 @@ def export_inventory(
 
 __all__ = [
     "MAX_TOOLS",
+    "ZONE_FROM_TIER",
     "InventoryFormat",
+    "agent_identifier",
     "agent_slug",
     "card_for",
+    "component_resources",
+    "data_trust_zones",
     "declared_level",
     "discovery_resources",
     "export_inventory",

@@ -16,6 +16,7 @@ fix one or the other in the same change and record the decision as an ADR.
 | [`checks.md`](checks.md) | Built-in policy checks (`SYM-*`), computed flags, severity, OWASP ASI and MITRE ATLAS mappings |
 | [`attestation.md`](attestation.md) | in-toto predicate types, DSSE/Sigstore signing and verification flows, anti-rollback, trust status |
 | [`collectors.md`](collectors.md) | Collector contracts, inputs, parsing rules, evidence locators and coverage semantics |
+- [`shadowscan-mapping.md`](shadowscan-mapping.md) — Nexus ShadowScan ↔ AgentBOM: report import, autonomy interval, inventory export, reconciliation checks
 | [`cli.md`](cli.md) | Command surface, exit codes, JSON output contracts, Python API shape |
 | [`divergences.md`](divergences.md) | Register of every place Symbiote extends or narrows CycloneDX/SPDX semantics (k8s-aibom format) |
 | [`versioning.md`](versioning.md) | Versioning rules for the tool, the taxonomy, the companion schema and predicate types |

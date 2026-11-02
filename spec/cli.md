@@ -41,6 +41,11 @@ stderr when a TTY), `--quiet`, `--store PATH` (default `./.symbiote/store`), `--
 | `symbiote allowlist export --format gab|opa-data|envoy-ext-authz-json|mcp-gateway-generic` | enforcement exports |
 | `symbiote redact --class C… IN -o OUT`, `symbiote merkle verify FILE --root R|--bundle B`, `symbiote merkle prove FILE --id ID` | redaction and Merkle proofs |
 | `symbiote index build`, `symbiote query who-holds-credential --server ID`, `query ran-under --snapshot D --between T1 T2`, `query trusts-publisher --publisher P`, `query blast-radius --tool ID`, `query drift --agent ID --since T` | incident index over the store |
+| `symbiote shadowscan import REPORT [-o DIR] [--name N] [--scope estate|root] [--scan-root P] [--format …] [--deterministic]` | Nexus ShadowScan JSON report or CycloneDX output → **observed** snapshot (`shadowscan-mapping.md §2`); writes `agentbom.observed.json` (+ `.cdx.json`, `.spdx.json`, loss reports) |
+| `symbiote shadowscan inventory COMPANION -o DIR|FILE [--format cards|agents|csv] [--scan-root P] [--resource PAT…] [--include-external] [--classification C]` | the AgentBOM as the ShadowScan inventory (Capability Cards v2, `agents.yaml`, CSV) so *shadow* means *not in the AgentBOM* (§4) |
+| `symbiote shadowscan reconcile COMPANION REPORT [--scan-root P] [--fail-on SEV] [-o FILE] [--sarif FILE]` | declared vs observed tool servers, autonomy verdicts, `SYM-SS-*` findings; exit 1 at `--fail-on` (§5) |
+| `symbiote shadowscan levels` | the L0-L5 scale and its ISO/IEC 22989 projection |
+| `symbiote scan … --shadowscan-report FILE [--shadowscan-scope root|estate]` | fold a ShadowScan report into the scan through the `shadowscan-report` collector (§6) |
 | `symbiote schema export companion|predicates|taxonomy|conformance`, `symbiote version` | introspection |
 
 ## Python API (`symbiote.api`)

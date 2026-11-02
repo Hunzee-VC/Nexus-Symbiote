@@ -291,7 +291,9 @@ def test_inventory_cards(declared_bom) -> None:
     assert list(files) == ["triage-agent.card.yaml"]
     card = yaml.safe_load(files["triage-agent.card.yaml"])
     assert card["schema_version"] == 2
-    assert card["metadata"]["agent_id"] == "triage-agent"
+    assert (
+        card["metadata"]["agent_id"] == "agent:triage-agent"
+    )  # the id ShadowScan's own AgentBOM loader binds
     assert card["metadata"]["owner_team"] == "Acme Platform Security"
     assert card["discovery"]["resources"] == [
         "github:acme/widgets",
@@ -306,16 +308,18 @@ def test_inventory_cards(declared_bom) -> None:
         "github",
         "triage-tools",
     }
-    assert card["symbiote"]["snapshot_digest"] == declared_bom.snapshot.digest
+    assert card["provenance"]["snapshot_digest"] == declared_bom.snapshot.digest
+    assert card["provenance"]["verification"] == "not-verified"
+    assert "https://api.githubcopilot.com/mcp/" in card["provenance"]["component_resources"]
     assert set(card["discovery"]) <= {"resources", "names", "frameworks"}
 
 
 def test_inventory_simple_and_csv(declared_bom) -> None:
     agents = yaml.safe_load(export_inventory(declared_bom, "agents")["agents.yaml"])
-    assert agents["agents"][0]["id"] == "triage-agent"
+    assert agents["agents"][0]["id"] == "agent:triage-agent"
     text = export_inventory(declared_bom, "csv", scan_root="/r")["agents.csv"]
     rows = list(csv.DictReader(io.StringIO(text)))
-    assert rows[0]["agent_id"] == "triage-agent" and rows[0]["resources"] == "/r|/r/*"
+    assert rows[0]["agent_id"] == "agent:triage-agent" and rows[0]["resources"] == "/r|/r/*"
     assert rows[0]["autonomy_level"] == ""
 
 
@@ -323,7 +327,7 @@ def test_inventory_declares_level_from_iso() -> None:
     bom = import_report(read_report(TRIAGE), deterministic=True)
     card = yaml.safe_load(export_inventory(bom, "cards")["triage-agent.card.yaml"])
     assert card["autonomy_profile"]["level"] == 3
-    assert card["symbiote"]["autonomy_level_source"] == "observed"
+    assert card["provenance"]["autonomy_level_source"] == "observed"
     assert literal_pattern("agent-*[x]?") == "agent-[*][[]x[]][?]"
 
 
@@ -346,7 +350,7 @@ def test_interop_shadowscan_accepts_generated_inventory(declared_bom, tmp_path: 
     )
     data = json.loads(report.read_text())
     assert data["inventory_present"] and data["summary"]["shadow"] == 0
-    assert all(f["registry_match"] == "triage-agent" for f in data["findings"])
+    assert all(f["registry_match"] == "agent:triage-agent" for f in data["findings"])
 
 
 # ------------------------------------------------------------------------------------------ reconcile & checks

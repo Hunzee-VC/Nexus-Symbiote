@@ -113,6 +113,7 @@ Common fields on every entity: `id`, `name?`, `description?`, `provenance: Prove
 | `owner`, `operator` | ref→Party | owner ✓ (Standard+) | |
 | `automation_level` | `Claim[IsoAutomationLevel]` | | ISO/IEC 22989 ladder, same names as SPDX 3.1 `isoAutomationLevel`: `notAutomated, assistiveAutomation, partialAutomation, conditionalAutomation, highAutomation, fullAutomation, autonomous` |
 | `autonomy_profile` | `[{capability: CapabilityClass, mode: autonomous \| approval-required \| forbidden}]` | | **Action-specific autonomy**; the agent-wide level is only a summary |
+| `autonomy_assessment` | `{scale, floor, ceiling, floor_level, ceiling_level, oversight: bypassed \| gated \| unknown, initiation: schedule \| event \| human \| unknown, basis: [{bound, rule, value}], declared?, declared_source?, assessor?, assurance, evidence}` | | An evidence **interval** on a named scale (ShadowScan `shadowscan.autonomy/v1`, `shadowscan-mapping.md §3`): the floor is what the evidence proves, the ceiling what positive evidence has not ruled out; `automation_level` summarises the floor |
 | `identities` | `[ref→Identity]` | | Workload principals it may act as |
 | `instructions` | `[{ref, precedence}]` | ✓ | Ordered loading stack |
 | `entrypoint` | str | | Module/command that starts it |

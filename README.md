@@ -104,6 +104,7 @@ from symbiote.snapshot import finalize, new_document, redact_entities, verify_do
 | Policy checks (`SYM-*`), computed flags (lethal trifecta, unpinned tools, floating aliases, unsafe serialization…), conformance levels, completeness score, SARIF | ✅ |
 | Snapshot diff and typed deltas; chain store with monotone serials, prev links and anti-rollback | ✅ |
 | Sigstore keyless signing with identity-constraint policies; Gateway Allowlist Bundle + reference served-tool check | ✅ |
+| Nexus ShadowScan: import discovery reports as observed snapshots (autonomy interval, servers, identities, coverage), export the AgentBOM as the ShadowScan inventory, reconcile declared vs observed (`SYM-SS-*`), fold reports into `symbiote scan` | ✅ |
 | Trust-status lists (CLI), incident index, CycloneDX/SPDX importers, live MCP and OTel collectors | 🚧 |
 | `symbiote scan .` zero-config: companion + CycloneDX 1.7 + SPDX 3.0.1 from a repository | ✅ (coverage grows with each collector) |
 

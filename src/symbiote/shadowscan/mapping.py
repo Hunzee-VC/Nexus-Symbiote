@@ -1290,6 +1290,7 @@ class _Mapper:
         assessed = self.assessment(f)
         if assessed:
             self.root_assessments.append(assessed)
+        self.map_models(f, self.out.root.id)
         self.record(f, self.out.root.id)
         self.out.root_findings.append(f.id)
         self.evidence_for(f)
