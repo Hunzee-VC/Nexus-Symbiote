@@ -66,9 +66,12 @@ nav:
       - Incident query: spec/incident-query.md
       - Native inventory migration: spec/native-inventory-migration.md
       - Collectors: spec/collectors.md
+      - Nexus ShadowScan mapping: spec/shadowscan-mapping.md
       - CLI: spec/cli.md
       - Divergence register: spec/divergences.md
       - Versioning: spec/versioning.md
+  - Integrations:
+      - Nexus ShadowScan: integrations/shadowscan.md
   - Research:
       - Overview: research/README.md
       - Design brief: research/design-brief.md

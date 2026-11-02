@@ -31,10 +31,16 @@ schema, predicate types) is versioned independently of the tool; see `spec/versi
   the `k8s-aibom` importer (CR unwrapping via status.bomDocument, §5 confidence mapping, no
   signature laundering), and the drift-mode fixture MCP server
   (description|schema|annotations|order|pagination|unicode).
-- Nexus-ShadowScan bridge: `export/shadowscan.py` emits schema-version-2 Agent
-  Capability Cards (authorized_tools[].sha256 = tooldef/v1 digests, trust-zone
-  mapping, discovery resources derived symmetrically with ShadowScan's AgentBOM
-  inventory loader) and `agents:` inventories; `imp/shadowscan.py` imports
-  ShadowScan JSON reports as observed evidence (autonomy interval floor →
-  ISO-ladder claim with the ceiling preserved, unmapped surfaces reported, the
-  report pinned by a scan-report evidence digest).
+- Nexus ShadowScan native integration (WP19, `symbiote.shadowscan`, `spec/shadowscan-mapping.md`): strict
+  reader for ShadowScan JSON reports and its CycloneDX 1.6 dialect; importer that turns findings into an
+  **observed** snapshot (assurance follows the surface, every finding is `scan-report` evidence, `shadow: null`
+  stays `unknown`, incomplete connectors stay `partial`); the L0-L5 autonomy interval as
+  `Agent.autonomy_assessment` with a strictly increasing ISO/IEC 22989 projection and ShadowScan's merge
+  semantics; inventory export (schema-v2 Capability Cards with `tooldef/v1` digests, `agents.yaml`, CSV —
+  validated against ShadowScan 0.1.4, bindings aligned with ShadowScan's own AgentBOM loader); `reconcile`
+  (declared vs observed servers, autonomy verdicts) and the `SYM-SS-001..007` checks; the `shadowscan-report`
+  collector (`symbiote scan --shadowscan-report`, corroboration merge of duplicate ids); the `symbiote shadowscan
+  levels|import|inventory|reconcile` commands. `export/shadowscan.py` and `imp/shadowscan.py` remain as façades.
+- Fixed: SPDX `software_File.contentType` (crashed exports with evidence or instructions); SPDX schema validation
+  skips the official `oneOf` schema above 400 graph elements (minutes per document) and says so; collector
+  results can hand root-agent facts (`root_updates`), flags and foreign properties back to the scan runner.

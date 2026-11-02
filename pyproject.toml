@@ -43,6 +43,7 @@ dependencies = [
 sign = ["sigstore>=4.5.1,<5", "in-toto-attestation>=0.9"]
 models = ["model-signing>=1.0", "pyopenssl>=24"]
 mcp = ["mcp>=1.9"]
+shadowscan = ["NexusShadowScan>=0.1.4,<0.2"]
 all = ["symbiote[sign,models,mcp]"]
 dev = [
   "pytest>=8.2",

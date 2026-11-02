@@ -1,0 +1,2341 @@
+{
+  "version": "0.1.4",
+  "finding_identity_schema": "shadowscan.finding-identity/v2",
+  "started_at": "2026-11-01T17:00:14+00:00",
+  "finished_at": "2026-11-01T17:00:14+00:00",
+  "inventory_size": 0,
+  "inventory_present": false,
+  "collection_scope": {
+    "schema": "shadowscan.collection-scope/v1",
+    "comparable": true,
+    "fingerprint": "5391e9472d7b41c46b03ffc1d91767c538d87571690f8bd586b1bd19103ba449",
+    "credential_identity_schema": "shadowscan.credential-identity/v1",
+    "credential_identity_scope": "run"
+  },
+  "summary": {
+    "complete": true,
+    "status": "complete",
+    "total": 12,
+    "shadow": 0,
+    "by_surface": {
+      "code": 12
+    },
+    "by_kind": {
+      "mcp-server": 5,
+      "agent-config": 6,
+      "agent": 1
+    },
+    "by_risk_level": {
+      "critical": 1,
+      "high": 3,
+      "medium": 6,
+      "low": 2
+    },
+    "frameworks": {
+      "protocol.mcp": 5,
+      "coding-agent.cursor": 1,
+      "coding-agent.claude-code": 1,
+      "coding-agent.gemini-cli": 1,
+      "coding-agent.openai-codex": 1,
+      "protocol.a2a": 1,
+      "coding-agent.agents-md": 1,
+      "coding-agent.agent-skills": 1
+    },
+    "model_providers": {},
+    "errors": 0,
+    "incomplete_reasons": {},
+    "declared_omissions": 0,
+    "tolerated_gaps": 0
+  },
+  "stats": [
+    {
+      "connector": "code.filesystem",
+      "started_at": "2026-11-01T17:00:14+00:00",
+      "finished_at": "2026-11-01T17:00:14+00:00",
+      "findings": 12,
+      "objects_examined": 24,
+      "errors": [],
+      "warnings": [
+        "code.filesystem: repository root: evidence not reported because nothing in the project establishes a technology on its own (a code pattern without the library's import or dependency, a host, variable or model id mentioned in test data or a data file, a CI job image, or a mention below weight 0.3): traces/otel-genai.json; review them if the project uses these products"
+      ],
+      "skipped": false,
+      "skip_reason": null,
+      "cached": false,
+      "incomplete": false,
+      "coverage": null,
+      "incomplete_reasons": {},
+      "declared_omissions": 0,
+      "declared_paths": [],
+      "name": "code.filesystem"
+    }
+  ],
+  "findings": [
+    {
+      "surface": "code",
+      "connector": "code.filesystem",
+      "kind": "mcp-server",
+      "title": "MCP configuration: .mcp.json",
+      "resource": "/work/triage-agent/.mcp.json",
+      "resource_type": "mcp-config",
+      "provider": "filesystem",
+      "account": null,
+      "region": null,
+      "owner": null,
+      "frameworks": [
+        "protocol.mcp"
+      ],
+      "model_providers": [],
+      "models": [],
+      "capabilities": [
+        "tool-use",
+        "data-access"
+      ],
+      "permissions": [],
+      "evidence": [
+        {
+          "signal": "file:protocol.mcp",
+          "description": "MCP client/server configuration file .mcp.json",
+          "location": ".mcp.json",
+          "snippet": null,
+          "weight": 0.95,
+          "signature": "protocol.mcp",
+          "attributes": {}
+        },
+        {
+          "signal": "domain:protocol.mcp",
+          "description": "endpoint matched Model Context Protocol (MCP): api.githubcopilot.com",
+          "location": ".mcp.json:1",
+          "snippet": null,
+          "weight": 0.85,
+          "signature": "protocol.mcp",
+          "attributes": {
+            "category": "protocol",
+            "value": "api.githubcopilot.com"
+          }
+        },
+        {
+          "signal": "secret:inline",
+          "description": "MCP server 'filesystem' has credential-looking values inline (args)",
+          "location": ".mcp.json",
+          "snippet": null,
+          "weight": 0.3,
+          "signature": null,
+          "attributes": {}
+        },
+        {
+          "signal": "mcp-risk:mcp-unpinned-package",
+          "description": "MCP server 'filesystem' fetches its package or image without an exact version (@modelcontextprotocol/server-filesystem)",
+          "location": ".mcp.json",
+          "snippet": null,
+          "weight": 0.0,
+          "signature": null,
+          "attributes": {}
+        }
+      ],
+      "confidence": 0.995,
+      "likelihood": "strong",
+      "risk": {
+        "score": 75,
+        "level": "critical",
+        "factors": [
+          {
+            "id": "kind",
+            "description": "mcp-server finding",
+            "weight": 15
+          },
+          {
+            "id": "no-owner",
+            "description": "no identifiable owner",
+            "weight": 10
+          },
+          {
+            "id": "capability:tool-use",
+            "description": "calls tools / functions",
+            "weight": 5
+          },
+          {
+            "id": "capability:data-access",
+            "description": "reads or writes files and databases directly (exfiltration / tampering surface)",
+            "weight": 10
+          },
+          {
+            "id": "tag:inline-secrets",
+            "description": "secrets inline in MCP configuration",
+            "weight": 15
+          },
+          {
+            "id": "tag:mcp-unpinned-package",
+            "description": "MCP server package or image is not pinned to an exact version",
+            "weight": 10
+          },
+          {
+            "id": "vendor-notes",
+            "description": "MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.",
+            "weight": 5
+          },
+          {
+            "id": "mcp-stdio",
+            "description": "local stdio MCP servers run with the user's full privileges",
+            "weight": 5
+          },
+          {
+            "id": "confidence-scaling",
+            "description": "score multiplied by 1.00 because confidence is 0.99; this only ever lowers risk",
+            "weight": 0
+          }
+        ],
+        "danger_score": 65
+      },
+      "shadow": null,
+      "registry_match": null,
+      "tags": [
+        "inline-secrets",
+        "mcp-unpinned-package"
+      ],
+      "first_seen": null,
+      "last_seen": null,
+      "metadata": {
+        "path": ".mcp.json",
+        "scan_root": "/work/triage-agent",
+        "agent_indicators": 1,
+        "servers": [
+          {
+            "name": "github",
+            "transport": "http",
+            "command": null,
+            "args": [],
+            "url": "https://api.githubcopilot.com/mcp/",
+            "urls": [
+              "https://api.githubcopilot.com/mcp/"
+            ],
+            "env_names": [],
+            "headers": [
+              "Authorization"
+            ],
+            "auto_approve": null,
+            "secrets_inline": false,
+            "disabled": false,
+            "risks": []
+          },
+          {
+            "name": "filesystem",
+            "transport": "stdio",
+            "command": "npx",
+            "args": [
+              "-y",
+              "@modelcontextprotocol/server-filesystem@latest",
+              "[REDACTED]"
+            ],
+            "url": null,
+            "urls": [],
+            "env_names": [
+              "FS_ROOT"
+            ],
+            "headers": [],
+            "auto_approve": null,
+            "secrets_inline": true,
+            "secret_locations": [
+              "args"
+            ],
+            "disabled": false,
+            "risks": [
+              "mcp-unpinned-package"
+            ]
+          },
+          {
+            "name": "triage-tools",
+            "transport": "stdio",
+            "command": "uvx",
+            "args": [
+              "triage-mcp-tools==1.4.2"
+            ],
+            "url": null,
+            "urls": [],
+            "env_names": [
+              "SLACK_WEBHOOK_URL"
+            ],
+            "headers": [],
+            "auto_approve": null,
+            "secrets_inline": false,
+            "disabled": false,
+            "risks": []
+          }
+        ],
+        "server_count": 3,
+        "disabled_server_count": 0,
+        "remote_urls": [
+          "https://api.githubcopilot.com/mcp/"
+        ],
+        "client": "Claude Code",
+        "evidence_counts": {
+          "protocol.mcp|domain": 1
+        },
+        "technologies": [
+          {
+            "id": "protocol.mcp",
+            "name": "Model Context Protocol (MCP)",
+            "category": "protocol",
+            "vendor": "Anthropic / Linux Foundation (Agentic AI Foundation)"
+          }
+        ],
+        "risk_notes": [
+          "MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.",
+          "Client configs commonly embed API keys and tokens in plain text."
+        ],
+        "runtime_activity": {
+          "status": "unknown",
+          "reason": "no-trusted-workload-binding",
+          "events": 0,
+          "frameworks": [],
+          "window": null,
+          "last_seen": null,
+          "production_observed": false,
+          "production_label_verified": false,
+          "sources": [],
+          "limitations": "Absence in exported telemetry does not establish that the framework is inactive."
+        },
+        "autonomy": {
+          "schema": "shadowscan.autonomy/v1",
+          "floor": 1,
+          "floor_label": "L1 Copilot",
+          "ceiling": 5,
+          "ceiling_label": "L5 Fully Autonomous",
+          "oversight": "unknown",
+          "initiation": "unknown",
+          "basis": [
+            {
+              "bound": "floor",
+              "rule": "ai-system",
+              "value": 0
+            },
+            {
+              "bound": "floor",
+              "rule": "tool-access",
+              "value": 1
+            },
+            {
+              "bound": "ceiling",
+              "rule": "no-restriction-evidence",
+              "value": 5
+            },
+            {
+              "bound": "oversight",
+              "rule": "no-oversight-evidence",
+              "value": "unknown"
+            },
+            {
+              "bound": "initiation",
+              "rule": "no-initiation-evidence",
+              "value": "unknown"
+            }
+          ]
+        },
+        "threats": [
+          "maestro-2025:L2",
+          "maestro-2025:L3",
+          "mitre-atlas-2026.09:AML.T0010.005",
+          "mitre-atlas-2026.09:AML.T0055",
+          "mitre-atlas-2026.09:AML.T0083",
+          "mitre-atlas-2026.09:AML.T0109",
+          "owasp-asi-2026:ASI03",
+          "owasp-asi-2026:ASI04",
+          "owasp-llm-2026:LLM02",
+          "owasp-llm-2026:LLM04"
+        ],
+        "controls": [
+          "aiuc-1-2026q2:B",
+          "aiuc-1-2026q2:E",
+          "eu-ai-act-2024:Art.15",
+          "iso-iec-42001-2023:A.10.3",
+          "iso-iec-42001-2023:A.3.2",
+          "nist-ai-rmf-1.0:GOVERN-2.1",
+          "nist-ai-rmf-1.0:GOVERN-6.1",
+          "nist-ai-rmf-1.0:MANAGE-3.1",
+          "nist-ai-rmf-1.0:MAP-4.1",
+          "nist-ai-rmf-1.0:MEASURE-2.7"
+        ]
+      },
+      "id": "ss-79caa859920ebb98",
+      "identity_discriminator": "mcp-config",
+      "identity_schema": "shadowscan.finding-identity/v2"
+    },
+    {
+      "surface": "code",
+      "connector": "code.filesystem",
+      "kind": "mcp-server",
+      "title": "MCP configuration: .gemini/settings.json",
+      "resource": "/work/triage-agent/.gemini/settings.json",
+      "resource_type": "mcp-config",
+      "provider": "filesystem",
+      "account": null,
+      "region": null,
+      "owner": null,
+      "frameworks": [
+        "protocol.mcp"
+      ],
+      "model_providers": [],
+      "models": [],
+      "capabilities": [
+        "tool-use",
+        "data-access"
+      ],
+      "permissions": [],
+      "evidence": [
+        {
+          "signal": "file:protocol.mcp",
+          "description": "MCP client/server configuration file .gemini/settings.json",
+          "location": ".gemini/settings.json",
+          "snippet": null,
+          "weight": 0.95,
+          "signature": "protocol.mcp",
+          "attributes": {}
+        },
+        {
+          "signal": "mcp-risk:mcp-unpinned-package",
+          "description": "MCP server 'filesystem' fetches its package or image without an exact version (@modelcontextprotocol/server-filesystem)",
+          "location": ".gemini/settings.json",
+          "snippet": null,
+          "weight": 0.0,
+          "signature": null,
+          "attributes": {}
+        }
+      ],
+      "confidence": 0.95,
+      "likelihood": "strong",
+      "risk": {
+        "score": 59,
+        "level": "high",
+        "factors": [
+          {
+            "id": "kind",
+            "description": "mcp-server finding",
+            "weight": 15
+          },
+          {
+            "id": "no-owner",
+            "description": "no identifiable owner",
+            "weight": 10
+          },
+          {
+            "id": "capability:tool-use",
+            "description": "calls tools / functions",
+            "weight": 5
+          },
+          {
+            "id": "capability:data-access",
+            "description": "reads or writes files and databases directly (exfiltration / tampering surface)",
+            "weight": 10
+          },
+          {
+            "id": "tag:mcp-unpinned-package",
+            "description": "MCP server package or image is not pinned to an exact version",
+            "weight": 10
+          },
+          {
+            "id": "vendor-notes",
+            "description": "MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.",
+            "weight": 5
+          },
+          {
+            "id": "mcp-stdio",
+            "description": "local stdio MCP servers run with the user's full privileges",
+            "weight": 5
+          },
+          {
+            "id": "confidence-scaling",
+            "description": "score multiplied by 0.98 because confidence is 0.95; this only ever lowers risk",
+            "weight": -1
+          }
+        ],
+        "danger_score": 49
+      },
+      "shadow": null,
+      "registry_match": null,
+      "tags": [
+        "mcp-unpinned-package"
+      ],
+      "first_seen": null,
+      "last_seen": null,
+      "metadata": {
+        "path": ".gemini/settings.json",
+        "scan_root": "/work/triage-agent",
+        "servers": [
+          {
+            "name": "filesystem",
+            "transport": "stdio",
+            "command": "npx",
+            "args": [
+              "-y",
+              "@modelcontextprotocol/server-filesystem@latest",
+              "./workspace"
+            ],
+            "url": null,
+            "urls": [],
+            "env_names": [],
+            "headers": [],
+            "auto_approve": null,
+            "secrets_inline": false,
+            "disabled": false,
+            "risks": [
+              "mcp-unpinned-package"
+            ]
+          }
+        ],
+        "server_count": 1,
+        "disabled_server_count": 0,
+        "remote_urls": [],
+        "client": "Gemini CLI",
+        "technologies": [
+          {
+            "id": "protocol.mcp",
+            "name": "Model Context Protocol (MCP)",
+            "category": "protocol",
+            "vendor": "Anthropic / Linux Foundation (Agentic AI Foundation)"
+          }
+        ],
+        "risk_notes": [
+          "MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.",
+          "Client configs commonly embed API keys and tokens in plain text."
+        ],
+        "runtime_activity": {
+          "status": "unknown",
+          "reason": "no-trusted-workload-binding",
+          "events": 0,
+          "frameworks": [],
+          "window": null,
+          "last_seen": null,
+          "production_observed": false,
+          "production_label_verified": false,
+          "sources": [],
+          "limitations": "Absence in exported telemetry does not establish that the framework is inactive."
+        },
+        "autonomy": {
+          "schema": "shadowscan.autonomy/v1",
+          "floor": 1,
+          "floor_label": "L1 Copilot",
+          "ceiling": 5,
+          "ceiling_label": "L5 Fully Autonomous",
+          "oversight": "unknown",
+          "initiation": "unknown",
+          "basis": [
+            {
+              "bound": "floor",
+              "rule": "ai-system",
+              "value": 0
+            },
+            {
+              "bound": "floor",
+              "rule": "tool-access",
+              "value": 1
+            },
+            {
+              "bound": "ceiling",
+              "rule": "no-restriction-evidence",
+              "value": 5
+            },
+            {
+              "bound": "oversight",
+              "rule": "no-oversight-evidence",
+              "value": "unknown"
+            },
+            {
+              "bound": "initiation",
+              "rule": "no-initiation-evidence",
+              "value": "unknown"
+            }
+          ]
+        },
+        "threats": [
+          "maestro-2025:L2",
+          "maestro-2025:L3",
+          "mitre-atlas-2026.09:AML.T0010.005",
+          "mitre-atlas-2026.09:AML.T0109",
+          "owasp-asi-2026:ASI04",
+          "owasp-llm-2026:LLM04"
+        ],
+        "controls": [
+          "aiuc-1-2026q2:E",
+          "iso-iec-42001-2023:A.10.3",
+          "iso-iec-42001-2023:A.3.2",
+          "nist-ai-rmf-1.0:GOVERN-2.1",
+          "nist-ai-rmf-1.0:GOVERN-6.1",
+          "nist-ai-rmf-1.0:MANAGE-3.1",
+          "nist-ai-rmf-1.0:MAP-4.1"
+        ]
+      },
+      "id": "ss-450127b04d801233",
+      "identity_discriminator": "mcp-config",
+      "identity_schema": "shadowscan.finding-identity/v2"
+    },
+    {
+      "surface": "code",
+      "connector": "code.filesystem",
+      "kind": "agent-config",
+      "title": "Cursor configured in repository root",
+      "resource": "/work/triage-agent",
+      "resource_type": "coding-agent-config",
+      "provider": "filesystem",
+      "account": null,
+      "region": null,
+      "owner": null,
+      "frameworks": [
+        "coding-agent.cursor"
+      ],
+      "model_providers": [],
+      "models": [],
+      "capabilities": [
+        "code-exec",
+        "tool-use",
+        "multi-agent"
+      ],
+      "permissions": [],
+      "evidence": [
+        {
+          "signal": "file:coding-agent.cursor",
+          "description": "config file matched Cursor: .cursor/rules/triage.mdc",
+          "location": ".cursor/rules/triage.mdc",
+          "snippet": null,
+          "weight": 0.9,
+          "signature": "coding-agent.cursor",
+          "attributes": {
+            "category": "coding-agent",
+            "value": ".cursor/rules/triage.mdc"
+          }
+        }
+      ],
+      "confidence": 0.9,
+      "likelihood": "strong",
+      "risk": {
+        "score": 51,
+        "level": "high",
+        "factors": [
+          {
+            "id": "kind",
+            "description": "agent-config finding",
+            "weight": 10
+          },
+          {
+            "id": "no-owner",
+            "description": "no identifiable owner",
+            "weight": 10
+          },
+          {
+            "id": "capability:code-exec",
+            "description": "can execute code or shell commands",
+            "weight": 15
+          },
+          {
+            "id": "capability:tool-use",
+            "description": "calls tools / functions",
+            "weight": 5
+          },
+          {
+            "id": "capability:multi-agent",
+            "description": "orchestrates or delegates to other agents",
+            "weight": 5
+          },
+          {
+            "id": "combination:fanout",
+            "description": "orchestrates other agents and executes code: one compromise reaches every delegate",
+            "weight": 5
+          },
+          {
+            "id": "sub-agents",
+            "description": "1 sub-agent definition(s)",
+            "weight": 3
+          },
+          {
+            "id": "confidence-scaling",
+            "description": "score multiplied by 0.96 because confidence is 0.90; this only ever lowers risk",
+            "weight": -2
+          }
+        ],
+        "danger_score": 41
+      },
+      "shadow": null,
+      "registry_match": null,
+      "tags": [],
+      "first_seen": null,
+      "last_seen": null,
+      "metadata": {
+        "path": ".",
+        "scan_root": "/work/triage-agent",
+        "agent_indicators": 1,
+        "files": [
+          ".cursor/rules/triage.mdc"
+        ],
+        "agent_definitions": [
+          {
+            "file": ".cursor/rules/triage.mdc",
+            "name": "triage",
+            "description": "Triage conventions",
+            "alwaysApply": true
+          }
+        ],
+        "evidence_counts": {
+          "coding-agent.cursor|file": 1
+        },
+        "technologies": [
+          {
+            "id": "coding-agent.cursor",
+            "name": "Cursor",
+            "category": "coding-agent",
+            "vendor": "Anysphere"
+          }
+        ],
+        "runtime_activity": {
+          "status": "unknown",
+          "reason": "no-trusted-workload-binding",
+          "events": 0,
+          "frameworks": [],
+          "window": null,
+          "last_seen": null,
+          "production_observed": false,
+          "production_label_verified": false,
+          "sources": [],
+          "limitations": "Absence in exported telemetry does not establish that the framework is inactive."
+        },
+        "autonomy": {
+          "schema": "shadowscan.autonomy/v1",
+          "floor": 3,
+          "floor_label": "L3 Semi-Autonomous / Agentic Workflow",
+          "ceiling": 5,
+          "ceiling_label": "L5 Fully Autonomous",
+          "oversight": "unknown",
+          "initiation": "unknown",
+          "basis": [
+            {
+              "bound": "floor",
+              "rule": "ai-system",
+              "value": 0
+            },
+            {
+              "bound": "floor",
+              "rule": "tool-access",
+              "value": 1
+            },
+            {
+              "bound": "floor",
+              "rule": "side-effect-tools",
+              "value": 2
+            },
+            {
+              "bound": "floor",
+              "rule": "agentic-execution",
+              "value": 3
+            },
+            {
+              "bound": "ceiling",
+              "rule": "no-restriction-evidence",
+              "value": 5
+            },
+            {
+              "bound": "oversight",
+              "rule": "no-oversight-evidence",
+              "value": "unknown"
+            },
+            {
+              "bound": "initiation",
+              "rule": "no-initiation-evidence",
+              "value": "unknown"
+            }
+          ]
+        },
+        "threats": [
+          "maestro-2025:L3",
+          "maestro-2025:L7",
+          "mitre-atlas-2026.09:AML.T0050",
+          "mitre-atlas-2026.09:AML.T0118",
+          "owasp-asi-2026:ASI05",
+          "owasp-asi-2026:ASI07",
+          "owasp-asi-2026:ASI08",
+          "owasp-llm-2026:LLM03"
+        ],
+        "controls": [
+          "aiuc-1-2026q2:E",
+          "iso-iec-42001-2023:A.3.2",
+          "iso-iec-42001-2023:A.6.2.6",
+          "nist-ai-rmf-1.0:GOVERN-2.1",
+          "nist-ai-rmf-1.0:MANAGE-4.1"
+        ]
+      },
+      "id": "ss-742c3b62ae49d966",
+      "identity_discriminator": "coding-agent-config:coding-agent.cursor",
+      "identity_schema": "shadowscan.finding-identity/v2"
+    },
+    {
+      "surface": "code",
+      "connector": "code.filesystem",
+      "kind": "mcp-server",
+      "title": "MCP configuration: .vscode/mcp.json",
+      "resource": "/work/triage-agent/.vscode/mcp.json",
+      "resource_type": "mcp-config",
+      "provider": "filesystem",
+      "account": null,
+      "region": null,
+      "owner": null,
+      "frameworks": [
+        "protocol.mcp"
+      ],
+      "model_providers": [],
+      "models": [],
+      "capabilities": [
+        "tool-use",
+        "data-access"
+      ],
+      "permissions": [],
+      "evidence": [
+        {
+          "signal": "file:protocol.mcp",
+          "description": "MCP client/server configuration file .vscode/mcp.json",
+          "location": ".vscode/mcp.json",
+          "snippet": null,
+          "weight": 0.95,
+          "signature": "protocol.mcp",
+          "attributes": {}
+        },
+        {
+          "signal": "domain:protocol.mcp",
+          "description": "endpoint matched Model Context Protocol (MCP): api.githubcopilot.com",
+          "location": ".vscode/mcp.json:1",
+          "snippet": null,
+          "weight": 0.85,
+          "signature": "protocol.mcp",
+          "attributes": {
+            "category": "protocol",
+            "value": "api.githubcopilot.com"
+          }
+        }
+      ],
+      "confidence": 0.992,
+      "likelihood": "strong",
+      "risk": {
+        "score": 50,
+        "level": "high",
+        "factors": [
+          {
+            "id": "kind",
+            "description": "mcp-server finding",
+            "weight": 15
+          },
+          {
+            "id": "no-owner",
+            "description": "no identifiable owner",
+            "weight": 10
+          },
+          {
+            "id": "capability:tool-use",
+            "description": "calls tools / functions",
+            "weight": 5
+          },
+          {
+            "id": "capability:data-access",
+            "description": "reads or writes files and databases directly (exfiltration / tampering surface)",
+            "weight": 10
+          },
+          {
+            "id": "vendor-notes",
+            "description": "MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.",
+            "weight": 5
+          },
+          {
+            "id": "mcp-stdio",
+            "description": "local stdio MCP servers run with the user's full privileges",
+            "weight": 5
+          },
+          {
+            "id": "confidence-scaling",
+            "description": "score multiplied by 1.00 because confidence is 0.99; this only ever lowers risk",
+            "weight": 0
+          }
+        ],
+        "danger_score": 40
+      },
+      "shadow": null,
+      "registry_match": null,
+      "tags": [],
+      "first_seen": null,
+      "last_seen": null,
+      "metadata": {
+        "path": ".vscode/mcp.json",
+        "scan_root": "/work/triage-agent",
+        "agent_indicators": 1,
+        "servers": [
+          {
+            "name": "github",
+            "transport": "http",
+            "command": null,
+            "args": [],
+            "url": "https://api.githubcopilot.com/mcp/",
+            "urls": [
+              "https://api.githubcopilot.com/mcp/"
+            ],
+            "env_names": [],
+            "headers": [
+              "Authorization"
+            ],
+            "auto_approve": null,
+            "secrets_inline": false,
+            "disabled": false,
+            "risks": []
+          },
+          {
+            "name": "filesystem",
+            "transport": "stdio",
+            "command": "npx",
+            "args": [
+              "-y",
+              "@modelcontextprotocol/server-filesystem@2025.8.21",
+              "./workspace"
+            ],
+            "url": null,
+            "urls": [],
+            "env_names": [],
+            "headers": [],
+            "auto_approve": null,
+            "secrets_inline": false,
+            "disabled": false,
+            "risks": []
+          }
+        ],
+        "server_count": 2,
+        "disabled_server_count": 0,
+        "remote_urls": [
+          "https://api.githubcopilot.com/mcp/"
+        ],
+        "client": "VS Code / Copilot",
+        "evidence_counts": {
+          "protocol.mcp|domain": 1
+        },
+        "technologies": [
+          {
+            "id": "protocol.mcp",
+            "name": "Model Context Protocol (MCP)",
+            "category": "protocol",
+            "vendor": "Anthropic / Linux Foundation (Agentic AI Foundation)"
+          }
+        ],
+        "risk_notes": [
+          "MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.",
+          "Client configs commonly embed API keys and tokens in plain text."
+        ],
+        "runtime_activity": {
+          "status": "unknown",
+          "reason": "no-trusted-workload-binding",
+          "events": 0,
+          "frameworks": [],
+          "window": null,
+          "last_seen": null,
+          "production_observed": false,
+          "production_label_verified": false,
+          "sources": [],
+          "limitations": "Absence in exported telemetry does not establish that the framework is inactive."
+        },
+        "autonomy": {
+          "schema": "shadowscan.autonomy/v1",
+          "floor": 1,
+          "floor_label": "L1 Copilot",
+          "ceiling": 5,
+          "ceiling_label": "L5 Fully Autonomous",
+          "oversight": "unknown",
+          "initiation": "unknown",
+          "basis": [
+            {
+              "bound": "floor",
+              "rule": "ai-system",
+              "value": 0
+            },
+            {
+              "bound": "floor",
+              "rule": "tool-access",
+              "value": 1
+            },
+            {
+              "bound": "ceiling",
+              "rule": "no-restriction-evidence",
+              "value": 5
+            },
+            {
+              "bound": "oversight",
+              "rule": "no-oversight-evidence",
+              "value": "unknown"
+            },
+            {
+              "bound": "initiation",
+              "rule": "no-initiation-evidence",
+              "value": "unknown"
+            }
+          ]
+        },
+        "threats": [
+          "maestro-2025:L2",
+          "maestro-2025:L3"
+        ],
+        "controls": [
+          "aiuc-1-2026q2:E",
+          "iso-iec-42001-2023:A.3.2",
+          "nist-ai-rmf-1.0:GOVERN-2.1"
+        ]
+      },
+      "id": "ss-58f2b50bc4a60ac7",
+      "identity_discriminator": "mcp-config",
+      "identity_schema": "shadowscan.finding-identity/v2"
+    },
+    {
+      "surface": "code",
+      "connector": "code.filesystem",
+      "kind": "mcp-server",
+      "title": "MCP configuration: .codex/config.toml",
+      "resource": "/work/triage-agent/.codex/config.toml",
+      "resource_type": "mcp-config",
+      "provider": "filesystem",
+      "account": null,
+      "region": null,
+      "owner": null,
+      "frameworks": [
+        "protocol.mcp"
+      ],
+      "model_providers": [],
+      "models": [],
+      "capabilities": [
+        "tool-use"
+      ],
+      "permissions": [],
+      "evidence": [
+        {
+          "signal": "file:protocol.mcp",
+          "description": "MCP client/server configuration file .codex/config.toml",
+          "location": ".codex/config.toml",
+          "snippet": null,
+          "weight": 0.95,
+          "signature": "protocol.mcp",
+          "attributes": {}
+        },
+        {
+          "signal": "domain:protocol.mcp",
+          "description": "endpoint matched Model Context Protocol (MCP): api.githubcopilot.com",
+          "location": ".codex/config.toml:1",
+          "snippet": null,
+          "weight": 0.85,
+          "signature": "protocol.mcp",
+          "attributes": {
+            "category": "protocol",
+            "value": "api.githubcopilot.com"
+          }
+        }
+      ],
+      "confidence": 0.992,
+      "likelihood": "strong",
+      "risk": {
+        "score": 40,
+        "level": "medium",
+        "factors": [
+          {
+            "id": "kind",
+            "description": "mcp-server finding",
+            "weight": 15
+          },
+          {
+            "id": "no-owner",
+            "description": "no identifiable owner",
+            "weight": 10
+          },
+          {
+            "id": "capability:tool-use",
+            "description": "calls tools / functions",
+            "weight": 5
+          },
+          {
+            "id": "vendor-notes",
+            "description": "MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.",
+            "weight": 5
+          },
+          {
+            "id": "mcp-stdio",
+            "description": "local stdio MCP servers run with the user's full privileges",
+            "weight": 5
+          },
+          {
+            "id": "confidence-scaling",
+            "description": "score multiplied by 1.00 because confidence is 0.99; this only ever lowers risk",
+            "weight": 0
+          }
+        ],
+        "danger_score": 30
+      },
+      "shadow": null,
+      "registry_match": null,
+      "tags": [],
+      "first_seen": null,
+      "last_seen": null,
+      "metadata": {
+        "path": ".codex/config.toml",
+        "scan_root": "/work/triage-agent",
+        "agent_indicators": 1,
+        "servers": [
+          {
+            "name": "github",
+            "transport": "http",
+            "command": null,
+            "args": [],
+            "url": "https://api.githubcopilot.com/mcp/",
+            "urls": [
+              "https://api.githubcopilot.com/mcp/"
+            ],
+            "env_names": [],
+            "headers": [],
+            "auto_approve": null,
+            "secrets_inline": false,
+            "disabled": false,
+            "risks": []
+          },
+          {
+            "name": "triage-tools",
+            "transport": "stdio",
+            "command": "uvx",
+            "args": [
+              "triage-mcp-tools==1.4.2"
+            ],
+            "url": null,
+            "urls": [],
+            "env_names": [],
+            "headers": [],
+            "auto_approve": null,
+            "secrets_inline": false,
+            "disabled": false,
+            "risks": []
+          }
+        ],
+        "server_count": 2,
+        "disabled_server_count": 0,
+        "remote_urls": [
+          "https://api.githubcopilot.com/mcp/"
+        ],
+        "client": "OpenAI Codex",
+        "evidence_counts": {
+          "protocol.mcp|domain": 1
+        },
+        "technologies": [
+          {
+            "id": "protocol.mcp",
+            "name": "Model Context Protocol (MCP)",
+            "category": "protocol",
+            "vendor": "Anthropic / Linux Foundation (Agentic AI Foundation)"
+          }
+        ],
+        "risk_notes": [
+          "MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.",
+          "Client configs commonly embed API keys and tokens in plain text."
+        ],
+        "runtime_activity": {
+          "status": "unknown",
+          "reason": "no-trusted-workload-binding",
+          "events": 0,
+          "frameworks": [],
+          "window": null,
+          "last_seen": null,
+          "production_observed": false,
+          "production_label_verified": false,
+          "sources": [],
+          "limitations": "Absence in exported telemetry does not establish that the framework is inactive."
+        },
+        "autonomy": {
+          "schema": "shadowscan.autonomy/v1",
+          "floor": 1,
+          "floor_label": "L1 Copilot",
+          "ceiling": 5,
+          "ceiling_label": "L5 Fully Autonomous",
+          "oversight": "unknown",
+          "initiation": "unknown",
+          "basis": [
+            {
+              "bound": "floor",
+              "rule": "ai-system",
+              "value": 0
+            },
+            {
+              "bound": "floor",
+              "rule": "tool-access",
+              "value": 1
+            },
+            {
+              "bound": "ceiling",
+              "rule": "no-restriction-evidence",
+              "value": 5
+            },
+            {
+              "bound": "oversight",
+              "rule": "no-oversight-evidence",
+              "value": "unknown"
+            },
+            {
+              "bound": "initiation",
+              "rule": "no-initiation-evidence",
+              "value": "unknown"
+            }
+          ]
+        },
+        "threats": [
+          "maestro-2025:L3"
+        ],
+        "controls": [
+          "aiuc-1-2026q2:E",
+          "iso-iec-42001-2023:A.3.2",
+          "nist-ai-rmf-1.0:GOVERN-2.1"
+        ]
+      },
+      "id": "ss-956be771585d4e70",
+      "identity_discriminator": "mcp-config",
+      "identity_schema": "shadowscan.finding-identity/v2"
+    },
+    {
+      "surface": "code",
+      "connector": "code.filesystem",
+      "kind": "agent-config",
+      "title": "Claude Code configured in repository root",
+      "resource": "/work/triage-agent",
+      "resource_type": "coding-agent-config",
+      "provider": "filesystem",
+      "account": null,
+      "region": null,
+      "owner": null,
+      "frameworks": [
+        "coding-agent.claude-code"
+      ],
+      "model_providers": [],
+      "models": [],
+      "capabilities": [
+        "code-exec",
+        "tool-use"
+      ],
+      "permissions": [],
+      "evidence": [
+        {
+          "signal": "file:coding-agent.claude-code",
+          "description": "config file matched Claude Code: CLAUDE.md",
+          "location": "CLAUDE.md",
+          "snippet": null,
+          "weight": 0.9,
+          "signature": "coding-agent.claude-code",
+          "attributes": {
+            "category": "coding-agent",
+            "value": "CLAUDE.md"
+          }
+        },
+        {
+          "signal": "file:coding-agent.claude-code",
+          "description": "config file matched Claude Code: .claude/skills/issue-triage/SKILL.md",
+          "location": ".claude/skills/issue-triage/SKILL.md",
+          "snippet": null,
+          "weight": 0.8,
+          "signature": "coding-agent.claude-code",
+          "attributes": {
+            "category": "coding-agent",
+            "value": ".claude/skills/issue-triage/SKILL.md"
+          }
+        }
+      ],
+      "confidence": 0.98,
+      "likelihood": "strong",
+      "risk": {
+        "score": 40,
+        "level": "medium",
+        "factors": [
+          {
+            "id": "kind",
+            "description": "agent-config finding",
+            "weight": 10
+          },
+          {
+            "id": "no-owner",
+            "description": "no identifiable owner",
+            "weight": 10
+          },
+          {
+            "id": "capability:code-exec",
+            "description": "can execute code or shell commands",
+            "weight": 15
+          },
+          {
+            "id": "capability:tool-use",
+            "description": "calls tools / functions",
+            "weight": 5
+          },
+          {
+            "id": "confidence-scaling",
+            "description": "score multiplied by 0.99 because confidence is 0.98; this only ever lowers risk",
+            "weight": 0
+          }
+        ],
+        "danger_score": 30
+      },
+      "shadow": null,
+      "registry_match": null,
+      "tags": [],
+      "first_seen": null,
+      "last_seen": null,
+      "metadata": {
+        "path": ".",
+        "scan_root": "/work/triage-agent",
+        "agent_indicators": 2,
+        "files": [
+          ".claude/skills/issue-triage/SKILL.md",
+          "CLAUDE.md"
+        ],
+        "evidence_counts": {
+          "coding-agent.claude-code|file": 2
+        },
+        "technologies": [
+          {
+            "id": "coding-agent.claude-code",
+            "name": "Claude Code",
+            "category": "coding-agent",
+            "vendor": "Anthropic"
+          }
+        ],
+        "runtime_activity": {
+          "status": "unknown",
+          "reason": "no-trusted-workload-binding",
+          "events": 0,
+          "frameworks": [],
+          "window": null,
+          "last_seen": null,
+          "production_observed": false,
+          "production_label_verified": false,
+          "sources": [],
+          "limitations": "Absence in exported telemetry does not establish that the framework is inactive."
+        },
+        "autonomy": {
+          "schema": "shadowscan.autonomy/v1",
+          "floor": 2,
+          "floor_label": "L2 Supervised",
+          "ceiling": 5,
+          "ceiling_label": "L5 Fully Autonomous",
+          "oversight": "unknown",
+          "initiation": "unknown",
+          "basis": [
+            {
+              "bound": "floor",
+              "rule": "ai-system",
+              "value": 0
+            },
+            {
+              "bound": "floor",
+              "rule": "tool-access",
+              "value": 1
+            },
+            {
+              "bound": "floor",
+              "rule": "side-effect-tools",
+              "value": 2
+            },
+            {
+              "bound": "ceiling",
+              "rule": "no-restriction-evidence",
+              "value": 5
+            },
+            {
+              "bound": "oversight",
+              "rule": "no-oversight-evidence",
+              "value": "unknown"
+            },
+            {
+              "bound": "initiation",
+              "rule": "no-initiation-evidence",
+              "value": "unknown"
+            }
+          ]
+        },
+        "threats": [
+          "maestro-2025:L3",
+          "mitre-atlas-2026.09:AML.T0050",
+          "owasp-asi-2026:ASI05",
+          "owasp-llm-2026:LLM03"
+        ],
+        "controls": [
+          "aiuc-1-2026q2:E",
+          "iso-iec-42001-2023:A.3.2",
+          "nist-ai-rmf-1.0:GOVERN-2.1"
+        ]
+      },
+      "id": "ss-c3d11ab3bccdb875",
+      "identity_discriminator": "coding-agent-config:coding-agent.claude-code",
+      "identity_schema": "shadowscan.finding-identity/v2"
+    },
+    {
+      "surface": "code",
+      "connector": "code.filesystem",
+      "kind": "agent-config",
+      "title": "Gemini CLI / Jules configured in repository root",
+      "resource": "/work/triage-agent",
+      "resource_type": "coding-agent-config",
+      "provider": "filesystem",
+      "account": null,
+      "region": null,
+      "owner": null,
+      "frameworks": [
+        "coding-agent.gemini-cli"
+      ],
+      "model_providers": [],
+      "models": [],
+      "capabilities": [
+        "code-exec",
+        "tool-use"
+      ],
+      "permissions": [],
+      "evidence": [
+        {
+          "signal": "file:coding-agent.gemini-cli",
+          "description": "config file matched Gemini CLI / Jules: .gemini/settings.json",
+          "location": ".gemini/settings.json",
+          "snippet": null,
+          "weight": 0.9,
+          "signature": "coding-agent.gemini-cli",
+          "attributes": {
+            "category": "coding-agent",
+            "value": ".gemini/settings.json"
+          }
+        }
+      ],
+      "confidence": 0.9,
+      "likelihood": "strong",
+      "risk": {
+        "score": 38,
+        "level": "medium",
+        "factors": [
+          {
+            "id": "kind",
+            "description": "agent-config finding",
+            "weight": 10
+          },
+          {
+            "id": "no-owner",
+            "description": "no identifiable owner",
+            "weight": 10
+          },
+          {
+            "id": "capability:code-exec",
+            "description": "can execute code or shell commands",
+            "weight": 15
+          },
+          {
+            "id": "capability:tool-use",
+            "description": "calls tools / functions",
+            "weight": 5
+          },
+          {
+            "id": "confidence-scaling",
+            "description": "score multiplied by 0.96 because confidence is 0.90; this only ever lowers risk",
+            "weight": -2
+          }
+        ],
+        "danger_score": 29
+      },
+      "shadow": null,
+      "registry_match": null,
+      "tags": [],
+      "first_seen": null,
+      "last_seen": null,
+      "metadata": {
+        "path": ".",
+        "scan_root": "/work/triage-agent",
+        "agent_indicators": 1,
+        "files": [
+          ".gemini/settings.json"
+        ],
+        "evidence_counts": {
+          "coding-agent.gemini-cli|file": 1
+        },
+        "technologies": [
+          {
+            "id": "coding-agent.gemini-cli",
+            "name": "Gemini CLI / Jules",
+            "category": "coding-agent",
+            "vendor": "Google"
+          }
+        ],
+        "runtime_activity": {
+          "status": "unknown",
+          "reason": "no-trusted-workload-binding",
+          "events": 0,
+          "frameworks": [],
+          "window": null,
+          "last_seen": null,
+          "production_observed": false,
+          "production_label_verified": false,
+          "sources": [],
+          "limitations": "Absence in exported telemetry does not establish that the framework is inactive."
+        },
+        "autonomy": {
+          "schema": "shadowscan.autonomy/v1",
+          "floor": 2,
+          "floor_label": "L2 Supervised",
+          "ceiling": 5,
+          "ceiling_label": "L5 Fully Autonomous",
+          "oversight": "unknown",
+          "initiation": "unknown",
+          "basis": [
+            {
+              "bound": "floor",
+              "rule": "ai-system",
+              "value": 0
+            },
+            {
+              "bound": "floor",
+              "rule": "tool-access",
+              "value": 1
+            },
+            {
+              "bound": "floor",
+              "rule": "side-effect-tools",
+              "value": 2
+            },
+            {
+              "bound": "ceiling",
+              "rule": "no-restriction-evidence",
+              "value": 5
+            },
+            {
+              "bound": "oversight",
+              "rule": "no-oversight-evidence",
+              "value": "unknown"
+            },
+            {
+              "bound": "initiation",
+              "rule": "no-initiation-evidence",
+              "value": "unknown"
+            }
+          ]
+        },
+        "threats": [
+          "maestro-2025:L3",
+          "mitre-atlas-2026.09:AML.T0050",
+          "owasp-asi-2026:ASI05",
+          "owasp-llm-2026:LLM03"
+        ],
+        "controls": [
+          "aiuc-1-2026q2:E",
+          "iso-iec-42001-2023:A.3.2",
+          "nist-ai-rmf-1.0:GOVERN-2.1"
+        ]
+      },
+      "id": "ss-74cc3d6b986d671a",
+      "identity_discriminator": "coding-agent-config:coding-agent.gemini-cli",
+      "identity_schema": "shadowscan.finding-identity/v2"
+    },
+    {
+      "surface": "code",
+      "connector": "code.filesystem",
+      "kind": "agent-config",
+      "title": "OpenAI Codex (CLI / cloud agent) configured in repository root",
+      "resource": "/work/triage-agent",
+      "resource_type": "coding-agent-config",
+      "provider": "filesystem",
+      "account": null,
+      "region": null,
+      "owner": null,
+      "frameworks": [
+        "coding-agent.openai-codex"
+      ],
+      "model_providers": [],
+      "models": [],
+      "capabilities": [
+        "code-exec",
+        "tool-use"
+      ],
+      "permissions": [],
+      "evidence": [
+        {
+          "signal": "file:coding-agent.openai-codex",
+          "description": "config file matched OpenAI Codex (CLI / cloud agent): .codex/config.toml",
+          "location": ".codex/config.toml",
+          "snippet": null,
+          "weight": 0.9,
+          "signature": "coding-agent.openai-codex",
+          "attributes": {
+            "category": "coding-agent",
+            "value": ".codex/config.toml"
+          }
+        }
+      ],
+      "confidence": 0.9,
+      "likelihood": "strong",
+      "risk": {
+        "score": 38,
+        "level": "medium",
+        "factors": [
+          {
+            "id": "kind",
+            "description": "agent-config finding",
+            "weight": 10
+          },
+          {
+            "id": "no-owner",
+            "description": "no identifiable owner",
+            "weight": 10
+          },
+          {
+            "id": "capability:code-exec",
+            "description": "can execute code or shell commands",
+            "weight": 15
+          },
+          {
+            "id": "capability:tool-use",
+            "description": "calls tools / functions",
+            "weight": 5
+          },
+          {
+            "id": "confidence-scaling",
+            "description": "score multiplied by 0.96 because confidence is 0.90; this only ever lowers risk",
+            "weight": -2
+          }
+        ],
+        "danger_score": 29
+      },
+      "shadow": null,
+      "registry_match": null,
+      "tags": [],
+      "first_seen": null,
+      "last_seen": null,
+      "metadata": {
+        "path": ".",
+        "scan_root": "/work/triage-agent",
+        "agent_indicators": 1,
+        "files": [
+          ".codex/config.toml"
+        ],
+        "approval_gate": {
+          "scope": "some-actions",
+          "settings": [
+            {
+              "client": "codex",
+              "setting": "approval_policy",
+              "value": "on-request",
+              "scope": "some-actions",
+              "file": ".codex/config.toml"
+            }
+          ]
+        },
+        "evidence_counts": {
+          "coding-agent.openai-codex|file": 1
+        },
+        "technologies": [
+          {
+            "id": "coding-agent.openai-codex",
+            "name": "OpenAI Codex (CLI / cloud agent)",
+            "category": "coding-agent",
+            "vendor": "OpenAI"
+          }
+        ],
+        "runtime_activity": {
+          "status": "unknown",
+          "reason": "no-trusted-workload-binding",
+          "events": 0,
+          "frameworks": [],
+          "window": null,
+          "last_seen": null,
+          "production_observed": false,
+          "production_label_verified": false,
+          "sources": [],
+          "limitations": "Absence in exported telemetry does not establish that the framework is inactive."
+        },
+        "autonomy": {
+          "schema": "shadowscan.autonomy/v1",
+          "floor": 2,
+          "floor_label": "L2 Supervised",
+          "ceiling": 5,
+          "ceiling_label": "L5 Fully Autonomous",
+          "oversight": "gated",
+          "initiation": "unknown",
+          "basis": [
+            {
+              "bound": "floor",
+              "rule": "ai-system",
+              "value": 0
+            },
+            {
+              "bound": "floor",
+              "rule": "tool-access",
+              "value": 1
+            },
+            {
+              "bound": "floor",
+              "rule": "side-effect-tools",
+              "value": 2
+            },
+            {
+              "bound": "ceiling",
+              "rule": "no-restriction-evidence",
+              "value": 5
+            },
+            {
+              "bound": "oversight",
+              "rule": "approval-gated",
+              "value": "gated"
+            },
+            {
+              "bound": "initiation",
+              "rule": "no-initiation-evidence",
+              "value": "unknown"
+            }
+          ]
+        },
+        "threats": [
+          "maestro-2025:L3",
+          "mitre-atlas-2026.09:AML.T0050",
+          "owasp-asi-2026:ASI05",
+          "owasp-llm-2026:LLM03"
+        ],
+        "controls": [
+          "aiuc-1-2026q2:E",
+          "iso-iec-42001-2023:A.3.2",
+          "nist-ai-rmf-1.0:GOVERN-2.1"
+        ]
+      },
+      "id": "ss-0460d932df91f767",
+      "identity_discriminator": "coding-agent-config:coding-agent.openai-codex",
+      "identity_schema": "shadowscan.finding-identity/v2"
+    },
+    {
+      "surface": "code",
+      "connector": "code.filesystem",
+      "kind": "mcp-server",
+      "title": "MCP configuration: .cursor/mcp.json",
+      "resource": "/work/triage-agent/.cursor/mcp.json",
+      "resource_type": "mcp-config",
+      "provider": "filesystem",
+      "account": null,
+      "region": null,
+      "owner": null,
+      "frameworks": [
+        "protocol.mcp"
+      ],
+      "model_providers": [],
+      "models": [],
+      "capabilities": [
+        "tool-use"
+      ],
+      "permissions": [],
+      "evidence": [
+        {
+          "signal": "file:protocol.mcp",
+          "description": "MCP client/server configuration file .cursor/mcp.json",
+          "location": ".cursor/mcp.json",
+          "snippet": null,
+          "weight": 0.95,
+          "signature": "protocol.mcp",
+          "attributes": {}
+        },
+        {
+          "signal": "domain:protocol.mcp",
+          "description": "endpoint matched Model Context Protocol (MCP): api.githubcopilot.com",
+          "location": ".cursor/mcp.json:1",
+          "snippet": null,
+          "weight": 0.85,
+          "signature": "protocol.mcp",
+          "attributes": {
+            "category": "protocol",
+            "value": "api.githubcopilot.com"
+          }
+        }
+      ],
+      "confidence": 0.992,
+      "likelihood": "strong",
+      "risk": {
+        "score": 35,
+        "level": "medium",
+        "factors": [
+          {
+            "id": "kind",
+            "description": "mcp-server finding",
+            "weight": 15
+          },
+          {
+            "id": "no-owner",
+            "description": "no identifiable owner",
+            "weight": 10
+          },
+          {
+            "id": "capability:tool-use",
+            "description": "calls tools / functions",
+            "weight": 5
+          },
+          {
+            "id": "vendor-notes",
+            "description": "MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.",
+            "weight": 5
+          },
+          {
+            "id": "confidence-scaling",
+            "description": "score multiplied by 1.00 because confidence is 0.99; this only ever lowers risk",
+            "weight": 0
+          }
+        ],
+        "danger_score": 25
+      },
+      "shadow": null,
+      "registry_match": null,
+      "tags": [],
+      "first_seen": null,
+      "last_seen": null,
+      "metadata": {
+        "path": ".cursor/mcp.json",
+        "scan_root": "/work/triage-agent",
+        "agent_indicators": 1,
+        "servers": [
+          {
+            "name": "github",
+            "transport": "http",
+            "command": null,
+            "args": [],
+            "url": "https://api.githubcopilot.com/mcp/",
+            "urls": [
+              "https://api.githubcopilot.com/mcp/"
+            ],
+            "env_names": [],
+            "headers": [],
+            "auto_approve": null,
+            "secrets_inline": false,
+            "disabled": false,
+            "risks": []
+          }
+        ],
+        "server_count": 1,
+        "disabled_server_count": 0,
+        "remote_urls": [
+          "https://api.githubcopilot.com/mcp/"
+        ],
+        "client": "Cursor",
+        "evidence_counts": {
+          "protocol.mcp|domain": 1
+        },
+        "technologies": [
+          {
+            "id": "protocol.mcp",
+            "name": "Model Context Protocol (MCP)",
+            "category": "protocol",
+            "vendor": "Anthropic / Linux Foundation (Agentic AI Foundation)"
+          }
+        ],
+        "risk_notes": [
+          "MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.",
+          "Client configs commonly embed API keys and tokens in plain text."
+        ],
+        "runtime_activity": {
+          "status": "unknown",
+          "reason": "no-trusted-workload-binding",
+          "events": 0,
+          "frameworks": [],
+          "window": null,
+          "last_seen": null,
+          "production_observed": false,
+          "production_label_verified": false,
+          "sources": [],
+          "limitations": "Absence in exported telemetry does not establish that the framework is inactive."
+        },
+        "autonomy": {
+          "schema": "shadowscan.autonomy/v1",
+          "floor": 1,
+          "floor_label": "L1 Copilot",
+          "ceiling": 5,
+          "ceiling_label": "L5 Fully Autonomous",
+          "oversight": "unknown",
+          "initiation": "unknown",
+          "basis": [
+            {
+              "bound": "floor",
+              "rule": "ai-system",
+              "value": 0
+            },
+            {
+              "bound": "floor",
+              "rule": "tool-access",
+              "value": 1
+            },
+            {
+              "bound": "ceiling",
+              "rule": "no-restriction-evidence",
+              "value": 5
+            },
+            {
+              "bound": "oversight",
+              "rule": "no-oversight-evidence",
+              "value": "unknown"
+            },
+            {
+              "bound": "initiation",
+              "rule": "no-initiation-evidence",
+              "value": "unknown"
+            }
+          ]
+        },
+        "threats": [
+          "maestro-2025:L3"
+        ],
+        "controls": [
+          "aiuc-1-2026q2:E",
+          "iso-iec-42001-2023:A.3.2",
+          "nist-ai-rmf-1.0:GOVERN-2.1"
+        ]
+      },
+      "id": "ss-b3b1612c3184a120",
+      "identity_discriminator": "mcp-config",
+      "identity_schema": "shadowscan.finding-identity/v2"
+    },
+    {
+      "surface": "code",
+      "connector": "code.filesystem",
+      "kind": "agent",
+      "title": "A2A agent card: release-notes-writer",
+      "resource": "/work/triage-agent/agent-card.json",
+      "resource_type": "agent-manifest",
+      "provider": "filesystem",
+      "account": null,
+      "region": null,
+      "owner": null,
+      "frameworks": [
+        "protocol.a2a"
+      ],
+      "model_providers": [],
+      "models": [],
+      "capabilities": [
+        "multi-agent"
+      ],
+      "permissions": [],
+      "evidence": [
+        {
+          "signal": "file:protocol.a2a",
+          "description": "A2A Agent Card",
+          "location": "agent-card.json",
+          "snippet": null,
+          "weight": 0.95,
+          "signature": "protocol.a2a",
+          "attributes": {}
+        }
+      ],
+      "confidence": 0.95,
+      "likelihood": "strong",
+      "risk": {
+        "score": 29,
+        "level": "medium",
+        "factors": [
+          {
+            "id": "kind",
+            "description": "agent finding",
+            "weight": 15
+          },
+          {
+            "id": "no-owner",
+            "description": "no identifiable owner",
+            "weight": 10
+          },
+          {
+            "id": "capability:multi-agent",
+            "description": "orchestrates or delegates to other agents",
+            "weight": 5
+          },
+          {
+            "id": "confidence-scaling",
+            "description": "score multiplied by 0.98 because confidence is 0.95; this only ever lowers risk",
+            "weight": -1
+          }
+        ],
+        "danger_score": 20
+      },
+      "shadow": null,
+      "registry_match": null,
+      "tags": [],
+      "first_seen": null,
+      "last_seen": null,
+      "metadata": {
+        "path": "agent-card.json",
+        "scan_root": "/work/triage-agent",
+        "agent_card": {
+          "name": "release-notes-writer",
+          "description": "Drafts release notes from merged pull requests.",
+          "url": "https://agents.acme.example/release-notes/",
+          "version": "1.0.3",
+          "protocol_version": "0.3.0",
+          "skills": [
+            "Draft release notes"
+          ],
+          "capabilities": {
+            "streaming": true,
+            "pushNotifications": false
+          },
+          "security_schemes": [
+            "oauth"
+          ],
+          "interfaces": [
+            {
+              "url": "https://agents.acme.example/release-notes/",
+              "protocol_binding": null,
+              "protocol_version": "0.3.0"
+            }
+          ],
+          "signature": "absent"
+        },
+        "agent_indicators": 0,
+        "technologies": [
+          {
+            "id": "protocol.a2a",
+            "name": "Agent2Agent Protocol (A2A)",
+            "category": "protocol",
+            "vendor": "Google / Linux Foundation"
+          }
+        ],
+        "runtime_activity": {
+          "status": "unknown",
+          "reason": "no-trusted-workload-binding",
+          "events": 0,
+          "frameworks": [],
+          "window": null,
+          "last_seen": null,
+          "production_observed": false,
+          "production_label_verified": false,
+          "sources": [],
+          "limitations": "Absence in exported telemetry does not establish that the framework is inactive."
+        },
+        "autonomy": {
+          "schema": "shadowscan.autonomy/v1",
+          "floor": 3,
+          "floor_label": "L3 Semi-Autonomous / Agentic Workflow",
+          "ceiling": 5,
+          "ceiling_label": "L5 Fully Autonomous",
+          "oversight": "unknown",
+          "initiation": "unknown",
+          "basis": [
+            {
+              "bound": "floor",
+              "rule": "ai-system",
+              "value": 0
+            },
+            {
+              "bound": "floor",
+              "rule": "agentic-execution",
+              "value": 3
+            },
+            {
+              "bound": "ceiling",
+              "rule": "no-restriction-evidence",
+              "value": 5
+            },
+            {
+              "bound": "oversight",
+              "rule": "no-oversight-evidence",
+              "value": "unknown"
+            },
+            {
+              "bound": "initiation",
+              "rule": "no-initiation-evidence",
+              "value": "unknown"
+            }
+          ]
+        },
+        "threats": [
+          "maestro-2025:L3",
+          "maestro-2025:L7",
+          "mitre-atlas-2026.09:AML.T0118",
+          "owasp-asi-2026:ASI07",
+          "owasp-asi-2026:ASI08"
+        ],
+        "controls": [
+          "aiuc-1-2026q2:E",
+          "iso-iec-42001-2023:A.3.2",
+          "iso-iec-42001-2023:A.6.2.6",
+          "nist-ai-rmf-1.0:GOVERN-2.1",
+          "nist-ai-rmf-1.0:MANAGE-4.1"
+        ]
+      },
+      "id": "ss-b3b3a0a3cde7f25e",
+      "identity_discriminator": "agent-manifest",
+      "identity_schema": "shadowscan.finding-identity/v2"
+    },
+    {
+      "surface": "code",
+      "connector": "code.filesystem",
+      "kind": "agent-config",
+      "title": "AGENTS.md convention configured in repository root",
+      "resource": "/work/triage-agent",
+      "resource_type": "coding-agent-config",
+      "provider": "filesystem",
+      "account": null,
+      "region": null,
+      "owner": null,
+      "frameworks": [
+        "coding-agent.agents-md"
+      ],
+      "model_providers": [],
+      "models": [],
+      "capabilities": [],
+      "permissions": [],
+      "evidence": [
+        {
+          "signal": "file:coding-agent.agents-md",
+          "description": "config file matched AGENTS.md convention: AGENTS.md",
+          "location": "AGENTS.md",
+          "snippet": null,
+          "weight": 0.85,
+          "signature": "coding-agent.agents-md",
+          "attributes": {
+            "category": "coding-agent",
+            "value": "AGENTS.md"
+          }
+        }
+      ],
+      "confidence": 0.85,
+      "likelihood": "strong",
+      "risk": {
+        "score": 19,
+        "level": "low",
+        "factors": [
+          {
+            "id": "kind",
+            "description": "agent-config finding",
+            "weight": 10
+          },
+          {
+            "id": "no-owner",
+            "description": "no identifiable owner",
+            "weight": 10
+          },
+          {
+            "id": "confidence-scaling",
+            "description": "score multiplied by 0.94 because confidence is 0.85; this only ever lowers risk",
+            "weight": -1
+          }
+        ],
+        "danger_score": 9
+      },
+      "shadow": null,
+      "registry_match": null,
+      "tags": [],
+      "first_seen": null,
+      "last_seen": null,
+      "metadata": {
+        "path": ".",
+        "scan_root": "/work/triage-agent",
+        "agent_indicators": 1,
+        "files": [
+          "AGENTS.md"
+        ],
+        "evidence_counts": {
+          "coding-agent.agents-md|file": 1
+        },
+        "technologies": [
+          {
+            "id": "coding-agent.agents-md",
+            "name": "AGENTS.md convention",
+            "category": "coding-agent",
+            "vendor": null
+          }
+        ],
+        "runtime_activity": {
+          "status": "unknown",
+          "reason": "no-trusted-workload-binding",
+          "events": 0,
+          "frameworks": [],
+          "window": null,
+          "last_seen": null,
+          "production_observed": false,
+          "production_label_verified": false,
+          "sources": [],
+          "limitations": "Absence in exported telemetry does not establish that the framework is inactive."
+        },
+        "autonomy": {
+          "schema": "shadowscan.autonomy/v1",
+          "floor": 0,
+          "floor_label": "L0 Chatbot",
+          "ceiling": 5,
+          "ceiling_label": "L5 Fully Autonomous",
+          "oversight": "unknown",
+          "initiation": "unknown",
+          "basis": [
+            {
+              "bound": "floor",
+              "rule": "ai-system",
+              "value": 0
+            },
+            {
+              "bound": "ceiling",
+              "rule": "no-restriction-evidence",
+              "value": 5
+            },
+            {
+              "bound": "oversight",
+              "rule": "no-oversight-evidence",
+              "value": "unknown"
+            },
+            {
+              "bound": "initiation",
+              "rule": "no-initiation-evidence",
+              "value": "unknown"
+            }
+          ]
+        },
+        "threats": [
+          "maestro-2025:L3"
+        ],
+        "controls": [
+          "aiuc-1-2026q2:E",
+          "iso-iec-42001-2023:A.3.2",
+          "nist-ai-rmf-1.0:GOVERN-2.1"
+        ]
+      },
+      "id": "ss-cb041acc846c98aa",
+      "identity_discriminator": "coding-agent-config:coding-agent.agents-md",
+      "identity_schema": "shadowscan.finding-identity/v2"
+    },
+    {
+      "surface": "code",
+      "connector": "code.filesystem",
+      "kind": "agent-config",
+      "title": "Agent skill instructions configured in repository root",
+      "resource": "/work/triage-agent",
+      "resource_type": "coding-agent-config",
+      "provider": "filesystem",
+      "account": null,
+      "region": null,
+      "owner": null,
+      "frameworks": [
+        "coding-agent.agent-skills"
+      ],
+      "model_providers": [],
+      "models": [],
+      "capabilities": [],
+      "permissions": [],
+      "evidence": [
+        {
+          "signal": "file:coding-agent.agent-skills",
+          "description": "config file matched Agent skill instructions: .claude/skills/issue-triage/SKILL.md",
+          "location": ".claude/skills/issue-triage/SKILL.md",
+          "snippet": null,
+          "weight": 0.75,
+          "signature": "coding-agent.agent-skills",
+          "attributes": {
+            "category": "coding-agent",
+            "value": ".claude/skills/issue-triage/SKILL.md"
+          }
+        }
+      ],
+      "confidence": 0.75,
+      "likelihood": "likely",
+      "risk": {
+        "score": 18,
+        "level": "low",
+        "factors": [
+          {
+            "id": "kind",
+            "description": "agent-config finding",
+            "weight": 10
+          },
+          {
+            "id": "no-owner",
+            "description": "no identifiable owner",
+            "weight": 10
+          },
+          {
+            "id": "confidence-scaling",
+            "description": "score multiplied by 0.90 because confidence is 0.75; this only ever lowers risk",
+            "weight": -2
+          }
+        ],
+        "danger_score": 9
+      },
+      "shadow": null,
+      "registry_match": null,
+      "tags": [],
+      "first_seen": null,
+      "last_seen": null,
+      "metadata": {
+        "path": ".",
+        "scan_root": "/work/triage-agent",
+        "agent_indicators": 0,
+        "files": [
+          ".claude/skills/issue-triage/SKILL.md"
+        ],
+        "static_instruction_audit": {
+          "files": [
+            {
+              "path": ".claude/skills/issue-triage/SKILL.md",
+              "method": "bounded-static-instruction-review-v1",
+              "status": "no-indicators-observed",
+              "incomplete": false,
+              "partial": false,
+              "indicators": [],
+              "limitations": [
+                "Static lexical indicators do not establish intent, execution, or safety.",
+                "Only direct English instruction forms are inspected; quoted examples, fenced code and YAML front matter other than name and description are excluded. Links and tools are never followed or invoked."
+              ]
+            }
+          ]
+        },
+        "evidence_counts": {
+          "coding-agent.agent-skills|file": 1
+        },
+        "technologies": [
+          {
+            "id": "coding-agent.agent-skills",
+            "name": "Agent skill instructions",
+            "category": "coding-agent",
+            "vendor": null
+          }
+        ],
+        "runtime_activity": {
+          "status": "unknown",
+          "reason": "no-trusted-workload-binding",
+          "events": 0,
+          "frameworks": [],
+          "window": null,
+          "last_seen": null,
+          "production_observed": false,
+          "production_label_verified": false,
+          "sources": [],
+          "limitations": "Absence in exported telemetry does not establish that the framework is inactive."
+        },
+        "autonomy": {
+          "schema": "shadowscan.autonomy/v1",
+          "floor": 0,
+          "floor_label": "L0 Chatbot",
+          "ceiling": 5,
+          "ceiling_label": "L5 Fully Autonomous",
+          "oversight": "unknown",
+          "initiation": "unknown",
+          "basis": [
+            {
+              "bound": "floor",
+              "rule": "ai-system",
+              "value": 0
+            },
+            {
+              "bound": "ceiling",
+              "rule": "no-restriction-evidence",
+              "value": 5
+            },
+            {
+              "bound": "oversight",
+              "rule": "no-oversight-evidence",
+              "value": "unknown"
+            },
+            {
+              "bound": "initiation",
+              "rule": "no-initiation-evidence",
+              "value": "unknown"
+            }
+          ]
+        },
+        "threats": [
+          "maestro-2025:L3"
+        ],
+        "controls": [
+          "aiuc-1-2026q2:E",
+          "iso-iec-42001-2023:A.3.2",
+          "nist-ai-rmf-1.0:GOVERN-2.1"
+        ]
+      },
+      "id": "ss-1d12f92fb6f2c7e6",
+      "identity_discriminator": "coding-agent-config:coding-agent.agent-skills",
+      "identity_schema": "shadowscan.finding-identity/v2"
+    }
+  ]
+}

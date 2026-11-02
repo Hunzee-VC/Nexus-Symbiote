@@ -108,6 +108,17 @@ Clarifications applied by the implementation:
 - A remote tool server with blanket auto-approval counts as an exfiltration leg: every call sends arguments
   across the trust boundary.
 
+### 2.2 Nexus ShadowScan reconciliation (`SYM-SS-*`, `shadowscan-mapping.md §5`)
+| ID | Sev | Fires when | Maps to |
+|---|---|---|---|
+| SYM-SS-001 shadow component observed | medium (high for critical/high risk) | an entity imported from a ShadowScan finding with `shadow: true` (tag `shadow`) | ASI10, ASI04; AML.T0010 |
+| SYM-SS-002 tool server observed, not declared | high | an observed `server:<client>-<name>` has no counterpart in the baseline | ASI04, ASI10; AML.T0010 |
+| SYM-SS-003 declared tool server not observed | medium / indeterminate | a baseline server has no observed counterpart; `fail` only when ShadowScan's code scan is complete | ASI04 |
+| SYM-SS-004 declared level below the observed floor | high | `automation_level` (ISO → L) below `autonomy_assessment.floor` | ASI09, ASI02 |
+| SYM-SS-005 declared level above the observed ceiling | info | declared above the ceiling that positive configuration evidence set | ASI09 |
+| SYM-SS-006 approval bypass observed | high | `autonomy_assessment.oversight = bypassed` | ASI09, ASI02, ASI05 |
+| SYM-SS-007 ShadowScan report incomplete | info / indeterminate | a `shadowscan:*` collector run is partial or failed | — |
+
 ## 3. Computed flags
 Flags are summaries of the checks above with inputs cited (`agentbom-profile.md §3.16`): `lethal-trifecta`,
 `rule-of-two-violation` (SYM-AUTHZ-001), `unpinned-tool` (SYM-TOOL-001/004), `floating-model-alias`
