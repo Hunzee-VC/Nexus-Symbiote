@@ -21,9 +21,7 @@ from nexus_symbiote.supply_chain_cli import register_supply_chain_commands
 from nexus_symbiote.utils.files import write_output_file
 
 console = Console(stderr=True)
-
-
-err_console = Console(stderr=True)
+err_console = console
 
 
 def _policy(root: Path, *, ignore_project: bool = False) -> Policy:
