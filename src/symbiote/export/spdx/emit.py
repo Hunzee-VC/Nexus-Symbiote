@@ -516,6 +516,18 @@ class _Emitter:
                     riskClass=p.risk_class,
                 ),
             )
+            if not self.include_text and p.variables_schema is not None:
+                # the schema travels only with --include-text (as for tool schemas); say so, never drop silently
+                self.loss.append(
+                    LossItem(
+                        path=f"/prompts/{p.id}/variablesSchema",
+                        entity=p.id,
+                        field="variables_schema",
+                        reason=E.LossReason.REDACTED,
+                        preserved_in=E.LossPreservedIn.COMPANION,
+                        severity=E.LossSeverity.INFO,
+                    )
+                )
         for s in self.bom.skills:
             pkg = m.software_Package()
             pkg.name = s.frontmatter.name or s.id.split(":", 1)[1]

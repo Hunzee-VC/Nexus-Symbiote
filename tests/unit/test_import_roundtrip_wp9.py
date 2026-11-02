@@ -129,6 +129,10 @@ def test_digests_only_export_reports_prompt_schema_as_redacted(example_bom: Agen
     assert item.reason is E.LossReason.REDACTED and item.preserved_in is E.LossPreservedIn.DROPPED
     comp = next(c for c in doc["components"] if c["bom-ref"] == prompt.id)
     assert not any(p["name"] == "agentbom:prompt:variables-schema:json" for p in comp["properties"])
+    # SPDX reports the same omission (it used to drop the schema silently)
+    _, sloss = export_spdx(example_bom)
+    sitem = next(i for i in sloss.items if i.path == f"/prompts/{prompt.id}/variablesSchema")
+    assert sitem.reason is E.LossReason.REDACTED
 
 
 def test_spdx_tool_text_round_trips_or_is_reported(minimal_bom: AgentBOM) -> None:
