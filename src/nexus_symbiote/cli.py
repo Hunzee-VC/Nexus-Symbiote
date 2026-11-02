@@ -233,6 +233,9 @@ def scan(
     source_unmapped_count = 0
     source_unmapped_indexes: list[int] = []
     scanner_status: dict[str, str] = dict.fromkeys(all_scanners, "unknown")
+    # AIBOM lookups scan the whole list; a project can declare tens of thousands of
+    # tools, so index what this loop adds instead of searching for each component.
+    collected: dict[str, Any] = {}
     for name in selected:
         scanner = (
             all_scanners[name](signature_policies=signature_policies)
@@ -271,11 +274,13 @@ def scan(
                 )
                 if comp.assurance_level is AssuranceLevel.VERIFIED:
                     comp.assurance_level = AssuranceLevel.DECLARED
-                existing = aibom.get_component(comp.bom_ref)
+                existing = collected.get(comp.bom_ref)
                 if existing is not None and existing != comp:
                     scan_failures.append(f"{name}: conflicting duplicate component {comp.bom_ref}")
                     continue
-                aibom.add_component(comp)
+                if existing is None:
+                    aibom.components.append(comp)
+                    collected[comp.bom_ref] = comp
                 accepted_refs.add(comp.bom_ref)
             for edge in result.dependencies:
                 if edge.source_ref in accepted_refs and edge.target_ref in accepted_refs:
