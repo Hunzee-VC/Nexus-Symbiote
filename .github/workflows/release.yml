@@ -19,6 +19,7 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
+      actions: read
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -34,7 +35,7 @@ jobs:
         if: inputs.publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python scripts/check_repository_controls.py --repo "$GITHUB_REPOSITORY" --branch main
+        run: python scripts/check_repository_controls.py --repo "$GITHUB_REPOSITORY" --branch main --sha "$GITHUB_SHA"
       - run: python -m pytest
       - name: Enforce committed security regression contracts
         run: python scripts/check_security_regressions.py --out evidence/security-regressions.json

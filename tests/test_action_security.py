@@ -159,7 +159,7 @@ def test_workflow_pins_structure_and_release_privilege_separation():
     assert set(events) == {"workflow_dispatch"}
     assert events["workflow_dispatch"]["inputs"]["publish"]["default"] is False
     jobs = release["jobs"]
-    assert jobs["build"]["permissions"] == {"contents": "read"}
+    assert jobs["build"]["permissions"] == {"contents": "read", "actions": "read"}
     build_commands = [step.get("run", "") for step in jobs["build"]["steps"]]
     assert any("--require-hashes -r requirements-ci.lock" in command for command in build_commands)
     assert "python -m build --no-isolation" in build_commands

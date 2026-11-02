@@ -1,4 +1,4 @@
-"""Fail publication closed unless GitHub reports enforced required CI checks.
+"""Require enforced checks and successful workflow evidence for the published SHA.
 
 Only read repository branch metadata. Administrative configuration is a separate
 operator action; a checked-in policy file does not protect a GitHub branch.
@@ -17,6 +17,7 @@ from urllib.parse import quote
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 REQUIRED_CHECKS = frozenset({"Verified CI"})
+CI_WORKFLOW = ".github/workflows/ci.yml"
 MAX_RESPONSE_BYTES = 1024 * 1024
 
 
@@ -57,15 +58,13 @@ class _NoRedirect(HTTPRedirectHandler):
         return None
 
 
-def fetch_branch(repo: str, branch: str, token: str) -> Any:
+def _fetch(repo: str, path: str, token: str) -> Any:
     if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo) is None:
         raise ValueError("repository must be owner/name")
-    if not branch or any(ord(c) < 32 for c in branch):
-        raise ValueError("branch name is invalid")
     if not token or any(c in token for c in "\r\n"):
         raise ValueError("a GitHub token with repository contents-read access is required")
     request = Request(
-        f"https://api.github.com/repos/{repo}/branches/{quote(branch, safe='')}",
+        f"https://api.github.com/repos/{repo}/{path}",
         headers={
             "Authorization": "Bearer " + token,
             "Accept": "application/vnd.github+json",
@@ -80,16 +79,108 @@ def fetch_branch(repo: str, branch: str, token: str) -> Any:
     return json.loads(raw)
 
 
+def fetch_branch(repo: str, branch: str, token: str) -> Any:
+    if not branch or any(ord(c) < 32 for c in branch):
+        raise ValueError("branch name is invalid")
+    return _fetch(repo, f"branches/{quote(branch, safe='')}", token)
+
+
+def _valid_sha(value: str) -> bool:
+    return re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", value) is not None
+
+
+def evaluate_revision(metadata: Any, sha: str) -> list[str]:
+    if not _valid_sha(sha):
+        return ["an exact source commit SHA is required"]
+    commit = metadata.get("commit") if isinstance(metadata, dict) else None
+    if not isinstance(commit, dict) or commit.get("sha") != sha:
+        return ["source SHA does not match the live branch head"]
+    return []
+
+
+def fetch_verification(repo: str, sha: str, token: str) -> tuple[Any, Any]:
+    if not _valid_sha(sha):
+        raise ValueError("an exact source commit SHA is required")
+    # The file-specific endpoint prevents an unrelated workflow from supplying
+    # an identically named check. Inspect the newest run, including queued runs;
+    # an older successful attempt must not hide a later failure or pending run.
+    response = _fetch(repo, f"actions/workflows/ci.yml/runs?head_sha={sha}&per_page=1", token)
+    runs = response.get("workflow_runs") if isinstance(response, dict) else None
+    if not isinstance(runs, list) or len(runs) != 1 or not isinstance(runs[0], dict):
+        return None, None
+    run = runs[0]
+    run_id = run.get("id")
+    if type(run_id) is not int or run_id <= 0:
+        return run, None
+    jobs = _fetch(repo, f"actions/runs/{run_id}/jobs?filter=latest&per_page=100", token)
+    return run, jobs
+
+
+def evaluate_verification(
+    run: Any, response: Any, *, repo: str, branch: str, sha: str
+) -> list[str]:
+    if not isinstance(run, dict):
+        return ["CI workflow evidence is unavailable for the source SHA"]
+    source = run.get("head_repository")
+    attempt = run.get("run_attempt")
+    if (
+        type(run.get("id")) is not int
+        or run["id"] <= 0
+        or type(attempt) is not int
+        or attempt <= 0
+        or run.get("head_sha") != sha
+        or run.get("head_branch") != branch
+        or run.get("path") != CI_WORKFLOW
+        or run.get("event") not in {"push", "workflow_dispatch"}
+        or not isinstance(source, dict)
+        or not isinstance(source.get("full_name"), str)
+        or source["full_name"].lower() != repo.lower()
+    ):
+        return ["CI evidence does not identify the expected repository, workflow and source"]
+    errors = []
+    if run.get("status") != "completed" or run.get("conclusion") != "success":
+        errors.append("the latest CI workflow run has not succeeded for the source SHA")
+    jobs = response.get("jobs") if isinstance(response, dict) else None
+    total = response.get("total_count") if isinstance(response, dict) else None
+    if (
+        not isinstance(jobs, list)
+        or not jobs
+        or type(total) is not int
+        or total != len(jobs)
+        or any(not isinstance(job, dict) for job in jobs)
+    ):
+        return [*errors, "CI job evidence is missing, incomplete or malformed"]
+    verified = [job for job in jobs if job.get("name") == "Verified CI"]
+    if len(verified) != 1 or any(
+        job.get("run_id") != run["id"]
+        or type(job.get("run_id")) is not int
+        or job.get("run_attempt") != attempt
+        or type(job.get("run_attempt")) is not int
+        or job.get("status") != "completed"
+        or job.get("conclusion") != "success"
+        for job in verified
+    ):
+        errors.append("Verified CI did not succeed in the latest workflow attempt")
+    return errors
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     parser.add_argument("--branch", default="main")
+    parser.add_argument("--sha", default=os.environ.get("GITHUB_SHA", ""))
     args = parser.parse_args()
     try:
-        metadata = fetch_branch(
-            args.repo, args.branch, os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN", "")
-        )
-        errors = evaluate(metadata)
+        if not _valid_sha(args.sha):
+            raise ValueError("an exact source commit SHA is required")
+        token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN", "")
+        metadata = fetch_branch(args.repo, args.branch, token)
+        errors = [*evaluate(metadata), *evaluate_revision(metadata, args.sha)]
+        if not errors:
+            run, jobs = fetch_verification(args.repo, args.sha, token)
+            errors.extend(
+                evaluate_verification(run, jobs, repo=args.repo, branch=args.branch, sha=args.sha)
+            )
     except (HTTPError, URLError, OSError, ValueError, RecursionError):
         # Do not include response bodies, headers or credential-bearing error text.
         print(
@@ -101,7 +192,7 @@ def main() -> int:
         print("Repository controls: " + error, file=sys.stderr)
     if errors:
         return 1
-    print("Repository controls verified: protected branch and required CI checks are enforced.")
+    print("Repository controls verified: protected branch and successful CI for the exact source.")
     return 0
 
 

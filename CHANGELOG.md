@@ -4,6 +4,8 @@
 
 ### Security
 
+- Require successful canonical CI-workflow evidence for the exact publication source SHA, in addition to protected-branch settings.
+- Enforce offline tracked-source hygiene and vendored schema provenance digests in the required quality job.
 - Check trust-status signers against the previous tenant revocation list and recheck the accepted status when consuming a tool approval. Upgrading an existing gateway may require replaying its last accepted trust status.
 - Reconcile supplied BOMs with the project's static inventory. A completed search can record zero matches. Skipped collectors, failed reads, and unmapped discovery evidence still block the default repository gate.
 - Ignore report-supplied project policy during standalone ShadowScan import. Use `--report-only` explicitly for exploratory imports.
