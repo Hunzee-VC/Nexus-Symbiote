@@ -1,0 +1,99 @@
+name: Publish to TestPyPI
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish verified distributions to TestPyPI
+        type: boolean
+        required: true
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: testpypi-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Install locked build environment
+        run: |
+          python -m pip install --require-hashes -r requirements-ci.lock
+          python -m pip install --no-deps --no-build-isolation -e .
+      - name: Verify exact source and enforced controls before publication
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/check_repository_controls.py --repo "$GITHUB_REPOSITORY" --branch main --sha "$GITHUB_SHA"
+      - name: Run tests
+        run: python -m pytest
+      - name: Check source and workflow quality
+        run: |
+          ruff check src tests scripts
+          ruff format --check src tests scripts
+          mypy src/nexus_symbiote
+          python scripts/check_workflows.py
+          python scripts/check_repository_hygiene.py
+      - name: Enforce committed security contracts
+        run: python scripts/check_security_regressions.py --out evidence/security-regressions.json
+      - name: Retain security contract evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: testpypi-security-evidence
+          path: evidence/security-regressions.json
+          if-no-files-found: warn
+      - name: Build distributions
+        run: python -m build --no-isolation
+      - name: Check distributions
+        run: python -m twine check dist/*
+      - name: Run security acceptance against the exact built wheel
+        run: |
+          python -m pip install --no-index --no-deps --force-reinstall dist/*.whl
+          python -I scripts/check_wheel_security.py dist/*.whl
+      - name: Upload distributions
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: testpypi-distributions
+          path: dist/*
+          if-no-files-found: error
+      - name: Smoke-test built wheel
+        run: |
+          python -m venv "$RUNNER_TEMP/testpypi-smoke"
+          "$RUNNER_TEMP/testpypi-smoke/bin/python" -m pip install --no-deps dist/*.whl
+          "$RUNNER_TEMP/testpypi-smoke/bin/python" -m pip install --require-hashes -r requirements-ci.lock
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/testpypi-smoke/bin/python" -m nexus_symbiote --version
+          mkdir "$RUNNER_TEMP/testpypi-fixture"
+          "$RUNNER_TEMP/testpypi-smoke/bin/python" -m nexus_symbiote scan "$RUNNER_TEMP/testpypi-fixture" --report-only -f json -o testpypi-agentbom.json
+  publish:
+    if: inputs.publish && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/nexus-symbiote
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: testpypi-distributions
+          path: dist
+      - name: Publish to TestPyPI with OIDC trusted publishing
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          attestations: true
