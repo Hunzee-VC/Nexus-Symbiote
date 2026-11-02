@@ -179,7 +179,10 @@ def import_shadowscan(
         else:
             element_id = make_id("sw", resource, collision_seed=finding_id)
 
-        providers = finding.get("model_providers") or ["unknown"]
+        raw_providers = finding.get("model_providers")
+        providers = (
+            [p for p in raw_providers if isinstance(p, str) and p] if isinstance(raw_providers, list) else []
+        ) or ["unknown"]
         for model_name in finding.get("models") or []:
             if not isinstance(model_name, str) or not model_name:
                 continue
@@ -211,12 +214,22 @@ def import_shadowscan(
             floor = autonomy.get("floor")
             ceiling = autonomy.get("ceiling")
             if isinstance(floor, int) and 0 <= floor <= 5 and (best is None or floor > best.floor):
+                ceiling_value = ceiling if isinstance(ceiling, int) and 0 <= ceiling <= 5 else 5
+                if ceiling_value < floor:
+                    result.warnings.append(
+                        f"autonomy interval inverted (ceiling L{ceiling_value} < floor L{floor}); "
+                        "raising the ceiling to the floor"
+                    )
+                    ceiling_value = floor
+                floor_label = autonomy.get("floor_label")
+                ceiling_label = autonomy.get("ceiling_label")
+                oversight = autonomy.get("oversight")
                 best = AutonomyInterval(
                     floor=floor,
-                    ceiling=ceiling if isinstance(ceiling, int) else 5,
-                    floor_label=autonomy.get("floor_label"),
-                    ceiling_label=autonomy.get("ceiling_label"),
-                    oversight=autonomy.get("oversight"),
+                    ceiling=ceiling_value,
+                    floor_label=floor_label if isinstance(floor_label, str) else None,
+                    ceiling_label=ceiling_label if isinstance(ceiling_label, str) else None,
+                    oversight=oversight if isinstance(oversight, str) else None,
                 )
 
     if best is not None:

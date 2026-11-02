@@ -193,6 +193,27 @@ def test_import_models_become_unpinned_hosted_stubs() -> None:
     assert hosted.resolved_ref.is_unknown  # a scan sees names, never snapshots
 
 
+def test_malformed_model_providers_fall_back_to_unknown() -> None:
+    report = _report()
+    report["findings"][0]["models"] = ["gpt-4o"]
+    for bad in ("openai", {"a": 1}, [None, ""], 7):
+        report["findings"][0]["model_providers"] = bad
+        result = import_shadowscan(report, now=NOW)  # neither 'o' nor KeyError: 0
+        (model,) = result.models
+        assert model.hosted is not None and model.hosted.value.provider == "unknown"
+
+
+def test_inverted_autonomy_interval_is_normalized_with_a_warning() -> None:
+    report = _report()
+    for finding in report["findings"]:
+        finding.get("metadata", {}).pop("autonomy", None)
+    report["findings"][0].setdefault("metadata", {})["autonomy"] = {"floor": 5, "ceiling": 0}
+    result = import_shadowscan(report, now=NOW)
+    assert result.autonomy_interval is not None
+    assert result.autonomy_interval.floor == 5 and result.autonomy_interval.ceiling == 5
+    assert any("inverted" in w for w in result.warnings)
+
+
 def test_selector_filters_findings() -> None:
     result = import_shadowscan(_report(), selector=lambda f: f.get("kind") == "mcp-server", now=NOW)
     assert result.tool_servers
