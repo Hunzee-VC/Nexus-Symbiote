@@ -60,7 +60,7 @@ nexus-symbiote diff reviewed.json agentbom.json --fail-on-alert
 
 Inspect the exit status and the inventory's coverage, exclusions and failures. A command may write evidence and still return a failing gate. Standalone imports require a new output path and retain partial coverage; `--report-only` is an explicit inspection mode. For trusted local projects, standalone `scan`, `validate` and `risk` load project policy by default. Pass `--no-project-policy` when the scanned checkout must not choose your verification policy.
 
-## Show the collectors (60s demo)
+## Show the collectors
 
 The eight built-in collectors are `shadowscan`, `mcp`, `model`, `prompt`, `rag`, `registry`, `a2a` and `ide_agents`.
 
@@ -69,9 +69,6 @@ The eight built-in collectors are `shadowscan`, `mcp`, `model`, `prompt`, `rag`,
 nexus-symbiote scan examples --no-project-policy --report-only -o demo-agentbom.json
 nexus-symbiote summary demo-agentbom.json
 ```
-
-[![Asciinema recording of collector demo](https://asciinema.org/a/placeholder.svg)](https://asciinema.org/a/placeholder)  
-*60-second recording of `scan examples` exercising the collectors (record and replace this link after v0.1.0 tag).*
 
 A completed search can find no matching files; unsupported declarations and failed reads remain coverage gaps. Collection is static by default.
 
