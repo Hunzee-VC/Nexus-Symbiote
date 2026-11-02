@@ -39,6 +39,11 @@ from symbiote.cli.shadowscan_cmd import shadowscan_app  # noqa: E402
 
 app.add_typer(shadowscan_app, name="shadowscan")
 
+from symbiote.cli import monitor_cmd, update_cmd  # noqa: E402
+
+monitor_cmd.register(app)  # symbiote monitor tick|run|plan|status|init (spec/monitoring.md)
+update_cmd.register(app)  # symbiote update: agent dependency proposals (spec/monitoring.md §4)
+
 console = Console(stderr=True)
 JsonFlag = Annotated[bool, typer.Option("--json", help="Machine-readable JSON on stdout.")]
 

@@ -1,0 +1,68 @@
+# symbiote-monitor.yaml - continuous assurance for a small fleet (spec/monitoring.md section 5).
+#
+#   symbiote monitor plan   --config examples/monitor/symbiote-monitor.yaml   # tiers and due times
+#   symbiote monitor tick   --config examples/monitor/symbiote-monitor.yaml   # run what is due, then exit
+#   symbiote monitor status --config examples/monitor/symbiote-monitor.yaml   # last result per agent
+#
+# Relative paths are resolved against the directory that holds this file.
+# Secrets never appear here: webhook URLs are read from the environment variables named under `notify`.
+
+state_dir: ../../.symbiote/monitor     # state.json, lock, snapshot chain, advisor cache, per-agent history
+
+# Re-scan interval per risk tier (floor: 1m). Each agent's due time carries a deterministic jitter of up to 10 %.
+cadence: {critical: 10m, high: 1h, medium: 1d, low: 14d}
+
+# An agent escalated to the critical cadence (new high/critical finding, definition drift, malicious or
+# vulnerable dependency, verification failure) returns to its own tier after this many clean cycles.
+deescalate_after: 3
+
+# Exit code 1 when anything new at or above this severity is found.
+fail_on: high
+
+# Ask the advisors (npm, PyPI, OSV, MCP Registry, the hosted-model retirement table) about each dependency.
+advisories: true
+update_policy: {cooldown_days: 7, security_cooldown_days: 2, require_provenance_continuity: true}
+
+# Operational knobs (defaults shown).
+concurrency: 4          # agents scanned in parallel by one tick
+agent_budget: 5m        # wall-clock budget for one agent's cycle
+lock_timeout: 30s       # how long a tick waits for another tick to finish
+lock_stale_after: 1h    # kept for compatibility: the lock is a kernel flock, released when its holder exits
+
+notify:
+  # POST a JSON summary of events at or above `min_severity`. Export SYMBIOTE_WEBHOOK_URL (https only).
+  - {type: webhook, url_env: SYMBIOTE_WEBHOOK_URL, min_severity: high}
+
+agents:
+  # critical: a production agent that can act on the world. `risk: auto` derives the tier after every cycle
+  # (production + lethal trifecta / Rule-of-Two violation / a critical finding -> critical; other production -> high).
+  - name: triage-agent
+    path: ../triage-agent
+    environment: production
+    risk: auto
+    # Uncomment once an approved companion and its Sigstore bundle exist (`symbiote approve`, `symbiote attest`):
+    # baseline: approved/triage-agent.agentbom.json
+    # attestation: {bundle: approved/triage-agent.sigstore.json, policy: approved/verify-policy.yaml}
+
+  # An explicit tier is a floor: derivation may raise it, never lower it.
+  # - name: payments-agent
+  #   path: ../payments-agent
+  #   environment: production
+  #   risk: critical
+
+  # high: other production agents with tool access (or any agent with a failing high finding).
+  # - name: support-bot
+  #   path: ../support-bot
+  #   environment: production
+
+  # medium: staging and internal agents.
+  # - name: release-notes-agent
+  #   path: ../release-notes-agent
+  #   environment: staging
+
+  # low: development and read-only agents. A per-agent `interval` overrides the tier cadence.
+  # - name: docs-search-agent
+  #   path: ../docs-search-agent
+  #   environment: development
+  #   risk: low
+  #   interval: 2w

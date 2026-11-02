@@ -1,0 +1,149 @@
+{
+ "_id": "agent-cli-demo",
+ "dist-tags": {
+  "latest": "2.5.0",
+  "next": "3.1.0-beta.1"
+ },
+ "name": "agent-cli-demo",
+ "time": {
+  "2.1.9": "2026-07-01T10:00:00.000Z",
+  "2.2.0": "2026-08-01T10:00:00.000Z",
+  "2.2.3": "2026-09-01T10:00:00.000Z",
+  "2.3.0": "2026-09-20T03:14:00.000Z",
+  "2.4.0": "2026-10-01T10:00:00.000Z",
+  "2.5.0": "2026-10-31T09:00:00.000Z",
+  "3.0.0": "2026-10-10T10:00:00.000Z",
+  "3.1.0-beta.1": "2026-10-30T09:00:00.000Z",
+  "created": "2026-06-01T00:00:00.000Z",
+  "modified": "2026-10-31T09:00:00.000Z"
+ },
+ "versions": {
+  "2.2.0": {
+   "_npmUser": {
+    "email": "npm-oidc-no-reply@github.com",
+    "name": "GitHub Actions"
+   },
+   "dist": {
+    "attestations": {
+     "provenance": {
+      "predicateType": "https://slsa.dev/provenance/v1"
+     },
+     "url": "https://registry.npmjs.org/-/npm/v1/attestations/agent-cli-demo@2.2.0"
+    },
+    "integrity": "sha512-AAAA",
+    "tarball": "https://registry.npmjs.org/agent-cli-demo/-/agent-cli-demo-2.2.0.tgz"
+   },
+   "name": "agent-cli-demo",
+   "version": "2.2.0"
+  },
+  "2.2.3": {
+   "_npmUser": {
+    "email": "npm-oidc-no-reply@github.com",
+    "name": "GitHub Actions"
+   },
+   "dist": {
+    "attestations": {
+     "provenance": {
+      "predicateType": "https://slsa.dev/provenance/v1"
+     },
+     "url": "https://registry.npmjs.org/-/npm/v1/attestations/agent-cli-demo@2.2.3"
+    },
+    "integrity": "sha512-AAAA",
+    "tarball": "https://registry.npmjs.org/agent-cli-demo/-/agent-cli-demo-2.2.3.tgz"
+   },
+   "name": "agent-cli-demo",
+   "version": "2.2.3"
+  },
+  "2.3.0": {
+   "_npmUser": {
+    "email": "bot@example.invalid",
+    "name": "cline-release-bot"
+   },
+   "dist": {
+    "integrity": "sha512-AAAA",
+    "tarball": "https://registry.npmjs.org/agent-cli-demo/-/agent-cli-demo-2.3.0.tgz"
+   },
+   "name": "agent-cli-demo",
+   "scripts": {
+    "postinstall": "node ./setup.js",
+    "test": "jest"
+   },
+   "version": "2.3.0"
+  },
+  "2.4.0": {
+   "_npmUser": {
+    "email": "npm-oidc-no-reply@github.com",
+    "name": "GitHub Actions"
+   },
+   "dist": {
+    "attestations": {
+     "provenance": {
+      "predicateType": "https://slsa.dev/provenance/v1"
+     },
+     "url": "https://registry.npmjs.org/-/npm/v1/attestations/agent-cli-demo@2.4.0"
+    },
+    "integrity": "sha512-AAAA",
+    "tarball": "https://registry.npmjs.org/agent-cli-demo/-/agent-cli-demo-2.4.0.tgz"
+   },
+   "name": "agent-cli-demo",
+   "scripts": {
+    "test": "jest"
+   },
+   "version": "2.4.0"
+  },
+  "2.5.0": {
+   "_npmUser": {
+    "email": "npm-oidc-no-reply@github.com",
+    "name": "GitHub Actions"
+   },
+   "dist": {
+    "attestations": {
+     "provenance": {
+      "predicateType": "https://slsa.dev/provenance/v1"
+     },
+     "url": "https://registry.npmjs.org/-/npm/v1/attestations/agent-cli-demo@2.5.0"
+    },
+    "integrity": "sha512-AAAA",
+    "tarball": "https://registry.npmjs.org/agent-cli-demo/-/agent-cli-demo-2.5.0.tgz"
+   },
+   "name": "agent-cli-demo",
+   "version": "2.5.0"
+  },
+  "3.0.0": {
+   "_npmUser": {
+    "email": "npm-oidc-no-reply@github.com",
+    "name": "GitHub Actions"
+   },
+   "dist": {
+    "attestations": {
+     "provenance": {
+      "predicateType": "https://slsa.dev/provenance/v1"
+     },
+     "url": "https://registry.npmjs.org/-/npm/v1/attestations/agent-cli-demo@3.0.0"
+    },
+    "integrity": "sha512-AAAA",
+    "tarball": "https://registry.npmjs.org/agent-cli-demo/-/agent-cli-demo-3.0.0.tgz"
+   },
+   "name": "agent-cli-demo",
+   "version": "3.0.0"
+  },
+  "3.1.0-beta.1": {
+   "_npmUser": {
+    "email": "npm-oidc-no-reply@github.com",
+    "name": "GitHub Actions"
+   },
+   "dist": {
+    "attestations": {
+     "provenance": {
+      "predicateType": "https://slsa.dev/provenance/v1"
+     },
+     "url": "https://registry.npmjs.org/-/npm/v1/attestations/agent-cli-demo@3.1.0-beta.1"
+    },
+    "integrity": "sha512-AAAA",
+    "tarball": "https://registry.npmjs.org/agent-cli-demo/-/agent-cli-demo-3.1.0-beta.1.tgz"
+   },
+   "name": "agent-cli-demo",
+   "version": "3.1.0-beta.1"
+  }
+ }
+}

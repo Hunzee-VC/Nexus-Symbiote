@@ -1,0 +1,14 @@
+# /etc/systemd/system/symbiote-monitor.timer - tick every 10 minutes (the critical-tier cadence).
+# Enable with: systemctl enable --now symbiote-monitor.timer
+[Unit]
+Description=Run the Symbiote monitor tick every 10 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+RandomizedDelaySec=30s
+Persistent=true
+Unit=symbiote-monitor.service
+
+[Install]
+WantedBy=timers.target

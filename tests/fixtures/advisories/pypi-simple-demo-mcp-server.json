@@ -1,0 +1,16 @@
+{
+ "meta": {
+  "api-version": "1.4"
+ },
+ "name": "demo-mcp-server",
+ "files": [
+  {
+   "filename": "demo_mcp_server-1.1.0-py3-none-any.whl",
+   "provenance": "https://pypi.org/integrity/demo-mcp-server/1.1.0/demo_mcp_server-1.1.0-py3-none-any.whl/provenance"
+  },
+  {
+   "filename": "demo_mcp_server-1.0.0-py3-none-any.whl",
+   "provenance": null
+  }
+ ]
+}

@@ -1,0 +1,61 @@
+# Kubernetes CronJob: one monitoring tick every 10 minutes.
+# State lives on a PersistentVolumeClaim so tiers, escalation, history and the snapshot chain survive between runs;
+# agent definitions are mounted read-only from a ConfigMap or a git-sync volume. The webhook URL comes from a Secret.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: symbiote-monitor
+  labels: {app.kubernetes.io/name: symbiote-monitor}
+spec:
+  schedule: "*/10 * * * *"
+  concurrencyPolicy: Forbid          # never two ticks at once (the monitor lock enforces this too)
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 1800
+      template:
+        metadata:
+          labels: {app.kubernetes.io/name: symbiote-monitor}
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            fsGroup: 10001
+            seccompProfile: {type: RuntimeDefault}
+          containers:
+            - name: monitor
+              image: ghcr.io/symbiote-agentbom/symbiote:0.1.0   # pin by digest in production (@sha256:...)
+              args: ["monitor", "tick", "--config", "/config/symbiote-monitor.yaml", "--json"]
+              env:
+                - name: SYMBIOTE_WEBHOOK_URL
+                  valueFrom:
+                    secretKeyRef: {name: symbiote-monitor, key: webhook-url, optional: true}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: {drop: ["ALL"]}
+              resources:
+                requests: {cpu: 100m, memory: 256Mi}
+                limits: {cpu: "1", memory: 1Gi}
+              volumeMounts:
+                - {name: config, mountPath: /config, readOnly: true}
+                - {name: agents, mountPath: /agents, readOnly: true}
+                - {name: state, mountPath: /state}
+                - {name: tmp, mountPath: /tmp}
+          volumes:
+            - name: config
+              configMap:
+                name: symbiote-monitor
+                # symbiote-monitor.yaml sets `state_dir: /state` and agent paths under /agents.
+            - name: agents
+              persistentVolumeClaim: {claimName: agent-definitions, readOnly: true}
+            - name: state
+              persistentVolumeClaim: {claimName: symbiote-monitor-state}
+            - name: tmp
+              emptyDir: {sizeLimit: 64Mi}
