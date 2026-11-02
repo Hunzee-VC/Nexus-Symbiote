@@ -1441,8 +1441,10 @@ def export_cyclonedx(
         pointered.insert(0, ("/metadata/component", root))
 
     # identities not bound to any subject: record on the root agent
+    acting = {edge.to_ref for edge in bom.edges if edge.type is E.EdgeType.ACTS_AS}
     for ident in bom.identities:
-        if not any(cb.identity_ref == ident.id for cb in bom.credential_bindings):
+        bound = any(cb.identity_ref == ident.id for cb in bom.credential_bindings)
+        if not bound and ident.id not in acting and not any(ident.id in a.identities for a in bom.agents):
             b._lose(
                 f"/identities/{ident.id}",
                 E.LossReason.NO_NATIVE_CONSTRUCT,

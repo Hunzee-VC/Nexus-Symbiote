@@ -167,7 +167,7 @@ external agents only with `--include-external`. Generated files are validated ag
 |---|---|---|---|
 | SYM-SS-001 shadow component observed | medium (high for critical/high risk) | an entity derived from a finding with `shadow: true` (tag `shadow`) | ASI10, ASI04; AML.T0010 |
 | SYM-SS-002 tool server observed, not declared | high | an observed `server:<client>-<name>` has no counterpart in the baseline/declared BOM (id, then name+launch) | ASI04, ASI10; AML.T0010 |
-| SYM-SS-003 declared tool server not observed | medium / **indeterminate** | a declared server has no observed counterpart; `fail` only when the report is complete and its code scan covers the root, otherwise indeterminate | ASI04 |
+| SYM-SS-003 declared tool server not observed | medium / **indeterminate** | a declared MCP or built-in server (A2A peers are outside ShadowScan's inventory) has no observed counterpart; `fail` only when the report is complete and its code scan covers the root, otherwise indeterminate | ASI04 |
 | SYM-SS-004 declared level below the observed floor | high | `automation_level` (ISO → L) < `autonomy_assessment.floor` | ASI09, ASI02 |
 | SYM-SS-005 declared level above the observed ceiling | info | declared > ceiling (positive configuration evidence rules it out) | ASI09 |
 | SYM-SS-006 approval bypass observed | high | `autonomy_assessment.oversight == bypassed` | ASI09, ASI02, ASI05 |

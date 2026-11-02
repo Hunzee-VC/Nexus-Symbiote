@@ -150,13 +150,67 @@ def parse_jsonc(text: str) -> Any:
     return json.loads(_strip_jsonc(text), object_pairs_hook=_no_duplicate_keys)
 
 
+#: Upper bounds for YAML from untrusted repositories: alias references and entries produced by merge keys.
+MAX_YAML_ALIASES: Final = 1000
+MAX_YAML_MERGED: Final = 100_000
+
+
+class _BoundedSafeLoader(yaml.SafeLoader):
+    """``SafeLoader`` that bounds alias use and merge-key expansion (``<<: [*a, *a]`` chains grow as 2^n)."""
+
+    def __init__(self, stream: str, *, allow_aliases: bool) -> None:
+        super().__init__(stream)
+        self._allow_aliases = allow_aliases
+        self._aliases = 0
+        self._merged = 0
+
+    def compose_node(self, parent: Any, index: Any) -> Any:
+        if self.check_event(yaml.AliasEvent):
+            self._aliases += 1
+            if not self._allow_aliases or self._aliases > MAX_YAML_ALIASES:
+                raise yaml.YAMLError("YAML aliases are not accepted here (or too many)")
+        return super().compose_node(parent, index)
+
+    def flatten_mapping(self, node: Any) -> None:
+        super().flatten_mapping(node)
+        self._merged += len(node.value)
+        if self._merged > MAX_YAML_MERGED:
+            raise yaml.YAMLError("YAML merge keys expand beyond the supported size")
+
+
+def load_yaml(text: str, *, allow_aliases: bool = True) -> Any:
+    """``yaml.safe_load`` for untrusted text: bounded aliases and merges; every failure is a ``yaml.YAMLError``.
+
+    PyYAML's constructor raises ``KeyError``/``IndexError``/``AttributeError``/``OverflowError`` for explicit
+    tags with bad values (``!!bool maybe``, ``!!int ''``); those would otherwise escape callers that catch
+    ``YAMLError`` and fail a whole collector over one file.
+    """
+    loader = _BoundedSafeLoader(text, allow_aliases=allow_aliases)
+    try:
+        return loader.get_single_data()
+    except yaml.YAMLError:
+        raise
+    except (
+        KeyError,
+        IndexError,
+        AttributeError,
+        OverflowError,
+        TypeError,
+        ValueError,
+        RecursionError,
+    ) as exc:
+        raise yaml.YAMLError(f"unsupported YAML ({type(exc).__name__})") from None
+    finally:
+        loader.dispose()
+
+
 def parse_structured(data: bytes, fmt: Literal["json", "jsonc", "toml", "yaml"]) -> Any:
     """Decode UTF-8 (BOM tolerated) and parse with the format's safe parser."""
     text = data.decode("utf-8-sig")
     if fmt == "toml":
         return tomllib.loads(text)
     if fmt == "yaml":
-        return yaml.safe_load(text)
+        return load_yaml(text)
     if fmt == "jsonc":
         return parse_jsonc(text)
     return json.loads(text, object_pairs_hook=_no_duplicate_keys)
@@ -315,18 +369,57 @@ class UrlFacts:
     query_param_names: tuple[str, ...]
     had_userinfo: bool
     secret_in_query: bool
+    secret_in_path: bool = False
+
+
+def _split_userinfo(url: str) -> tuple[str, bool]:
+    """Remove ``user:password@`` even when the password contains ``/`` (``urlsplit`` would end the authority there).
+
+    ``@`` after the first ``/`` is userinfo only when a ``user:secret`` prefix (not ``host:port``) precedes the
+    slash, so npm-style ``/@scope/pkg`` paths are left alone.
+    """
+    sep = url.find("://")
+    if sep == -1:
+        return url, False
+    rest = url[sep + 3 :]
+    stop = len(rest)
+    for ch in "?#":
+        idx = rest.find(ch)
+        if idx != -1:
+            stop = min(stop, idx)
+    head = rest[:stop]
+    at = head.rfind("@")
+    if at == -1:
+        return url, False
+    slash = head.find("/")
+    if slash == -1 or at < slash:
+        return url[: sep + 3] + rest[at + 1 :], True
+    colon = head.find(":")
+    if 0 <= colon < slash and not head[colon + 1 : slash].isdigit():
+        return url[: sep + 3] + rest[at + 1 :], True
+    return url, False
 
 
 def url_facts(url: str) -> UrlFacts:
-    """Classify ``url`` without retaining credentials: userinfo and query values are dropped from ``display``."""
-    parts = urlsplit(url.strip())
+    """Classify ``url`` without retaining credentials: userinfo, query, fragment and credential-shaped path
+    segments never reach ``display``."""
+    cleaned, had_userinfo = _split_userinfo(url.strip())
+    parts = urlsplit(cleaned)
     scheme = parts.scheme.lower()
     host = (parts.hostname or "").lower() or None
     query = parse_qsl(parts.query, keep_blank_values=True)
     names = tuple(sorted({k for k, _ in query}))
     secret_q = any(secretish_name(k) or looks_like_secret(v) for k, v in query)
-    netloc = parts.netloc.rsplit("@", 1)[-1]
-    display = urlunsplit((scheme, netloc.lower(), parts.path, "", ""))
+    netloc = parts.netloc.rsplit("@", 1)
+    had_userinfo = had_userinfo or len(netloc) == 2
+    authority = netloc[-1].lower()
+    path = parts.path
+    secret_path = bool(path) and looks_like_secret(path)
+    if secret_path:
+        path = "/<redacted>"
+    if host and looks_like_secret(host):
+        authority, path, secret_path = "<redacted>", "", True
+    display = urlunsplit((scheme, authority, path, "", ""))
     zone = _zone_for_host(host)
     crosses = zone not in (TrustZone.LOCAL_PROCESS, TrustZone.LOOPBACK)
     return UrlFacts(
@@ -336,8 +429,9 @@ def url_facts(url: str) -> UrlFacts:
         trust_zone=zone,
         crosses_trust_boundary=crosses,
         query_param_names=names,
-        had_userinfo="@" in parts.netloc,
+        had_userinfo=had_userinfo,
         secret_in_query=secret_q,
+        secret_in_path=secret_path,
     )
 
 
