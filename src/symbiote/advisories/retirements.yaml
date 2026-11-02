@@ -1,0 +1,160 @@
+# Announced hosted-model retirements (spec/monitoring.md §3, signal `retiring-model`).
+#
+# One entry per model or alias, matched after symbiote.models_identity.hosted.classify_model_ref (so routing
+# suffixes are stripped and the provider is attributed the same way as in the BOM). Entries are matched only
+# within the named provider: the same model on Bedrock or Vertex has its own, different lifecycle.
+#
+# Every date carries its source. `confidence`:
+#   high   - read from the provider's own documentation or repository in the research session
+#   medium - read from a provider-published secondary source (an SDK docstring, a cached mirror of the docs)
+#   low    - recalled from earlier documentation or taken from a third-party table, not re-fetched
+# `successor` is set only where a source names one; otherwise the planner advises choosing a supported model.
+# Whether a model is already retired is computed from `retires_on` and the check time, not stored here.
+#
+# Research register: providers -> known_aliases / id_patterns, research session of 2026-11-01.
+version: "2026-11-01"
+retirements:
+  # ------------------------------------------------------------------ Anthropic (Claude API)
+  - provider: anthropic
+    ids: [claude-sonnet-4-5-20250929, claude-sonnet-4-5]
+    retires_on: 2026-11-30
+    successor: null
+    confidence: medium
+    source: "https://platform.claude.com/docs/en/about-claude/models/overview (via the claude-api skill cache of 2026-10-06 mirroring that page: claude-sonnet-4-5-20250929 deprecated, retires 2026-11-30)"
+  - provider: anthropic
+    ids: [claude-opus-4-1-20250805, claude-opus-4-1]
+    retires_on: 2026-08-05
+    successor: null
+    confidence: medium
+    source: "https://platform.claude.com/docs/en/about-claude/models/overview (via the claude-api skill cache of 2026-10-06: claude-opus-4-1 retired 2026-08-05)"
+  - provider: anthropic
+    ids: [claude-opus-4-20250514, claude-opus-4-0]
+    retires_on: 2026-06-15
+    successor: null
+    confidence: medium
+    source: "https://platform.claude.com/docs/en/about-claude/models/overview (via the claude-api skill cache of 2026-10-06: claude-opus-4-0 retired 2026-06-15)"
+  - provider: anthropic
+    ids: [claude-sonnet-4-20250514, claude-sonnet-4-0]
+    retires_on: 2026-06-15
+    successor: null
+    confidence: medium
+    source: "https://platform.claude.com/docs/en/about-claude/models/overview (via the claude-api skill cache of 2026-10-06: claude-sonnet-4-0 retired 2026-06-15)"
+  - provider: anthropic
+    ids: [claude-3-7-sonnet-20250219, claude-3-7-sonnet-latest]
+    retires_on: 2026-02-19
+    successor: null
+    confidence: low
+    source: "recalled from the 2025 Claude models overview; not re-fetched in the research session"
+  - provider: anthropic
+    ids: [claude-3-5-sonnet-20241022, claude-3-5-sonnet-latest]
+    retires_on: 2025-10-28
+    successor: null
+    confidence: low
+    source: "recalled from the 2025 Claude models overview; not re-fetched in the research session"
+  - provider: anthropic
+    ids: [claude-3-5-haiku-20241022, claude-3-5-haiku-latest]
+    retires_on: 2026-02-19
+    successor: null
+    confidence: low
+    source: "recalled from the 2025 Claude models overview; not re-fetched in the research session"
+  - provider: anthropic
+    ids: [claude-3-opus-20240229, claude-3-opus-latest]
+    retires_on: 2026-01-05
+    successor: null
+    confidence: low
+    source: "recalled from the 2025 Claude models overview; not re-fetched in the research session"
+
+  # ------------------------------------------------------------------ OpenAI (api.openai.com)
+  # Shutdown dates from the 'Deprecated values' docstring of openai-python 3.42.0
+  # (src/openai/types/shared/chat_model.py, fetched 2026-11-01). Dates are attached to the IDs the docstring
+  # lists; a dated snapshot is not assumed to share its alias's date unless it is listed itself.
+  - provider: openai
+    ids: [gpt-4o]
+    retires_on: 2027-01-14
+    successor: null
+    confidence: medium
+    source: "https://raw.githubusercontent.com/openai/openai-python/main/src/openai/types/shared/chat_model.py (openai-python 3.42.0, fetched 2026-11-01)"
+  - provider: openai
+    ids: [o3]
+    retires_on: 2026-12-11
+    successor: null
+    confidence: medium
+    source: "https://raw.githubusercontent.com/openai/openai-python/main/src/openai/types/shared/chat_model.py (openai-python 3.42.0, fetched 2026-11-01)"
+  - provider: openai
+    ids: [gpt-5]
+    retires_on: 2026-12-11
+    successor: null
+    confidence: medium
+    source: "https://raw.githubusercontent.com/openai/openai-python/main/src/openai/types/shared/chat_model.py (openai-python 3.42.0, fetched 2026-11-01)"
+  - provider: openai
+    ids: [gpt-5.1]
+    retires_on: 2027-04-01
+    successor: null
+    confidence: medium
+    source: "https://raw.githubusercontent.com/openai/openai-python/main/src/openai/types/shared/chat_model.py (openai-python 3.42.0, fetched 2026-11-01)"
+  - provider: openai
+    ids: [gpt-4-0613, gpt-3.5-turbo-0125]
+    retires_on: 2026-10-23
+    successor: null
+    confidence: medium
+    source: "https://raw.githubusercontent.com/openai/openai-python/main/src/openai/types/shared/chat_model.py (openai-python 3.42.0, fetched 2026-11-01: gpt-4-0613 and gpt-3.5-turbo-0125 listed for 2026-10-23)"
+  - provider: openai
+    ids: [gpt-4, gpt-3.5-turbo, gpt-4-turbo]
+    retires_on: 2026-10-23
+    successor: null
+    confidence: medium
+    source: "https://raw.githubusercontent.com/openai/openai-python/main/src/openai/types/shared/chat_model.py (openai-python 3.42.0, fetched 2026-11-01; alias-to-snapshot mapping recalled from historical OpenAI docs)"
+  - provider: openai
+    ids: [gpt-4-turbo-preview]
+    retires_on: 2026-03-26
+    successor: null
+    confidence: medium
+    source: "https://raw.githubusercontent.com/openai/openai-python/main/src/openai/types/shared/chat_model.py (openai-python 3.42.0, fetched 2026-11-01)"
+  - provider: openai
+    ids: [chatgpt-4o-latest]
+    retires_on: 2026-02-17
+    successor: null
+    confidence: medium
+    source: "https://raw.githubusercontent.com/openai/openai-python/main/src/openai/types/shared/chat_model.py (openai-python 3.42.0, fetched 2026-11-01)"
+  - provider: openai
+    ids: [codex-mini-latest]
+    retires_on: 2026-02-12
+    successor: null
+    confidence: medium
+    source: "https://raw.githubusercontent.com/openai/openai-python/main/src/openai/types/shared/chat_model.py (openai-python 3.42.0, fetched 2026-11-01)"
+  - provider: openai
+    ids: [gpt-5-chat-latest, gpt-5.1-chat-latest]
+    retires_on: 2026-07-23
+    successor: null
+    confidence: medium
+    source: "https://raw.githubusercontent.com/openai/openai-python/main/src/openai/types/shared/chat_model.py (openai-python 3.42.0, fetched 2026-11-01)"
+  - provider: openai
+    ids: [gpt-5.2-chat-latest, gpt-5.3-chat-latest]
+    retires_on: 2026-08-10
+    successor: null
+    confidence: medium
+    source: "https://raw.githubusercontent.com/openai/openai-python/main/src/openai/types/shared/chat_model.py (openai-python 3.42.0, fetched 2026-11-01)"
+
+  # ------------------------------------------------------------------ Cohere
+  - provider: cohere
+    ids: [command-r-plus, command-r-plus-04-2024]
+    deprecated_on: 2025-09-15
+    retires_on: null
+    successor: null
+    confidence: high
+    source: "cohere-ai/cohere-developer-experience fern/pages/models/models.mdx (git checkout, commit of 2026-10-27: deprecated 2025-09-15)"
+  - provider: cohere
+    ids: [command-r, command-r-03-2024]
+    deprecated_on: 2025-09-15
+    retires_on: null
+    successor: null
+    confidence: high
+    source: "cohere-ai/cohere-developer-experience fern/pages/models/models.mdx (git checkout, commit of 2026-10-27: deprecated 2025-09-15)"
+
+  # ------------------------------------------------------------------ DeepSeek
+  - provider: deepseek
+    ids: [deepseek-chat, deepseek-reasoner]
+    retires_on: 2026-07-24
+    successor: null
+    confidence: low
+    source: "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json (third-party table, fetched 2026-11-01: deprecation_date 2026-07-24)"

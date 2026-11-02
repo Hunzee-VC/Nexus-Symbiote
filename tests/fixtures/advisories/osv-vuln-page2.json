@@ -1,0 +1,9 @@
+{
+ "vulns": [
+  {
+   "id": "GHSA-page-2222-3333",
+   "summary": "second page",
+   "affected": []
+  }
+ ]
+}
