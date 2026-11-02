@@ -297,6 +297,19 @@ class CompletenessValidator:
                 problems.append("Static discovery coverage or assurance is misrepresented.")
 
         actual = {c.bom_ref: c for c in local.components}
+        imported_refs = set(actual)
+        # Imported relationships are supplier claims with source-bound provenance.
+        # Compare a sorted list to retain multiplicity and detect injected local links.
+        projected_edges = sorted(
+            canonical_json(edge.model_dump(mode="json")) for edge in local.dependencies
+        )
+        supplied_edges = sorted(
+            canonical_json(edge.model_dump(mode="json"))
+            for edge in bom.dependencies
+            if edge.source_ref in imported_refs or edge.target_ref in imported_refs
+        )
+        if supplied_edges != projected_edges:
+            problems.append("Discovery report dependency claims differ from the source projection.")
         for supplied in bom.components:
             component = actual.pop(supplied.bom_ref, None)
             if component is None:
