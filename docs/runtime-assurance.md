@@ -66,6 +66,23 @@ Unsupported descriptor fields fail closed until the digest profile is upgraded.
 Arguments are copied before checking; schema references cannot trigger network
 retrieval. Identities and validity are checked again immediately before execution.
 
+Schema validity does not bound validation cost. Approved tool schemas and hostile
+arguments are checked in disposable isolated Python workers, with a two-second
+wall deadline, one CPU second and 256 MiB address-space limit. Validation requires
+POSIX resource limits and fails closed if a worker cannot start, crashes, times
+out or returns an invalid result. At most four validations run concurrently in
+one gateway process; additional requests fail closed. JSON input is bounded to
+32 levels and 20,000 nodes per value, 256 KiB per served descriptor/schema and
+1 MiB per argument object. Deployments must also rate-limit requests and bound
+the trusted authentication, description, scope and execution adapters.
+Workers load the reviewed package installed in the gateway's Python environment
+using isolated mode; a source tree available only through `PYTHONPATH` is
+insufficient and fails closed.
+
+Revocation and required operation approvals are checked before schema evaluation.
+The worker cannot retrieve schema references from the network. Validation failure
+does not consume an approval nonce or advance snapshot state.
+
 ### Pinned stdio integration
 
 `nexus_symbiote.live.session.invoke_pinned_stdio` is an opt-in POSIX adapter that

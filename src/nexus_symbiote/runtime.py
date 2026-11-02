@@ -21,9 +21,15 @@ import rfc8785
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
-from jsonschema import Draft202012Validator
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from referencing import Registry
+
+from nexus_symbiote.runtime_validation import (
+    MAX_ARGUMENT_BYTES,
+    MAX_SCHEMA_BYTES,
+    ValidationBudgetError,
+    check_json_budget,
+    validate_arguments,
+)
 
 PAYLOAD_TYPE: Literal["application/vnd.in-toto+json"] = "application/vnd.in-toto+json"
 STATEMENT_TYPE = "https://in-toto.io/Statement/v1"
@@ -43,7 +49,7 @@ class AuthorizationError(ValueError):
 def canonical_bytes(value: Any) -> bytes:
     try:
         return rfc8785.dumps(value)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, RecursionError) as exc:
         raise AuthorizationError("value is outside the canonical JSON domain") from exc
 
 
@@ -290,13 +296,9 @@ def _window(contract: ValidWindow, now: datetime, maximum: timedelta) -> None:
 
 
 def _validate_arguments(schema: Any, arguments: dict[str, Any]) -> None:
-    if not isinstance(schema, dict):
-        raise AuthorizationError("served tool requires an object input schema")
-
     try:
-        Draft202012Validator.check_schema(schema)
-        Draft202012Validator(schema, registry=Registry()).validate(arguments)
-    except Exception as exc:
+        validate_arguments(schema, arguments)
+    except ValidationBudgetError as exc:
         raise AuthorizationError("tool arguments or offline input schema are invalid") from exc
 
 
@@ -442,7 +444,13 @@ class ReferenceGateway(Generic[T]):
     ) -> T:
         from nexus_symbiote.core.hashing import hash_tool_definition
 
-        call = ToolCall.model_validate(strict_json(canonical_bytes(call.model_dump(mode="json"))))
+        try:
+            check_json_budget(call.arguments, maximum=MAX_ARGUMENT_BYTES)
+            call = ToolCall.model_validate(
+                strict_json(canonical_bytes(call.model_dump(mode="json")))
+            )
+        except (ValidationBudgetError, RecursionError) as exc:
+            raise AuthorizationError("tool arguments exceed the supported JSON budget") from exc
         timestamp = self.clock()
         context = self.authenticate()
         statuses, trust_signers = verify_contract(trust, "trust", self.trust_keys)
@@ -495,6 +503,10 @@ class ReferenceGateway(Generic[T]):
         unsupported = set(definition) - {"name", "description", "inputSchema", "annotations"}
         if unsupported:
             raise AuthorizationError("descriptor uses fields unsupported by digest profile v1")
+        try:
+            check_json_budget(definition, maximum=MAX_SCHEMA_BYTES)
+        except ValidationBudgetError as exc:
+            raise AuthorizationError("served descriptor exceeds the supported JSON budget") from exc
         actual = hash_tool_definition(
             call.tool_name,
             definition.get("description", ""),
@@ -503,7 +515,6 @@ class ReferenceGateway(Generic[T]):
         )
         if actual != grant.definition_digest:
             raise AuthorizationError("served descriptor changed since approval")
-        _validate_arguments(definition.get("inputSchema"), call.arguments)
         if (
             actual in statuses.revoked_tools
             or served.endpoint_identity in statuses.revoked_endpoints
@@ -532,6 +543,7 @@ class ReferenceGateway(Generic[T]):
             ):
                 raise AuthorizationError("approval does not cover this operation")
             nonce = consent.nonce
+        _validate_arguments(definition.get("inputSchema"), call.arguments)
         if self.authenticate() != context:
             raise AuthorizationError("execution identity changed during authorization")
 
