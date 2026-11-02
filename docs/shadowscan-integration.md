@@ -31,9 +31,10 @@ The importer maps native `agent`, `mcp-server` and `local-model` findings. It
 also accepts ShadowScan's CycloneDX 1.6/1.7 components and services, marking the
 projection partial. Unmapped entries are counted with source indexes. For
 CycloneDX, the index is into components followed by services. The source report
-and its scope, timestamps, detailed evidence, identities and graph remain the
-authoritative discovery record; those fields are not duplicated into the BOM.
-This reduces leakage but does not turn the BOM into a complete evidence graph.
+and its scope, timestamps, detailed evidence, identities and full graph remain
+the authoritative discovery record. Only supported, mapped-endpoint CycloneDX
+dependencies are projected as declared claims; the rest of those fields remain
+in the report. This reduces leakage but does not create a complete evidence graph.
 
 All imported components have declared assurance and unknown trust. The importer
 does not run ShadowScan, execute tools, fetch endpoints, infer agent autonomy, or
