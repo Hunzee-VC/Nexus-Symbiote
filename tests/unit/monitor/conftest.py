@@ -18,8 +18,15 @@ NOW = datetime(2026, 11, 1, 12, 0, tzinfo=UTC)
 
 @pytest.fixture
 def agent_dir(tmp_path: Path) -> Path:
+    """The example agent without its deliberately unsafe model directory.
+
+    ``models-local`` reports the pickle weights and the ``trust_remote_code`` config there as critical
+    ``SYM-MODEL-002`` findings, which would pin the agent to the critical tier and make the tier, cadence and escalation tests below vacuous; ``test_critical_finding_tier``
+    covers the critical path with the model present.
+    """
     dest = tmp_path / "agents" / "triage-agent"
     shutil.copytree(TRIAGE, dest)
+    shutil.rmtree(dest / "models", ignore_errors=True)
     return dest
 
 

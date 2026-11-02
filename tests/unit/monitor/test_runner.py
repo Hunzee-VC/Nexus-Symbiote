@@ -236,3 +236,16 @@ def test_run_forever_stops(make_config: Callable[..., MonitorConfig]) -> None:
 
     run_forever(cfg, stop=stop, on_tick=on_tick)
     assert len(reports) == 1 and reports[0].records[0].agent == "triage-agent"
+
+
+def test_critical_finding_tier(make_config: Callable[..., MonitorConfig], agent_dir: Path) -> None:
+    """With the example's unsafe model present, a production agent is critical (10 minute cadence)."""
+    shutil.copytree(
+        Path(__file__).resolve().parents[3] / "examples" / "triage-agent" / "models", agent_dir / "models"
+    )
+    cfg = make_config()
+    record = run_cycle(cfg.agents[0], config=cfg, state=StateStore(cfg.state_dir), now=NOW)
+    assert any(f["check"] == "SYM-MODEL-002" and f["severity"] == "critical" for f in record.new_findings)
+    assert record.tier == "critical"
+    due = datetime.fromisoformat(record.next_due_at or "")
+    assert NOW + timedelta(minutes=10) <= due < NOW + timedelta(minutes=11)
