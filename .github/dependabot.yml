@@ -15,3 +15,9 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "deps"
+    ignore:
+      # tree-sitter 0.26 removed Parser(timeout_micros=...), and its replacement,
+      # parse(progress_callback=...), segfaults with tree-sitter-typescript 0.23.2.
+      # Untrusted TypeScript must stay time-bounded, so see #91 before widening.
+      - dependency-name: tree-sitter
+        versions: [">=0.26,<0.27"]
