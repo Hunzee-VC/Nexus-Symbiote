@@ -1,0 +1,3436 @@
+{
+ "generated": "2026-11-01",
+ "scope_note": "Coverage reflects documented capability as of 1-2 Nov 2026; no tool was executed. The symbiote row is the author's own assessment.",
+ "tools": [
+  {
+   "id": "cdxgen",
+   "name": "cdxgen (incl. aibom, tracebom, cdx-sign)",
+   "owner": "cdxgen project (formerly published under the @cyclonedx npm scope)",
+   "open_source": "yes",
+   "version_status": "13.6.0 as @cdxgen/cdxgen (npm, 2026-10-31); 12.9.0 as @cyclonedx/cdxgen (npm, 2026-10-22)",
+   "inventories_by_layer": {
+    "data": "Hugging Face dataset references from model cards",
+    "model": "Local GGUF, safetensors, ONNX and pickle checkpoints; Hugging Face purls with revision; modelCard.modelParameters",
+    "instructions": "AGENTS.md, CLAUDE.md, GEMINI.md, .cursorrules, .clinerules, copilot instructions and skills, as derived signals (counts, flags, categories), never raw text",
+    "tools": "MCP configs, MCP services, MCP Registry server.json, MCPB/DXT bundles; tool names and counts",
+    "runtime": "tracebom traces a command's loaded libraries and HTTP hosts (not agent-specific)",
+    "identity": "MCP auth posture and credential-exposure indicators (pattern names only)",
+    "delivery": "Package purls and lockfile integrity; GitHub Actions workflow properties (SHA pinning, write permissions, id-token)"
+   },
+   "output_formats": "CycloneDX JSON (1.7 default in tracebom; --spec-version 2.0 targets an older draft); SPDX 3.0.1 JSON-LD export",
+   "agent_capabilities": {
+    "mcp_servers": "yes, as CycloneDX services under cdx:mcp:*",
+    "tool_definition_digests": "no; experimental --experimental-mcp-pinning records package-hash pinning state (pinned, unpinned, unhashable), not tool-definition digests",
+    "instruction_and_skill_files": "yes, derived properties under cdx:agent:* and cdx:skill:*",
+    "hosted_model_identity": "detects inference providers (OpenAI, Anthropic, Bedrock and others) from source and config; no alias resolution documented",
+    "credentials": "credential-exposure flags and indicator names; no custody or revocation record",
+    "ci_agents": "workflow-level properties; AI agents running in CI are not modeled as such in the docs reviewed"
+   },
+   "signing_attestation": "cdx-sign and cdx-verify (JSF signatures); experimental CycloneDX 1.7 citation for registry-sourced integrity values",
+   "runtime_observation": "tracebom only (process-level libraries, HTTP hosts, TLS)",
+   "verification_status": "verified",
+   "register_ids": [
+    "B2-06",
+    "B2-07",
+    "B6-11",
+    "B7-05",
+    "B7-09"
+   ],
+   "evidence_urls": [
+    "https://raw.githubusercontent.com/cdxgen/cdxgen/master/README.md",
+    "https://raw.githubusercontent.com/cdxgen/cdxgen/master/docs/AI_BOM.md",
+    "https://raw.githubusercontent.com/cdxgen/cdxgen/master/docs/MCP.md",
+    "https://raw.githubusercontent.com/cdxgen/cdxgen/master/docs/CUSTOM_PROPERTIES.md",
+    "https://raw.githubusercontent.com/cdxgen/cdxgen/master/docs/TRACEBOM.md",
+    "https://registry.npmjs.org/@cdxgen/cdxgen",
+    "https://registry.npmjs.org/@cyclonedx/cdxgen",
+    "https://github.com/cdxgen/cdxgen/issues/4593",
+    "https://raw.githubusercontent.com/CycloneDX/cyclonedx-property-taxonomy/main/cdx.md"
+   ],
+   "summary": "Of the open-source generators reviewed here, cdxgen covers the most layers. Its `aibom` command and `-t ai` project type catalog models (GGUF, safetensors, ONNX, pickle checkpoints), Hugging Face purls with revisions, inference providers, agent frameworks, instruction and skill files, and MCP configurations, MCP Registry manifests and MCPB bundles . It deliberately emits derived signals (counts, flags, tool names, scopes) rather than raw instruction text, so secrets in rules files do not leak into the BOM (B2-07). Two cautions. Its `cdx:mcp:*`, `cdx:agent:*`, `cdx:tool:*` and `cdx:skill:*` properties sit under the `cdx` namespace, which the CycloneDX taxonomy reserves for registered sub-namespaces . Its MCP pinning flag, experimental and off by default, records whether a server package carries a hash; it does not digest tool definitions . Releases currently ship under two npm names: @cdxgen/cdxgen 13.6.0 (31 Oct 2026) and @cyclonedx/cdxgen 12.9.0 (22 Oct 2026) . CycloneDX 2.0 agent-behavior output is planned in issue #4593, not shipped (B2-06) . cdxgen also records GitHub Actions properties such as SHA pinning and id-token permissions , signs BOMs with JSF through `cdx-sign` , and traces a running process with `tracebom` ."
+  },
+  {
+   "id": "owasp-aibom-generator",
+   "name": "OWASP AIBOM Generator",
+   "owner": "OWASP GenAI Security Project (AIBOM Initiative)",
+   "open_source": "yes (Apache-2.0)",
+   "version_status": "owasp-aibom-generator 1.0.2 (pyproject); moved under the GenAI Security Project, blog dated 2025-12-18",
+   "inventories_by_layer": {
+    "data": "Training-data fields from model cards, as properties",
+    "model": "Hugging Face model metadata, modelCard.modelParameters and considerations",
+    "instructions": "none",
+    "tools": "none",
+    "runtime": "none",
+    "identity": "none",
+    "delivery": "Supplier, licenses, external references for Hugging Face models"
+   },
+   "output_formats": "CycloneDX 1.6 JSON (built with cyclonedx-python-lib); described as compatible with the SPDX AI profile",
+   "agent_capabilities": {
+    "mcp_servers": "no",
+    "tool_definition_digests": "no",
+    "instruction_and_skill_files": "no",
+    "hosted_model_identity": "no (open Hugging Face models only)",
+    "credentials": "no",
+    "ci_agents": "no"
+   },
+   "signing_attestation": "none documented",
+   "runtime_observation": "none",
+   "verification_status": "verified",
+   "register_ids": [
+    "B6-05",
+    "A7-03",
+    "A7-05",
+    "B7-05"
+   ],
+   "evidence_urls": [
+    "https://raw.githubusercontent.com/GenAI-Security-Project/aibom-generator/main/README.md",
+    "https://raw.githubusercontent.com/GenAI-Security-Project/aibom-generator/main/pyproject.toml",
+    "https://genai.owasp.org/2025/12/18/evolving-ai-transparency-the-journey-of-the-aibom-generator-and-its-new-home-at-owasp/",
+    "https://raw.githubusercontent.com/GenAI-Security-Project/aibom-generator/main/src/models/field_registry.json"
+   ],
+   "summary": "The OWASP AIBOM Generator builds CycloneDX 1.6 AIBOMs for open models on Hugging Face and scores how complete each one is . It lives under the OWASP GenAI Security Project, not the separate OWASP AIBOM Project at owaspaibom.org (A7-03) . Native CycloneDX fields carry what they can (model card parameters, considerations, licenses, supplier); SPDX-AI-style fields such as autonomyType and safetyRiskAssessment go into bare metadata properties, and GGUF and tokenizer details into `genai:aibom:modelcard:*` (B6-05) . It is a build-time complement to runtime inventory and says nothing about agents, tools or instructions."
+  },
+  {
+   "id": "k8s-aibom",
+   "name": "k8s-aibom",
+   "owner": "Google Cloud (GoogleCloudPlatform; README: not an officially supported Google product)",
+   "open_source": "yes (Apache-2.0)",
+   "version_status": "v1.6.2 (2026-10-22); announced 2026-07-13; v1.0.0 2026-08-17; v1.5.0 added signature verification 2026-09-22",
+   "inventories_by_layer": {
+    "data": "Training datasets mounted through volume specs; vector stores (Milvus, Qdrant, Weaviate, Chroma, pgvector, Vespa) and collections where determinable",
+    "model": "Model identities with declared, inferred, verified or unresolved confidence",
+    "instructions": "none",
+    "tools": "none (no MCP servers or tool schemas)",
+    "runtime": "Serving runtimes (vLLM, TGI, Triton, Ollama, Ray Serve, SGLang), agent frameworks, KServe, NVIDIA Dynamo and NIM, LeaderWorkerSet, llm-d, evaluation harnesses",
+    "identity": "External LLM APIs declared through environment variable names; credential values never emitted",
+    "delivery": "Image digests; OMS/Sigstore model-signature verification against operator trust roots"
+   },
+   "output_formats": "CycloneDX 1.6 ML-BOM with aibom.* and signature.* properties",
+   "agent_capabilities": {
+    "mcp_servers": "no",
+    "tool_definition_digests": "no",
+    "instruction_and_skill_files": "no",
+    "hosted_model_identity": "partial: external LLM APIs from env names; no alias resolution",
+    "credentials": "no inventory; output sanitized of credentials",
+    "ci_agents": "no"
+   },
+   "signing_attestation": "Verifies model signatures (verified tier, v1.5.0+); does not sign the BOMs it emits; releases ship a signed image with provenance",
+   "runtime_observation": "yes: unprivileged controller watching live workloads in opted-in namespaces",
+   "verification_status": "verified",
+   "register_ids": [
+    "A7-01",
+    "A7-08",
+    "A7-09",
+    "A7-05"
+   ],
+   "evidence_urls": [
+    "https://cloud.google.com/blog/products/identity-security/introducing-k8s-aibom-on-gke-for-automated-ai-bills-of-materials",
+    "https://raw.githubusercontent.com/GoogleCloudPlatform/k8s-aibom/main/README.md",
+    "https://raw.githubusercontent.com/GoogleCloudPlatform/k8s-aibom/main/CHANGELOG.md",
+    "https://raw.githubusercontent.com/GoogleCloudPlatform/k8s-aibom/main/docs/security-model.md",
+    "https://raw.githubusercontent.com/NVIDIA/aicr/main/docs/design/019-k8s-aibom-runtime-inventory.md"
+   ],
+   "summary": "k8s-aibom is an unprivileged Kubernetes controller that writes a CycloneDX 1.6 ML-BOM for each AI workload it detects: serving runtimes, agent frameworks, vector databases, training jobs and evaluation harnesses . Google open-sourced it on 13 July 2026; the latest release is v1.6.2 (22 Oct 2026) . Its best idea is the confidence model: every attribute is declared, inferred, verified or unresolved, with an evidence locator, and 'verified' requires an OMS/Sigstore signature that matches an operator-configured signer (A7-01). Its limits matter for agents. It does not see MCP servers, tool schemas, skills or prompts, and it does not sign its own BOMs (A7-01); models downloaded at runtime are invisible ; and its README warns that zero matches is never proof of absence (A7-08) . NVIDIA's AI Cluster Runtime adopted it under ADR-019 and notes that signing runtime observations still needs a separate design ."
+  },
+  {
+   "id": "agent-harness-aibom",
+   "name": "agent-harness-aibom",
+   "owner": "Ajay Kumar Yegireddi (individual maintainer)",
+   "open_source": "yes (MIT)",
+   "version_status": "1.0.0 (PyPI, 2026-09-10); first release 0.1.0 on 2026-09-08",
+   "inventories_by_layer": {
+    "data": "unknown",
+    "model": "Models behind the configured endpoint via Ollama's API: digest, family, parameters, quantization",
+    "instructions": "AGENTS.md and CLAUDE.md as fingerprinted prompt_surface components; skills and hooks as components",
+    "tools": "MCP servers as CycloneDX services; per-tool definitionSha256 when probed",
+    "runtime": "Harness binary version, install method, upstream hash (Hermes, OpenClaw)",
+    "identity": "secrets_surface: location and permissions of credential files, contents never read; service auth posture",
+    "delivery": "purl, hashes, licenses, supplier"
+   },
+   "output_formats": "CycloneDX 1.6 (default) or 1.7 with harness-aibom:* properties; SARIF 2.1.0; HTML report",
+   "agent_capabilities": {
+    "mcp_servers": "yes, as bom.services[]",
+    "tool_definition_digests": "yes when probed: SHA-256 over sorted-key JSON of name, description, inputSchema; probing is opt-in and HTTP-only; unprobed tools raise mcp_tool_not_pinned",
+    "instruction_and_skill_files": "yes, fingerprinted",
+    "hosted_model_identity": "local Ollama models by digest; hosted aliases not documented",
+    "credentials": "file locations and permissions only",
+    "ci_agents": "no"
+   },
+   "signing_attestation": "cosign key-based sign and verify-signature, offline",
+   "runtime_observation": "Scans a running harness installation; baseline diff flags digest drift",
+   "verification_status": "verified",
+   "register_ids": [
+    "B6-04",
+    "B6-09",
+    "B6-11"
+   ],
+   "evidence_urls": [
+    "https://pypi.org/pypi/agent-harness-aibom/json",
+    "https://raw.githubusercontent.com/Aj7Ay/agent-harness-aibom/main/README.md",
+    "https://raw.githubusercontent.com/Aj7Ay/agent-harness-aibom/main/SPEC.md"
+   ],
+   "summary": "agent-harness-aibom inventories a running Hermes or OpenClaw installation: the harness binary, models behind its endpoint, MCP servers, tools, skills, hooks, prompt surfaces and credential files (locations and permissions only) . It stays inside the CycloneDX 1.6 schema where a native field exists and puts the rest under a `harness-aibom:` namespace, validated in its tests (B6-04) . It is the clearest published example of tool-definition digests in a BOM: once a server is probed, `definitionSha256` covers name, description and inputSchema, and unprobed tools are flagged `mcp_tool_not_pinned` (B6-09) . Probing is opt-in and HTTP-only, and the hash uses sorted-key JSON rather than RFC 8785, so digests are not comparable with other tools. It signs BOMs with cosign keys and gates CI with its policy command."
+  },
+  {
+   "id": "smithmark",
+   "name": "smithmark",
+   "owner": "sns45 (individual maintainer; 'trust as code' tool family)",
+   "open_source": "yes (Apache-2.0)",
+   "version_status": "v0.2.1 (Go module proxy, 2026-07-26); README states v0.2.0 released",
+   "inventories_by_layer": {
+    "data": "none",
+    "model": "none",
+    "instructions": "SKILL.md bundles, digested from their directory and signed",
+    "tools": "MCP servers: npm tarball digest plus tool listing extracted from the running server; capability manifest (tools, egress, filesystem, exec, env, secrets)",
+    "runtime": "none",
+    "identity": "Declared secrets and env in the capability manifest; Sigstore signer identity",
+    "delivery": "SLSA-style build provenance for skills and MCP packages; checks npm provenance; 'registry check' inspects MCP Registry entries"
+   },
+   "output_formats": "in-toto DSSE attestations (Sigstore bundles); CycloneDX property projection of the capability declaration; JSON verification report",
+   "agent_capabilities": {
+    "mcp_servers": "yes",
+    "tool_definition_digests": "tool listing captured into the signed manifest; digest scheme for individual tool definitions not documented",
+    "instruction_and_skill_files": "skills yes; other instruction files no",
+    "hosted_model_identity": "no",
+    "credentials": "declared secrets and env names",
+    "ci_agents": "ships a GitHub Action; does not inventory CI agents"
+   },
+   "signing_attestation": "Keyless Sigstore (Fulcio, Rekor) and key-based DSSE; verifiable with stock cosign",
+   "runtime_observation": "none (static capability lint)",
+   "verification_status": "verified",
+   "register_ids": [
+    "B6-03"
+   ],
+   "evidence_urls": [
+    "https://raw.githubusercontent.com/sns45/smithmark/main/README.md",
+    "https://proxy.golang.org/github.com/sns45/smithmark/@latest",
+    "https://raw.githubusercontent.com/modelcontextprotocol/registry/main/docs/reference/server-json/draft/server.schema.json"
+   ],
+   "summary": "The claim register could not find smithmark (B6-03, unverifiable). A follow-up search located it as a Go module, github.com/sns45/smithmark, at v0.2.1 (26 Jul 2026), Apache-2.0 . Its README describes signed capability attestations for MCP servers and SKILL.md bundles: a manifest of tools, egress, filesystem, exec, env and secrets, wrapped in in-toto DSSE and signed keyless through Sigstore or with a key, plus a static lint for undeclared capabilities . Its `registry check` command reports whether an MCP Registry entry carries the attestation reference field proposed in the project's own registry-provenance RFC; the README says no real entry does today, which matches the registry schema (B6-03) . Adoption figures (two servers) are self-reported."
+  },
+  {
+   "id": "snyk-aibom",
+   "name": "Snyk CLI: snyk aibom and snyk aibom test",
+   "owner": "Snyk",
+   "open_source": "CLI source is public; analysis requires a Snyk account (commercial)",
+   "version_status": "snyk CLI 1.1308.3 (npm, 2026-10-23); aibom needs 1.1298.3+ (2025-08-14); aibom test needs 1.1304.0+ (2026-04-09)",
+   "inventories_by_layer": {
+    "data": "Datasets",
+    "model": "Models referenced in Python, Java, JavaScript or Go source",
+    "instructions": "not documented",
+    "tools": "MCP client, server and tool graph, identified through the official MCP SDK",
+    "runtime": "none",
+    "identity": "not documented",
+    "delivery": "Upload to the Snyk organization (--upload --repo)"
+   },
+   "output_formats": "CycloneDX 1.6 JSON",
+   "agent_capabilities": {
+    "mcp_servers": "yes, client -> server -> tool dependency chain",
+    "tool_definition_digests": "no",
+    "instruction_and_skill_files": "not documented",
+    "hosted_model_identity": "model names in code; no alias resolution",
+    "credentials": "not documented",
+    "ci_agents": "no"
+   },
+   "signing_attestation": "none documented",
+   "runtime_observation": "none (source analysis)",
+   "verification_status": "verified",
+   "register_ids": [
+    "B6-07",
+    "B6-11"
+   ],
+   "evidence_urls": [
+    "https://raw.githubusercontent.com/snyk/cli/main/help/cli-commands/aibom.md",
+    "https://raw.githubusercontent.com/snyk/cli/main/help/cli-commands/aibom-test.md",
+    "https://registry.npmjs.org/snyk"
+   ],
+   "summary": "`snyk aibom` analyzes Python, Java, JavaScript or Go source and emits a CycloneDX 1.6 AI-BOM covering models, datasets, agents, tools and MCP, where MCP servers are identified through the official SDK and drawn as a client -> server -> tool chain . `snyk aibom test` (CLI 1.1304.0+, 9 Apr 2026) checks the result against the tenant's Evo policies (B6-07) . It is static and source-based: it will not see a server's served tool definitions or their drift."
+  },
+  {
+   "id": "snyk-agent-scan",
+   "name": "Snyk Agent Scan (formerly Invariant Labs mcp-scan)",
+   "owner": "Snyk (originally Invariant Labs)",
+   "open_source": "yes (Apache-2.0); analysis calls a Snyk API and needs SNYK_TOKEN",
+   "version_status": "snyk-agent-scan 0.6.10 (PyPI, 2026-10-30); mcp-scan 0.4.3 (2026-03-02) is a redirect package; first mcp-scan release 2025-04-07",
+   "inventories_by_layer": {
+    "data": "Risk indicators for exposure to untrusted or private data",
+    "model": "none",
+    "instructions": "Agent skills (SKILL.md); MCP prompts and resources",
+    "tools": "Discovers MCP servers in agent configs, connects to them and retrieves tool descriptions; scans for tool poisoning and prompt injection",
+    "runtime": "Background (MDM) mode rescans endpoints on a schedule and reports to Snyk Evo",
+    "identity": "Skills: credential handling and hardcoded secrets",
+    "delivery": "none"
+   },
+   "output_formats": "JSON (schema varies by CLI version and is marked experimental); console report",
+   "agent_capabilities": {
+    "mcp_servers": "yes, auto-discovered for Claude Code and Desktop, Cursor, Copilot, Windsurf, Gemini CLI and others",
+    "tool_definition_digests": "mcp-scan 0.3.0 'detects changes to MCP tools via hashing'; the current README does not describe hashing",
+    "instruction_and_skill_files": "skills yes",
+    "hosted_model_identity": "no",
+    "credentials": "credential-handling and secret findings in skills",
+    "ci_agents": "no"
+   },
+   "signing_attestation": "Release binaries verifiable with Snyk's GPG key; scan results unsigned",
+   "runtime_observation": "Periodic endpoint rescans (background mode); not per-call interception in the current docs",
+   "verification_status": "verified",
+   "register_ids": [
+    "A3-04",
+    "B6-02",
+    "B6-07"
+   ],
+   "evidence_urls": [
+    "https://pypi.org/pypi/snyk-agent-scan/json",
+    "https://raw.githubusercontent.com/snyk/agent-scan/main/README.md",
+    "https://pypi.org/pypi/mcp-scan/json",
+    "https://pypi.org/pypi/mcp-scan/0.3.0/json",
+    "https://raw.githubusercontent.com/invariantlabs-ai/mcp-injection-experiments/main/README.md"
+   ],
+   "summary": "Invariant Labs released mcp-scan in April 2025 after its tool-poisoning disclosure; version 0.3.0 'detects changes to MCP tools via hashing' to catch rug pulls . Snyk renamed it Snyk Agent Scan, and the PyPI mcp-scan package is now a redirect (A3-04, B6-07) . Version 0.6.10 (30 Oct 2026) discovers MCP servers and skills across agent clients including Claude Code, Cursor, GitHub Copilot, Windsurf and Gemini CLI, retrieves tool descriptions and reports scored risks such as prompt injection, destructive capabilities and malicious skills . Three cautions for production use: it starts stdio MCP servers to read their tools, so its README says to scan untrusted configs in a sandbox; analysis sends MCP server configurations, tool names and descriptions, and skill content (secrets redacted) to Snyk's Agent Scan API under a SNYK_TOKEN, which matters if agent configuration may not leave the network; and its JSON output is marked experimental . The current README no longer describes hash-based pinning, so confirm before relying on it for rug-pull detection."
+  },
+  {
+   "id": "cisco-aibom",
+   "name": "Cisco AI BOM",
+   "owner": "Cisco AI Defense",
+   "open_source": "yes (Apache-2.0)",
+   "version_status": "cisco-aibom 1.10.0 (PyPI, 2026-08-17); on PyPI since 2026-02-11",
+   "inventories_by_layer": {
+    "data": "dataset, vector_store, retriever, knowledge_base, feature_store and memory types",
+    "model": "model, llm_endpoint, model_endpoint, embedding",
+    "instructions": "prompt and skill types; optional skill scanner integration",
+    "tools": "tool, mcp_server, mcp_client, mcp_gateway; A2A and remote agent resolution",
+    "runtime": "Container images and cloud environments",
+    "identity": "Secret detection through Yelp detect-secrets",
+    "delivery": "Dependency analysis and OSV.dev vulnerability scanning"
+   },
+   "output_formats": "CycloneDX 1.6 (ML-BOM profile), SPDX 3.0 (AI and Dataset profiles), SARIF 2.1.0, JSON, HTML, Markdown, CSV, JUnit, plaintext, API server",
+   "agent_capabilities": {
+    "mcp_servers": "yes",
+    "tool_definition_digests": "not documented",
+    "instruction_and_skill_files": "prompt and skill component types",
+    "hosted_model_identity": "LLM and model endpoints detected; no alias resolution documented",
+    "credentials": "hardcoded secret detection",
+    "ci_agents": "not documented"
+   },
+   "signing_attestation": "none documented",
+   "runtime_observation": "Point-in-time scans of containers and cloud environments",
+   "verification_status": "verified",
+   "register_ids": [
+    "B6-11",
+    "B5-05"
+   ],
+   "evidence_urls": [
+    "https://raw.githubusercontent.com/cisco-ai-defense/aibom/main/README.md",
+    "https://raw.githubusercontent.com/cisco-ai-defense/aibom/main/aibom/src/aibom/reporters/cyclonedx_reporter.py",
+    "https://pypi.org/pypi/cisco-aibom/json"
+   ],
+   "summary": "Cisco AI BOM scans source, container images and cloud environments with 23 scanners and classifies findings into 30 AI component types, including agent, tool, mcp_server, mcp_client, mcp_gateway, prompt, memory, guardrail and skill . Its type vocabulary is among the largest here, but CycloneDX has no native component types for most of it: the reporter maps agents and MCP servers to `application`, tools to `library` and skills to `file`, and keeps the real type in a `cisco-aibom:type` property (B6-11) . It also writes SPDX 3.0 with the AI and Dataset profiles and SARIF. The `analyze` command requires an LLM provider for agentic classification, which matters if code may not leave the network."
+  },
+  {
+   "id": "cisco-model-provenance-kit",
+   "name": "Cisco Model Provenance Kit",
+   "owner": "Cisco AI Defense",
+   "open_source": "yes (Apache-2.0)",
+   "version_status": "cisco-ai-provenance-kit 1.0.0 (PyPI, 2026-05-04); main branch at 1.1.0",
+   "inventories_by_layer": {
+    "data": "none",
+    "model": "Lineage to known base-model families from eight signals over weights, tokenizer and architecture metadata",
+    "instructions": "none",
+    "tools": "none",
+    "runtime": "none",
+    "identity": "none",
+    "delivery": "Reference database of about 150 base models from 45+ families"
+   },
+   "output_formats": "Terminal table, JSON, plain text",
+   "agent_capabilities": {
+    "mcp_servers": "no",
+    "tool_definition_digests": "no",
+    "instruction_and_skill_files": "no",
+    "hosted_model_identity": "no (needs weights)",
+    "credentials": "no",
+    "ci_agents": "no"
+   },
+   "signing_attestation": "none",
+   "runtime_observation": "none",
+   "verification_status": "verified",
+   "register_ids": [
+    "B5-05"
+   ],
+   "evidence_urls": [
+    "https://raw.githubusercontent.com/cisco-ai-defense/model-provenance-kit/main/README.md",
+    "https://pypi.org/pypi/cisco-ai-provenance-kit/json"
+   ],
+   "summary": "The Model Provenance Kit answers one question: does this model derive from a known base family? It compares eight fingerprints, from architecture metadata and tokenizer to weight statistics, against about 150 base models from 45+ families . It produces similarity statistics for lineage, not per-tensor content digests, and is not built to detect a trojaned layer (B5-05). Use it to check a supplier's lineage claim, and use OMS digests for integrity."
+  },
+  {
+   "id": "dependency-track",
+   "name": "OWASP Dependency-Track",
+   "owner": "OWASP",
+   "open_source": "yes",
+   "version_status": "v5.2.1 and v4.14.6 (release notes 2026-10-25); v5.1.0 added CycloneDX 1.7 ingestion (2026-08-27); v4 reaches end-of-life December 2026",
+   "inventories_by_layer": {
+    "data": "Stores whatever components a BOM contains",
+    "model": "Stores machine-learning-model components if present",
+    "instructions": "none",
+    "tools": "none",
+    "runtime": "none",
+    "identity": "none",
+    "delivery": "Component analysis, vulnerability intelligence, policy evaluation"
+   },
+   "output_formats": "Ingests CycloneDX 1.2 to 1.7 (code), despite docs saying all versions",
+   "agent_capabilities": {
+    "mcp_servers": "only as whatever the uploaded BOM encodes",
+    "tool_definition_digests": "no",
+    "instruction_and_skill_files": "no",
+    "hosted_model_identity": "no",
+    "credentials": "no",
+    "ci_agents": "no"
+   },
+   "signing_attestation": "not documented in the sources reviewed",
+   "runtime_observation": "none",
+   "verification_status": "verified",
+   "register_ids": [
+    "B2-08"
+   ],
+   "evidence_urls": [
+    "https://github.com/DependencyTrack/dependency-track/releases/tag/5.1.0",
+    "https://dependencytrack.org/news/dependency-track-5-1/",
+    "https://raw.githubusercontent.com/DependencyTrack/dependency-track/4.14.x/docs/_posts/2026-09-14-v4.14.4.md",
+    "https://raw.githubusercontent.com/DependencyTrack/dependency-track/main/apiserver/src/main/java/org/dependencytrack/parser/cyclonedx/CycloneDxValidator.java",
+    "https://raw.githubusercontent.com/DependencyTrack/dependency-track/4.14.x/docs/_posts/2026-10-25-v4.14.6.md",
+    "https://raw.githubusercontent.com/DependencyTrack/dependency-track/main/README.md",
+    "https://raw.githubusercontent.com/DependencyTrack/docs/main/docs/reference/file-formats.md"
+   ],
+   "summary": "Dependency-Track is where many teams will load AI-BOMs. Since v5.1.0 (GitHub release 27 Aug 2026, announced 31 Aug) and its v4.14.4 backport (release notes 14 Sep 2026) it ingests CycloneDX 1.7; the validator accepts 1.2 to 1.7, although the v5 docs say all versions (B2-08) . The v4 line reaches end-of-life in December 2026 . It has no agent semantics of its own. Its policy engine can only query agent facts consistently if producers use the same property names, which today they do not (cdxgen uses unregistered `cdx:` sub-namespaces, while k8s-aibom, Cisco and agent-harness-aibom each use their own namespace)."
+  },
+  {
+   "id": "guac",
+   "name": "GUAC (Graph for Understanding Artifact Composition)",
+   "owner": "OpenSSF (incubating project, Supply Chain Integrity WG)",
+   "open_source": "yes",
+   "version_status": "v1.1.0 (Go module proxy, 2026-03-13)",
+   "inventories_by_layer": {
+    "data": "none specific",
+    "model": "none specific",
+    "instructions": "none",
+    "tools": "none",
+    "runtime": "none",
+    "identity": "none",
+    "delivery": "Aggregates SBOMs, SLSA and in-toto ITE6 attestations, Scorecard, OSV, deps.dev and ClearlyDefined into one graph"
+   },
+   "output_formats": "Ingests CycloneDX, SPDX, in-toto ITE6, SLSA, OpenSSF Scorecard, OSV, deps.dev; GraphQL and REST APIs",
+   "agent_capabilities": {
+    "mcp_servers": "no",
+    "tool_definition_digests": "no",
+    "instruction_and_skill_files": "no",
+    "hosted_model_identity": "no",
+    "credentials": "no",
+    "ci_agents": "no"
+   },
+   "signing_attestation": "Ingests attestations; not a signer",
+   "runtime_observation": "none",
+   "verification_status": "verified",
+   "register_ids": [],
+   "evidence_urls": [
+    "https://raw.githubusercontent.com/guacsec/guac/main/README.md",
+    "https://proxy.golang.org/github.com/guacsec/guac/@latest"
+   ],
+   "summary": "GUAC is not an AI tool. It aggregates SBOMs, SLSA and in-toto attestations, Scorecard and vulnerability data into a graph you can query . It belongs in the landscape as the place where agent BOMs and their attestations could be joined with conventional supply-chain evidence. Its README documents no AI-BOM or agent-specific handling."
+  },
+  {
+   "id": "owasp-aos-agbom",
+   "name": "OWASP Agent Observability Standard (AOS) and AgBOM",
+   "owner": "OWASP (originated with Zenity)",
+   "open_source": "yes (Apache-2.0; specification)",
+   "version_status": "Specification; CycloneDX mapping 'Working draft' (example dated 2025-05-19); SPDX and SWID mappings 'Help wanted'",
+   "inventories_by_layer": {
+    "data": "Knowledge and memory entities",
+    "model": "Models entity",
+    "instructions": "none in the AgBOM entity list",
+    "tools": "Tools; capabilities including MCP servers (protocolVersion, capabilities, serverInfo) and A2A agent cards",
+    "runtime": "Dynamic updates on discovery, removal or change; separate Instrument (hooks) and Trace (OpenTelemetry, OCSF) specifications",
+    "identity": "none specified in AgBOM",
+    "delivery": "Standard packages"
+   },
+   "output_formats": "Extends CycloneDX (draft example, specVersion 1.6); SPDX and SWID mappings not written",
+   "agent_capabilities": {
+    "mcp_servers": "yes, in the spec",
+    "tool_definition_digests": "no",
+    "instruction_and_skill_files": "no",
+    "hosted_model_identity": "models entity only",
+    "credentials": "no",
+    "ci_agents": "no"
+   },
+   "signing_attestation": "none specified (draft example uses a non-standard top-level signatures array)",
+   "runtime_observation": "By design: AgBOM is dynamic; Instrument and Trace specs define hooks and events",
+   "verification_status": "verified",
+   "register_ids": [
+    "B6-06"
+   ],
+   "evidence_urls": [
+    "https://raw.githubusercontent.com/OWASP/aos/main/docs/spec/inspect/README.md",
+    "https://raw.githubusercontent.com/OWASP/aos/main/docs/spec/inspect/extend_cyclonedx.md",
+    "https://raw.githubusercontent.com/OWASP/aos/main/mkdocs.yml",
+    "https://raw.githubusercontent.com/CycloneDX/specification/master/schema/bom-1.6.schema.json",
+    "https://raw.githubusercontent.com/CycloneDX/specification/master/schema/bom-1.7.schema.json"
+   ],
+   "summary": "OWASP AOS defines AgBOM as 'a structured, dynamic inventory' of an agent's tools, models, capabilities and dependencies, updated whenever a component is discovered, removed or changed (B6-06) . It also has Instrument (hooks) and Trace (OpenTelemetry and OCSF) sections . It is a specification, not a tool. Its CycloneDX example is a working draft and uses component types `service` and `tool`, neither valid in CycloneDX 1.6 or 1.7, so it fails schema validation (B6-06) ."
+  },
+  {
+   "id": "protectai-modelscan",
+   "name": "Protect AI ModelScan",
+   "owner": "Protect AI (reported acquired by Palo Alto Networks)",
+   "open_source": "yes (Apache-2.0)",
+   "version_status": "modelscan 0.8.8 (PyPI, 2026-02-18)",
+   "inventories_by_layer": {
+    "data": "none",
+    "model": "Static scan of H5, Keras v3, pickle-family (PyTorch, joblib, dill, cloudpickle) and SavedModel files for unsafe operations",
+    "instructions": "none",
+    "tools": "none",
+    "runtime": "none",
+    "identity": "none",
+    "delivery": "Model intake gate"
+   },
+   "output_formats": "Console or JSON report; exit codes",
+   "agent_capabilities": {
+    "mcp_servers": "no",
+    "tool_definition_digests": "no",
+    "instruction_and_skill_files": "no",
+    "hosted_model_identity": "no",
+    "credentials": "no",
+    "ci_agents": "no"
+   },
+   "signing_attestation": "none",
+   "runtime_observation": "none",
+   "verification_status": "verified",
+   "register_ids": [
+    "A5-01",
+    "A5-05"
+   ],
+   "evidence_urls": [
+    "https://raw.githubusercontent.com/protectai/modelscan/main/README.md",
+    "https://pypi.org/pypi/modelscan/json"
+   ],
+   "summary": "ModelScan is Protect AI's open-source scanner for unsafe operations in serialized models: pickle-family formats, H5, Keras v3 and SavedModel . Treat it as triage at model intake, not proof of safety. Signature-style scanners keep getting bypassed (see picklescan below), and no scanner reveals a backdoor trained into the weights (A5-05)."
+  },
+  {
+   "id": "protectai-guardian",
+   "name": "Protect AI Guardian (now part of Palo Alto Networks Prisma AIRS)",
+   "owner": "Palo Alto Networks (via Protect AI acquisition)",
+   "open_source": "no (commercial)",
+   "version_status": "Commercial service; acquisition completion reported by press release reprints (date not confirmed from a primary source)",
+   "inventories_by_layer": {
+    "data": "unknown",
+    "model": "Model scanning; on Hugging Face it applies 'a zero trust approach' that treats arbitrary code execution as unsafe regardless of intent",
+    "instructions": "unknown",
+    "tools": "unknown",
+    "runtime": "unknown",
+    "identity": "unknown",
+    "delivery": "Hugging Face scanning partner since 22 Oct 2024"
+   },
+   "output_formats": "unknown",
+   "agent_capabilities": {
+    "mcp_servers": "unknown",
+    "tool_definition_digests": "unknown",
+    "instruction_and_skill_files": "unknown",
+    "hosted_model_identity": "unknown",
+    "credentials": "unknown",
+    "ci_agents": "unknown"
+   },
+   "signing_attestation": "unknown",
+   "runtime_observation": "unknown",
+   "verification_status": "partially_verified",
+   "register_ids": [
+    "A5-01"
+   ],
+   "evidence_urls": [
+    "https://huggingface.co/blog/pai-6-month",
+    "https://www.securityinfowatch.com/ai/press-release/55305712/palo-alto-networks-palo-alto-networks-completes-acquisition-of-protect-ai"
+   ],
+   "summary": "Guardian is Protect AI's commercial model scanner and a Hugging Face scanning partner. By 1 April 2025 it had scanned 4.47 million model versions and flagged 352,000 unsafe or suspicious issues across 51,700 models; these are risky constructs, not confirmed malware (A5-01) . Palo Alto Networks is reported to have completed its acquisition of Protect AI and folded the technology into Prisma AIRS . We reviewed no primary product documentation, so agent-related capabilities are marked unknown."
+  },
+  {
+   "id": "hiddenlayer-model-scanner",
+   "name": "HiddenLayer Model Scanner (AISec Platform)",
+   "owner": "HiddenLayer",
+   "open_source": "no (commercial)",
+   "version_status": "Commercial; current version not verified (vendor site not reachable from this environment)",
+   "inventories_by_layer": {
+    "data": "unknown",
+    "model": "Vendor describes static detection of malware, vulnerabilities and model integrity issues (secondary report)",
+    "instructions": "unknown",
+    "tools": "unknown",
+    "runtime": "Separate runtime security module (secondary report)",
+    "identity": "unknown",
+    "delivery": "unknown"
+   },
+   "output_formats": "unknown; a third-party review reports an AIBOM per scanned model, format not stated",
+   "agent_capabilities": {
+    "mcp_servers": "unknown",
+    "tool_definition_digests": "unknown",
+    "instruction_and_skill_files": "unknown",
+    "hosted_model_identity": "unknown",
+    "credentials": "unknown",
+    "ci_agents": "unknown"
+   },
+   "signing_attestation": "unknown",
+   "runtime_observation": "unknown",
+   "verification_status": "partially_verified",
+   "register_ids": [
+    "A5-05"
+   ],
+   "evidence_urls": [
+    "https://appsecsanta.com/hiddenlayer",
+    "https://hiddenlayer.com/research/silent-sabotage"
+   ],
+   "summary": "HiddenLayer sells a commercial AI security platform that, according to a third-party review, includes a pre-production Model Scanner and generates an AIBOM for each scanned model . We could not reach HiddenLayer's own documentation, so every cell is unknown and the entry is partially verified. HiddenLayer's 2024 research showed that Hugging Face's pickle-to-safetensors conversion service could be hijacked, because conversion itself loads the pickle (A5-05) ."
+  },
+  {
+   "id": "oms-model-signing",
+   "name": "OpenSSF Model Signing (sigstore/model-transparency, model_signing)",
+   "owner": "OpenSSF AI/ML Working Group (Model Signing project), hosted in sigstore/model-transparency",
+   "open_source": "yes",
+   "version_status": "model-signing 1.1.1 (PyPI, 2025-10-10); 1.0.0 first stable 2025-04-04; main branch lists unreleased verification fixes",
+   "inventories_by_layer": {
+    "data": "none",
+    "model": "Per-file or per-shard digests of a model directory in a signed manifest",
+    "instructions": "none",
+    "tools": "none",
+    "runtime": "none",
+    "identity": "Signer identity (Sigstore OIDC, certificates, keys, PKCS#11)",
+    "delivery": "Signature bundle shipped beside the model"
+   },
+   "output_formats": "Sigstore bundle containing DSSE envelope with in-toto Statement v1 (predicate https://model_signing/signature/v1.0)",
+   "agent_capabilities": {
+    "mcp_servers": "no",
+    "tool_definition_digests": "no",
+    "instruction_and_skill_files": "no",
+    "hosted_model_identity": "no (provider-hosted weights cannot be signed by the user)",
+    "credentials": "no",
+    "ci_agents": "no"
+   },
+   "signing_attestation": "Yes: Sigstore keyless (with transparency log), keys, certificates; only Sigstore writes to a log",
+   "runtime_observation": "none",
+   "verification_status": "verified",
+   "register_ids": [
+    "A5-08",
+    "A5-10",
+    "B5-04",
+    "B5-14"
+   ],
+   "evidence_urls": [
+    "https://pypi.org/pypi/model-signing/json",
+    "https://raw.githubusercontent.com/sigstore/model-transparency/main/README.md",
+    "https://raw.githubusercontent.com/sigstore/model-transparency/main/CHANGELOG.md",
+    "https://raw.githubusercontent.com/ossf/model-signing-spec/main/README.md",
+    "https://raw.githubusercontent.com/sigstore/model-transparency/main/src/model_signing/_signing/signing.py"
+   ],
+   "summary": "OMS signs a manifest of per-file or per-shard digests for a model directory, as an in-toto Statement v1 in a DSSE envelope inside a Sigstore bundle . Keyless Sigstore is the default, but the spec is PKI-agnostic, and only Sigstore-signed bundles land in a transparency log (A5-08, A5-10). The latest release is 1.1.1 (10 Oct 2025); the main-branch changelog lists unreleased verification fixes for symlinks, empty files and certificate EKU checks . Model-card signing is a stated plan, not a feature (B5-04). OMS gives you content identity for weights you hold; it cannot identify a model behind a provider API."
+  },
+  {
+   "id": "cosign",
+   "name": "Sigstore cosign",
+   "owner": "Sigstore project",
+   "open_source": "yes",
+   "version_status": "v3.1.4 (Go module proxy, 2026-10-20); v2 line at v2.6.5 (2026-08-05)",
+   "inventories_by_layer": {
+    "data": "none",
+    "model": "Can sign any blob or OCI artifact, including model images",
+    "instructions": "none",
+    "tools": "none",
+    "runtime": "none",
+    "identity": "Keyless OIDC identities via Fulcio; keys and KMS",
+    "delivery": "Signatures and in-toto attestations for OCI artifacts and blobs"
+   },
+   "output_formats": "DSSE-wrapped in-toto attestations, including --type cyclonedx and spdx predicates; Sigstore bundles",
+   "agent_capabilities": {
+    "mcp_servers": "no",
+    "tool_definition_digests": "no",
+    "instruction_and_skill_files": "no",
+    "hosted_model_identity": "no",
+    "credentials": "no",
+    "ci_agents": "no"
+   },
+   "signing_attestation": "Yes",
+   "runtime_observation": "none",
+   "verification_status": "verified",
+   "register_ids": [
+    "A7-09",
+    "B1-04"
+   ],
+   "evidence_urls": [
+    "https://raw.githubusercontent.com/sigstore/cosign/main/README.md",
+    "https://raw.githubusercontent.com/sigstore/cosign/main/pkg/cosign/attestation/attestation.go",
+    "https://raw.githubusercontent.com/sigstore/cosign/main/doc/cosign_attest-blob.md",
+    "https://proxy.golang.org/github.com/sigstore/cosign/v3/@latest",
+    "https://raw.githubusercontent.com/in-toto/attestation/main/spec/predicates/spdx3.md"
+   ],
+   "summary": "cosign is a common way to sign BOMs outside the BOM format itself. `cosign attest --type cyclonedx` attaches a CycloneDX BOM as an in-toto predicate in a DSSE envelope whose subject is a container image digest, avoiding CycloneDX's rarely implemented JSF signatures; for a BOM that describes no image, such as an agent snapshot, `cosign attest-blob` attests to a file you name instead . For SPDX 3.0.1, which has no in-document signing, pass the custom predicate type `--type https://spdx.dev/Document/v3` , because cosign's built-in `spdx` type labels the predicate as SPDX 2 (A7-09, B1-04) . Every statement `cosign attest` builds is labelled in-toto Statement v0.1, not v1 . It is the mechanism, not the inventory: it proves who signed which bytes, not that the BOM is complete or true."
+  },
+  {
+   "id": "in-toto",
+   "name": "in-toto (framework and attestation specification)",
+   "owner": "in-toto project",
+   "open_source": "yes",
+   "version_status": "in-toto Python 3.1.0 (PyPI, 2026-04-25); attestation spec with vetted predicates",
+   "inventories_by_layer": {
+    "data": "none",
+    "model": "OMS uses an in-toto statement",
+    "instructions": "none",
+    "tools": "none",
+    "runtime": "Runtime Traces predicate",
+    "identity": "Functionary keys in layouts",
+    "delivery": "Supply-chain step metadata, layouts and attestations"
+   },
+   "output_formats": "in-toto Statement v1; vetted predicates include CycloneDX, SPDX 2/3, SLSA Provenance, VSA, Runtime Traces, SCAI, Test Result, VULNS",
+   "agent_capabilities": {
+    "mcp_servers": "no",
+    "tool_definition_digests": "no",
+    "instruction_and_skill_files": "no",
+    "hosted_model_identity": "no",
+    "credentials": "no",
+    "ci_agents": "no"
+   },
+   "signing_attestation": "Yes (DSSE envelopes)",
+   "runtime_observation": "Runtime Traces predicate exists; no agent-specific predicate",
+   "verification_status": "verified",
+   "register_ids": [
+    "B5-14",
+    "A7-09"
+   ],
+   "evidence_urls": [
+    "https://raw.githubusercontent.com/in-toto/attestation/main/spec/predicates/README.md",
+    "https://pypi.org/pypi/in-toto/json",
+    "https://raw.githubusercontent.com/in-toto/attestation/main/spec/v1/statement.md",
+    "https://raw.githubusercontent.com/sigstore/model-transparency/main/src/model_signing/_signing/signing.py",
+    "https://raw.githubusercontent.com/in-toto/attestation/main/spec/predicates/provenance.md",
+    "https://raw.githubusercontent.com/sigstore/cosign/main/pkg/cosign/attestation/attestation.go"
+   ],
+   "summary": "in-toto supplies the statement format almost everyone else uses . OMS and SymBiote emit in-toto Statement v1 in DSSE envelopes (B5-04) , and SLSA Provenance is defined as an in-toto predicate type ; `cosign attest` also wraps its predicates in DSSE but still labels the statement `https://in-toto.io/Statement/v0.1` . Verifiers therefore have to accept both statement versions. None of the vetted predicates is ML- or agent-specific (B5-14) . A tool-definition-set or agent-snapshot predicate would have to be defined by a profile and, ideally, proposed upstream."
+  },
+  {
+   "id": "slsa",
+   "name": "SLSA (Supply-chain Levels for Software Artifacts)",
+   "owner": "SLSA project (slsa-framework)",
+   "open_source": "yes (specification)",
+   "version_status": "Released versions on release branches (v1.0, v1.2 named in the README); active workstreams: Build L4, Attested Build Environments, Dependency Ingestion, Tooling Modernization",
+   "inventories_by_layer": {
+    "data": "none",
+    "model": "No ML or training track",
+    "instructions": "none",
+    "tools": "none",
+    "runtime": "none",
+    "identity": "Builder identity in provenance",
+    "delivery": "Build provenance levels and the SLSA Provenance predicate"
+   },
+   "output_formats": "SLSA Provenance and Verification Summary (in-toto predicates)",
+   "agent_capabilities": {
+    "mcp_servers": "no",
+    "tool_definition_digests": "no",
+    "instruction_and_skill_files": "no",
+    "hosted_model_identity": "no",
+    "credentials": "no",
+    "ci_agents": "no (says nothing about AI agents running inside the build)"
+   },
+   "signing_attestation": "Provenance is meant to be signed",
+   "runtime_observation": "none",
+   "verification_status": "verified",
+   "register_ids": [
+    "B5-14",
+    "A1-01"
+   ],
+   "evidence_urls": [
+    "https://raw.githubusercontent.com/slsa-framework/slsa/main/README.md",
+    "https://raw.githubusercontent.com/slsa-framework/slsa/main/spec/future-directions.md",
+    "https://raw.githubusercontent.com/ossf/ai-ml-security/main/README.md",
+    "https://registry.npmjs.org/cline"
+   ],
+   "summary": "SLSA is the build-provenance baseline. The Cline incident shows its value: `cline@2.3.0` had no provenance while its neighbors were published through trusted publishing with SLSA provenance, an anomaly a consumer could have caught (A1-01) . The project's active workstreams are Build L4, attested build environments, dependency ingestion and tooling modernization . SLSA has no ML or training track as of November 2026; the OpenSSF AI/ML working group's model-lifecycle provenance work is still in development (B5-14) ."
+  },
+  {
+   "id": "taibom",
+   "name": "TAIBOM (Trustable AI Bill of Materials)",
+   "owner": "Techworks working group (led by NquiringMinds; founder members include Copper Horse, BSI and BAE)",
+   "open_source": "unknown (the public repository nqminds/Trusted-AI-BOM holds the project website and states no license)",
+   "version_status": "No release version identified; seed-funded by the UKRI Technology Missions Fund, now a standalone Techworks working group",
+   "inventories_by_layer": {
+    "data": "Dependencies and annotations can cover data",
+    "model": "Identity, versioning and validation of AI system parts",
+    "instructions": "unknown",
+    "tools": "unknown",
+    "runtime": "none",
+    "identity": "Verifiable-credential issuers for claims",
+    "delivery": "Dependencies with transitive risk propagation"
+   },
+   "output_formats": "W3C Verifiable Credentials; designed to interoperate with AIBOMs and model cards",
+   "agent_capabilities": {
+    "mcp_servers": "no",
+    "tool_definition_digests": "no",
+    "instruction_and_skill_files": "no",
+    "hosted_model_identity": "no",
+    "credentials": "no",
+    "ci_agents": "no"
+   },
+   "signing_attestation": "Verifiable credentials (signed claims)",
+   "runtime_observation": "none",
+   "verification_status": "partially_verified",
+   "register_ids": [
+    "B6-08"
+   ],
+   "evidence_urls": [
+    "https://raw.githubusercontent.com/nqminds/trusted-ai-bom/main/packages/docusaurus/src/partials/home/technical-details.jsx",
+    "https://raw.githubusercontent.com/nqminds/trusted-ai-bom/main/packages/docusaurus/src/partials/home/contributors.jsx",
+    "https://raw.githubusercontent.com/nqminds/trusted-ai-bom/main/packages/docusaurus/src/partials/home/why.jsx",
+    "https://raw.githubusercontent.com/nqminds/trusted-ai-bom/main/README.md"
+   ],
+   "summary": "TAIBOM adds a trust layer on top of AI BOMs: identity, dependencies, annotations and inferencing, expressed as W3C verifiable credentials, with transitive risk propagation . It stresses that the T means 'trustable (not trustworthy)' (B6-08) . It has no agent-specific component types. All evidence comes from the project homepage source; the working-docs pages were not reachable and no implementation or license was identified, so the entry is partially verified (B6-08) ."
+  },
+  {
+   "id": "syft",
+   "name": "Syft",
+   "owner": "Anchore",
+   "open_source": "yes",
+   "version_status": "v1.55.0 (Go module proxy, 2026-10-19)",
+   "inventories_by_layer": {
+    "data": "none",
+    "model": "GGUF and SafeTensors catalogers (header metadata, including Docker Model Runner OCI layers) in v1.55.0",
+    "instructions": "none",
+    "tools": "none",
+    "runtime": "none",
+    "identity": "none",
+    "delivery": "Packages across many ecosystems in images, filesystems and archives"
+   },
+   "output_formats": "CycloneDX, SPDX (2.3 default; 3.0 JSON opt-in), Syft JSON and others",
+   "agent_capabilities": {
+    "mcp_servers": "no",
+    "tool_definition_digests": "no",
+    "instruction_and_skill_files": "no",
+    "hosted_model_identity": "no",
+    "credentials": "no",
+    "ci_agents": "no"
+   },
+   "signing_attestation": "syft attest wraps the SBOM in a signed in-toto attestation by invoking cosign (cosign must be installed)",
+   "runtime_observation": "none",
+   "verification_status": "verified",
+   "register_ids": [
+    "B4-09",
+    "B7-05"
+   ],
+   "evidence_urls": [
+    "https://raw.githubusercontent.com/anchore/syft/main/README.md",
+    "https://raw.githubusercontent.com/anchore/syft/main/cmd/syft/internal/commands/attest.go",
+    "https://raw.githubusercontent.com/anchore/syft/v1.55.0/syft/pkg/cataloger/ai/cataloger.go",
+    "https://raw.githubusercontent.com/anchore/syft/main/syft/format/internal/spdxutil/versions.go",
+    "https://proxy.golang.org/github.com/anchore/syft/@latest"
+   ],
+   "summary": "Syft is a mainstream software SBOM generator; when asked for SPDX it writes 2.3 by default, with 3.0 available only in JSON (B4-09) . With cosign installed, `syft attest` signs its SBOM as an in-toto attestation . Its README lists no AI ecosystem, which the register took as weak evidence of no model support (B7-05). The v1.55.0 source shows otherwise: it ships GGUF and SafeTensors catalogers that read model headers, including Docker Model Runner OCI layers . It still knows nothing about agents, tools or instructions."
+  },
+  {
+   "id": "ms-sbom-tool",
+   "name": "Microsoft sbom-tool",
+   "owner": "Microsoft",
+   "open_source": "yes (MIT); does not accept outside contributions",
+   "version_status": "Tag v4.1.13 (tracked by Homebrew because the last GitHub release no longer builds)",
+   "inventories_by_layer": {
+    "data": "none",
+    "model": "none",
+    "instructions": "none",
+    "tools": "none",
+    "runtime": "none",
+    "identity": "none",
+    "delivery": "Software packages and files"
+   },
+   "output_formats": "SPDX 2.2 (default); SPDX 3.0 opt-in (-mi SPDX:3.0) writes specVersion '3.0', which strict SPDX 3.0.1 validators reject (inference from code)",
+   "agent_capabilities": {
+    "mcp_servers": "no",
+    "tool_definition_digests": "no",
+    "instruction_and_skill_files": "no",
+    "hosted_model_identity": "no",
+    "credentials": "no",
+    "ci_agents": "no"
+   },
+   "signing_attestation": "not documented in sources reviewed",
+   "runtime_observation": "none",
+   "verification_status": "verified",
+   "register_ids": [
+    "B4-07",
+    "B4-09"
+   ],
+   "evidence_urls": [
+    "https://raw.githubusercontent.com/microsoft/sbom-tool/main/README.md",
+    "https://raw.githubusercontent.com/Homebrew/homebrew-core/main/Formula/s/sbom-tool.rb",
+    "https://raw.githubusercontent.com/microsoft/sbom-tool/main/src/Microsoft.Sbom.Parsers.Spdx30SbomParser/Constants.cs"
+   ],
+   "summary": "sbom-tool generates SPDX 2.2 by default; SPDX 3.0 is opt-in and hard-codes specVersion '3.0', which does not match the 3.0.1 SemVer pattern (B4-07) . Homebrew tracks tag v4.1.13 because the last GitHub release no longer builds . It has no AI or agent coverage."
+  },
+  {
+   "id": "brox",
+   "name": "brox",
+   "owner": "'brox Contributors' (repository links are an unfilled placeholder)",
+   "open_source": "yes (Apache-2.0, per PyPI metadata)",
+   "version_status": "0.1.0, the only release (PyPI, 2026-02-13)",
+   "inventories_by_layer": {
+    "data": "none",
+    "model": "LLM endpoints and agent frameworks",
+    "instructions": "Prompts",
+    "tools": "MCP servers and their capabilities as brox.capability.record strings with scope and evidence",
+    "runtime": "none",
+    "identity": "Egress domains; capability scopes such as filesystem.write",
+    "delivery": "PR capability diff"
+   },
+   "output_formats": "'CycloneDX-compatible' JSON, specVersion 1.5; README sample uses component type 'service', which fails schema validation",
+   "agent_capabilities": {
+    "mcp_servers": "yes",
+    "tool_definition_digests": "no",
+    "instruction_and_skill_files": "prompts",
+    "hosted_model_identity": "LLM endpoints",
+    "credentials": "no",
+    "ci_agents": "no"
+   },
+   "signing_attestation": "none",
+   "runtime_observation": "none",
+   "verification_status": "verified",
+   "register_ids": [
+    "B6-01"
+   ],
+   "evidence_urls": [
+    "https://pypi.org/pypi/brox/json",
+    "https://raw.githubusercontent.com/CycloneDX/specification/master/schema/bom-1.5.schema.json"
+   ],
+   "summary": "brox is real, though thin: one PyPI release, 0.1.0 (13 Feb 2026), that turns agent, tool and model changes into a pull-request capability diff (B6-01) . Its repository links point to a template placeholder, and its README sample declares CycloneDX 1.5 but gives an MCP server the component type 'service', which no CycloneDX schema from 1.5 to 1.7 allows (B6-01) . With a single release, placeholder links and a schema-invalid sample, brox reads as an early prototype of a pull-request capability diff rather than a production tool."
+  },
+  {
+   "id": "mcp-registry",
+   "name": "Official MCP Registry",
+   "owner": "Model Context Protocol project",
+   "open_source": "yes",
+   "version_status": "Preview since 2025-09-08; v0.1 API freeze since 2025-10-24; latest dated server.json schema 2025-12-11; repository tag v1.8.7 (2026-10-30)",
+   "inventories_by_layer": {
+    "data": "none",
+    "model": "none",
+    "instructions": "none",
+    "tools": "Server metadata (packages, remotes, repository, version); no tool definitions",
+    "runtime": "none",
+    "identity": "Namespace ownership via GitHub OAuth/OIDC or DNS/HTTP challenges",
+    "delivery": "Immutable version metadata; fileSha256 required only for MCPB bundles and not validated by the registry"
+   },
+   "output_formats": "server.json (JSON Schema); REST API v0.1",
+   "agent_capabilities": {
+    "mcp_servers": "yes (metadata)",
+    "tool_definition_digests": "no",
+    "instruction_and_skill_files": "no",
+    "hosted_model_identity": "no",
+    "credentials": "environment variable declarations only",
+    "ci_agents": "no"
+   },
+   "signing_attestation": "No attestation, signature or provenance field in server.json",
+   "runtime_observation": "none",
+   "verification_status": "verified",
+   "register_ids": [
+    "A3-02",
+    "A3-08",
+    "B6-03"
+   ],
+   "evidence_urls": [
+    "https://raw.githubusercontent.com/modelcontextprotocol/registry/main/README.md",
+    "https://raw.githubusercontent.com/modelcontextprotocol/registry/main/docs/modelcontextprotocol-io/faq.mdx",
+    "https://raw.githubusercontent.com/modelcontextprotocol/registry/main/docs/reference/server-json/draft/server.schema.json",
+    "https://raw.githubusercontent.com/modelcontextprotocol/registry/main/docs/modelcontextprotocol-io/moderation-policy.mdx",
+    "https://raw.githubusercontent.com/modelcontextprotocol/registry/main/docs/modelcontextprotocol-io/package-types.mdx",
+    "https://raw.githubusercontent.com/modelcontextprotocol/registry/main/docs/modelcontextprotocol-io/remote-servers.mdx",
+    "https://raw.githubusercontent.com/modelcontextprotocol/registry/main/docs/design/roadmap.md",
+    "https://proxy.golang.org/github.com/modelcontextprotocol/registry/@latest"
+   ],
+   "summary": "The official MCP Registry launched in preview on 8 Sep 2025 and froze its v0.1 API on 24 Oct 2025 . It verifies namespace ownership , and published version metadata cannot be changed . It does not verify that a publisher controls a remote server's URL, does not itself validate the hash it requires for MCPB bundles (MCP clients check it at install time), and tells consumers to 'assume minimal-to-no moderation' . server.json has no attestation, signature or provenance field and no tool definitions (B6-03) . Treat a registry entry as a pointer, not as evidence."
+  },
+  {
+   "id": "agent-bom",
+   "name": "agent-bom",
+   "owner": "koda-ai-studio (PyPI author: Wagdy Saad)",
+   "open_source": "yes (Apache-2.0, per PyPI license_expression; repository github.com/koda-ai-studio/agent-bom)",
+   "version_status": "0.112.1 (PyPI, 2026-11-01); 177 releases since 2026-02-19",
+   "inventories_by_layer": {
+    "data": "unknown",
+    "model": "AI packages",
+    "instructions": "CLAUDE.md, AGENTS.md, .cursorrules, .windsurfrules, skills",
+    "tools": "MCP clients, servers, tools, transports, trust posture",
+    "runtime": "MCP proxy/gateway with inline firewall enforcement (claimed in PyPI description; not inspected)",
+    "identity": "Summary says it maps 'what each one can reach' (not inspected)",
+    "delivery": "AI packages"
+   },
+   "output_formats": "CycloneDX and SPDX (versions not checked), SARIF, OCSF and others",
+   "agent_capabilities": {
+    "mcp_servers": "yes",
+    "tool_definition_digests": "unknown",
+    "instruction_and_skill_files": "yes",
+    "hosted_model_identity": "unknown",
+    "credentials": "unknown",
+    "ci_agents": "unknown"
+   },
+   "signing_attestation": "unknown",
+   "runtime_observation": "MCP proxy/gateway claimed in PyPI description; not inspected",
+   "verification_status": "partially_verified",
+   "register_ids": [
+    "B6-11"
+   ],
+   "evidence_urls": [
+    "https://pypi.org/pypi/agent-bom/json"
+   ],
+   "summary": "agent-bom (koda-ai-studio) scans MCP clients, servers and tools plus rules and skill files (B6-11). It outputs CycloneDX, SPDX, SARIF and OCSF, and its description claims an MCP proxy/gateway with inline firewall enforcement . It reports coverage, warning that 'incomplete evidence is not clean'. It releases very often (177 releases since February 2026). Only its PyPI description was reviewed, so it is partially verified and its runtime and enforcement claims are untested."
+  },
+  {
+   "id": "trusera-ai-bom",
+   "name": "Trusera ai-bom",
+   "owner": "Trusera",
+   "open_source": "yes (Apache-2.0)",
+   "version_status": "ai-bom 3.6.0 (PyPI, 2026-03-15)",
+   "inventories_by_layer": {
+    "data": "unknown",
+    "model": "LLM and API integrations, agent frameworks",
+    "instructions": "unknown",
+    "tools": "MCP server configurations; n8n AI nodes",
+    "runtime": "Separate trusera-sdk intercepts HTTP calls and evaluates Cedar policies",
+    "identity": "unknown",
+    "delivery": "none"
+   },
+   "output_formats": "CycloneDX 1.6, SPDX 3.0, SARIF, JSON",
+   "agent_capabilities": {
+    "mcp_servers": "yes (configurations)",
+    "tool_definition_digests": "unknown",
+    "instruction_and_skill_files": "unknown",
+    "hosted_model_identity": "API integrations detected",
+    "credentials": "unknown",
+    "ci_agents": "no"
+   },
+   "signing_attestation": "none documented",
+   "runtime_observation": "trusera-sdk (separate package)",
+   "verification_status": "partially_verified",
+   "register_ids": [
+    "A7-05"
+   ],
+   "evidence_urls": [
+    "https://pypi.org/pypi/ai-bom/json"
+   ],
+   "summary": "Trusera's ai-bom inventories LLM integrations, agent frameworks and MCP server configurations and writes CycloneDX 1.6, SPDX 3.0 and SARIF (A7-05) . A companion SDK intercepts HTTP calls at runtime and evaluates Cedar policies. Only the PyPI description was reviewed."
+  },
+  {
+   "id": "mcplock",
+   "name": "mcplock",
+   "owner": "Yashrajsinh Rathod (individual maintainer)",
+   "open_source": "yes (MIT)",
+   "version_status": "1.0.3 (PyPI, 2026-07-29)",
+   "inventories_by_layer": {
+    "data": "none",
+    "model": "none",
+    "instructions": "none",
+    "tools": "Lockfile of MCP tool definitions with four hashes: content (description + inputSchema), description, schema, annotations",
+    "runtime": "Diff against the lockfile when run",
+    "identity": "none",
+    "delivery": "none"
+   },
+   "output_formats": "Lockfile; CI exit codes",
+   "agent_capabilities": {
+    "mcp_servers": "yes",
+    "tool_definition_digests": "yes (four hashes per tool)",
+    "instruction_and_skill_files": "no",
+    "hosted_model_identity": "no",
+    "credentials": "no",
+    "ci_agents": "no"
+   },
+   "signing_attestation": "none",
+   "runtime_observation": "On-demand diff",
+   "verification_status": "verified",
+   "register_ids": [
+    "B6-09"
+   ],
+   "evidence_urls": [
+    "https://pypi.org/pypi/mcplock/json"
+   ],
+   "summary": "mcplock is 'npm audit / SRI for MCP tools': it pins each tool with separate content, description, schema and annotations hashes, so a flipped destructiveHint shows up as its own finding, and it treats a missing baseline as a failure (B6-09) . It is a CI lockfile tool, not a BOM."
+  },
+  {
+   "id": "mcp-pin",
+   "name": "mcp-pin",
+   "owner": "Rufat Mahmudov (individual maintainer)",
+   "open_source": "yes (Apache-2.0)",
+   "version_status": "0.1.8 (PyPI, 2026-09-23)",
+   "inventories_by_layer": {
+    "data": "none",
+    "model": "none",
+    "instructions": "Agent skills",
+    "tools": "Tool-integrity pins for MCP servers",
+    "runtime": "Refuses what changed after approval",
+    "identity": "none",
+    "delivery": "none"
+   },
+   "output_formats": "unknown",
+   "agent_capabilities": {
+    "mcp_servers": "yes",
+    "tool_definition_digests": "yes (pin-then-compare)",
+    "instruction_and_skill_files": "skills",
+    "hosted_model_identity": "no",
+    "credentials": "no",
+    "ci_agents": "no"
+   },
+   "signing_attestation": "Seals its hash-chained guard log via --sign-command (ssh-keygen -Y sign, smartcard or KMS CLI); the .mcp-pin.lock approval baseline is unsigned",
+   "runtime_observation": "Compares on use; guard, gateway and a PreToolUse hook refuse tool calls whose digest drifted from the lockfile",
+   "verification_status": "verified",
+   "register_ids": [
+    "B6-02"
+   ],
+   "evidence_urls": [
+    "https://pypi.org/pypi/mcp-pin/json"
+   ],
+   "summary": "mcp-pin is a zero-dependency 'approve once, refuse what changed' pin for MCP servers and skills . Its own README states the limit every pinning tool shares: pinning detects change, not initial honesty, so a tool poisoned from its first approved version passes (B6-02). Its guard log can be sealed with an external signing command, but the lockfile itself is unsigned: the README notes that guard 'cannot tell your lock from someone else's'."
+  },
+  {
+   "id": "aibom-scanner",
+   "name": "aibom-scanner",
+   "owner": "SaaSVista (Mike Carroll)",
+   "open_source": "yes (Apache-2.0)",
+   "version_status": "1.3.5 (PyPI, 2026-10-24); coverage accounting since 1.1.0 (2026-07-21)",
+   "inventories_by_layer": {
+    "data": "unknown",
+    "model": "AI SDK usage in code",
+    "instructions": "unknown",
+    "tools": "Flags MCP servers launched without a pinned package version",
+    "runtime": "none",
+    "identity": "unknown",
+    "delivery": "Maps findings to NIST AI RMF, ISO/IEC 42001, EU AI Act and OWASP lists"
+   },
+   "output_formats": "Table, JSON, SARIF (not CycloneDX)",
+   "agent_capabilities": {
+    "mcp_servers": "launch pinning only",
+    "tool_definition_digests": "no",
+    "instruction_and_skill_files": "unknown",
+    "hosted_model_identity": "SDK usage",
+    "credentials": "unknown",
+    "ci_agents": "no"
+   },
+   "signing_attestation": "none",
+   "runtime_observation": "none",
+   "verification_status": "verified",
+   "register_ids": [
+    "B6-09"
+   ],
+   "evidence_urls": [
+    "https://pypi.org/pypi/aibom-scanner/json"
+   ],
+   "summary": "aibom-scanner matters for one idea: every scan reports what it actually read (coverage_pct, incomplete_inputs), and `--fail-on-incomplete-coverage` fails the build when it could not parse something. 'An AI Bill of Materials that silently omits what it could not parse is not incomplete, it is wrong' (B6-09) . Its output is not a CycloneDX BOM."
+  },
+  {
+   "id": "picklescan",
+   "name": "picklescan",
+   "owner": "Matthieu Maitre",
+   "open_source": "yes",
+   "version_status": "1.0.5 (PyPI, 2026-07-01)",
+   "inventories_by_layer": {
+    "data": "none",
+    "model": "Blocklist scan of pickle files for dangerous callables",
+    "instructions": "none",
+    "tools": "none",
+    "runtime": "none",
+    "identity": "none",
+    "delivery": "Model intake"
+   },
+   "output_formats": "Console report; exit codes",
+   "agent_capabilities": {
+    "mcp_servers": "no",
+    "tool_definition_digests": "no",
+    "instruction_and_skill_files": "no",
+    "hosted_model_identity": "no",
+    "credentials": "no",
+    "ci_agents": "no"
+   },
+   "signing_attestation": "none",
+   "runtime_observation": "none",
+   "verification_status": "verified",
+   "register_ids": [
+    "A5-01",
+    "A5-02"
+   ],
+   "evidence_urls": [
+    "https://pypi.org/pypi/picklescan/json",
+    "https://pypi.org/pypi/picklescan/0.0.20/json",
+    "https://raw.githubusercontent.com/huggingface/hub-docs/main/docs/hub/security-pickle.md"
+   ],
+   "summary": "picklescan is an open-source blocklist scanner for pickle files; the Hugging Face Hub runs a similar import scan on every uploaded pickle and highlights suspicious imports . picklescan has had 59 security advisories (58 CVEs) against v0.0.20, almost all detection bypasses, fixed between v0.0.21 (Feb 2025) and v1.0.4 (Mar 2026) . Use it for triage; the robust control is not to load untrusted pickles at all (see fickling below)."
+  },
+  {
+   "id": "fickling",
+   "name": "fickling",
+   "owner": "Trail of Bits",
+   "open_source": "yes (LGPL)",
+   "version_status": "0.1.12 (PyPI, 2026-06-26)",
+   "inventories_by_layer": {
+    "data": "none",
+    "model": "Static analysis of pickles; allowlist hook for ML imports at load time",
+    "instructions": "none",
+    "tools": "none",
+    "runtime": "Load-time hook blocks non-allowlisted imports",
+    "identity": "none",
+    "delivery": "Model intake"
+   },
+   "output_formats": "Analysis reports",
+   "agent_capabilities": {
+    "mcp_servers": "no",
+    "tool_definition_digests": "no",
+    "instruction_and_skill_files": "no",
+    "hosted_model_identity": "no",
+    "credentials": "no",
+    "ci_agents": "no"
+   },
+   "signing_attestation": "none",
+   "runtime_observation": "Load-time import hook",
+   "verification_status": "verified",
+   "register_ids": [],
+   "evidence_urls": [
+    "https://pypi.org/project/fickling/",
+    "https://pypi.org/pypi/fickling/0.1.4/json",
+    "https://raw.githubusercontent.com/huggingface/safetensors/main/README.md",
+    "https://raw.githubusercontent.com/pytorch/pytorch/main/torch/serialization.py"
+   ],
+   "summary": "fickling's `activate_safe_ml_environment()` checks pickle imports against an allowlist of ML-library imports and blocks everything else, which is sturdier than a blocklist scan but is not a sandbox (lens controls-06) . fickling itself has fixed 16 security advisories between 0.1.6 and 0.1.12 . The robust control is not to load pickles from untrusted sources at all: prefer safetensors, which does not execute code on load , or `torch.load(weights_only=True)` , and keep scanners for triage."
+  },
+  {
+   "id": "symbiote",
+   "name": "SymBiote (AgentBOM toolkit; author's project)",
+   "owner": "Emmanuel Dahunsi (author's project)",
+   "open_source": "not yet (private repository; the README declares an MIT license for release)",
+   "version_status": "Alpha; specification v0.1; status as of 2026-11-01 per Part II.13 of the SymBiote document",
+   "inventories_by_layer": {
+    "data": "otel-traces collector records observed data and memory sources (implemented); memory write provenance not implemented",
+    "model": "models-hosted collector (alias versus dated snapshot) implemented; models-local (OMS-compatible manifests) in progress",
+    "instructions": "instructions and skills collectors in progress; typed instruction digests implemented",
+    "tools": "mcp-config and mcp-live collectors implemented; tooldef/v1 digests over raw tools/list JSON (RFC 8785); Gateway Allowlist Bundle",
+    "runtime": "otel-traces and k8s-aibom import implemented; declared-versus-observed diff",
+    "identity": "Grants and approval gates modeled; identity-config collector in progress; credential custody proposed, not implemented",
+    "delivery": "mcp-registry collector implemented; Build record proposed, not implemented"
+   },
+   "output_formats": "Companion AgentBOM JSON; CycloneDX 1.7 and SPDX 3.0.1 exporters validated against official schemas; SARIF; OPA data; Rego export",
+   "agent_capabilities": {
+    "mcp_servers": "yes",
+    "tool_definition_digests": "yes (tooldef/v1, toolset/v1, fail-closed)",
+    "instruction_and_skill_files": "digest types implemented; collectors in progress",
+    "hosted_model_identity": "alias pinning flag; resolved_ref with live provider lookup",
+    "credentials": "names only, values never read; custody record not implemented",
+    "ci_agents": "SYM-CI checks defined; CI collector in progress"
+   },
+   "signing_attestation": "in-toto Statement v1 in DSSE; Sigstore keyless with identity policies and key-based DSSE; anti-rollback serials",
+   "runtime_observation": "OTel GenAI spans and k8s-aibom import; runtime evidence not yet signed",
+   "verification_status": "partially_verified",
+   "register_ids": [],
+   "evidence_urls": [
+    "SymBiote specification v0.1 (collectors.md, attestation.md, digests.md); repository private"
+   ],
+   "summary": "SymBiote is the author's AgentBOM toolkit and is listed for comparison, with its status taken from the specification and the SymBiote document's implementation table, not from an independent test; its row is a self-assessment. AgentBOM is the name of SymBiote's profile; it is unrelated to the agent-bom tool from koda-ai-studio reviewed above. It computes a typed SHA-256 digest (tooldef/v1) over the RFC 8785 canonical JSON of each tool's model-visible fields, taken from the raw `tools/list` JSON-RPC result, exports CycloneDX 1.7 and SPDX 3.0.1 that validate against the official schemas, signs snapshots as in-toto statements with Sigstore or keys, and exports a Gateway Allowlist Bundle that a reference check enforces (SymBiote spec: digests.md, attestation.md, collectors.md). The specification defines 14 collectors. MCP configuration and ShadowScan import run from the CLI; live `tools/list`, OpenTelemetry traces, MCP registry resolution and k8s-aibom import exist as Python APIs not yet wired into the CLI; a hosted-models module exists, but the README still lists hosted models as in progress; instructions, skills, frameworks, local models, Agent Cards, identity configuration and SBOM merge are in progress. Approvals are not yet keyed by authorization context, and the trust-status signing CLI is in progress, which is why G1 and G9 are rated P. It is alpha software in a private repository."
+  }
+ ],
+ "gaps": [
+  {
+   "id": "G1",
+   "title": "Tool definitions and digests"
+  },
+  {
+   "id": "G2",
+   "title": "Instructions and executable agent configuration"
+  },
+  {
+   "id": "G3",
+   "title": "Hosted model identity"
+  },
+  {
+   "id": "G4",
+   "title": "Identity and credentials"
+  },
+  {
+   "id": "G5",
+   "title": "CI and build agents"
+  },
+  {
+   "id": "G6",
+   "title": "Runtime observation and drift"
+  },
+  {
+   "id": "G7",
+   "title": "Registry and provenance"
+  },
+  {
+   "id": "G8",
+   "title": "Data and memory provenance"
+  },
+  {
+   "id": "G9",
+   "title": "Attestation and signing"
+  },
+  {
+   "id": "G10",
+   "title": "Policy and enforcement"
+  }
+ ],
+ "matrix": {
+  "cdxgen": {
+   "G1": {
+    "coverage": "partial",
+    "why": "Inventories MCP servers, tool names and counts; pinning flag is package-hash based, no tool-definition digest"
+   },
+   "G2": {
+    "coverage": "partial",
+    "why": "Reads instruction, rules and skill files including allowed-tools, but emits derived signals; content digests not documented"
+   },
+   "G3": {
+    "coverage": "partial",
+    "why": "Detects inference providers and Hugging Face revisions; no hosted alias-to-snapshot resolution"
+   },
+   "G4": {
+    "coverage": "partial",
+    "why": "MCP auth posture and credential-exposure indicators; no custody, scope or revocation path"
+   },
+   "G5": {
+    "coverage": "partial",
+    "why": "GitHub Actions properties (isShaPinned, hasWritePermissions, hasIdTokenWrite); no record of CI-resident AI agents' authority"
+   },
+   "G6": {
+    "coverage": "partial",
+    "why": "tracebom observes a traced process; no declared-versus-observed agent diff"
+   },
+   "G7": {
+    "coverage": "partial",
+    "why": "Reads MCP Registry server.json and lockfile integrity; does not verify publisher provenance"
+   },
+   "G8": {
+    "coverage": "partial",
+    "why": "Dataset references from model cards; no RAG index or memory store"
+   },
+   "G9": {
+    "coverage": "partial",
+    "why": "JSF signing via cdx-sign; no in-toto or Sigstore attestation built in"
+   },
+   "G10": {
+    "coverage": "partial",
+    "why": "BOM audit rules (ai-bom category) and cdx-validate; build-time only"
+   }
+  },
+  "owasp-aibom-generator": {
+   "G1": {
+    "coverage": "none",
+    "why": "Model-only scope"
+   },
+   "G2": {
+    "coverage": "none",
+    "why": "Model-only scope"
+   },
+   "G3": {
+    "coverage": "none",
+    "why": "Open Hugging Face models only; no API-hosted model identity"
+   },
+   "G4": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G5": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G6": {
+    "coverage": "none",
+    "why": "Static, from Hub metadata"
+   },
+   "G7": {
+    "coverage": "partial",
+    "why": "Records supplier, license and Hub references; no signature or provenance verification"
+   },
+   "G8": {
+    "coverage": "partial",
+    "why": "Training and dataset fields from model cards, often as bare properties"
+   },
+   "G9": {
+    "coverage": "none",
+    "why": "No signing documented"
+   },
+   "G10": {
+    "coverage": "partial",
+    "why": "Completeness scoring with recommendations; not an enforcement point"
+   }
+  },
+  "k8s-aibom": {
+   "G1": {
+    "coverage": "none",
+    "why": "Does not inventory MCP servers or tool definitions"
+   },
+   "G2": {
+    "coverage": "none",
+    "why": "No prompts, skills or instruction files"
+   },
+   "G3": {
+    "coverage": "partial",
+    "why": "Model identities with confidence flags; hosted APIs seen only as declared env names"
+   },
+   "G4": {
+    "coverage": "none",
+    "why": "Sanitizes credentials out; no identity or credential inventory"
+   },
+   "G5": {
+    "coverage": "none",
+    "why": "Runtime only"
+   },
+   "G6": {
+    "coverage": "partial",
+    "why": "Observes live workload composition with evidence locators; not tool calls or agent behavior, and only opted-in namespaces"
+   },
+   "G7": {
+    "coverage": "partial",
+    "why": "Image digests and OMS/Sigstore verification with signer-identity constraints"
+   },
+   "G8": {
+    "coverage": "partial",
+    "why": "Mounted datasets and vector-store identity; no memory or write provenance"
+   },
+   "G9": {
+    "coverage": "partial",
+    "why": "Verifies model signatures; its own BOMs are unsigned (integrity via digests and write-once storage)"
+   },
+   "G10": {
+    "coverage": "none",
+    "why": "Observation only; 'kubectl aibom find' answers where something runs but enforces nothing"
+   }
+  },
+  "agent-harness-aibom": {
+   "G1": {
+    "coverage": "partial",
+    "why": "definitionSha256 over name, description and inputSchema, but opt-in, HTTP-only, and not RFC 8785 canonical JSON"
+   },
+   "G2": {
+    "coverage": "partial",
+    "why": "Fingerprints prompt surfaces, skills and hooks; limited to Hermes and OpenClaw"
+   },
+   "G3": {
+    "coverage": "partial",
+    "why": "Local Ollama model digests; hosted aliases not covered"
+   },
+   "G4": {
+    "coverage": "partial",
+    "why": "Records where secrets live and their permissions, not scope or revocation"
+   },
+   "G5": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G6": {
+    "coverage": "partial",
+    "why": "Baseline diff of two scans detects content drift; no continuous observation"
+   },
+   "G7": {
+    "coverage": "partial",
+    "why": "purl and upstream hashes; no publisher verification"
+   },
+   "G8": {
+    "coverage": "unknown",
+    "why": "Not documented"
+   },
+   "G9": {
+    "coverage": "partial",
+    "why": "Wraps cosign key-based signing; no keyless or in-toto predicate"
+   },
+   "G10": {
+    "coverage": "partial",
+    "why": "Built-in risk rules and policy-as-code with --fail-on for CI"
+   }
+  },
+  "smithmark": {
+   "G1": {
+    "coverage": "partial",
+    "why": "Signs MCP server capability manifests with the extracted tool listing; per-tool digest profile not documented"
+   },
+   "G2": {
+    "coverage": "partial",
+    "why": "Signs SKILL.md bundles; no rules or system-prompt files"
+   },
+   "G3": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G4": {
+    "coverage": "partial",
+    "why": "Manifest declares egress, filesystem, exec, env and secrets; lint flags undeclared ones"
+   },
+   "G5": {
+    "coverage": "partial",
+    "why": "SLSA-style provenance for skills and MCP packages; GitHub Action"
+   },
+   "G6": {
+    "coverage": "none",
+    "why": "Static only"
+   },
+   "G7": {
+    "coverage": "partial",
+    "why": "Verifies npm provenance and reports whether an MCP Registry entry carries an attestation reference"
+   },
+   "G8": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G9": {
+    "coverage": "partial",
+    "why": "Sigstore keyless and key-based in-toto DSSE for MCP servers and skills; early-stage (v0.2) with adoption self-reported by two servers"
+   },
+   "G10": {
+    "coverage": "partial",
+    "why": "Verification report feeds an external policy engine; Claude Code hook demo"
+   }
+  },
+  "snyk-aibom": {
+   "G1": {
+    "coverage": "partial",
+    "why": "Maps MCP servers and the tools they provide from SDK usage; no definition digests"
+   },
+   "G2": {
+    "coverage": "unknown",
+    "why": "Instruction and skill files not listed in the command docs"
+   },
+   "G3": {
+    "coverage": "partial",
+    "why": "Models referenced in code; no resolution of hosted aliases"
+   },
+   "G4": {
+    "coverage": "unknown",
+    "why": "Not documented"
+   },
+   "G5": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G6": {
+    "coverage": "none",
+    "why": "Static source analysis"
+   },
+   "G7": {
+    "coverage": "none",
+    "why": "No provenance verification documented"
+   },
+   "G8": {
+    "coverage": "partial",
+    "why": "Detects datasets"
+   },
+   "G9": {
+    "coverage": "none",
+    "why": "No signing documented"
+   },
+   "G10": {
+    "coverage": "partial",
+    "why": "snyk aibom test evaluates the AI-BOM against tenant Evo policies"
+   }
+  },
+  "snyk-agent-scan": {
+   "G1": {
+    "coverage": "partial",
+    "why": "Retrieves and scans live tool descriptions; earlier versions pinned tools by hash, current docs do not say"
+   },
+   "G2": {
+    "coverage": "partial",
+    "why": "Scans skills for prompt injection, malware and secrets; rules files not listed"
+   },
+   "G3": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G4": {
+    "coverage": "partial",
+    "why": "Flags credential handling and hardcoded secrets in skills; no custody record"
+   },
+   "G5": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G6": {
+    "coverage": "partial",
+    "why": "Background mode rescans endpoints over time; results go to Snyk Evo"
+   },
+   "G7": {
+    "coverage": "none",
+    "why": "No provenance or registry checks"
+   },
+   "G8": {
+    "coverage": "none",
+    "why": "Risk indicators only"
+   },
+   "G9": {
+    "coverage": "none",
+    "why": "Results unsigned"
+   },
+   "G10": {
+    "coverage": "partial",
+    "why": "Risk scores usable as a CI gate; fleet enforcement in Evo not verified"
+   }
+  },
+  "cisco-aibom": {
+   "G1": {
+    "coverage": "partial",
+    "why": "Typed tool and MCP components, flattened to application/library in CycloneDX; no definition digests"
+   },
+   "G2": {
+    "coverage": "partial",
+    "why": "Prompt and skill types; skill files mapped to CycloneDX file"
+   },
+   "G3": {
+    "coverage": "partial",
+    "why": "Detects model endpoints; no resolution of aliases to snapshots"
+   },
+   "G4": {
+    "coverage": "partial",
+    "why": "detect-secrets for hardcoded credentials; no custody or scope"
+   },
+   "G5": {
+    "coverage": "unknown",
+    "why": "Not documented"
+   },
+   "G6": {
+    "coverage": "partial",
+    "why": "Scans deployed containers and cloud environments; no continuous diff"
+   },
+   "G7": {
+    "coverage": "partial",
+    "why": "Dependency and OSV vulnerability analysis; no signature verification"
+   },
+   "G8": {
+    "coverage": "partial",
+    "why": "Datasets, vector stores, retrievers, knowledge bases and memory as types"
+   },
+   "G9": {
+    "coverage": "none",
+    "why": "No signing documented"
+   },
+   "G10": {
+    "coverage": "partial",
+    "why": "SARIF output for CI and IDE gating"
+   }
+  },
+  "cisco-model-provenance-kit": {
+   "G1": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G2": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G3": {
+    "coverage": "none",
+    "why": "Needs local weights; cannot identify an API-hosted model"
+   },
+   "G4": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G5": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G6": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G7": {
+    "coverage": "partial",
+    "why": "Infers which base family a model derives from (fine-tune, distill, quantize, merge); similarity, not proof"
+   },
+   "G8": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G9": {
+    "coverage": "none",
+    "why": "No signing"
+   },
+   "G10": {
+    "coverage": "none",
+    "why": "Not an enforcement point"
+   }
+  },
+  "dependency-track": {
+   "G1": {
+    "coverage": "none",
+    "why": "Consumer only; no agent semantics"
+   },
+   "G2": {
+    "coverage": "none",
+    "why": "Consumer only"
+   },
+   "G3": {
+    "coverage": "none",
+    "why": "Consumer only"
+   },
+   "G4": {
+    "coverage": "none",
+    "why": "Consumer only"
+   },
+   "G5": {
+    "coverage": "none",
+    "why": "Consumer only"
+   },
+   "G6": {
+    "coverage": "none",
+    "why": "Consumer only"
+   },
+   "G7": {
+    "coverage": "partial",
+    "why": "Vulnerability and component analysis over ingested BOMs"
+   },
+   "G8": {
+    "coverage": "none",
+    "why": "Consumer only"
+   },
+   "G9": {
+    "coverage": "unknown",
+    "why": "Not verified"
+   },
+   "G10": {
+    "coverage": "partial",
+    "why": "Policy engine over components; agent-specific policies depend on producers agreeing on property names"
+   }
+  },
+  "guac": {
+   "G1": {
+    "coverage": "none",
+    "why": "No agent semantics documented"
+   },
+   "G2": {
+    "coverage": "none",
+    "why": "No agent semantics documented"
+   },
+   "G3": {
+    "coverage": "none",
+    "why": "Not documented"
+   },
+   "G4": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G5": {
+    "coverage": "partial",
+    "why": "Links SLSA build provenance to artifacts"
+   },
+   "G6": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G7": {
+    "coverage": "partial",
+    "why": "Joins provenance, vulnerability and scorecard data across artifacts"
+   },
+   "G8": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G9": {
+    "coverage": "partial",
+    "why": "Ingests and links in-toto and SLSA attestations"
+   },
+   "G10": {
+    "coverage": "partial",
+    "why": "Graph queries can drive policy and audit; no AI-specific rules documented"
+   }
+  },
+  "owasp-aos-agbom": {
+   "G1": {
+    "coverage": "partial",
+    "why": "Specifies tools and MCP server capabilities; no definition digests"
+   },
+   "G2": {
+    "coverage": "none",
+    "why": "Instructions are not an AgBOM entity"
+   },
+   "G3": {
+    "coverage": "partial",
+    "why": "Models entity; no hosted identity semantics"
+   },
+   "G4": {
+    "coverage": "none",
+    "why": "Not specified"
+   },
+   "G5": {
+    "coverage": "none",
+    "why": "Not specified"
+   },
+   "G6": {
+    "coverage": "partial",
+    "why": "Dynamic inventory plus hook and trace specifications; implementations not assessed"
+   },
+   "G7": {
+    "coverage": "none",
+    "why": "Not specified"
+   },
+   "G8": {
+    "coverage": "partial",
+    "why": "Knowledge and memory entities"
+   },
+   "G9": {
+    "coverage": "none",
+    "why": "Not specified"
+   },
+   "G10": {
+    "coverage": "partial",
+    "why": "Instrument hooks give enforcement points in the spec"
+   }
+  },
+  "protectai-modelscan": {
+   "G1": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G2": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G3": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G4": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G5": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G6": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G7": {
+    "coverage": "partial",
+    "why": "Flags code-execution constructs in model files at intake; blocklist-style scanners get bypassed"
+   },
+   "G8": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G9": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G10": {
+    "coverage": "partial",
+    "why": "Exit codes can gate a pipeline"
+   }
+  },
+  "protectai-guardian": {
+   "G1": {
+    "coverage": "unknown",
+    "why": "No primary product documentation reviewed"
+   },
+   "G2": {
+    "coverage": "unknown",
+    "why": "No primary product documentation reviewed"
+   },
+   "G3": {
+    "coverage": "unknown",
+    "why": "No primary product documentation reviewed"
+   },
+   "G4": {
+    "coverage": "unknown",
+    "why": "No primary product documentation reviewed"
+   },
+   "G5": {
+    "coverage": "unknown",
+    "why": "No primary product documentation reviewed"
+   },
+   "G6": {
+    "coverage": "unknown",
+    "why": "No primary product documentation reviewed"
+   },
+   "G7": {
+    "coverage": "partial",
+    "why": "Scans Hugging Face models at intake; by 1 Apr 2025 it had flagged 352,000 unsafe or suspicious issues across 51,700 models"
+   },
+   "G8": {
+    "coverage": "unknown",
+    "why": "No primary product documentation reviewed"
+   },
+   "G9": {
+    "coverage": "unknown",
+    "why": "No primary product documentation reviewed"
+   },
+   "G10": {
+    "coverage": "unknown",
+    "why": "No primary product documentation reviewed"
+   }
+  },
+  "hiddenlayer-model-scanner": {
+   "G1": {
+    "coverage": "unknown",
+    "why": "No primary documentation reviewed"
+   },
+   "G2": {
+    "coverage": "unknown",
+    "why": "No primary documentation reviewed"
+   },
+   "G3": {
+    "coverage": "unknown",
+    "why": "No primary documentation reviewed"
+   },
+   "G4": {
+    "coverage": "unknown",
+    "why": "No primary documentation reviewed"
+   },
+   "G5": {
+    "coverage": "unknown",
+    "why": "No primary documentation reviewed"
+   },
+   "G6": {
+    "coverage": "unknown",
+    "why": "No primary documentation reviewed"
+   },
+   "G7": {
+    "coverage": "unknown",
+    "why": "Secondary sources describe a model scanner; no primary documentation reviewed"
+   },
+   "G8": {
+    "coverage": "unknown",
+    "why": "No primary documentation reviewed"
+   },
+   "G9": {
+    "coverage": "unknown",
+    "why": "No primary documentation reviewed"
+   },
+   "G10": {
+    "coverage": "unknown",
+    "why": "No primary documentation reviewed"
+   }
+  },
+  "oms-model-signing": {
+   "G1": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G2": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G3": {
+    "coverage": "none",
+    "why": "Covers weights you hold, not API-hosted models"
+   },
+   "G4": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G5": {
+    "coverage": "none",
+    "why": "Not build provenance"
+   },
+   "G6": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G7": {
+    "coverage": "partial",
+    "why": "Content identity and signer for model directories; adoption still limited"
+   },
+   "G8": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G9": {
+    "coverage": "partial",
+    "why": "Model signing; the latest release (1.1.1) predates unreleased verification fixes, including certificate EKU checks, and model-card signing is planned, not shipped"
+   },
+   "G10": {
+    "coverage": "none",
+    "why": "Verification is a building block; admission is up to the consumer"
+   }
+  },
+  "cosign": {
+   "G1": {
+    "coverage": "none",
+    "why": "Signs what you give it; no agent semantics"
+   },
+   "G2": {
+    "coverage": "none",
+    "why": "Same"
+   },
+   "G3": {
+    "coverage": "none",
+    "why": "Same"
+   },
+   "G4": {
+    "coverage": "none",
+    "why": "Same"
+   },
+   "G5": {
+    "coverage": "partial",
+    "why": "Common in CI release signing; not an inventory"
+   },
+   "G6": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G7": {
+    "coverage": "partial",
+    "why": "Signatures and transparency-log entries for published artifacts"
+   },
+   "G8": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G9": {
+    "coverage": "full",
+    "why": "General-purpose signing and attestation of BOMs and artifacts, keyless or key-based"
+   },
+   "G10": {
+    "coverage": "partial",
+    "why": "verify and verify-attestation feed admission controllers"
+   }
+  },
+  "in-toto": {
+   "G1": {
+    "coverage": "none",
+    "why": "No ML- or agent-specific predicate among vetted ones"
+   },
+   "G2": {
+    "coverage": "none",
+    "why": "Same"
+   },
+   "G3": {
+    "coverage": "none",
+    "why": "Same"
+   },
+   "G4": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G5": {
+    "coverage": "partial",
+    "why": "Layouts and link metadata describe pipeline steps and who may perform them"
+   },
+   "G6": {
+    "coverage": "partial",
+    "why": "Runtime Traces predicate could carry observations; nothing agent-specific"
+   },
+   "G7": {
+    "coverage": "partial",
+    "why": "Attestations bind artifacts to provenance"
+   },
+   "G8": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G9": {
+    "coverage": "full",
+    "why": "The common envelope for BOM, provenance and model-signing attestations"
+   },
+   "G10": {
+    "coverage": "partial",
+    "why": "Layout verification is a policy check"
+   }
+  },
+  "slsa": {
+   "G1": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G2": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G3": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G4": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G5": {
+    "coverage": "partial",
+    "why": "Build provenance for artifacts; no model for AI agents holding CI credentials"
+   },
+   "G6": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G7": {
+    "coverage": "partial",
+    "why": "Provenance makes out-of-pipeline publishes detectable, as with `cline@2.3.0`"
+   },
+   "G8": {
+    "coverage": "none",
+    "why": "No training-data track"
+   },
+   "G9": {
+    "coverage": "partial",
+    "why": "Provenance attestation format"
+   },
+   "G10": {
+    "coverage": "partial",
+    "why": "Verification Summary Attestations support admission decisions"
+   }
+  },
+  "taibom": {
+   "G1": {
+    "coverage": "none",
+    "why": "No agent component types"
+   },
+   "G2": {
+    "coverage": "unknown",
+    "why": "Not documented"
+   },
+   "G3": {
+    "coverage": "none",
+    "why": "Not documented"
+   },
+   "G4": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G5": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G6": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G7": {
+    "coverage": "partial",
+    "why": "Identity and dependency claims with transitive risk"
+   },
+   "G8": {
+    "coverage": "unknown",
+    "why": "Not documented"
+   },
+   "G9": {
+    "coverage": "partial",
+    "why": "Claims as W3C verifiable credentials"
+   },
+   "G10": {
+    "coverage": "partial",
+    "why": "Inferencing propagates risk across dependencies"
+   }
+  },
+  "syft": {
+   "G1": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G2": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G3": {
+    "coverage": "none",
+    "why": "Local model files only"
+   },
+   "G4": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G5": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G6": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G7": {
+    "coverage": "partial",
+    "why": "Package and local model file inventory for software composition"
+   },
+   "G8": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G9": {
+    "coverage": "partial",
+    "why": "syft attest wraps the SBOM in a signed in-toto attestation by invoking cosign (cosign must be installed); signs software SBOMs, not agent BOMs"
+   },
+   "G10": {
+    "coverage": "none",
+    "why": "Not an enforcement point"
+   }
+  },
+  "ms-sbom-tool": {
+   "G1": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G2": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G3": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G4": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G5": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G6": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G7": {
+    "coverage": "partial",
+    "why": "Software package SBOM only"
+   },
+   "G8": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G9": {
+    "coverage": "unknown",
+    "why": "Not verified"
+   },
+   "G10": {
+    "coverage": "none",
+    "why": "Not an enforcement point"
+   }
+  },
+  "brox": {
+   "G1": {
+    "coverage": "partial",
+    "why": "Lists MCP servers and capability scopes; no definition digests"
+   },
+   "G2": {
+    "coverage": "partial",
+    "why": "Lists prompts"
+   },
+   "G3": {
+    "coverage": "partial",
+    "why": "Lists LLM endpoints"
+   },
+   "G4": {
+    "coverage": "partial",
+    "why": "Capability scopes and egress domains"
+   },
+   "G5": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G6": {
+    "coverage": "none",
+    "why": "Static"
+   },
+   "G7": {
+    "coverage": "none",
+    "why": "Placeholder repository; no provenance"
+   },
+   "G8": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G9": {
+    "coverage": "none",
+    "why": "No signing"
+   },
+   "G10": {
+    "coverage": "partial",
+    "why": "Summary claims it blocks 'unsafe power upgrades' in PRs; not tested"
+   }
+  },
+  "mcp-registry": {
+   "G1": {
+    "coverage": "none",
+    "why": "Entries carry no tool definitions or digests"
+   },
+   "G2": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G3": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G4": {
+    "coverage": "none",
+    "why": "Declares environment variables; no authority model"
+   },
+   "G5": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G6": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G7": {
+    "coverage": "partial",
+    "why": "Namespace verification and immutable versions; minimal moderation; remote URL control not verified"
+   },
+   "G8": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G9": {
+    "coverage": "none",
+    "why": "No attestation field; publisher metadata only via free-form _meta"
+   },
+   "G10": {
+    "coverage": "none",
+    "why": "Explicitly no moderation guarantees"
+   }
+  },
+  "agent-bom": {
+   "G1": {
+    "coverage": "partial",
+    "why": "Inventories MCP tools and trust posture; digests unknown"
+   },
+   "G2": {
+    "coverage": "partial",
+    "why": "Scans rules and skill files"
+   },
+   "G3": {
+    "coverage": "unknown",
+    "why": "Not checked"
+   },
+   "G4": {
+    "coverage": "unknown",
+    "why": "Reachability claimed in summary; not inspected"
+   },
+   "G5": {
+    "coverage": "unknown",
+    "why": "Not checked"
+   },
+   "G6": {
+    "coverage": "partial",
+    "why": "MCP proxy/gateway claimed in PyPI description; not inspected"
+   },
+   "G7": {
+    "coverage": "unknown",
+    "why": "Not checked"
+   },
+   "G8": {
+    "coverage": "unknown",
+    "why": "Not checked"
+   },
+   "G9": {
+    "coverage": "unknown",
+    "why": "Not checked"
+   },
+   "G10": {
+    "coverage": "partial",
+    "why": "Reports coverage warnings: 'incomplete evidence is not clean'; inline firewall enforcement claimed, not inspected"
+   }
+  },
+  "trusera-ai-bom": {
+   "G1": {
+    "coverage": "partial",
+    "why": "Lists MCP server configurations"
+   },
+   "G2": {
+    "coverage": "unknown",
+    "why": "Not documented"
+   },
+   "G3": {
+    "coverage": "partial",
+    "why": "Detects LLM API integrations"
+   },
+   "G4": {
+    "coverage": "unknown",
+    "why": "Not documented"
+   },
+   "G5": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G6": {
+    "coverage": "partial",
+    "why": "Runtime SDK tracks events (separate product)"
+   },
+   "G7": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G8": {
+    "coverage": "unknown",
+    "why": "Not documented"
+   },
+   "G9": {
+    "coverage": "none",
+    "why": "No signing documented"
+   },
+   "G10": {
+    "coverage": "partial",
+    "why": "Cedar policies in the runtime SDK; SARIF for CI"
+   }
+  },
+  "mcplock": {
+   "G1": {
+    "coverage": "partial",
+    "why": "Pins description, inputSchema and annotations separately; titles, output schemas and server instructions not documented"
+   },
+   "G2": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G3": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G4": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G5": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G6": {
+    "coverage": "partial",
+    "why": "Detects drift when re-run; not continuous"
+   },
+   "G7": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G8": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G9": {
+    "coverage": "none",
+    "why": "Lockfile unsigned"
+   },
+   "G10": {
+    "coverage": "partial",
+    "why": "A missing baseline fails (exit 2), not passes"
+   }
+  },
+  "mcp-pin": {
+   "G1": {
+    "coverage": "partial",
+    "why": "Pins tool definitions; hash scope not reviewed"
+   },
+   "G2": {
+    "coverage": "partial",
+    "why": "Pins skills"
+   },
+   "G3": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G4": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G5": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G6": {
+    "coverage": "partial",
+    "why": "Detects change after approval"
+   },
+   "G7": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G8": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G9": {
+    "coverage": "partial",
+    "why": "Seals its hash-chained guard log via --sign-command (ssh-keygen -Y sign, smartcard or KMS CLI); the .mcp-pin.lock approval baseline is unsigned"
+   },
+   "G10": {
+    "coverage": "partial",
+    "why": "Refuses changed tools"
+   }
+  },
+  "aibom-scanner": {
+   "G1": {
+    "coverage": "partial",
+    "why": "Package-version pinning of MCP launches, not definition digests"
+   },
+   "G2": {
+    "coverage": "unknown",
+    "why": "Not documented"
+   },
+   "G3": {
+    "coverage": "partial",
+    "why": "Detects AI SDK usage"
+   },
+   "G4": {
+    "coverage": "unknown",
+    "why": "Not documented"
+   },
+   "G5": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G6": {
+    "coverage": "none",
+    "why": "Static"
+   },
+   "G7": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G8": {
+    "coverage": "unknown",
+    "why": "Not documented"
+   },
+   "G9": {
+    "coverage": "none",
+    "why": "No signing"
+   },
+   "G10": {
+    "coverage": "partial",
+    "why": "--fail-on-incomplete-coverage exits 3; every scan reports its own denominator"
+   }
+  },
+  "picklescan": {
+   "G1": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G2": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G3": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G4": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G5": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G6": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G7": {
+    "coverage": "partial",
+    "why": "Triage at intake; 59 advisories (58 CVEs), mostly detection bypasses, fixed between v0.0.21 and v1.0.4"
+   },
+   "G8": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G9": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G10": {
+    "coverage": "partial",
+    "why": "Exit codes can gate intake"
+   }
+  },
+  "fickling": {
+   "G1": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G2": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G3": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G4": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G5": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G6": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G7": {
+    "coverage": "partial",
+    "why": "Intake analysis of pickles"
+   },
+   "G8": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G9": {
+    "coverage": "none",
+    "why": "Not in scope"
+   },
+   "G10": {
+    "coverage": "partial",
+    "why": "activate_safe_ml_environment() blocks imports outside an ML allowlist at load"
+   }
+  },
+  "symbiote": {
+   "G1": {
+    "coverage": "partial",
+    "why": "tooldef/v1 digests over raw tools/list JSON, live collector and allowlist check implemented in alpha (private repository, not independently verifiable); approvals not yet keyed by authorization context (ttlMs/cacheScope), declared dynamism not implemented, live collection not yet wired into the CLI"
+   },
+   "G2": {
+    "coverage": "partial",
+    "why": "Digest types exist; instruction and skill collectors in progress"
+   },
+   "G3": {
+    "coverage": "partial",
+    "why": "Alias-versus-snapshot flag; hosted models cannot reach verified until providers sign"
+   },
+   "G4": {
+    "coverage": "partial",
+    "why": "Grants and gates modeled; custody and revocation proposed only"
+   },
+   "G5": {
+    "coverage": "partial",
+    "why": "CI checks defined; Build record not implemented"
+   },
+   "G6": {
+    "coverage": "partial",
+    "why": "OTel and k8s-aibom observations with snapshot diff; runtime evidence unsigned"
+   },
+   "G7": {
+    "coverage": "partial",
+    "why": "Registry resolution records; registry offers no attestations to verify"
+   },
+   "G8": {
+    "coverage": "partial",
+    "why": "Observed data and memory sources; no per-entry write provenance"
+   },
+   "G9": {
+    "coverage": "partial",
+    "why": "in-toto statements, Sigstore keyless and key-based DSSE and anti-rollback implemented in alpha (private repository, not independently verifiable); trust-status signing CLI in progress and runtime evidence unsigned"
+   },
+   "G10": {
+    "coverage": "partial",
+    "why": "68 policy checks, Rego export, reference gateway check; no production gateway or session-level enforcement"
+   }
+  }
+ },
+ "coverage_counts_excluding_symbiote": {
+  "G1": {
+   "full": 0,
+   "partial": 13,
+   "none": 16,
+   "unknown": 2
+  },
+  "G2": {
+   "full": 0,
+   "partial": 8,
+   "none": 17,
+   "unknown": 6
+  },
+  "G3": {
+   "full": 0,
+   "partial": 9,
+   "none": 19,
+   "unknown": 3
+  },
+  "G4": {
+   "full": 0,
+   "partial": 6,
+   "none": 19,
+   "unknown": 6
+  },
+  "G5": {
+   "full": 0,
+   "partial": 6,
+   "none": 21,
+   "unknown": 4
+  },
+  "G6": {
+   "full": 0,
+   "partial": 11,
+   "none": 18,
+   "unknown": 2
+  },
+  "G7": {
+   "full": 0,
+   "partial": 21,
+   "none": 8,
+   "unknown": 2
+  },
+  "G8": {
+   "full": 0,
+   "partial": 6,
+   "none": 18,
+   "unknown": 7
+  },
+  "G9": {
+   "full": 2,
+   "partial": 10,
+   "none": 14,
+   "unknown": 5
+  },
+  "G10": {
+   "full": 0,
+   "partial": 23,
+   "none": 6,
+   "unknown": 2
+  }
+ },
+ "sources": [
+  {
+   "key": "cdx-readme",
+   "url": "https://raw.githubusercontent.com/cdxgen/cdxgen/master/README.md",
+   "title": "cdxgen README",
+   "date": "fetched 2026-11-01",
+   "source_type": "primary"
+  },
+  {
+   "key": "cdx-aibom",
+   "url": "https://raw.githubusercontent.com/cdxgen/cdxgen/master/docs/AI_BOM.md",
+   "title": "cdxgen AI-BOM Guide",
+   "date": "fetched 2026-11-01",
+   "source_type": "primary"
+  },
+  {
+   "key": "cdx-mcp",
+   "url": "https://raw.githubusercontent.com/cdxgen/cdxgen/master/docs/MCP.md",
+   "title": "cdxgen: MCP inventory for JavaScript and dedicated MCP project scans",
+   "date": "fetched 2026-11-01",
+   "source_type": "primary"
+  },
+  {
+   "key": "cdx-props",
+   "url": "https://raw.githubusercontent.com/cdxgen/cdxgen/master/docs/CUSTOM_PROPERTIES.md",
+   "title": "cdxgen custom properties reference",
+   "date": "fetched 2026-11-01",
+   "source_type": "primary"
+  },
+  {
+   "key": "cdx-trace",
+   "url": "https://raw.githubusercontent.com/cdxgen/cdxgen/master/docs/TRACEBOM.md",
+   "title": "cdxgen: tracebom, dynamic SBOM CLI",
+   "date": "fetched 2026-11-01",
+   "source_type": "primary"
+  },
+  {
+   "key": "cdx-npm13",
+   "url": "https://registry.npmjs.org/@cdxgen/cdxgen",
+   "title": "npm registry: @cdxgen/cdxgen (13.6.0)",
+   "date": "2026-10-31",
+   "source_type": "primary"
+  },
+  {
+   "key": "cdx-npm12",
+   "url": "https://registry.npmjs.org/@cyclonedx/cdxgen",
+   "title": "npm registry: @cyclonedx/cdxgen (12.9.0)",
+   "date": "2026-10-22",
+   "source_type": "primary"
+  },
+  {
+   "key": "cdx-4593",
+   "url": "https://github.com/cdxgen/cdxgen/issues/4593",
+   "title": "cdxgen issue #4593: Describe declared coding-agent behaviour in AI-BOMs at CycloneDX 2.0",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "cdx-taxonomy",
+   "url": "https://raw.githubusercontent.com/CycloneDX/cyclonedx-property-taxonomy/main/cdx.md",
+   "title": "CycloneDX property taxonomy: cdx namespace",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "cdx17-schema",
+   "url": "https://raw.githubusercontent.com/CycloneDX/specification/master/schema/bom-1.7.schema.json",
+   "title": "CycloneDX 1.7 JSON schema",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "owaspgen-readme",
+   "url": "https://raw.githubusercontent.com/GenAI-Security-Project/aibom-generator/main/README.md",
+   "title": "OWASP GenAI Security Project: AIBOM Generator README",
+   "date": "fetched 2026-11-01",
+   "source_type": "primary"
+  },
+  {
+   "key": "owaspgen-pyproject",
+   "url": "https://raw.githubusercontent.com/GenAI-Security-Project/aibom-generator/main/pyproject.toml",
+   "title": "owasp-aibom-generator pyproject.toml (v1.0.2)",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "owaspgen-blog",
+   "url": "https://genai.owasp.org/2025/12/18/evolving-ai-transparency-the-journey-of-the-aibom-generator-and-its-new-home-at-owasp/",
+   "title": "OWASP GenAI: The journey of the AIBOM Generator and its new home at OWASP",
+   "date": "2025-12-18",
+   "source_type": "primary"
+  },
+  {
+   "key": "k8s-blog",
+   "url": "https://cloud.google.com/blog/products/identity-security/introducing-k8s-aibom-on-gke-for-automated-ai-bills-of-materials",
+   "title": "Google Cloud: Introducing k8s-aibom on GKE for automated AI bills of materials",
+   "date": "2026-07-13",
+   "source_type": "primary"
+  },
+  {
+   "key": "k8s-readme",
+   "url": "https://raw.githubusercontent.com/GoogleCloudPlatform/k8s-aibom/main/README.md",
+   "title": "k8s-aibom README",
+   "date": "fetched 2026-11-01",
+   "source_type": "primary"
+  },
+  {
+   "key": "k8s-changelog",
+   "url": "https://raw.githubusercontent.com/GoogleCloudPlatform/k8s-aibom/main/CHANGELOG.md",
+   "title": "k8s-aibom CHANGELOG (v1.6.2)",
+   "date": "2026-10-22",
+   "source_type": "primary"
+  },
+  {
+   "key": "k8s-security",
+   "url": "https://raw.githubusercontent.com/GoogleCloudPlatform/k8s-aibom/main/docs/security-model.md",
+   "title": "k8s-aibom security model",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "nvidia-adr",
+   "url": "https://raw.githubusercontent.com/NVIDIA/aicr/main/docs/design/019-k8s-aibom-runtime-inventory.md",
+   "title": "NVIDIA AICR ADR-019: k8s-aibom runtime inventory",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "harness-pypi",
+   "url": "https://pypi.org/pypi/agent-harness-aibom/json",
+   "title": "PyPI: agent-harness-aibom 1.0.0",
+   "date": "2026-09-10",
+   "source_type": "primary"
+  },
+  {
+   "key": "harness-readme",
+   "url": "https://raw.githubusercontent.com/Aj7Ay/agent-harness-aibom/main/README.md",
+   "title": "agent-harness-aibom README",
+   "date": "fetched 2026-11-01",
+   "source_type": "primary"
+  },
+  {
+   "key": "harness-spec",
+   "url": "https://raw.githubusercontent.com/Aj7Ay/agent-harness-aibom/main/SPEC.md",
+   "title": "agent-harness-aibom SPEC",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "smith-readme",
+   "url": "https://raw.githubusercontent.com/sns45/smithmark/main/README.md",
+   "title": "smithmark README",
+   "date": "fetched 2026-11-02",
+   "source_type": "primary"
+  },
+  {
+   "key": "smith-go",
+   "url": "https://proxy.golang.org/github.com/sns45/smithmark/@latest",
+   "title": "Go module proxy: github.com/sns45/smithmark v0.2.1",
+   "date": "2026-07-26",
+   "source_type": "primary"
+  },
+  {
+   "key": "snyk-aibom",
+   "url": "https://raw.githubusercontent.com/snyk/cli/main/help/cli-commands/aibom.md",
+   "title": "Snyk CLI help: snyk aibom",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "snyk-aibom-test",
+   "url": "https://raw.githubusercontent.com/snyk/cli/main/help/cli-commands/aibom-test.md",
+   "title": "Snyk CLI help: snyk aibom test",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "snyk-npm",
+   "url": "https://registry.npmjs.org/snyk",
+   "title": "npm registry: snyk (1.1308.3)",
+   "date": "2026-10-23",
+   "source_type": "primary"
+  },
+  {
+   "key": "agentscan-pypi",
+   "url": "https://pypi.org/pypi/snyk-agent-scan/json",
+   "title": "PyPI: snyk-agent-scan 0.6.10",
+   "date": "2026-10-30",
+   "source_type": "primary"
+  },
+  {
+   "key": "mcpscan-pypi",
+   "url": "https://pypi.org/pypi/mcp-scan/json",
+   "title": "PyPI: mcp-scan 0.4.3 (redirect to snyk-agent-scan)",
+   "date": "2026-03-02",
+   "source_type": "primary"
+  },
+  {
+   "key": "mcpscan-030",
+   "url": "https://pypi.org/pypi/mcp-scan/0.3.0/json",
+   "title": "PyPI: mcp-scan 0.3.0",
+   "date": "2025-07-18",
+   "source_type": "primary"
+  },
+  {
+   "key": "invariant-exp",
+   "url": "https://raw.githubusercontent.com/invariantlabs-ai/mcp-injection-experiments/main/README.md",
+   "title": "Invariant Labs: MCP injection experiments",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "cisco-readme",
+   "url": "https://raw.githubusercontent.com/cisco-ai-defense/aibom/main/README.md",
+   "title": "Cisco AI BOM README",
+   "date": "fetched 2026-11-02",
+   "source_type": "primary"
+  },
+  {
+   "key": "cisco-reporter",
+   "url": "https://raw.githubusercontent.com/cisco-ai-defense/aibom/main/aibom/src/aibom/reporters/cyclonedx_reporter.py",
+   "title": "Cisco AI BOM CycloneDX reporter source",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "cisco-pypi",
+   "url": "https://pypi.org/pypi/cisco-aibom/json",
+   "title": "PyPI: cisco-aibom 1.10.0",
+   "date": "2026-08-17",
+   "source_type": "primary"
+  },
+  {
+   "key": "mpk-readme",
+   "url": "https://raw.githubusercontent.com/cisco-ai-defense/model-provenance-kit/main/README.md",
+   "title": "Cisco Model Provenance Kit README",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "mpk-pypi",
+   "url": "https://pypi.org/pypi/cisco-ai-provenance-kit/json",
+   "title": "PyPI: cisco-ai-provenance-kit 1.0.0",
+   "date": "2026-05-04",
+   "source_type": "primary"
+  },
+  {
+   "key": "dt-51",
+   "url": "https://dependencytrack.org/news/dependency-track-5-1/",
+   "title": "Dependency-Track 5.1 announcement",
+   "date": "2026-08-31",
+   "source_type": "primary"
+  },
+  {
+   "key": "dt-validator",
+   "url": "https://raw.githubusercontent.com/DependencyTrack/dependency-track/main/apiserver/src/main/java/org/dependencytrack/parser/cyclonedx/CycloneDxValidator.java",
+   "title": "Dependency-Track CycloneDxValidator (main)",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "dt-4146",
+   "url": "https://raw.githubusercontent.com/DependencyTrack/dependency-track/4.14.x/docs/_posts/2026-10-25-v4.14.6.md",
+   "title": "Dependency-Track v4.14.6 release notes",
+   "date": "2026-10-25",
+   "source_type": "primary"
+  },
+  {
+   "key": "dt-formats",
+   "url": "https://raw.githubusercontent.com/DependencyTrack/docs/main/docs/reference/file-formats.md",
+   "title": "Dependency-Track v5 docs: file formats",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "guac-readme",
+   "url": "https://raw.githubusercontent.com/guacsec/guac/main/README.md",
+   "title": "GUAC README",
+   "date": "fetched 2026-11-02",
+   "source_type": "primary"
+  },
+  {
+   "key": "guac-go",
+   "url": "https://proxy.golang.org/github.com/guacsec/guac/@latest",
+   "title": "Go module proxy: github.com/guacsec/guac v1.1.0",
+   "date": "2026-03-13",
+   "source_type": "primary"
+  },
+  {
+   "key": "aos-inspect",
+   "url": "https://raw.githubusercontent.com/OWASP/aos/main/docs/spec/inspect/README.md",
+   "title": "OWASP AOS: Inspect with AgBOM",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "aos-cdx",
+   "url": "https://raw.githubusercontent.com/OWASP/aos/main/docs/spec/inspect/extend_cyclonedx.md",
+   "title": "OWASP AOS: AgBOM with CycloneDX (working draft)",
+   "date": "2025-05-19",
+   "source_type": "primary"
+  },
+  {
+   "key": "aos-mkdocs",
+   "url": "https://raw.githubusercontent.com/OWASP/aos/main/mkdocs.yml",
+   "title": "OWASP AOS documentation configuration",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "modelscan-readme",
+   "url": "https://raw.githubusercontent.com/protectai/modelscan/main/README.md",
+   "title": "Protect AI ModelScan README",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "modelscan-pypi",
+   "url": "https://pypi.org/pypi/modelscan/json",
+   "title": "PyPI: modelscan 0.8.8",
+   "date": "2026-02-18",
+   "source_type": "primary"
+  },
+  {
+   "key": "hf-pai",
+   "url": "https://huggingface.co/blog/pai-6-month",
+   "title": "Hugging Face: 4M models scanned, Protect AI six-month update",
+   "date": "2025-04-14",
+   "source_type": "primary"
+  },
+  {
+   "key": "panw-pai",
+   "url": "https://www.securityinfowatch.com/ai/press-release/55305712/palo-alto-networks-palo-alto-networks-completes-acquisition-of-protect-ai",
+   "title": "Palo Alto Networks Completes Acquisition of Protect AI (press release reprint)",
+   "date": null,
+   "source_type": "secondary"
+  },
+  {
+   "key": "hl-sabotage",
+   "url": "https://hiddenlayer.com/research/silent-sabotage",
+   "title": "HiddenLayer: Silent Sabotage (Hugging Face conversion service)",
+   "date": "2024-02",
+   "source_type": "primary"
+  },
+  {
+   "key": "hl-review",
+   "url": "https://appsecsanta.com/hiddenlayer",
+   "title": "AppSec Santa: HiddenLayer review",
+   "date": null,
+   "source_type": "secondary"
+  },
+  {
+   "key": "oms-pypi",
+   "url": "https://pypi.org/pypi/model-signing/json",
+   "title": "PyPI: model-signing (1.0.0 2025-04-04; 1.1.1 2025-10-10)",
+   "date": "2025-10-10",
+   "source_type": "primary"
+  },
+  {
+   "key": "oms-readme",
+   "url": "https://raw.githubusercontent.com/sigstore/model-transparency/main/README.md",
+   "title": "sigstore/model-transparency README",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "oms-changelog",
+   "url": "https://raw.githubusercontent.com/sigstore/model-transparency/main/CHANGELOG.md",
+   "title": "sigstore/model-transparency CHANGELOG",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "oms-spec",
+   "url": "https://raw.githubusercontent.com/ossf/model-signing-spec/main/README.md",
+   "title": "OpenSSF Model Signing specification README",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "cosign-readme",
+   "url": "https://raw.githubusercontent.com/sigstore/cosign/main/README.md",
+   "title": "Sigstore cosign README",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "cosign-att",
+   "url": "https://raw.githubusercontent.com/sigstore/cosign/main/pkg/cosign/attestation/attestation.go",
+   "title": "cosign attestation predicate types (source)",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "cosign-go",
+   "url": "https://proxy.golang.org/github.com/sigstore/cosign/v3/@latest",
+   "title": "Go module proxy: github.com/sigstore/cosign/v3 v3.1.4",
+   "date": "2026-10-20",
+   "source_type": "primary"
+  },
+  {
+   "key": "intoto-pred",
+   "url": "https://raw.githubusercontent.com/in-toto/attestation/main/spec/predicates/README.md",
+   "title": "in-toto attestation: vetted predicates",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "intoto-pypi",
+   "url": "https://pypi.org/pypi/in-toto/json",
+   "title": "PyPI: in-toto 3.1.0",
+   "date": "2026-04-25",
+   "source_type": "primary"
+  },
+  {
+   "key": "cline-npm",
+   "url": "https://registry.npmjs.org/cline",
+   "title": "npm registry: cline (2.3.0 published without provenance)",
+   "date": "2026-02-17",
+   "source_type": "primary"
+  },
+  {
+   "key": "slsa-readme",
+   "url": "https://raw.githubusercontent.com/slsa-framework/slsa/main/README.md",
+   "title": "SLSA repository README",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "slsa-future",
+   "url": "https://raw.githubusercontent.com/slsa-framework/slsa/main/spec/future-directions.md",
+   "title": "SLSA: future directions",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "ossf-aiml",
+   "url": "https://raw.githubusercontent.com/ossf/ai-ml-security/main/README.md",
+   "title": "OpenSSF AI/ML Security Working Group README",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "taibom-tech",
+   "url": "https://raw.githubusercontent.com/nqminds/trusted-ai-bom/main/packages/docusaurus/src/partials/home/technical-details.jsx",
+   "title": "TAIBOM site source: technical details",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "taibom-contrib",
+   "url": "https://raw.githubusercontent.com/nqminds/trusted-ai-bom/main/packages/docusaurus/src/partials/home/contributors.jsx",
+   "title": "TAIBOM site source: contributors",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "taibom-why",
+   "url": "https://raw.githubusercontent.com/nqminds/trusted-ai-bom/main/packages/docusaurus/src/partials/home/why.jsx",
+   "title": "TAIBOM site source: why TAIBOM",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "syft-readme",
+   "url": "https://raw.githubusercontent.com/anchore/syft/main/README.md",
+   "title": "Syft README",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "syft-ai",
+   "url": "https://raw.githubusercontent.com/anchore/syft/v1.55.0/syft/pkg/cataloger/ai/cataloger.go",
+   "title": "Syft v1.55.0: GGUF and SafeTensors catalogers (source)",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "syft-versions",
+   "url": "https://raw.githubusercontent.com/anchore/syft/main/syft/format/internal/spdxutil/versions.go",
+   "title": "Syft SPDX version defaults (source)",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "syft-go",
+   "url": "https://proxy.golang.org/github.com/anchore/syft/@latest",
+   "title": "Go module proxy: github.com/anchore/syft v1.55.0",
+   "date": "2026-10-19",
+   "source_type": "primary"
+  },
+  {
+   "key": "sbomtool-readme",
+   "url": "https://raw.githubusercontent.com/microsoft/sbom-tool/main/README.md",
+   "title": "Microsoft sbom-tool README",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "sbomtool-brew",
+   "url": "https://raw.githubusercontent.com/Homebrew/homebrew-core/main/Formula/s/sbom-tool.rb",
+   "title": "Homebrew formula: sbom-tool (tracks tag v4.1.13)",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "sbomtool-const",
+   "url": "https://raw.githubusercontent.com/microsoft/sbom-tool/main/src/Microsoft.Sbom.Parsers.Spdx30SbomParser/Constants.cs",
+   "title": "sbom-tool SPDX 3.0 generator constants (source)",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "brox-pypi",
+   "url": "https://pypi.org/pypi/brox/json",
+   "title": "PyPI: brox 0.1.0",
+   "date": "2026-02-13",
+   "source_type": "primary"
+  },
+  {
+   "key": "reg-readme",
+   "url": "https://raw.githubusercontent.com/modelcontextprotocol/registry/main/README.md",
+   "title": "MCP Registry README",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "reg-schema",
+   "url": "https://raw.githubusercontent.com/modelcontextprotocol/registry/main/docs/reference/server-json/draft/server.schema.json",
+   "title": "MCP Registry server.json schema (draft)",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "reg-moderation",
+   "url": "https://raw.githubusercontent.com/modelcontextprotocol/registry/main/docs/modelcontextprotocol-io/moderation-policy.mdx",
+   "title": "MCP Registry moderation policy",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "reg-pkgtypes",
+   "url": "https://raw.githubusercontent.com/modelcontextprotocol/registry/main/docs/modelcontextprotocol-io/package-types.mdx",
+   "title": "MCP Registry package types",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "reg-remote",
+   "url": "https://raw.githubusercontent.com/modelcontextprotocol/registry/main/docs/modelcontextprotocol-io/remote-servers.mdx",
+   "title": "MCP Registry remote servers",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "reg-roadmap",
+   "url": "https://raw.githubusercontent.com/modelcontextprotocol/registry/main/docs/design/roadmap.md",
+   "title": "MCP Registry roadmap",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "reg-go",
+   "url": "https://proxy.golang.org/github.com/modelcontextprotocol/registry/@latest",
+   "title": "Go module proxy: github.com/modelcontextprotocol/registry v1.8.7",
+   "date": "2026-10-30",
+   "source_type": "primary"
+  },
+  {
+   "key": "agentbom-pypi",
+   "url": "https://pypi.org/pypi/agent-bom/json",
+   "title": "PyPI: agent-bom 0.112.1",
+   "date": "2026-11-01",
+   "source_type": "primary"
+  },
+  {
+   "key": "trusera-pypi",
+   "url": "https://pypi.org/pypi/ai-bom/json",
+   "title": "PyPI: ai-bom (Trusera) 3.6.0",
+   "date": "2026-03-15",
+   "source_type": "primary"
+  },
+  {
+   "key": "mcplock-pypi",
+   "url": "https://pypi.org/pypi/mcplock/json",
+   "title": "PyPI: mcplock 1.0.3",
+   "date": "2026-07-29",
+   "source_type": "primary"
+  },
+  {
+   "key": "mcppin-pypi",
+   "url": "https://pypi.org/pypi/mcp-pin/json",
+   "title": "PyPI: mcp-pin 0.1.8",
+   "date": "2026-09-23",
+   "source_type": "primary"
+  },
+  {
+   "key": "aibomscanner-pypi",
+   "url": "https://pypi.org/pypi/aibom-scanner/json",
+   "title": "PyPI: aibom-scanner 1.3.5",
+   "date": "2026-10-24",
+   "source_type": "primary"
+  },
+  {
+   "key": "picklescan-pypi",
+   "url": "https://pypi.org/pypi/picklescan/json",
+   "title": "PyPI: picklescan 1.0.5",
+   "date": "2026-07-01",
+   "source_type": "primary"
+  },
+  {
+   "key": "picklescan-0020",
+   "url": "https://pypi.org/pypi/picklescan/0.0.20/json",
+   "title": "PyPI: picklescan 0.0.20 (advisory baseline)",
+   "date": "2025-02",
+   "source_type": "primary"
+  },
+  {
+   "key": "fickling-pypi",
+   "url": "https://pypi.org/project/fickling/",
+   "title": "PyPI: fickling 0.1.12 (Trail of Bits)",
+   "date": "2026-06-26",
+   "source_type": "primary"
+  },
+  {
+   "key": "owaspgen-fields",
+   "url": "https://raw.githubusercontent.com/GenAI-Security-Project/aibom-generator/main/src/models/field_registry.json",
+   "title": "owasp-aibom-generator field registry (source)",
+   "date": "fetched 2026-11-02",
+   "source_type": "primary"
+  },
+  {
+   "key": "dt-510",
+   "url": "https://github.com/DependencyTrack/dependency-track/releases/tag/5.1.0",
+   "title": "Dependency-Track 5.1.0 GitHub release (adds CycloneDX 1.7 support)",
+   "date": "2026-08-27",
+   "source_type": "primary"
+  },
+  {
+   "key": "dt-4144",
+   "url": "https://raw.githubusercontent.com/DependencyTrack/dependency-track/4.14.x/docs/_posts/2026-09-14-v4.14.4.md",
+   "title": "Dependency-Track v4.14.4 release notes",
+   "date": "2026-09-14",
+   "source_type": "primary"
+  },
+  {
+   "key": "dt-readme",
+   "url": "https://raw.githubusercontent.com/DependencyTrack/dependency-track/main/README.md",
+   "title": "Dependency-Track README (v4 end-of-life)",
+   "date": "fetched 2026-11-02",
+   "source_type": "primary"
+  },
+  {
+   "key": "reg-faq",
+   "url": "https://raw.githubusercontent.com/modelcontextprotocol/registry/main/docs/modelcontextprotocol-io/faq.mdx",
+   "title": "MCP Registry FAQ",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "cdx15-schema",
+   "url": "https://raw.githubusercontent.com/CycloneDX/specification/master/schema/bom-1.5.schema.json",
+   "title": "CycloneDX 1.5 JSON schema",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "cdx16-schema",
+   "url": "https://raw.githubusercontent.com/CycloneDX/specification/master/schema/bom-1.6.schema.json",
+   "title": "CycloneDX 1.6 JSON schema",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "agentscan-readme",
+   "url": "https://raw.githubusercontent.com/snyk/agent-scan/main/README.md",
+   "title": "Snyk Agent Scan README",
+   "date": "fetched 2026-11-02",
+   "source_type": "primary"
+  },
+  {
+   "key": "hf-pickle-docs",
+   "url": "https://raw.githubusercontent.com/huggingface/hub-docs/main/docs/hub/security-pickle.md",
+   "title": "Hugging Face Hub docs: Pickle Scanning (source)",
+   "date": "fetched 2026-11-02",
+   "source_type": "primary"
+  },
+  {
+   "key": "fickling-0014",
+   "url": "https://pypi.org/pypi/fickling/0.1.4/json",
+   "title": "PyPI: fickling 0.1.4 (advisory baseline: 16 GHSA advisories fixed in 0.1.6 to 0.1.12)",
+   "date": "fetched 2026-11-02",
+   "source_type": "primary"
+  },
+  {
+   "key": "safetensors-readme",
+   "url": "https://raw.githubusercontent.com/huggingface/safetensors/main/README.md",
+   "title": "safetensors README",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "torch-serialization",
+   "url": "https://raw.githubusercontent.com/pytorch/pytorch/main/torch/serialization.py",
+   "title": "PyTorch torch.load source (weights_only)",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "syft-attest",
+   "url": "https://raw.githubusercontent.com/anchore/syft/main/cmd/syft/internal/commands/attest.go",
+   "title": "Syft attest command (source; requires cosign on PATH)",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "taibom-readme",
+   "url": "https://raw.githubusercontent.com/nqminds/trusted-ai-bom/main/README.md",
+   "title": "nqminds/Trusted-AI-BOM README (website build instructions; no LICENSE file at root)",
+   "date": "fetched 2026-11-02",
+   "source_type": "primary"
+  },
+  {
+   "key": "intoto-statement",
+   "url": "https://raw.githubusercontent.com/in-toto/attestation/main/spec/v1/statement.md",
+   "title": "in-toto attestation: Statement v1",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "intoto-slsa",
+   "url": "https://raw.githubusercontent.com/in-toto/attestation/main/spec/predicates/provenance.md",
+   "title": "in-toto attestation: SLSA Provenance predicate type",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "intoto-spdx3",
+   "url": "https://raw.githubusercontent.com/in-toto/attestation/main/spec/predicates/spdx3.md",
+   "title": "in-toto attestation: SPDX 3 predicate type (https://spdx.dev/Document/v3)",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "oms-signing-src",
+   "url": "https://raw.githubusercontent.com/sigstore/model-transparency/main/src/model_signing/_signing/signing.py",
+   "title": "model_signing source: in-toto Statement v1 type",
+   "date": null,
+   "source_type": "primary"
+  },
+  {
+   "key": "cosign-attestblob",
+   "url": "https://raw.githubusercontent.com/sigstore/cosign/main/doc/cosign_attest-blob.md",
+   "title": "cosign attest-blob command reference",
+   "date": null,
+   "source_type": "primary"
+  }
+ ]
+}

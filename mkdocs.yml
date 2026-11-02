@@ -94,6 +94,10 @@ nav:
       - Overview: research/README.md
       - Design brief: research/design-brief.md
       - Exporter notes: research/exporter-notes-ihvm.md
+      - Source-document review: research/document-review.md
+      - Claim register: research/claim-register.md
+      - Gap analysis v2 (fact-checked): research/gap-analysis-v2.md
+      - Tools landscape: research/landscape.md
       - Proposals:
           - Enforcement-first: research/proposals/enforcement-first.md
           - Standards-purist: research/proposals/standards-purist.md
