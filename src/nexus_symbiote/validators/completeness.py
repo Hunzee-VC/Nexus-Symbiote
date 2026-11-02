@@ -488,10 +488,11 @@ class CompletenessValidator:
             isinstance(local, MCPServerComponent)
             and local.properties.get("collection_mode") == "static-config"
         ):
-            # Redaction hides executable arguments and endpoint paths. Compare the
-            # declared launcher identity and the original, versioned source binding;
-            # a legacy record missing either cannot bind the subject. No live
-            # observation can supply missing static source evidence.
+            # A legacy record missing the current launcher package or the versioned
+            # source binding cannot bind this subject. Redaction hides executable
+            # arguments and endpoint paths, so matching package versions or redacted
+            # strings do not identify the same launcher. Live observations may add
+            # descriptor evidence but cannot supply missing static source evidence.
             return (
                 isinstance(supplied, MCPServerComponent)
                 and (
@@ -511,8 +512,14 @@ class CompletenessValidator:
                     local.version_pinned,
                 )
                 and all(
-                    supplied.properties.get(field) == local.properties[field]
-                    for field in ("static_config_hash", "static_config_hash_profile")
+                    supplied.properties.get(field) == local.properties.get(field)
+                    for field in (
+                        "static_config_hash",
+                        "static_config_hash_profile",
+                        "static_value_binding",
+                        "static_value_binding_key_id",
+                        "static_value_binding_profile",
+                    )
                 )
             )
         if (

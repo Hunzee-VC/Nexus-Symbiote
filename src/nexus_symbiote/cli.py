@@ -716,7 +716,7 @@ def validate(
             valid = False
     # Graph integrity is structural and cannot be disabled by a coverage policy.
     if bom.graph_issues():
-        console.print("  ERROR: " + "; ".join(bom.graph_issues()))
+        console.print("  ERROR: " + _safe("; ".join(bom.graph_issues())), soft_wrap=True)
         valid = False
     if not valid:
         raise click.exceptions.Exit(1)
@@ -797,7 +797,7 @@ def risk(
             else:
                 click.echo("Risk unknown. Project reconciliation failed.", err=True)
                 for reason in reasons:
-                    click.echo(_UNSAFE_TEXT.sub("\ufffd", reason), err=True)
+                    click.echo(reason, err=True)
             raise click.exceptions.Exit(1)
         basis = "project-reconciled"
     scorer = RiskScorer(

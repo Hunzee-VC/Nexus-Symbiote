@@ -65,8 +65,8 @@ Inspect the exit status and the inventory's coverage, exclusions and failures. A
 The eight built-in collectors are `shadowscan`, `mcp`, `model`, `prompt`, `rag`, `registry`, `a2a` and `ide_agents`.
 
 ```bash
-# From a reviewed checkout — scan the offline demo project (walkthrough: examples/README.md)
-nexus-symbiote scan examples/demo-agent --no-project-policy --report-only -o demo-agentbom.json
+# From a reviewed checkout — scan the examples/ fixture
+nexus-symbiote scan examples --no-project-policy --report-only -o demo-agentbom.json
 nexus-symbiote summary demo-agentbom.json
 ```
 
@@ -101,6 +101,8 @@ The eight built-in collector names are `shadowscan`, `mcp`, `model`, `prompt`, `
 
 Collection is static by default and does not execute project modules, model loaders, hooks or MCP launch commands. Configuration presence does not prove that a server is running or that its live tool definitions match the declaration. `verify-live` is a separate explicit execution operation requiring an independently pinned launcher policy and external isolation. `discover-mcp` is an explicit HTTPS observation operation. Neither command calls tools.
 
+Project validation compares static MCP records and configured tool fingerprints with fresh local evidence. A structure binding detects added or removed arguments, environment variables and tools. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` set, a keyed binding also detects same-version package swaps and changed argument, environment and endpoint values, without exporting anything a secret could be guessed from. Legacy snapshots without this binding need recollection; see [source reconciliation and migration](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/verification-source-binding.md).
+
 ## Key capabilities and limits
 
 | Capability | Evidence and limitation |
@@ -116,10 +118,6 @@ Collection is static by default and does not execute project modules, model load
 | GitHub Action | One collected inventory, caller-owned gates and optional SARIF upload; disabled or skipped gates are visible policy choices |
 
 MCP references include the relative configuration path and declared name. Recollect and review legacy snapshots that used name-only identities. Python source declaration collection has bounded application-file coverage and reports unresolved or dynamic registrations as gaps. See [TypeScript inventory](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/typescript-inventory.md), [ShadowScan integration](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/shadowscan-integration.md) and [runtime assurance](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/runtime-assurance.md) for the exact supported contracts.
-
-Project validation binds static MCP records to the original configuration before export redaction and compares configured tool fingerprints with fresh local evidence. Changing a package at the same version, launcher arguments, environment values, endpoint paths or declared descriptors invalidates the old snapshot. Legacy snapshots without this binding need recollection; see [source reconciliation and migration](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/verification-source-binding.md).
-
-IDE permission records describe collected project declarations. Claude's `permissions.defaultMode` and broad tool allowances are retained, while user/managed policy, workspace trust, deny/ask precedence and session flags remain outside effective-authorization verification. Scanner failures emit application-owned diagnostic codes; raw exception text and invalid model configuration values are omitted from failure reports.
 
 ## Commands and exit codes
 
@@ -198,6 +196,8 @@ Enable SARIF upload only when repository code scanning and the event's permissio
 Inventories can expose infrastructure, permissions, source references and instruction fingerprints. Restrict evidence access and retention. Static collection reduces secret capture, but consumers must review artifacts before sharing them. Keep credentials, private BOMs and customer data out of public issues.
 
 Use independent expected digests and signer/issuer policies. A signature or registry label does not establish content safety. Runtime integrations govern only calls actually mediated by their adapter; surrounding identity, network and sandbox controls are deployment responsibilities.
+
+IDE permission records describe collected project declarations. Claude's `permissions.defaultMode` and broad tool allowances are retained, while user/managed policy, workspace trust, deny/ask precedence and session flags remain outside effective-authorization verification. Scanner failures emit application-owned diagnostic codes; raw exception text and invalid model configuration values are omitted from failure reports.
 
 ## Documentation
 

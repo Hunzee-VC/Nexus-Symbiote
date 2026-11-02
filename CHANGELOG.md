@@ -6,7 +6,7 @@ Alpha release of the AgentBOM toolkit under the Hunzee-VC organization.
 
 ### Security
 
-- Bind static MCP server configuration before redaction and reconcile configured tool fingerprints against fresh source evidence; require recollection of legacy snapshots without the binding.
+- Bind static MCP server structure and reconcile configured tool fingerprints against fresh source evidence; with `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, bind configuration values by HMAC so exports never carry a digest that secrets could be guessed from. Require recollection of legacy snapshots without the binding.
 - Reject same-version MCP package substitutions, argument and endpoint-path drift, and edited supplied descriptors during project validation.
 - Replace raw scanner exception text with safe diagnostic codes and record malformed model metadata using field names only.
 - Read Claude's declared `permissions.defaultMode`, recognize bare broad tool grants, and retain allowances across collected settings layers without claiming effective authorization.
@@ -50,10 +50,9 @@ Alpha release of the AgentBOM toolkit under the Hunzee-VC organization.
 - Align documentation with MIT licensing and the alpha support boundary.
 - Document every command and option in `docs/cli-reference.md`, checked against the CLI by a test, and add help text to the 20 options that had none. Add `docs/offline-and-live-modes.md`.
 - Add an offline demo project, `examples/demo-agent`, with a walkthrough in `examples/README.md`. Remove `examples/customer-support-agent.json`, whose legacy tool fingerprints current validation rejects.
-- Rehearse releases on TestPyPI through the same pipeline as PyPI: the release workflow's `publish` input is now `none`, `testpypi` or `pypi`, each with its own protected environment and trusted publisher.
-- Build release distributions from a `git archive` export of the commit with `SOURCE_DATE_EPOCH`, and upload them before tests, evidence collection or the wheel smoke installation run. Previously evidence written during the run could enter the sdist, and a dependency resolved without hashes ran before the distributions were hashed and uploaded. Attest and publish jobs now reject artifact digest mismatches.
+- Rehearse releases on TestPyPI through the same pipeline as PyPI, replacing the separate `publish-testpypi.yml` workflow: the release workflow's `publish` input is now `none`, `testpypi` or `pypi`, each with its own protected environment and trusted publisher.
+- Build release distributions from a `git archive` export of the commit with `SOURCE_DATE_EPOCH`, and upload them before tests, evidence collection or the unpinned smoke installation run. Previously evidence written during the run could enter the sdist, and a dependency resolved without hashes ran before the distributions were hashed and uploaded. Attest and publish jobs now reject artifact digest mismatches.
 - Check `.yaml` workflows as well as `.yml` for unpinned Actions and expressions in shell source.
-- Verify both release distributions against their retained build attestation, repository, signing workflow, `main` ref and exact source digest in an unprivileged job before publication.
 - Canonical repository moved to Hunzee-VC/Nexus-Symbiote; documentation and package metadata updated accordingly.
 
 ## Unreleased

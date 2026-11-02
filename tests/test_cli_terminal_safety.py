@@ -54,3 +54,15 @@ def test_validate_shows_the_component_each_issue_belongs_to(tmp_path):
         main, ["validate", str(bom), "--project", str(project), "--no-project-policy"]
     )
     assert "[mcp-server:" in result.output, result.output
+
+
+def test_validate_prints_dangling_graph_references_literally(tmp_path):
+    hostile = "tool:" + MARKUP + CONTROLS
+    server = MCPServerComponent(bom_ref="mcp:docs", name="docs", tool_refs=[hostile])
+    bom = tmp_path / "bom.json"
+    bom.write_text(AIBOM(components=[server]).to_json())
+    result = CliRunner().invoke(main, ["validate", str(bom), "--no-project-policy"])
+    assert "ERROR:" in result.output, result.output
+    assert MARKUP in result.output
+    for character in ("\x1b", "\x07", "\r", "\u202e"):
+        assert character not in result.output

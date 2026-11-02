@@ -96,3 +96,78 @@ def test_cli_rejects_substituted_missing_and_legacy_package_identity(tmp_path):
     opaque = scan("opaque.json", "reviewed-docs@npm:replacement-docs@1.2.3")
     validate(original, 1)
     diff(original, opaque)
+
+
+def scan_server(project: Path, server: dict) -> MCPServerComponent:
+    (project / ".mcp.json").write_text(json.dumps({"mcpServers": {"docs": server}}))
+    result = MCPScanner().scan(project)
+    assert not result.scan_failures
+    return next(c for c in result.components if isinstance(c, MCPServerComponent))
+
+
+def test_short_environment_flags_do_not_discard_launcher_identity(tmp_path):
+    server = scan_server(
+        tmp_path,
+        {"command": "npx", "args": ["-y", "mcp-1@1.2.3"], "env": {"MODE": "m", "DEBUG": "1"}},
+    )
+    assert server.launcher_package == "npm:mcp-1"
+
+
+def test_credential_inside_package_name_withholds_launcher_identity(tmp_path):
+    server = scan_server(
+        tmp_path,
+        {"command": "npx", "args": ["-y", "docs-k8x2v9q4zt"], "env": {"TOKEN": "k8x2v9q4zt"}},
+    )
+    assert server.launcher_package is None
+    assert "k8x2v9q4zt" not in server.model_dump_json()
+
+
+@pytest.mark.parametrize(
+    "command,args",
+    [
+        ("npx", ["-y", "docs@."]),
+        ("npx", ["-y", "docs@.."]),
+        ("npx", ["-y", "docs.tgz"]),
+        ("npx", ["-y", "docs@release.TAR.GZ"]),
+        ("uvx", ["--from", "docs==1.2.3", "--index-url", "https://mirror.test/simple", "docs"]),
+        ("uvx", ["--from", "docs==1.2.3", "--find-links=/opt/wheels", "docs"]),
+        ("pipx", ["run", "--spec", "docs==1.2.3", "--index-url", "https://mirror.test", "docs"]),
+    ],
+)
+def test_local_or_alternate_index_launchers_have_no_registry_identity(tmp_path, command, args):
+    assert scan_server(tmp_path, {"command": command, "args": args}).launcher_package is None
+
+
+@pytest.mark.parametrize(
+    "before,after",
+    [
+        (
+            {"command": "npx", "args": ["-y", "docs@1.2.3"], "env": {"BASE": "https://a.test"}},
+            {"command": "npx", "args": ["-y", "docs@1.2.3"], "env": {"BASE": "https://b.test"}},
+        ),
+        ({"url": "https://mcp.test/safe/sse"}, {"url": "https://mcp.test/other/sse"}),
+    ],
+)
+def test_drift_gate_reports_redacted_source_changes_as_critical(
+    tmp_path, monkeypatch, before, after
+):
+    monkeypatch.setenv("NEXUS_SYMBIOTE_SOURCE_BINDING_KEY", "k" * 40)
+    project = tmp_path / "project"
+    project.mkdir()
+    runner = CliRunner()
+    snapshots = []
+    for index, server in enumerate([before, after]):
+        (project / ".mcp.json").write_text(json.dumps({"mcpServers": {"docs": server}}))
+        path = tmp_path / f"snapshot-{index}.json"
+        run = runner.invoke(
+            main, ["scan", str(project), "--report-only", "-f", "json", "-o", str(path)]
+        )
+        assert run.exit_code == 0, run.output
+        snapshots.append(str(path))
+    run = runner.invoke(main, ["diff", *snapshots, "--json-output", "--fail-on-alert"])
+    assert run.exit_code == 1, run.output
+    alerts = json.loads(run.stdout)["security_alerts"]
+    assert any(
+        alert["severity"] == "critical" and "static source binding changed" in alert["alert"]
+        for alert in alerts
+    ), alerts

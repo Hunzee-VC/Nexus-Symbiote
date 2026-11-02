@@ -294,6 +294,28 @@ class AIBOMDiffer:
                             "severity": "critical",
                         }
                     )
+            binding = (
+                "static_config_hash",
+                "static_config_hash_profile",
+                "static_value_binding",
+                "static_value_binding_key_id",
+                "static_value_binding_profile",
+            )
+            old_binding = tuple(old.properties.get(key) for key in binding)
+            new_binding = tuple(new.properties.get(key) for key in binding)
+            if old_binding != new_binding and (old_binding[0] or new_binding[0]):
+                # These bindings are the only compared fields covering launcher
+                # arguments, environment and endpoint paths, which exports redact.
+                modifications.append(
+                    {
+                        "detail": (
+                            "MCP server static source binding changed: launcher, arguments, "
+                            "environment, endpoint or declared tools differ, or the binding key "
+                            "changed. Review before execution."
+                        ),
+                        "severity": "critical",
+                    }
+                )
 
         if old.trust_tier != new.trust_tier:
             old_rank = TRUST_TIER_ORDER.get(old.trust_tier, 5)

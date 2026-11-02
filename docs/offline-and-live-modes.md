@@ -21,7 +21,7 @@ outside your local files, and only when you ask for **live mode** explicitly.
 | | Offline (default) | Live (`--live` or `NEXUS_SYMBIOTE_MODE=live`) |
 |---|---|---|
 | Name resolution, network connections | Refused | Allowed for the three live commands only |
-| Starting processes | Refused | Allowed for `verify-live` only |
+| Starting processes | Refused | Not guarded for the three live commands; only `verify-live` is designed to start processes (its pinned launchers) |
 | `discover-mcp`, `advisories`, `verify-live` | Refused with exit 2 and a hint | Run |
 | Every other command | Runs | Runs, **still offline** |
 

@@ -1,21 +1,32 @@
 # Reconcile a BOM with its MCP configuration
 
 `validate --project` checks a supplied inventory against freshly collected local
-evidence. Static MCP server records now include `static_config_hash` and
-`static_config_hash_profile` properties. The profile is
-`nexus-symbiote/mcp-static-config/v1`: a domain-separated RFC 8785 digest of the
-original server configuration object, calculated before arguments, environment
-values and endpoint details are redacted from the exported fields.
+evidence. Static MCP server records carry two kinds of source binding.
 
-This binding detects a different package with the same version, changes to an
-opaque launcher, ordered arguments, environment values, endpoint paths and
-declared tool definitions. Credential rotation therefore also requires a new
-inventory. JSON object-key ordering and whitespace do not change the binding.
-The digest establishes source consistency; it does not authenticate a publisher,
-identify the installed executable or establish that a tool backend is benign.
-It is not encryption or password protection: someone who knows the surrounding
-configuration can test guesses for a low-entropy secret against the digest.
-Restrict access to these BOMs and their exports as sensitive integrity evidence.
+`static_config_hash` (profile `nexus-symbiote/mcp-static-config/v2`) is an RFC 8785
+digest of the server's structure: configuration field names, the displayed
+launcher, transport, endpoint origin, argument count, environment variable names
+and declared tool names. It covers only information the inventory already exports
+in clear, so it reveals nothing about secret values. It detects added or removed
+arguments, environment variables, fields and tools, and changed endpoint origins.
+
+Values are bound only when the operator sets `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` to
+a secret of at least 32 characters during collection and validation. Records then
+also carry `static_value_binding`, an HMAC-SHA256 under that key over the original
+server object (profile `nexus-symbiote/mcp-static-values/v1`), and a key
+identifier. This detects a different package with the same version, changed
+arguments, environment values, endpoint paths and opaque launchers. The key never
+enters the BOM; without it, the binding cannot be used to test guesses for a
+secret. Keep the key in the CI secret store, use the same key for a baseline and
+its candidates, and rotate it by recollecting both. A keyed BOM validated without
+the key, or with a different key, fails reconciliation.
+
+Profile v1 records (an unkeyed digest over raw configuration, including secret
+values) let anyone holding the BOM confirm guesses for low-entropy secrets. They
+fail reconciliation as unknown and require recollection; treat existing v1 exports
+as sensitive and replace them. Neither binding authenticates a publisher,
+identifies the installed executable or establishes that a tool backend is benign.
+JSON object-key ordering and whitespace do not change either binding.
 
 Configured tool entries retain their configuration source path and static
 collection mode. Validation compares their descriptor digest, fingerprint

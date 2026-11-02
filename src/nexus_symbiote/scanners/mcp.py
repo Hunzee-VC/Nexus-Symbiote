@@ -14,7 +14,9 @@ and detects unpinned versions, missing transport security, and rug-pull risk.
 from __future__ import annotations
 
 import ast
+import hmac
 import ipaddress
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -32,6 +34,7 @@ from nexus_symbiote.core.enums import (
 )
 from nexus_symbiote.core.hashing import (
     TOOL_DEFINITION_HASH_VERSION,
+    canonical_json,
     extract_version_pin,
     hash_canonical,
     hash_tool_definition,
@@ -60,10 +63,84 @@ _OCI_REPOSITORY = (
     r"[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)*"
 )
 
-# Bind the original server object before secrets and opaque arguments are
-# removed from exported fields. This is source consistency evidence, not a
-# publisher signature, an installed-artifact identity, or a live descriptor.
-STATIC_CONFIG_HASH_PROFILE = "nexus-symbiote/mcp-static-config/v1"
+# Exported bindings must not be computable from secret values: an unkeyed digest
+# over credentials lets anyone holding the BOM confirm guesses offline. The
+# structure digest covers only fields the inventory already exports in clear.
+# Values are bound by an HMAC under an operator key that never enters the BOM.
+STATIC_CONFIG_HASH_PROFILE = "nexus-symbiote/mcp-static-config/v2"
+STATIC_VALUE_BINDING_PROFILE = "nexus-symbiote/mcp-static-values/v1"
+SOURCE_BINDING_KEY_ENV = "NEXUS_SYMBIOTE_SOURCE_BINDING_KEY"
+_MIN_SOURCE_BINDING_KEY_LENGTH = 32
+
+
+def _value_binding(config: dict[str, Any]) -> tuple[str, str] | None:
+    key = os.environ.get(SOURCE_BINDING_KEY_ENV, "")
+    if not key:
+        return None
+    if len(key) < _MIN_SOURCE_BINDING_KEY_LENGTH:
+        raise ValueError(f"{SOURCE_BINDING_KEY_ENV} must contain at least 32 characters")
+    material = key.encode()
+    message = canonical_json({"profile": STATIC_VALUE_BINDING_PROFILE, "configuration": config})
+    mac = hmac.new(material, message.encode(), "sha256").hexdigest()
+    key_id = hmac.new(material, b"nexus-symbiote/source-binding-key-id", "sha256").hexdigest()
+    return "hmac-sha256:" + mac, key_id[:32]
+
+
+# Index, registry and find-links options decide where a launcher fetches its package.
+# Without credentials they are not secret, so the unkeyed digest binds them.
+_SOURCE_OPTIONS = frozenset(
+    {
+        "-i",
+        "-f",
+        "--index",
+        "--default-index",
+        "--index-url",
+        "--extra-index-url",
+        "--find-links",
+        "--registry",
+    }
+)
+
+
+def _package_sources(args: list[str], secrets: list[str]) -> list[str]:
+    sources = []
+    for index, arg in enumerate(args):
+        name, separator, value = arg.partition("=")
+        if name not in _SOURCE_OPTIONS:
+            continue
+        if not separator:
+            value = args[index + 1] if index + 1 < len(args) else ""
+        if "://" in value:
+            parts = urlsplit(value)
+            try:
+                port = f":{parts.port}" if parts.port else ""
+            except ValueError:
+                # Never hash an unparsed authority: it may hold credentials.
+                sources.append(f"{name}=[unparsed]")
+                continue
+            value = f"{parts.scheme}://{parts.hostname or ''}{port}{parts.path}"
+        sources.append(f"{name}={redact_text(value, secrets)}")
+    return sorted(sources)
+
+
+# Short environment values are flags such as "1" or "true", not credentials. Matching
+# them against package names would silently discard ordinary launcher identities.
+_MIN_IDENTITY_SECRET_LENGTH = 8
+# npm resolves these specs to a local directory or tarball, not a registry package.
+_NPM_LOCAL_SPEC = re.compile(r"(?:^|@)\.|\.(?:tgz|tar|tar\.gz)$", re.IGNORECASE)
+# Options that make uvx or pipx resolve the package from somewhere other than PyPI.
+_PYTHON_SOURCE_OPTIONS = frozenset(
+    {
+        "-i",
+        "-f",
+        "--index",
+        "--default-index",
+        "--index-url",
+        "--extra-index-url",
+        "--find-links",
+        "--pip-args",
+    }
+)
 
 
 class MCPScanner(Scanner):
@@ -166,14 +243,45 @@ class MCPScanner(Scanner):
         safe_endpoint = (
             redact_text(sanitized_origin(endpoint_url), secrets) if endpoint_url else None
         )
-        source_config_hash = hash_canonical(
-            {"profile": STATIC_CONFIG_HASH_PROFILE, "configuration": config}
+        shown_command = (
+            command
+            if command in {"npx", "bunx", "uvx", "pipx", "docker", "node", "python", "python3"}
+            else ("[redacted-command]" if command else None)
         )
+        tool_names = sorted(
+            redact_text(str(tool.get("name", "")), secrets)
+            for tool in config.get("tools", [])
+            if isinstance(tool, dict)
+        )
+        source_config_hash = hash_canonical(
+            {
+                "profile": STATIC_CONFIG_HASH_PROFILE,
+                "structure": {
+                    "fields": sorted(config),
+                    "command": shown_command,
+                    "transport": transport,
+                    "endpoint": safe_endpoint,
+                    "argument_count": len(args),
+                    "environment_names": sorted(env),
+                    "tool_names": tool_names,
+                    "package_sources": _package_sources(args, secrets),
+                },
+            }
+        )
+        value_binding = _value_binding(config)
 
         package_ref = self._extract_package_ref(command, args)
         launcher_package = self._launcher_package(command, package_ref) if package_ref else None
-        if launcher_package and any(secret in launcher_package for secret in secrets):
-            launcher_package = None
+        if launcher_package and command in {"uvx", "pipx"}:
+            if any(arg.split("=", 1)[0] in _PYTHON_SOURCE_OPTIONS for arg in args):
+                launcher_package = None
+        if launcher_package:
+            package_name = launcher_package.split(":", 1)[1]
+            if any(
+                len(secret) >= _MIN_IDENTITY_SECRET_LENGTH and secret in package_name
+                for secret in secrets
+            ):
+                launcher_package = None
         version_pinned: bool | None = None
         version = None
         if package_ref:
@@ -241,6 +349,15 @@ class MCPScanner(Scanner):
                 "endpoint_credentials_omitted": bool(endpoint_url),
                 "static_config_hash": source_config_hash,
                 "static_config_hash_profile": STATIC_CONFIG_HASH_PROFILE,
+                **(
+                    {
+                        "static_value_binding": value_binding[0],
+                        "static_value_binding_key_id": value_binding[1],
+                        "static_value_binding_profile": STATIC_VALUE_BINDING_PROFILE,
+                    }
+                    if value_binding
+                    else {}
+                ),
             },
         )
 
@@ -315,7 +432,9 @@ class MCPScanner(Scanner):
         # A tag or range may follow the name. An alias, URL or path can point to
         # a different package, so its nominal name does not identify the target.
         package = re.fullmatch(rf"({_NPM_NAME})(?:@[A-Za-z0-9.*^~<>=|+ -]+)?", reference, re.ASCII)
-        return "npm:" + package[1] if package else None
+        if package is None or _NPM_LOCAL_SPEC.search(reference):
+            return None
+        return "npm:" + package[1]
 
     @staticmethod
     def _python_package_ref(command: str, value: str) -> str | None:
