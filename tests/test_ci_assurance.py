@@ -127,7 +127,15 @@ def test_verified_ci_aggregates_all_verification_jobs_and_rejects_skips():
     verified = jobs["verified"]
     assert verified["name"] == "Verified CI"
     assert verified["if"] == "always()"
-    assert {"test", "coverage", "quality", "distribution", "security-regressions"} <= jobs.keys()
+    assert {
+        "test",
+        "coverage",
+        "quality",
+        "distribution",
+        "security-regressions",
+        "dependency-audit",
+        "codeql",
+    } <= jobs.keys()
     assert set(verified["needs"]) == jobs.keys() - {"verified"}
 
 

@@ -1,10 +1,6 @@
 name: "CodeQL"
 
 on:
-  push:
-    branches: ["main"]
-  pull_request:
-    branches: ["main"]
   schedule:
     - cron: "0 6 * * 1"
   workflow_dispatch:
@@ -44,3 +40,21 @@ jobs:
         uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           category: "/language:${{ matrix.language }}"
+          output: ${{ runner.temp }}/codeql-sarif
+
+      - name: Reject high and critical security findings
+        env:
+          SARIF_PATH: ${{ runner.temp }}/codeql-sarif/python.sarif
+          CODEQL_REPORT: ${{ runner.temp }}/codeql-policy.json
+        run: python scripts/check_codeql_sarif.py "$SARIF_PATH" --out "$CODEQL_REPORT"
+
+      - name: Retain CodeQL analysis and policy evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: scheduled-codeql-policy-evidence
+          path: |
+            ${{ runner.temp }}/codeql-sarif/*.sarif
+            ${{ runner.temp }}/codeql-policy.json
+          if-no-files-found: error
+          retention-days: 14

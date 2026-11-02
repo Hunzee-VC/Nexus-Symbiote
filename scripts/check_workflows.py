@@ -42,7 +42,15 @@ def check(path: Path) -> list[str]:
                     errors.append(f"{path}: {name} references unknown prerequisites")
             if path.name == "ci.yml":
                 verified = jobs.get("verified", {})
-                required = {"test", "coverage", "quality", "distribution", "security-regressions"}
+                required = {
+                    "test",
+                    "coverage",
+                    "quality",
+                    "distribution",
+                    "security-regressions",
+                    "dependency-audit",
+                    "codeql",
+                }
                 if (
                     not isinstance(verified, dict)
                     or verified.get("name") != "Verified CI"
