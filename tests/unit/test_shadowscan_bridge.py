@@ -208,25 +208,27 @@ def test_import_models_become_unpinned_hosted_stubs() -> None:
     assert hosted.resolved_ref.is_unknown  # a scan sees names, never snapshots
 
 
-def test_malformed_model_providers_fall_back_to_unknown() -> None:
+def test_malformed_model_providers_fail_closed_with_a_typed_error() -> None:
+    """Hostile shapes must neither corrupt provider identity (string indexing
+    yielded 'o') nor escape as KeyError: the strict reader rejects them."""
     report = _report()
     report["findings"][0]["models"] = ["gpt-4o"]
     for bad in ("openai", {"a": 1}, [None, ""], 7):
         report["findings"][0]["model_providers"] = bad
-        result = import_shadowscan(report, now=NOW)  # neither 'o' nor KeyError: 0
-        (model,) = result.models
-        assert model.hosted is not None and model.hosted.value.provider == "unknown"
+        with pytest.raises(ShadowScanImportError, match="model_providers"):
+            import_shadowscan(report, now=NOW)
 
 
-def test_inverted_autonomy_interval_is_normalized_with_a_warning() -> None:
+def test_inverted_autonomy_interval_is_rejected_not_exported() -> None:
+    """ceiling < floor is contradictory evidence: it must never be stored or
+    exported as an observed L5 — the interval is dropped."""
     report = _report()
     for finding in report["findings"]:
         finding.get("metadata", {}).pop("autonomy", None)
     report["findings"][0].setdefault("metadata", {})["autonomy"] = {"floor": 5, "ceiling": 0}
     result = import_shadowscan(report, now=NOW)
-    assert result.autonomy_interval is not None
-    assert result.autonomy_interval.floor == 5 and result.autonomy_interval.ceiling == 5
-    assert any("inverted" in w for w in result.warnings)
+    assert result.autonomy_interval is None
+    assert result.automation_level is None
 
 
 def test_selector_filters_findings() -> None:

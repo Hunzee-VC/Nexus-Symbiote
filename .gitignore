@@ -28,3 +28,7 @@ agentbom-store/
 !tests/fixtures/**/*.sigstore.json
 !examples/**/*.sigstore.json
 site/
+
+# Example-agent fixtures are test inputs, not editor settings
+!examples/**/.vscode/
+!examples/**/.vscode/mcp.json
