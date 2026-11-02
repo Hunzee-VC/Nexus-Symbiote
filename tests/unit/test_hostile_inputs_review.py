@@ -330,3 +330,30 @@ def test_shell_double_dash_and_args_digest_credential_invariance() -> None:
     c, _ = redact_args(["-y", "pkg@1.0.0", "--registry", "https://tokC@reg.example/x"])
     assert a == b  # rotating a token does not change argsDigest's input
     assert all("tok" not in arg for arg in (*a, *c))
+
+
+def test_round4_shell_options_and_composition_refs() -> None:
+    from symbiote.collect.launchers import parse_launch
+
+    assert parse_launch("bash", ["-c", "-x", "--", "npx -y @e/f"]).purl == "pkg:npm/%40e/f"
+    base = {
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.7",
+        "version": 1,
+        "components": [{"type": "library", "name": "a", "bom-ref": "x"}],
+    }
+    assert any(
+        "compositions/0/assemblies" in e
+        for e in validate_cyclonedx(
+            {**base, "compositions": [{"aggregate": "complete", "assemblies": ["nope"]}]}
+        )
+    )
+    assert any(
+        "compositions/0/dependencies" in e
+        for e in validate_cyclonedx(
+            {**base, "compositions": [{"aggregate": "complete", "dependencies": ["nope"]}]}
+        )
+    )
+    assert (
+        validate_cyclonedx({**base, "compositions": [{"aggregate": "complete", "assemblies": ["x"]}]}) == []
+    )

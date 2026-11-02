@@ -105,6 +105,13 @@ def referential_errors(doc: dict[str, Any]) -> list[str]:
                 refs[ref] = where
         stack += [(f"{where}/components/{i}", c) for i, c in enumerate(node.get("components") or [])]
         stack += [(f"{where}/services/{i}", c) for i, c in enumerate(node.get("services") or [])]
+    for i, comp in enumerate(doc.get("compositions") or []):
+        if not isinstance(comp, dict):
+            continue
+        for key in ("assemblies", "dependencies", "vulnerabilities"):
+            for target in comp.get(key) or []:
+                if isinstance(target, str) and target not in refs and key != "vulnerabilities":
+                    errors.append(f"compositions/{i}/{key}: reference {target!r:.120} resolves to nothing")
     for i, dep in enumerate(doc.get("dependencies") or []):
         if not isinstance(dep, dict):
             continue

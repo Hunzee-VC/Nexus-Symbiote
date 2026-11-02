@@ -710,7 +710,8 @@ def _unwrap_shell(base: str, argv: list[str]) -> list[str] | None:
         posix_combined = base != "cmd" and re.fullmatch(r"-[a-zA-Z]*c", arg) is not None
         if (arg.lower() in switches or posix_combined) and i + 1 < len(argv):
             rest = argv[i + 1 :]
-            if rest and rest[0] == "--":
+            # the shell parses every option before the command string: skip them (-x, -e, --noprofile, --)
+            while rest and rest[0].startswith("-") and len(rest) > 1:
                 rest = rest[1:]
             if len(rest) == 1 and " " in rest[0]:
                 import shlex
