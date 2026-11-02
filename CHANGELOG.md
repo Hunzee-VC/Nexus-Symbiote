@@ -50,6 +50,9 @@ Alpha release of the AgentBOM toolkit under the Hunzee-VC organization.
 - Align documentation with MIT licensing and the alpha support boundary.
 - Document every command and option in `docs/cli-reference.md`, checked against the CLI by a test, and add help text to the 20 options that had none. Add `docs/offline-and-live-modes.md`.
 - Add an offline demo project, `examples/demo-agent`, with a walkthrough in `examples/README.md`. Remove `examples/customer-support-agent.json`, whose legacy tool fingerprints current validation rejects.
+- Rehearse releases on TestPyPI through the same pipeline as PyPI: the release workflow's `publish` input is now `none`, `testpypi` or `pypi`, each with its own protected environment and trusted publisher.
+- Build release distributions from a `git archive` export of the commit with `SOURCE_DATE_EPOCH`, and upload them before tests, evidence collection or the wheel smoke installation run. Previously evidence written during the run could enter the sdist, and a dependency resolved without hashes ran before the distributions were hashed and uploaded. Attest and publish jobs now reject artifact digest mismatches.
+- Check `.yaml` workflows as well as `.yml` for unpinned Actions and expressions in shell source.
 - Canonical repository moved to Hunzee-VC/Nexus-Symbiote; documentation and package metadata updated accordingly.
 
 ## Unreleased

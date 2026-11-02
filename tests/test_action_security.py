@@ -152,21 +152,45 @@ def test_workflow_pins_structure_and_release_privilege_separation():
     checker = importlib.util.module_from_spec(checker_spec)
     checker_spec.loader.exec_module(checker)
     root = Path(__file__).parents[1]
-    for path in [root / "action.yml", *(root / ".github/workflows").glob("*.yml")]:
+    workflows = root / ".github/workflows"
+    for path in [root / "action.yml", *workflows.glob("*.yml"), *workflows.glob("*.yaml")]:
         assert checker.check(path) == []
     release = yaml.safe_load((root / ".github/workflows/release.yml").read_text())
     events = release.get("on", release.get(True))
     assert set(events) == {"workflow_dispatch"}
-    assert events["workflow_dispatch"]["inputs"]["publish"]["default"] is False
+    publish_input = events["workflow_dispatch"]["inputs"]["publish"]
+    assert publish_input["type"] == "choice"
+    assert publish_input["options"] == ["none", "testpypi", "pypi"]
+    assert publish_input["default"] == "none"
     jobs = release["jobs"]
     assert jobs["build"]["permissions"] == {"contents": "read", "actions": "read"}
-    build_commands = [step.get("run", "") for step in jobs["build"]["steps"]]
+    build_steps = jobs["build"]["steps"]
+    build_commands = [step.get("run", "") for step in build_steps]
     assert any("--require-hashes -r requirements-ci.lock" in command for command in build_commands)
-    assert "python -m build --no-isolation" in build_commands
-    assert jobs["publish"]["environment"]["name"] == "pypi"
+    build = next(s for s in build_steps if s.get("run") == "python -m build --no-isolation")
+    assert build["working-directory"].endswith("/release-source")
+    assert any("git archive" in command for command in build_commands)
+
+    def index(predicate):
+        return next(i for i, step in enumerate(build_steps) if predicate(step))
+
+    upload = index(lambda s: s.get("name") == "Upload distributions")
+    # The attested bytes are uploaded before anything runs tests, writes evidence
+    # or installs dependencies for the wheel smoke test.
+    assert upload < index(lambda s: s.get("run") == "python -m pytest")
+    assert upload < index(lambda s: "evidence/" in s.get("run", ""))
+    assert upload < index(lambda s: 'release-smoke/bin/python" -m pip install' in s.get("run", ""))
+    assert jobs["publish"]["environment"]["name"] == "${{ inputs.publish }}"
+    assert jobs["publish"]["if"].startswith("inputs.publish != 'none'")
+    publish_step = next(s for s in jobs["publish"]["steps"] if "pypi-publish" in s["uses"])
+    assert "test.pypi.org/legacy/" in publish_step["with"]["repository-url"]
+    assert "upload.pypi.org/legacy/" in publish_step["with"]["repository-url"]
     assert set(jobs["publish"]["needs"]) == {"build", "attest"}
     for name in ["attest", "publish"]:
         assert all("run" not in step for step in jobs[name]["steps"])
+        downloads = [s for s in jobs[name]["steps"] if "download-artifact" in s.get("uses", "")]
+        assert downloads
+        assert all(s["with"]["digest-mismatch"] == "error" for s in downloads)
 
 
 def test_release_floating_dependencies_cannot_replace_attestation_or_publication_inputs():
