@@ -28,3 +28,6 @@ agentbom-store/
 !tests/fixtures/**/*.sigstore.json
 !examples/**/*.sigstore.json
 site/
+
+# Claude Code agent worktrees (local tooling, never project content)
+.claude/worktrees/
