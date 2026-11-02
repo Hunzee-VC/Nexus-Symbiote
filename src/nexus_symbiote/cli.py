@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
 
 import click
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from nexus_symbiote import __version__, modes
@@ -37,6 +39,18 @@ def _policy(root: Path, *, ignore_project: bool = False) -> Policy:
         return load_policy(root) or default_policy()
     except PolicyError as exc:
         raise click.ClickException(str(exc)) from exc
+
+
+# C0/C1 controls move the cursor or rewrite earlier output; bidirectional and
+# invisible format characters disguise text. Inventory data may contain any of them.
+_UNSAFE_TEXT = re.compile(
+    "[\x00-\x08\x0b-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]"
+)
+
+
+def _safe(value: object) -> str:
+    """Render untrusted text literally: no Rich markup and no terminal control sequences."""
+    return escape(_UNSAFE_TEXT.sub("\ufffd", str(value)))
 
 
 def _load_bom(path: str | Path) -> AIBOM:
@@ -178,7 +192,7 @@ def scan(
     """Scan a project and generate an AIBOM."""
     root = Path(project_path).resolve()
     if not root.is_dir():
-        err_console.print(f"[red]Error:[/] '{project_path}' is not a directory")
+        err_console.print(f"[red]Error:[/] '{_safe(project_path)}' is not a directory")
         sys.exit(1)
 
     from nexus_symbiote.core.models import ClaimEvidence
@@ -205,7 +219,7 @@ def scan(
         )
     if output_format not in {"json", "cyclonedx", "spdx", "sarif"}:
         raise click.BadParameter("Unknown output format", param_hint="--format")
-    console.print(f"[bold]Scanning[/] {root}")
+    console.print(f"[bold]Scanning[/] {_safe(root)}")
     aibom = AIBOM(metadata=AIBOMMetadata(authors=[]))
     aibom.finalize()
     surfaces_scanned: list[str] = []
@@ -225,7 +239,7 @@ def scan(
             if name == "model"
             else all_scanners[name]()
         )
-        console.print(f"  Running [cyan]{name}[/] scanner...")
+        console.print(f"  Running [cyan]{_safe(name)}[/] scanner...")
         try:
             configure = getattr(scanner, "configure", None)
             if configure:
@@ -282,7 +296,7 @@ def scan(
                 completed.append(name)
             console.print(f"    Found [green]{len(result.components)}[/] components")
         except Exception as exc:
-            err_console.print(f"  [red]Scanner '{name}' failed:[/] {exc}")
+            err_console.print(f"  [red]Scanner '{_safe(name)}' failed:[/] {_safe(exc)}")
             scan_failures.append(f"{name}: {exc}")
             scanner_status[name] = "failed"
     try:
@@ -346,7 +360,7 @@ def scan(
 
     if output:
         write_output_file(Path(output), out_data)
-        console.print(f"[bold green]Saved[/] {output}")
+        console.print(f"[bold green]Saved[/] {_safe(output)}")
     else:
         click.echo(out_data)
 
@@ -632,7 +646,10 @@ def validate(
         console.print("  Status: " + ("[green]PASS[/]" if c_report.is_complete else "[red]FAIL[/]"))
         console.print(f"  Components: {c_report.total_components}")
         for issue in c_report.issues:
-            console.print(f"  {issue.severity.upper()} [{issue.surface}] {issue.description}")
+            console.print(
+                f"  {_safe(issue.severity.upper())} \\[{_safe(issue.surface)}] "
+                f"{_safe(issue.description)}"
+            )
         valid = valid and c_report.is_complete
     else:
         console.print("  SKIPPED by explicit policy")
@@ -647,7 +664,8 @@ def validate(
         )
         for integrity_issue in i_report.issues:
             console.print(
-                f"  {integrity_issue.severity.upper()} [{integrity_issue.component_ref}] {integrity_issue.detail}"
+                f"  {_safe(integrity_issue.severity.upper())} \\[{_safe(integrity_issue.component_ref)}] "
+                f"{_safe(integrity_issue.detail)}"
             )
         valid = valid and i_report.is_valid
     else:
@@ -742,20 +760,20 @@ def risk(
 
     if report.findings:
         table = Table(title="Top Findings", show_lines=True)
-        table.add_column("Severity", style="bold", width=10)
-        table.add_column("Component", width=30)
-        table.add_column("Category", width=20)
-        table.add_column("Detail", width=50)
+        table.add_column("Severity", style="bold", min_width=8, no_wrap=True)
+        table.add_column("Component", ratio=2, max_width=30)
+        table.add_column("Category", ratio=1, max_width=20)
+        table.add_column("Detail", ratio=3)
 
         for finding in report.findings[:15]:
             sev_color = {"critical": "red", "high": "red", "medium": "yellow", "low": "blue"}.get(
                 finding.severity.value, "white"
             )
             table.add_row(
-                f"[{sev_color}]{finding.severity.value}[/]",
-                finding.component_name[:30],
-                finding.category,
-                finding.detail[:50],
+                f"[{sev_color}]{_safe(finding.severity.value)}[/]",
+                _safe(finding.component_name),
+                _safe(finding.category),
+                _safe(finding.detail),
             )
         console.print(table)
 
@@ -795,20 +813,20 @@ def diff(old_path: str, new_path: str, json_output: bool, fail_on_alert: bool = 
         if result.security_alerts:
             console.print("\n[bold red]Security Alerts:[/]")
             for alert in result.security_alerts:
-                console.print(f"  [{alert['severity'].upper()}] {alert['alert']}")
+                console.print(f"  \\[{_safe(alert['severity'].upper())}] {_safe(alert['alert'])}")
 
         if result.components_added:
             console.print(f"\n[green]+{len(result.components_added)} added[/]")
             for c in result.components_added:
-                console.print(f"  + {c.name} ({c.component_type})")
+                console.print(f"  + {_safe(c.name)} ({_safe(c.component_type)})")
         if result.components_removed:
             console.print(f"\n[red]-{len(result.components_removed)} removed[/]")
             for c in result.components_removed:
-                console.print(f"  - {c.name} ({c.component_type})")
+                console.print(f"  - {_safe(c.name)} ({_safe(c.component_type)})")
         if result.components_modified:
             console.print(f"\n[yellow]~{len(result.components_modified)} modified[/]")
             for c in result.components_modified:
-                console.print(f"  ~ {c.name}: {'; '.join(c.details)}")
+                console.print(f"  ~ {_safe(c.name)}: {_safe('; '.join(c.details))}")
 
     if fail_on_alert and result.security_alerts:
         raise click.exceptions.Exit(1)
@@ -829,11 +847,11 @@ def summary(aibom_path: str) -> None:
     if s["component_types"]:
         console.print("  Component types:")
         for ctype, count in sorted(s["component_types"].items()):
-            console.print(f"    {ctype}: {count}")
+            console.print(f"    {_safe(ctype)}: {count}")
     if s["risk_breakdown"]:
         console.print("  Risk breakdown:")
         for sev, count in sorted(s["risk_breakdown"].items()):
-            console.print(f"    {sev}: {count}")
+            console.print(f"    {_safe(sev)}: {count}")
 
 
 @main.command("blast-radius")
@@ -855,8 +873,8 @@ def blast_radius_command(aibom_path: str, component_ref: str, json_output: bool)
         console.print(
             "[bold]Potential blast radius[/] (repository association; effective authority unknown)"
         )
-        console.print("  Agents: " + ", ".join(result["affected_agents"]))
-        console.print("  Components: " + ", ".join(result["reachable_components"]))
+        console.print("  Agents: " + _safe(", ".join(result["affected_agents"])))
+        console.print("  Components: " + _safe(", ".join(result["reachable_components"])))
 
 
 @main.command()
@@ -874,11 +892,13 @@ def init(force: bool, path: str) -> None:
     target = Path(path).resolve() / ".nexus-symbiote.yaml"
 
     if target.exists() and not force:
-        err_console.print(f"[yellow]Warning:[/] {target} already exists. Use --force to overwrite.")
+        err_console.print(
+            f"[yellow]Warning:[/] {_safe(target)} already exists. Use --force to overwrite."
+        )
         sys.exit(1)
 
     write_output_file(target, DEFAULT_POLICY_YAML, overwrite=force)
-    console.print(f"[bold green]Created[/] {target}")
+    console.print(f"[bold green]Created[/] {_safe(target)}")
     console.print("  Edit this file to customize scan, risk, and validation policies.")
 
 
