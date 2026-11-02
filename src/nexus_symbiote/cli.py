@@ -296,7 +296,9 @@ def scan(
                 completed.append(name)
             console.print(f"    Found [green]{len(result.components)}[/] components")
         except Exception as exc:
-            err_console.print(f"  [red]Scanner '{_safe(name)}' failed:[/] {_safe(exc)}")
+            err_console.print(
+                f"  [red]Scanner '{_safe(name)}' failed:[/] {_safe(exc)}", soft_wrap=True
+            )
             scan_failures.append(f"{name}: {exc}")
             scanner_status[name] = "failed"
     try:
@@ -648,7 +650,8 @@ def validate(
         for issue in c_report.issues:
             console.print(
                 f"  {_safe(issue.severity.upper())} \\[{_safe(issue.surface)}] "
-                f"{_safe(issue.description)}"
+                f"{_safe(issue.description)}",
+                soft_wrap=True,
             )
         valid = valid and c_report.is_complete
     else:
@@ -665,7 +668,8 @@ def validate(
         for integrity_issue in i_report.issues:
             console.print(
                 f"  {_safe(integrity_issue.severity.upper())} \\[{_safe(integrity_issue.component_ref)}] "
-                f"{_safe(integrity_issue.detail)}"
+                f"{_safe(integrity_issue.detail)}",
+                soft_wrap=True,
             )
         valid = valid and i_report.is_valid
     else:
@@ -813,20 +817,23 @@ def diff(old_path: str, new_path: str, json_output: bool, fail_on_alert: bool = 
         if result.security_alerts:
             console.print("\n[bold red]Security Alerts:[/]")
             for alert in result.security_alerts:
-                console.print(f"  \\[{_safe(alert['severity'].upper())}] {_safe(alert['alert'])}")
+                console.print(
+                    f"  \\[{_safe(alert['severity'].upper())}] {_safe(alert['alert'])}",
+                    soft_wrap=True,
+                )
 
         if result.components_added:
             console.print(f"\n[green]+{len(result.components_added)} added[/]")
             for c in result.components_added:
-                console.print(f"  + {_safe(c.name)} ({_safe(c.component_type)})")
+                console.print(f"  + {_safe(c.name)} ({_safe(c.component_type)})", soft_wrap=True)
         if result.components_removed:
             console.print(f"\n[red]-{len(result.components_removed)} removed[/]")
             for c in result.components_removed:
-                console.print(f"  - {_safe(c.name)} ({_safe(c.component_type)})")
+                console.print(f"  - {_safe(c.name)} ({_safe(c.component_type)})", soft_wrap=True)
         if result.components_modified:
             console.print(f"\n[yellow]~{len(result.components_modified)} modified[/]")
             for c in result.components_modified:
-                console.print(f"  ~ {_safe(c.name)}: {_safe('; '.join(c.details))}")
+                console.print(f"  ~ {_safe(c.name)}: {_safe('; '.join(c.details))}", soft_wrap=True)
 
     if fail_on_alert and result.security_alerts:
         raise click.exceptions.Exit(1)
@@ -873,8 +880,10 @@ def blast_radius_command(aibom_path: str, component_ref: str, json_output: bool)
         console.print(
             "[bold]Potential blast radius[/] (repository association; effective authority unknown)"
         )
-        console.print("  Agents: " + _safe(", ".join(result["affected_agents"])))
-        console.print("  Components: " + _safe(", ".join(result["reachable_components"])))
+        console.print("  Agents: " + _safe(", ".join(result["affected_agents"])), soft_wrap=True)
+        console.print(
+            "  Components: " + _safe(", ".join(result["reachable_components"])), soft_wrap=True
+        )
 
 
 @main.command()

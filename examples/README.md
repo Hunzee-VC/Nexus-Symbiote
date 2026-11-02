@@ -77,10 +77,8 @@ endpoint and a high alert for the removed version pin, and exits 1:
 
 ```text
 Security Alerts:
-  [CRITICAL] Critical change in 'tickets': MCP server endpoint changed. Review
-before execution.; endpoint_url changed.
-  [HIGH] High change in 'notes': Version changed: 2025.8.21 → None; Version pin
-removed — now floating or unknown.; risks changed.
+  [CRITICAL] Critical change in 'tickets': MCP server endpoint changed. Review before execution.; endpoint_url changed.
+  [HIGH] High change in 'notes': Version changed: 2025.8.21 → None; Version pin removed — now floating or unknown.; risks changed.
 ```
 
 Compare snapshots taken from the same checkout path: an inventory records where
