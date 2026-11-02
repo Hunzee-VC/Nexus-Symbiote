@@ -211,6 +211,29 @@ def test_export_validation_is_offline(monkeypatch):
     assert validate_spdx(SPDXGenerator().generate(fixture_bom())) == []
 
 
+def test_validators_never_retrieve_remote_references(monkeypatch):
+    import urllib.request
+
+    from referencing.exceptions import Unresolvable
+
+    from nexus_symbiote.generators import validation
+
+    attempts = []
+
+    def denied(*args, **kwargs):
+        attempts.append(args)
+        raise OSError("remote retrieval blocked by the test")
+
+    monkeypatch.setattr(urllib.request, "urlopen", denied)
+    for fmt in ("spdx", "cyclonedx"):
+        registry = validation._validator(fmt)._resolver._registry
+        with pytest.raises(Unresolvable):
+            registry.resolver().lookup("https://example.invalid/remote.schema.json")
+    # referencing wraps retrieval errors in Unresolvable, so only the absence of
+    # any attempt proves the registry is pinned.
+    assert attempts == []
+
+
 def test_invalid_input_documents_return_errors_instead_of_crashing():
     assert validate_cyclonedx({"components": [None]})
     assert validate_spdx({"@graph": [None]})

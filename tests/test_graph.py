@@ -130,7 +130,7 @@ def test_scanner_failure_nonzero_and_explicit_report_only(tmp_path, monkeypatch)
     out = tmp_path / "bom.json"
     args = ["scan", str(tmp_path), "--scanner", "mcp", "-o", str(out)]
     result = runner.invoke(main, args)
-    assert result.exit_code == 1
+    assert result.exit_code == 3, "an incomplete collection exits 3, not a gate failure"
     data = json.loads(out.read_text())
     coverage = data["metadata"]["completeness"]
     assert coverage["scope"] == "repository"

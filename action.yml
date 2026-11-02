@@ -1,5 +1,5 @@
 name: Nexus SymBiote AgentBOM Scanner
-description: Collect one agent inventory, validate it, and export reviewable supply-chain evidence
+description: Collect one agent inventory offline, validate it, and export reviewable supply-chain evidence
 branding:
   icon: shield
   color: blue
@@ -66,6 +66,7 @@ runs:
         SYMBIOTE_RISK_CHECK: ${{ inputs.risk-check }}
         SYMBIOTE_RISK_THRESHOLD: ${{ inputs.risk-threshold }}
         SYMBIOTE_SARIF: ${{ inputs.sarif-upload }}
+        NEXUS_SYMBIOTE_MODE: offline
       run: python -I "$SYMBIOTE_ACTION_PATH/scripts/run_action.py"
     - name: Upload SARIF
       if: inputs.sarif-upload == 'true' && always() && steps.scan.outputs.sarif_path != ''

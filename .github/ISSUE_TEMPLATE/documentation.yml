@@ -1,0 +1,79 @@
+name: Documentation
+description: Report missing, unclear or incorrect documentation, or propose an improvement.
+labels: [documentation]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Documentation fixes are the fastest first contribution. If you already know the fix, a small pull request is welcome instead of an issue.
+        **Do not include real credentials, private inventories or unsanitized scan output.**
+
+  - type: dropdown
+    id: location
+    attributes:
+      label: Where is the problem?
+      options:
+        - README
+        - docs/concepts (security model, deployment evidence)
+        - docs/operations (releasing, runtime assurance, ShadowScan integration)
+        - docs/reference
+        - docs/migrations
+        - CLI help text (`nexus-symbiote --help` or a command's `--help`)
+        - GitHub Action (action.yml) or the consumer pre-commit hooks
+        - benchmarks README
+        - CONTRIBUTING, SECURITY, SUPPORT, GOVERNANCE or another community file
+        - Somewhere else
+    validations:
+      required: true
+
+  - type: input
+    id: page
+    attributes:
+      label: Page or file
+      description: The repository path and heading, or a link to the page.
+      placeholder: "docs/operations/releasing.md#per-release"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of problem is it?
+      options:
+        - Incorrect (the docs do not match the tool's behavior)
+        - Missing (a command, option, format or limit is undocumented)
+        - Unclear (correct but hard to follow)
+        - Broken link, formatting or rendering
+        - Typo or wording
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is wrong or missing?
+      description: Quote the current text where possible and say what you expected to find.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Suggested change
+      description: Proposed wording, or the information the page should carry. Optional.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or full commit SHA, if the problem is about behavior
+      description: Output of `nexus-symbiote --version`; for a source checkout, the 40-character commit SHA you tested.
+      placeholder: "nexus-symbiote, version 0.1.0  (commit 0123456789abcdef0123456789abcdef01234567)"
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: This report contains no real credentials, private inventories or customer data.
+          required: true
+        - label: I am willing to open a pull request for this change.

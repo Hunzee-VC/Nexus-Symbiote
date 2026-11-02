@@ -1232,6 +1232,43 @@
           },
           "title": "Scanner Status",
           "type": "object"
+        },
+        "collection_mode": {
+          "anyOf": [
+            {
+              "enum": [
+                "offline",
+                "live"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "offline: every record came from files or saved exports; live: at least one record came from a live step listed in live_operations; null: not recorded",
+          "title": "Collection Mode"
+        },
+        "offline_enforced": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Whether the producing run refused network access and process execution",
+          "title": "Offline Enforced"
+        },
+        "live_operations": {
+          "items": {
+            "$ref": "#/$defs/LiveOperation"
+          },
+          "title": "Live Operations",
+          "type": "array"
         }
       },
       "required": [
@@ -1974,6 +2011,50 @@
         "name"
       ],
       "title": "IDEAgentComponent",
+      "type": "object"
+    },
+    "LiveOperation": {
+      "additionalProperties": false,
+      "description": "One live step that contributed evidence: a network request or a launched process.",
+      "properties": {
+        "command": {
+          "description": "CLI command that performed the step, e.g. verify-live",
+          "title": "Command",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "network",
+            "process"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "target": {
+          "description": "Sanitized origin or BOM reference; never a credential",
+          "title": "Target",
+          "type": "string"
+        },
+        "observed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observed At"
+        }
+      },
+      "required": [
+        "command",
+        "kind",
+        "target"
+      ],
+      "title": "LiveOperation",
       "type": "object"
     },
     "MCPClientComponent": {

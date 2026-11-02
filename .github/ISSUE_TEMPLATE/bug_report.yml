@@ -1,0 +1,128 @@
+name: Bug report
+description: Report a crash, a wrong inventory entry, or an unexpected validation, risk, diff or export result.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not include real credentials, private inventories or BOM exports, launch policies, Nexus-ShadowScan reports from real environments, or exploit details.**
+        Report vulnerabilities and credential exposure through [private vulnerability reporting](https://github.com/aisecnomad/Nexus-symbiote/security/advisories/new) instead, as [SECURITY.md](https://github.com/aisecnomad/Nexus-symbiote/blob/main/SECURITY.md) describes.
+        A successful scan is an inventory result, not a safety certificate; a finding you disagree with is still a bug report, not a security report, unless it hides a real risk.
+
+  - type: input
+    id: version
+    attributes:
+      label: Output of `nexus-symbiote --version`, plus the full commit SHA for a source install
+      description: Version `0.1.0` is not yet published and covers many commits, so a source checkout needs `git rev-parse HEAD` (40 characters) as well.
+      placeholder: "nexus-symbiote, version 0.1.0  (commit 0123456789abcdef0123456789abcdef01234567)"
+    validations:
+      required: true
+
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      description: Output of `python --version`. Supported versions are 3.11 to 3.13.
+      placeholder: "Python 3.12.4"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: Distribution and version, or the CI runner image.
+      placeholder: "Ubuntu 24.04, macOS 15, Windows 11, ubuntu-latest in GitHub Actions"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: command
+    attributes:
+      label: Command
+      description: The command or entry point that misbehaved.
+      options:
+        - scan
+        - import-shadowscan
+        - validate
+        - risk
+        - diff
+        - summary
+        - blast-radius
+        - baseline
+        - vex
+        - init
+        - verify-artifact
+        - verify-discovery
+        - runtime
+        - advisories (live, opt-in)
+        - discover-mcp (live, opt-in)
+        - verify-live (live, opt-in)
+        - GitHub Action (action.yml)
+        - Consumer pre-commit hook (.pre-commit-hooks.yaml)
+        - Python API or other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: format
+    attributes:
+      label: Output format
+      options:
+        - json (native)
+        - cyclonedx
+        - spdx
+        - sarif
+        - vex
+        - Not applicable
+    validations:
+      required: true
+
+  - type: textarea
+    id: command-line
+    attributes:
+      label: Exact command and sanitized output
+      description: The full command line as run, with private paths, account identifiers and secrets removed, and the relevant output or traceback.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Synthetic reproduction
+      description: |
+        The smallest synthetic project that reproduces the problem: for example a temporary directory with one `.mcp.json`, `CLAUDE.md` or model file, written out here, or a public repository pinned to a commit. Use `${REDACTED}` or invented values in place of anything real.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and exit code
+      description: Include the process exit code. Note that a command can write an output file and still exit nonzero; both the file and the status are part of the result.
+    validations:
+      required: true
+
+  - type: textarea
+    id: policy
+    attributes:
+      label: Policy configuration (sanitized, optional)
+      description: The relevant part of `.nexus-symbiote.yaml` if one was in use, or the Action inputs.
+      render: yaml
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Before you submit
+      options:
+        - label: This report contains no real credentials, tokens, private inventories or BOM exports, launch policies, or customer data; every input shown is synthetic or public.
+          required: true
+        - label: I am willing to turn the reproduction into a test or a benchmark fixture.

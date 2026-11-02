@@ -7,6 +7,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
+from nexus_symbiote import exits
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.enums import (
@@ -215,7 +216,7 @@ class TestValidateCommand:
         bom_path = tmp_path / "test.json"
         runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_path)])
         result = runner.invoke(main, ["validate", str(bom_path)])
-        assert result.exit_code in (0, 1)
+        assert result.exit_code in (exits.OK, exits.GATE)
 
     def test_validate_with_project(self, tmp_path):
         project = _create_test_project(tmp_path)
@@ -223,7 +224,7 @@ class TestValidateCommand:
         bom_path = tmp_path / "test.json"
         runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_path)])
         result = runner.invoke(main, ["validate", str(bom_path), "--project", str(project)])
-        assert result.exit_code in (0, 1)
+        assert result.exit_code in (exits.OK, exits.GATE)
 
 
 class TestRiskCommand:
@@ -233,7 +234,7 @@ class TestRiskCommand:
         bom_path = tmp_path / "test.json"
         runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_path)])
         result = runner.invoke(main, ["risk", str(bom_path)])
-        assert result.exit_code in (0, 1)
+        assert result.exit_code in (exits.OK, exits.GATE)
 
     def test_risk_json_output(self, tmp_path):
         project = _create_test_project(tmp_path)

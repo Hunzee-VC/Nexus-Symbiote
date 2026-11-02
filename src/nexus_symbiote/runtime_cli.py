@@ -12,6 +12,7 @@ import click
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
+from nexus_symbiote import exits
 from nexus_symbiote.runtime import (
     ActionApproval,
     ApprovedSnapshot,
@@ -129,7 +130,10 @@ def sign(contract_path: Path, kind: str, keys: tuple[Path, ...], out: Path) -> N
 def verify(
     envelope_path: Path, kind: str, keys: tuple[Path, ...], threshold: int, bom: Path | None
 ) -> None:
-    """Verify purpose, signer, subject and time; invocation uses ReferenceGateway."""
+    """Verify purpose, signer, subject and time; invocation uses ReferenceGateway.
+
+    Unreadable or malformed inputs exit 1; a contract that fails verification exits 2.
+    """
     try:
         ring = {}
         for path in keys:
@@ -138,6 +142,10 @@ def verify(
                 raise ValueError("expected Ed25519 public key")
             ring[key_id(public)] = public
         envelope = Envelope.model_validate(strict_json(_read(envelope_path)))
+        companion = strict_json(_read(bom)) if bom is not None else None
+    except (ValueError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    try:
         contract, accepted = verify_contract(
             envelope, cast(Purpose, kind), ring, threshold=threshold
         )
@@ -148,17 +156,17 @@ def verify(
         )
         _window(contract, datetime.now(UTC), maximum)
         if isinstance(contract, ApprovedSnapshot):
-            if bom is None or digest(strict_json(_read(bom))) != contract.bom_digest:
+            if companion is None or digest(companion) != contract.bom_digest:
                 raise ValueError("snapshot verification requires its exact companion BOM")
-        result: dict[str, Any] = {
-            "contract_verified": True,
-            "kind": kind,
-            "accepted_signers": sorted(accepted),
-            "invocation_authorized": False,
-        }
-        click.echo(json.dumps(result, indent=2))
-    except (ValueError, OSError) as exc:
-        raise click.ClickException(str(exc)) from exc
+    except ValueError as exc:
+        raise exits.GateFailed(str(exc)) from exc
+    result: dict[str, Any] = {
+        "contract_verified": True,
+        "kind": kind,
+        "accepted_signers": sorted(accepted),
+        "invocation_authorized": False,
+    }
+    click.echo(json.dumps(result, indent=2))
 
 
 def register_runtime_commands(main: click.Group) -> None:

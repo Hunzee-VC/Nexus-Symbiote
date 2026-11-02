@@ -83,10 +83,14 @@ class Config:
         )
 
 
+RISK_PASSED, RISK_GATE_FAILED = 0, 2
+
+
 def _run(args: list[str]) -> subprocess.CompletedProcess[str]:
     # The executable is this interpreter; arguments never pass through a shell.
+    # --offline makes every step refuse network access and process execution.
     return subprocess.run(  # noqa: S603
-        [sys.executable, "-I", "-m", "nexus_symbiote", *args],
+        [sys.executable, "-I", "-m", "nexus_symbiote", "--offline", *args],
         text=True,
         capture_output=True,
         check=False,
@@ -179,7 +183,7 @@ def run(
                     "--json-output",
                 ]
             )
-            if scored.returncode not in {0, 1}:
+            if scored.returncode not in {RISK_PASSED, RISK_GATE_FAILED}:
                 raise ValueError("risk evaluation failed to run")
             report = json.loads(scored.stdout)
             score = report.get("overall_score")
@@ -189,8 +193,9 @@ def run(
                 or not math.isfinite(score)
             ):
                 raise ValueError("risk evaluation returned no finite numeric score")
-            emit(risk_score=str(score), passed="true" if scored.returncode == 0 else "false")
-            if scored.returncode != 0:
+            passed = scored.returncode == RISK_PASSED
+            emit(risk_score=str(score), passed="true" if passed else "false")
+            if not passed:
                 return 1
     return 0
 

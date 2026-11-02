@@ -66,6 +66,9 @@ jobs:
       - run: ruff format --check src tests scripts
       - run: mypy src/nexus_symbiote
       - run: python scripts/check_workflows.py
+      - run: python scripts/check_docs.py
+      - run: python scripts/generate_schemas.py --check
+      - run: python scripts/generate_cli_reference.py --check
   distribution:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -88,8 +91,9 @@ jobs:
           "$RUNNER_TEMP/wheel-smoke/bin/python" -m pip install dist/*.whl
           cd "$RUNNER_TEMP"
           "$RUNNER_TEMP/wheel-smoke/bin/python" -m nexus_symbiote --version
+          "$RUNNER_TEMP/wheel-smoke/bin/nexus-symbiote" --version
           mkdir "$RUNNER_TEMP/wheel-fixture"
           "$RUNNER_TEMP/wheel-smoke/bin/python" -m nexus_symbiote scan "$RUNNER_TEMP/wheel-fixture" --report-only -f json -o wheel-agentbom.json
           "$RUNNER_TEMP/wheel-smoke/bin/python" -m nexus_symbiote scan "$RUNNER_TEMP/wheel-fixture" --report-only -f cyclonedx -o wheel-agentbom.cdx.json
           "$RUNNER_TEMP/wheel-smoke/bin/python" -m nexus_symbiote scan "$RUNNER_TEMP/wheel-fixture" --report-only -f spdx -o wheel-agentbom.spdx.json
-          "$RUNNER_TEMP/wheel-smoke/bin/python" -c 'import json; d=json.load(open("wheel-agentbom.json")); assert "components" in d'
+          "$RUNNER_TEMP/wheel-smoke/bin/python" -c 'import json; d=json.load(open("wheel-agentbom.json")); assert "components" in d; assert d["metadata"]["completeness"]["offline_enforced"] is True'

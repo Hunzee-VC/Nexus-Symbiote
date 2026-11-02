@@ -87,12 +87,26 @@ def loss_report(bom: AIBOM, target: str) -> dict[str, Any]:
     }
 
 
+def collection_properties(bom: AIBOM) -> dict[str, str]:
+    """How the evidence was collected, as flat strings for exporter property bags."""
+    claim = bom.metadata.completeness
+    mode = claim.collection_mode if claim else None
+    enforced = claim.offline_enforced if claim else None
+    return {
+        "nexus-symbiote:collectionMode": mode or "unrecorded",
+        "nexus-symbiote:offlineEnforced": "unrecorded"
+        if enforced is None
+        else str(enforced).lower(),
+    }
+
+
 def document_properties(bom: AIBOM, target: str) -> list[dict[str, str]]:
     document = native_document(bom)
     return [
         {"name": "nexus-symbiote:document", "value": json_text(document)},
         {"name": "nexus-symbiote:documentDigest", "value": content_digest(document)},
         {"name": "nexus-symbiote:lossReport", "value": json_text(loss_report(bom, target))},
+        *({"name": name, "value": value} for name, value in collection_properties(bom).items()),
     ]
 
 

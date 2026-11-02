@@ -436,6 +436,15 @@ class VerifiedExtensionComponent(ComponentBase):
     risks: list[RiskAssessment] = Field(default_factory=list)
 
 
+class LiveOperation(InventoryModel):
+    """One live step that contributed evidence: a network request or a launched process."""
+
+    command: str = Field(description="CLI command that performed the step, e.g. verify-live")
+    kind: Literal["network", "process"]
+    target: str = Field(description="Sanitized origin or BOM reference; never a credential")
+    observed_at: datetime | None = None
+
+
 class CompletenessClaim(InventoryModel):
     """What was actually scanned and what was excluded."""
 
@@ -461,6 +470,19 @@ class CompletenessClaim(InventoryModel):
     source_unmapped_indexes: list[Annotated[int, Field(ge=0)]] = Field(default_factory=list)
 
     scanner_status: dict[str, str] = Field(default_factory=dict)
+
+    collection_mode: Literal["offline", "live"] | None = Field(
+        default=None,
+        description=(
+            "offline: every record came from files or saved exports; live: at least one "
+            "record came from a live step listed in live_operations; null: not recorded"
+        ),
+    )
+    offline_enforced: bool | None = Field(
+        default=None,
+        description="Whether the producing run refused network access and process execution",
+    )
+    live_operations: list[LiveOperation] = Field(default_factory=list)
 
 
 class AIBOMMetadata(InventoryModel):

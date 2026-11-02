@@ -1,0 +1,48 @@
+name: Usage question
+description: Ask about installation, a command, an export format, or how to read a sanitized result.
+labels: [question]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Read [SUPPORT.md](https://github.com/aisecnomad/Nexus-symbiote/blob/main/SUPPORT.md) first. This is a public issue: remove credentials, private paths, account identifiers, private inventories and sensitive findings. Use [private vulnerability reporting](https://github.com/aisecnomad/Nexus-symbiote/security/advisories/new) for anything security-sensitive.
+
+  - type: input
+    id: version
+    attributes:
+      label: Output of `nexus-symbiote --version`, plus the full commit SHA for a source install
+      placeholder: "nexus-symbiote, version 0.1.0  (commit 0123456789abcdef0123456789abcdef01234567)"
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Python version and operating system
+      placeholder: "Python 3.12.4, Ubuntu 24.04"
+    validations:
+      required: true
+
+  - type: textarea
+    id: question
+    attributes:
+      label: What are you trying to do?
+      description: Name the command, the output format and whether it is a static command or an opt-in live operation (`verify-live`, `discover-mcp`, `advisories`), without private project details.
+    validations:
+      required: true
+
+  - type: textarea
+    id: attempted
+    attributes:
+      label: What have you tried?
+      description: Link the documentation you followed and include a sanitized command, its exit code and a short error summary. Synthetic inputs only.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Before you submit
+      options:
+        - label: This question contains no real credentials, private inventories or customer data.
+          required: true

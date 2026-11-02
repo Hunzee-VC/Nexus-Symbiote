@@ -10,7 +10,7 @@ from urllib.parse import quote
 from nexus_symbiote import __version__
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import RiskSeverity
-from nexus_symbiote.generators._common import content_digest, prepare
+from nexus_symbiote.generators._common import collection_properties, content_digest, prepare
 from nexus_symbiote.generators.base import Generator
 
 SEVERITY_TO_SARIF = {
@@ -63,7 +63,7 @@ class SARIFGenerator(Generator):
                         "helpUri": (
                             risk.references[0]
                             if risk.references
-                            else "https://github.com/aisecnomad/nexus-symbiote"
+                            else "https://github.com/aisecnomad/Nexus-symbiote"
                         ),
                         "properties": {"security-severity": SECURITY_SEVERITY[risk.severity]},
                     }
@@ -117,13 +117,14 @@ class SARIFGenerator(Generator):
                         "driver": {
                             "name": "nexus-symbiote",
                             "version": __version__,
-                            "informationUri": "https://github.com/aisecnomad/nexus-symbiote",
+                            "informationUri": "https://github.com/aisecnomad/Nexus-symbiote",
                             "rules": list(rules.values()),
                         }
                     },
                     "results": results,
                     "invocations": [
                         {
+                            "properties": collection_properties(bom),
                             "executionSuccessful": True,
                             "endTimeUtc": bom.metadata.timestamp.astimezone(UTC)
                             .isoformat()

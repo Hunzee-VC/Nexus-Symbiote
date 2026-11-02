@@ -1,0 +1,37 @@
+cff-version: 1.2.0
+message: >-
+  If you use Nexus SymBiote in research or in a security program, cite this
+  repository. The project is alpha software: cite the exact version or commit
+  you used.
+title: Nexus SymBiote
+type: software
+authors:
+  - name: AISecNomad
+    website: https://github.com/aisecnomad
+repository-code: https://github.com/aisecnomad/Nexus-symbiote
+url: https://github.com/aisecnomad/Nexus-symbiote
+abstract: >-
+  Nexus SymBiote builds an Agent Bill of Materials (AgentBOM, AIBOM) for AI
+  agent projects from static evidence: MCP configuration, model artifacts,
+  prompts and skills, retrieval configuration, package manifests, A2A cards,
+  IDE agent configuration, and imported Nexus-ShadowScan reports. It exports
+  native JSON, CycloneDX 1.7, SPDX 3.0.1, SARIF, and VEX, validates
+  completeness and integrity, scores risk under a policy, and compares
+  snapshots. A successful scan is an inventory result, not a safety
+  certificate.
+keywords:
+  - agentbom
+  - aibom
+  - sbom
+  - ai-security
+  - supply-chain
+  - agentic-ai
+  - mcp
+  - model-context-protocol
+  - a2a
+  - cyclonedx
+  - spdx
+  - sarif
+  - vex
+license: MIT
+version: 0.1.0

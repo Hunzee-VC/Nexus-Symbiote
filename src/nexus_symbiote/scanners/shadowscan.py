@@ -67,6 +67,7 @@ class ImportedReport:
             collectors_requested=["shadowscan"],
             collectors_completed=["shadowscan"],
             unobserved_surfaces=["runtime", "effective-identity", "effective-authorization"],
+            collection_mode="offline",
         )
         return aibom
 

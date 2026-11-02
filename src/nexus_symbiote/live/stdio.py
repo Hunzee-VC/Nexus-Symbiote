@@ -15,6 +15,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+from nexus_symbiote import modes
 from nexus_symbiote.core.hashing import open_regular_file, parse_json_strict
 
 PROTOCOL = "2025-06-18"
@@ -186,6 +187,7 @@ def _capture(binary: Path, work: Path) -> list[dict[str, Any]]:
 
 def list_pinned_tools(command: str, digest: str) -> list[dict[str, Any]]:
     """Execute only a private copy of the exact bytes selected by operator policy."""
+    modes.require_live("process execution (verify-live: pinned launcher)")
     if (
         os.name != "posix"
         or not Path(command).is_absolute()

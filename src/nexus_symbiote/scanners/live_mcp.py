@@ -34,6 +34,7 @@ from urllib.parse import urlsplit
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
+from nexus_symbiote import __version__, modes
 from nexus_symbiote.core.hashing import hash_canonical
 from nexus_symbiote.utils.secrets import redact_metadata, redact_text
 
@@ -111,6 +112,8 @@ class DiscoveryResult:
     complete: bool = False
     pages_observed: int = 0
     bytes_observed: int = 0
+    collection_mode: str = "live"
+    input_digest: str | None = None
     coverage: dict[str, Any] = field(
         default_factory=lambda: {
             "scope": "tools/list responses in one bounded discovery session",
@@ -313,6 +316,7 @@ class PinnedHTTPTransport:
     def request(
         self, endpoint: str, body: bytes, headers: dict[str, str], *, timeout: float, max_bytes: int
     ) -> HTTPReply:
+        modes.require_live("network access (HTTPS request)")
         _, host, port, path = _endpoint(endpoint)
         started = time.monotonic()
         key = (host, port)
@@ -386,7 +390,7 @@ class PinnedHTTPTransport:
         raise DiscoveryError("SSE ended without matching response")
 
 
-def _json(raw: bytes) -> dict[str, Any]:
+def _loads(raw: bytes) -> Any:
     def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
         value: dict[str, Any] = {}
         for key, item in pairs:
@@ -396,13 +400,17 @@ def _json(raw: bytes) -> dict[str, Any]:
         return value
 
     try:
-        value = json.loads(
+        return json.loads(
             raw.decode("utf-8"),
             object_pairs_hook=unique,
             parse_constant=lambda _: (_ for _ in ()).throw(DiscoveryError("nonfinite JSON")),
         )
     except (UnicodeError, ValueError, RecursionError) as exc:
         raise DiscoveryError("invalid JSON response") from exc
+
+
+def _json(raw: bytes) -> dict[str, Any]:
+    value = _loads(raw)
     if not isinstance(value, dict):
         raise DiscoveryError("JSON response must be an object")
     return cast(dict[str, Any], value)
@@ -531,6 +539,7 @@ def discover_tools(
     checks; it exists for local fixtures or an independently controlled transport.
     It must never be selected from a repository/configuration being scanned.
     """
+    modes.require_live("network access (discover-mcp: HTTPS tools/list)")
     result = DiscoveryResult()
     session: str | None = None
     protected = [bearer_token] if isinstance(bearer_token, str) else []
@@ -623,7 +632,7 @@ def discover_tools(
             {
                 "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": {},
-                "clientInfo": {"name": "nexus-symbiote-discovery", "version": "0.1.0"},
+                "clientInfo": {"name": "nexus-symbiote-discovery", "version": __version__},
             },
         )
         if initialized.get("protocolVersion") != PROTOCOL_VERSION:
@@ -696,6 +705,77 @@ def discover_tools(
         result.failures.append(
             "Live MCP discovery refused or incomplete; check endpoint policy, protocol and configured limits."
         )
+        result.complete = False
+    finally:
+        result.completed_at = datetime.now(UTC).isoformat()
+    return result
+
+
+EXPORT_MAX_BYTES = 16 * 1024 * 1024
+
+
+def _export_pages(document: Any) -> list[Any]:
+    if isinstance(document, list):
+        return document
+    if isinstance(document, dict) and "jsonrpc" in document:
+        if document.get("jsonrpc") != "2.0" or "error" in document:
+            raise DiscoveryError("exported JSON-RPC response is not a successful result")
+        return [document.get("result")]
+    return [document]
+
+
+def read_tools_export(
+    data: bytes, *, label: str | None = None, limits: DiscoveryLimits | None = None
+) -> DiscoveryResult:
+    """Analyze a saved ``tools/list`` result offline, with the checks live discovery applies.
+
+    ``data`` is a ``tools/list`` result object, a JSON-RPC response carrying one,
+    or a list of result pages in order. Nothing is contacted. The records are
+    recorded declarations: whoever saved the export, not this run, observed them.
+    """
+    result = DiscoveryResult(
+        endpoint="[offline-export]",
+        collector_id="nexus-symbiote-mcp-export",
+        collection_mode="offline",
+        input_digest="sha256:" + hashlib.sha256(data).hexdigest(),
+        bytes_observed=len(data),
+    )
+    result.coverage["scope"] = "tools/list results read from a saved export"
+    result.coverage["assurance"] = "recorded-server-declarations"
+    try:
+        limits = limits or DiscoveryLimits()
+        if label is not None:
+            origin, _, _, path = _endpoint(label)
+            result.endpoint = origin + path
+        if len(data) > EXPORT_MAX_BYTES:
+            raise DiscoveryError("tools/list export exceeds the byte limit")
+        pages = _export_pages(_loads(data))
+        if not pages or len(pages) > limits.max_pages:
+            raise DiscoveryError("tools/list export has no pages or too many pages")
+        names: set[str] = set()
+        for index, page in enumerate(pages):
+            tools = page.get("tools") if isinstance(page, dict) else None
+            if not isinstance(tools, list) or len(tools) + len(result.tools) > limits.max_tools:
+                raise DiscoveryError("invalid tool list or tool-count limit exceeded")
+            for raw_tool in tools:
+                tool = _tool(raw_tool, [])
+                if tool.name in names:
+                    raise DiscoveryError("duplicate tool identity in the export")
+                names.add(tool.name)
+                result.tools.append(tool)
+            result.pages_observed += 1
+            cursor = page.get("nextCursor")
+            last = index == len(pages) - 1
+            if cursor is not None and last:
+                raise DiscoveryError("export ends with a nextCursor; record every page")
+            if cursor is None and not last:
+                raise DiscoveryError("export has pages after the final page")
+        result.complete = True
+    except DiscoveryError as exc:
+        result.failures.append(str(exc))
+        result.complete = False
+    except (TypeError, ValueError, RecursionError):
+        result.failures.append("tools/list export is malformed or exceeds configured limits.")
         result.complete = False
     finally:
         result.completed_at = datetime.now(UTC).isoformat()

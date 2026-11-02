@@ -1,7 +1,13 @@
-"""Compare approved inventory with descriptors served by operator-pinned stdio launchers."""
+"""Compare approved inventory with served MCP tool descriptors.
+
+Live, the descriptors come from operator-pinned stdio launchers. Offline, they
+come from a recorded export in the ``RECORDED_FORMAT`` shape, which
+``recorded_descriptors`` writes from a live report.
+"""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -17,7 +23,9 @@ from nexus_symbiote.core.hashing import (
 )
 from nexus_symbiote.core.models import MCPServerComponent, ToolComponent
 from nexus_symbiote.graph import validate_graph
-from nexus_symbiote.live.stdio import list_pinned_tools
+from nexus_symbiote.live.stdio import MAX_TOOLS, list_pinned_tools
+
+RECORDED_FORMAT = "nexus-symbiote.recorded-tools/1"
 
 
 @dataclass
@@ -112,13 +120,65 @@ def fetch_tools_from_config(
     return "stdio", list_tools_stdio(command, [], expected_sha256=pin)
 
 
+def parse_recorded(document: Any) -> dict[str, list[dict[str, Any]]]:
+    """Validate a recorded-descriptor export: server references to complete tool lists."""
+    if (
+        not isinstance(document, dict)
+        or set(document) != {"format", "servers"}
+        or document["format"] != RECORDED_FORMAT
+        or not isinstance(document["servers"], dict)
+    ):
+        raise ValueError(f"expected a {RECORDED_FORMAT} document with format and servers")
+    recorded: dict[str, list[dict[str, Any]]] = {}
+    for reference, listing in document["servers"].items():
+        if not isinstance(listing, dict) or set(listing) != {"tools"}:
+            raise ValueError("each server maps to an object holding only its complete tools list")
+        tools = listing["tools"]
+        if not isinstance(tools, list) or len(tools) > MAX_TOOLS:
+            raise ValueError("invalid or oversized recorded tool list")
+        names: set[str] = set()
+        for tool in tools:
+            name = tool.get("name") if isinstance(tool, dict) else None
+            if (
+                not isinstance(name, str)
+                or not name
+                or len(name) > 256
+                or not name.isprintable()
+                or name in names
+                or not isinstance(tool.get("inputSchema"), dict)
+            ):
+                raise ValueError("invalid or duplicate recorded MCP tool")
+            names.add(name)
+        recorded[reference] = tools
+    return recorded
+
+
+def recorded_descriptors(report: LiveVerifyReport) -> dict[str, Any]:
+    """The descriptors a report observed, in the format ``parse_recorded`` reads back."""
+    return {
+        "format": RECORDED_FORMAT,
+        "servers": {
+            result.server_ref: {
+                "tools": [f.descriptor for f in result.tool_findings if f.descriptor is not None]
+            }
+            for result in report.results
+            if result.reachable
+        },
+    }
+
+
 def verify_mcp_servers(
     bom: AIBOM,
     config_lookup: dict[str, dict[str, Any]] | None = None,
     *,
     trusted_launchers: dict[str, dict[str, str]] | None = None,
+    recorded: Mapping[str, list[dict[str, Any]]] | None = None,
 ) -> LiveVerifyReport:
-    """Bind collection to the exact server reference in an independent launch policy."""
+    """Bind collection to the exact server reference in an independent launch policy.
+
+    With ``recorded``, descriptors come from that export instead and nothing is
+    launched; any transport is accepted because no process is started.
+    """
     report = LiveVerifyReport()
     if validate_graph(bom):
         report.results.append(
@@ -138,11 +198,16 @@ def verify_mcp_servers(
         report.servers_checked += 1
         report.results.append(result)
         try:
-            if server.transport not in ("stdio", None):
-                raise ValueError("unsupported transport")
-            _, tools = fetch_tools_from_config(
-                server.name, {}, trusted_launcher=(trusted_launchers or {}).get(server.bom_ref)
-            )
+            if recorded is not None:
+                if server.bom_ref not in recorded:
+                    raise ValueError("no recorded descriptors for this server reference")
+                tools = recorded[server.bom_ref]
+            else:
+                if server.transport not in ("stdio", None):
+                    raise ValueError("unsupported transport")
+                _, tools = fetch_tools_from_config(
+                    server.name, {}, trusted_launcher=(trusted_launchers or {}).get(server.bom_ref)
+                )
             live = {}
             for tool in tools:
                 if set(tool) - {"name", "description", "inputSchema", "annotations"}:
@@ -171,7 +236,11 @@ def verify_mcp_servers(
             if len(by_name) != len(approved):
                 raise ValueError("ambiguous tool references")
         except (OSError, ValueError, TypeError, RecursionError, SchemaError):
-            result.error = "Pinned MCP discovery refused or incomplete; review launch policy and protocol limits"
+            result.error = (
+                "Recorded descriptors missing or invalid for this server reference"
+                if recorded is not None
+                else "Pinned MCP discovery refused or incomplete; review launch policy and protocol limits"
+            )
             continue
         result.reachable = True
         report.servers_reachable += 1
@@ -203,14 +272,19 @@ def verify_mcp_servers(
     return report
 
 
-def record_candidate(bom: AIBOM, report: LiveVerifyReport) -> None:
-    """Update a separate unsigned candidate; observations confer no authority."""
+def record_candidate(bom: AIBOM, report: LiveVerifyReport, *, observed: bool = True) -> None:
+    """Update a separate unsigned candidate; observations confer no authority.
+
+    ``observed`` is True when this run launched the servers. Descriptors replayed
+    from a recorded export keep declared assurance: this run did not observe them.
+    """
     from datetime import UTC, datetime
     from urllib.parse import quote
 
+    from nexus_symbiote import modes
     from nexus_symbiote.core.aibom import DependencyEdge
     from nexus_symbiote.core.enums import AssuranceLevel
-    from nexus_symbiote.core.models import ClaimEvidence
+    from nexus_symbiote.core.models import ClaimEvidence, CompletenessClaim, LiveOperation
 
     if not report.complete or any(
         finding.status == "missing" for result in report.results for finding in result.tool_findings
@@ -243,8 +317,13 @@ def record_candidate(bom: AIBOM, report: LiveVerifyReport) -> None:
                         source_ref=result.server_ref,
                         target_ref=tool.bom_ref,
                         relationship="provides-tool",
-                        assurance_level="observed",
-                        conditions="served descriptor observed; backend behavior and authorization unverified",
+                        assurance_level="observed" if observed else "declared",
+                        conditions=(
+                            "served descriptor observed"
+                            if observed
+                            else "descriptor read from a recorded export"
+                        )
+                        + "; backend behavior and authorization unverified",
                     )
                 )
             tool.definition_hash = finding.definition_hash
@@ -252,12 +331,17 @@ def record_candidate(bom: AIBOM, report: LiveVerifyReport) -> None:
             tool.description_text = descriptor.get("description", "")
             tool.input_schema = descriptor["inputSchema"]
             tool.annotations = descriptor.get("annotations") or {}
-            tool.assurance_level = AssuranceLevel.OBSERVED
+            level = AssuranceLevel.OBSERVED if observed else AssuranceLevel.DECLARED
+            tool.assurance_level = level
             tool.claims["tool_definition"] = ClaimEvidence(
-                assurance=AssuranceLevel.OBSERVED,
-                method="operator-pinned-stdio-tools-list",
-                scope="served-descriptor",
-                collector="nexus-symbiote-live-stdio",
+                assurance=level,
+                method=(
+                    "operator-pinned-stdio-tools-list" if observed else "recorded-tools-list-export"
+                ),
+                scope="served-descriptor" if observed else "recorded-descriptor",
+                collector="nexus-symbiote-live-stdio"
+                if observed
+                else "nexus-symbiote-recorded-tools",
                 observed_at=datetime.now(UTC),
             )
         server = bom.get_component(result.server_ref)
@@ -270,3 +354,21 @@ def record_candidate(bom: AIBOM, report: LiveVerifyReport) -> None:
                 and component.mcp_server_ref == result.server_ref
             ]
             server.tool_count = len(server.tool_refs)
+    claim = bom.metadata.completeness or CompletenessClaim(scope="live-candidate")
+    bom.metadata.completeness = claim
+    if observed:
+        now = datetime.now(UTC)
+        claim.collection_mode = "live"
+        claim.offline_enforced = False
+        claim.live_operations.extend(
+            LiveOperation(
+                command="verify-live", kind="process", target=r.server_ref, observed_at=now
+            )
+            for r in report.results
+            if r.reachable
+        )
+    else:
+        claim.collection_mode = claim.collection_mode or "offline"
+        claim.offline_enforced = bool(claim.offline_enforced) and (
+            modes.current() is modes.Mode.OFFLINE
+        )

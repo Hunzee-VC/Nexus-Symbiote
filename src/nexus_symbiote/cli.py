@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import json
-import sys
+import os
 from pathlib import Path
+from typing import Any
 
 import click
 from rich.console import Console
 from rich.table import Table
 
-from nexus_symbiote import __version__
+from nexus_symbiote import __version__, exits, modes
+from nexus_symbiote.cli_common import collection_evidence, load_bom
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import AssuranceLevel
 from nexus_symbiote.core.models import AIBOMMetadata, CompletenessClaim
@@ -21,9 +23,7 @@ from nexus_symbiote.supply_chain_cli import register_supply_chain_commands
 from nexus_symbiote.utils.files import write_output_file
 
 console = Console(stderr=True)
-
-
-err_console = Console(stderr=True)
+err_console = console
 
 
 def _policy(root: Path, *, ignore_project: bool = False) -> Policy:
@@ -66,10 +66,108 @@ def _get_scanners() -> dict[str, type]:
     return SCANNER_REGISTRY
 
 
-@click.group()
+_MODE_FLAGS = frozenset({"--offline", "--live"})
+
+
+class _UsageError(click.UsageError):
+    """A Click usage error, shown unchanged, that exits 1 instead of 2.
+
+    Exit 2 means complete evidence failed a gate. A mistyped option or a missing
+    file stops the command before it collects anything, so a CI gate must not
+    read it as a policy result.
+    """
+
+    exit_code = exits.FAILURE
+
+    def __init__(self, error: click.UsageError) -> None:
+        super().__init__(error.message, error.ctx)
+        self.error = error
+
+    def format_message(self) -> str:
+        return self.error.format_message()
+
+    def __str__(self) -> str:
+        return str(self.error)
+
+    def show(self, file: Any = None) -> None:
+        self.error.show(file)
+
+
+def _usage(error: click.UsageError) -> click.UsageError:
+    if isinstance(error, click.NoSuchOption) and error.option_name in _MODE_FLAGS:
+        error = click.NoSuchOption(
+            error.option_name,
+            message=error.format_message()
+            + " (--offline and --live go before the command: nexus-symbiote --live <command> ...)",
+            ctx=error.ctx,
+        )
+    return _UsageError(error)
+
+
+class NexusGroup(click.Group):
+    """Root group: deterministic exit codes and the offline guarantee for every command."""
+
+    def make_context(
+        self,
+        info_name: str | None,
+        args: list[str],
+        parent: click.Context | None = None,
+        **extra: Any,
+    ) -> click.Context:
+        try:
+            return super().make_context(info_name, args, parent, **extra)
+        except click.UsageError as exc:
+            raise _usage(exc) from None
+
+    def invoke(self, ctx: click.Context) -> Any:
+        try:
+            return super().invoke(ctx)
+        except click.UsageError as exc:
+            raise _usage(exc) from None
+        except modes.OfflineViolation as exc:
+            raise exits.Incomplete(
+                f"offline mode stopped the run before it completed: {exc} is disabled. "
+                "Nothing in a static command needs it; report this as a defect."
+            ) from None
+        except OSError as exc:
+            detail = exc.strerror or type(exc).__name__
+            target = f": {exc.filename}" if exc.filename else ""
+            raise click.ClickException(f"input or output failure ({detail}{target})") from None
+
+
+@click.group(cls=NexusGroup, context_settings={"help_option_names": ["-h", "--help"]})
 @click.version_option(version=__version__, prog_name="nexus-symbiote")
-def main() -> None:
-    """Nexus SymBiote — Agent Bill of Materials for AI supply chain security."""
+@click.option(
+    "--offline",
+    "offline_flag",
+    is_flag=True,
+    help="Refuse network access and process execution for this run (the default).",
+)
+@click.option(
+    "--live",
+    "live_flag",
+    is_flag=True,
+    help="Permit the live steps of discover-mcp, advisories and verify-live.",
+)
+@click.pass_context
+def main(ctx: click.Context, offline_flag: bool, live_flag: bool) -> None:
+    """Nexus SymBiote — Agent Bill of Materials for AI supply chain security.
+
+    Every command runs offline unless --live is given (or NEXUS_SYMBIOTE_MODE=live):
+    no network access and no process execution. discover-mcp, advisories and
+    verify-live need --live to contact a server or start a launcher; with --input
+    they analyze a saved export offline instead.
+
+    Exit codes: 0 complete and within policy; 1 usage, configuration, input or
+    output failure; 2 a gate or verification failed on complete evidence; 3
+    incomplete collection or observation, or a live step refused offline.
+    """
+    try:
+        resolved = modes.resolve(offline=offline_flag, live=live_flag, environ=os.environ)
+    except ValueError as exc:
+        raise click.UsageError(str(exc), ctx=ctx) from None
+    ctx.obj = resolved
+    ctx.with_resource(modes.enforce(resolved.mode))
 
 
 @main.command()
@@ -114,8 +212,7 @@ def scan(
     """Scan a project and generate an AIBOM."""
     root = Path(project_path).resolve()
     if not root.is_dir():
-        err_console.print(f"[red]Error:[/] '{project_path}' is not a directory")
-        sys.exit(1)
+        raise click.ClickException(f"'{project_path}' is not a directory")
 
     from nexus_symbiote.core.models import ClaimEvidence
     from nexus_symbiote.graph import assemble_repository_agent, validate_graph
@@ -239,6 +336,7 @@ def scan(
             "live-tools",
             "network",
         ],
+        **collection_evidence(),
     )
     passed, risk_report = RiskScorer(
         fail_threshold=policy.risk.fail_threshold,
@@ -276,9 +374,18 @@ def scan(
     if risk_report.warning_threshold_exceeded:
         err_console.print(f"[yellow]Risk warning:[/] score {risk_report.overall_score:.1f}")
     if scan_failures or not passed:
-        err_console.print("[yellow]Report only[/]" if report_mode else "[red]Scan gate failed[/]")
-        if not report_mode:
-            raise click.exceptions.Exit(1)
+        if report_mode:
+            err_console.print("[yellow]Report only[/]")
+        elif scan_failures:
+            raise exits.Incomplete(
+                f"scan incomplete: {len(scan_failures)} collection failure(s); "
+                "see metadata.completeness.scan_failures in the inventory"
+            )
+        else:
+            reasons = "; ".join(risk_report.gate_reasons) or "risk policy not satisfied"
+            raise exits.GateFailed(
+                f"scan gate failed: {reasons} (risk score {risk_report.overall_score:.1f})"
+            )
 
 
 @main.command("import-shadowscan")
@@ -292,8 +399,17 @@ def scan(
     default="json",
 )
 @click.option("--report-only", is_flag=True, help="Emit imported claims without a CI gate failure")
+@click.option(
+    "--no-project-policy",
+    is_flag=True,
+    help="Use built-in policy without reading configuration near the report.",
+)
 def import_shadowscan(
-    report_path: str, output: str, output_format: str, report_only: bool = False
+    report_path: str,
+    output: str,
+    output_format: str,
+    report_only: bool = False,
+    no_project_policy: bool = False,
 ) -> None:
     """Import a Nexus-ShadowScan report and generate an AIBOM of imported claims.
 
@@ -302,7 +418,7 @@ def import_shadowscan(
     """
     from nexus_symbiote.scanners.shadowscan import ShadowScanImporter
 
-    policy = _policy(Path(report_path).parent)
+    policy = _policy(Path(report_path).parent, ignore_project=no_project_policy)
     importer = ShadowScanImporter()
     try:
         imported = importer.read_report(Path(report_path))
@@ -310,6 +426,8 @@ def import_shadowscan(
         raise click.ClickException("Failed to safely import the ShadowScan report") from exc
 
     aibom = imported.to_native_bom()
+    if aibom.metadata.completeness is not None:
+        aibom.metadata.completeness.offline_enforced = modes.current() is modes.Mode.OFFLINE
     aibom.finalize()
 
     if output_format == "sarif":
@@ -339,7 +457,7 @@ def import_shadowscan(
         f"Imported {len(imported.components)} components and saved {output}; discovery coverage remains partial."
     )
     if imported.source_status != "complete" and not report_only:
-        raise click.ClickException("ShadowScan source report is incomplete; the BOM is partial")
+        raise exits.Incomplete("ShadowScan source report is incomplete; the BOM is partial")
 
     from nexus_symbiote.validators.risk import RiskScorer
 
@@ -350,8 +468,7 @@ def import_shadowscan(
         fail_on_severity=policy.risk.fail_on_severity,
     ).passes_gate(aibom)
     if not passed and not (report_only or policy.scan.failure_mode == "report-only"):
-        err_console.print("[red]Imported claims do not establish complete verified coverage[/]")
-        raise click.exceptions.Exit(1)
+        raise exits.GateFailed("imported claims do not establish complete verified coverage")
 
 
 @main.command("verify-artifact")
@@ -384,7 +501,7 @@ def verify_artifact(
 
     from nexus_symbiote.scanners.base import read_regular_text
     from nexus_symbiote.utils.confined import hash_confined_file
-    from nexus_symbiote.utils.crypto import verify_sigstore_digest
+    from nexus_symbiote.utils.crypto import SIGSTORE_MISSING, verify_sigstore_digest
 
     if not re.fullmatch(r"sha256:[0-9a-f]{64}", expected_digest):
         raise click.ClickException(
@@ -401,7 +518,7 @@ def verify_artifact(
             "Cannot safely hash the artifact within the project root"
         ) from exc
     if not hmac.compare_digest(digest, expected_digest):
-        raise click.ClickException("Artifact digest mismatch")
+        raise exits.GateFailed("Artifact digest mismatch")
     if bundle:
         try:
             bundle_bytes = read_regular_text(Path(bundle)).encode("utf-8")
@@ -412,8 +529,10 @@ def verify_artifact(
                 "Bundle verification requires both signer identity and issuer"
             )
         verified = verify_sigstore_digest(digest, bundle_bytes, signer_identity, issuer)
+        if verified.error == SIGSTORE_MISSING:
+            raise click.ClickException(SIGSTORE_MISSING)
         if not verified.verified:
-            raise click.ClickException("Sigstore signature or signer policy verification failed")
+            raise exits.GateFailed("Sigstore signature or signer policy verification failed")
         click.echo(
             "Artifact digest and Sigstore signer policy verified. This does not establish artifact safety or a deployment binding."
         )
@@ -450,7 +569,7 @@ def verify_discovery(
     from nexus_symbiote.core.hashing import parse_json_strict
     from nexus_symbiote.scanners.base import read_regular_text
     from nexus_symbiote.scanners.shadowscan import MAX_REPORT_BYTES, ShadowScanImporter
-    from nexus_symbiote.utils.crypto import verify_sigstore_digest
+    from nexus_symbiote.utils.crypto import SIGSTORE_MISSING, verify_sigstore_digest
 
     if any(x is not None for x in (bundle, signer_identity, issuer)) and not all(
         (bundle, signer_identity, issuer)
@@ -471,7 +590,7 @@ def verify_discovery(
         raise click.ClickException("BOM does not contain a valid ShadowScan report digest")
     actual = "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
     if not hmac.compare_digest(actual, expected):
-        raise click.ClickException("Discovery report digest mismatch")
+        raise exits.GateFailed("Discovery report digest mismatch")
     if projection or bundle:
         try:
             projected = ShadowScanImporter().parse_report(text).to_native_bom().to_dict()
@@ -481,10 +600,16 @@ def verify_discovery(
                 projected["metadata"].pop(field)
                 if not isinstance(doc["metadata"].pop(field, None), str):
                     raise ValueError("missing generated metadata")
+            # Whether the importing run enforced offline mode describes that run,
+            # not the report, so it is excluded like the import time.
+            for claim in (projected["metadata"], doc["metadata"]):
+                completeness = claim.get("completeness")
+                if isinstance(completeness, dict):
+                    completeness.pop("offline_enforced", None)
             if json.dumps(projected, sort_keys=True) != json.dumps(doc, sort_keys=True):
                 raise ValueError("projection differs")
         except (KeyError, TypeError, ValueError, RecursionError) as exc:
-            raise click.ClickException(
+            raise exits.GateFailed(
                 "BOM does not match the direct native ShadowScan projection"
             ) from exc
     if bundle and signer_identity and issuer:
@@ -492,8 +617,11 @@ def verify_discovery(
             bundle_bytes = read_regular_text(Path(bundle)).encode("utf-8")
         except (OSError, UnicodeError) as exc:
             raise click.ClickException("Cannot safely read the Sigstore bundle") from exc
-        if not verify_sigstore_digest(actual, bundle_bytes, signer_identity, issuer).verified:
-            raise click.ClickException(
+        signature = verify_sigstore_digest(actual, bundle_bytes, signer_identity, issuer)
+        if signature.error == SIGSTORE_MISSING:
+            raise click.ClickException(SIGSTORE_MISSING)
+        if not signature.verified:
+            raise exits.GateFailed(
                 "ShadowScan report signature or signer policy verification failed"
             )
         click.echo(
@@ -533,7 +661,7 @@ def validate(
     no_project_policy: bool = False,
 ) -> None:
     """Validate an AIBOM for completeness and integrity."""
-    bom = AIBOM.load(Path(aibom_path))
+    bom = load_bom(aibom_path)
 
     from nexus_symbiote.signature_policy import load_signature_policies
     from nexus_symbiote.validators.completeness import CompletenessValidator
@@ -608,7 +736,7 @@ def validate(
         console.print("  ERROR: " + "; ".join(bom.graph_issues()))
         valid = False
     if not valid:
-        raise click.exceptions.Exit(1)
+        raise click.exceptions.Exit(exits.GATE)
 
 
 @main.command()
@@ -633,7 +761,7 @@ def risk(
     no_project_policy: bool = False,
 ) -> None:
     """Score supply-chain risks in an AIBOM."""
-    bom = AIBOM.load(Path(aibom_path))
+    bom = load_bom(aibom_path)
 
     from nexus_symbiote.validators.risk import RiskScorer
 
@@ -651,7 +779,7 @@ def risk(
 
     if json_output:
         click.echo(json.dumps(report.to_dict(), indent=2))
-        sys.exit(0 if passed else 1)
+        raise click.exceptions.Exit(exits.OK if passed else exits.GATE)
 
     level_colors = {
         "critical": "red",
@@ -692,29 +820,26 @@ def risk(
             )
         console.print(table)
 
-    gate = "[green]PASSED[/]" if passed else "[red]FAILED[/]"
+    gate = "[green]PASSED[/]" if passed else "[red]FAILED[/]: " + "; ".join(report.gate_reasons)
     console.print(f"\nGate (threshold={threshold}): {gate}")
 
     if not passed:
-        sys.exit(1)
+        raise click.exceptions.Exit(exits.GATE)
 
 
 @main.command()
 @click.argument("old_path", type=click.Path(exists=True))
 @click.argument("new_path", type=click.Path(exists=True))
 @click.option("--json-output", is_flag=True, help="Output as JSON")
-def diff(old_path: str, new_path: str, json_output: bool) -> None:
+@click.option(
+    "--fail-on-change",
+    is_flag=True,
+    help="Exit 2 when the snapshots differ, for a drift gate in CI.",
+)
+def diff(old_path: str, new_path: str, json_output: bool, fail_on_change: bool = False) -> None:
     """Compare two AIBOM snapshots for supply-chain drift."""
-    try:
-        old_bom = AIBOM.load(Path(old_path))
-    except Exception:
-        click.echo(f"Error: {old_path} is not a valid native AIBOM file.", err=True)
-        sys.exit(1)
-    try:
-        new_bom = AIBOM.load(Path(new_path))
-    except Exception:
-        click.echo(f"Error: {new_path} is not a valid native AIBOM file.", err=True)
-        sys.exit(1)
+    old_bom = load_bom(old_path)
+    new_bom = load_bom(new_path)
 
     from nexus_symbiote.diff.differ import AIBOMDiffer
 
@@ -747,13 +872,15 @@ def diff(old_path: str, new_path: str, json_output: bool) -> None:
             console.print(f"\n[yellow]~{len(result.components_modified)} modified[/]")
             for c in result.components_modified:
                 console.print(f"  ~ {c.name}: {'; '.join(c.details)}")
+    if fail_on_change and result.has_changes:
+        raise click.exceptions.Exit(exits.GATE)
 
 
 @main.command()
 @click.argument("aibom_path", type=click.Path(exists=True))
 def summary(aibom_path: str) -> None:
     """Print a summary of an AIBOM."""
-    bom = AIBOM.load(Path(aibom_path))
+    bom = load_bom(aibom_path)
     s = bom.summary()
 
     console.print("[bold]AIBOM Summary[/]")
@@ -780,7 +907,7 @@ def blast_radius_command(aibom_path: str, component_ref: str, json_output: bool)
     from nexus_symbiote.graph import blast_radius
 
     try:
-        result = blast_radius(AIBOM.load(Path(aibom_path)), component_ref)
+        result = blast_radius(load_bom(aibom_path), component_ref)
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
     if json_output:
@@ -808,8 +935,7 @@ def init(force: bool, path: str) -> None:
     target = Path(path).resolve() / ".nexus-symbiote.yaml"
 
     if target.exists() and not force:
-        err_console.print(f"[yellow]Warning:[/] {target} already exists. Use --force to overwrite.")
-        sys.exit(1)
+        raise click.ClickException(f"{target} already exists. Use --force to overwrite.")
 
     write_output_file(target, DEFAULT_POLICY_YAML, overwrite=force)
     console.print(f"[bold green]Created[/] {target}")

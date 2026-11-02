@@ -1,0 +1,56 @@
+# Dependabot keeps the Action pins in .github/workflows moving and watches the
+# dependency ranges declared in pyproject.toml.
+#
+# It does not regenerate requirements-ci.lock. That hash-locked file is
+# refreshed by hand with the uv command recorded in its first lines
+# (uv pip compile pyproject.toml --extra dev --extra all --universal
+# --python-version 3.11 --generate-hashes --no-emit-index-url
+# -o requirements-ci.lock), after which every new package, hash, Python marker
+# and license implication is reviewed as CONTRIBUTING.md requires. A pip pull
+# request therefore cannot pass CI until the lock is regenerated in the same
+# change. A ruff bump must also carry the matching ruff-pre-commit rev and
+# version comment in .pre-commit-config.yaml.
+#
+# Review routing comes from CODEOWNERS.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      # One pull request per weekly run. Sub-actions of one repository (the
+      # codeql-action init, analyze and upload-sarif steps) must move together:
+      # a workflow that mixes their versions fails at analysis time.
+      actions:
+        patterns:
+          - "*"
+
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      dev-tools:
+        patterns:
+          - "ruff"
+          - "mypy"
+          - "pytest*"
+          - "hypothesis"
+          - "build"
+          - "twine"
+          - "types-*"
+      exporters-and-signing:
+        patterns:
+          - "cyclonedx-python-lib"
+          - "spdx-python-model"
+          - "sigstore"
+      # Every other range in one pull request rather than one per package: each
+      # needs the same hand-refreshed lock before CI can pass.
+      runtime:
+        patterns:
+          - "*"

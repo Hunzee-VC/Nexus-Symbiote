@@ -33,6 +33,9 @@ class SigstoreArtifactPolicy:
             raise ValueError("Both an expected signer identity and OIDC issuer are required")
 
 
+SIGSTORE_MISSING = "sigstore package not installed; install nexus-symbiote[sigstore]"
+
+
 @dataclass
 class VerificationResult:
     """Outcome of a signature or hash verification."""
@@ -117,9 +120,7 @@ def verify_sigstore_digest(
             },
         )
     except ImportError:
-        return VerificationResult(
-            False, error="sigstore package not installed; install nexus-symbiote[sigstore]"
-        )
+        return VerificationResult(False, error=SIGSTORE_MISSING)
     except Exception as exc:
         return VerificationResult(
             False, error=f"Sigstore artifact verification failed ({type(exc).__name__})"

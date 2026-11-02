@@ -1,45 +1,57 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27,<2"]
 build-backend = "hatchling.build"
 
 [project]
 name = "nexus-symbiote"
-version = "0.1.0"
-description = "Agent Bill of Materials (AgentBOM) — generate, validate, and manage AIBOMs for production AI agent systems"
+dynamic = ["version"]
+description = "Agent Bill of Materials (AgentBOM) for AI agent supply chains: inventory MCP servers and tools, models, prompts, retrieval, registries, A2A and IDE agents; export CycloneDX, SPDX, SARIF and VEX; validate, score and diff"
 readme = "README.md"
 license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 authors = [
     { name = "Emmanuel Dahunsi", email = "immanueldahunsi@gmail.com" },
 ]
 keywords = [
+    "agentbom",
     "aibom",
     "sbom",
     "ai-security",
     "supply-chain",
+    "agentic-ai",
+    "mcp",
+    "model-context-protocol",
+    "a2a",
     "cyclonedx",
     "spdx",
-    "mcp",
-    "agent-security",
+    "sarif",
+    "vex",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
+    "Environment :: Console",
     "Intended Audience :: Developers",
     "Intended Audience :: Information Technology",
-    "License :: OSI Approved :: MIT License",
+    "Intended Audience :: System Administrators",
+    "Operating System :: POSIX",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: Implementation :: CPython",
     "Topic :: Security",
     "Topic :: Software Development :: Quality Assurance",
+    "Topic :: System :: Software Distribution",
     "Typing :: Typed",
 ]
+# Each range caps the next major so an untested upstream major cannot resolve
+# into an unlocked install. requirements-ci.lock pins the exact reviewed set.
 dependencies = [
     "click>=8.1,<9",
     "pydantic>=2.5,<3",
     "rich>=13.0,<14",
-    "tomli>=2.0; python_version<'3.11'",
     "rfc8785>=0.1.4,<1",
     "pyyaml>=6.0,<7",
     "jsonschema>=4.23,<5",
@@ -47,6 +59,7 @@ dependencies = [
     "cryptography>=43,<48",
     "tree-sitter>=0.25,<0.26",
     "tree-sitter-typescript>=0.23,<0.24",
+    "packaging>=24,<27",
 ]
 
 [project.optional-dependencies]
@@ -56,13 +69,9 @@ cyclonedx = [
 sigstore = [
     "sigstore>=3.6.7,<4",
 ]
-yaml = [
-    "pyyaml>=6.0,<7",
-]
 all = [
     "cyclonedx-python-lib[json-validation]>=11.12,<12",
     "sigstore>=3.6.7,<4",
-    "pyyaml>=6.0,<7",
 ]
 dev = [
     "pytest>=8.0,<9",
@@ -77,7 +86,7 @@ dev = [
     "hypothesis>=6.0,<7",
     "spdx-python-model>=0.0.6,<1",
     "cyclonedx-python-lib[json-validation]>=11.12,<12",
-    "hatchling>=1.25,<2",
+    "hatchling>=1.27,<2",
     "editables>=0.5,<1",
 ]
 
@@ -85,10 +94,15 @@ dev = [
 nexus-symbiote = "nexus_symbiote.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/aisecnomad/nexus-symbiote"
-Repository = "https://github.com/aisecnomad/nexus-symbiote"
-Issues = "https://github.com/aisecnomad/nexus-symbiote/issues"
-Documentation = "https://github.com/aisecnomad/nexus-symbiote/tree/main/docs"
+Homepage = "https://github.com/aisecnomad/Nexus-symbiote"
+Documentation = "https://github.com/aisecnomad/Nexus-symbiote/blob/main/docs/index.md"
+Repository = "https://github.com/aisecnomad/Nexus-symbiote"
+Changelog = "https://github.com/aisecnomad/Nexus-symbiote/blob/main/CHANGELOG.md"
+Security = "https://github.com/aisecnomad/Nexus-symbiote/blob/main/SECURITY.md"
+Issues = "https://github.com/aisecnomad/Nexus-symbiote/issues"
+
+[tool.hatch.version]
+path = "src/nexus_symbiote/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/nexus_symbiote"]
@@ -102,7 +116,7 @@ target-version = "py311"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "N", "UP", "S", "B", "A", "C4", "SIM"]
+select = ["E", "F", "W", "I", "N", "UP", "S", "B", "A", "C4", "SIM", "RUF100"]
 ignore = ["S101", "UP042", "E501", "SIM102", "SIM105"]
 
 [tool.mypy]
@@ -112,4 +126,4 @@ plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-v --tb=short"
+addopts = "--strict-markers --strict-config --tb=short"

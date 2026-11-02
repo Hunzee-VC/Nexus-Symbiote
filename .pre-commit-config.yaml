@@ -1,0 +1,62 @@
+# Pre-commit hooks for developing Nexus SymBiote itself. (.pre-commit-hooks.yaml
+# is different: it defines the scan and risk hooks that consuming repositories
+# install.)
+#
+# Install, after the locked install in CONTRIBUTING.md:
+#   python -m pip install pre-commit && pre-commit install
+# Run on everything: pre-commit run --all-files
+#
+# Every rev is an immutable commit; the comment names the tag it resolves to.
+# The ruff rev must stay equal to the ruff version pinned in requirements-ci.lock
+# so the hooks check exactly what CI checks. The mypy and workflow hooks run the
+# active environment's mypy and python (language: system), which is why the
+# locked install comes first.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c # v6.0.0
+    hooks:
+      # Fixtures and the vendored schemas are digest-bound byte for byte
+      # (benchmarks/manifest.json, benchmarks/inventory/manifest.json and
+      # src/nexus_symbiote/generators/schemas/vendor/SOURCES.json); never rewrite them.
+      - id: trailing-whitespace
+        # Two trailing spaces are a Markdown line break (.editorconfig keeps them).
+        args: [--markdown-linebreak-ext=md]
+        exclude: ^(tests/fixtures/|benchmarks/fixtures/|benchmarks/inventory/fixtures/|src/nexus_symbiote/generators/schemas/vendor/)
+      - id: end-of-file-fixer
+        exclude: ^(tests/fixtures/|benchmarks/fixtures/|benchmarks/inventory/fixtures/|src/nexus_symbiote/generators/schemas/vendor/)
+      - id: check-yaml
+      - id: check-json
+        # The mcp-malformed-coverage benchmark case is malformed on purpose: it
+        # checks that a broken MCP configuration is reported as a coverage gap,
+        # not silently skipped. The vendored SPDX schema is a digest-bound copy
+        # of the upstream file, which contains a duplicate key.
+        exclude: ^(benchmarks/fixtures/mcp-malformed-coverage/|src/nexus_symbiote/generators/schemas/vendor/)
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: detect-private-key
+      - id: check-merge-conflict
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: 25bcf95026b96e2dd3c0aec3090c3d6ef6ca2e6c # v0.17.3, equal to ruff==0.17.3 in requirements-ci.lock
+    hooks:
+      # CI runs `ruff check src tests scripts` and `ruff format --check` on the
+      # same directories; the hooks cover the same files and nothing else.
+      - id: ruff-check
+        files: ^(src|tests|scripts)/
+      - id: ruff-format
+        files: ^(src|tests|scripts)/
+
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy src/nexus_symbiote
+        entry: mypy src/nexus_symbiote
+        language: system
+        pass_filenames: false
+        files: ^(src/nexus_symbiote/.*\.pyi?|pyproject\.toml)$
+      - id: check-workflows
+        name: scripts/check_workflows.py
+        entry: python scripts/check_workflows.py
+        language: system
+        pass_filenames: false
+        files: ^(action\.yml|\.github/workflows/.*\.yml|scripts/check_workflows\.py)$

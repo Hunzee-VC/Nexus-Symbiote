@@ -23,9 +23,13 @@ def _schema(name: str) -> dict[str, Any]:
 
 @lru_cache(maxsize=2)
 def _validator(fmt: str) -> Any:
+    # Every validator gets an explicit registry. Without one, jsonschema falls
+    # back to a registry that retrieves unknown remote $ref URIs over the network.
     if fmt == "spdx":
         return Draft202012Validator(
-            _schema("spdx/spdx-json-schema-3.0.1.json"), format_checker=FormatChecker()
+            _schema("spdx/spdx-json-schema-3.0.1.json"),
+            registry=Registry(),
+            format_checker=FormatChecker(),
         )
     main = _schema("cyclonedx/bom-1.7.schema.json")
     base = main["$id"]

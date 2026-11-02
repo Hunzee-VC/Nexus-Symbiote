@@ -1,0 +1,64 @@
+name: Feature request
+description: Propose a scanner, exporter, validator, policy capability, CLI or Action change.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Static scans execute nothing and contact nothing, and failures stay closed. A proposal that needs network access, executable discovery or credential collection is only considered with an explicit design, an opt-in boundary and tests; say so below rather than leaving it implicit.
+        **Do not include real credentials, private inventories or customer data.**
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - New scanner or evidence source
+        - Exporter or output format (native JSON, CycloneDX, SPDX, SARIF, VEX)
+        - Validation, risk scoring or policy
+        - Diff, baseline or snapshot comparison
+        - CLI
+        - GitHub Action or pre-commit hook
+        - Live operation (opt-in; verify-live, discover-mcp, advisories)
+        - ShadowScan import
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to inventory, verify or decide that Nexus SymBiote does not support today? Include the evidence that exists on disk for it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: How should it work? Include example commands, configuration or output, and what the result should say when the evidence is missing or malformed.
+
+  - type: textarea
+    id: boundary
+    attributes:
+      label: Trust boundary
+      description: Does the proposal read anything outside the scanned project, execute anything, contact a network service, or handle credentials? If yes, describe the opt-in and what fails closed.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you have tried, including running Nexus-ShadowScan for discovery and importing its report.
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: This request contains no real credentials, private inventories or customer data.
+          required: true
+        - label: I am willing to implement this with synthetic fixtures and tests.

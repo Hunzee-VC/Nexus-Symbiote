@@ -63,10 +63,43 @@ def test_command_runner_never_uses_shell(monkeypatch):
         "-I",
         "-m",
         "nexus_symbiote",
+        "--offline",
         "scan",
         "$(touch PWNED)",
     ]
     assert captured["kwargs"].get("shell", False) is False
+
+
+@pytest.mark.parametrize("code,passed,returned", [(0, "true", 0), (2, "false", 1)])
+def test_risk_exit_codes_map_to_gate_outputs(tmp_path, code, passed, returned):
+    config = configuration(tmp_path, SYMBIOTE_VALIDATE="false")
+    outputs = tmp_path / "outputs"
+
+    def command(args):
+        if args[0] == "scan":
+            Path(args[args.index("--output") + 1]).write_text("{}")
+        return subprocess.CompletedProcess(
+            args, code if args[0] == "risk" else 0, '{"overall_score": 61.5}', ""
+        )
+
+    assert runner.run(config, command=command, outputs=outputs) == returned
+    lines = outputs.read_text().splitlines()
+    assert f"passed={passed}" in lines and "risk_score=61.5" in lines
+
+
+@pytest.mark.parametrize("code", [1, 3, 127])
+def test_risk_command_that_failed_to_run_is_not_a_gate_result(tmp_path, code):
+    config = configuration(tmp_path, SYMBIOTE_VALIDATE="false")
+
+    def command(args):
+        if args[0] == "scan":
+            Path(args[args.index("--output") + 1]).write_text("{}")
+        return subprocess.CompletedProcess(
+            args, code if args[0] == "risk" else 0, '{"overall_score": 0}', ""
+        )
+
+    with pytest.raises(ValueError, match="failed to run"):
+        runner.run(config, command=command)
 
 
 @pytest.mark.parametrize("status", [1, 7])
@@ -157,13 +190,33 @@ def test_workflow_pins_structure_and_release_privilege_separation():
     release = yaml.safe_load((root / ".github/workflows/release.yml").read_text())
     events = release.get("on", release.get(True))
     assert set(events) == {"workflow_dispatch"}
-    assert events["workflow_dispatch"]["inputs"]["publish"]["default"] is False
+    inputs = events["workflow_dispatch"]["inputs"]
+    assert inputs["publish"]["default"] == "none"
+    assert inputs["publish"]["options"] == ["none", "testpypi", "pypi"]
+    assert inputs["expected_commit"]["required"] is True
     jobs = release["jobs"]
+    assert release["permissions"] == {"contents": "read"}
     assert jobs["build"]["permissions"] == {"contents": "read"}
-    assert jobs["publish"]["environment"]["name"] == "pypi"
-    assert set(jobs["publish"]["needs"]) == {"build", "attest"}
+    assert any("EXPECTED_COMMIT" in step.get("env", {}) for step in jobs["build"]["steps"])
+    assert jobs["publication-gate"]["permissions"] == {"contents": "read"}
+    assert jobs["publish"]["permissions"] == {"id-token": "write"}
+    assert jobs["publish"]["environment"]["name"] == "${{ inputs.publish }}"
+    assert set(jobs["publish"]["needs"]) == {"build", "attest", "publication-gate"}
+    for name in ["publication-gate", "publish"]:
+        assert "inputs.publish != 'none'" in jobs[name]["if"]
+        assert "refs/heads/main" in jobs[name]["if"]
     for name in ["attest", "publish"]:
         assert all("run" not in step for step in jobs[name]["steps"])
+        assert all("checkout" not in step.get("uses", "") for step in jobs[name]["steps"])
+    publish = jobs["publish"]["steps"][-1]
+    assert publish["uses"].startswith("pypa/gh-action-pypi-publish@")
+    assert "test.pypi.org/legacy" in publish["with"]["repository-url"]
+    upload_jobs = [
+        name
+        for name, job in jobs.items()
+        if any("gh-action-pypi-publish" in step.get("uses", "") for step in job["steps"])
+    ]
+    assert upload_jobs == ["publish"]
 
 
 @pytest.mark.parametrize("validate", [True, False])
