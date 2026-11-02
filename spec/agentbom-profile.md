@@ -96,7 +96,7 @@ document and is the attestation subject.
 A standalone, signable change record between two snapshots:
 `{id, from_snapshot: Digest, to_snapshot: Digest, produced_at, producer, events: [DeltaEvent]}` with
 `DeltaEvent = {type, subject: id, before: Digest|null, after: Digest|null, evidence: [EvidenceRef], assurance, severity_hint}` and
-`type ∈ {tool-registered, tool-removed, tool-definition-changed, tool-annotations-changed, server-added, server-removed, server-identity-changed, model-added, model-routed, model-alias-resolved, sub-agent-spawned, memory-writer-added, instruction-changed, skill-changed, grant-added, grant-removed, grant-changed, identity-changed, registry-status-changed, signer-changed, data-source-added, trust-status-changed}`.
+`type ∈ {tool-registered, tool-removed, tool-definition-changed, tool-annotations-changed, server-added, server-removed, server-identity-changed, model-added, model-routed, model-alias-resolved, sub-agent-spawned, memory-writer-added, instruction-changed, skill-changed, grant-added, grant-removed, grant-changed, identity-changed, registry-status-changed, signer-changed, data-source-added, data-source-changed, data-source-removed, trust-status-changed}`.
 
 ## 3. Entities
 
@@ -177,7 +177,7 @@ Content is never embedded unless explicitly requested and under 4 KiB, and never
 ### 3.8 `Model`
 | Field | Type | Req | Notes |
 |---|---|---|---|
-| `kind` | `weights` \| `hosted` \| `adapter` \| `tokenizer` \| `chat-template` \| `embedding` | ✓ | |
+| `kind` | `weights` \| `hosted` \| `adapter` \| `tokenizer` \| `chat-template` \| `embedding` \| `unknown` | ✓ | |
 | `identity` | `Claim[ModelIdentity]` | ✓ | weights: `{purl?, manifest_root: Digest, manifest_ref?, file_count, formats: [str]}`; hosted: `{provider, endpoint_origin?, requested_ref, resolved_ref: Claim[str], alias_pinning: pinned \| floating \| unknown, provider_evidence: [EvidenceRef], fingerprint?: {method, digest, sampled_at, expires}}` |
 | `manifest` | `ModelManifest` | weights | `digests.md §3.6`; OMS-compatible |
 | `serialization` | `Claim[{formats: [safetensors \| onnx \| gguf \| pickle \| torch-zip \| tf-savedmodel \| keras-h5 \| joblib \| npz \| other], risk_class: none \| low \| code-exec-on-load \| template-execution, trust_remote_code: bool \| unknown, chat_template_executable: bool \| unknown, scanner?: {name, version, report_digest}}]` | weights | |
@@ -270,11 +270,12 @@ Aggregate completeness per surface and for the document: `complete` (all `querie
 - **verified** — evidence authenticated (signature over the exact digest) and evaluated against an explicit
   trust policy with a constrained signer and documented coverage.
 
-k8s-aibom import mapping (`aibom.confidence` / `k8s-aibom:confidence`): `declared→declared`;
-`inferred→observed` (`method=heuristic`, confidence 0.5, locator preserved); `unresolved→state=unknown`;
-`verified→verified` only when the document also carries a signer identity and a non-empty constraint record,
-otherwise `observed` plus the fact `imported-verified-without-constraint`. Reverse export is used only in the
-`k8s-aibom-compat` profile.
+Unsigned k8s-aibom imports retain the producer's confidence and locators as source evidence.
+Both inferred and verified producer labels remain declared. An unresolved claim stays unknown.
+A component SHA-256 may populate `artifactDigest`; a weights-directory manifest requires independent
+manifest evidence. Without an explicit hosting declaration, the model kind stays unknown. Matching
+primary-model argv and environment declarations within one Kubernetes workload and container can share
+a declaration while preserving both original component references.
 
 ## 6. Invariants (tested; cited by id in code)
 - **I1** every contestable fact is a `Claim` with assurance and state.

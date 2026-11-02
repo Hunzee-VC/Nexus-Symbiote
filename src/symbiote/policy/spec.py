@@ -92,8 +92,6 @@ class CheckSpec:
     remediation: str
     inputs: tuple[str, ...]
     fn: CheckFn
-    #: Rego rule body for ``symbiote policy export-rego`` (empty = evaluated by the built-in engine only)
-    rego: str = ""
     #: True for checks introduced from the 2026 review gap analysis (documented in ``spec/checks.md`` §2.1)
     extension: bool = False
 
@@ -143,7 +141,6 @@ def check(
     remediation: str,
     inputs: Iterable[str] = (),
     description: str = "",
-    rego: str = "",
     extension: bool = False,
 ) -> Callable[[CheckFn], CheckFn]:
     """Register a check function under ``check_id``."""
@@ -160,7 +157,6 @@ def check(
             remediation=remediation,
             inputs=tuple(inputs),
             fn=fn,
-            rego=rego,
             extension=extension,
         )
         return fn

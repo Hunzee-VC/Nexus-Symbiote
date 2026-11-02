@@ -140,11 +140,17 @@ def verify_commitment(commitment: MerkleCommitment, bodies: Mapping[tuple[str, s
     A disclosed leaf whose recomputed hash differs from the recorded one fails verification; a leaf without a
     salt is treated as redacted and its recorded ``leaf_hash`` is used as-is.
     """
+    if commitment.algorithm != ALGORITHM:
+        return False
+    keys = {(leaf.kind, leaf.id) for leaf in commitment.leaves}
+    disclosed = {(leaf.kind, leaf.id) for leaf in commitment.leaves if leaf.salt is not None}
+    if len(keys) != len(commitment.leaves) or bodies.keys() != disclosed:
+        return False
     hashes: list[bytes] = []
     for leaf in sorted(commitment.leaves, key=lambda l: (l.kind, l.id)):
         recorded = bytes.fromhex(leaf.leaf_hash.split(":", 1)[1])
         key = (leaf.kind, leaf.id)
-        if leaf.salt is not None and key in bodies:
+        if leaf.salt is not None:
             computed = leaf_hash(leaf.kind, leaf.id, bodies[key], bytes.fromhex(leaf.salt))
             if not hmac.compare_digest(computed, recorded):
                 return False

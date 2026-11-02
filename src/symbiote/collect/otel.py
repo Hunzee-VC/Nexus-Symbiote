@@ -19,9 +19,11 @@ the trace summary so a delta can cite the snapshot that was active.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 from collections.abc import Iterable, Iterator, Mapping
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, ClassVar
@@ -126,7 +128,12 @@ def iter_spans(payload: Any) -> Iterator[SpanFacts]:
 
 
 def read_span_file(path: Path) -> Iterator[SpanFacts]:
-    text = path.read_text(encoding="utf-8")
+    with path.open("rb") as source:
+        limit = 16 * 1024 * 1024
+        raw = source.read(limit + 1)
+        if len(raw) > limit:
+            raise ValueError("OTel trace exceeds 16 MiB per source")
+    text = raw.decode("utf-8")
     stripped = text.lstrip()
     if stripped.startswith("{") and '"resourceSpans"' in stripped[:2000]:
         yield from iter_spans(json.loads(text))
@@ -144,6 +151,7 @@ class _ToolAgg:
     first_ns: int | None = None
     last_ns: int | None = None
     raw_definition: Mapping[str, Any] | None = None
+    definition_conflict: bool = False
 
 
 @dataclass(slots=True)
@@ -201,6 +209,8 @@ def aggregate(spans: Iterable[SpanFacts]) -> _Aggregate:
                     if isinstance(parsed, list):
                         for raw in parsed:
                             if isinstance(raw, Mapping) and raw.get("name") == name:
+                                if entry.raw_definition is not None and entry.raw_definition != raw:
+                                    entry.definition_conflict = True
                                 entry.raw_definition = raw
         if operation in ("chat", "embeddings", "generate_content", "text_completion"):
             provider = str(attrs.get("gen_ai.provider.name") or attrs.get("gen_ai.system") or "unknown")
@@ -237,51 +247,75 @@ class OtelTracesCollector(BaseCollector):
 
     def collect(self, ctx: CollectContext) -> CollectionResult:
         result = self.new_result()
-        agg = _Aggregate()
-        for raw_path in ctx.options.get("otel_files", []):
+        # Scope is selected by the operator for ctx.agent_id, independently of trace contents.
+        scope = ctx.options.get("otel_scope")
+        fields = ("agentbom.tenant.id", "agentbom.deployment.id", "agentbom.snapshot.digest")
+        if (
+            not isinstance(scope, Mapping)
+            or not all(isinstance(scope.get(k), str) and scope[k] for k in fields)
+            or not re.fullmatch(r"sha256:[0-9a-f]{64}", scope[fields[2]])
+        ):
+            result.add_source(Surface.RUNTIME, "otel", ok=False, error_class="unbound-scope")
+            result.warnings.append(
+                "OTel attribution requires a trusted tenant, deployment and snapshot selector"
+            )
+            return result
+        selected = {k: scope[k] for k in fields}
+        for raw_path in dict.fromkeys(ctx.options.get("otel_files", [])):
             path = Path(raw_path)
             source = ctx.display(path)
+            groups: dict[str, list[SpanFacts]] = {}
+            skipped = 0
             try:
-                file_agg = aggregate(read_span_file(path))
-            except (OSError, ValueError) as exc:
+                for span in read_span_file(path):
+                    if any(span.resource.get(k) != v for k, v in selected.items()):
+                        skipped += 1
+                        continue
+                    identity = str(
+                        span.attributes.get("mcp.server.id") or span.resource.get("service.instance.id") or ""
+                    )
+                    groups.setdefault(identity, []).append(span)
+            except (OSError, TypeError, ValueError, AttributeError) as exc:
                 result.add_source(
                     Surface.RUNTIME, source, ok=False, error_class="unsupported-source", locator=source
                 )
-                result.warnings.append(f"{source}: {type(exc).__name__}: {exc}")
+                result.warnings.append(f"{source}: {type(exc).__name__}")
                 continue
-            # merge
-            for name, entry in file_agg.tools.items():
-                mine = agg.tools.setdefault(name, _ToolAgg())
-                mine.count += entry.count
-                mine.first_ns = (
-                    entry.first_ns
-                    if mine.first_ns is None
-                    else min(filter(None, [mine.first_ns, entry.first_ns]))
+            for identity, spans in sorted(groups.items()):
+                annotations = {**selected, "traceSource": source, "sourceInstance": identity}
+                self._emit(
+                    ctx,
+                    result,
+                    aggregate(spans),
+                    annotations,
+                    hashlib.sha256(
+                        json.dumps([asdict(span) for span in spans], sort_keys=True).encode()
+                    ).hexdigest(),
                 )
-                mine.last_ns = (
-                    entry.last_ns
-                    if mine.last_ns is None
-                    else max(filter(None, [mine.last_ns, entry.last_ns]))
+            if skipped:
+                result.add_source(Surface.RUNTIME, source, ok=False, error_class="scope-mismatch")
+                result.warnings.append(f"{source}: omitted {skipped} spans outside the selected scope")
+            if groups or not skipped:
+                result.add_source(
+                    Surface.RUNTIME, source, items=sum(len(v) for v in groups.values()), locator=source
                 )
-                mine.raw_definition = mine.raw_definition or entry.raw_definition
-            for key, responses in file_agg.models.items():
-                agg.models.setdefault(key, set()).update(responses)
-            agg.agents.update(file_agg.agents)
-            agg.data_sources.update(file_agg.data_sources)
-            agg.memory_stores.update(file_agg.memory_stores)
-            agg.system_instruction_hashes.update(file_agg.system_instruction_hashes)
-            agg.snapshot_digests.update(file_agg.snapshot_digests)
-            agg.deployment_ids.update(file_agg.deployment_ids)
-            agg.observe_window(*file_agg.window)
-            agg.spans += file_agg.spans
-            result.add_source(Surface.RUNTIME, source, ok=True, items=file_agg.spans, locator=source)
-        self._emit(ctx, result, agg)
         return result
 
     # ------------------------------------------------------------------ shaping
 
-    def _emit(self, ctx: CollectContext, result: CollectionResult, agg: _Aggregate) -> None:
+    def _emit(
+        self,
+        ctx: CollectContext,
+        result: CollectionResult,
+        agg: _Aggregate,
+        attribution: dict[str, str],
+        span_digest: str,
+    ) -> None:
+        scope_id = hashlib.sha256(json.dumps(attribution, sort_keys=True).encode()).hexdigest()
+        server_id = make_id("server", "observed", scope_id)
         summary = {
+            "scope": attribution,
+            "spanDigest": "sha256:" + span_digest,
             "spans": agg.spans,
             "tools": {
                 name: {"count": entry.count, "definitionCaptured": entry.raw_definition is not None}
@@ -322,9 +356,9 @@ class OtelTracesCollector(BaseCollector):
             return datetime.fromtimestamp(ns / _NS, tz=UTC) if ns else None
 
         if agg.tools:
-            result.entities.append(_observed_stub_server())
+            result.entities.append(_observed_stub_server(server_id))
         for name, entry in sorted(agg.tools.items()):
-            if entry.raw_definition is not None:
+            if entry.raw_definition is not None and not entry.definition_conflict:
                 definition = tooldef_digest(entry.raw_definition)
                 schema = dict(entry.raw_definition.get("inputSchema") or {})
                 description = entry.raw_definition.get("description")
@@ -332,15 +366,17 @@ class OtelTracesCollector(BaseCollector):
                 definition = DigestResult(
                     algorithm="tooldef/v1",
                     status=DigestStatus.UNDIGESTABLE,
-                    reason="not-observed: the span carried no tool definition",
+                    reason="conflicting tool definitions"
+                    if entry.definition_conflict
+                    else "not-observed: the span carried no tool definition",
                 )
                 schema = {}
                 description = None
             tool = ToolDefinition(
-                id=tool_id("server:observed", name),
-                server_ref="server:observed",
+                id=tool_id(server_id, name),
+                server_ref=server_id,
                 tool_name=name,
-                description=description if isinstance(description, str) else None,
+                description=description if ctx.include_text and isinstance(description, str) else None,
                 input_schema=schema,
                 digest=definition,
                 source=ToolSource.TRACE,
@@ -355,6 +391,7 @@ class OtelTracesCollector(BaseCollector):
                     type=EdgeType.INVOKES_TOOL,
                     **{"from": ctx.agent_id, "to": tool.id},
                     scope=EdgeScope.RUNTIME,
+                    qualifiers=attribution,
                     assurance=AssuranceLevel.OBSERVED,
                     evidence=[ref],
                     observed_count=entry.count,
@@ -365,7 +402,7 @@ class OtelTracesCollector(BaseCollector):
         for (provider, requested), responses in sorted(agg.models.items()):
             resolved = sorted(r for r in responses if r)
             model = Model(
-                id=make_id("model", f"{provider}-{requested}"),
+                id=make_id("model", f"{provider}-{requested}", scope_id),
                 model_kind=ModelKind.HOSTED,
                 hosted=Claim.observed(
                     HostedIdentity(
@@ -375,11 +412,7 @@ class OtelTracesCollector(BaseCollector):
                             resolved[0], collector=self.ref, observed_at=ctx.now, evidence=[ref]
                         )
                         if len(resolved) == 1
-                        else Claim.unknown(UnknownReason.PROVIDER_UNDISCLOSED)
-                        if not resolved
-                        else Claim.observed(
-                            resolved[-1], collector=self.ref, observed_at=ctx.now, evidence=[ref]
-                        ),
+                        else Claim.unknown(UnknownReason.PROVIDER_UNDISCLOSED),
                     ),
                     collector=self.ref,
                     observed_at=ctx.now,
@@ -393,13 +426,14 @@ class OtelTracesCollector(BaseCollector):
                     type=EdgeType.USES_MODEL,
                     **{"from": ctx.agent_id, "to": model.id},
                     scope=EdgeScope.RUNTIME,
+                    qualifiers=attribution,
                     assurance=AssuranceLevel.OBSERVED,
                     evidence=[ref],
                 )
             )
         for agent_key, display in sorted(agg.agents.items()):
             sub = Agent(
-                id=make_id("agent", agent_key),
+                id=make_id("agent", agent_key, scope_id),
                 name=display,
                 version="observed",
                 role=AgentRole.SUB_AGENT,
@@ -410,14 +444,14 @@ class OtelTracesCollector(BaseCollector):
                     type=EdgeType.SPAWNS,
                     **{"from": ctx.agent_id, "to": sub.id},
                     scope=EdgeScope.RUNTIME,
+                    qualifiers=attribution,
                     assurance=AssuranceLevel.OBSERVED,
                     evidence=[ref],
-                    qualifiers={"dynamic": True},
                 )
             )
         for source_id in sorted(agg.data_sources):
             ds = DataSource(
-                id=make_id("data", source_id),
+                id=make_id("data", source_id, scope_id),
                 data_kind=DataSourceKind.RETRIEVAL_CONNECTOR,
                 instruction_bearing=Claim.unknown(UnknownReason.NOT_COLLECTED),
                 live=True,
@@ -428,13 +462,14 @@ class OtelTracesCollector(BaseCollector):
                     type=EdgeType.READS_CONTEXT_FROM,
                     **{"from": ctx.agent_id, "to": ds.id},
                     scope=EdgeScope.RUNTIME,
+                    qualifiers=attribution,
                     assurance=AssuranceLevel.OBSERVED,
                     evidence=[ref],
                 )
             )
         for store_id in sorted(agg.memory_stores):
             store = DataSource(
-                id=make_id("data", f"memory-{store_id}"),
+                id=make_id("data", f"memory-{store_id}", scope_id),
                 data_kind=DataSourceKind.MEMORY_STORE,
                 instruction_bearing=Claim.unknown(UnknownReason.NOT_COLLECTED),
             )
@@ -444,6 +479,7 @@ class OtelTracesCollector(BaseCollector):
                     type=EdgeType.READS_MEMORY_FROM,
                     **{"from": ctx.agent_id, "to": store.id},
                     scope=EdgeScope.RUNTIME,
+                    qualifiers=attribution,
                     assurance=AssuranceLevel.OBSERVED,
                     evidence=[ref],
                 )
@@ -464,12 +500,12 @@ class OtelTracesCollector(BaseCollector):
 __all__ = ["OtelTracesCollector", "SpanFacts", "aggregate", "iter_spans", "read_span_file"]
 
 
-def _observed_stub_server() -> ToolServer:
+def _observed_stub_server(server_id: str) -> ToolServer:
     """Placeholder server entity for trace-only tools whose serving server is unknown."""
     from symbiote.model.enums import ToolServerKind
 
     return ToolServer(
-        id="server:observed",
+        id=server_id,
         name="observed-from-traces",
         server_kind=ToolServerKind.BUILTIN,
         transport=Claim.unknown(UnknownReason.NOT_COLLECTED),

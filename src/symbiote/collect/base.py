@@ -28,6 +28,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, ClassVar, Literal, Protocol, runtime_checkable
 
+from symbiote.collect._common import ReadOutcome, read_bounded
 from symbiote.model.common import Party
 from symbiote.model.edges import Edge
 from symbiote.model.entities import Collector as CollectorRecord
@@ -139,6 +140,13 @@ class CollectContext:
         if self.platform == "windows":
             return self.appdata or self.home / "AppData" / "Roaming"
         return self.xdg_config_home or self.home / ".config"
+
+    def read_config(self, path: Path) -> ReadOutcome:
+        """Read only beneath a root enabled for this collection context."""
+        for root in (self.root, self.home, self.user_config_dir()):
+            if root is not None and path.is_relative_to(root):
+                return read_bounded(path, self.max_file_bytes, root=root)
+        return ReadOutcome(None, "permission-denied", "outside collection scope")
 
     def display(self, path: Path) -> str:
         """Stable, privacy-preserving display path: repo-relative, ``~/``-relative, or absolute as a last resort."""

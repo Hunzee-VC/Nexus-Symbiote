@@ -1,9 +1,9 @@
 # Built-in policy checks and computed flags
 
 `symbiote policy check` evaluates the companion document (Policy Input Document). Each check is a `CheckSpec`
-with a stable id, severity, the inputs it reads, its logic, its threat mappings and an equivalent Rego body;
-`symbiote policy export-rego` generates `package agentbom` rules from the same specs, and a parity test asserts
-built-in findings == OPA findings over the fixtures. A check whose inputs are `unknown` reports
+with a stable id, severity, the inputs it reads, its logic and its threat mappings. Checks whose logic is a plain
+predicate over the document also have a Rego rule: `symbiote policy export-rego` generates `package agentbom`
+(§5), and a parity test asserts built-in findings == OPA findings over the fixtures for every exported check. A check whose inputs are `unknown` reports
 `state: indeterminate` — it never passes silently. Severity ∈ {critical, high, medium, low, info}.
 
 Threat mapping vocabularies: OWASP Top 10 for Agentic Applications (Dec 2025; ids `ASI01`–`ASI10`), OWASP Top 10
@@ -97,6 +97,7 @@ scanner indicators from the static model-artefact analysis (WP3). `symbiote poli
 | SYM-SKILL-002 skill scripts with shell access | medium | a skill bundles scripts and its `allowed-tools` grant shell execution | ASI05, ASI04 |
 | SYM-MODEL-005 malicious indicators in model artefacts | critical | the models-local collector recorded scanner indicators (dangerous pickle globals, broken-stream evasion, chat-template SSTI gadgets) as `malicious-indicator:*` tags | ASI05; AML.T0010, AML.T0018 |
 | SYM-MODEL-006 weights metadata anomalies | medium | safetensors/GGUF structural anomalies recorded as `format-anomaly:*` tags | ASI04 |
+| SYM-MODEL-007 model endpoint redirected by the repository | high | a project-scoped setting (`.claude/settings.json` `env.ANTHROPIC_BASE_URL`, `.env`, a gateway `api_base`) points a hosted model's API traffic at a host that is not the provider's (`endpoint-override:project`, from `models-hosted`); user-scope overrides are not flagged | ASI04, ASI03; AML.T0010 |
 
 Clarifications applied by the implementation:
 - `SYM-TOOL-001` also fails for a tool server with no observed or approved tool definitions (nothing is pinned).
@@ -120,3 +121,26 @@ Findings are emitted as JSON (`Finding` records), as a rich table, and as **SARI
 GitHub code scanning, with `ruleId = check id`, `level` from severity, and `locations` from evidence locators.
 Exit code 1 when any finding at or above `--fail-on` (default `high`) is `fail`; `indeterminate` findings are
 reported and counted separately (`--fail-on-indeterminate` to treat them as failures).
+
+## 5. Rego export
+`symbiote policy export-rego DIR` writes `agentbom.rego` (`package agentbom`, Rego v1 syntax) and `manifest.json`.
+The input is the companion document; fields whose value is null are omitted from it, so rules read optional
+values through fallbacks and never treat a missing field as `false`.
+
+- **Output.** `data.agentbom.findings` is a set of `{checkId, severity, state: "fail", subjectRefs, message}` with
+  the same `checkId`, `severity` and `subjectRefs` the built-in engine reports. `data.agentbom.deny` holds one
+  message per finding at `critical` or `high`, matching `--fail-on high`, for
+  `conftest test --policy DIR --namespace agentbom agentbom.json`.
+- **Coverage is explicit.** `manifest.json` lists the exported checks (`rego`) and the rest (`builtinOnly`). Checks
+  that need graph reachability (SYM-AUTHZ-001), three-valued reasoning, a baseline or chain state (SYM-TOOL-002,
+  SYM-INSTR-003, SYM-SNAP-001/003, SYM-SUB-001) or an ordered client decision table (SYM-HITL-001) stay
+  built-in. A Rego rule never reports `pass` or `indeterminate`: no finding means only that the rule did not fire,
+  so the bundle cannot stand in for `symbiote policy check`.
+- **Organisation policy.** `symbiote policy check FILE --rego DIR` evaluates `data.agentbom.findings` from the Rego
+  in `DIR` with the `opa` binary and merges the results into the same report, SARIF and exit code. Organisation
+  rules use their own ids (for example `ORG-001`). A finding that duplicates a built-in one (same check id and
+  subjects) is dropped, a malformed one is reported as a warning, and a missing `opa` or a failed evaluation
+  exits 6.
+- **Parity.** `tests/unit/policy/test_rego.py` pins every document path and enum literal the rules read to the
+  published companion schema, and, where `opa` is installed, asserts that OPA's findings equal the built-in
+  failing findings for the exported checks. The CI `rego-parity` job installs OPA and makes those tests mandatory.

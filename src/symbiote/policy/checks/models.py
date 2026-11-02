@@ -185,3 +185,37 @@ def structural_anomalies(spec: CheckSpec, ctx: PolicyContext) -> Iterator[Findin
                 subjects=[model.id],
                 message=f"Model {model.name or model.id!r} has malformed weights metadata: {', '.join(hits[:6])}.",
             )
+
+
+@check(
+    "SYM-MODEL-007",
+    "Model API traffic redirected by repository configuration",
+    Severity.HIGH,
+    mappings=(asi(4), asi(3), atlas("AML.T0010")),
+    inputs=("models[].hosted.endpoint_origin", "models[].tags"),
+    remediation=(
+        "Remove base-URL overrides (ANTHROPIC_BASE_URL, OPENAI_BASE_URL, api_base) from files the repository "
+        "ships; configure gateways in user or managed settings, and review any project file that changes where "
+        "the agent sends prompts and API keys before trusting a checkout."
+    ),
+    extension=True,
+)
+def endpoint_redirected(spec: CheckSpec, ctx: PolicyContext) -> Iterator[Finding]:
+    """A project-scoped setting points a hosted model's API traffic at a host that is not the provider's.
+
+    Anyone who can commit to the repository can then receive the prompts and the credential that authenticates
+    them (the class of CVE-2025-59536 and CVE-2026-21852). User-scope overrides are deliberate and not flagged.
+    """
+    for model in ctx.bom.models:
+        if "endpoint-override:project" not in model.tags:
+            continue
+        hosted = model.hosted.value if model.hosted is not None else None
+        origin = hosted.endpoint_origin if hosted is not None else None
+        yield spec.finding(
+            ctx,
+            subjects=[model.id],
+            message=(
+                f"Model {model.name or model.id!r}: a file in the repository sends its API traffic, and the key "
+                f"that authenticates it, to {origin or 'a host that is not the provider'}."
+            ),
+        )

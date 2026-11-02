@@ -62,6 +62,9 @@ nav:
       - Conformance levels: spec/conformance.md
       - Policy checks: spec/checks.md
       - Attestation: spec/attestation.md
+      - Gateway admission: spec/gateway-admission.md
+      - Incident query: spec/incident-query.md
+      - Native inventory migration: spec/native-inventory-migration.md
       - Collectors: spec/collectors.md
       - CLI: spec/cli.md
       - Divergence register: spec/divergences.md

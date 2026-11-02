@@ -250,6 +250,7 @@ class TemplateRiskClass(StrEnum):
 
 
 class ModelKind(StrEnum):
+    UNKNOWN = "unknown"
     WEIGHTS = "weights"
     HOSTED = "hosted"
     ADAPTER = "adapter"
@@ -644,6 +645,8 @@ class DeltaEventType(StrEnum):
     REGISTRY_STATUS_CHANGED = "registry-status-changed"
     SIGNER_CHANGED = "signer-changed"
     DATA_SOURCE_ADDED = "data-source-added"
+    DATA_SOURCE_CHANGED = "data-source-changed"
+    DATA_SOURCE_REMOVED = "data-source-removed"
     TRUST_STATUS_CHANGED = "trust-status-changed"
 
 

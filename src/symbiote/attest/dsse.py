@@ -127,14 +127,19 @@ class KeyRing:
 
 def verify_envelope(envelope: Envelope, keyring: KeyRing, *, threshold: int = 1) -> tuple[bytes, list[str]]:
     """Return ``(payload, accepted_keyids)``; raises ``InvalidSignature`` when fewer than ``threshold`` trusted signatures verify."""
+    if type(threshold) is not int or threshold < 1:
+        raise ValueError("signature threshold must be a positive integer")
     payload = envelope.payload_bytes
     message = pae(envelope.payload_type, payload)
     accepted: list[str] = []
+    verified_keys: set[str] = set()
     for sig in envelope.signatures:
         key = keyring.get(sig.keyid)
         if key is None:
             continue
-        if _verify(key, base64.b64decode(sig.sig), message):
+        fingerprint = key_id(key)
+        if fingerprint not in verified_keys and _verify(key, base64.b64decode(sig.sig), message):
+            verified_keys.add(fingerprint)
             accepted.append(sig.keyid)
     if len(accepted) < threshold:
         raise InvalidSignature(f"{len(accepted)} trusted signature(s) verified, {threshold} required")

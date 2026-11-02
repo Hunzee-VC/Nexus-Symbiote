@@ -50,3 +50,8 @@ data/memory 10, identity 10, instructions 10, coverage 5, evidence linkage 5) wi
 (`missing | unknown | present-declared | present-observed | present-verified`), **always** alongside the
 assurance distribution (% of claims declared / observed / verified). The score is a BOM-quality number, never a
 trust or safety score, and the CLI says so in its output.
+
+An area with no assessed fields receives no credit. An explicit successful, empty enumeration of its surface
+makes that area inapplicable and removes its weight from the denominator. Missing, denied, truncated, and
+unattempted coverage retain their weight with status `unknown`. A producer-supplied pass/fail result must
+be a JSON boolean. Validation evidence is required for a linked SPDX projection as well as for CycloneDX.

@@ -12,6 +12,7 @@ from rich.console import Console
 
 from symbiote import __version__
 from symbiote.cli import exit_codes
+from symbiote.cli.admission import app as admission_app
 
 app = typer.Typer(
     name="symbiote",
@@ -27,6 +28,7 @@ attest_app = typer.Typer(help="Build and sign in-toto statements (DSSE).")
 allowlist_app = typer.Typer(help="Enforcement exports for tool gateways and policy engines.")
 app.add_typer(schema_app, name="schema")
 app.add_typer(allowlist_app, name="allowlist")
+app.add_typer(admission_app, name="admission")
 app.add_typer(digest_app, name="digest")
 app.add_typer(merkle_app, name="merkle")
 app.add_typer(attest_app, name="attest")
@@ -38,6 +40,28 @@ app.add_typer(shadowscan_app, name="shadowscan")
 
 console = Console(stderr=True)
 JsonFlag = Annotated[bool, typer.Option("--json", help="Machine-readable JSON on stdout.")]
+
+
+def load_companion_or_exit(path: Path) -> Any:
+    """Load a companion document, mapping failures to the stable exit codes (6 = I/O, 3 = schema)."""
+    from symbiote.export.companion import CompanionValidationError, load_companion
+
+    try:
+        return load_companion(path)
+    except FileNotFoundError:
+        console.print(
+            f"[red]{path}: not found[/red] (run `symbiote scan` first or pass a companion document)"
+        )
+        raise typer.Exit(exit_codes.IO) from None
+    except CompanionValidationError as exc:
+        console.print(f"[red]{path} is not a valid AgentBOM companion document[/red]: {exc}")
+        raise typer.Exit(exit_codes.SCHEMA) from None
+    except OSError as exc:
+        console.print(f"[red]{path}[/red]: {exc.strerror or exc}")
+        raise typer.Exit(exit_codes.IO) from None
+    except ValueError as exc:  # JSON syntax, encoding and model validation errors
+        console.print(f"[red]{path} is not a valid AgentBOM companion document[/red]: {str(exc)[:500]}")
+        raise typer.Exit(exit_codes.SCHEMA) from None
 
 
 def emit(data: Any, as_json: bool, human: str | None = None) -> None:
@@ -236,6 +260,7 @@ def scan(
     as_json: JsonFlag = False,
 ) -> None:
     """Zero-config collection: produce a declared AgentBOM snapshot (companion, CycloneDX 1.7, SPDX 3.0.1) from a repository."""
+    from symbiote.confined import write_scan_output
     from symbiote.digest import bytes_digest
     from symbiote.export.companion import companion_bytes
     from symbiote.scan import scan as run_scan
@@ -262,11 +287,10 @@ def scan(
         console.print(f"[red]anti-rollback conflict[/red]: {exc}")
         raise typer.Exit(exit_codes.ROLLBACK) from None
     bom = outcome.bom
-    out.mkdir(parents=True, exist_ok=True)
     written: dict[str, str] = {}
     companion = companion_bytes(bom)
     companion_path = out / "agentbom.json"
-    companion_path.write_bytes(companion)
+    write_scan_output(companion_path, companion)
     written["companion"] = str(companion_path)
     companion_digest = bytes_digest(companion)
     errors: dict[str, list[str]] = {}
@@ -280,9 +304,9 @@ def scan(
             companion_ref=companion_path.name,
         )
         errors["cyclonedx"] = validate_cyclonedx(doc)
-        (out / "agentbom.cdx.json").write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
-        (out / "agentbom.cdx.loss.json").write_text(
-            json.dumps(loss.to_json_dict(), indent=2) + "\n", encoding="utf-8"
+        write_scan_output(out / "agentbom.cdx.json", (json.dumps(doc, indent=2) + "\n").encode())
+        write_scan_output(
+            out / "agentbom.cdx.loss.json", (json.dumps(loss.to_json_dict(), indent=2) + "\n").encode()
         )
         written["cyclonedx"] = str(out / "agentbom.cdx.json")
     if fmt in ("spdx", "all"):
@@ -295,9 +319,9 @@ def scan(
             companion_ref=companion_path.name,
         )
         errors["spdx"] = validate_spdx(sdoc)
-        (out / "agentbom.spdx.json").write_text(json.dumps(sdoc, indent=2) + "\n", encoding="utf-8")
-        (out / "agentbom.spdx.loss.json").write_text(
-            json.dumps(sloss.to_json_dict(), indent=2) + "\n", encoding="utf-8"
+        write_scan_output(out / "agentbom.spdx.json", (json.dumps(sdoc, indent=2) + "\n").encode())
+        write_scan_output(
+            out / "agentbom.spdx.loss.json", (json.dumps(sloss.to_json_dict(), indent=2) + "\n").encode()
         )
         written["spdx"] = str(out / "agentbom.spdx.json")
     coverage = {s.value: c.status.value for s, c in bom.coverage.surfaces.items()}
@@ -312,9 +336,9 @@ def scan(
         "collectors": [c.to_json_dict() for c in bom.coverage.collectors],
         "warnings": outcome.warnings,
         "written": written,
-        "cyclonedxValid": not errors.get("cyclonedx"),
+        "cyclonedxValid": not errors["cyclonedx"] if "cyclonedx" in errors else None,
         "cyclonedxErrors": errors.get("cyclonedx", [])[:20],
-        "spdxValid": not errors.get("spdx"),
+        "spdxValid": not errors["spdx"] if "spdx" in errors else None,
         "spdxErrors": errors.get("spdx", [])[:20],
         "findings": outcome.policy.counts() if outcome.policy else None,
         "flags": {f.flag.value: f.value.value for f in bom.derived.flags if f.value.value != "false"},
@@ -653,7 +677,7 @@ def allowlist_check(
     ],
     as_json: JsonFlag = False,
 ) -> None:
-    """Reference enforcement: decide allow/block/drop for served tools against a GAB."""
+    """Compare served descriptors to GAB pins. Use admission decide for call authorization."""
     from symbiote.enforce import check_served_toolset
 
     bundle = json.loads(gab.read_text(encoding="utf-8"))
@@ -686,20 +710,44 @@ def policy_check(
         ),
     ] = None,
     sarif: Annotated[Path | None, typer.Option("--sarif", help="Write SARIF 2.1.0 to this file")] = None,
+    rego: Annotated[
+        Path | None,
+        typer.Option(
+            "--rego",
+            help="Also evaluate data.agentbom.findings from the Rego policies in this directory (needs `opa`)",
+        ),
+    ] = None,
     fail_on_indeterminate: Annotated[
         bool, typer.Option("--fail-on-indeterminate", help="Treat indeterminate findings as failures")
     ] = False,
     as_json: JsonFlag = False,
 ) -> None:
     """Run the built-in SYM-* checks over a companion document (spec/checks.md)."""
-    from symbiote.export.companion import load_companion
+    import dataclasses
+
     from symbiote.model.enums import Severity
     from symbiote.policy import run_policy, to_sarif
+    from symbiote.policy.rego import RegoError, evaluate_with_opa
 
-    bom = load_companion(companion)
-    base = load_companion(baseline) if baseline else None
+    try:
+        threshold = Severity(fail_on.lower())
+    except ValueError:
+        console.print("[red]--fail-on must be one of critical, high, medium, low, info[/red]")
+        raise typer.Exit(exit_codes.USAGE) from None
+    bom = load_companion_or_exit(companion)
+    base = load_companion_or_exit(baseline) if baseline else None
     result = run_policy(bom, select=select, exclude=exclude or (), baseline=base)
-    threshold = Severity(fail_on)
+    if rego is not None:
+        try:
+            extra, warnings = evaluate_with_opa(bom, rego)
+        except RegoError as exc:
+            console.print(f"[red]--rego[/red]: {exc}")
+            raise typer.Exit(exit_codes.IO) from None
+        seen = {(f.check_id, tuple(sorted(f.subject_refs))) for f in result.findings}
+        merged = tuple(f for f in extra if (f.check_id, tuple(sorted(f.subject_refs))) not in seen)
+        result = dataclasses.replace(
+            result, findings=result.findings + merged, errors=result.errors + tuple(warnings)
+        )
     if sarif:
         sarif.write_text(
             json.dumps(to_sarif(result.findings, artifact_root=str(companion.parent)), indent=2) + "\n",
@@ -732,25 +780,64 @@ def policy_check(
 
 @policy_app.command("list")
 def policy_list(as_json: JsonFlag = False) -> None:
-    """List the built-in checks."""
-    from symbiote.policy import list_checks
+    """List the built-in checks (``rego`` marks the ones `policy export-rego` exports)."""
+    from symbiote.policy import REGO_RULES, list_checks
 
     rows = []
     for c in list_checks():
         sev = getattr(c, "severity", None)
         rows.append(
-            {"id": c.id, "severity": sev.value if sev is not None else None, "title": getattr(c, "title", "")}
+            {
+                "id": c.id,
+                "severity": sev.value if sev is not None else None,
+                "title": getattr(c, "title", ""),
+                "rego": c.id in REGO_RULES,
+            }
         )
-    emit(rows, as_json, "\n".join(f"{r['id']:14s} {r['severity'] or ''!s:8s} {r['title']}" for r in rows))
+    emit(
+        rows,
+        as_json,
+        "\n".join(
+            f"{r['id']:14s} {r['severity'] or ''!s:8s} {'rego' if r['rego'] else '    '} {r['title']}"
+            for r in rows
+        ),
+    )
 
 
 @policy_app.command("explain")
 def policy_explain(check_id: str, as_json: JsonFlag = False) -> None:
     """Explain one check: inputs, logic, threat mappings."""
-    from symbiote.policy import explain
+    from symbiote.policy import CHECKS, explain
 
-    info = explain(check_id)
+    if check_id.upper() not in CHECKS:
+        console.print(f"[red]unknown check {check_id!r}[/red]; `symbiote policy list` shows every id")
+        raise typer.Exit(exit_codes.USAGE)
+    info = explain(check_id.upper())
     emit(info, as_json, json.dumps(info, indent=2, default=str))
+
+
+@policy_app.command("export-rego")
+def policy_export_rego(
+    directory: Annotated[Path, typer.Argument(help="Output directory for agentbom.rego and manifest.json")],
+    as_json: JsonFlag = False,
+) -> None:
+    """Write `package agentbom` (Rego v1) for OPA, Conftest or a gateway, plus a manifest of what it covers."""
+    from symbiote.policy import CHECKS, REGO_RULES, export_rego
+    from symbiote.policy.rego import QUERY
+
+    try:
+        manifest = export_rego(directory)
+    except OSError as exc:
+        console.print(f"[red]{directory}[/red]: {exc.strerror or exc}")
+        raise typer.Exit(exit_codes.IO) from None
+    emit(
+        {**manifest, "directory": str(directory)},
+        as_json,
+        f"wrote {directory / 'agentbom.rego'} and {directory / 'manifest.json'}: {len(REGO_RULES)} checks in Rego, "
+        f"{len(set(CHECKS) - set(REGO_RULES))} built-in only (run `symbiote policy check` for those)\n"
+        f"OPA:      opa eval -d {directory} -i agentbom.json {QUERY}\n"
+        f"Conftest: conftest test --policy {directory} --namespace agentbom agentbom.json",
+    )
 
 
 @app.command()
@@ -760,13 +847,12 @@ def conformance(
     as_json: JsonFlag = False,
 ) -> None:
     """Evaluate AgentBOM conformance requirements (spec/conformance.md) up to the requested level."""
-    from symbiote.export.companion import load_companion
     from symbiote.policy import evaluate_conformance
 
     if level not in ("minimal", "standard", "verified"):
         console.print("[red]level must be minimal, standard or verified[/red]")
         raise typer.Exit(exit_codes.USAGE)
-    report = evaluate_conformance(load_companion(companion), level)  # type: ignore[arg-type]
+    report = evaluate_conformance(load_companion_or_exit(companion), level)  # type: ignore[arg-type]
     data = report.to_json()
     lines = [
         f"requested {report.requested}; attained {report.attained or 'none'} — {'PASS' if report.passed else 'NOT ATTAINED'}",
@@ -790,10 +876,9 @@ def conformance(
 @app.command()
 def score(companion: Path, as_json: JsonFlag = False) -> None:
     """Completeness score (a BOM-quality number, never a trust score) with per-area reasons."""
-    from symbiote.export.companion import load_companion
     from symbiote.policy import completeness_score
 
-    report = completeness_score(load_companion(companion))
+    report = completeness_score(load_companion_or_exit(companion))
     data = report.to_json()
     lines = [
         f"completeness {report.score}/100 — {data['note']}",
@@ -850,3 +935,31 @@ def main() -> None:
 
 if __name__ == "__main__":  # pragma: no cover
     main()
+
+
+@app.command("import-legacy")
+def import_legacy_inventory(
+    source: Path,
+    output: Annotated[Path, typer.Option("--output", "-o")],
+    agent: Annotated[
+        str | None, typer.Option("--agent", help="Root agent bom_ref in a multi-agent inventory.")
+    ] = None,
+) -> None:
+    """Convert a native 1.0 inventory to a declared companion with embedded mapping losses."""
+    from symbiote.confined import open_scoped_file, write_scan_output
+    from symbiote.export.companion import companion_bytes
+    from symbiote.imp.legacy import import_legacy
+
+    try:
+        limit = 32 * 1024 * 1024
+        source = source.absolute()
+        with open_scoped_file(Path(source.anchor), source) as stream:
+            raw = stream.read(limit + 1)
+        if len(raw) > limit:
+            raise ValueError("legacy input exceeds 32 MiB")
+        if source == output.absolute():
+            raise ValueError("source and output must differ")
+        write_scan_output(output, companion_bytes(import_legacy(raw, root_ref=agent)))
+    except (ValueError, OSError) as exc:
+        typer.echo(f"Legacy import failed: {exc}", err=True)
+        raise typer.Exit(1) from None

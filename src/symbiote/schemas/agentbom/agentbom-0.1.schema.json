@@ -3767,6 +3767,8 @@
         "registry-status-changed",
         "signer-changed",
         "data-source-added",
+        "data-source-changed",
+        "data-source-removed",
         "trust-status-changed"
       ],
       "title": "DeltaEventType",
@@ -6205,6 +6207,18 @@
     "Model": {
       "additionalProperties": false,
       "properties": {
+        "artifactDigest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Claim_Annotated_str__StringConstraints__"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Digest of an imported component artifact; distinct from a verified model-directory manifest."
+        },
         "card": {
           "anyOf": [
             {
@@ -6571,6 +6585,7 @@
     },
     "ModelKind": {
       "enum": [
+        "unknown",
         "weights",
         "hosted",
         "adapter",

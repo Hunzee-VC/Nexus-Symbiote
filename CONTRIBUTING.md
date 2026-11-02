@@ -42,7 +42,7 @@ Imperative mood, a body that explains *why*, and no model identifiers or tool ad
 body beyond the attribution trailer your environment adds.
 
 ## Reporting security issues
-See [`SECURITY.md`](SECURITY.md). Do not open public issues for vulnerabilities.
+See [`SECURITY.md`](https://github.com/aisecnomad/Nexus-symbiote/blob/claude/symbiote-foundation/SECURITY.md). Do not open public issues for vulnerabilities.
 
 ## Code of conduct
-This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md).
+This project follows the [Contributor Covenant](https://github.com/aisecnomad/Nexus-symbiote/blob/claude/symbiote-foundation/CODE_OF_CONDUCT.md).

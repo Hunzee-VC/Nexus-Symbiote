@@ -529,6 +529,10 @@ class ModelCardFacts(SymbioteModel):
 
 
 class Model(Entity):
+    artifact_digest: Claim[DigestStr] | None = Field(
+        default=None,
+        description="Digest of an imported component artifact; distinct from a verified model-directory manifest.",
+    )
     model_kind: ModelKind = Field(alias="kind")
     weights: Claim[WeightsIdentity] | None = None
     hosted: Claim[HostedIdentity] | None = None
