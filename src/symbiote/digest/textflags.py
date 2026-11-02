@@ -33,11 +33,53 @@ _CROSS_TOOL_PATTERNS = [
 MAX_DESCRIPTION_BYTES = 4096
 
 
+def _is_variation_selector(cp: int) -> bool:
+    return 0xFE00 <= cp <= 0xFE0F or 0xE0100 <= cp <= 0xE01EF or 0x180B <= cp <= 0x180F
+
+
+_KEYCAP_BASES = frozenset("0123456789#*")
+_HANGUL_FILLERS = frozenset({0x115F, 0x1160, 0x3164, 0xFFA0})
+
+
+def _valid_selector_base(prev: str | None, selector: int) -> bool:
+    """Whether ``prev`` is a character a single variation selector legitimately follows.
+
+    Standardized variation sequences: emoji presentation (U+FE0E/U+FE0F) after pictographs, symbols and the
+    keycap bases ``0-9 # *``; ideographic variation sequences (U+E0100..) after CJK ideographs; Mongolian free
+    variation selectors after Mongolian letters. Plain letters, invisible bases (combining marks, format and
+    space characters, Hangul fillers) and other selectors are not bases — a selector after them is smuggled data.
+    """
+    if prev is None or _is_variation_selector(ord(prev)):
+        return False
+    pcp = ord(prev)
+    cat = unicodedata.category(prev)
+    if cat in ("Mn", "Me", "Cf", "Zs", "Cc") or pcp in _HANGUL_FILLERS or prev.isspace():
+        return False
+    if 0x180B <= selector <= 0x180F:
+        return 0x1800 <= pcp <= 0x18AF
+    if 0xE0100 <= selector <= 0xE01EF:
+        return unicodedata.name(prev, "").startswith("CJK")
+    if prev in _KEYCAP_BASES:
+        return True
+    if prev.isascii():
+        return False
+    return cat in ("So", "Sm", "Sk", "Lo", "No") or 0x1F000 <= pcp <= 0x1FAFF
+
+
 def hidden_code_points(text: str) -> list[str]:
     """Code points in ``text`` that are invisible or direction-altering (Cf/Co/Cn, bidi controls, tag characters)."""
     found: list[str] = []
+    prev: str | None = None
     for ch in text:
         cp = ord(ch)
+        if _is_variation_selector(cp):
+            # One selector after a visible base is ordinary text (emoji presentation, ideographic variants);
+            # a run of selectors, or one with no base, is invisible data smuggled through plain text.
+            if not _valid_selector_base(prev, cp):
+                found.append(f"U+{cp:04X}")
+            prev = ch
+            continue
+        prev = ch
         if cp in _BIDI or cp in _TAGS:
             found.append(f"U+{cp:04X}")
             continue
@@ -49,29 +91,30 @@ def hidden_code_points(text: str) -> list[str]:
     return found
 
 
+def _nodes(obj: Any) -> Iterable[Any]:
+    """Every value in a JSON tree, depth first, without recursion (hostile schemas nest thousands deep)."""
+    stack = [obj]
+    while stack:
+        node = stack.pop()
+        yield node
+        if isinstance(node, Mapping):
+            stack.extend(reversed(list(node.values())))
+        elif isinstance(node, list):
+            stack.extend(reversed(node))
+
+
 def iter_strings(obj: Any) -> Iterable[str]:
-    if isinstance(obj, str):
-        yield obj
-    elif isinstance(obj, Mapping):
-        for v in obj.values():
-            yield from iter_strings(v)
-    elif isinstance(obj, list):
-        for v in obj:
-            yield from iter_strings(v)
+    return (n for n in _nodes(obj) if isinstance(n, str))
 
 
 def external_refs(schema: Any) -> list[str]:
     """``$ref`` values that are not fragment-local."""
     out: list[str] = []
-    if isinstance(schema, Mapping):
-        ref = schema.get("$ref")
-        if isinstance(ref, str) and not ref.startswith("#"):
-            out.append(ref)
-        for v in schema.values():
-            out.extend(external_refs(v))
-    elif isinstance(schema, list):
-        for v in schema:
-            out.extend(external_refs(v))
+    for node in _nodes(schema):
+        if isinstance(node, Mapping):
+            ref = node.get("$ref")
+            if isinstance(ref, str) and not ref.startswith("#"):
+                out.append(ref)
     return out
 
 
@@ -80,18 +123,12 @@ def cross_tool_directives(text: str) -> list[str]:
 
 
 def schema_descriptions(schema: Any) -> Iterable[str]:
-    if isinstance(schema, Mapping):
-        d = schema.get("description")
-        if isinstance(d, str):
-            yield d
-        t = schema.get("title")
-        if isinstance(t, str):
-            yield t
-        for v in schema.values():
-            yield from schema_descriptions(v)
-    elif isinstance(schema, list):
-        for v in schema:
-            yield from schema_descriptions(v)
+    for node in _nodes(schema):
+        if isinstance(node, Mapping):
+            for key in ("description", "title"):
+                value = node.get(key)
+                if isinstance(value, str):
+                    yield value
 
 
 def tool_text_flags(raw_tool: Mapping[str, Any]) -> list[TextFlag]:

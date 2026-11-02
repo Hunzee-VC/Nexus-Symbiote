@@ -1,0 +1,163 @@
+# SymBiote agent dependency bot ("Dependabot for AI agents", spec/monitoring.md).
+#
+# Copy to .github/workflows/symbiote-agent-deps.yml. It
+#   1. runs `symbiote monitor tick` on a risk-tiered schedule: every agent in symbiote-monitor.yaml that is due
+#      is re-scanned and re-verified (drift, policy, dependency advisories, attestation), and
+#   2. once a day, runs `symbiote update --open-pr` to open a *draft* pull request with safe dependency updates
+#      for the agent's MCP servers, A2A peers, skills, tools/plugins and models. It never merges and never pushes
+#      to the default branch.
+#
+# Security notes
+#   * Least privilege: the workflow default is read-only; only the `update` job may write contents and pull
+#     requests, and only the `monitor` job may upload code-scanning results.
+#   * Every action is pinned to a full commit SHA (the tag is in the trailing comment). The SHAs below were
+#     resolved from the upstream tags when this file was written; re-verify them (or let Dependabot for
+#     github-actions keep them current) before use.
+#   * Secrets are read from environment variables named in symbiote-monitor.yaml (for example
+#     SYMBIOTE_WEBHOOK_URL); SymBiote never prints them.
+#   * The toolkit itself is a dependency with write access to this repository, so it is installed only from a
+#     hash-locked requirements file (`pip --require-hashes`), never by bare name from a public index: the name
+#     `symbiote` is not a package this project publishes on PyPI, and anyone could register it. Create
+#     .github/symbiote-requirements.txt from an artifact you have reviewed, for example a wheel built from a
+#     pinned commit of the SymBiote repository and attached to an internal release:
+#         https://artifacts.example.internal/symbiote/symbiote-0.1.0-py3-none-any.whl \
+#             --hash=sha256:<sha256 of the reviewed wheel>
+#     plus every dependency with its hash (`pip-compile --generate-hashes`). pip refuses anything unhashed.
+#   * The `update` job's checkout does not persist the token; the token reaches only the step that pushes the
+#     symbiote/deps/* branch and opens the draft pull request.
+
+name: symbiote agent dependencies
+
+on:
+  schedule:
+    # GitHub Actions schedules run in UTC, at best every 5 minutes, and may be delayed under load. Every entry
+    # runs `monitor tick`, which only cycles the agents that are due, so overlapping entries are harmless.
+    - cron: "*/10 * * * *" # critical tier: production agents that can act on the world (10 minutes)
+    - cron: "7 * * * *" # high tier: other production agents with tool access (1 hour)
+    - cron: "23 4 * * *" # medium tier: staging and internal agents (1 day); also runs `symbiote update`
+    - cron: "41 5 1,15 * *" # low tier: development and read-only agents (about every 14 days)
+  workflow_dispatch:
+    inputs:
+      open_pr:
+        description: "Also run `symbiote update --open-pr`"
+        type: boolean
+        default: true
+
+# Read-only by default; jobs widen only what they need.
+permissions:
+  contents: read
+
+concurrency:
+  group: symbiote-agent-deps
+  cancel-in-progress: false
+
+env:
+  SYMBIOTE_REQUIREMENTS: ".github/symbiote-requirements.txt" # hash-locked; see the security notes above
+  AGENT_PATH: "." # the agent to propose dependency updates for
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write # upload SARIF to code scanning
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+      - name: Install symbiote (hash-locked)
+        run: |
+          test -f "${SYMBIOTE_REQUIREMENTS}" || { echo "::error::${SYMBIOTE_REQUIREMENTS} is missing"; exit 1; }
+          python -m pip install --disable-pip-version-check --no-input --require-hashes --only-binary=:all: \
+            -r "${SYMBIOTE_REQUIREMENTS}"
+      # The monitor's state (snapshot chain, cycle history, due times) must survive between runs; the cache
+      # below keeps it per branch. Use durable storage (an artifact store or a self-hosted runner) for
+      # production fleets: a lost chain resets anti-rollback protection.
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: .symbiote
+          key: symbiote-monitor-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: symbiote-monitor-${{ github.ref_name }}-
+      - name: Monitor tick (agents that are due)
+        env:
+          SYMBIOTE_WEBHOOK_URL: ${{ secrets.SYMBIOTE_WEBHOOK_URL }}
+        run: symbiote monitor tick --config symbiote-monitor.yaml
+      - name: Policy SARIF for the agent
+        if: always()
+        run: |
+          symbiote scan "${AGENT_PATH}" --out .symbiote/out --format companion
+          symbiote policy check .symbiote/out/agentbom.json --sarif symbiote.sarif || true
+      - uses: github/codeql-action/upload-sarif@51f77329afa6477de8c49fc9c7046c15b9a4e79d # v3.29.5
+        if: always() && hashFiles('symbiote.sarif') != ''
+        with:
+          sarif_file: symbiote.sarif
+          category: symbiote-agentbom
+
+  update:
+    # Once a day (the medium-tier schedule) or on demand: propose dependency updates as a draft pull request.
+    if: >-
+      (github.event_name == 'schedule' && github.event.schedule == '23 4 * * *') ||
+      (github.event_name == 'workflow_dispatch' && inputs.open_pr)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write # push the symbiote/deps/* branch
+      pull-requests: write # open the draft pull request
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false # the token is handed only to the step that pushes
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+      - name: Install symbiote (hash-locked)
+        run: |
+          test -f "${SYMBIOTE_REQUIREMENTS}" || { echo "::error::${SYMBIOTE_REQUIREMENTS} is missing"; exit 1; }
+          python -m pip install --disable-pip-version-check --no-input --require-hashes --only-binary=:all: \
+            -r "${SYMBIOTE_REQUIREMENTS}"
+      - name: Configure the commit author
+        run: |
+          git config user.name "symbiote-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Propose updates (draft pull request)
+        env:
+          GH_TOKEN: ${{ github.token }} # used by `gh` and, via `gh auth setup-git`, by `git push`; never printed
+        run: |
+          gh auth setup-git
+          set +e
+          symbiote update "${AGENT_PATH}" --open-pr --fail-on high --json > symbiote-update.json
+          status=$?
+          set -e
+          # 0: nothing at or above high pending and every lookup succeeded;
+          # 1: a high/critical proposal or unresolved risk is pending (the draft PR, if any, is the fix);
+          # anything else (2 usage, 6 failed lookups / PR / crash, ...) fails the job.
+          case "$status" in
+            0|1) ;;
+            *) echo "::error::symbiote update exited ${status}"; exit "$status" ;;
+          esac
+          # The report must be well-formed, and exit 1 must be backed by a finding.
+          python - "$status" <<'PY'
+          import json, sys
+          status = int(sys.argv[1])
+          with open("symbiote-update.json", encoding="utf-8") as fh:
+              report = json.load(fh)
+          if not isinstance(report, dict) or not isinstance(report.get("proposals"), list):
+              sys.exit("symbiote-update.json is malformed")
+          if status == 1 and not (report["proposals"] or report.get("unresolvedSignals")):
+              sys.exit("exit 1 without any proposal or unresolved signal")
+          def esc(value):  # workflow-command escaping for untrusted text
+              return str(value)[:200].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          for item in report.get("coverage", []):
+              print(f"::warning::{esc(item.get('name'))}: coverage {esc(item.get('coverage'))}")
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: symbiote-update
+          path: symbiote-update.json
+          if-no-files-found: ignore

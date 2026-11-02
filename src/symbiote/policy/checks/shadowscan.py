@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator
 
 from symbiote.model.entities import Finding
-from symbiote.model.enums import CollectorStatus, FindingState, Severity
+from symbiote.model.enums import CollectorStatus, FindingState, Severity, ToolServerKind
 from symbiote.policy.spec import CHECKS, CheckSpec, PolicyContext, asi, atlas, check
 
 _PREFIX = "SYM-SS-"
@@ -130,7 +130,8 @@ def declared_not_observed(spec: CheckSpec, ctx: PolicyContext) -> Iterator[Findi
     if not observed and not runs:
         return
     for server in ctx.baseline.tool_servers:
-        if server.id in observed:
+        # ShadowScan does not inventory A2A peers, so their absence from its report says nothing
+        if server.id in observed or server.server_kind is ToolServerKind.A2A:
             continue
         yield spec.finding(
             ctx,

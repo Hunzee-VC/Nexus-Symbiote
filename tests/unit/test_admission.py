@@ -46,7 +46,7 @@ PEER = digest_str(b"verified-server-image")
 POLICY = digest_str(b"release-policy-v1")
 
 
-def fixture_bom(*, serial=1, trust_serial=1, revoke=False, reverse=False):
+def fixture_bom(*, serial=1, trust_serial=1, revoke=False, reverse=False, prev=None):
     bom = approved_doc()
     deployment = Deployment(
         id=BINDING.deployment,
@@ -112,6 +112,7 @@ def fixture_bom(*, serial=1, trust_serial=1, revoke=False, reverse=False):
     header = bom.snapshot.replace(
         id=snapshot_id(serial, bom.snapshot.digest),
         serial=serial,
+        prev=prev,
         deployment_ref=deployment.id,
         policy_bundle=Claim.declared(POLICY),
         validity=Validity(not_before=NOW - timedelta(minutes=1), not_after=NOW + timedelta(days=1)),
@@ -214,7 +215,9 @@ def test_dispatch_signed_policy_approval_revocation_and_replay(tmp_path: Path, r
         == "deny"
     )
     assert dispatch(bundle, intent("dev", "7").replace(peer_digest=digest_str(b"other"))).decision == "deny"
-    revoked = sign_gateway_bundle(fixture_bom(serial=2, trust_serial=2, revoke=True), BINDING, signer)
+    revoked = sign_gateway_bundle(
+        fixture_bom(serial=2, trust_serial=2, revoke=True, prev=bom.snapshot.digest), BINDING, signer
+    )
     assert dispatch(revoked, intent("dev", "8")).reason == "publisher-revoked-or-quarantined"
     assert dispatch(revoked, intent("prod", "9")).decision == "deny"
     assert dispatch(bundle, intent("dev", "10")).reason == "rollback-or-equivocation"
@@ -443,3 +446,54 @@ def test_dispatch_rejects_cached_trust_at_operator_deadline(tmp_path):
         if expected == "deny":
             assert decision.reason == "stale-or-invalid-policy"
     assert calls == [{"repo": "dev"}]
+
+
+def test_forward_serial_jump_must_chain_onto_the_admitted_snapshot(tmp_path):
+    """A validly signed bundle with a far-forward serial but no ``prev`` link cannot lock the scope (audit §6.1)."""
+    signer, gateway = [generate_signing_key("ed25519") for _ in range(2)]
+    first = fixture_bom()
+
+    def decide(doc, request_id):
+        bundle = sign_gateway_bundle(doc, BINDING, signer)
+        rec = admit_call(
+            bundle,
+            intent("dev", request_id),
+            RAW2,
+            bundle_keys=ring(signer),
+            receipt_key=gateway,
+            state_db=tmp_path / "chain.sqlite",
+            now=NOW,
+        )
+        return verify_receipt(rec, ring(gateway))
+
+    assert decide(first, "1").decision == "allow"
+    jump = fixture_bom(serial=1000, trust_serial=1000)  # no prev: not a successor of the admitted snapshot
+    assert decide(jump, "2").reason == "rollback-or-equivocation"
+    successor = fixture_bom(serial=2, trust_serial=2, prev=first.snapshot.digest)
+    assert decide(successor, "3").decision == "allow"  # the legitimate chain still advances
+
+
+def test_serial_steps_are_bounded(tmp_path):
+    """Even with a correct prev link, one admission cannot jump the snapshot or trust serial out of reach."""
+    from symbiote.enforce.admission import MAX_SERIAL_STEP
+
+    signer, gateway = [generate_signing_key("ed25519") for _ in range(2)]
+
+    def decide(doc, request_id):
+        rec = admit_call(
+            sign_gateway_bundle(doc, BINDING, signer),
+            intent("dev", request_id),
+            RAW2,
+            bundle_keys=ring(signer),
+            receipt_key=gateway,
+            state_db=tmp_path / "steps.sqlite",
+            now=NOW,
+        )
+        return verify_receipt(rec, ring(gateway))
+
+    first = fixture_bom()
+    assert decide(first, "1").decision == "allow"
+    huge = fixture_bom(serial=2, trust_serial=MAX_SERIAL_STEP + 5, prev=first.snapshot.digest)
+    assert decide(huge, "2").reason == "rollback-or-equivocation"  # trust serial step too large
+    far = fixture_bom(serial=MAX_SERIAL_STEP + 5, trust_serial=2, prev=first.snapshot.digest)
+    assert decide(far, "3").reason == "rollback-or-equivocation"  # snapshot serial step too large

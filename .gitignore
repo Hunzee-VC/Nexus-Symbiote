@@ -40,3 +40,5 @@ evidence/
 
 # Claude Code agent worktrees (local tooling, never project content)
 .claude/worktrees/
+# the example agent ships a VS Code MCP config
+!examples/triage-agent/.vscode/

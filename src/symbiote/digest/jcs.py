@@ -19,29 +19,38 @@ class UndigestableError(ValueError):
         super().__init__(f"{reason_class}: {detail}" if detail else reason_class)
 
 
+#: Deepest nesting JCS will canonicalize; deeper documents are undigestable (fail closed, I5).
+MAX_DEPTH = 512
+
+
 def _check_domain(obj: Any, path: str = "$") -> None:
-    """Reject values JCS cannot represent faithfully before handing them to the serializer."""
-    if isinstance(obj, bool) or obj is None or isinstance(obj, str):
-        return
-    if isinstance(obj, int):
-        if abs(obj) >= 2**53:
-            raise UndigestableError("integer-out-of-range", f"{path}: |{obj}| >= 2^53")
-        return
-    if isinstance(obj, float):
-        if math.isnan(obj) or math.isinf(obj):
-            raise UndigestableError("non-finite-number", f"{path}: {obj}")
-        return
-    if isinstance(obj, dict):
-        for k, v in obj.items():
-            if not isinstance(k, str):
-                raise UndigestableError("non-string-key", f"{path}: {k!r}")
-            _check_domain(v, f"{path}.{k}")
-        return
-    if isinstance(obj, list | tuple):
-        for i, v in enumerate(obj):
-            _check_domain(v, f"{path}[{i}]")
-        return
-    raise UndigestableError("unsupported-type", f"{path}: {type(obj).__name__}")
+    """Reject values JCS cannot represent faithfully before handing them to the serializer (iterative)."""
+    stack: list[tuple[Any, str, int]] = [(obj, path, 0)]
+    while stack:
+        node, where, depth = stack.pop()
+        if depth > MAX_DEPTH:
+            raise UndigestableError("too-deep", f"nesting deeper than {MAX_DEPTH} at {where[:80]}…")
+        if isinstance(node, bool) or node is None or isinstance(node, str):
+            continue
+        if isinstance(node, int):
+            if abs(node) >= 2**53:
+                raise UndigestableError("integer-out-of-range", f"{where}: |{node}| >= 2^53")
+            continue
+        if isinstance(node, float):
+            if math.isnan(node) or math.isinf(node):
+                raise UndigestableError("non-finite-number", f"{where}: {node}")
+            continue
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if not isinstance(k, str):
+                    raise UndigestableError("non-string-key", f"{where}: {k!r}")
+                stack.append((v, f"{where}.{k}", depth + 1))
+            continue
+        if isinstance(node, list | tuple):
+            for i, v in enumerate(node):
+                stack.append((v, f"{where}[{i}]", depth + 1))
+            continue
+        raise UndigestableError("unsupported-type", f"{where}: {type(node).__name__}")
 
 
 def canonical_bytes(obj: Any) -> bytes:
@@ -49,6 +58,8 @@ def canonical_bytes(obj: Any) -> bytes:
     _check_domain(obj)
     try:
         return rfc8785.dumps(obj)
+    except RecursionError:  # pragma: no cover - guarded by MAX_DEPTH
+        raise UndigestableError("too-deep", "recursion limit") from None
     except (rfc8785.CanonicalizationError, ValueError, TypeError) as exc:  # pragma: no cover - defensive
         raise UndigestableError("canonicalization-error", str(exc)) from exc
 

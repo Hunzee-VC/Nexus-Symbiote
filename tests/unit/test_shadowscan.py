@@ -306,6 +306,7 @@ def test_inventory_cards(declared_bom) -> None:
     assert {s["name"] for s in card["capability_surface"]["tool_servers"]} == {
         "filesystem",
         "github",
+        "release-notes-writer",  # the A2A peer card found by the a2a-cards collector
         "triage-tools",
     }
     assert card["provenance"]["snapshot_digest"] == declared_bom.snapshot.digest
@@ -402,7 +403,7 @@ def test_reconcile_autonomy_verdicts(declared_bom) -> None:
     root = declared_bom.root_agent.replace(
         automation_level=Claim.declared(E.IsoAutomationLevel.ASSISTIVE_AUTOMATION)
     )
-    low = declared_bom.replace(agents=[root])
+    low = declared_bom.replace(agents=[root, *(a for a in declared_bom.agents if a.id != root.id)])
     rec = reconcile(low, read_report(TRIAGE), scan_root="/work/triage-agent", deterministic=True)
     assert rec.autonomy is not None and rec.autonomy.verdict == "understated"
     assert any(f.check_id == "SYM-SS-004" for f in rec.findings)
@@ -410,7 +411,7 @@ def test_reconcile_autonomy_verdicts(declared_bom) -> None:
         automation_level=Claim.declared(E.IsoAutomationLevel.HIGH_AUTOMATION)
     )
     rec = reconcile(
-        declared_bom.replace(agents=[root]),
+        declared_bom.replace(agents=[root, *(a for a in declared_bom.agents if a.id != root.id)]),
         read_report(TRIAGE),
         scan_root="/work/triage-agent",
         deterministic=True,
@@ -551,3 +552,14 @@ def test_cli_levels_import_inventory_reconcile(tmp_path: Path) -> None:
     assert any(c["name"] == "shadowscan-report" for c in json.loads(res.stdout)["collectors"])
     res = runner.invoke(app, ["shadowscan", "import", str(tmp_path / "missing.json"), "-o", str(out)])
     assert res.exit_code == 6
+
+
+def test_a2a_peers_are_outside_shadowscan_reconciliation(declared_bom) -> None:
+    # the example's A2A peer card is declared (a2a-cards collector) but ShadowScan never inventories A2A peers
+    peers = [s for s in declared_bom.tool_servers if s.server_kind is E.ToolServerKind.A2A]
+    assert peers, "the example agent ships an A2A peer card"
+    rec = reconcile(declared_bom, read_report(TRIAGE), scan_root="/work/triage-agent", deterministic=True)
+    assert not {p.id for p in peers} & set(rec.declared_not_observed)
+    observed = import_report(read_report(TRIAGE), deterministic=True, scope="root", policy=False)
+    result = run_policy(observed, select=["SYM-SS-003"], baseline=declared_bom)
+    assert not [f for f in result.findings if set(f.subject_refs) & {p.id for p in peers}]

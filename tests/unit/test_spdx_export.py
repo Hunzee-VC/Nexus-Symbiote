@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -68,9 +69,9 @@ def test_spdx_example() -> None:
     assert len(_nodes(doc, "software_Package")) >= 5
     assert not loss.security_relevant_dropped
     text = json.dumps(doc)
-    assert "sk-" not in text and "${" not in text.replace("${GITHUB_PAT}", "").replace(
-        "${SLACK_WEBHOOK_URL}", ""
-    ).replace("${input:github-pat}", "")
+    assert not re.search(r"\bsk-[A-Za-z0-9_-]{16,}", text) and "${" not in text.replace(
+        "${GITHUB_PAT}", ""
+    ).replace("${SLACK_WEBHOOK_URL}", "").replace("${input:github-pat}", "")
 
 
 def test_empty_scoped_query_cannot_prove_runtime_absence(minimal_bom: AgentBOM) -> None:

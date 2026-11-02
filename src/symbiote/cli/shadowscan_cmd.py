@@ -11,6 +11,7 @@ import typer
 from rich.console import Console
 
 from symbiote.cli import exit_codes
+from symbiote.cli._render import safe_markup
 
 shadowscan_app = typer.Typer(
     help=(
@@ -27,7 +28,7 @@ def _emit(data: Any, as_json: bool, human: str) -> None:
     if as_json:
         sys.stdout.write(json.dumps(data, indent=2, ensure_ascii=False, default=str) + "\n")
     else:
-        console.print(human)
+        console.print(safe_markup(human))
 
 
 def _read(path: Path) -> Any:

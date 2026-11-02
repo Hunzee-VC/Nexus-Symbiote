@@ -19,6 +19,7 @@ from symbiote.model.entities import (
     Agent,
     DataSource,
     Entity,
+    Identity,
     Instruction,
     LossItem,
     LossReport,
@@ -35,6 +36,14 @@ from symbiote.model.ids import uuid5_for_digest
 CDX_SCHEMA_URI = "http://cyclonedx.org/schema/bom-1.7.schema.json"
 SPEC_VERSION_PROFILE = "0.1"
 PRODUCER_REF = "producer:symbiote"
+#: property naming the bom-ref a merged software component carried in its source SBOM
+SOURCE_BOM_REF = "agentbom:import:source-bom-ref"
+#: names of the ``declarations.evidence[].data[]`` items after the leading digest item
+EVIDENCE_URI = "uri"
+EVIDENCE_MEDIA_TYPE = "media-type"
+EVIDENCE_NAME = "name"
+EVIDENCE_AUTHOR = "author"
+EVIDENCE_REDACTION = "redaction-class"
 
 _LIFECYCLE_PHASE = {
     E.SnapshotKind.DECLARED: "design",
@@ -186,6 +195,18 @@ class Props:
         if claim.locator:
             self.add(f"{name}:locator", claim.locator)
 
+    def list_claim(self, name: str, claim: Claim[Any] | None) -> None:
+        """A list-valued claim: repeated values plus qualifiers, so a present-but-empty list stays present."""
+        if claim is None:
+            return
+        if claim.state is E.ValueState.UNKNOWN:
+            self.add(f"{name}:unknown-reason", claim.unknown_reason)
+        else:
+            self.add_many(name, claim.value or [])
+        self.add(f"{name}:assurance", claim.assurance)
+        if claim.locator:
+            self.add(f"{name}:locator", claim.locator)
+
     def provenance(self, prov: Provenance) -> None:
         self.add("agentbom:assurance", prov.assurance)
         if prov.locator:
@@ -255,6 +276,10 @@ class _Builder:
         self.edges_from: dict[str, list] = {}
         for e in bom.edges:
             self.edges_from.setdefault(e.from_ref, []).append(e)
+        self.agent_identities = {a.id: list(a.identities) for a in bom.agents}
+        #: identities / credential bindings that ended up on some element (the rest are reported as lost)
+        self.emitted_identities: set[str] = set()
+        self.emitted_bindings: set[str] = set()
 
     # ---- cross-cutting
 
@@ -300,9 +325,12 @@ class _Builder:
             if g.delegation_chain:
                 props.add_json(f"{p}:delegation-chain:json", [h.to_json_dict() for h in g.delegation_chain])
 
-        for i, cb in enumerate(sorted(self.bindings_by_subject.get(subject_id, []), key=lambda c: c.id)):
+        bindings = sorted(self.bindings_by_subject.get(subject_id, []), key=lambda c: c.id)
+        for i, cb in enumerate(bindings):
             p = f"agentbom:credential:{i}"
+            self.emitted_bindings.add(cb.id)
             props.add(f"{p}:identity", cb.identity_ref)
+            props.add(f"{p}:name", cb.name)
             props.add(f"{p}:kind", cb.credential_kind)
             props.add(f"{p}:lifetime", cb.lifetime)
             props.add(f"{p}:storage-kind", cb.storage.kind)
@@ -312,11 +340,7 @@ class _Builder:
                     props.add(f"{p}:scope-granted:{j}", sc)
             ident = self.identity_by_id.get(cb.identity_ref)
             if ident is not None:
-                q = f"agentbom:identity:{i}"
-                props.add(f"{q}:kind", ident.identity_kind)
-                props.add(f"{q}:ref", ident.ref)
-                props.add(f"{q}:issuer", ident.issuer)
-                props.add(f"{q}:tenant", ident.tenant)
+                self._identity_block(props, i, ident)
             self._lose(
                 f"/credentialBindings/{cb.id}",
                 E.LossReason.NO_NATIVE_CONSTRUCT,
@@ -324,6 +348,28 @@ class _Builder:
                 E.LossSeverity.SECURITY_RELEVANT,
                 entity=cb.id,
             )
+
+        # identities the subject acts as (``actsAs`` edges / ``Agent.identities``) without a credential binding:
+        # indexed after the credential-paired blocks so the pairing by index stays unambiguous
+        paired = {cb.identity_ref for cb in bindings}
+        acting = {e.to_ref for e in self.edges_from.get(subject_id, []) if e.type is E.EdgeType.ACTS_AS}
+        acting |= set(self.agent_identities.get(subject_id, []))
+        index = len(bindings)
+        for iid in sorted(acting - paired):
+            ident = self.identity_by_id.get(iid)
+            if ident is not None:
+                self._identity_block(props, index, ident)
+                index += 1
+
+    def _identity_block(self, props: Props, index: int, ident: Identity) -> None:
+        q = f"agentbom:identity:{index}"
+        self.emitted_identities.add(ident.id)
+        props.add(f"{q}:id", ident.id)
+        props.add(f"{q}:name", ident.name)
+        props.add(f"{q}:kind", ident.identity_kind)
+        props.add(f"{q}:ref", ident.ref)
+        props.add(f"{q}:issuer", ident.issuer)
+        props.add(f"{q}:tenant", ident.tenant)
 
     def _edge_props(self, props: Props, source_id: str) -> None:
         for e in sorted(self.edges_from.get(source_id, []), key=lambda e: e.key):
@@ -352,6 +398,12 @@ class _Builder:
 
     def _common_props(self, props: Props, entity: Entity, kind: str) -> None:
         props.add("agentbom:kind", kind)
+        # The native ``name``/``description`` fields carry derived or different values for several kinds
+        # (a file's basename, an agent's purpose, a skill's frontmatter); these carry the entity's own.
+        # Tool descriptions are text and follow ``include_text`` on the native field instead.
+        props.add("agentbom:name", entity.name)
+        if not isinstance(entity, ToolDefinition):
+            props.add("agentbom:description", entity.description)
         props.provenance(entity.provenance)
         self._authority_props(props, entity.id)
         self._edge_props(props, entity.id)
@@ -431,7 +483,13 @@ class _Builder:
             props.add("agentbom:a2a:card-digest", a.a2a_card.digest)
             props.add("agentbom:a2a:card-url", a.a2a_card.url)
             props.add_many("agentbom:a2a:protocol-version", a.a2a_card.protocol_versions)
+            props.add("agentbom:a2a:card-version", a.a2a_card.version)
             props.add_many("agentbom:a2a:skill", (s.id for s in a.a2a_card.skills))
+            for i, sk in enumerate(a.a2a_card.skills):
+                props.add(f"agentbom:a2a:skill:{i}:id", sk.id)
+                props.add(f"agentbom:a2a:skill:{i}:name", sk.name)
+                for j, tag in enumerate(sk.tags):
+                    props.add(f"agentbom:a2a:skill:{i}:tag:{j}", tag)
             props.add_many("agentbom:a2a:security-scheme", a.a2a_card.security_schemes)
             props.add("agentbom:a2a:signature-status", a.a2a_card.signature_status)
             if a.a2a_card.url:
@@ -643,10 +701,10 @@ class _Builder:
         props.add("agentbom:instruction:media-type", i.media_type)
         props.add("agentbom:instruction:line-endings", i.line_endings)
         props.add("agentbom:instruction:precedence", i.precedence)
-        if i.editors and i.editors.value:
-            props.add_many("agentbom:instruction:editor", i.editors.value)
-        if i.loads_remote and i.loads_remote.value:
-            props.add_many("agentbom:instruction:loads-remote", i.loads_remote.value)
+        props.list_claim("agentbom:instruction:editor", i.editors)
+        props.list_claim("agentbom:instruction:loads-remote", i.loads_remote)
+        if i.frontmatter is not None:
+            props.add_json("agentbom:instruction:frontmatter:json", i.frontmatter)
         props.add("agentbom:instruction:secret-like-redacted", i.contains_secret_like)
         props.add("agentbom:instruction:normalized-digest", i.normalized_digest)
         ext = list(self._ext_refs(i) or [])
@@ -674,6 +732,18 @@ class _Builder:
         props.add("agentbom:prompt:digest", p.digest.value)
         props.add("agentbom:prompt:variables-schema-digest", p.variables_schema_digest)
         props.add("agentbom:prompt:risk-class", p.risk_class)
+        props.add("agentbom:prompt:path", p.path)
+        if p.variables_schema is not None:
+            if self.include_text:
+                props.add_json("agentbom:prompt:variables-schema:json", p.variables_schema)
+            else:
+                self._lose(
+                    f"/prompts/{p.id}/variablesSchema",
+                    E.LossReason.REDACTED,
+                    E.LossPreservedIn.COMPANION,
+                    entity=p.id,
+                    field="variables_schema",
+                )
         return _clean(
             {
                 "type": "file",
@@ -696,6 +766,13 @@ class _Builder:
         )
         props.add_many("agentbom:skill:allowed-tool", s.frontmatter.allowed_tools)
         props.add("agentbom:skill:compatibility", s.frontmatter.compatibility)
+        props.add("agentbom:skill:path", s.path)
+        props.add("agentbom:skill:license", s.frontmatter.license)
+        if s.frontmatter.metadata:
+            props.add_json("agentbom:skill:metadata:json", s.frontmatter.metadata)
+        props.add_json("agentbom:skill:manifest:json", s.manifest.to_json_dict())
+        for i, server in enumerate(s.referenced_servers):
+            props.add(f"agentbom:skill:referenced-server:{i}", server)
         props.add("agentbom:skill:file-count", len(s.manifest.resources))
         props.add("agentbom:skill:script-count", len(s.scripts))
         props.add("agentbom:skill:has-scripts", s.has_scripts)
@@ -790,6 +867,8 @@ class _Builder:
             else:
                 props.claim("agentbom:model:manifest-root", m.weights)
         props.add("agentbom:model:tensor-manifest-root", m.tensor_manifest_root)
+        if m.manifest is not None:
+            props.add_json("agentbom:model:manifest:json", m.manifest.to_json_dict())
         if m.serialization and m.serialization.value:
             ser = m.serialization.value
             props.add_many("agentbom:model:serialization:format", ser.formats)
@@ -961,7 +1040,17 @@ class _Builder:
     def software(self, s: SoftwareComponent) -> dict[str, Any]:
         if s.cyclonedx:
             comp = dict(s.cyclonedx)
+            original_ref = comp.get("bom-ref")
             comp["bom-ref"] = s.id
+            if isinstance(original_ref, str) and original_ref:
+                # the element is re-keyed to the entity id; keep the source SBOM's own bom-ref
+                comp["properties"] = sorted(
+                    [
+                        *[p for p in comp.get("properties") or [] if p.get("name") != SOURCE_BOM_REF],
+                        {"name": SOURCE_BOM_REF, "value": original_ref},
+                    ],
+                    key=lambda p: (str(p.get("name")), str(p.get("value"))),
+                )
             return comp
         return _clean(
             {
@@ -1138,15 +1227,30 @@ class _Builder:
         bom = self.bom
         evidence = []
         for ev in bom.evidence:
+            # the first data item is always the digest; the others are named facts (spec/cyclonedx-mapping.md)
+            data: list[dict[str, Any]] = [{"name": ev.evidence_kind.value, "contents": {"url": ev.digest}}]
+            if ev.uri:
+                data.append({"name": EVIDENCE_URI, "contents": {"url": ev.uri}})
+            for item, value in (
+                (EVIDENCE_MEDIA_TYPE, ev.media_type),
+                (EVIDENCE_NAME, ev.name),
+                (EVIDENCE_AUTHOR, ev.author_ref),
+                (EVIDENCE_REDACTION, ev.redaction_class.value if ev.redaction_class else None),
+            ):
+                if value:
+                    data.append(
+                        {
+                            "name": item,
+                            "contents": {"attachment": {"contentType": "text/plain", "content": value}},
+                        }
+                    )
             evidence.append(
                 _clean(
                     {
                         "bom-ref": ev.id,
                         "propertyName": ev.evidence_kind.value,
                         "description": ev.description,
-                        "data": [
-                            _clean({"name": ev.evidence_kind.value, "contents": {"url": ev.uri or ev.digest}})
-                        ],
+                        "data": data,
                         "created": _iso(ev.created),
                         "expires": _iso(ev.expires),
                     }
@@ -1421,6 +1525,7 @@ def export_cyclonedx(
             }
         )
 
+    root_component = b.agent(root, root=True)
     components.sort(key=lambda c: c["bom-ref"])
     services.sort(key=lambda s: s["bom-ref"])
     refs = {c["bom-ref"] for c in components} | {s["bom-ref"] for s in services} | {root.id}
@@ -1440,9 +1545,18 @@ def export_cyclonedx(
     if root.provenance.locator:
         pointered.insert(0, ("/metadata/component", root))
 
-    # identities not bound to any subject: record on the root agent
+    # identities / credential bindings that no element carries (their subject has no CycloneDX element)
+    for cb in bom.credential_bindings:
+        if cb.id not in b.emitted_bindings:
+            b._lose(
+                f"/credentialBindings/{cb.id}",
+                E.LossReason.NO_NATIVE_CONSTRUCT,
+                E.LossPreservedIn.COMPANION,
+                E.LossSeverity.SECURITY_RELEVANT,
+                entity=cb.id,
+            )
     for ident in bom.identities:
-        if not any(cb.identity_ref == ident.id for cb in bom.credential_bindings):
+        if ident.id not in b.emitted_identities:
             b._lose(
                 f"/identities/{ident.id}",
                 E.LossReason.NO_NATIVE_CONSTRUCT,
@@ -1501,7 +1615,7 @@ def export_cyclonedx(
                         },
                     ],
                     "tools": {"components": tools_components},
-                    "component": b.agent(root, root=True),
+                    "component": root_component,
                     "properties": b.metadata_properties(),
                 }
             ),

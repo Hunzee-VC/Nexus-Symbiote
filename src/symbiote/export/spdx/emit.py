@@ -151,8 +151,10 @@ class _Emitter:
         *,
         companion_digest: str | None,
         companion_ref: str | None,
+        include_text: bool = False,
     ) -> None:
         self.bom = bom
+        self.include_text = include_text
         self.companion_digest = companion_digest
         self.companion_ref = companion_ref
         digest12 = strip_prefix(bom.snapshot.digest)[:12]
@@ -353,6 +355,8 @@ class _Emitter:
                     "A2ACard",
                     cardDigest=a.a2a_card.digest,
                     cardUrl=a.a2a_card.url,
+                    cardVersion=a.a2a_card.version,
+                    securitySchemes=a.a2a_card.security_schemes or None,
                     protocolVersions=a.a2a_card.protocol_versions or None,
                     skills=[s.id for s in a.a2a_card.skills] or None,
                     signatureStatus=a.a2a_card.signature_status,
@@ -442,8 +446,23 @@ class _Emitter:
                     textFlags=[f.value for f in t.text_flags] or None,
                     source=t.source,
                     state=t.state,
+                    # definition text (``--include-text``): canonical JSON strings, as the CycloneDX attachment
+                    title=t.title if self.include_text else None,
+                    inputSchema=t.input_schema if self.include_text else None,
+                    outputSchema=t.output_schema if self.include_text else None,
                 ),
             )
+            if not self.include_text:
+                self.loss.append(
+                    LossItem(
+                        path=f"/tools/{t.id}/inputSchema",
+                        entity=t.id,
+                        field="input_schema",
+                        reason=E.LossReason.REDACTED,
+                        preserved_in=E.LossPreservedIn.COMPANION,
+                        severity=E.LossSeverity.INFO,
+                    )
+                )
             if t.server_ref in self.elements:
                 self.relate(
                     f"rel:contains:{t.id}",
@@ -497,6 +516,18 @@ class _Emitter:
                     riskClass=p.risk_class,
                 ),
             )
+            if not self.include_text and p.variables_schema is not None:
+                # the schema travels only with --include-text (as for tool schemas); say so, never drop silently
+                self.loss.append(
+                    LossItem(
+                        path=f"/prompts/{p.id}/variablesSchema",
+                        entity=p.id,
+                        field="variables_schema",
+                        reason=E.LossReason.REDACTED,
+                        preserved_in=E.LossPreservedIn.COMPANION,
+                        severity=E.LossSeverity.INFO,
+                    )
+                )
         for s in self.bom.skills:
             pkg = m.software_Package()
             pkg.name = s.frontmatter.name or s.id.split(":", 1)[1]
@@ -525,6 +556,7 @@ class _Emitter:
                 f.verifiedUsing = _hash(sc.digest)
                 ref = f"{s.id}/{sc.path}"
                 self.register(ref, f)
+                self.finish_element(ref, f, None)  # mirrors agentbom:kind and the interpreter
                 self.relate(f"rel:contains:{ref}", s.id, [ref], "contains", scope=None)
             if s.skill_md_ref in self.elements:
                 self.relate(f"rel:contains:{s.id}/skill-md", s.id, [s.skill_md_ref], "contains", scope=None)
@@ -716,6 +748,7 @@ class _Emitter:
                 ident,
                 extension(
                     "Identity",
+                    name=ident.name,
                     kind=ident.identity_kind,
                     ref=ident.ref,
                     issuer=ident.issuer,
@@ -729,6 +762,7 @@ class _Emitter:
             ext = extension(
                 "CredentialBinding",
                 id=cb.id,
+                name=cb.name,
                 identityRef=cb.identity_ref,
                 kind=cb.credential_kind,
                 lifetime=cb.lifetime,
@@ -800,7 +834,14 @@ class _Emitter:
                 f,
                 ev,
                 extension(
-                    "Evidence", kind=ev.evidence_kind, uri=ev.uri, created=ev.created, expires=ev.expires
+                    "Evidence",
+                    kind=ev.evidence_kind,
+                    name=ev.name,
+                    uri=ev.uri,
+                    created=ev.created,
+                    expires=ev.expires,
+                    author=ev.author_ref,
+                    redactionClass=ev.redaction_class,
                 ),
             )
         for ev in self.bom.evaluations:
@@ -1023,7 +1064,13 @@ def export_spdx(
     cdx_doc, _ = export_cyclonedx(
         bom, include_text=include_text, companion_digest=companion_digest, companion_ref=companion_ref
     )
-    em = _Emitter(bom, cdx_doc, companion_digest=companion_digest, companion_ref=companion_ref)
+    em = _Emitter(
+        bom,
+        cdx_doc,
+        companion_digest=companion_digest,
+        companion_ref=companion_ref,
+        include_text=include_text,
+    )
     em.objset.add(em.ci)
     agent_actor, tools = em.producers()
     em.parties()

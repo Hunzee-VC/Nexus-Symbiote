@@ -282,6 +282,10 @@ def _evaluate(
     return verdict, reason
 
 
+#: Largest serial increase (snapshot and trust status) one admission may make, and the largest first serial.
+MAX_SERIAL_STEP = 2**20
+
+
 def _advance(db: sqlite3.Connection, scope: str, policy: SignedPolicy) -> bool:
     """Reject snapshot and trust rollback and equivocation under the same deployment scope."""
     snap, trust = policy.gab["snapshot"], policy.gab["trustStatus"]
@@ -289,6 +293,12 @@ def _advance(db: sqlite3.Connection, scope: str, policy: SignedPolicy) -> bool:
     signed_config = {k: v for k, v in policy.gab.items() if k != "trustStatus"}
     row = (snap["serial"], _digest([signed_config, policy.policy_digest]), trust["serial"], _digest(trust))
     old = db.execute("SELECT sn, sd, tn, td FROM heads WHERE scope=?", (scope,)).fetchone()
+    if any(type(v) is not int or v < 1 or v >= 2**53 for v in (row[0], row[2])):
+        return False
+    if old and (row[0] - old[0] > MAX_SERIAL_STEP or row[2] - old[2] > MAX_SERIAL_STEP):
+        return False  # a bounded step: even a compromised signer cannot push the scope out of reach
+    if not old and (row[0] > MAX_SERIAL_STEP or row[2] > MAX_SERIAL_STEP):
+        return False
     if old and (
         row[0] < old[0]
         or row[2] < old[2]
@@ -296,7 +306,15 @@ def _advance(db: sqlite3.Connection, scope: str, policy: SignedPolicy) -> bool:
         or (row[2] == old[2] and row[3] != old[3])
     ):
         return False
+    # A forward snapshot advance must chain onto the admitted head: its ``prev`` names the snapshot admitted
+    # before. Otherwise one validly signed contract with an arbitrary serial jump (or a fork) would lock the
+    # legitimate chain out of this scope for good.
+    db.execute("CREATE TABLE IF NOT EXISTS chain(scope TEXT PRIMARY KEY, digest TEXT)")
+    head = db.execute("SELECT digest FROM chain WHERE scope=?", (scope,)).fetchone()
+    if old and row[0] > old[0] and head is not None and snap.get("prev") != head[0]:
+        return False
     db.execute("INSERT OR REPLACE INTO heads VALUES(?,?,?,?,?)", (scope, *row))
+    db.execute("INSERT OR REPLACE INTO chain VALUES(?,?)", (scope, snap.get("digest")))
     return True
 
 

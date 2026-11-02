@@ -41,7 +41,15 @@ def build_dir_manifest(
     if not root.is_dir():
         raise UndigestableError("not-a-directory", str(root))
     items: list[ManifestItem] = []
-    for path in sorted(root.rglob("*"), key=lambda p: p.relative_to(root).as_posix().encode("utf-8")):
+    paths = list(root.rglob("*"))
+    for path in paths:
+        rel = path.relative_to(root).as_posix()
+        try:
+            rel.encode("utf-8")
+        except UnicodeEncodeError:
+            # A file name that is not valid UTF-8 has no canonical manifest name: fail closed (I5), never crash.
+            raise UndigestableError("non-utf8-file-name", repr(rel)) from None
+    for path in sorted(paths, key=lambda p: p.relative_to(root).as_posix().encode("utf-8")):
         rel = path.relative_to(root).as_posix()
         if _ignored(rel, ignore):
             continue

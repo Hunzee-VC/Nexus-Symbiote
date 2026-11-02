@@ -658,6 +658,35 @@ def load_report(
     return report_from_dict(data, source_digest=source_digest, source_path=source_path)
 
 
+#: Upper bound for a report read from a path (the nine-surface demo report is under 1 MiB).
+MAX_REPORT_BYTES = 256 * 1024 * 1024
+
+
+def _read_regular_file(path: Path, limit: int) -> bytes:
+    """Read a regular file of at most ``limit`` bytes; refuse devices, FIFOs and a final symlink."""
+    import errno
+    import os
+    import stat
+
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise ReportError(f"report path is a symbolic link: {path.name}") from None
+        raise
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise ReportError(f"report is not a regular file: {path.name}")
+        with os.fdopen(fd, "rb", closefd=False) as fh:
+            data = fh.read(limit + 1)
+    finally:
+        os.close(fd)
+    if len(data) > limit:
+        raise ReportError(f"report exceeds {limit} bytes")
+    return data
+
+
 def read_report(source: Path | str | bytes) -> ShadowScanReport:
     """Read a ShadowScan JSON report or CycloneDX document from a path or bytes (NaN/Infinity refused)."""
     path: str | None = None
@@ -665,7 +694,7 @@ def read_report(source: Path | str | bytes) -> ShadowScanReport:
         raw = source
     else:
         p = Path(source)
-        raw = p.read_bytes()
+        raw = _read_regular_file(p, MAX_REPORT_BYTES)
         path = p.name
     try:
         data = json.loads(raw.decode("utf-8"), parse_constant=_reject_constant)

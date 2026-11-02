@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Final
 
@@ -77,6 +77,71 @@ def _split_npm_spec(spec: str) -> tuple[str, str | None]:
     return name, (version or None) if sep else None
 
 
+_TARBALL = re.compile(r"\.(?:tgz|tar\.gz|tar)$", re.IGNORECASE)
+
+
+def _npm_version_is_local(version: str) -> bool:
+    """Whether the part after ``name@`` names a local directory or tarball rather than a registry version."""
+    return (
+        version in (".", "..")
+        or version.startswith(("./", "../", "/", "~/", "file:", ".\\", "..\\"))
+        or bool(re.match(r"^[A-Za-z]:[\\/]", version))
+        or bool(_TARBALL.search(version))
+        or (
+            "/" in version
+            and not version.startswith(("github:", "git+", "git:", "gitlab:", "bitbucket:", "http"))
+        )
+    )
+
+
+def index_identity(url: str) -> str | None:
+    """``scheme://host[:port]/path`` of a package index — never userinfo, query or fragment.
+
+    Index URLs often carry a token in the username or password position. Only the credential-free location
+    may reach a purl, a digest, a message or a log; a digest over the raw URL would let anyone holding the BOM
+    confirm a guessed credential offline.
+    """
+    from urllib.parse import urlsplit, urlunsplit
+
+    try:
+        parts = urlsplit(url.strip())
+        host = parts.hostname
+        port = parts.port
+    except ValueError:
+        return None
+    if not parts.scheme or not host:
+        return None
+    netloc = host.lower() if ":" not in host else f"[{host.lower()}]"
+    if port is not None:
+        netloc += f":{port}"
+    return urlunsplit((parts.scheme.lower(), netloc, parts.path or "/", "", ""))
+
+
+def _with_registry_override(facts: LaunchFacts, flag: str, value: str | None) -> LaunchFacts:
+    """A package resolved through an operator-chosen index is not the public-registry package of that name.
+
+    The purl gains a ``repository_url`` qualifier (so the server identity digest changes when the index does),
+    the reference no longer counts as pinned, and the flag is recorded.
+    """
+    if facts.purl is None or facts.package_name is None:
+        return facts
+    purl = PackageURL.from_string(facts.purl)
+    qualifiers = dict(purl.qualifiers or {})
+    if value and flag in ("--index-url", "--index", "--default-index", "-i", "--registry"):
+        index = index_identity(value)
+        if index:
+            qualifiers["repository_url"] = index
+    return replace(
+        facts,
+        purl=PackageURL(
+            purl.type, purl.namespace, purl.name, purl.version, qualifiers or None, purl.subpath
+        ).to_string(),
+        pinned=False,
+        float_reason=f"registry-override:{flag.lstrip('-')}",
+        risky_flags=(*facts.risky_flags, f"registry-override:{flag.lstrip('-')}"),
+    )
+
+
 def _npm_facts(spec: str, detail: str) -> LaunchFacts:
     if spec.startswith(("./", "../", "/", "file:")) or re.match(r"^[A-Za-z]:[\\/]", spec):
         return LaunchFacts(Launcher.NPX, detail, local_path=spec)
@@ -97,6 +162,16 @@ def _npm_facts(spec: str, detail: str) -> LaunchFacts:
             Launcher.NPX, detail, ecosystem="npm", package_name=spec, pinned=False, float_reason="url"
         )
     name, version = _split_npm_spec(spec)
+    if version is not None and _npm_version_is_local(version):
+        # npm-package-arg: ``name@.``, ``name@../dir``, ``name@x.tgz`` resolve to a directory or tarball on
+        # disk; the registry name is only an alias and must not become the package identity.
+        return LaunchFacts(Launcher.NPX, detail, local_path=version, risky_flags=("local-alias",))
+    if version is not None and version.startswith(("http://", "https://")):
+        return LaunchFacts(
+            Launcher.NPX, detail, ecosystem="npm", package_name=version, pinned=False, float_reason="url"
+        )
+    if version is not None and version.startswith(("github:", "git+", "git:", "gitlab:", "bitbucket:")):
+        return _npm_facts(version, detail)
     namespace, _, short = name.rpartition("/")
     if version is None:
         reason: str | None = "no-version"
@@ -142,6 +217,23 @@ _NPX_VALUE_FLAGS: Final = frozenset(
 
 
 def _parse_npx(args: Sequence[str], detail: str) -> LaunchFacts:
+    facts = _parse_npx_spec(args, detail)
+    override = _find_flag(args, ("--registry",))
+    return _with_registry_override(facts, *override) if override else facts
+
+
+def _find_flag(args: Sequence[str], flags: Sequence[str]) -> tuple[str, str | None] | None:
+    """The first of ``flags`` anywhere in ``args`` (``--flag value`` or ``--flag=value``)."""
+    for i, arg in enumerate(args):
+        for flag in flags:
+            if arg == flag:
+                return flag, args[i + 1] if i + 1 < len(args) else None
+            if arg.startswith(flag + "="):
+                return flag, arg.split("=", 1)[1]
+    return None
+
+
+def _parse_npx_spec(args: Sequence[str], detail: str) -> LaunchFacts:
     packages: list[str] = []
     i = 0
     while i < len(args):
@@ -159,6 +251,14 @@ def _parse_npx(args: Sequence[str], detail: str) -> LaunchFacts:
         elif not arg.startswith("-"):
             break
         i += 1
+    if len(packages) > 1:
+        first = _npm_facts(packages[0], detail)
+        return replace(
+            first,
+            pinned=False,
+            float_reason="multiple-packages",
+            risky_flags=(*first.risky_flags, "multiple-packages:" + ",".join(packages[1:8])),
+        )
     if packages:
         return _npm_facts(packages[0], detail)
     if i < len(args):
@@ -262,7 +362,11 @@ def _parse_uvx(args: Sequence[str], detail: str) -> LaunchFacts:
     spec = from_spec or (args[i] if i < len(args) else None)
     if spec is None:
         return LaunchFacts(Launcher.UVX, detail)
-    return _pypi_facts(spec, detail, Launcher.UVX)
+    facts = _pypi_facts(spec, detail, Launcher.UVX)
+    override = _find_flag(
+        args, ("--index-url", "--index", "--default-index", "--extra-index-url", "--find-links", "-f")
+    )
+    return _with_registry_override(facts, *override) if override else facts
 
 
 def _parse_pipx(args: Sequence[str]) -> LaunchFacts:
@@ -282,7 +386,21 @@ def _parse_pipx(args: Sequence[str]) -> LaunchFacts:
             spec = spec or arg
             break
         i += 1
-    return _pypi_facts(spec, "pipx run", Launcher.UVX) if spec else LaunchFacts(Launcher.UVX, "pipx run")
+    if not spec:
+        return LaunchFacts(Launcher.UVX, "pipx run")
+    facts = _pypi_facts(spec, "pipx run", Launcher.UVX)
+    override = _find_flag(rest, ("--index-url", "-i"))
+    if override is None:
+        pip_args = _find_flag(rest, ("--pip-args",))
+        if (
+            pip_args
+            and pip_args[1]
+            and any(
+                f in pip_args[1] for f in ("--index-url", "--extra-index-url", "--find-links", "-i ", "-f ")
+            )
+        ):
+            override = ("--pip-args", None)
+    return _with_registry_override(facts, *override) if override else facts
 
 
 # --------------------------------------------------------------------------------------------- OCI
@@ -572,12 +690,50 @@ _LAUNCHERS: Final[dict[str, Callable[[str, list[str]], LaunchFacts]]] = {
 }
 
 
+_SHELLS: Final = {"cmd": ("/c", "/k"), "sh": ("-c",), "bash": ("-c",), "zsh": ("-c",), "dash": ("-c",)}
+
+
+def _unwrap_shell(base: str, argv: list[str]) -> list[str] | None:
+    """``cmd /c npx -y pkg`` / ``sh -c "npx -y pkg"`` → the wrapped command line (tokens), else ``None``.
+
+    A wrapper must not hide the package behind a ``binary`` launcher: the inner command is what runs.
+    """
+    if base == "env":
+        rest = list(argv)
+        while rest and (re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", rest[0]) or rest[0] in ("-i", "-", "--")):
+            rest.pop(0)
+        return rest or None
+    switches = _SHELLS.get(base)
+    if not switches:
+        return None
+    for i, arg in enumerate(argv):
+        posix_combined = base != "cmd" and re.fullmatch(r"-[a-zA-Z]*c", arg) is not None
+        if (arg.lower() in switches or posix_combined) and i + 1 < len(argv):
+            rest = argv[i + 1 :]
+            # the shell parses every option before the command string: skip them (-x, -e, --noprofile, --)
+            while rest and rest[0].startswith("-") and len(rest) > 1:
+                rest = rest[1:]
+            if len(rest) == 1 and " " in rest[0]:
+                import shlex
+
+                try:
+                    rest = shlex.split(rest[0], posix=base != "cmd")
+                except ValueError:
+                    return None
+            return rest or None
+    return None
+
+
 def parse_launch(command: str | None, args: Sequence[object]) -> LaunchFacts:
     """Identify what ``command args...`` would fetch and execute. Never executes anything."""
     if not command:
         return LaunchFacts(Launcher.OTHER, "none")
     argv = [str(a) for a in args]
     base = _basename(command)
+    unwrapped = _unwrap_shell(base, argv)
+    if unwrapped is not None:
+        inner = parse_launch(unwrapped[0], unwrapped[1:])
+        return replace(inner, risky_flags=(*inner.risky_flags, f"shell-wrapper:{base}"))
     handler = _LAUNCHERS.get(base)
     if handler is not None:
         return handler(base, argv)

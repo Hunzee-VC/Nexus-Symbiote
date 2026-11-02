@@ -93,3 +93,42 @@ def test_diff_and_chain_store(tmp_path: Path) -> None:
     )
     assert r.exit_code == 1, r.output
     assert any(e["type"] == "server-removed" for e in json.loads(r.stdout)["events"])
+
+
+def test_scan_nonce_flag_controls_the_merkle_nonce(tmp_path) -> None:
+    """``--nonce`` replaces the all-zero deterministic nonce; a malformed nonce is a usage error."""
+    import json
+    from pathlib import Path
+
+    from typer.testing import CliRunner
+
+    from symbiote.cli.app import app
+
+    example = Path(__file__).resolve().parents[2] / "examples" / "triage-agent"
+    runner = CliRunner()
+    nonce = "ab" * 32
+    a = runner.invoke(
+        app,
+        [
+            "scan",
+            str(example),
+            "-o",
+            str(tmp_path / "a"),
+            "--format",
+            "companion",
+            "--deterministic",
+            "--nonce",
+            nonce,
+        ],
+    )
+    b = runner.invoke(
+        app, ["scan", str(example), "-o", str(tmp_path / "b"), "--format", "companion", "--deterministic"]
+    )
+    assert a.exit_code == 0 and b.exit_code == 0, a.output + b.output
+    doc_a = json.loads((tmp_path / "a" / "agentbom.json").read_text())
+    doc_b = json.loads((tmp_path / "b" / "agentbom.json").read_text())
+    assert doc_a["merkle"]["nonce"] == nonce
+    assert doc_a["snapshot"]["digest"] != doc_b["snapshot"]["digest"]
+    assert "all-zero Merkle nonce" in b.output
+    bad = runner.invoke(app, ["scan", str(example), "-o", str(tmp_path / "c"), "--nonce", "xyz"])
+    assert bad.exit_code == 2

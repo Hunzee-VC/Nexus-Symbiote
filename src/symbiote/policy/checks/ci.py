@@ -72,6 +72,12 @@ def untrusted_ci_agent(spec: CheckSpec, ctx: PolicyContext) -> Iterator[Finding]
             *(f"token {p}" for p in writes),
             *(["default (possibly write) token permissions"] if default_perms else []),
             *(f"secret {s}" for s in secrets),
+            *(
+                ["every repository secret (toJSON(secrets) or secrets[expr])"]
+                if "secrets:all" in identity.tags
+                else []
+            ),
+            *(["inherited secrets"] if "secrets:inherit" in identity.tags else []),
             *(f"cache via {c}" for c in caches),
         ]
         if powers:

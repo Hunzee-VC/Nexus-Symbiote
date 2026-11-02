@@ -16,9 +16,11 @@ A report that does not parse yields a ``partial`` coverage fragment with the err
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, ClassVar
 
+from symbiote.collect._common import read_bounded
 from symbiote.collect.base import BaseCollector, CollectContext, CollectionResult
 from symbiote.model.enums import CollectorMode, CollectorStatus, CoverageStatus, Surface
 from symbiote.shadowscan.mapping import map_report
@@ -29,26 +31,67 @@ OPTION_KEY = "shadowscan_report"
 SCOPE_KEY = "shadowscan_scope"
 
 
+class _Declared:
+    """Where the report comes from: the operator (any location) or the scanned repository (root-confined)."""
+
+    __slots__ = ("operator", "path", "scope")
+
+    def __init__(self, path: Path, scope: str, *, operator: bool) -> None:
+        self.path, self.scope, self.operator = path, scope, operator
+
+
 def _declared_report(ctx: CollectContext) -> tuple[Path | None, str]:
-    """``(path, scope)`` from the context options, ``symbiote.yaml`` or a conventional file name."""
+    """``(path, scope)`` of the report to read (compatibility wrapper around :func:`_declared`)."""
+    declared = _declared(ctx)
+    return (declared.path, declared.scope) if declared else (None, str(ctx.options.get(SCOPE_KEY) or "root"))
+
+
+def _declared(ctx: CollectContext) -> _Declared | None:
+    """The report named by the operator, by ``symbiote.yaml`` in the scanned repository, or by convention.
+
+    A path the **operator** passes (``--shadowscan-report``) may live anywhere. A path taken from the scanned
+    repository is attacker-controlled: it must resolve inside the scan root (``..`` and absolute paths are
+    refused) and it is later read through :meth:`CollectContext.read_config`, which refuses symlinks and
+    non-regular files and bounds the read.
+    """
     scope = str(ctx.options.get(SCOPE_KEY) or "root")
     explicit = ctx.options.get(OPTION_KEY)
     if explicit:
         path = Path(str(explicit))
-        return (path if path.is_absolute() else ctx.root / path), scope
+        return _Declared(path if path.is_absolute() else Path.cwd() / path, scope, operator=True)
     declaration = ctx.options.get("declaration")
     if isinstance(declaration, dict) and isinstance(declaration.get("shadowscan"), dict):
         block: dict[str, Any] = declaration["shadowscan"]
         scope = str(block.get("scope") or scope)
         report = block.get("report")
         if isinstance(report, str) and report:
-            path = Path(report)
-            return (path if path.is_absolute() else ctx.root / path), scope
+            return _Declared(ctx.root / report, scope, operator=False)
     for name in DEFAULT_REPORT_NAMES:
         candidate = ctx.root / name
         if candidate.is_file() and not candidate.is_symlink():
-            return candidate, scope
-    return None, scope
+            return _Declared(candidate, scope, operator=False)
+    return None
+
+
+def _confined(ctx: CollectContext, path: Path) -> Path | None:
+    """``path`` if it stays inside the scan root after resolving ``..`` (symlinks are refused at open time)."""
+    root = ctx.root.resolve()
+    candidate = Path(os.path.normpath(root / path if not path.is_absolute() else path))
+    return candidate if candidate.is_relative_to(root) else None
+
+
+def _read(ctx: CollectContext, declared: _Declared) -> bytes:
+    """Bounded, regular-file-only read; never follows a final symlink; repository paths stay inside the root."""
+    if declared.operator:
+        outcome = read_bounded(declared.path, ctx.max_file_bytes, root=declared.path.parent)
+    else:
+        confined = _confined(ctx, declared.path)
+        if confined is None:
+            raise ReportError("report path declared by the scanned repository leaves the scan root")
+        outcome = ctx.read_config(confined)
+    if outcome.data is None:
+        raise ReportError(f"report not read ({outcome.error_class}): {outcome.detail}")
+    return outcome.data
 
 
 class ShadowScanReportCollector(BaseCollector):
@@ -66,21 +109,19 @@ class ShadowScanReportCollector(BaseCollector):
     mode: ClassVar[CollectorMode] = CollectorMode.OBSERVED
 
     def detect(self, ctx: CollectContext) -> bool:
-        path, _ = _declared_report(ctx)
-        return path is not None
+        return _declared(ctx) is not None
 
     def collect(self, ctx: CollectContext) -> CollectionResult:
         result = self.new_result()
-        path, scope = _declared_report(ctx)
-        if path is None:  # pragma: no cover - detect() gates this
+        declared = _declared(ctx)
+        if declared is None:  # pragma: no cover - detect() gates this
             result.status = CollectorStatus.SKIPPED
             result.reason = "no report"
             return result
-        display = ctx.display(path)
+        scope = declared.scope
+        display = ctx.display(declared.path)
         try:
-            if path.stat().st_size > ctx.max_file_bytes:
-                raise ReportError(f"report exceeds max_file_bytes ({ctx.max_file_bytes})")
-            report = read_report(path)
+            report = read_report(_read(ctx, declared))
         except (OSError, ReportError) as exc:
             result.status = CollectorStatus.FAILED
             result.reason = f"{type(exc).__name__}: {exc}"

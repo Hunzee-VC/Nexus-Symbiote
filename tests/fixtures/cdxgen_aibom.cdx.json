@@ -1,0 +1,120 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "serialNumber": "urn:uuid:0c9e8d7f-6a5b-4c3d-8e2f-1a0b9c8d7e6f",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-10-29T10:00:00Z",
+    "tools": {
+      "components": [
+        {"type": "application", "name": "cdxgen", "version": "11.9.0", "author": "OWASP Foundation"}
+      ]
+    },
+    "component": {
+      "type": "application",
+      "bom-ref": "pkg:pypi/triage-agent@2.3.1",
+      "name": "triage-agent",
+      "version": "2.3.1",
+      "purl": "pkg:pypi/triage-agent@2.3.1",
+      "properties": [
+        {"name": "cdx:agent:framework", "value": "claude-agent-sdk"},
+        {"name": "cdx:agent:permission", "value": "acceptEdits"},
+        {"name": "cdx:agent:tools", "value": "get_issue,search_code"}
+      ]
+    }
+  },
+  "components": [
+    {
+      "type": "application",
+      "bom-ref": "mcp:github",
+      "name": "github",
+      "version": "0.6.2",
+      "purl": "pkg:npm/%40modelcontextprotocol/server-github@0.6.2",
+      "properties": [
+        {"name": "cdx:mcp:transport", "value": "stdio"},
+        {"name": "cdx:mcp:command", "value": "npx"},
+        {"name": "cdx:mcp:pinning", "value": "pinned"},
+        {"name": "cdx:mcp:authMode", "value": "api-key"},
+        {"name": "cdx:mcp:env", "value": "GITHUB_PERSONAL_ACCESS_TOKEN"},
+        {"name": "cdx:mcp:configFile", "value": ".mcp.json"},
+        {"name": "cdx:mcp:client", "value": "claude-code"},
+        {"name": "cdx:mcp:registry", "value": "io.github.modelcontextprotocol/server-github"}
+      ]
+    },
+    {
+      "type": "data",
+      "bom-ref": "mcp:github/get_issue",
+      "name": "get_issue",
+      "group": "mcp:github",
+      "data": [{"type": "definition", "name": "get_issue"}],
+      "properties": [
+        {"name": "cdx:mcp:toolName", "value": "get_issue"},
+        {"name": "cdx:mcp:server", "value": "mcp:github"},
+        {"name": "cdx:mcp:toolDescription", "value": "Get details of a GitHub issue"},
+        {"name": "cdx:ai:toolSchema", "value": "{\"type\":\"object\",\"properties\":{\"owner\":{\"type\":\"string\"},\"repo\":{\"type\":\"string\"},\"issue_number\":{\"type\":\"integer\"}},\"required\":[\"owner\",\"repo\",\"issue_number\"]}"},
+        {"name": "cdx:mcp:toolAnnotations", "value": "{\"readOnlyHint\":true,\"destructiveHint\":false,\"openWorldHint\":true}"}
+      ]
+    },
+    {
+      "type": "data",
+      "bom-ref": "mcp:github/search_code",
+      "name": "search_code",
+      "group": "mcp:github",
+      "data": [{"type": "definition", "name": "search_code"}],
+      "properties": [
+        {"name": "cdx:mcp:toolName", "value": "search_code"},
+        {"name": "cdx:mcp:server", "value": "mcp:github"}
+      ]
+    },
+    {
+      "type": "machine-learning-model",
+      "bom-ref": "model:anthropic/claude-sonnet-4-5",
+      "name": "claude-sonnet-4-5",
+      "properties": [
+        {"name": "cdx:ai:provider", "value": "anthropic"},
+        {"name": "cdx:ai:modelName", "value": "claude-sonnet-4-5"},
+        {"name": "cdx:ai:endpoint", "value": "https://api.anthropic.com"},
+        {"name": "cdx:ai:contextWindow", "value": "200000"}
+      ]
+    },
+    {
+      "type": "machine-learning-model",
+      "bom-ref": "model:local/reranker-mini",
+      "name": "reranker-mini",
+      "hashes": [{"alg": "SHA-256", "content": "3f9c6b1a2e4d5c7b8a9f0e1d2c3b4a5968778695a4b3c2d1e0f9a8b7c6d5e4f3"}],
+      "properties": [
+        {"name": "cdx:ai:format", "value": "pytorch"},
+        {"name": "cdx:ai:unsafeDeserialization", "value": "true"},
+        {"name": "cdx:ai:source", "value": "models/reranker-mini/pytorch_model.bin"}
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/mcp@1.9.0",
+      "name": "mcp",
+      "version": "1.9.0",
+      "purl": "pkg:pypi/mcp@1.9.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/claude-agent-sdk@0.9.4",
+      "name": "claude-agent-sdk",
+      "version": "0.9.4",
+      "purl": "pkg:pypi/claude-agent-sdk@0.9.4",
+      "properties": [{"name": "cdx:pypi:resolved_from", "value": "requirements.txt"}]
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "pkg:pypi/triage-agent@2.3.1",
+      "dependsOn": [
+        "pkg:pypi/mcp@1.9.0",
+        "pkg:pypi/claude-agent-sdk@0.9.4",
+        "mcp:github",
+        "model:anthropic/claude-sonnet-4-5",
+        "model:local/reranker-mini"
+      ]
+    },
+    {"ref": "mcp:github", "dependsOn": ["mcp:github/get_issue", "mcp:github/search_code"]}
+  ]
+}
