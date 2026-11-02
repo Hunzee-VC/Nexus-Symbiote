@@ -8,6 +8,9 @@ The examples below are synthetic and intentionally include hostile metadata.
 
 import json
 
+from click.testing import CliRunner
+
+from nexus_symbiote.cli import main
 from nexus_symbiote.core.enums import AssuranceLevel, ComponentType, TrustTier
 from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
 from nexus_symbiote.generators.spdx import SPDXGenerator
@@ -54,7 +57,12 @@ def parse(report):
 
 
 def test_native_and_cyclonedx_tool_observations_remain_unverified():
-    for report in (native(), cdx()):
+    # The producer emits an MCP finding as a CycloneDX service, not a
+    # component; its generic component representation is accepted too.
+    service_report = cdx()
+    service_report["services"] = service_report.pop("components")
+    del service_report["services"][0]["type"]
+    for report in (native(), cdx(), service_report):
         result = parse(report)
         assert result.unmapped_count == 0
         tool = result.components[0]
@@ -90,3 +98,26 @@ def test_portable_exports_keep_tool_type_and_partial_coverage():
         assert recovered.components[0].component_type == ComponentType.TOOL
         assert recovered.components[0].trust_tier == TrustTier.UNKNOWN
         assert recovered.metadata.completeness.scanner_status["shadowscan"] == "partial"
+
+
+def test_v1_projection_requires_its_original_importer_for_reverification(tmp_path):
+    source = tmp_path / "source.json"
+    bom = tmp_path / "bom.json"
+    source.write_text(json.dumps(native(resource_type="mcp-server")))
+    runner = CliRunner()
+    assert (
+        runner.invoke(
+            main, ["import-shadowscan", str(source), "-o", str(bom), "--report-only"]
+        ).exit_code
+        == 0
+    )
+    doc = json.loads(bom.read_text())
+    doc["components"][0]["properties"]["shadowscan:projection-profile"] = (
+        "nexus-symbiote/shadowscan-projection/v1"
+    )
+    bom.write_text(json.dumps(doc))
+    assert runner.invoke(main, ["verify-discovery", str(bom), str(source)]).exit_code == 0
+    assert (
+        runner.invoke(main, ["verify-discovery", str(bom), str(source), "--projection"]).exit_code
+        != 0
+    )
