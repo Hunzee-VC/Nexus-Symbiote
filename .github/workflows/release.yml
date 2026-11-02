@@ -39,15 +39,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python scripts/check_repository_controls.py --repo "$GITHUB_REPOSITORY" --branch main --sha "$GITHUB_SHA"
+      - name: Recheck candidate dependencies against current OSV advisories
+        run: python scripts/check_dependency_advisories.py --out evidence/dependency-advisories.json
       - run: python -m pytest
       - name: Enforce committed security regression contracts
         run: python scripts/check_security_regressions.py --out evidence/security-regressions.json
-      - name: Retain security regression report on candidate failure
+      - name: Retain candidate security reports on failure
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-security-regression-evidence
-          path: evidence/security-regressions.json
+          path: |
+            evidence/security-regressions.json
+            evidence/dependency-advisories.json
           if-no-files-found: warn
       - run: ruff check src tests scripts && ruff format --check src tests scripts
       - run: mypy src/nexus_symbiote
@@ -76,6 +80,8 @@ jobs:
           sha256sum dist/*.whl > "$RUNNER_TEMP/inventory-benchmark/wheel.sha256"
           tar -C "$RUNNER_TEMP/inventory-benchmark" -czf evidence/inventory-benchmark.tar.gz results.json statement.json wheel.sha256
           python scripts/release_checksums.py
+          tar -C "$GITHUB_WORKSPACE" -czf "$RUNNER_TEMP/release-evidence.tar.gz" evidence
+          mv "$RUNNER_TEMP/release-evidence.tar.gz" evidence/release-evidence.tar.gz
       - name: Upload distributions
         id: distributions
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -134,6 +140,17 @@ jobs:
         with:
           artifact-ids: ${{ needs.build.outputs.evidence_id || 'missing' }}
           path: evidence
+      - name: Attest the complete candidate evidence bundle
+        id: candidate-evidence
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: evidence/release-evidence.tar.gz
+      - name: Retain candidate evidence attestation bundle
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-evidence-attestation
+          path: ${{ steps.candidate-evidence.outputs.bundle-path }}
+          if-no-files-found: error
       - name: Attest inventory benchmark results and wheel digest
         id: inventory
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2

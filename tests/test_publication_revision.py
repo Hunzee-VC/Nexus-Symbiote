@@ -29,7 +29,7 @@ def test_settings_without_a_verified_source_cannot_approve_publication(monkeypat
                 "required_status_checks": {
                     "enforcement_level": "everyone",
                     "contexts": ["Verified CI"],
-                    "checks": [],
+                    "checks": [{"context": "Verified CI", "app_id": 15368}],
                 },
             },
         },
@@ -46,7 +46,7 @@ def branch(sha="a" * 40):
             "required_status_checks": {
                 "enforcement_level": "everyone",
                 "contexts": ["Verified CI"],
-                "checks": [],
+                "checks": [{"context": "Verified CI", "app_id": 15368}],
             },
         },
     }
@@ -66,15 +66,16 @@ def evidence():
             "conclusion": "success",
         },
         {
-            "total_count": 1,
+            "total_count": 3,
             "jobs": [
                 {
-                    "name": "Verified CI",
+                    "name": name,
                     "run_id": 123,
                     "run_attempt": 2,
                     "status": "completed",
                     "conclusion": "success",
                 }
+                for name in ["Verified CI", "CodeQL policy", "Dependency advisories"]
             ],
         },
     )
@@ -214,3 +215,14 @@ def test_api_failure_blocks_publication_without_logging_credentials(monkeypatch,
     monkeypatch.setattr(controls, "fetch_verification", unavailable)
     assert controls.main() == 2
     assert "CANARY" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("name", ["CodeQL policy", "Dependency advisories"])
+def test_green_aggregate_cannot_mask_missing_or_failed_security_acceptance(name):
+    run, jobs = evidence()
+    job = next(job for job in jobs["jobs"] if job["name"] == name)
+    job["conclusion"] = "failure"
+    assert evaluate(run, jobs)
+    jobs["jobs"].remove(job)
+    jobs["total_count"] -= 1
+    assert evaluate(run, jobs)
