@@ -8,7 +8,7 @@ inputs:
     description: Repository or agent directory to scan, within the checked-out workspace
     default: "."
   output-dir:
-    description: Directory within the workspace that receives agentbom.json, agentbom.cdx.json, agentbom.spdx.json, agentbom.sarif and findings.json
+    description: Directory within the workspace that receives agentbom.json, agentbom.cdx.json, agentbom.spdx.json, agentbom.sarif and findings.json. On runners that reuse a workspace, keep it outside scan-path so a later run does not inventory earlier outputs
     default: agentbom
   fail-on:
     description: "Lowest severity that fails the policy gate: critical, high, medium, low or info"

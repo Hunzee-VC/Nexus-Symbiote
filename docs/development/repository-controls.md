@@ -3,7 +3,8 @@
 ## One required status check
 
 `.github/workflows/ci.yml` ends with an aggregate job named **`Verified CI`**. It runs on `always()`, needs
-every other job (`test` across the Python matrix, `quality`, `distribution`, `rego-parity`, `docs`) and fails
+every other job (`test` across the Python matrix, `quality`, `distribution`, `rego-parity`, `shadowscan-interop`,
+`docs`) and fails
 if any of them failed, was skipped or was cancelled. `scripts/check_workflows.py` fails CI if the aggregate
 stops covering a job. Make this exact context a required status check on `main`; a workflow that merely runs
 enforces nothing.
