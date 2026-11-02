@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Final
 
@@ -228,6 +228,14 @@ def _parse_npx_spec(args: Sequence[str], detail: str) -> LaunchFacts:
         elif not arg.startswith("-"):
             break
         i += 1
+    if len(packages) > 1:
+        first = _npm_facts(packages[0], detail)
+        return replace(
+            first,
+            pinned=False,
+            float_reason="multiple-packages",
+            risky_flags=(*first.risky_flags, "multiple-packages:" + ",".join(packages[1:8])),
+        )
     if packages:
         return _npm_facts(packages[0], detail)
     if i < len(args):
@@ -659,12 +667,41 @@ _LAUNCHERS: Final[dict[str, Callable[[str, list[str]], LaunchFacts]]] = {
 }
 
 
+_SHELLS: Final = {"cmd": ("/c", "/k"), "sh": ("-c",), "bash": ("-c",), "zsh": ("-c",), "dash": ("-c",)}
+
+
+def _unwrap_shell(base: str, argv: list[str]) -> list[str] | None:
+    """``cmd /c npx -y pkg`` / ``sh -c "npx -y pkg"`` → the wrapped command line (tokens), else ``None``.
+
+    A wrapper must not hide the package behind a ``binary`` launcher: the inner command is what runs.
+    """
+    switches = _SHELLS.get(base)
+    if not switches:
+        return None
+    for i, arg in enumerate(argv):
+        if arg.lower() in switches and i + 1 < len(argv):
+            rest = argv[i + 1 :]
+            if len(rest) == 1 and " " in rest[0]:
+                import shlex
+
+                try:
+                    rest = shlex.split(rest[0], posix=base != "cmd")
+                except ValueError:
+                    return None
+            return rest or None
+    return None
+
+
 def parse_launch(command: str | None, args: Sequence[object]) -> LaunchFacts:
     """Identify what ``command args...`` would fetch and execute. Never executes anything."""
     if not command:
         return LaunchFacts(Launcher.OTHER, "none")
     argv = [str(a) for a in args]
     base = _basename(command)
+    unwrapped = _unwrap_shell(base, argv)
+    if unwrapped is not None:
+        inner = parse_launch(unwrapped[0], unwrapped[1:])
+        return replace(inner, risky_flags=(*inner.risky_flags, f"shell-wrapper:{base}"))
     handler = _LAUNCHERS.get(base)
     if handler is not None:
         return handler(base, argv)

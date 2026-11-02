@@ -296,7 +296,15 @@ def _advance(db: sqlite3.Connection, scope: str, policy: SignedPolicy) -> bool:
         or (row[2] == old[2] and row[3] != old[3])
     ):
         return False
+    # A forward snapshot advance must chain onto the admitted head: its ``prev`` names the snapshot admitted
+    # before. Otherwise one validly signed contract with an arbitrary serial jump (or a fork) would lock the
+    # legitimate chain out of this scope for good.
+    db.execute("CREATE TABLE IF NOT EXISTS chain(scope TEXT PRIMARY KEY, digest TEXT)")
+    head = db.execute("SELECT digest FROM chain WHERE scope=?", (scope,)).fetchone()
+    if old and row[0] > old[0] and head is not None and snap.get("prev") != head[0]:
+        return False
     db.execute("INSERT OR REPLACE INTO heads VALUES(?,?,?,?,?)", (scope, *row))
+    db.execute("INSERT OR REPLACE INTO chain VALUES(?,?)", (scope, snap.get("digest")))
     return True
 
 

@@ -13,6 +13,7 @@ from rich.console import Console
 
 from symbiote import __version__
 from symbiote.cli import exit_codes
+from symbiote.cli._render import escape, safe_markup
 from symbiote.cli.admission import app as admission_app
 
 app = typer.Typer(
@@ -74,7 +75,7 @@ def emit(data: Any, as_json: bool, human: str | None = None) -> None:
     if as_json or human is None:
         sys.stdout.write(json.dumps(data, indent=2, ensure_ascii=False, default=str) + "\n")
     else:
-        console.print(human)
+        console.print(safe_markup(human))
 
 
 @app.command()
@@ -180,9 +181,13 @@ def digest_file(path: Path, as_json: JsonFlag = False) -> None:
 @digest_app.command("dir")
 def digest_dir(path: Path, allow_symlinks: bool = False, as_json: JsonFlag = False) -> None:
     """dirmanifest/v1 manifest with an OpenSSF model-signing compatible root."""
-    from symbiote.digest import build_dir_manifest, dirmanifest_digest
+    from symbiote.digest import UndigestableError, build_dir_manifest, dirmanifest_digest
 
-    manifest = build_dir_manifest(path, allow_symlinks=allow_symlinks)
+    try:
+        manifest = build_dir_manifest(path, allow_symlinks=allow_symlinks)
+    except UndigestableError as exc:
+        console.print(f"[red]undigestable[/red]: {escape(str(exc))}")
+        raise typer.Exit(exit_codes.SCHEMA) from None
     env = dirmanifest_digest(manifest)
     data = {
         "root": manifest.root,

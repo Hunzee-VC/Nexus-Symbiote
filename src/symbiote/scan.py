@@ -154,7 +154,7 @@ def root_agent_from(
         framework=fw_claim,
         provenance={"assurance": "declared", "method": "config", "locator": locator}
         if locator
-        else {"assurance": "declared", "method": "heuristic", "locator": str(root)},
+        else {"assurance": "declared", "method": "heuristic", "locator": "."},
     )
     return agent, parties
 

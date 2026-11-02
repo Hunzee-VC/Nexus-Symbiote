@@ -38,7 +38,8 @@ def hidden_code_points(text: str) -> list[str]:
     found: list[str] = []
     for ch in text:
         cp = ord(ch)
-        if cp in _BIDI or cp in _TAGS:
+        if cp in _BIDI or cp in _TAGS or 0xFE00 <= cp <= 0xFE0F or 0xE0100 <= cp <= 0xE01EF:
+            # variation selectors (Mn) are invisible and can smuggle data through otherwise plain text
             found.append(f"U+{cp:04X}")
             continue
         if cp in _ALLOWED_FORMAT:
@@ -49,29 +50,30 @@ def hidden_code_points(text: str) -> list[str]:
     return found
 
 
+def _nodes(obj: Any) -> Iterable[Any]:
+    """Every value in a JSON tree, depth first, without recursion (hostile schemas nest thousands deep)."""
+    stack = [obj]
+    while stack:
+        node = stack.pop()
+        yield node
+        if isinstance(node, Mapping):
+            stack.extend(reversed(list(node.values())))
+        elif isinstance(node, list):
+            stack.extend(reversed(node))
+
+
 def iter_strings(obj: Any) -> Iterable[str]:
-    if isinstance(obj, str):
-        yield obj
-    elif isinstance(obj, Mapping):
-        for v in obj.values():
-            yield from iter_strings(v)
-    elif isinstance(obj, list):
-        for v in obj:
-            yield from iter_strings(v)
+    return (n for n in _nodes(obj) if isinstance(n, str))
 
 
 def external_refs(schema: Any) -> list[str]:
     """``$ref`` values that are not fragment-local."""
     out: list[str] = []
-    if isinstance(schema, Mapping):
-        ref = schema.get("$ref")
-        if isinstance(ref, str) and not ref.startswith("#"):
-            out.append(ref)
-        for v in schema.values():
-            out.extend(external_refs(v))
-    elif isinstance(schema, list):
-        for v in schema:
-            out.extend(external_refs(v))
+    for node in _nodes(schema):
+        if isinstance(node, Mapping):
+            ref = node.get("$ref")
+            if isinstance(ref, str) and not ref.startswith("#"):
+                out.append(ref)
     return out
 
 
@@ -80,18 +82,12 @@ def cross_tool_directives(text: str) -> list[str]:
 
 
 def schema_descriptions(schema: Any) -> Iterable[str]:
-    if isinstance(schema, Mapping):
-        d = schema.get("description")
-        if isinstance(d, str):
-            yield d
-        t = schema.get("title")
-        if isinstance(t, str):
-            yield t
-        for v in schema.values():
-            yield from schema_descriptions(v)
-    elif isinstance(schema, list):
-        for v in schema:
-            yield from schema_descriptions(v)
+    for node in _nodes(schema):
+        if isinstance(node, Mapping):
+            for key in ("description", "title"):
+                value = node.get(key)
+                if isinstance(value, str):
+                    yield value
 
 
 def tool_text_flags(raw_tool: Mapping[str, Any]) -> list[TextFlag]:

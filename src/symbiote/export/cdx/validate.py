@@ -7,7 +7,7 @@ from functools import lru_cache
 from importlib import resources
 from typing import Any
 
-from jsonschema import Draft7Validator
+from jsonschema import Draft7Validator, ValidationError, validators
 from referencing import Registry, Resource
 from referencing.jsonschema import DRAFT7
 
@@ -18,12 +18,49 @@ _FILES = {
 }
 
 
+def _canonical(value: Any) -> Any:
+    """A hashable form with JSON Schema equality: ``1 == 1.0``, ``true != 1``, objects compare by content."""
+    if isinstance(value, bool) or value is None or isinstance(value, str):
+        return (type(value).__name__, value)
+    if isinstance(value, (int, float)):
+        return (
+            ("number", float(value) if not isinstance(value, int) else value)
+            if not (isinstance(value, float) and value.is_integer())
+            else ("number", int(value))
+        )
+    if isinstance(value, list):
+        return ("array", tuple(_canonical(v) for v in value))
+    if isinstance(value, dict):
+        return ("object", frozenset((k, _canonical(v)) for k, v in value.items()))
+    return ("other", repr(value))
+
+
+def _unique_items(validator: Any, unique: Any, instance: Any, schema: Any) -> Any:
+    """``uniqueItems`` in linear time (jsonschema compares every pair of unhashable items: quadratic).
+
+    A hostile document with thousands of components would otherwise cost minutes per validation.
+    """
+    del validator, schema
+    if not unique or not isinstance(instance, list):
+        return
+    seen: set[Any] = set()
+    for item in instance:
+        key = _canonical(item)
+        if key in seen:
+            yield ValidationError(f"{instance!r:.200} has non-unique elements")
+            return
+        seen.add(key)
+
+
+_FastDraft7 = validators.extend(Draft7Validator, {"uniqueItems": _unique_items})
+
+
 def _load(name: str) -> dict[str, Any]:
     return json.loads(resources.files("symbiote").joinpath(f"{_VENDOR}/{name}").read_text(encoding="utf-8"))
 
 
 @lru_cache(maxsize=4)
-def _validator(version: str) -> Draft7Validator:
+def _validator(version: str) -> Any:
     schema = _load(_FILES[version])
     jsf = _load("jsf-0.82.schema.json")
     spdx = _load("spdx.schema.json")
@@ -38,7 +75,15 @@ def _validator(version: str) -> Draft7Validator:
             ("spdx.schema.json", Resource.from_contents(spdx, default_specification=DRAFT7)),
         ]
     )
-    return Draft7Validator(schema, registry=registry)
+    return _FastDraft7(schema, registry=registry)
+
+
+#: Above this many components + services + dependencies the redundant second validator is skipped.
+SECOND_VALIDATOR_ELEMENT_BUDGET = 500
+
+
+def _element_count(doc: dict[str, Any]) -> int:
+    return sum(len(doc.get(k) or []) for k in ("components", "services", "dependencies"))
 
 
 def validate_cyclonedx(doc: dict[str, Any], version: str | None = None) -> list[str]:
@@ -51,6 +96,10 @@ def validate_cyclonedx(doc: dict[str, Any], version: str | None = None) -> list[
         for e in sorted(_validator(version).iter_errors(doc), key=lambda e: list(e.absolute_path))
     ]
     if errors:
+        return errors
+    if _element_count(doc) > SECOND_VALIDATOR_ELEMENT_BUDGET:
+        # cyclonedx-python-lib validates with stock jsonschema, whose uniqueItems is quadratic: a hostile
+        # document with thousands of entries would cost minutes. The full-schema pass above is authoritative.
         return errors
     try:  # second, independent validator
         from cyclonedx.schema import SchemaVersion
@@ -65,4 +114,4 @@ def validate_cyclonedx(doc: dict[str, Any], version: str | None = None) -> list[
     return errors
 
 
-__all__ = ["validate_cyclonedx"]
+__all__ = ["SECOND_VALIDATOR_ELEMENT_BUDGET", "validate_cyclonedx"]
