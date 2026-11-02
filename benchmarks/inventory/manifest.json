@@ -10,6 +10,7 @@
   "cases": [
     {
       "id": "reference-filesystem",
+      "inventory_scope": "source",
       "fixture": "upstream/server.ts.fixture",
       "file": "src/filesystem/server.ts",
       "sha256": "672a909d31499e7ffde523705a31c90eb8d2a69f3b135ff0a1d5c23bf98083fc",
@@ -33,6 +34,7 @@
     },
     {
       "id": "python-sdk-quickstart",
+      "inventory_scope": "source",
       "fixture": "upstream/python-sdk-quickstart.py.fixture",
       "file": "app/mcpserver_quickstart.py",
       "sha256": "96f3a8692eff290dba9e68a788956f58893a72426a7a78539c3cae4b9ed65a02",
@@ -49,6 +51,12 @@
     },
     {
       "id": "registration-decoys",
+      "inventory_scope": "source",
+      "coverage_rationale": "Unresolved receiver and dynamic name are intentional; absent labels remain unknown.",
+      "expected_mcp_exclusions": [
+        "src/server.ts:6 (unresolved MCP registration receiver)",
+        "src/server.ts:7 (unresolved MCP tool name)"
+      ],
       "files": {
         "src/server.ts": "import { McpServer as S } from \"@modelcontextprotocol/server\";\nconst service = new S({});\nservice.registerTool(\"active_tool\", {}, () => {});\n// service.registerTool(\"in_comment\", {}, fn);\nconst help = `service.registerTool(\"in_string\", {}, fn)`;\nunrelated.registerTool(\"wrong_receiver\", {}, fn);\nservice.registerTool(nameFromRuntime, {}, fn);\n",
         "tests/server.ts": "import { McpServer } from \"@modelcontextprotocol/server\";\nconst server = new McpServer({});\nserver.registerTool(\"test_only\", {}, fn);\n",

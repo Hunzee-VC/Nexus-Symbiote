@@ -27,13 +27,17 @@ DIRECTORY = Path(__file__).resolve().parent
 
 
 def score_tools(
-    predicted: set[str], expected: list[str], decoys: list[str], *, collection_failed: bool = False
+    predicted: set[str],
+    expected: list[str],
+    decoys: list[str],
+    *,
+    collection_incomplete: bool = False,
 ) -> dict:
     """Score only labeled tools and explicitly labeled non-tools.
 
     An unexpected, unlabeled name fails the case but does not become a false
     positive in a closed-world confusion matrix without an adjudicated label.
-    Missing labels are unknown when collection failed, not false or true negatives.
+    Missing labels are unknown when collection is incomplete, not false or true negatives.
     """
     if (
         len(set(expected)) != len(expected)
@@ -44,13 +48,25 @@ def score_tools(
     positives, negatives = set(expected), set(decoys)
     return {
         "tp": len(predicted & positives),
-        "fn": 0 if collection_failed else len(positives - predicted),
+        "fn": 0 if collection_incomplete else len(positives - predicted),
         "fp": len(predicted & negatives),
-        "tn": 0 if collection_failed else len(negatives - predicted),
-        "unknown_positive_labels": len(positives - predicted) if collection_failed else 0,
-        "unknown_negative_labels": len(negatives - predicted) if collection_failed else 0,
+        "tn": 0 if collection_incomplete else len(negatives - predicted),
+        "unknown_positive_labels": len(positives - predicted) if collection_incomplete else 0,
+        "unknown_negative_labels": len(negatives - predicted) if collection_incomplete else 0,
         "unexpected_unlabeled": sorted(predicted - positives - negatives),
     }
+
+
+def relevant_mcp_exclusions(case: dict, exclusions: list[str]) -> list[str]:
+    """Only ignore absent config when labels explicitly concern application source."""
+    return sorted(
+        reason
+        for reason in exclusions
+        if not (
+            case.get("inventory_scope") == "source"
+            and reason == "mcp-config (no config files found)"
+        )
+    )
 
 
 def run() -> dict:
@@ -81,6 +97,7 @@ def run() -> dict:
                 path.write_bytes(data)
             bom = AIBOM()
             failures, exclusions = [], []
+            mcp_exclusions = []
             statuses = {}
             for scanner in (MCPScanner(), ModelScanner()):
                 collected = scanner.scan(project)
@@ -91,6 +108,8 @@ def run() -> dict:
                         failures.append("conflicting scanner component identity")
                 failures.extend(collected.scan_failures)
                 exclusions.extend(collected.surfaces_excluded)
+                if scanner.name == "mcp":
+                    mcp_exclusions.extend(collected.surfaces_excluded)
                 statuses[scanner.name] = (
                     "failed"
                     if collected.scan_failures
@@ -158,9 +177,14 @@ def run() -> dict:
                     raise ValueError(f"Unknown benchmark assertion {name}")
                 checks[name] = ok
             misses, extras = sorted(expected - predicted), sorted(predicted - expected)
+            relevant_exclusions = relevant_mcp_exclusions(case, mcp_exclusions)
+            has_tool_labels = bool(case["tools"] or case["decoys"])
+            incomplete = bool(failures or (has_tool_labels and relevant_exclusions))
             scores = score_tools(
-                predicted, case["tools"], case["decoys"], collection_failed=bool(failures)
+                predicted, case["tools"], case["decoys"], collection_incomplete=incomplete
             )
+            expected_exclusions = sorted(case.get("expected_mcp_exclusions", []))
+            exclusions_match = not has_tool_labels or relevant_exclusions == expected_exclusions
             totals.update({k: scores[k] for k in ("tp", "fp", "fn", "tn")})
             rows.append(
                 {
@@ -174,7 +198,15 @@ def run() -> dict:
                     "checks": checks,
                     "collection_failures": failures,
                     "collector_status": statuses,
-                    "passed": not misses and not extras and not failures and all(checks.values()),
+                    "relevant_mcp_exclusions": relevant_exclusions,
+                    "coverage_incomplete": incomplete,
+                    "coverage_rationale": case.get("coverage_rationale"),
+                    "expected_mcp_exclusions": expected_exclusions,
+                    "passed": not misses
+                    and not extras
+                    and not failures
+                    and exclusions_match
+                    and all(checks.values()),
                 }
             )
     return {

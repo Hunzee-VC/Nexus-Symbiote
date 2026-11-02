@@ -9,8 +9,9 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_public_inventory_corpus_has_honest_denominators():
     report = runpy.run_path(str(ROOT / "benchmarks/inventory/run_inventory.py"))["run"]()
     assert report["passed"], report
-    assert report["counts"] == {"tp": 18, "fp": 0, "fn": 0, "tn": 7}
-    assert report["denominators"] == {"expected_tools": 18, "explicit_decoys": 7}
+    assert report["counts"] == {"tp": 18, "fp": 0, "fn": 0, "tn": 2}
+    assert report["denominators"] == {"expected_tools": 18, "explicit_decoys": 2}
+    assert report["unknown_negative_labels"] == 5
     assert report["unlabeled_predictions"] == 0
 
 
@@ -29,7 +30,7 @@ def test_only_adjudicated_negatives_enter_confusion_counts():
         "unexpected_unlabeled": ["unknown"],
     }
     incomplete = score(
-        {"tool", "decoy"}, ["tool", "missing"], ["decoy", "negative"], collection_failed=True
+        {"tool", "decoy"}, ["tool", "missing"], ["decoy", "negative"], collection_incomplete=True
     )
     assert incomplete["tp"] == incomplete["fp"] == 1
     assert incomplete["fn"] == incomplete["tn"] == 0
@@ -38,6 +39,26 @@ def test_only_adjudicated_negatives_enter_confusion_counts():
         score(set(), ["tool"], ["tool"])
     with pytest.raises(ValueError, match="unique and disjoint"):
         score(set(), ["tool", "tool"], [])
+
+
+def test_unexpected_exclusion_is_unknown_and_fails_the_case(monkeypatch):
+    namespace = runpy.run_path(str(ROOT / "benchmarks/inventory/run_inventory.py"))
+    scanner = namespace["MCPScanner"]
+    original = scanner.scan
+
+    def incomplete(self, path):
+        result = original(self, path)
+        if (path / "app/mcpserver_quickstart.py").exists():
+            result.surfaces_excluded.append("app/mcpserver_quickstart.py: unexpected omission")
+        return result
+
+    monkeypatch.setattr(scanner, "scan", incomplete)
+    report = namespace["run"]()
+    case = next(row for row in report["cases"] if row["case"] == "python-sdk-quickstart")
+    assert not case["passed"] and case["coverage_incomplete"]
+    assert case["unknown_negative_labels"] == 2
+    assert case["relevant_mcp_exclusions"] == ["app/mcpserver_quickstart.py: unexpected omission"]
+    assert not report["passed"]
 
 
 def test_inventory_statement_binds_results_and_scanner_materials(tmp_path, monkeypatch):
