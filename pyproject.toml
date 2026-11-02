@@ -58,14 +58,14 @@ cyclonedx = [
     "cyclonedx-python-lib[json-validation]>=11.12,<12",
 ]
 sigstore = [
-    "sigstore>=3.6.7,<4",
+    "sigstore>=3.6.7,<5",
 ]
 yaml = [
     "pyyaml>=6.0,<7",
 ]
 all = [
     "cyclonedx-python-lib[json-validation]>=11.12,<12",
-    "sigstore>=3.6.7,<4",
+    "sigstore>=3.6.7,<5",
     "pyyaml>=6.0,<7",
 ]
 dev = [
@@ -75,7 +75,7 @@ dev = [
     "mypy>=1.10,<2",
     "types-PyYAML>=6.0,<7",
     "types-jsonschema>=4.23,<5",
-    "sigstore>=3.6.7,<4",
+    "sigstore>=3.6.7,<5",
     "build>=1.2,<2",
     "twine>=6.0,<7",
     "hypothesis>=6.0,<7",
