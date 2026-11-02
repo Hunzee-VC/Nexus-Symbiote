@@ -22,6 +22,20 @@ MAX_JSON_NODES = 20_000
 WORKER_TIMEOUT_SECONDS = 2.0
 _WORKER_SLOTS = threading.BoundedSemaphore(4)
 _VALID = b"valid\n"
+# Optional checkers jsonschema imports whenever they are installed, for example
+# through cyclonedx-python-lib's jsonschema[format-nongpl] requirement.
+_UNUSED_FORMAT_MODULES = (
+    "fqdn",
+    "idna",
+    "isoduration",
+    "jsonpointer",
+    "rfc3339_validator",
+    "rfc3986_validator",
+    "rfc3987",
+    "rfc3987_syntax",
+    "uri_template",
+    "webcolors",
+)
 
 
 class ValidationBudgetError(ValueError):
@@ -114,6 +128,17 @@ def validate_arguments(schema: Any, arguments: dict[str, Any]) -> None:
         _WORKER_SLOTS.release()
 
 
+def _disable_unused_format_checkers() -> None:
+    """Keep optional format checkers out of the worker before jsonschema loads.
+
+    The worker never asserts "format" (no FormatChecker), so these modules cannot
+    change a result. Some do expensive import-time work (rfc3987-syntax compiles a
+    grammar), which would spend the CPU budget meant for the untrusted input.
+    """
+    for name in _UNUSED_FORMAT_MODULES:
+        sys.modules[name] = None  # type: ignore[assignment]
+
+
 def _worker() -> int:
     """Internal fixed-protocol worker; failure details never echo input values."""
     try:
@@ -124,6 +149,7 @@ def _worker() -> int:
         resource.setrlimit(resource.RLIMIT_CPU, (1, 1))
         resource.setrlimit(resource.RLIMIT_AS, (256 * 1024 * 1024, 256 * 1024 * 1024))
         resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+        _disable_unused_format_checkers()
         from jsonschema import Draft202012Validator
         from referencing import Registry
 

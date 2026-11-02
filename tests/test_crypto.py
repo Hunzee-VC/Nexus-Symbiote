@@ -200,11 +200,19 @@ def local_signed_bundle(tmp_path, monkeypatch):
     signature = key.sign(digest, ec.ECDSA(Prehashed(hashes.SHA256())))
     hashed = Hashed(algorithm=HashAlgorithm.SHA2_256, digest=digest)
     record = _hashedrekord_from_parts(cert, signature, hashed)
+    body = record.model_dump_json(by_alias=True).encode()
     bundle = SimpleNamespace(
         signing_certificate=cert,
-        _inner=SimpleNamespace(message_signature=SimpleNamespace(signature=signature)),
+        _inner=SimpleNamespace(
+            message_signature=SimpleNamespace(signature=signature, message_digest=None)
+        ),
+        # sigstore 3 reads the base64 entry body; sigstore 4 reads the typed entry.
         log_entry=SimpleNamespace(
-            body=base64.b64encode(record.model_dump_json(by_alias=True).encode()).decode()
+            body=base64.b64encode(body).decode(),
+            _inner=SimpleNamespace(
+                kind_version=SimpleNamespace(kind="hashedrekord", version="0.0.1"),
+                canonicalized_body=body,
+            ),
         ),
     )
     verifier = object.__new__(Verifier)
