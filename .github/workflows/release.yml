@@ -34,7 +34,8 @@ jobs:
       - run: ruff check src tests scripts && ruff format --check src tests scripts
       - run: mypy src/nexus_symbiote
       - run: python scripts/check_workflows.py
-      - run: python -m build
+      - name: Build distributions with the locked backend
+        run: python -m build --no-isolation
       - run: python -m twine check dist/*
       - name: Smoke-test wheel and collect release evidence
         run: |
