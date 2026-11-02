@@ -20,6 +20,12 @@ are case-label occurrences: repeated names across cases are not distinct real
 deployments. The release statement signs the new results along with existing
 corpus and scanner materials.
 
+The manifest's `version` identifies the corpus and labels, not the result wire
+format; it is unchanged because the cases and labels are unchanged. The additional
+result fields are additive. Consumers that reject unknown JSON fields must update
+their parser. New result bytes require a new evidence statement and signature;
+previously signed results remain verifiable using their original statement.
+
 ## Independent effectiveness evaluation
 
 These regression fixtures do not establish a field baseline. To build one,
