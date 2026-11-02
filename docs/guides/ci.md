@@ -43,8 +43,8 @@ arrives through an environment variable, never through shell source; every path 
 `agentbom` artifact even when the gate fails. Outputs: `agentbom-path`, `sarif-path`, `policy-exit-code`,
 `conformance-exit-code`. The step's own exit code follows the CLI: 1 findings at or above `fail-on` (or a
 failed conformance requirement), 3 an emitted document failed its schema, 5 conformance blocked by unknowns,
-6 the scan could not read or write. The Action has no `--profile` input yet because `scan` has no profile
-selection on this branch.
+6 the scan could not read or write. `conformance-level` runs `symbiote conformance` after the policy gate so
+both verdicts are recorded; `symbiote scan --profile LEVEL` is the single-command equivalent for plain steps.
 
 ## The same pipeline as plain steps
 

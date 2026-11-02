@@ -7,13 +7,6 @@ schema, predicate types) is versioned independently of the tool; see `spec/versi
 
 ## [Unreleased]
 
-### Changed
-- `main` reconciled onto the foundation implementation; the `nexus_symbiote` package removed; `action.yml`,
-  pre-commit hooks, CodeQL and release workflows ported to the `symbiote` CLI. The CI workflow pins actions
-  by commit, adds `quality` (workflow linter, repository hygiene), `distribution` (wheel build and smoke
-  test) and the `Verified CI` aggregate job; `main`'s small security fixtures live on as
-  `tests/fixtures/security-corpus/` regression tests.
-
 ### Added
 - Initial public foundation: semantic model, canonical digests, CycloneDX 1.7 and SPDX 3.0.1
   exporters, collectors, policy checks, conformance levels, attestations, and the `symbiote` CLI.
@@ -61,6 +54,19 @@ schema, predicate types) is versioned independently of the tool; see `spec/versi
   proposals and ADRs in the site navigation.
 
 ### Changed
+- `main` reconciled onto the foundation implementation; the `nexus_symbiote` package removed; `action.yml`,
+  pre-commit hooks, CodeQL and release workflows ported to the `symbiote` CLI. The CI workflow pins actions
+  by commit, adds `quality` (workflow linter, repository hygiene), `distribution` (wheel build and smoke
+  test) and the `Verified CI` aggregate job; `main`'s small security fixtures live on as
+  `tests/fixtures/security-corpus/` regression tests.
+- `symbiote scan` now writes the companion last with `links` to the CycloneDX and SPDX documents (BOM-Link,
+  document IRI, digests of the written bytes) and the loss report, writes `agentbom.validation.json`, accepts
+  `--valid-for DAYS` and `--profile LEVEL` (conformance evaluated with the validation evidence; exit 5 when
+  not attained), refuses a non-directory path (exit 6) and reports `cyclonedxValid`/`spdxValid` as `null` when
+  the format was not exported. A zero-config scan of the example attains Minimal conformance.
+- `symbiote conformance --evidence` reads validation evidence (default: the sibling `agentbom.validation.json`);
+  `symbiote validate` recognises loss reports and validation evidence; `policy check` groups repeated flags;
+  collectors whose module is missing are reported as scan warnings instead of being skipped silently.
 - README: the status table now distinguishes the merged WP10 observed-layer modules (available
   through the Python API) from the pending WP9 static collectors and the CLI wiring, and links the
   gap analysis and the interoperability story (k8s-aibom import, OWASP AIBOM guide).

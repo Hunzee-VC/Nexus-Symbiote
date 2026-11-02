@@ -105,6 +105,40 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  shadowscan-interop:
+    name: Nexus ShadowScan interop (inventory round trip)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13"
+      - name: Install Symbiote and ShadowScan (separate environments)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+          python -m venv "$RUNNER_TEMP/shadowscan"
+          "$RUNNER_TEMP/shadowscan/bin/python" -m pip install --quiet "NexusShadowScan>=0.1.4,<0.2"
+          "$RUNNER_TEMP/shadowscan/bin/shadowscan" --version
+      - name: Generated inventories register the example agent in ShadowScan
+        env:
+          SYMBIOTE_SHADOWSCAN_BIN: ${{ runner.temp }}/shadowscan/bin/shadowscan
+        run: pytest -q -p no:cacheprovider tests/unit/test_shadowscan.py
+      - name: Round trip on the example (ShadowScan report -> observed snapshot -> inventory -> ShadowScan)
+        run: |
+          ss="$RUNNER_TEMP/shadowscan/bin/shadowscan"
+          "$ss" code examples/triage-agent --format json -o "$RUNNER_TEMP/ss.json"
+          symbiote shadowscan import "$RUNNER_TEMP/ss.json" -o "$RUNNER_TEMP/observed" --deterministic
+          symbiote scan examples/triage-agent -o "$RUNNER_TEMP/declared" --deterministic --format companion
+          symbiote shadowscan inventory "$RUNNER_TEMP/declared/agentbom.json" -o "$RUNNER_TEMP/inventory" --scan-root "$PWD/examples/triage-agent"
+          "$ss" inventory check "$RUNNER_TEMP/inventory"
+          "$ss" code examples/triage-agent --inventory "$RUNNER_TEMP/inventory" --format json -o "$RUNNER_TEMP/ss-registered.json"
+          python -c "import json,os,sys; r=json.load(open(os.path.join(os.environ['RUNNER_TEMP'],'ss-registered.json'))); s=r['summary']; print(s['total'], 'findings,', s['shadow'], 'shadow'); sys.exit(0 if s['shadow']==0 and r['inventory_present'] else 1)"
+          symbiote shadowscan reconcile "$RUNNER_TEMP/declared/agentbom.json" "$RUNNER_TEMP/ss.json"
+
   rego-parity:
     name: Rego export parity (OPA)
     runs-on: ubuntu-latest
@@ -154,7 +188,7 @@ jobs:
   verified:
     name: Verified CI
     if: always()
-    needs: [test, quality, distribution, rego-parity, docs]
+    needs: [test, quality, distribution, shadowscan-interop, rego-parity, docs]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -167,7 +201,7 @@ jobs:
           import os
           import sys
           results = json.loads(os.environ["CI_RESULTS"])
-          expected = {"test", "quality", "distribution", "rego-parity", "docs"}
+          expected = {"test", "quality", "distribution", "shadowscan-interop", "rego-parity", "docs"}
           if not isinstance(results, dict) or set(results) != expected:
               print("Verification metadata does not contain exactly the required jobs")
               sys.exit(1)

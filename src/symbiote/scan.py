@@ -15,6 +15,7 @@ from symbiote.collect import CollectContext, CollectionResult, load_collectors, 
 from symbiote.collect._common import read_bounded, url_facts
 from symbiote.model import AgentBOM, Claim, Edge, Party
 from symbiote.model import enums as E
+from symbiote.model.common import Validity
 from symbiote.model.document import COLLECTIONS
 from symbiote.model.entities import (
     Agent,
@@ -241,6 +242,7 @@ def scan(
     policy: bool = True,
     store: Path | None = None,
     options: Mapping[str, Any] | None = None,
+    validity: Validity | None = None,
 ) -> ScanOutcome:
     """Collect declared facts from ``root`` and return a finalised document."""
     root = Path(root).resolve()
@@ -257,13 +259,18 @@ def scan(
         budget_seconds=budget_seconds,
         options={"declaration": declaration, **dict(options or {})},
     )
-    loaded = load_collectors(collectors) if collectors else load_collectors()
+    load_warnings: list[str] = []
+    loaded = (
+        load_collectors(collectors, warnings=load_warnings)
+        if collectors
+        else load_collectors(warnings=load_warnings)
+    )
     results = run_collectors(ctx, loaded)
 
     buckets: dict[str, dict[str, Entity]] = {attr: {} for attr in COLLECTIONS}
     party_map: dict[str, Party] = {p.id: p for p in parties}
     edges: dict[tuple[str, str, str], Edge] = {}
-    warnings: list[str] = []
+    warnings: list[str] = list(load_warnings)
     collector_flags: list[Any] = []
     foreign_properties: list[Any] = []
     for res in results:
@@ -335,6 +342,8 @@ def scan(
         doc = _merge_flags(doc, collector_flags)
     use_nonce = nonce if nonce is not None else (bytes(32) if deterministic else None)
     chain_issues: list[ChainIssue] = []
+    if validity is not None:
+        doc = doc.replace(snapshot=doc.snapshot.replace(validity=validity.model_dump(mode="python")))
     if store is not None:
         bom, chain_issues = seal_with_chain(doc, ChainStore(store), nonce=use_nonce)
     else:
