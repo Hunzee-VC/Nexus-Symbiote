@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from symbiote.model.common import Claim
+from symbiote.model.common import Claim, Provenance
 from symbiote.model.entities import (
     Deployment,
     Environment,
@@ -42,6 +42,8 @@ from symbiote.model.entities import (
     WorkloadRef,
 )
 from symbiote.model.enums import (
+    AssuranceLevel,
+    ClaimMethod,
     EnvironmentKind,
     ModelKind,
     SignatureOutcome,
@@ -70,6 +72,16 @@ class K8sAibomImport:
     facts: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     source_serial_number: str | None = None
+    #: bom-refs of the components this importer mapped (a surrounding importer must not map them again)
+    handled_refs: list[str] = field(default_factory=list)
+    #: model id → source bom-ref
+    model_refs: dict[str, str] = field(default_factory=dict)
+    #: ``aibom.truncation.applied`` values (the controller dropped material; coverage is not complete)
+    truncations: list[str] = field(default_factory=list)
+    #: ``(name, version)`` of the emitting controller when the document says so
+    controller: tuple[str, str] | None = None
+    #: ``aibom.workload.*`` facts (group, kind, namespace, name, uid)
+    workload: dict[str, str] = field(default_factory=dict)
 
 
 def extract_bom_document(payload: Mapping[str, Any]) -> tuple[Mapping[str, Any], str | None]:
@@ -133,7 +145,7 @@ def _confidence_claim(
 
 def _signature_facts(props: list[tuple[str, str]]) -> SignatureFacts | None:
     """Keep upstream signature metadata as a claim. Raw producer fields remain in foreign_properties."""
-    prefixes = ("signature.", "k8s-aibom:signature:")
+    prefixes = ("signature.", "k8s-aibom:signature:", "k8s-aibom:security:signing:")
     raw = {
         name[len(prefix) :]: value for name, value in props for prefix in prefixes if name.startswith(prefix)
     }
@@ -161,6 +173,7 @@ def import_k8s_aibom(
     document, _ = extract_bom_document(payload)
     result = K8sAibomImport(source_serial_number=document.get("serialNumber"))
     workload: dict[str, str] = {}
+    controller: dict[str, str] = {}
     seen_components: dict[str, Model] = {}
     model_refs: dict[str, str] = {}
     namespace = None
@@ -172,10 +185,16 @@ def import_k8s_aibom(
             continue
         props = _properties(component)
         bom_ref = str(component.get("bom-ref", component.get("name", "component")))
+        entity_foreign: dict[str, str] = {}
         for name, value in props:
             lowered = name.lower()
             if lowered.startswith(("aibom.workload.", "k8s-aibom:workload:")):
                 workload[lowered.rsplit(".", 1)[-1].rsplit(":", 1)[-1]] = value
+                continue
+            if lowered.startswith(("aibom.controller.", "k8s-aibom:controller:")):
+                controller[lowered.rsplit(".", 1)[-1].rsplit(":", 1)[-1]] = value
+            if lowered in ("aibom.truncation.applied", "k8s-aibom:truncation:applied"):
+                result.truncations.append(value or "unspecified")
                 continue
             if lowered in ("aibom.redaction.applied", "k8s-aibom:redaction:applied"):
                 result.redactions.append(
@@ -191,6 +210,7 @@ def import_k8s_aibom(
                 result.foreign_properties.append(
                     ForeignProperty(dialect=DIALECT, element_id=bom_ref, name=name, value=value)
                 )
+                entity_foreign.setdefault(name, value)
         if component.get("type") != "machine-learning-model":
             continue
         name = str(component.get("name", "model"))
@@ -203,7 +223,9 @@ def import_k8s_aibom(
                 digest = "sha256:" + str(hash_entry.get("content", "")).lower()
         if digest and not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
             raise K8sAibomError(f"invalid SHA-256 for model {bom_ref}")
-        locator = f"cdx:{bom_ref}"
+        evidence_locator = _dialect_value(props, "aibom.evidence.locator", "k8s-aibom:evidence:locator")
+        locator = evidence_locator or f"cdx:{bom_ref}"
+        provenance = Provenance(assurance=AssuranceLevel.DECLARED, method=ClaimMethod.CONFIG, locator=locator)
         # A display name can cover many weight revisions, endpoints and BOM subjects.
         source_ref: str | list[str] = bom_ref
         props_by_name = dict(props)
@@ -254,6 +276,8 @@ def import_k8s_aibom(
             model = Model(
                 id=model_id,
                 name=name,
+                provenance=provenance,
+                foreign=entity_foreign,
                 model_kind=ModelKind.HOSTED,
                 hosted=hosted,
                 signature=signature,
@@ -263,6 +287,8 @@ def import_k8s_aibom(
             model = Model(
                 id=model_id,
                 name=name,
+                provenance=provenance,
+                foreign=entity_foreign,
                 model_kind=ModelKind.UNKNOWN,
                 signature=signature,
                 artifact_digest=artifact,
@@ -272,13 +298,32 @@ def import_k8s_aibom(
                 ForeignProperty(dialect=DIALECT, element_id=model_id, name="sourceComponent", value=bom_ref)
             )
         previous = seen_components.get(model.id)
-        if previous is not None and previous != model:
-            raise K8sAibomError(f"conflicting assertions for model {bom_ref}")
+        if previous is not None:
+            comparable = model.replace(provenance=previous.provenance, foreign=previous.foreign)
+            if previous != comparable:
+                raise K8sAibomError(f"conflicting assertions for model {bom_ref}")
+            merged_foreign = {
+                **previous.foreign,
+                **{k: v for k, v in entity_foreign.items() if k not in previous.foreign},
+            }
+            if merged_foreign != previous.foreign:
+                merged = previous.replace(foreign=merged_foreign)
+                seen_components[model.id] = merged
+                result.models[result.models.index(previous)] = merged
         if previous is None:
             seen_components[model.id] = model
             result.models.append(model)
+            result.model_refs[model.id] = bom_ref
+        if component.get("bom-ref"):
+            result.handled_refs.append(bom_ref)
         if ns := _dialect_value(props, "aibom.workload.namespace", "k8s-aibom:workload:namespace"):
             namespace = ns
+    if controller:
+        result.controller = (
+            str(controller.get("name") or "k8s-aibom"),
+            str(controller.get("version") or "unknown"),
+        )
+    result.workload = dict(workload)
     if workload:
         result.deployments.append(
             Deployment(
