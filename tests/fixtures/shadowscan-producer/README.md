@@ -16,11 +16,20 @@ Regenerate in a reviewed checkout of that commit with its dependencies installed
 from shadowscan.models import Finding, Surface, Kind, ScanResult, ScanStats
 from shadowscan.reporters.cyclonedx import render_cyclonedx
 
-f = Finding(surface=Surface.CODE, connector="code.filesystem", kind=Kind.AGENT,
-            title="synthetic", resource="synthetic-agent", resource_type="repository",
-            models=["example/model:1"])
-s = ScanResult(findings=[f], stats=[ScanStats(connector="code.filesystem",
-               started_at="2026-01-01T00:00:00Z")],
-               started_at="2026-01-01T00:00:00Z", finished_at="2026-01-01T00:00:00Z")
+f = Finding(
+    surface=Surface.CODE,
+    connector="code.filesystem",
+    kind=Kind.AGENT,
+    title="synthetic",
+    resource="synthetic-agent",
+    resource_type="repository",
+    models=["example/model:1"],
+)
+s = ScanResult(
+    findings=[f],
+    stats=[ScanStats(connector="code.filesystem", started_at="2026-01-01T00:00:00Z")],
+    started_at="2026-01-01T00:00:00Z",
+    finished_at="2026-01-01T00:00:00Z",
+)
 print(render_cyclonedx(s))
 ```
