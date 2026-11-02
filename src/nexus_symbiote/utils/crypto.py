@@ -98,7 +98,16 @@ def verify_sigstore_digest(
         from sigstore.models import Bundle
         from sigstore.verify import Verifier
         from sigstore.verify.policy import Identity
-        from sigstore_protobuf_specs.dev.sigstore.common.v1 import HashAlgorithm
+
+        # sigstore 4 moved the enum to sigstore_models; Hashed rejects the old type.
+        try:
+            from sigstore_models.common.v1 import (  # type: ignore[import-not-found,unused-ignore]
+                HashAlgorithm,
+            )
+        except ImportError:
+            from sigstore_protobuf_specs.dev.sigstore.common.v1 import (  # type: ignore[no-redef,assignment,import-not-found,unused-ignore]
+                HashAlgorithm,
+            )
 
         bundle = Bundle.from_json(bundle_json)
         policy = Identity(identity=expected_identity, issuer=expected_issuer)
