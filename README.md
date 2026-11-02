@@ -61,7 +61,7 @@ nexus-symbiote diff previous.json agentbom.json --fail-on-alert
 nexus-symbiote import-shadowscan shadowscan-report.json -o agentbom.json --report-only
 ```
 
-Exit codes: `0` = gate passed, `1` = gate failed or security alert, `2` = usage error.
+Exit codes: `0` = gate passed, `1` = gate failed, incomplete collection, or verification mismatch, `2` = usage error or invalid configuration.
 
 ## Why Nexus SymBiote
 
@@ -117,7 +117,7 @@ Collection is **static by default** — configuration files, manifests, and loca
 | **Runtime contracts** | Ed25519 signing for snapshots, tool approvals, trust status, and hosted-model attestations |
 | **Live observation** | Explicit opt-in MCP endpoint discovery and launcher verification under operator-provisioned policy |
 | **Blast-radius analysis** | Graph-based impact analysis showing which agents and components are affected by a compromise |
-| **Policy configuration** | Project-level `.nexus-symbiote.yaml` controlling scanners, thresholds, formats, and validation rules |
+| **Policy configuration** | Project-level `.nexus-symbiote.yaml` controlling scanners, thresholds, formats, and validation rules; pass `--no-project-policy` when evaluating untrusted checkouts |
 | **GitHub Action** | First-party composite Action for CI inventory, validation, risk gating, and SARIF upload |
 | **Pre-commit hooks** | Scan and risk-gate hooks for local development workflows |
 
@@ -147,8 +147,8 @@ Collection is **static by default** — configuration files, manifests, and loca
 | Exit code | Meaning |
 | --- | --- |
 | `0` | Success — gate passed, verification succeeded |
-| `1` | Failure — gate failed, security alert, or verification mismatch |
-| `2` | Usage error — invalid arguments or configuration |
+| `1` | Failure — gate failed, security alert, incomplete collection, verification mismatch, or `import-shadowscan` without `--report-only` |
+| `2` | Usage error — invalid arguments, configuration, or missing required mode |
 
 ## Export formats
 
@@ -175,7 +175,7 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
       - uses: aisecnomad/nexus-symbiote@<commit-sha>
@@ -188,7 +188,7 @@ jobs:
           sarif-upload: 'true'
 ```
 
-The Action installs its own reviewed source, collects once, and derives the requested format and SARIF from that same native inventory. Use a reviewed immutable commit SHA in `uses:`. See the [Action reference](action.yml) for all inputs and outputs.
+The Action installs its own reviewed source, collects once, and derives the requested format and SARIF from that same native inventory. Use a reviewed immutable commit SHA in `uses:`. See the [Action reference](https://github.com/aisecnomad/nexus-symbiote/blob/main/action.yml) for all inputs and outputs.
 
 ## Data handling and safety
 
@@ -198,28 +198,29 @@ The Action installs its own reviewed source, collects once, and derives the requ
 - Agent inventories can expose infrastructure details — restrict access to exported evidence.
 - A risk score summarizes findings under a policy; it is not a probability of compromise.
 - Signature verification proves bytes were signed under policy, not that content is safe.
+- **Untrusted checkouts**: `scan`, `validate`, and `risk` read project policy (`.nexus-symbiote.yaml`) by default. A pull request can weaken the gate (e.g. set `report-only`). Pass `--no-project-policy` to those commands when evaluating an untrusted checkout.
 
-Read the [security model](docs/security-model.md) and [security policy](SECURITY.md) before using results in an approval process.
+Read the [security model](https://github.com/aisecnomad/nexus-symbiote/blob/main/docs/security-model.md) and [security policy](https://github.com/aisecnomad/nexus-symbiote/blob/main/SECURITY.md) before using results in an approval process.
 
 ## Documentation
 
 | Topic | Link |
 | --- | --- |
-| Security model | [`docs/security-model.md`](docs/security-model.md) |
-| Runtime assurance | [`docs/runtime-assurance.md`](docs/runtime-assurance.md) |
-| ShadowScan integration | [`docs/shadowscan-integration.md`](docs/shadowscan-integration.md) |
-| Deployment evidence | [`docs/deployment-evidence.md`](docs/deployment-evidence.md) |
-| TypeScript inventory | [`docs/typescript-inventory.md`](docs/typescript-inventory.md) |
-| Releasing | [`docs/releasing.md`](docs/releasing.md) |
-| Repository controls | [`docs/repository-controls.md`](docs/repository-controls.md) |
-| Changelog | [`CHANGELOG.md`](CHANGELOG.md) |
-| Roadmap | [`ROADMAP.md`](ROADMAP.md) |
-| Contributing | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
-| Security policy | [`SECURITY.md`](SECURITY.md) |
+| Security model | [`docs/security-model.md`](https://github.com/aisecnomad/nexus-symbiote/blob/main/docs/security-model.md) |
+| Runtime assurance | [`docs/runtime-assurance.md`](https://github.com/aisecnomad/nexus-symbiote/blob/main/docs/runtime-assurance.md) |
+| ShadowScan integration | [`docs/shadowscan-integration.md`](https://github.com/aisecnomad/nexus-symbiote/blob/main/docs/shadowscan-integration.md) |
+| Deployment evidence | [`docs/deployment-evidence.md`](https://github.com/aisecnomad/nexus-symbiote/blob/main/docs/deployment-evidence.md) |
+| TypeScript inventory | [`docs/typescript-inventory.md`](https://github.com/aisecnomad/nexus-symbiote/blob/main/docs/typescript-inventory.md) |
+| Releasing | [`docs/releasing.md`](https://github.com/aisecnomad/nexus-symbiote/blob/main/docs/releasing.md) |
+| Repository controls | [`docs/repository-controls.md`](https://github.com/aisecnomad/nexus-symbiote/blob/main/docs/repository-controls.md) |
+| Changelog | [`CHANGELOG.md`](https://github.com/aisecnomad/nexus-symbiote/blob/main/CHANGELOG.md) |
+| Roadmap | [`ROADMAP.md`](https://github.com/aisecnomad/nexus-symbiote/blob/main/ROADMAP.md) |
+| Contributing | [`CONTRIBUTING.md`](https://github.com/aisecnomad/nexus-symbiote/blob/main/CONTRIBUTING.md) |
+| Security policy | [`SECURITY.md`](https://github.com/aisecnomad/nexus-symbiote/blob/main/SECURITY.md) |
 
 ## Benchmarks
 
-The [security regression corpus](benchmarks/README.md) contains inspectable hand-authored fixtures covering MCP configurations, model formats, prompt injection patterns, and tool drift scenarios. Run the benchmark suite:
+The [security regression corpus](https://github.com/aisecnomad/nexus-symbiote/blob/main/benchmarks/README.md) contains inspectable hand-authored fixtures covering MCP configurations, model formats, prompt injection patterns, and tool drift scenarios. Run the benchmark suite:
 
 ```bash
 PYTHONPATH=src python scripts/benchmark_security.py --out benchmark-results.json
@@ -236,22 +237,20 @@ Nexus SymBiote is in **alpha**. The API, output formats, and policy semantics ma
 - Coverage is expanding across agent frameworks and MCP configurations.
 - No long-term support commitment or production SLA while in alpha.
 
-The [closed-PR review](docs/audits/closed-pr-review-2026-11-02.md) reconciles historical work with the supported package and records remaining verification blockers.
-
-See [ROADMAP.md](ROADMAP.md) for near-term goals.
+See [`ROADMAP.md`](https://github.com/aisecnomad/nexus-symbiote/blob/main/ROADMAP.md) for near-term goals.
 
 ## Community and contributing
 
 | I want to... | Go to |
 | --- | --- |
-| Report a security issue | [SECURITY.md](SECURITY.md) |
+| Report a security issue | [`SECURITY.md`](https://github.com/aisecnomad/nexus-symbiote/blob/main/SECURITY.md) |
 | Report a bug | [GitHub Issues](https://github.com/aisecnomad/nexus-symbiote/issues) |
 | Request a feature | [GitHub Issues](https://github.com/aisecnomad/nexus-symbiote/issues) |
-| Contribute code | [CONTRIBUTING.md](CONTRIBUTING.md) |
-| Read the governance model | [GOVERNANCE.md](GOVERNANCE.md) |
-| Understand support options | [SUPPORT.md](SUPPORT.md) |
-| See current maintainers | [MAINTAINERS.md](MAINTAINERS.md) |
+| Contribute code | [`CONTRIBUTING.md`](https://github.com/aisecnomad/nexus-symbiote/blob/main/CONTRIBUTING.md) |
+| Read the governance model | [`GOVERNANCE.md`](https://github.com/aisecnomad/nexus-symbiote/blob/main/GOVERNANCE.md) |
+| Understand support options | [`SUPPORT.md`](https://github.com/aisecnomad/nexus-symbiote/blob/main/SUPPORT.md) |
+| See current maintainers | [`MAINTAINERS.md`](https://github.com/aisecnomad/nexus-symbiote/blob/main/MAINTAINERS.md) |
 
 ## License
 
-[MIT](LICENSE) — Copyright (c) 2026 AISecNomad
+[MIT](https://github.com/aisecnomad/nexus-symbiote/blob/main/LICENSE) — Copyright (c) 2026 AISecNomad
