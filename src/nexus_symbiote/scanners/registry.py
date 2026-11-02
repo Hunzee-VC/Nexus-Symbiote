@@ -14,8 +14,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+from packaging.requirements import InvalidRequirement, Requirement
+from packaging.utils import canonicalize_name
+
 from nexus_symbiote.core.enums import AssuranceLevel, RiskSeverity, TrustTier
-from nexus_symbiote.core.hashing import hash_bytes, parse_json_strict
+from nexus_symbiote.core.hashing import extract_version_pin, hash_bytes, parse_json_strict
 from nexus_symbiote.core.models import ClaimEvidence, RegistryEntryComponent, RiskAssessment
 from nexus_symbiote.scanners.base import Scanner, ScanResult, sanitized_origin
 from nexus_symbiote.utils.secrets import redact_text
@@ -214,23 +217,42 @@ class RegistryScanner(Scanner):
             )
         return components
 
-    def _pip_component(self, line: str, path: Path) -> RegistryEntryComponent | None:
-        match = re.match(r"^([a-zA-Z0-9_.-]+)(?:\[[^\]]*\])?\s*(.*)$", line.strip())
+    def _pip_component(
+        self, line: str, path: Path, result: ScanResult | None = None
+    ) -> RegistryEntryComponent | None:
+        reference = line.strip().split(" #", 1)[0].strip()
+        match = re.match(r"^([a-zA-Z0-9_.-]+)", reference)
         if not match or not self._is_ai_package(match.group(1)):
             return None
-        name = match.group(1)
-        raw_spec = match.group(2).split(";", 1)[0].split(" #", 1)[0].strip()
-        spec = redact_text(raw_spec)
-        pinned = bool(re.fullmatch(r"==\d+(?:\.\d+)+(?:[a-zA-Z0-9.+-]*)", raw_spec))
+        name = str(canonicalize_name(match.group(1)))
+        invalid = False
+        try:
+            requirement = Requirement(reference)
+        except InvalidRequirement:
+            invalid = True
+            spec = redact_text(reference[len(match.group(1)) :].strip())
+            if result is not None:
+                result.scan_failures.append(f"{path.name}: invalid or unsupported PyPI requirement")
+        else:
+            name = str(canonicalize_name(requirement.name))
+            # Retain markers and URLs as declared, unresolved conditions; they
+            # must not silently turn into an unconditional exact package URL.
+            spec = str(requirement.specifier)
+            if requirement.url:
+                spec = "@ " + requirement.url
+            if requirement.marker:
+                spec += "; " + str(requirement.marker)
+            spec = redact_text(spec)
+        version = extract_version_pin(reference, ecosystem="python") if not invalid else None
         risks = (
             []
-            if pinned
+            if version is not None
             else [
                 RiskAssessment(
                     severity=RiskSeverity.MEDIUM,
                     category="version_pinning",
-                    detail=f"PyPI package '{name}' has a nonexact declared reference: {spec}",
-                    recommendation="Pin the version and verify artifact hashes (pip --require-hashes).",
+                    detail=f"PyPI package '{name}' has an unresolved or nonexact declared reference.",
+                    recommendation="Resolve the declared conditions, pin the version and verify artifact hashes.",
                 )
             ]
         )
@@ -239,8 +261,8 @@ class RegistryScanner(Scanner):
             name=name,
             version=spec or None,
             package_url=(
-                f"pkg:pypi/{quote(name, safe='')}@{quote(raw_spec[2:], safe='')}"
-                if pinned
+                f"pkg:pypi/{quote(name, safe='')}@{quote(version, safe='')}"
+                if version is not None
                 else None
             ),
             registry_type="pypi",
@@ -248,7 +270,11 @@ class RegistryScanner(Scanner):
             source_path=str(path),
             trust_tier=TrustTier.UNKNOWN,
             risks=risks,
-            properties={"collection_mode": "manifest-reference", "registry_origin_verified": False},
+            properties={
+                "collection_mode": "manifest-reference",
+                "registry_origin_verified": False,
+                "requested_requirement": redact_text(reference),
+            },
         )
 
     def _scan_pip(self, root: Path, result: ScanResult) -> list[RegistryEntryComponent]:
@@ -261,7 +287,7 @@ class RegistryScanner(Scanner):
             for line in content.splitlines():
                 if not line.strip() or line.lstrip().startswith(("#", "-")):
                     continue
-                component = self._pip_component(line, path)
+                component = self._pip_component(line, path, result)
                 if component:
                     components.append(component)
         path = root / "pyproject.toml"
@@ -300,7 +326,7 @@ class RegistryScanner(Scanner):
                 elif isinstance(value, dict) and isinstance(value.get("version"), str):
                     declarations.append(f"{name}{value['version']}")
         for declaration in declarations:
-            component = self._pip_component(declaration, path)
+            component = self._pip_component(declaration, path, result)
             if component and not any(item.name == component.name for item in components):
                 components.append(component)
         return components

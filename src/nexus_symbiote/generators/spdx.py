@@ -23,6 +23,10 @@ from nexus_symbiote.generators._common import (
     recover_document,
 )
 from nexus_symbiote.generators.base import Generator
+from nexus_symbiote.generators.package_identifiers import (
+    package_identifier,
+    package_identifier_properties,
+)
 from nexus_symbiote.generators.validation import require_valid
 
 SPDX_TYPE_MAP = {
@@ -174,10 +178,28 @@ class SPDXGenerator(Generator):
             "spdxId": ids.element("component", comp.bom_ref),
             "creationInfo": ids.creation,
             "name": comp.name,
-            "extension": _extension([component_property(comp), *claim_properties(comp)]),
+            "extension": _extension(
+                [
+                    component_property(comp),
+                    *claim_properties(comp),
+                    *package_identifier_properties(comp),
+                ]
+            ),
         }
-        if comp.version and typ != "software_File":
-            element["software_packageVersion"] = comp.version
+        package = package_identifier(comp)
+        if package.value is not None:
+            element["externalIdentifier"] = [
+                {
+                    "type": "ExternalIdentifier",
+                    "externalIdentifierType": "packageUrl",
+                    "identifier": package.value,
+                    "comment": "Declared package identity; not authenticated by the exporter.",
+                }
+            ]
+            if typ != "software_File":
+                element["software_packageUrl"] = package.value
+        if typ != "software_File" and (package.version or comp.version):
+            element["software_packageVersion"] = package.version or comp.version
         if comp.supplier:
             element["suppliedBy"] = ids.element("supplier", comp.supplier)
         if comp.description:

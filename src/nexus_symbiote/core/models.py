@@ -106,7 +106,7 @@ class AgentComponent(ComponentBase):
     """An autonomous AI agent deployment."""
 
     component_type: Literal[ComponentType.AGENT] = ComponentType.AGENT
-    autonomy_level: AutonomyLevel | None = AutonomyLevel.L2_AGENT
+    autonomy_level: AutonomyLevel | None = None
     deployment_status: Literal["unknown", "declared", "observed"] = "unknown"
     deployment_id: str | None = None
     workload_identity: str | None = None
@@ -136,7 +136,7 @@ class AgentComponent(ComponentBase):
     @model_serializer(mode="wrap")
     def preserve_unknown_autonomy(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
         data: dict[str, Any] = handler(self)
-        # The legacy constructor default is L2; explicit unknown must survive exclude_none exports.
+        # Explicit unknown must survive exclude_none exports and legacy snapshot loading.
         if self.autonomy_level is None:
             data["autonomy_level"] = None
         return data

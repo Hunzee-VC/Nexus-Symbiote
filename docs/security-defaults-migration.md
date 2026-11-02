@@ -6,4 +6,20 @@ When evidence is missing, newly constructed native BOMs no longer infer tenant i
 
 Consumers must handle unknown values explicitly. In particular, avoid boolean coercion (`if not value`) when false and unknown have different consequences. Older BOMs may contain security values created by earlier defaults; those values do not independently prove that the protections were observed. Recollect the evidence rather than upgrading their assurance based on the old default.
 
-The current CycloneDX exporter may omit explicit `false` properties; native JSON should be retained until lossless export handling is available.
+Agent autonomy also defaults to unknown. Loading an agent with an omitted or null
+`autonomy_level` no longer creates an `L2-agent` assertion. An explicitly supplied
+autonomy enum is retained as a declaration. Historical snapshots that already
+contain `L2-agent` cannot reveal whether it was a producer assertion or an old
+constructor default; recollect or review them before relying on that value.
+
+CycloneDX and SPDX preserve explicit false and unknown native values through the
+digest-bound native extension and report projection limitations. Standard-only
+consumers must account for those limitations. A lossless extension round trip
+does not authenticate the values or their producer.
+
+Snapshot comparison now covers component semantics, missing integrity evidence,
+capabilities, authorization records and dependency conditions or assurance.
+Set-like native collections ignore ordering; opaque JSON arrays, command
+arguments and tool schemas retain order. Fresh claim observation timestamps do
+not alone constitute component drift. The diff remains a comparison of supplied
+snapshots; authenticate their provenance and evaluate coverage separately.

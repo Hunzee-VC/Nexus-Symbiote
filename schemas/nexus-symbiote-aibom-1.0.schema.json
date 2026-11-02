@@ -510,7 +510,7 @@
               "type": "null"
             }
           ],
-          "default": "L2-agent"
+          "default": null
         },
         "deployment_status": {
           "default": "unknown",

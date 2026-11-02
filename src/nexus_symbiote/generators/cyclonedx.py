@@ -33,6 +33,10 @@ from nexus_symbiote.generators._common import (
     recover_document,
 )
 from nexus_symbiote.generators.base import Generator
+from nexus_symbiote.generators.package_identifiers import (
+    package_identifier,
+    package_identifier_properties,
+)
 from nexus_symbiote.generators.validation import require_valid
 
 COMPONENT_TYPE_MAP: dict[ComponentType, str] = {
@@ -154,6 +158,11 @@ class CycloneDXGenerator(Generator):
             result["supplier"] = {"name": comp.supplier}
         if comp.description:
             result["description"] = comp.description
+        package = package_identifier(comp)
+        if package.value is not None:
+            result["purl"] = package.value
+            if package.version is not None:
+                result["version"] = package.version
         if comp.hashes:
             result["hashes"] = [
                 {"alg": normalize_hash(alg, val)[0], "content": normalize_hash(alg, val)[1]}
@@ -226,6 +235,7 @@ class CycloneDXGenerator(Generator):
 
         props.append(component_property(comp))
         props.extend(claim_properties(comp))
+        props.extend(package_identifier_properties(comp))
 
         return props
 

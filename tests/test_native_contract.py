@@ -17,6 +17,7 @@ def test_native_schema_matches_runtime_and_preserves_unknowns():
     schema = json.loads(
         (Path(__file__).parents[1] / "schemas/nexus-symbiote-aibom-1.0.schema.json").read_text()
     )
+    assert schema == AIBOM.model_json_schema()
     bom = AIBOM(components=[AgentComponent(bom_ref="agent:one", name="one", autonomy_level=None)])
     document = bom.to_dict()
     assert not list(Draft202012Validator(schema).iter_errors(document))

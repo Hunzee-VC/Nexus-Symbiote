@@ -65,7 +65,19 @@ def native_document(bom: AIBOM) -> dict[str, Any]:
 
 
 def loss_report(bom: AIBOM, target: str) -> dict[str, Any]:
+    from nexus_symbiote.generators.package_identifiers import package_identifier
+
     preserves_native = target.startswith(("cyclonedx-", "spdx-"))
+    identifier_losses = [
+        {
+            "path": f"/components/{index}/package_url",
+            "reason": "declared package URL is invalid or conflicts with the component; standard identifier omitted",
+            "preservedIn": "nexus-symbiote:document",
+            "severity": "warning",
+        }
+        for index, component in enumerate(sorted(bom.components, key=lambda c: c.bom_ref))
+        if preserves_native and package_identifier(component).status == "unavailable-invalid"
+    ]
     return {
         "profile": "nexus-symbiote-export/v1",
         "target": target,
@@ -73,7 +85,16 @@ def loss_report(bom: AIBOM, target: str) -> dict[str, Any]:
         "nativeSemanticsComplete": False,
         "extensionRoundTripComplete": preserves_native,
         "admissionAuthority": False,
-        "normalizations": ["component and dependency collections sorted for deterministic output"],
+        "normalizations": [
+            "component and dependency collections sorted for deterministic output",
+            *(
+                [
+                    "valid declared package URLs canonicalized; standard package versions use their exact PURL version"
+                ]
+                if preserves_native
+                else []
+            ),
+        ],
         "items": [
             {
                 "path": "/",
@@ -82,7 +103,8 @@ def loss_report(bom: AIBOM, target: str) -> dict[str, Any]:
                 else "finding projection omits the complete source inventory",
                 "preservedIn": "nexus-symbiote:document" if preserves_native else None,
                 "severity": "info" if preserves_native else "warning",
-            }
+            },
+            *identifier_losses,
         ],
     }
 
