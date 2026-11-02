@@ -30,7 +30,21 @@ jobs:
         run: |
           python -m pip install --require-hashes -r requirements-ci.lock
           python -m pip install --no-deps --no-build-isolation -e .
+      - name: Require enforced repository review controls before publication
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/check_repository_controls.py --repo "$GITHUB_REPOSITORY" --branch main
       - run: python -m pytest
+      - name: Enforce committed security regression contracts
+        run: python scripts/check_security_regressions.py --out evidence/security-regressions.json
+      - name: Retain security regression report on candidate failure
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: release-security-regression-evidence
+          path: evidence/security-regressions.json
+          if-no-files-found: warn
       - run: ruff check src tests scripts && ruff format --check src tests scripts
       - run: mypy src/nexus_symbiote
       - run: python scripts/check_workflows.py

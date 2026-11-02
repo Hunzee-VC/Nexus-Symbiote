@@ -40,6 +40,20 @@ def check(path: Path) -> list[str]:
                 needs = [needs] if isinstance(needs, str) else needs
                 if not isinstance(needs, list) or set(needs) - jobs.keys():
                     errors.append(f"{path}: {name} references unknown prerequisites")
+            if path.name == "ci.yml":
+                verified = jobs.get("verified", {})
+                required = {"test", "coverage", "quality", "distribution", "security-regressions"}
+                if (
+                    not isinstance(verified, dict)
+                    or verified.get("name") != "Verified CI"
+                    or verified.get("if") != "always()"
+                    or not isinstance(verified.get("needs"), list)
+                    or not required <= jobs.keys()
+                    or set(verified.get("needs", [])) != jobs.keys() - {"verified"}
+                ):
+                    errors.append(
+                        f"{path}: Verified CI must always aggregate every verification job"
+                    )
 
     def visit(value: object) -> None:
         if isinstance(value, dict):
