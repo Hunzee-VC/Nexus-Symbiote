@@ -101,8 +101,16 @@ def test_distribution_bundle_is_retained_and_downloaded_for_publish():
         step for step in attest if step.get("with", {}).get("name") == "distribution-attestation"
     )
     assert retained["with"]["path"] == "${{ steps.distributions.outputs.bundle-path }}"
+    assert workflow["jobs"]["attest"]["outputs"]["distribution_attestation_id"] == (
+        "${{ steps.distribution-attestation.outputs.artifact-id }}"
+    )
+    # Selected by ID, like every other release download: the compatibility job runs
+    # unpinned code holding an artifact token, so a name is not a stable selector.
     download = next(
-        step for step in verify if step.get("with", {}).get("name") == "distribution-attestation"
+        step
+        for step in verify
+        if step.get("with", {}).get("artifact-ids")
+        == "${{ needs.attest.outputs.distribution_attestation_id || 'missing' }}"
     )
     command = next(step["run"] for step in verify if "gh attestation verify" in step.get("run", ""))
     assert download["with"]["path"] == "attestation"

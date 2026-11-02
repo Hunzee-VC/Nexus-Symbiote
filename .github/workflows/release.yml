@@ -152,6 +152,8 @@ jobs:
     needs: [build, compatibility]
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      distribution_attestation_id: ${{ steps.distribution-attestation.outputs.artifact-id }}
     permissions:
       contents: read
       id-token: write
@@ -168,6 +170,7 @@ jobs:
         with:
           subject-path: dist/*
       - name: Retain distribution attestation bundle
+        id: distribution-attestation
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: distribution-attestation
@@ -217,7 +220,7 @@ jobs:
           digest-mismatch: error
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: distribution-attestation
+          artifact-ids: ${{ needs.attest.outputs.distribution_attestation_id || 'missing' }}
           path: attestation
           digest-mismatch: error
       - name: Verify exact distributions and source provenance

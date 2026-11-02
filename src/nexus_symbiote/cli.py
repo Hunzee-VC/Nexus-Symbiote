@@ -797,7 +797,7 @@ def risk(
             else:
                 click.echo("Risk unknown. Project reconciliation failed.", err=True)
                 for reason in reasons:
-                    click.echo(reason, err=True)
+                    click.echo(_UNSAFE_TEXT.sub("\ufffd", reason), err=True)
             raise click.exceptions.Exit(1)
         basis = "project-reconciled"
     scorer = RiskScorer(

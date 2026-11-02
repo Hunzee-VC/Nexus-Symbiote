@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from click.testing import CliRunner
 
@@ -65,4 +66,23 @@ def test_validate_prints_dangling_graph_references_literally(tmp_path):
     assert "ERROR:" in result.output, result.output
     assert MARKUP in result.output
     for character in ("\x1b", "\x07", "\r", "\u202e"):
+        assert character not in result.output
+
+
+def test_risk_project_failure_reasons_print_without_terminal_controls(tmp_path):
+    # File names are project data; reconciliation reasons quote the component ref.
+    project = tmp_path / "project"
+    (project / "models").mkdir(parents=True)
+    hostile = "evil\x1b[1A\x1b[2K\rfake‮gpj"
+    sample = Path(__file__).parents[1] / "examples/demo-agent/models/intent-classifier.safetensors"
+    (project / "models" / f"{hostile}.safetensors").write_bytes(sample.read_bytes())
+    bom = tmp_path / "bom.json"
+    bom.write_text(AIBOM(components=[]).to_json())
+    result = CliRunner().invoke(
+        main, ["risk", str(bom), "--project", str(project), "--no-project-policy"]
+    )
+    assert result.exit_code == 1, result.output
+    assert "Project reconciliation failed." in result.output
+    assert "evil" in result.output and "fake" in result.output
+    for character in ("\x1b", "\r", "‮"):
         assert character not in result.output
