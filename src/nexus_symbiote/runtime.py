@@ -574,4 +574,3 @@ class ReferenceGateway(Generic[T]):
             check_time=check_time,
         )
         return self.execute(call)
-

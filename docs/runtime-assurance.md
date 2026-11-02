@@ -181,4 +181,3 @@ rollback/fork rejection. `tests/test_lineage.py` covers source withdrawal,
 cross-tenant rejection, ACL revocation and hosted identity verification boundaries.
 These fixtures establish local contract behavior, not a production penetration
 test or a comparative security benchmark.
-

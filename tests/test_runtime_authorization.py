@@ -500,4 +500,3 @@ def test_approval_actor_must_match_authorized_key(tmp_path):
 def test_noncanonical_input_rejected(raw):
     with pytest.raises(AuthorizationError):
         strict_json(raw)
-
