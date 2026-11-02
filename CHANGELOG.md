@@ -6,6 +6,9 @@ Alpha release of the AgentBOM toolkit under the Hunzee-VC organization.
 
 ### Security
 
+- Lock dependency versions without known advisories (cryptography 50.0.2, sigstore 4.5.1, tuf 7.0.1, pytest 9.2.0) so the required OSV audit of the locked environment passes.
+- Keep unused jsonschema format checkers out of the runtime validation worker. With the cyclonedx or all extras installed, their import cost exceeded the worker's CPU limit and every runtime authorization failed closed.
+- Require TLS 1.2 or later explicitly in the pinned HTTPS transport, and create `runtime keygen` public keys with mode 0600 like private keys.
 - Bind static MCP server structure and reconcile configured tool fingerprints against fresh source evidence; with `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, bind configuration values by HMAC so exports never carry a digest that secrets could be guessed from. Require recollection of legacy snapshots without the binding.
 - Reject same-version MCP package substitutions, argument and endpoint-path drift, and edited supplied descriptors during project validation.
 - Replace raw scanner exception text with safe diagnostic codes and record malformed model metadata using field names only.
