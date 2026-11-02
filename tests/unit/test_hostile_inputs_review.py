@@ -146,9 +146,9 @@ def test_variation_selectors_are_hidden() -> None:
         hidden_code_points("I \u2764\ufe0f it") == []
     )  # one selector after a visible base is ordinary emoji
     assert hidden_code_points("\u8fbb\U000e0100") == []  # ideographic variation sequence
-    assert hidden_code_points("x\ufe0f\ufe0f") == ["U+FE0F"]  # a run smuggles data
+    assert hidden_code_points("\u2764\ufe0f\ufe0f") == ["U+FE0F"]  # a run smuggles data
     assert hidden_code_points("\U000e0101 hidden") == ["U+E0101"]  # no base
-    assert hidden_code_points("a\u180b\u180b") == ["U+180B"]  # Mongolian free variation selectors
+    assert hidden_code_points("\u1820\u180b\u180b") == ["U+180B"]  # Mongolian free variation selectors
 
 
 # (5) shell wrappers and repeated packages do not hide the package identity
@@ -297,3 +297,36 @@ def test_cyclonedx_referential_integrity() -> None:
         "dependencies": [{"ref": "x", "dependsOn": []}],
     }
     assert validate_cyclonedx(ok) == []
+
+
+@pytest.mark.parametrize(
+    ("text", "flagged"),
+    [
+        ("I ❤️ it", []),
+        ("葛\U000e0100", []),
+        ("1️⃣", []),
+        ("ᠠ᠋", []),
+        ("x️", ["U+FE0F"]),
+        ("A️", ["U+FE0F"]),
+        ("a᠋", ["U+180B"]),
+        ("͏︀", ["U+FE00"]),
+        ("ㅤ️", ["U+FE0F"]),
+        ("͏\U000e0100", ["U+E0100"]),
+    ],
+)
+def test_selector_bases(text: str, flagged: list[str]) -> None:
+    from symbiote.digest.textflags import hidden_code_points
+
+    assert hidden_code_points(text) == flagged
+
+
+def test_shell_double_dash_and_args_digest_credential_invariance() -> None:
+    from symbiote.collect._common import redact_args
+    from symbiote.collect.launchers import parse_launch
+
+    assert parse_launch("bash", ["-c", "--", "npx -y @e/f"]).purl == "pkg:npm/%40e/f"
+    a, _ = redact_args(["-y", "pkg@1.0.0", "--registry", "https://u:tokA@reg.example/x?t=1"])
+    b, _ = redact_args(["-y", "pkg@1.0.0", "--registry", "https://u:tokB@reg.example/x?t=2"])
+    c, _ = redact_args(["-y", "pkg@1.0.0", "--registry", "https://tokC@reg.example/x"])
+    assert a == b  # rotating a token does not change argsDigest's input
+    assert all("tok" not in arg for arg in (*a, *c))

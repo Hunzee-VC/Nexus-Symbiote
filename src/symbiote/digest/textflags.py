@@ -37,6 +37,35 @@ def _is_variation_selector(cp: int) -> bool:
     return 0xFE00 <= cp <= 0xFE0F or 0xE0100 <= cp <= 0xE01EF or 0x180B <= cp <= 0x180F
 
 
+_KEYCAP_BASES = frozenset("0123456789#*")
+_HANGUL_FILLERS = frozenset({0x115F, 0x1160, 0x3164, 0xFFA0})
+
+
+def _valid_selector_base(prev: str | None, selector: int) -> bool:
+    """Whether ``prev`` is a character a single variation selector legitimately follows.
+
+    Standardized variation sequences: emoji presentation (U+FE0E/U+FE0F) after pictographs, symbols and the
+    keycap bases ``0-9 # *``; ideographic variation sequences (U+E0100..) after CJK ideographs; Mongolian free
+    variation selectors after Mongolian letters. Plain letters, invisible bases (combining marks, format and
+    space characters, Hangul fillers) and other selectors are not bases — a selector after them is smuggled data.
+    """
+    if prev is None or _is_variation_selector(ord(prev)):
+        return False
+    pcp = ord(prev)
+    cat = unicodedata.category(prev)
+    if cat in ("Mn", "Me", "Cf", "Zs", "Cc") or pcp in _HANGUL_FILLERS or prev.isspace():
+        return False
+    if 0x180B <= selector <= 0x180F:
+        return 0x1800 <= pcp <= 0x18AF
+    if 0xE0100 <= selector <= 0xE01EF:
+        return unicodedata.name(prev, "").startswith("CJK")
+    if prev in _KEYCAP_BASES:
+        return True
+    if prev.isascii():
+        return False
+    return cat in ("So", "Sm", "Sk", "Lo", "No") or 0x1F000 <= pcp <= 0x1FAFF
+
+
 def hidden_code_points(text: str) -> list[str]:
     """Code points in ``text`` that are invisible or direction-altering (Cf/Co/Cn, bidi controls, tag characters)."""
     found: list[str] = []
@@ -46,7 +75,7 @@ def hidden_code_points(text: str) -> list[str]:
         if _is_variation_selector(cp):
             # One selector after a visible base is ordinary text (emoji presentation, ideographic variants);
             # a run of selectors, or one with no base, is invisible data smuggled through plain text.
-            if prev is None or prev.isspace() or _is_variation_selector(ord(prev)):
+            if not _valid_selector_base(prev, cp):
                 found.append(f"U+{cp:04X}")
             prev = ch
             continue

@@ -290,7 +290,10 @@ _SECRET_FLAGS: Final = re.compile(
     r"bearer|key|pat|github[-_]?token|private[-_]?key)$",
     re.I,
 )
-_URL_USERINFO = re.compile(r"^(?P<scheme>[a-z][a-z0-9+.-]*://)(?P<user>[^:/@\s]+):(?P<pw>[^@/\s]+)@", re.I)
+_URL_USERINFO = re.compile(
+    r"^(?P<scheme>[a-z][a-z0-9+.-]*://)(?P<user>[^:/@\s]+)(?::(?P<pw>[^@/\s]+))?@", re.I
+)
+_URL_QUERY = re.compile(r"^(?P<base>[a-z][a-z0-9+.-]*://[^?#\s]+)[?#]\S*$", re.I)
 
 
 def redact_args(args: Sequence[object]) -> tuple[list[str], int]:
@@ -327,9 +330,16 @@ def redact_args(args: Sequence[object]) -> tuple[list[str], int]:
                 continue
         m = _URL_USERINFO.match(arg)
         if m:
-            out.append(
-                _URL_USERINFO.sub(lambda mm: f"{mm.group('scheme')}{mm.group('user')}:{REDACTED}@", arg)
-            )
+            # the whole userinfo goes: a token is as often the username as the password
+            cleaned = _URL_USERINFO.sub(lambda mm: f"{mm.group('scheme')}{REDACTED}@", arg)
+            q = _URL_QUERY.match(cleaned)
+            out.append(f"{q.group('base')}?{REDACTED}" if q else cleaned)
+            redactions += 1
+            continue
+        q = _URL_QUERY.match(arg)
+        if q:
+            # query strings carry tokens (?token=, ?sig=); the location stays, the values go
+            out.append(f"{q.group('base')}?{REDACTED}")
             redactions += 1
             continue
         if looks_like_secret(arg):
