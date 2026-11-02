@@ -111,8 +111,8 @@ class MCPScanner(Scanner):
             result.components.extend(clients.values())
             self._scan_code_mcp_clients(files.root, result)
 
-        if not found_any and not result.scan_failures:
-            result.surfaces_excluded.append("mcp-config (no config files found)")
+        if not found_any and not result.scan_failures and not result.surfaces_excluded:
+            result.surfaces_scanned.append("mcp-config (no config files found)")
 
         return result
 

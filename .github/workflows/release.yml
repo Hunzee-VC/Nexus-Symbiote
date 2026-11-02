@@ -37,6 +37,10 @@ jobs:
       - name: Build distributions with the locked backend
         run: python -m build --no-isolation
       - run: python -m twine check dist/*
+      - name: Run security acceptance against the exact built wheel
+        run: |
+          python -m pip install --no-index --no-deps --force-reinstall dist/*.whl
+          python -I scripts/check_wheel_security.py dist/*.whl
       - name: Smoke-test wheel and collect release evidence
         run: |
           python -m venv "$RUNNER_TEMP/release-smoke"

@@ -100,8 +100,32 @@ directly as an authorization decision.
 The SQLite `StateStore` atomically records snapshot and trust-status high-water
 marks and consumes approval nonces. Fresh authenticated revocation knowledge is
 retained even when the current operation is denied. Failed signature or binding
-checks cannot advance snapshot state. Expiry during authorization fails closed;
-an approval consumed before a late failure requires a new approval.
+checks cannot advance snapshot state. After the final identity check, the gateway
+takes the database write lock, confirms the current trust head, and checks validity
+against its clock before committing the snapshot head and nonce. The commit admits
+the call. A newer trust status committed before admission denies the stale call
+and preserves its nonce. A later revocation applies to subsequent admissions.
+Cancellation of work already admitted requires executor support. Execution failure
+after admission consumes the approval. Use a fast, local clock for the validity check.
+
+Each tenant's accepted trust status records its revoked signer IDs in the same
+transaction as the serial and digest. The gateway checks the signers on the next
+status against both the prior revocations and the proposed list. To reinstate a
+key, a still-authorized trust issuer must sign a higher serial that removes the
+key from the list. Remove a compromised key from the configured trust ring on
+every gateway. Keep a separately protected recovery issuer available.
+
+Before upgrading an existing gateway fleet, stop writers to the shared database,
+back it up, and retain each tenant's last accepted trust predicate. Older databases
+contain only the serial and digest. The upgraded gateway can recover the revoked
+signer IDs by replaying the exact, still-valid signed status. For an expired
+status, load the archived predicate with
+`StateStore(path).restore_trust_status(TrustStatus.model_validate(predicate))`.
+This matches the tenant, serial and canonical digest already on disk and restores
+only its signer list. A currently valid signed status is required to authorize a
+call. If the archive is missing, restore it from a trusted backup before advancing
+that tenant. Preserve the original database and its consumed nonces throughout
+the migration.
 
 Protect the database against modification, deletion and rollback, and place it
 outside scanned repositories. Database backup/restore must preserve monotonic

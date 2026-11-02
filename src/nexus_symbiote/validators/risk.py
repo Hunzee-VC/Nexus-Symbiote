@@ -8,7 +8,7 @@ from typing import Any
 
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import RiskSeverity, SerializationSafety
-from nexus_symbiote.core.models import ModelComponent, RiskAssessment
+from nexus_symbiote.core.models import AgentComponent, ModelComponent, RiskAssessment
 from nexus_symbiote.scanner_catalog import BUILTIN_SCANNER_NAMES
 
 REQUIRED_SCANNERS = BUILTIN_SCANNER_NAMES
@@ -206,6 +206,23 @@ class RiskScorer:
             report.gate_reasons.append("SafeTensors structural safety is unverified")
         if report.coverage_status != "reported":
             report.gate_reasons.append("collection coverage is unknown or incomplete")
+        if (
+            coverage is not None
+            and coverage.scope in {"repository", "repository+shadowscan"}
+            and not any(
+                c.properties.get("collection_mode") != "imported-unverified-report"
+                and not (
+                    isinstance(c, AgentComponent)
+                    and c.properties.get("identity_source") == "repository-path"
+                )
+                for c in bom.components
+            )
+        ):
+            report.gate_reasons.append(
+                "no agent manifest or supported local inventory evidence was found"
+            )
+            if not report.findings:
+                report.risk_level = "unknown"
         report.findings.sort(key=lambda f: self.weights.get(f.severity, 0.0), reverse=True)
 
         return report

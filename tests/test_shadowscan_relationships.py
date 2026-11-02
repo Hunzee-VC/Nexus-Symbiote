@@ -12,6 +12,7 @@ from nexus_symbiote.core.enums import ComponentType
 from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
 from nexus_symbiote.generators.spdx import SPDXGenerator
 from nexus_symbiote.scanners.shadowscan import PROJECTION_PROFILE, ShadowScanImporter
+from nexus_symbiote.validators.completeness import CompletenessValidator
 
 FIXTURE = Path(__file__).parent / "fixtures/shadowscan-producer/cyclonedx-agent-model.json"
 
@@ -93,3 +94,40 @@ def test_direct_import_scan_and_projection_verification_preserve_edges(tmp_path)
         edges = [edge for edge in bom.dependencies if edge.assurance_level == "declared"]
         assert len(edges) == 1 and edges[0].relationship == "depends-on"
         assert "example/model:1" not in path.read_text()
+
+
+@pytest.mark.parametrize(
+    "edit", ["omitted", "assurance", "conditions", "reversed", "duplicate", "added"]
+)
+def test_project_reconciliation_binds_imported_dependency_claims(tmp_path, edit):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "shadowscan.json").write_bytes(FIXTURE.read_bytes())
+    output = tmp_path / "bom.json"
+    result = CliRunner().invoke(main, ["scan", str(project), "-o", str(output), "--report-only"])
+    assert result.exit_code == 0, result.output
+    bom = AIBOM.load(output)
+    validator = CompletenessValidator()
+    message = "Discovery report dependency claims differ from the source projection."
+    # CycloneDX coverage is still partial; check the specific reconciliation finding.
+    assert not any(
+        issue.description == message
+        for issue in validator.validate_against_project(bom, project).issues
+    )
+    edge = next(e for e in bom.dependencies if e.source_ref.startswith("shadowscan:"))
+    if edit == "omitted":
+        bom.dependencies.remove(edge)
+    elif edit == "assurance":
+        edge.assurance_level = "verified"
+    elif edit == "conditions":
+        edge.conditions = "fabricated provenance"
+    elif edit == "reversed":
+        edge.source_ref, edge.target_ref = edge.target_ref, edge.source_ref
+    elif edit == "duplicate":
+        bom.dependencies.append(edge.model_copy())
+    else:
+        bom.dependencies.append(edge.model_copy(update={"relationship": "uses-model"}))
+    assert any(
+        issue.description == message
+        for issue in validator.validate_against_project(bom, project).issues
+    )

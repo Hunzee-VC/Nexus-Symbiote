@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from datetime import UTC
 from typing import Any
 
@@ -16,6 +17,7 @@ from nexus_symbiote.generators._common import (
     content_digest,
     document_properties,
     json_text,
+    native_document,
     normalize_hash,
     prepare,
     recover_document,
@@ -52,20 +54,32 @@ def _extension(properties: list[dict[str, str]]) -> list[dict[str, Any]]:
     ]
 
 
+@dataclass(frozen=True)
+class _DocumentIds:
+    document: str
+
+    @property
+    def creation(self) -> str:
+        return self.document + "#creation"
+
+    def element(self, kind: str, key: str) -> str:
+        return f"{self.document}#{kind}-{uuid.uuid5(NAMESPACE, key)}"
+
+
 class SPDXGenerator(Generator):
     format_name = "spdx-3.0.1"
 
     def __init__(self, namespace: str = "https://spdx.org/spdxdocs/nexus_symbiote") -> None:
         self._namespace = namespace.rstrip("/")
 
-    def _id(self, kind: str, key: str) -> str:
-        return self._namespace + "/" + kind + "/" + str(uuid.uuid5(NAMESPACE, kind + ":" + key))
-
     def generate(self, aibom: AIBOM) -> dict[str, Any]:
         prepare(aibom)
-        ci = "_:creation"
-        producer_id = self._id("producer", aibom.metadata.tool_name)
-        tool_id = self._id("generator", aibom.metadata.tool_name)
+        # Native refs are BOM-local, and producers can reuse serial numbers across revisions.
+        revision = content_digest(native_document(aibom)).removeprefix("sha256:")
+        ids = _DocumentIds(f"{self._namespace}/document/{revision}")
+        ci = ids.creation
+        producer_id = ids.element("producer", aibom.metadata.tool_name)
+        tool_id = ids.element("generator", aibom.metadata.tool_name)
         creator = {
             "type": "SoftwareAgent",
             "spdxId": producer_id,
@@ -95,24 +109,24 @@ class SPDXGenerator(Generator):
         parties = [
             {
                 "type": "Organization",
-                "spdxId": self._id("supplier", name),
+                "spdxId": ids.element("supplier", name),
                 "creationInfo": ci,
                 "name": name,
             }
             for name in sorted(suppliers)
         ]
         components = [
-            self._element(comp) for comp in sorted(aibom.components, key=lambda c: c.bom_ref)
+            self._element(comp, ids) for comp in sorted(aibom.components, key=lambda c: c.bom_ref)
         ]
         edge_values = {
             json_text(edge.model_dump(mode="json", exclude_none=True)): edge
             for edge in aibom.dependencies
         }
-        relationships = [self._relationship(edge_values[key]) for key in sorted(edge_values)]
+        relationships = [self._relationship(edge_values[key], ids) for key in sorted(edge_values)]
         license_relationships = [
             {
                 "type": "Relationship",
-                "spdxId": self._id("license-relationship", component["spdxId"] + ":" + kind),
+                "spdxId": ids.element("license-relationship", component["spdxId"] + ":" + kind),
                 "creationInfo": ci,
                 "relationshipType": kind,
                 "from": component["spdxId"],
@@ -132,12 +146,12 @@ class SPDXGenerator(Generator):
         ]
         doc = {
             "type": "SpdxDocument",
-            "spdxId": self._id("document", str(aibom.metadata.serial_number)),
+            "spdxId": ids.document,
             "creationInfo": ci,
             "name": "Nexus SymBiote AgentBOM " + str(aibom.metadata.serial_number),
             "element": [element["spdxId"] for element in elements],
             "rootElement": [
-                self._id("component", comp.bom_ref)
+                ids.element("component", comp.bom_ref)
                 for comp in sorted(aibom.components, key=lambda c: c.bom_ref)
                 if comp.component_type == ComponentType.AGENT
             ],
@@ -152,19 +166,20 @@ class SPDXGenerator(Generator):
         require_valid(result, "spdx")
         return result
 
-    def _element(self, comp: AnyComponent) -> dict[str, Any]:
+    @staticmethod
+    def _element(comp: AnyComponent, ids: _DocumentIds) -> dict[str, Any]:
         typ = SPDX_TYPE_MAP.get(comp.component_type, "software_Package")
         element: dict[str, Any] = {
             "type": typ,
-            "spdxId": self._id("component", comp.bom_ref),
-            "creationInfo": "_:creation",
+            "spdxId": ids.element("component", comp.bom_ref),
+            "creationInfo": ids.creation,
             "name": comp.name,
             "extension": _extension([component_property(comp), *claim_properties(comp)]),
         }
         if comp.version and typ != "software_File":
             element["software_packageVersion"] = comp.version
         if comp.supplier:
-            element["suppliedBy"] = self._id("supplier", comp.supplier)
+            element["suppliedBy"] = ids.element("supplier", comp.supplier)
         if comp.description:
             element["description"] = comp.description
         if typ != "software_File":
@@ -218,7 +233,8 @@ class SPDXGenerator(Generator):
             element["verifiedUsing"] = hashes
         return element
 
-    def _relationship(self, edge: DependencyEdge) -> dict[str, Any]:
+    @staticmethod
+    def _relationship(edge: DependencyEdge, ids: _DocumentIds) -> dict[str, Any]:
         mapping = {
             "invokes": "usesTool",
             "trained-on": "trainedOn",
@@ -230,11 +246,11 @@ class SPDXGenerator(Generator):
         body = edge.model_dump(mode="json", exclude_none=True)
         return {
             "type": "Relationship",
-            "spdxId": self._id("relationship", content_digest(body)),
-            "creationInfo": "_:creation",
+            "spdxId": ids.element("relationship", content_digest(body)),
+            "creationInfo": ids.creation,
             "relationshipType": mapping.get(edge.relationship, "other"),
-            "from": self._id("component", edge.source_ref),
-            "to": [self._id("component", edge.target_ref)],
+            "from": ids.element("component", edge.source_ref),
+            "to": [ids.element("component", edge.target_ref)],
             "extension": _extension(
                 [{"name": "nexus-symbiote:relationship", "value": json_text(body)}]
             ),

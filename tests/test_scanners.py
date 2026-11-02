@@ -49,7 +49,8 @@ class TestMCPScanner:
         scanner = MCPScanner()
         result = scanner.scan(tmp_path)
         assert len(result.components) == 0
-        assert len(result.surfaces_excluded) > 0
+        assert not result.surfaces_excluded
+        assert "mcp-config (no config files found)" in result.surfaces_scanned
 
 
 class TestModelScanner:

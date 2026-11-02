@@ -11,7 +11,8 @@ import base64
 import hashlib
 import json
 import sqlite3
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import closing, contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Generic, Literal, TypeVar
@@ -307,43 +308,99 @@ class StateStore:
             raise AuthorizationError("state database cannot be a symlink")
         path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path
-        with self._connect() as connection:
+        with self._transaction() as connection:
             connection.execute(
                 "CREATE TABLE IF NOT EXISTS heads (scope TEXT PRIMARY KEY, serial INTEGER NOT NULL, digest TEXT NOT NULL)"
             )
+            if "revoked_signers" not in {
+                row[1] for row in connection.execute("PRAGMA table_info(heads)")
+            }:
+                connection.execute("ALTER TABLE heads ADD COLUMN revoked_signers TEXT")
             connection.execute("CREATE TABLE IF NOT EXISTS nonces (nonce TEXT PRIMARY KEY)")
         path.chmod(0o600)
 
-    def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(self.path, timeout=10, isolation_level=None)
+    @contextmanager
+    def _transaction(self) -> Iterator[sqlite3.Connection]:
+        with closing(sqlite3.connect(self.path, timeout=10, isolation_level=None)) as db, db:
+            db.execute("BEGIN IMMEDIATE")
+            yield db
 
-    def record(self, heads: tuple[tuple[str, int, str], ...], nonce: str | None = None) -> None:
-        connection = self._connect()
-        try:
-            connection.execute("BEGIN IMMEDIATE")
+    def restore_trust_status(self, status: TrustStatus) -> None:
+        """Restore issuer eligibility only for the exact digest already accepted by this store."""
+        with self._transaction() as db:
+            restored = db.execute(
+                "UPDATE heads SET revoked_signers=? WHERE scope=? AND serial=? AND digest=?",
+                (
+                    json.dumps(status.revoked_signers),
+                    "trust:" + status.tenant,
+                    status.serial,
+                    digest(status.model_dump(mode="json")),
+                ),
+            )
+            if restored.rowcount != 1:
+                raise AuthorizationError("archived trust status does not match the recorded head")
+
+    def accept_trust_status(
+        self, status: TrustStatus, verified_signers: set[str]
+    ) -> tuple[str, int, str]:
+        """Atomically authenticate a transition against the preceding tenant trust state."""
+        scope = "trust:" + status.tenant
+        head = (scope, status.serial, digest(status.model_dump(mode="json")))
+        if not verified_signers or verified_signers.intersection(status.revoked_signers):
+            raise AuthorizationError("trust status requires unrevoked signers")
+        with self._transaction() as db:
+            old = db.execute(
+                "SELECT serial, digest, revoked_signers FROM heads WHERE scope=?", (scope,)
+            ).fetchone()
+            if old:
+                if status.serial < old[0] or (status.serial == old[0] and head[2] != old[1]):
+                    raise AuthorizationError("trust-status rollback/fork")
+                if old[2] is None:
+                    if head[1:] != old[:2]:
+                        raise AuthorizationError(
+                            "restore the recorded trust status before advancing"
+                        )
+                elif verified_signers.intersection(json.loads(old[2])):
+                    raise AuthorizationError("previously revoked trust-status signer")
+            db.execute(
+                "INSERT OR REPLACE INTO heads(scope,serial,digest,revoked_signers) VALUES (?,?,?,?)",
+                (*head, json.dumps(status.revoked_signers)),
+            )
+        return head
+
+    def record(
+        self,
+        heads: tuple[tuple[str, int, str], ...],
+        nonce: str | None = None,
+        *,
+        check_time: Callable[[], None] | None = None,
+    ) -> None:
+        with self._transaction() as db:
             for scope, serial, value in heads:
-                old = connection.execute(
+                old = db.execute(
                     "SELECT serial, digest FROM heads WHERE scope=?", (scope,)
                 ).fetchone()
+                if scope.startswith("trust:"):
+                    # Only accept_trust_status may advance this head or change issuer eligibility.
+                    if old != (serial, value):
+                        raise AuthorizationError(
+                            "trust-status rollback/fork or missing trust state"
+                        )
+                    continue
                 if old and (serial < old[0] or (serial == old[0] and value != old[1])):
                     raise AuthorizationError("snapshot or trust-status rollback/fork")
-            if nonce is not None:
-                try:
-                    connection.execute("INSERT INTO nonces(nonce) VALUES (?)", (nonce,))
-                except sqlite3.IntegrityError as exc:
-                    raise AuthorizationError("approval nonce has already been used") from exc
-            for scope, serial, value in heads:
-                connection.execute(
+                db.execute(
                     "INSERT OR REPLACE INTO heads(scope,serial,digest) VALUES (?,?,?)",
                     (scope, serial, value),
                 )
-            connection.execute("COMMIT")
-        except Exception:
-            if connection.in_transaction:
-                connection.execute("ROLLBACK")
-            raise
-        finally:
-            connection.close()
+            if nonce is not None:
+                try:
+                    db.execute("INSERT INTO nonces(nonce) VALUES (?)", (nonce,))
+                except sqlite3.IntegrityError as exc:
+                    raise AuthorizationError("approval nonce has already been used") from exc
+            if check_time is not None:
+                # The write lock may have taken longer than the remaining approval lifetime.
+                check_time()
 
 
 class ReferenceGateway(Generic[T]):
@@ -392,14 +449,9 @@ class ReferenceGateway(Generic[T]):
         if not isinstance(statuses, TrustStatus):
             raise AuthorizationError("unexpected contract")
         _window(statuses, timestamp, timedelta(hours=1))
-        if statuses.tenant != context.tenant or trust_signers & set(statuses.revoked_signers):
-            raise AuthorizationError("trust status tenant or signer mismatch")
-        trust_head = (
-            "trust:" + context.tenant,
-            statuses.serial,
-            digest(statuses.model_dump(mode="json")),
-        )
-        self.state.record((trust_head,))
+        if statuses.tenant != context.tenant:
+            raise AuthorizationError("trust status tenant mismatch")
+        trust_head = self.state.accept_trust_status(statuses, trust_signers)
         approved, snapshot_signers = verify_contract(snapshot, "snapshot", self.snapshot_keys)
         if not isinstance(approved, ApprovedSnapshot):
             raise AuthorizationError("unexpected snapshot")
@@ -480,6 +532,16 @@ class ReferenceGateway(Generic[T]):
             ):
                 raise AuthorizationError("approval does not cover this operation")
             nonce = consent.nonce
+        if self.authenticate() != context:
+            raise AuthorizationError("execution identity changed during authorization")
+
+        def check_time() -> None:
+            final_time = self.clock()
+            _window(approved, final_time, timedelta(hours=24))
+            _window(statuses, final_time, timedelta(hours=1))
+            if consent is not None:
+                _window(consent, final_time, timedelta(minutes=5))
+
         self.state.record(
             (
                 (
@@ -490,12 +552,6 @@ class ReferenceGateway(Generic[T]):
                 trust_head,
             ),
             nonce,
+            check_time=check_time,
         )
-        if self.authenticate() != context:
-            raise AuthorizationError("execution identity changed during authorization")
-        final_time = self.clock()
-        _window(approved, final_time, timedelta(hours=24))
-        _window(statuses, final_time, timedelta(hours=1))
-        if consent is not None:
-            _window(consent, final_time, timedelta(minutes=5))
         return self.execute(call)

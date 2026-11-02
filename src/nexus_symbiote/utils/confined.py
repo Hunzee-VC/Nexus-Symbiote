@@ -179,9 +179,12 @@ class ConfinedCollection:
     def excluded(self, path: str | Path) -> bool:
         relative = self._relative(path)
         absolute = self.root / relative
-        denied = any(part in DEFAULT_EXCLUDES for part in relative.parts) or any(
-            absolute == value or value in absolute.parents for value in self._excluded
-        )
+        # Dependency caches, virtual environments and Git internals are outside
+        # the documented static scope. The BOM records these patterns. Any
+        # further omission within that scope is a blocking coverage gap.
+        if any(part in DEFAULT_EXCLUDES for part in relative.parts):
+            return True
+        denied = any(absolute == value or value in absolute.parents for value in self._excluded)
         if denied:
             message = f"{relative}: excluded by collection policy"
             if message not in self.exclusions:

@@ -64,11 +64,11 @@ coverage and provenance.
 
 ## Import and policy gates
 
-Imported coverage remains partial even when the source report claims a completed
-scan. The normal import command writes the evidence and returns a failing inventory
-gate; use `--report-only` explicitly to inspect a report without treating it as
-approval. Incomplete source reports remain recorded as incomplete in either mode.
-Existing output files are never overwritten by `import-shadowscan`.
+Standalone import records partial coverage even when the source reports a completed
+scan. It writes the evidence and exits with status 1. Pass `--report-only` to
+accept that result for inspection. The command ignores project policy in the
+report directory and its ancestors. Incomplete source reports retain their
+status in either mode. Each import requires a new output path.
 
 Native JSON, CycloneDX and SPDX preserve report provenance, source status and
 unmapped indexes. Portable formats embed a digest-bound native inventory extension;
@@ -81,6 +81,29 @@ provenance, rather than a bare component list. It rejects bare finding arrays th
 cannot carry source coverage. Unknown finding kinds remain unmapped. Imported
 assets are not automatically linked to the repository agent or asserted present
 on the local filesystem.
+
+### Scope of a repository baseline
+
+`scan` and `baseline` assess the supported static files in one repository.
+All eight collectors must finish for the default gate to pass. A successful
+search can find zero matching files. Git metadata, dependency directories and
+virtual environments are outside the built-in scope. The inventory lists those
+patterns under `exclusions`. Unreadable files, unsupported declarations and
+additional policy exclusions encountered inside the scope keep coverage partial.
+A baseline also requires a local subject. The path-inferred repository agent
+and imported findings alone provide no evidence of a local agent or artifact.
+
+The collector checks the conventional local ShadowScan report paths. If none
+exists, the inventory records that observation. A fully mapped native report
+whose source collection completed can accompany a successful repository baseline.
+The digest and `source_projection_limitations` record the external evidence
+separately. Imported assets retain declared assurance and unknown trust, and
+the CycloneDX composition remains incomplete. Incomplete sources, unmapped
+entries and lossy CycloneDX inputs keep the default repository gate closed.
+
+Project validation also compares imported dependency endpoints, relationship types,
+assurance, provenance and multiplicity against the local report projection. Missing,
+modified or additional edges involving imported components fail reconciliation.
 
 ### Verify the native import and its producer
 

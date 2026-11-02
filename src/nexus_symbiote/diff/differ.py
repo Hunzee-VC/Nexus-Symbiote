@@ -12,6 +12,7 @@ from typing import Any
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import TrustTier
 from nexus_symbiote.core.hashing import TOOL_DEFINITION_HASH_VERSION
+from nexus_symbiote.core.models import MCPServerComponent
 
 TRUST_TIER_ORDER = {
     TrustTier.INTERNAL_VERIFIED: 0,
@@ -153,6 +154,21 @@ class AIBOMDiffer:
 
     def _compare_components(self, old: Any, new: Any) -> list[dict[str, str]]:
         modifications: list[dict[str, str]] = []
+
+        if isinstance(old, MCPServerComponent) and isinstance(new, MCPServerComponent):
+            for label, before, after in (
+                ("endpoint", old.endpoint_url, new.endpoint_url),
+                ("transport", old.transport, new.transport),
+                ("launch command", old.command, new.command),
+            ):
+                if before != after:
+                    # External or legacy inventories may contain credentials in these fields.
+                    modifications.append(
+                        {
+                            "detail": f"MCP server {label} changed. Review before execution.",
+                            "severity": "critical",
+                        }
+                    )
 
         if old.trust_tier != new.trust_tier:
             old_rank = TRUST_TIER_ORDER.get(old.trust_tier, 5)

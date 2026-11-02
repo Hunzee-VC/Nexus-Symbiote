@@ -44,6 +44,8 @@ nexus-symbiote diff previous.json agentbom.json --json-output
 nexus-symbiote summary agentbom.json
 ```
 
+For a CI drift check, run `nexus-symbiote diff reviewed.json candidate.json --json-output --fail-on-alert`. It writes the diff and exits with status 1 on a security alert. Changing the recorded origin, transport, or launcher of a named MCP server triggers a critical alert. Static collection redacts URL paths and arguments, so same-origin path changes require separate deployment evidence.
+
 Collection is static by default: repository instructions, MCP configuration, local model references and files, retrieval configuration, and package manifests provide evidence of declared composition. A configuration entry does not prove that a server is running or that its live tool definitions match the declaration. Failed or inaccessible inputs must remain visible in coverage.
 
 Additional review commands:
@@ -95,6 +97,8 @@ nexus-symbiote scan . -f sarif -o results.sarif
 
 Native JSON retains the product's agent-specific model. CycloneDX 1.7 and SPDX 3.0.1 exports use supported native structures and documented extension points. Schema validity is necessary but does not establish equivalent semantics or completeness. Consumers must inspect coverage, unknown values, and conversion limitations before using an export for authorization. SARIF carries reviewable findings rather than an admission decision.
 
+SPDX identifiers are scoped to the exported BOM revision. Re-exporting a legacy inventory creates new document and element identifiers. Consumers that retain older graphs can use the native serial number for lineage and the revision-specific identifiers to distinguish the exported observations.
+
 ## GitHub Action
 
 Use a reviewed immutable Nexus SymBiote commit SHA in a consuming repository. For a local checked-out copy, this workflow runs only the local Action and shows explicit SARIF permissions:
@@ -128,7 +132,7 @@ jobs:
 
 The Action installs its own reviewed source, collects once, and derives the requested format and SARIF from that same native inventory. Inputs are passed as data, validation failures fail the Action, and malformed risk reports cannot become a zero score. Scan and output paths must stay inside the workspace, and output paths must not contain artifact glob syntax. Collection failures fail the Action even when later validation is disabled. Isolated Python execution prevents the scanned repository from supplying a replacement module through its current directory or `PYTHONPATH`. SARIF uploading is off by default; enable it only when repository code scanning and the event's permissions support uploading. Fork pull requests may have restricted tokens; use the evidence artifact when upload is unavailable.
 
-The Action uses built-in policy and the workflow inputs for collection, validation and scoring. A policy file in the scanned checkout cannot exclude a model or disable either validator. Standalone CLI calls continue to load project policy by default. Pass `--no-project-policy` to `scan`, `validate` or `risk` when evaluating an untrusted checkout.
+The Action uses built-in policy and workflow inputs for collection, validation and scoring. Standalone `scan`, `validate` and `risk` load project policy by default. Pass `--no-project-policy` to those commands when evaluating an untrusted checkout. Standalone `import-shadowscan` ignores policy files supplied alongside the report or in parent directories. Only the caller's `--report-only` flag enables a successful stand-alone import of partial evidence.
 
 A threshold of `0` explicitly disables the risk gate. Disabling `validate` or `risk-check` is a caller policy choice, not evidence that verification passed. Outputs distinguish an actual risk score from a skipped evaluation. Inventories may expose infrastructure details; restrict access to uploaded artifacts.
 

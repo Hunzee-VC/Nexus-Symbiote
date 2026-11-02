@@ -244,6 +244,7 @@ def test_advisories_cli_fails_when_inventory_identity_is_unknown(tmp_path):
 def test_baseline_failure_preserves_previous_baseline(tmp_path):
     target = tmp_path / "baseline.json"
     target.write_text("reviewed old baseline")
+    (tmp_path / ".mcp.json").write_text("{malformed")
     result = CliRunner().invoke(main, ["baseline", str(tmp_path), "-o", str(target)])
     assert result.exit_code != 0
     assert target.read_text() == "reviewed old baseline"

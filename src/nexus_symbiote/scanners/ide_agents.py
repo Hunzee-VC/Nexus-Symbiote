@@ -163,8 +163,8 @@ class IDEAgentScanner(Scanner):
                     )
                 )
             self._scan_extensions(files.root, result, available)
-        if not result.components and not result.scan_failures:
-            result.surfaces_excluded.append("ide-agents (no IDE agent configs found)")
+        if not result.components and not result.scan_failures and not result.surfaces_excluded:
+            result.surfaces_scanned.append("ide-agents (no IDE agent configs found)")
         return result
 
     def _read_ide_settings(
