@@ -13,6 +13,12 @@ It does not intercept other network requests, sandbox a process, or establish
 that an unchanged tool backend is benign. Restrict bypass paths through the
 surrounding runtime, credentials, sandbox and network policy.
 
+The gateway copies the request before scope resolution and rejects a resolver
+that modifies its copy during resolution. A resolver retaining that copy cannot
+change the request subsequently submitted to the executor. The resolver remains
+trusted to derive the correct scope, and the executor remains trusted to send
+the authorized call over the same authenticated session used for observation.
+
 Four signed contracts have distinct predicate types and schemas:
 
 | Contract | Purpose | Maximum validity |
