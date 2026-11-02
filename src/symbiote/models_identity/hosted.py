@@ -31,6 +31,7 @@ from symbiote.model.enums import AliasPinning, UnknownReason
 
 __all__ = [
     "MAX_MODEL_REF",
+    "PROVIDER_PREFIXES",
     "HostedRef",
     "PinningRule",
     "ProviderSpec",
@@ -41,12 +42,41 @@ __all__ = [
     "provider_for_env",
     "provider_for_package",
     "split_litellm_prefix",
+    "split_provider_prefix",
 ]
 
 #: Longest identifier the classifier accepts; longer strings are not model names and are reported unknown.
 MAX_MODEL_REF: Final = 512
 
-Attribution = Literal["explicit", "endpoint", "litellm-prefix", "shape", "context", "env", "package", "none"]
+Attribution = Literal[
+    "explicit", "endpoint", "litellm-prefix", "provider-prefix", "shape", "context", "env", "package", "none"
+]
+
+#: ``provider:model`` prefixes (Pydantic AI, LangChain ``init_chat_model``) -> provider ids. One table for every
+#: collector, so ``Agent("anthropic:claude-…")`` and ``Agent(model="anthropic:claude-…")`` get one model id.
+PROVIDER_PREFIXES: Final[Mapping[str, str]] = {
+    "openai": "openai",
+    "openai-chat": "openai",
+    "openai-responses": "openai",
+    "anthropic": "anthropic",
+    "google-gla": "google-gemini",
+    "google_genai": "google-gemini",
+    "google-vertex": "google-vertex",
+    "google_vertexai": "google-vertex",
+    "bedrock": "aws-bedrock",
+    "bedrock_converse": "aws-bedrock",
+    "azure": "azure-openai",
+    "azure_openai": "azure-openai",
+    "mistral": "mistral",
+    "mistralai": "mistral",
+    "cohere": "cohere",
+    "deepseek": "deepseek",
+    "xai": "xai",
+    "grok": "xai",
+    "ollama": "ollama",
+    "openrouter": "openrouter",
+    "huggingface": "huggingface",
+}
 
 _CATCH_ALL: Final = "^.+$"
 _REF_SHAPE: Final = re.compile(r"^[A-Za-z0-9~][A-Za-z0-9._:/@~*\[\]+-]*$")
@@ -178,6 +208,14 @@ def provider_for_package(name: str) -> str | None:
     return None
 
 
+def split_provider_prefix(ref: str) -> tuple[str | None, str]:
+    """``("openai", "gpt-4o")`` for a ``provider:model`` string with a known prefix, else ``(None, ref)``."""
+    head, sep, rest = ref.partition(":")
+    if sep and rest and head.lower() in PROVIDER_PREFIXES:
+        return PROVIDER_PREFIXES[head.lower()], rest
+    return None, ref
+
+
 def split_litellm_prefix(ref: str) -> tuple[str | None, str]:
     """``("anthropic", "claude-…")`` for a LiteLLM-style ``provider/model`` string, else ``(None, ref)``."""
     head, sep, rest = ref.partition("/")
@@ -211,6 +249,12 @@ def _attribute(
 ) -> tuple[str | None, str, Attribution]:
     """Decide the provider and the identifier to classify: explicit > endpoint > LiteLLM prefix > shape > hints."""
     specs = _by_id()
+    prefixed, rest = split_provider_prefix(ref)
+    if prefixed is not None and prefixed in specs:
+        # ``anthropic:claude-…``: the prefix names the provider; the rest is the model to classify
+        if provider is not None and provider in specs:
+            return provider, rest, "explicit"
+        return prefixed, rest, "provider-prefix"
     if provider is not None and provider in specs:
         return provider, ref, "explicit"
     if endpoint:
