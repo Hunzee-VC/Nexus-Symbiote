@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.enums import AssuranceLevel, RiskSeverity, TrustTier
 from nexus_symbiote.core.hashing import parse_json_strict
 from nexus_symbiote.core.models import (
@@ -28,6 +28,8 @@ from nexus_symbiote.utils.confined import ConfinedCollection
 
 MAX_REPORT_BYTES = 16 * 1024 * 1024
 MAX_FINDINGS = 10_000
+MAX_DEPENDENCIES = 10_000
+PROJECTION_PROFILE = "nexus-symbiote/shadowscan-projection/v1"
 _ALLOWED_SURFACES = frozenset(
     {"code", "identity", "gateway", "lowcode", "saas", "cloud", "endpoint", "network", "runtime"}
 )
@@ -36,6 +38,7 @@ _ALLOWED_SURFACES = frozenset(
 @dataclass
 class ImportedReport:
     components: list[AnyComponent] = field(default_factory=list)
+    dependencies: list[DependencyEdge] = field(default_factory=list)
     digest: str = ""
     source_format: str = ""
     source_status: str = "unknown"
@@ -48,6 +51,8 @@ class ImportedReport:
         aibom = AIBOM(metadata=AIBOMMetadata(authors=[]))
         for component in self.components:
             aibom.add_component(component)
+        for dependency in self.dependencies:
+            aibom.add_dependency(dependency)
         aibom.metadata.completeness = CompletenessClaim(
             scope="shadowscan-imported",
             surfaces_scanned=["shadowscan:report"],
@@ -118,6 +123,7 @@ def _make_component(
         "shadowscan:finding-index": index,
         "shadowscan:source-id-sha256": identity_hash,
         "collection_mode": "imported-unverified-report",
+        "shadowscan:projection-profile": PROJECTION_PROFILE,
     }
     if surface in _ALLOWED_SURFACES:
         props["shadowscan:surface"] = surface
@@ -171,6 +177,7 @@ class ShadowScanImporter(Scanner):
                     result.scan_failures.append("ShadowScan report could not be safely imported")
                     break
                 result.components.extend(imported.components)
+                result.dependencies.extend(imported.dependencies)
                 result.source_report_digest = imported.digest
                 result.source_report_format = imported.source_format
                 result.source_report_status = imported.source_status
@@ -232,7 +239,7 @@ class ShadowScanImporter(Scanner):
             "ShadowScan discovery is a source claim; artifact integrity and full BOM coverage are unverified"
         )
         result.limitations.append(
-            "Names, detailed evidence, models, and relationships remain in the source report and are not mapped"
+            "Names, detailed evidence, and unmapped relationships remain in the source report"
         )
         if result.unmapped_count:
             result.limitations.append(
@@ -301,6 +308,63 @@ class ShadowScanImporter(Scanner):
                 result.components.append(comp)
         return result
 
+    @staticmethod
+    def _project_cyclonedx_dependencies(
+        data: dict[str, Any], result: ImportedReport, mapped_refs: dict[str, str]
+    ) -> None:
+        """Retain bounded, source-reported edges without resolving external identities."""
+        dependencies = data.get("dependencies", [])
+        if not isinstance(dependencies, list) or len(dependencies) > MAX_DEPENDENCIES:
+            raise ValueError("invalid or oversized CycloneDX dependency list")
+        seen_sources: set[str] = set()
+        total = 0
+        omitted = 0
+        for index, entry in enumerate(dependencies):
+            if not isinstance(entry, dict):
+                raise ValueError("invalid CycloneDX dependency")
+            source, targets = entry.get("ref"), entry.get("dependsOn", [])
+            if (
+                not isinstance(source, str)
+                or not source
+                or len(source) > 4096
+                or source in seen_sources
+                or not isinstance(targets, list)
+            ):
+                raise ValueError("invalid or duplicate CycloneDX dependency source")
+            seen_sources.add(source)
+            total += len(targets)
+            if total > MAX_DEPENDENCIES:
+                raise ValueError("too many CycloneDX dependency edges")
+            seen_targets: set[str] = set()
+            for target in targets:
+                if (
+                    not isinstance(target, str)
+                    or not target
+                    or len(target) > 4096
+                    or target in seen_targets
+                ):
+                    raise ValueError("invalid or duplicate CycloneDX dependency target")
+                seen_targets.add(target)
+                if source not in mapped_refs or target not in mapped_refs:
+                    omitted += 1
+                    continue
+                result.dependencies.append(
+                    DependencyEdge(
+                        source_ref=mapped_refs[source],
+                        target_ref=mapped_refs[target],
+                        relationship="depends-on",
+                        assurance_level="declared",
+                        conditions=(
+                            f"Source-reported CycloneDX dependency; report {result.digest}; "
+                            f"dependencies index {index}; not independently verified"
+                        ),
+                    )
+                )
+        if omitted:
+            result.limitations.append(
+                f"{omitted} source dependency edges have unmapped endpoints and were not projected"
+            )
+
     def _from_cyclonedx(self, data: dict[str, Any], digest: str) -> ImportedReport:
         meta = data.get("metadata")
         if data.get("specVersion") not in ("1.6", "1.7") or not isinstance(meta, dict):
@@ -331,6 +395,7 @@ class ShadowScanImporter(Scanner):
             "CycloneDX source omits or summarizes discovery evidence and relationships"
         )
         ids: set[str] = set()
+        mapped_refs: dict[str, str] = {}
         entries = []
         for key in ("components", "services"):
             items = data.get(key, [])
@@ -370,6 +435,8 @@ class ShadowScanImporter(Scanner):
                 result.unmapped_indexes.append(index)
             else:
                 result.components.append(comp)
+                mapped_refs[ref] = comp.bom_ref
+        self._project_cyclonedx_dependencies(data, result, mapped_refs)
         return result
 
 

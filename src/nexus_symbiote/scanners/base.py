@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from nexus_symbiote.core.aibom import DependencyEdge
 from nexus_symbiote.core.models import AnyComponent
 from nexus_symbiote.utils.confined import ConfinedCollection
 
@@ -57,6 +58,7 @@ class ScanResult:
 
     scanner_name: str
     components: list[AnyComponent] = field(default_factory=list)
+    dependencies: list[DependencyEdge] = field(default_factory=list)
     surfaces_scanned: list[str] = field(default_factory=list)
     surfaces_excluded: list[str] = field(default_factory=list)
     scan_failures: list[str] = field(default_factory=list)
