@@ -86,13 +86,30 @@ def test_expiry_issue(tmp_path) -> None:
     assert ChainStore(tmp_path).expiry_issues(_snap(1, "a"), now=NOW) == []
 
 
-def test_lock_contention_and_stale_steal(tmp_path) -> None:
+def test_lock_contention_and_crash_release(tmp_path) -> None:
+    """flock semantics: a live holder blocks everyone; a dead holder's lock
+    is released by the kernel — no mtime heuristics, no steal races."""
+    import fcntl
+
     store = ChainStore(tmp_path, lock_timeout=0.2)
     store.root.mkdir(parents=True, exist_ok=True)
-    lock = store.root / "chains.lock"
-    lock.write_text("1")
-    with pytest.raises(StoreLockedError):
-        store.commit(_snap(1, "a"))
-    old = NOW.timestamp() - 3600
-    os.utime(lock, (old, old))  # stale lock is stolen
+    holder = os.open(store.root / "chains.lock", os.O_CREAT | os.O_WRONLY, 0o600)
+    fcntl.flock(holder, fcntl.LOCK_EX)
+    try:
+        with pytest.raises(StoreLockedError):
+            store.commit(_snap(1, "a"))
+    finally:
+        os.close(holder)  # holder exits/crashes: the kernel releases the lock
     assert store.commit(_snap(1, "a")) == []
+
+    # An over-mtime ("stale-looking") lock held by a LIVE process must NOT be
+    # stolen: with flock, mtime is irrelevant and contention still blocks.
+    holder2 = os.open(store.root / "chains.lock", os.O_CREAT | os.O_WRONLY, 0o600)
+    fcntl.flock(holder2, fcntl.LOCK_EX)
+    old_time = NOW.timestamp() - 3600
+    os.utime(store.root / "chains.lock", (old_time, old_time))
+    try:
+        with pytest.raises(StoreLockedError):
+            store.commit(_snap(2, "b"))
+    finally:
+        os.close(holder2)

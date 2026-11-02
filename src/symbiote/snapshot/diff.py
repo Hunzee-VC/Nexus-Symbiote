@@ -40,6 +40,7 @@ from symbiote.model.enums import (
     Severity,
     SideEffectClass,
     TrustState,
+    TrustTier,
 )
 from symbiote.model.snapshot import Delta, DeltaEvent, Producer
 from symbiote.snapshot.body import body_digest, comparison_digest
@@ -205,14 +206,22 @@ def _diff_tools(c: _Collector, a: Mapping[str, ToolDefinition], b: Mapping[str, 
 def _diff_servers(c: _Collector, a: Mapping[str, ToolServer], b: Mapping[str, ToolServer]) -> None:
     for sid in sorted(b.keys() - a.keys()):
         server = b[sid]
-        crossing = bool(server.crosses_trust_boundary.value)
+        claim = server.crosses_trust_boundary
+        if claim.is_unknown:
+            # I2 / checks.md posture: an unknown boundary is triaged worst-case,
+            # and the unknown is named instead of silently reading as benign.
+            severity, detail = Severity.HIGH, "trust boundary unknown (treated as crossing)"
+        elif claim.value:
+            severity, detail = Severity.HIGH, "crosses a trust boundary"
+        else:
+            severity, detail = Severity.MEDIUM, None
         c.emit(
             DeltaEventType.SERVER_ADDED,
             sid,
             after=server.digest,
-            severity=Severity.HIGH if crossing else Severity.MEDIUM,
+            severity=severity,
             assurance=_assurance(server, c.default_assurance),
-            detail="crosses a trust boundary" if crossing else None,
+            detail=detail,
         )
     for sid in sorted(a.keys() - b.keys()):
         c.emit(DeltaEventType.SERVER_REMOVED, sid, before=a[sid].digest)
@@ -418,14 +427,27 @@ def _diff_trust(c: _Collector, a: Mapping[str, TrustStatus], b: Mapping[str, Tru
 def _diff_data_sources(c: _Collector, a: Mapping[str, DataSource], b: Mapping[str, DataSource]) -> None:
     for did in sorted(b.keys() - a.keys()):
         source = b[did]
-        risky = source.trust_tier.value.startswith("3") and bool(source.instruction_bearing.value)
+        tier_untrusted = source.trust_tier in (TrustTier.UNTRUSTED_PUBLIC, TrustTier.UNKNOWN)
+        bearing = source.instruction_bearing
+        bearing_risky = bool(bearing.value) or bearing.is_unknown
+        risky = tier_untrusted and bearing_risky
+        unknowns = []
+        if source.trust_tier is TrustTier.UNKNOWN:
+            unknowns.append("trust tier unknown")
+        if bearing.is_unknown:
+            unknowns.append("instruction-bearing unknown")
+        detail = None
+        if risky:
+            detail = "untrusted and instruction-bearing"
+            if unknowns:
+                detail += " (" + "; ".join(unknowns) + " - treated as worst case)"
         c.emit(
             DeltaEventType.DATA_SOURCE_ADDED,
             did,
             after=comparison_digest(source),
             severity=Severity.HIGH if risky else Severity.MEDIUM,
             assurance=_assurance(source, c.default_assurance),
-            detail="untrusted and instruction-bearing" if risky else None,
+            detail=detail,
         )
     for did in sorted(a.keys() - b.keys()):
         c.emit(DeltaEventType.DATA_SOURCE_REMOVED, did, before=comparison_digest(a[did]))
