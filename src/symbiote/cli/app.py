@@ -258,6 +258,13 @@ def scan(
             "--shadowscan-scope", help="root (findings about this repository) | estate (every finding)."
         ),
     ] = "root",
+    nonce: Annotated[
+        str | None,
+        typer.Option(
+            "--nonce",
+            help="Merkle nonce as 64 hex digits (keep it secret for redactable documents; with --deterministic it replaces the all-zero nonce).",
+        ),
+    ] = None,
     valid_for: Annotated[
         int | None,
         typer.Option(
@@ -297,12 +304,28 @@ def scan(
         raise typer.Exit(exit_codes.IO)
     now = datetime(2000, 1, 1, tzinfo=UTC) if deterministic else datetime.now(UTC)
     validity = Validity(not_before=now, not_after=now + timedelta(days=valid_for)) if valid_for else None
+    nonce_bytes: bytes | None = None
+    if nonce is not None:
+        try:
+            nonce_bytes = bytes.fromhex(nonce)
+        except ValueError:
+            nonce_bytes = b""
+        if len(nonce_bytes) != 32:
+            console.print("[red]--nonce must be 64 hexadecimal digits (32 bytes)[/red]")
+            raise typer.Exit(exit_codes.USAGE)
+    if deterministic and nonce_bytes is None:
+        console.print(
+            "[yellow]--deterministic uses the all-zero Merkle nonce: byte-identical output, but a redacted copy "
+            "of this document is not confidentiality-preserving (leaf salts are derivable). Pass --nonce HEX "
+            "from a secret for redactable deterministic documents.[/yellow]"
+        )
     try:
         outcome = run_scan(
             path,
             agent_name=name,
             home=Path.home() if user_scope else None,
             deterministic=deterministic,
+            nonce=nonce_bytes,
             now=now,
             include_text=include_text,
             policy=not no_policy,
