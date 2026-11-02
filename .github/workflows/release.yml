@@ -97,7 +97,7 @@ jobs:
           name: release-distributions
           path: dist
       - name: Attest distribution provenance
-        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/*
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
@@ -106,7 +106,7 @@ jobs:
           path: evidence
       - name: Attest inventory benchmark results and wheel digest
         id: inventory
-        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: evidence/inventory-benchmark.tar.gz
       - name: Retain inventory attestation bundle
