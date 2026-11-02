@@ -18,6 +18,9 @@ htmlcov/
 # Tooling
 .idea/
 .vscode/
+# example agents are fixtures: their client configuration must stay tracked
+!examples/**/.vscode/
+!examples/**/.vscode/**
 *.swp
 .DS_Store
 
@@ -29,6 +32,5 @@ agentbom-store/
 !examples/**/*.sigstore.json
 site/
 
-# Example-agent fixtures are test inputs, not editor settings
-!examples/**/.vscode/
-!examples/**/.vscode/mcp.json
+# Claude Code agent worktrees (local tooling, never project content)
+.claude/worktrees/
