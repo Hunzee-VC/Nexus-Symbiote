@@ -7,7 +7,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import click
 from rich.console import Console
@@ -24,10 +24,25 @@ from nexus_symbiote.runtime_cli import register_runtime_commands
 from nexus_symbiote.supply_chain_cli import register_supply_chain_commands
 from nexus_symbiote.utils.files import write_output_file
 
+if TYPE_CHECKING:
+    from nexus_symbiote.utils.crypto import SigstoreArtifactPolicy
+
 console = Console(stderr=True)
+err_console = console
 
 
-err_console = Console(stderr=True)
+def _scanner_error_summary(exc: Exception) -> str:
+    # Exception messages can include Pydantic input values, parser snippets or
+    # credentials. Only application-owned diagnostic codes cross this boundary.
+    from pydantic import ValidationError
+
+    if isinstance(exc, ValidationError):
+        return "component validation failed (scanner-validation-error)"
+    if isinstance(exc, OSError):
+        return "collection I/O failed (scanner-io-error)"
+    if isinstance(exc, (ValueError, TypeError, RecursionError)):
+        return "invalid or unsupported input (scanner-input-error)"
+    return "collector failed (scanner-internal-error)"
 
 
 def _policy(root: Path, *, ignore_project: bool = False) -> Policy:
@@ -62,6 +77,19 @@ def _load_bom(path: str | Path) -> AIBOM:
 
 
 SCANNER_REGISTRY: dict[str, type] = {}
+
+
+def _signer_policies(path: Path | None, project: Path | None) -> list[SigstoreArtifactPolicy]:
+    from nexus_symbiote.signature_policy import load_signature_policies
+
+    if path is None:
+        return []
+    if project is None:
+        raise click.BadParameter("--signature-policy requires --project")
+    try:
+        return load_signature_policies(path, project)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from None
 
 
 def _get_scanners() -> dict[str, type]:
@@ -198,17 +226,11 @@ def scan(
     from nexus_symbiote.core.models import ClaimEvidence
     from nexus_symbiote.graph import assemble_repository_agent, validate_graph
     from nexus_symbiote.policy import PolicyError
-    from nexus_symbiote.signature_policy import load_signature_policies
     from nexus_symbiote.utils.confined import DEFAULT_EXCLUDES
     from nexus_symbiote.validators.risk import RiskScorer
 
     policy = _policy(root, ignore_project=no_project_policy)
-    try:
-        signature_policies = (
-            load_signature_policies(signature_policy, root) if signature_policy else []
-        )
-    except ValueError as exc:
-        raise click.ClickException(str(exc)) from None
+    signature_policies = _signer_policies(signature_policy, root)
     output_format = output_format or policy.output.default_format
     all_scanners = _get_scanners()
     selected = scanners or tuple(policy.scan.scanners)
@@ -301,10 +323,11 @@ def scan(
                 completed.append(name)
             console.print(f"    Found [green]{len(result.components)}[/] components")
         except Exception as exc:
+            summary = _scanner_error_summary(exc)
             err_console.print(
-                f"  [red]Scanner '{_safe(name)}' failed:[/] {_safe(exc)}", soft_wrap=True
+                f"  [red]Scanner '{_safe(name)}' failed:[/] {_safe(summary)}", soft_wrap=True
             )
-            scan_failures.append(f"{name}: {exc}")
+            scan_failures.append(f"{name}: {summary}")
             scanner_status[name] = "failed"
     try:
         assemble_repository_agent(aibom, root)
@@ -620,20 +643,10 @@ def validate(
     """Validate an AIBOM for completeness and integrity."""
     bom = _load_bom(aibom_path)
 
-    from nexus_symbiote.signature_policy import load_signature_policies
     from nexus_symbiote.validators.completeness import CompletenessValidator
     from nexus_symbiote.validators.integrity import IntegrityValidator
 
-    if signature_policy and not project:
-        raise click.BadParameter("--signature-policy requires --project")
-    try:
-        signature_policies = (
-            load_signature_policies(signature_policy, Path(project))
-            if signature_policy and project
-            else []
-        )
-    except ValueError as exc:
-        raise click.ClickException(str(exc)) from None
+    signature_policies = _signer_policies(signature_policy, Path(project) if project else None)
 
     policy = _policy(
         Path(project).resolve() if project else Path(aibom_path).parent,
@@ -645,7 +658,10 @@ def validate(
         cv = CompletenessValidator()
         c_report = (
             cv.validate_against_project(
-                bom, Path(project).resolve(), exclude_paths=policy.scan.exclude_paths
+                bom,
+                Path(project).resolve(),
+                exclude_paths=policy.scan.exclude_paths,
+                signature_policies=signature_policies,
             )
             if project
             else cv.validate(bom)
@@ -664,7 +680,9 @@ def validate(
     console.print("\n[bold]Integrity check[/]")
     if policy.validation.require_integrity:
         i_report = IntegrityValidator(signature_policies=signature_policies).validate(
-            bom, Path(project).resolve() if project else None
+            bom,
+            Path(project).resolve() if project else None,
+            exclude_paths=policy.scan.exclude_paths,
         )
         console.print("  Status: " + ("[green]PASS[/]" if i_report.is_valid else "[red]FAIL[/]"))
         console.print(
@@ -709,6 +727,16 @@ def validate(
 @click.option("--threshold", type=float, default=None, help="Fail threshold score")
 @click.option("--json-output", is_flag=True, help="Output as JSON")
 @click.option(
+    "--project",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="Reconcile the supplied BOM against this project's static evidence before scoring.",
+)
+@click.option(
+    "--signature-policy",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Explicit operator signer policy for model recollection; requires --project.",
+)
+@click.option(
     "--fail-on-severity",
     type=click.Choice(["critical", "high", "medium", "low", "info", "none"]),
     default=None,
@@ -725,16 +753,53 @@ def risk(
     json_output: bool,
     fail_on_severity: str | None,
     no_project_policy: bool = False,
+    project: Path | None = None,
+    signature_policy: Path | None = None,
 ) -> None:
     """Score supply-chain risks in an AIBOM."""
     bom = _load_bom(aibom_path)
 
     from nexus_symbiote.validators.risk import RiskScorer
 
-    policy = _policy(Path(aibom_path).parent, ignore_project=no_project_policy)
+    root = project.resolve() if project else None
+    signature_policies = _signer_policies(signature_policy, root)
+    policy = _policy(root or Path(aibom_path).parent, ignore_project=no_project_policy)
     threshold = threshold if threshold is not None else policy.risk.fail_threshold
     if threshold <= 0 or not __import__("math").isfinite(threshold):
         raise click.BadParameter("threshold must be positive and finite", param_hint="--threshold")
+    basis = "supplied-bom"
+    if root is not None:
+        from nexus_symbiote.validators.completeness import CompletenessValidator
+
+        checked = CompletenessValidator().validate_against_project(
+            bom,
+            root,
+            exclude_paths=policy.scan.exclude_paths,
+            signature_policies=signature_policies,
+        )
+        if not checked.is_complete or not checked.local_subjects:
+            reasons = [issue.description for issue in checked.issues if issue.severity == "error"]
+            if not checked.local_subjects:
+                reasons.append("No local project subject was available to reconcile.")
+            if json_output:
+                click.echo(
+                    json.dumps(
+                        {
+                            "assessment_basis": "project-reconciliation-failed",
+                            "overall_score": None,
+                            "risk_level": "unknown",
+                            "coverage_status": "unreconciled",
+                            "gate_reasons": reasons,
+                        },
+                        indent=2,
+                    )
+                )
+            else:
+                click.echo("Risk unknown. Project reconciliation failed.", err=True)
+                for reason in reasons:
+                    click.echo(_UNSAFE_TEXT.sub("\ufffd", reason), err=True)
+            raise click.exceptions.Exit(1)
+        basis = "project-reconciled"
     scorer = RiskScorer(
         fail_threshold=threshold,
         warn_threshold=policy.risk.warn_threshold,
@@ -744,7 +809,7 @@ def risk(
     passed, report = scorer.passes_gate(bom)
 
     if json_output:
-        click.echo(json.dumps(report.to_dict(), indent=2))
+        click.echo(json.dumps({**report.to_dict(), "assessment_basis": basis}, indent=2))
         sys.exit(0 if passed else 1)
 
     level_colors = {
@@ -758,6 +823,7 @@ def risk(
     score = report.overall_score
     level = report.risk_level
     console.print(f"[bold]Risk Score:[/] [{color}]{score:.1f}[/] ({level})")
+    console.print(f"  Assessment basis: {basis}")
     total = report.total_components
     risky = report.components_with_risks
     console.print(f"  Components: {total} total, {risky} with risks")

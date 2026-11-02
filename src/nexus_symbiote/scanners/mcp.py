@@ -21,6 +21,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from packaging.requirements import InvalidRequirement, Requirement
+from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
 from nexus_symbiote.core.enums import (
@@ -43,7 +44,7 @@ from nexus_symbiote.core.models import (
     ToolComponent,
 )
 from nexus_symbiote.scanners.base import Scanner, ScanResult, sanitized_origin
-from nexus_symbiote.utils.secrets import REDACTED, redact_metadata, redact_text
+from nexus_symbiote.utils.secrets import REDACTED, redact_descriptor, redact_text
 
 MCP_CONFIG_FILES = [
     ".mcp.json",
@@ -53,11 +54,22 @@ MCP_CONFIG_FILES = [
     ".claude/mcp.json",
 ]
 
+_NPM_NAME = r"(?:@[A-Za-z0-9][\w.-]*/)?[A-Za-z0-9][\w.-]*"
+_OCI_REPOSITORY = (
+    r"(?:[A-Za-z0-9][A-Za-z0-9.-]*(?::[0-9]+)?/)?"
+    r"[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)*"
+)
+
+# Bind the original server object before secrets and opaque arguments are
+# removed from exported fields. This is source consistency evidence, not a
+# publisher signature, an installed-artifact identity, or a live descriptor.
+STATIC_CONFIG_HASH_PROFILE = "nexus-symbiote/mcp-static-config/v1"
+
 
 class MCPScanner(Scanner):
     name = "mcp"
 
-    def scan(self, project_root: Path) -> ScanResult:
+    def scan(self, project_root: Path, *, config_only: bool = False) -> ScanResult:
         result = ScanResult(scanner_name=self.name)
         found_any = False
         clients: dict[str, MCPClientComponent] = {}
@@ -109,7 +121,8 @@ class MCPScanner(Scanner):
                     client.server_refs = sorted({*client.server_refs, *server_refs})
                     client.properties["config_paths"].append(str(config_path))
             result.components.extend(clients.values())
-            self._scan_code_mcp_clients(files.root, result)
+            if not config_only:
+                self._scan_code_mcp_clients(files.root, result)
 
         if not found_any and not result.scan_failures and not result.surfaces_excluded:
             result.surfaces_scanned.append("mcp-config (no config files found)")
@@ -153,8 +166,14 @@ class MCPScanner(Scanner):
         safe_endpoint = (
             redact_text(sanitized_origin(endpoint_url), secrets) if endpoint_url else None
         )
+        source_config_hash = hash_canonical(
+            {"profile": STATIC_CONFIG_HASH_PROFILE, "configuration": config}
+        )
 
         package_ref = self._extract_package_ref(command, args)
+        launcher_package = self._launcher_package(command, package_ref) if package_ref else None
+        if launcher_package and any(secret in launcher_package for secret in secrets):
+            launcher_package = None
         version_pinned: bool | None = None
         version = None
         if package_ref:
@@ -203,6 +222,7 @@ class MCPScanner(Scanner):
             name=name,
             version=version,
             transport=transport,
+            launcher_package=launcher_package,
             command=(
                 command
                 if command in {"npx", "bunx", "uvx", "pipx", "docker", "node", "python", "python3"}
@@ -219,10 +239,14 @@ class MCPScanner(Scanner):
                 "collection_mode": "static-config",
                 "launch_arguments_redacted": bool(args),
                 "endpoint_credentials_omitted": bool(endpoint_url),
+                "static_config_hash": source_config_hash,
+                "static_config_hash_profile": STATIC_CONFIG_HASH_PROFILE,
             },
         )
 
-        tools = self._extract_tools(name, config, secrets, server_ref=server_ref)
+        tools = self._extract_tools(
+            name, config, secrets, server_ref=server_ref, config_path=config_path
+        )
         server_comp.tool_count = len(tools)
         server_comp.tool_refs = [tool.bom_ref for tool in tools]
         return server_comp, tools
@@ -254,8 +278,11 @@ class MCPScanner(Scanner):
                     return None
                 if command in {"uvx", "pipx"}:
                     return self._python_package_ref(command, arg)
-                pattern = r"(?:@[A-Za-z0-9][\w.-]*/[A-Za-z0-9][\w.-]*|[A-Za-z0-9][\w.-]*)(?:@.+)?"
-                return arg if len(arg) <= 2048 and re.fullmatch(pattern, arg, re.ASCII) else None
+                return (
+                    arg
+                    if len(arg) <= 2048 and re.fullmatch(rf"{_NPM_NAME}(?:@.+)?", arg, re.ASCII)
+                    else None
+                )
         if command == "docker" and args and args[0] == "run":
             for arg in args[1:]:
                 if arg in {"--rm", "-i", "-t", "-it", "-d", "--detach"}:
@@ -264,10 +291,31 @@ class MCPScanner(Scanner):
                     return None
                 return (
                     arg
-                    if re.fullmatch(r"[A-Za-z0-9][\w./:-]*(?:@sha256:[a-fA-F0-9]{64})?", arg)
+                    if len(arg) <= 2048
+                    and re.fullmatch(r"[A-Za-z0-9][\w./:-]*(?:@sha256:[a-fA-F0-9]{64})?", arg)
                     else None
                 )
         return None
+
+    @staticmethod
+    def _launcher_package(command: str, reference: str) -> str | None:
+        """Keep only a declared registry name. Never copy arbitrary launcher arguments."""
+        if command in {"uvx", "pipx"}:
+            requirement = Requirement(reference)  # Validated by _python_package_ref.
+            if requirement.url:
+                return None
+            return "pypi:" + canonicalize_name(requirement.name)
+        if command == "docker":
+            image = re.fullmatch(
+                rf"({_OCI_REPOSITORY})(?::[A-Za-z0-9_][A-Za-z0-9_.-]{{0,127}})?"
+                r"(?:@sha256:[a-fA-F0-9]{64})?",
+                reference,
+            )
+            return "oci:" + image[1].lower() if image else None
+        # A tag or range may follow the name. An alias, URL or path can point to
+        # a different package, so its nominal name does not identify the target.
+        package = re.fullmatch(rf"({_NPM_NAME})(?:@[A-Za-z0-9.*^~<>=|+ -]+)?", reference, re.ASCII)
+        return "npm:" + package[1] if package else None
 
     @staticmethod
     def _python_package_ref(command: str, value: str) -> str | None:
@@ -294,6 +342,7 @@ class MCPScanner(Scanner):
         secrets: list[str] | None = None,
         *,
         server_ref: str,
+        config_path: Path,
     ) -> list[ToolComponent]:
         tools_config = config.get("tools", [])
         tool_comps = []
@@ -321,7 +370,19 @@ class MCPScanner(Scanner):
 
                     side_effect = self._classify_side_effects(t_annotations, t_name)
                     caps = self._infer_capabilities(t_name, t_desc, t_annotations)
-                    t_name = redact_text(t_name, secrets or [])
+                    safe = redact_descriptor(
+                        {
+                            "name": t_name,
+                            "description": t_desc,
+                            "inputSchema": t_schema,
+                            "annotations": t_annotations,
+                        },
+                        secrets or [],
+                    )
+                    t_name = safe["name"]
+                    display_hash = hash_tool_definition(
+                        t_name, safe["description"], safe["inputSchema"], safe["annotations"]
+                    )
 
                     risks: list[RiskAssessment] = []
                     if side_effect in (
@@ -342,11 +403,15 @@ class MCPScanner(Scanner):
                             bom_ref=tool_ref,
                             name=t_name,
                             mcp_server_ref=server_ref,
-                            description_text=redact_text(t_desc, secrets or []),
-                            input_schema=redact_metadata(t_schema, secrets or []),
+                            source_path=str(config_path),
+                            description_text=safe["description"],
+                            input_schema=safe["inputSchema"],
                             definition_hash=def_hash,
+                            redacted_definition_hash=display_hash
+                            if display_hash != def_hash
+                            else None,
                             definition_hash_version=TOOL_DEFINITION_HASH_VERSION,
-                            annotations=redact_metadata(t_annotations, secrets or []),
+                            annotations=safe["annotations"],
                             capabilities=CapabilityDeclaration(
                                 capabilities=caps,
                                 side_effect_profile=side_effect,
@@ -354,6 +419,7 @@ class MCPScanner(Scanner):
                             trust_tier=TrustTier.THIRD_PARTY_UNSIGNED,
                             risks=risks,
                             properties={
+                                "collection_mode": "static-config",
                                 "capability_evidence": "unverified-declaration-and-name-heuristic",
                                 "definition_hash_subject": "original-declared-descriptor",
                                 "descriptor_output_may_be_redacted": True,

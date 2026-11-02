@@ -169,6 +169,47 @@ def test_workflow_pins_structure_and_release_privilege_separation():
         assert all("run" not in step for step in jobs[name]["steps"])
 
 
+def test_release_floating_dependencies_cannot_replace_attestation_or_publication_inputs():
+    path = Path(__file__).parents[1] / ".github/workflows/release.yml"
+    jobs = yaml.safe_load(path.read_text())["jobs"]
+    build = jobs["build"]
+    compatibility = jobs["compatibility"]
+    assert compatibility["needs"] == "build"
+    assert compatibility["permissions"] == {}
+    assert "outputs" not in compatibility
+    assert set(jobs["attest"]["needs"]) == {"build", "compatibility"}
+
+    for step in build["steps"]:
+        for command in step.get("run", "").splitlines():
+            if "pip install" in command:
+                assert "--require-hashes" in command or "--no-deps" in command
+    assert any("pip install dist/*.whl" in step.get("run", "") for step in compatibility["steps"])
+
+    for output, step_id in [("distributions_id", "distributions"), ("evidence_id", "evidence")]:
+        assert build["outputs"][output] == "${{ steps." + step_id + ".outputs.artifact-id }}"
+        upload = next(s for s in build["steps"] if s.get("id") == step_id)
+        assert upload["uses"].startswith("actions/upload-artifact@")
+        assert upload["with"]["if-no-files-found"] == "error"
+
+    for job, paths in [
+        ("compatibility", ["dist"]),
+        ("attest", ["dist", "evidence"]),
+        ("publish", ["dist"]),
+    ]:
+        downloads = [
+            s["with"]
+            for s in jobs[job]["steps"]
+            if s.get("uses", "").startswith("actions/download-artifact@")
+        ]
+        assert [d["path"] for d in downloads] == paths
+        for download in downloads:
+            output = "distributions_id" if download["path"] == "dist" else "evidence_id"
+            # The pinned downloader selects *all* artifacts for an empty ID.
+            assert (
+                download["artifact-ids"] == "${{ needs.build.outputs." + output + " || 'missing' }}"
+            )
+
+
 @pytest.mark.parametrize("validate", [True, False])
 def test_real_entry_point_ignores_untrusted_python_path_and_policy(tmp_path, validate):
     project = tmp_path / "$(touch PWNED)'quoted space"

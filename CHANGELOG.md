@@ -1,9 +1,21 @@
 # Changelog
 
-## Unreleased
+## [0.1.0] - 2026-11-02
+
+Alpha release of the AgentBOM toolkit under the Hunzee-VC organization.
 
 ### Security
 
+- Bind static MCP server configuration before redaction and reconcile configured tool fingerprints against fresh source evidence; require recollection of legacy snapshots without the binding.
+- Reject same-version MCP package substitutions, argument and endpoint-path drift, and edited supplied descriptors during project validation.
+- Replace raw scanner exception text with safe diagnostic codes and record malformed model metadata using field names only.
+- Read Claude's declared `permissions.defaultMode`, recognize bare broad tool grants, and retain allowances across collected settings layers without claiming effective authorization.
+- Add independent runtime signing quorums for snapshots, trust status and action approvals; preserve them through pinned stdio invocation.
+- Reject runtime CLI FIFO, symlink and oversized inputs through the bounded regular-file reader.
+- Detect same-version MCP launcher package substitutions in project validation and drift checks. Review older baselines that lack the launcher identity.
+- Reconcile locally collected security fields and findings before accepting supplied BOMs. Project-backed risk scoring rejects a conflicting inventory.
+- Omit schema literals from MCP descriptor exports and corroborate the original static definition against project evidence.
+- Reject contradictory native ShadowScan finding counts and conflicting public fields during CycloneDX and SPDX recovery. Emit only unconditional dependencies in the standard CycloneDX graph.
 - Require successful canonical CI-workflow evidence for the exact publication source SHA, in addition to protected-branch settings.
 - Enforce offline tracked-source hygiene and vendored schema provenance digests in the required quality job.
 - Check trust-status signers against the previous tenant revocation list and recheck the accepted status when consuming a tool approval. Upgrading an existing gateway may require replaying its last accepted trust status.
@@ -38,3 +50,8 @@
 - Align documentation with MIT licensing and the alpha support boundary.
 - Document every command and option in `docs/cli-reference.md`, checked against the CLI by a test, and add help text to the 20 options that had none. Add `docs/offline-and-live-modes.md`.
 - Add an offline demo project, `examples/demo-agent`, with a walkthrough in `examples/README.md`. Remove `examples/customer-support-agent.json`, whose legacy tool fingerprints current validation rejects.
+- Canonical repository moved to Hunzee-VC/Nexus-Symbiote; documentation and package metadata updated accordingly.
+
+## Unreleased
+
+(empty for now)

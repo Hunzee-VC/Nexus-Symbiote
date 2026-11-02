@@ -11,7 +11,7 @@ whole walkthrough below works without network access or credentials.
 Run it from a repository checkout (the wheel does not include the examples):
 
 ```bash
-git clone https://github.com/aisecnomad/nexus-symbiote && cd nexus-symbiote
+git clone https://github.com/Hunzee-VC/Nexus-Symbiote && cd Nexus-Symbiote
 python -m venv .venv && . .venv/bin/activate && pip install .
 ```
 
@@ -77,8 +77,8 @@ endpoint and a high alert for the removed version pin, and exits 1:
 
 ```text
 Security Alerts:
-  [CRITICAL] Critical change in 'tickets': MCP server endpoint changed. Review before execution.; endpoint_url changed.
-  [HIGH] High change in 'notes': Version changed: 2025.8.21 → None; Version pin removed — now floating or unknown.; risks changed.
+  [CRITICAL] Critical change in 'tickets': MCP server endpoint changed. Review before execution.; endpoint_url changed.; properties changed.
+  [HIGH] High change in 'notes': Version changed: 2025.8.21 → None; Version pin removed — now floating or unknown.; properties changed.; risks changed.
 ```
 
 Compare snapshots taken from the same checkout path: an inventory records where
@@ -87,7 +87,7 @@ location changes.
 
 ### 5. Import a discovery report
 
-[Nexus ShadowScan](https://github.com/aisecnomad/Nexus-ShadowScan) finds agents
+[Nexus ShadowScan](https://github.com/Hunzee-VC/Nexus-ShadowScan) finds agents
 across many surfaces; Nexus SymBiote turns its report into an AgentBOM. A recorded
 ShadowScan 0.1.4 report ships with the tests:
 
