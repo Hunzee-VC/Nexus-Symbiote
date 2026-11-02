@@ -20,6 +20,9 @@
 - Generate requested exports and SARIF from one collected native inventory.
 - Pin third-party Actions to verified commit references and disable persisted checkout credentials.
 - Add a pinned CodeQL workflow for push, pull request, and weekly schedule; hosted analysis requires runner availability and code-scanning entitlement.
+- Run every command offline by default: the CLI refuses name resolution, network connections and process creation. Only `discover-mcp`, `advisories` and `verify-live` can reach outside local files, and only in live mode (`--live` before the command, or `NEXUS_SYMBIOTE_MODE=live`); every other command stays offline even then. A project policy file cannot select the mode. **Breaking:** add `--live` to existing invocations of those three commands.
+- Report a malformed or truncated inventory in `summary`, `validate`, `risk`, `blast-radius` and `diff` as a short error instead of a traceback, without echoing the file's contents to the terminal.
+- Make `diff --fail-on-alert` fail on every in-place component change rated medium or above, as additions already did. Previously a version bump of an MCP server package, a swapped npm lockfile integrity value, a replaced MCP tool implementation, an A2A card URL moved to plaintext HTTP, or an IDE agent newly granted `Bash(*)` was reported as a change but passed the gate.
 
 ### Delivery
 
@@ -30,3 +33,5 @@
 - Exercise supported Python versions, built-wheel installation, Action abuse cases, and exporter conformance in CI.
 - Add manually requested release candidates, distribution checksums, release evidence, build attestations, and environment-gated OIDC publication.
 - Align documentation with MIT licensing and the alpha support boundary.
+- Document every command and option in `docs/cli-reference.md`, checked against the CLI by a test, and add help text to the 20 options that had none. Add `docs/offline-and-live-modes.md`.
+- Add an offline demo project, `examples/demo-agent`, with a walkthrough in `examples/README.md`. Remove `examples/customer-support-agent.json`, whose legacy tool fingerprints current validation rejects.
