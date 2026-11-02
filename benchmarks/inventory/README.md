@@ -8,6 +8,34 @@ Tool confusion counts include only explicit expected tools and explicit decoys. 
 
 Source-scoped cases explicitly assess source declarations; the routine absence of an MCP config is outside that scope. Other exclusions make collection incomplete. The registration-decoys case intentionally contains two ambiguous registrations; the manifest records those exact expected exclusions and their rationale. The case can pass as a control when those omissions are reported exactly, but its missing labels remain unknown. An additional unexpected exclusion fails the case. A passing regression control therefore does not mean all labels were scored or that collection was complete.
 
+Each case and the aggregate report include `tool_counts` and/or `label_bounds`.
+The recall interval treats every unobserved positive label first as missed, then
+as detected; the specificity interval treats every unobserved negative first as
+incorrectly detected, then as correctly absent. Each interval includes its full
+explicit-label count, observed count, and unknown count. A zero denominator is
+reported as null, not perfect performance. These are worst/best case bounds for
+the selected labels, not statistical confidence intervals. Names with no label
+are still reported separately, not assigned to either bound. Aggregate counts
+are case-label occurrences: repeated names across cases are not distinct real
+deployments. The release statement signs the new results along with existing
+corpus and scanner materials.
+
+## Independent effectiveness evaluation
+
+These regression fixtures do not establish a field baseline. To build one,
+independently select a versioned and appropriately licensed sample across agent
+frameworks and sources before examining predictions; record inclusion criteria,
+collection date, source revision, exclusions, and intended deployment population.
+Have reviewers label tool declarations and explicit decoys against a written
+protocol, blinded to scanner results, and record disagreements and adjudication.
+Reserve a held-out set that is not used to tune the scanner or fixture assertions.
+Run a fixed built artifact against each snapshot and retain input hashes, scanner
+revision, configuration, raw outputs, coverage failures and unmapped labels.
+Report per-surface confusion counts and unknowns, as well as the selection
+process and limits; do not treat this regression corpus as that held-out set.
+No representative sample or independently adjudicated performance claim is
+provided by this repository today.
+
 ### Sign and check a result
 
 Install the project's Sigstore extra. Prepare the evidence directory on a trusted checkout. Sign the statement with the release operator's authorized OIDC identity. Consumers can verify the exact result bytes offline with their own signer and issuer policy.
