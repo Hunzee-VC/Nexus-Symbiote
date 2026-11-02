@@ -18,10 +18,14 @@ def test_publish_verification_gate_checks_every_distribution(tmp_path, case):
     publish = workflow["jobs"]["publish"]
     steps = publish["steps"]
     verify = next(
-        step for step in steps if step.get("name") == "Verify exact distributions and source provenance"
+        step
+        for step in steps
+        if step.get("name") == "Verify exact distributions and source provenance"
     )
     publish_index = next(
-        i for i, step in enumerate(steps) if step.get("name") == "Publish with OIDC trusted publishing"
+        i
+        for i, step in enumerate(steps)
+        if step.get("name") == "Publish with OIDC trusted publishing"
     )
     assert steps.index(verify) < publish_index
     assert "attest" in publish["needs"]
@@ -40,8 +44,9 @@ def test_publish_verification_gate_checks_every_distribution(tmp_path, case):
     )
     gh.chmod(0o755)
     calls = tmp_path / "calls"
-    process = subprocess.run(
-        ["bash", "-c", verify["run"]],
+    # Exercise the reviewed workflow shell with a local stub, never live credentials.
+    process = subprocess.run(  # noqa: S603
+        ["/bin/bash", "-c", verify["run"]],
         cwd=tmp_path,
         env={
             **os.environ,
