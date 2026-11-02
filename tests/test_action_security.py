@@ -185,7 +185,7 @@ def test_workflow_pins_structure_and_release_privilege_separation():
     publish_step = next(s for s in jobs["publish"]["steps"] if "pypi-publish" in s["uses"])
     assert "test.pypi.org/legacy/" in publish_step["with"]["repository-url"]
     assert "upload.pypi.org/legacy/" in publish_step["with"]["repository-url"]
-    assert set(jobs["publish"]["needs"]) == {"build", "attest"}
+    assert set(jobs["publish"]["needs"]) == {"build", "attest", "verify-provenance"}
     for name in ["attest", "publish"]:
         assert all("run" not in step for step in jobs[name]["steps"])
         downloads = [s for s in jobs[name]["steps"] if "download-artifact" in s.get("uses", "")]

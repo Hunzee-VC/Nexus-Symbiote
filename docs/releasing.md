@@ -136,6 +136,18 @@ publisher configured for its environment. Neither of those jobs checks out or ru
 project source or any shell step. Both download artifacts with
 `digest-mismatch: error`, so a corrupted transfer stops the run.
 
+**Provenance check before upload.** The attest job retains the distribution
+attestation bundle as a run artifact without a shell step. A separate
+`verify-provenance` job, with read-only repository and attestation permissions and
+no OIDC token, downloads the candidate distributions and that bundle by ID. It
+requires exactly one wheel, one sdist and one bundle, and verifies each
+distribution with GitHub CLI, constraining the repository, signing workflow, `main`
+ref, source digest and runner type. The publish job needs it, so missing artifacts,
+a missing bundle or failed verification block publishing. This validates the
+attestation and subject bytes; it does not prove that the builder or its
+dependencies were uncompromised. A successful candidate run and an independently
+reviewed published artifact remain necessary evidence.
+
 The composite GitHub Action uses a separate hashed runtime and build lock and an
 isolated environment, then installs its reviewed source with dependency resolution
 and build isolation disabled. This fixes its dependency input set without claiming

@@ -148,6 +148,8 @@ jobs:
     needs: [build, compatibility]
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      distribution_attestation_id: ${{ steps.distribution-attestation.outputs.artifact-id }}
     permissions:
       contents: read
       id-token: write
@@ -159,9 +161,17 @@ jobs:
           path: dist
           digest-mismatch: error
       - name: Attest distribution provenance
+        id: distributions
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/*
+      - name: Retain distribution attestation bundle
+        id: distribution-attestation
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: distribution-attestation
+          path: ${{ steps.distributions.outputs.bundle-path }}
+          if-no-files-found: error
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           artifact-ids: ${{ needs.build.outputs.evidence_id || 'missing' }}
@@ -189,9 +199,49 @@ jobs:
           name: inventory-benchmark-attestation
           path: ${{ steps.inventory.outputs.bundle-path }}
           if-no-files-found: error
+  # Verify the retained attestation against the exact candidate bytes before any
+  # upload. This job runs shell, so it holds no OIDC or write permissions.
+  verify-provenance:
+    needs: [build, attest]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      attestations: read
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.build.outputs.distributions_id || 'missing' }}
+          path: dist
+          digest-mismatch: error
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.attest.outputs.distribution_attestation_id || 'missing' }}
+          path: attestation
+          digest-mismatch: error
+      - name: Verify exact distributions and source provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          bundles=(attestation/*)
+          wheels=(dist/*.whl)
+          sdists=(dist/*.tar.gz)
+          (( ${#bundles[@]} == 1 && ${#wheels[@]} == 1 && ${#sdists[@]} == 1 ))
+          test -s "${bundles[0]}"
+          for artifact in "${wheels[@]}" "${sdists[@]}"; do
+            gh attestation verify "$artifact" \
+              --bundle "${bundles[0]}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+              --source-ref refs/heads/main --source-digest "$GITHUB_SHA" \
+              --deny-self-hosted-runners
+          done
   publish:
     if: inputs.publish != 'none' && github.ref == 'refs/heads/main'
-    needs: [build, attest]
+    needs: [build, attest, verify-provenance]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # The environment is named after the index: each index's trusted publisher
