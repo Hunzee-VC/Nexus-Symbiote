@@ -174,6 +174,7 @@ def scan(
                 source_report_status = result.source_report_status
                 source_unmapped_count = result.source_unmapped_count
                 source_unmapped_indexes = result.source_unmapped_indexes
+            accepted_refs: set[str] = set()
             for comp in result.components:
                 # Discovery of a file/configuration does not verify every supplier assertion.
                 imported = name == "shadowscan"
@@ -194,6 +195,12 @@ def scan(
                     scan_failures.append(f"{name}: conflicting duplicate component {comp.bom_ref}")
                     continue
                 aibom.add_component(comp)
+                accepted_refs.add(comp.bom_ref)
+            for edge in result.dependencies:
+                if edge.source_ref in accepted_refs and edge.target_ref in accepted_refs:
+                    aibom.add_dependency(edge)
+                else:
+                    scan_failures.append(f"{name}: dependency endpoint was not imported")
             surfaces_scanned.extend(result.surfaces_scanned)
             surfaces_excluded.extend(result.surfaces_excluded)
             scan_failures.extend(result.scan_failures)
