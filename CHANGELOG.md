@@ -4,6 +4,12 @@
 
 ### Security
 
+- Bind static MCP server configuration before redaction and reconcile configured tool fingerprints against fresh source evidence; require recollection of legacy snapshots without the binding.
+- Reject same-version MCP package substitutions, argument and endpoint-path drift, and edited supplied descriptors during project validation.
+- Replace raw scanner exception text with safe diagnostic codes and record malformed model metadata using field names only.
+- Read Claude's declared `permissions.defaultMode`, recognize bare broad tool grants, and retain allowances across collected settings layers without claiming effective authorization.
+- Add independent runtime signing quorums for snapshots, trust status and action approvals; preserve them through pinned stdio invocation.
+- Reject runtime CLI FIFO, symlink and oversized inputs through the bounded regular-file reader.
 - Require successful canonical CI-workflow evidence for the exact publication source SHA, in addition to protected-branch settings.
 - Enforce offline tracked-source hygiene and vendored schema provenance digests in the required quality job.
 - Check trust-status signers against the previous tenant revocation list and recheck the accepted status when consuming a tool approval. Upgrading an existing gateway may require replaying its last accepted trust status.

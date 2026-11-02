@@ -53,6 +53,11 @@ MCP_CONFIG_FILES = [
     ".claude/mcp.json",
 ]
 
+# Bind the original server object before secrets and opaque arguments are
+# removed from exported fields. This is source consistency evidence, not a
+# publisher signature, an installed-artifact identity, or a live descriptor.
+STATIC_CONFIG_HASH_PROFILE = "nexus-symbiote/mcp-static-config/v1"
+
 
 class MCPScanner(Scanner):
     name = "mcp"
@@ -153,6 +158,9 @@ class MCPScanner(Scanner):
         safe_endpoint = (
             redact_text(sanitized_origin(endpoint_url), secrets) if endpoint_url else None
         )
+        source_config_hash = hash_canonical(
+            {"profile": STATIC_CONFIG_HASH_PROFILE, "configuration": config}
+        )
 
         package_ref = self._extract_package_ref(command, args)
         version_pinned: bool | None = None
@@ -219,10 +227,14 @@ class MCPScanner(Scanner):
                 "collection_mode": "static-config",
                 "launch_arguments_redacted": bool(args),
                 "endpoint_credentials_omitted": bool(endpoint_url),
+                "static_config_hash": source_config_hash,
+                "static_config_hash_profile": STATIC_CONFIG_HASH_PROFILE,
             },
         )
 
-        tools = self._extract_tools(name, config, secrets, server_ref=server_ref)
+        tools = self._extract_tools(
+            name, config, secrets, server_ref=server_ref, config_path=config_path
+        )
         server_comp.tool_count = len(tools)
         server_comp.tool_refs = [tool.bom_ref for tool in tools]
         return server_comp, tools
@@ -294,6 +306,7 @@ class MCPScanner(Scanner):
         secrets: list[str] | None = None,
         *,
         server_ref: str,
+        config_path: Path,
     ) -> list[ToolComponent]:
         tools_config = config.get("tools", [])
         tool_comps = []
@@ -342,6 +355,7 @@ class MCPScanner(Scanner):
                             bom_ref=tool_ref,
                             name=t_name,
                             mcp_server_ref=server_ref,
+                            source_path=str(config_path),
                             description_text=redact_text(t_desc, secrets or []),
                             input_schema=redact_metadata(t_schema, secrets or []),
                             definition_hash=def_hash,
@@ -354,6 +368,7 @@ class MCPScanner(Scanner):
                             trust_tier=TrustTier.THIRD_PARTY_UNSIGNED,
                             risks=risks,
                             properties={
+                                "collection_mode": "static-config",
                                 "capability_evidence": "unverified-declaration-and-name-heuristic",
                                 "definition_hash_subject": "original-declared-descriptor",
                                 "descriptor_output_may_be_redacted": True,

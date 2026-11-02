@@ -48,6 +48,8 @@ For a CI drift check, run `nexus-symbiote diff reviewed.json candidate.json --js
 
 Collection is static by default: repository instructions, MCP configuration, local model references and files, retrieval configuration, and package manifests provide evidence of declared composition. A configuration entry does not prove that a server is running or that its live tool definitions match the declaration. Failed or inaccessible inputs must remain visible in coverage.
 
+Project validation binds static MCP records to the original configuration before export redaction and compares configured tool fingerprints with fresh local evidence. Changing a package at the same version, launcher arguments, environment values, endpoint paths or declared descriptors invalidates the old snapshot. Legacy snapshots without this binding need recollection; see [source reconciliation and migration](docs/verification-source-binding.md).
+
 Additional review commands:
 
 ```bash
@@ -145,6 +147,8 @@ nexus-symbiote init
 Review `.nexus-symbiote.yaml` as security-relevant configuration. A risk score summarizes findings under a policy; it is not a probability of compromise or a safety certificate. Signatures need explicit subject and signer constraints. Registry membership, trust labels, or model-visible hints must not increase permissions.
 
 Runtime approval integrations govern only calls that pass through their adapter. Use deployment identity, token scopes, sandboxing, and network policy to enforce the surrounding boundary. See the [security model](docs/security-model.md) and [runtime assurance guide](docs/runtime-assurance.md) for the contract, invocation binding, revocation state, and limitations.
+
+IDE permission records describe collected project declarations. Claude's `permissions.defaultMode` and broad tool allowances are retained, while user/managed policy, workspace trust, deny/ask precedence and session flags remain outside effective-authorization verification. Scanner failures emit application-owned diagnostic codes; raw exception text and invalid model configuration values are omitted from failure reports.
 
 ## Reproduce the security regression corpus
 

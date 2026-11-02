@@ -11,7 +11,9 @@ from typing import Any, Literal, cast
 import click
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+from pydantic import ValidationError
 
+from nexus_symbiote.core.hashing import open_regular_file
 from nexus_symbiote.runtime import (
     ActionApproval,
     ApprovedSnapshot,
@@ -29,9 +31,42 @@ from nexus_symbiote.runtime import (
 Purpose = Literal["snapshot", "approval", "trust", "model"]
 
 
+def _safe_error(exc: Exception, operation: Literal["signing", "verification"]) -> str:
+    """Describe an operator error without echoing contract values or extra keys."""
+    if isinstance(exc, ValidationError):
+        fields = {
+            field
+            for model in (
+                ApprovedSnapshot,
+                ActionApproval,
+                TrustStatus,
+                HostedModelAttestation,
+                Envelope,
+            )
+            for field in model.model_fields
+        }
+        fields.add("payloadType")
+        invalid = set()
+        for error in exc.errors(include_input=False, include_context=False, include_url=False):
+            location = error["loc"]
+            field = location[0] if location else None
+            invalid.add(
+                field if isinstance(field, str) and field in fields else "unsupported field"
+            )
+        locations = ", ".join(sorted(invalid))
+        return f"runtime input validation failed; review fields: {locations} (runtime-input-error)"
+    if isinstance(exc, OSError):
+        return f"runtime {operation} files could not be accessed safely (runtime-io-error)"
+    return (
+        f"runtime {operation} failed; review the selected contract, Ed25519 keys, "
+        "signer policy and validity (runtime-contract-error)"
+    )
+
+
 def _read(path: Path, maximum: int = 24 * 1024 * 1024) -> bytes:
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-    with os.fdopen(os.open(path, flags), "rb") as stream:
+    with open_regular_file(path) as stream:
+        if os.fstat(stream.fileno()).st_size > maximum:
+            raise click.ClickException("input exceeds size limit")
         raw = stream.read(maximum + 1)
     if len(raw) > maximum:
         raise click.ClickException("input exceeds size limit")
@@ -109,7 +144,7 @@ def sign(contract_path: Path, kind: str, keys: tuple[Path, ...], out: Path) -> N
         )
         click.echo(json.dumps({"out": str(out), "predicate": kind, "signed": True}))
     except (ValueError, OSError) as exc:
-        raise click.ClickException(str(exc)) from exc
+        raise click.ClickException(_safe_error(exc, "signing")) from None
 
 
 @runtime_group.command("verify")
@@ -158,7 +193,7 @@ def verify(
         }
         click.echo(json.dumps(result, indent=2))
     except (ValueError, OSError) as exc:
-        raise click.ClickException(str(exc)) from exc
+        raise click.ClickException(_safe_error(exc, "verification")) from None
 
 
 def register_runtime_commands(main: click.Group) -> None:
