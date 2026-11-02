@@ -70,7 +70,10 @@ __all__ = [
     "ConfigLocation",
     "McpConfigCollector",
     "ServerDecl",
+    "emit_server_credentials",
     "parse_client_config",
+    "server_args_digest",
+    "server_authentication",
 ]
 
 Fmt = Literal["json", "jsonc", "toml", "yaml"]
@@ -859,12 +862,7 @@ class McpConfigCollector(BaseCollector):
             endpoint=decl.url_display if decl.transport is not Transport.STDIO else None,
             package=package_ident,
         )
-        args_digest: str | None = None
-        if decl.redacted_args:
-            try:
-                args_digest = "sha256:" + hashlib.sha256(canonical_bytes(decl.redacted_args)).hexdigest()
-            except UndigestableError:
-                args_digest = None
+        args_digest = server_args_digest(decl)
         tags = [f"scope:{decl.scope}"]
         if decl.disabled:
             tags.append("disabled")
@@ -924,73 +922,13 @@ class McpConfigCollector(BaseCollector):
         return ctx.display(path) if path.is_absolute() else command
 
     def _authentication(self, decl: ServerDecl) -> Claim[Authentication]:
-        loc = decl.locator
-        if decl.transport is Transport.STDIO:
-            return Claim.declared(Authentication(mode=AuthMode.NONE), locator=loc, collector=self.ref)
-        if decl.oauth_configured:
-            return Claim.declared(Authentication(mode=AuthMode.OAUTH2), locator=loc, collector=self.ref)
-        auth_headers = [h for h in decl.headers if h.lower() in _AUTH_HEADERS or secretish_name(h)]
-        if auth_headers or any(k.startswith("codex.bearer_token_env_var") for k in decl.trust_flags):
-            return Claim.declared(Authentication(mode=AuthMode.API_KEY), locator=loc, collector=self.ref)
-        # remote servers usually negotiate OAuth at connect time (MCP authorization); config alone cannot tell
-        return Claim.unknown(UnknownReason.NOT_COLLECTED, locator=loc, collector=self.ref)
+        return server_authentication(decl, self.ref)
 
+    @staticmethod
     def _emit_credentials(
-        self, result: CollectionResult, decl: ServerDecl, server_id: str, prov: Provenance
+        result: CollectionResult, decl: ServerDecl, server_id: str, prov: Provenance
     ) -> None:
-        server_slug = server_id.split(":", 1)[1]
-        entries = [("env", name, kind) for name, kind in decl.env.items()] + [
-            ("header", name, kind) for name, kind in decl.headers.items()
-        ]
-        for channel, name, kind in entries:
-            if kind not in {"literal-secret", "placeholder"} and not secretish_name(name):
-                continue
-            ident_id = make_id("ident", f"{server_slug}-{channel}-{name}")
-            cred_id = make_id("cred", f"{server_slug}-{channel}-{name}")
-            storage = (
-                CredentialStorage(kind=CredentialStorageKind.FILE, locator=f"{decl.locator}/{channel}/{name}")
-                if kind == "literal-secret"
-                else CredentialStorage(
-                    kind=CredentialStorageKind.KEYCHAIN
-                    if decl.client == "vscode" and "input:" in name
-                    else CredentialStorageKind.ENV,
-                    locator=f"{channel}:{name}",
-                )
-            )
-            result.entities.append(
-                Identity(
-                    id=ident_id,
-                    name=name,
-                    provenance=prov,
-                    identity_kind=IdentityKind.API_KEY_REF,
-                    ref=f"{channel}:{name}",
-                )
-            )
-            result.entities.append(
-                CredentialBinding(
-                    id=cred_id,
-                    name=f"{decl.name} {channel} {name}",
-                    provenance=prov,
-                    subject_ref=server_id,
-                    identity_ref=ident_id,
-                    credential_kind=CredentialKind.STATIC_LONG_LIVED
-                    if kind == "literal-secret"
-                    else CredentialKind.UNKNOWN,
-                    storage=storage,
-                    tags=["inline-secret-in-config"] if kind == "literal-secret" else [],
-                )
-            )
-            result.edges.append(
-                Edge.model_validate(
-                    {
-                        "type": EdgeType.HOLDS_CREDENTIAL,
-                        "from": server_id,
-                        "to": cred_id,
-                        "qualifiers": {"channel": channel},
-                        "declaredBy": decl.locator,
-                    }
-                )
-            )
+        emit_server_credentials(result, decl, server_id, prov)
 
     def _emit_declared_tools(
         self,
@@ -1040,3 +978,86 @@ class McpConfigCollector(BaseCollector):
                     }
                 )
             )
+
+
+def server_args_digest(decl: ServerDecl) -> str | None:
+    """SHA-256 of the canonical redacted argument list (``None`` without arguments or when undigestable)."""
+    if not decl.redacted_args:
+        return None
+    try:
+        return "sha256:" + hashlib.sha256(canonical_bytes(decl.redacted_args)).hexdigest()
+    except UndigestableError:
+        return None
+
+
+def server_authentication(decl: ServerDecl, collector: str) -> Claim[Authentication]:
+    """Authentication a server declaration states (shared by every collector that emits MCP servers)."""
+    loc = decl.locator
+    if decl.transport is Transport.STDIO:
+        return Claim.declared(Authentication(mode=AuthMode.NONE), locator=loc, collector=collector)
+    if decl.oauth_configured:
+        return Claim.declared(Authentication(mode=AuthMode.OAUTH2), locator=loc, collector=collector)
+    auth_headers = [h for h in decl.headers if h.lower() in _AUTH_HEADERS or secretish_name(h)]
+    if auth_headers or any(k.startswith("codex.bearer_token_env_var") for k in decl.trust_flags):
+        return Claim.declared(Authentication(mode=AuthMode.API_KEY), locator=loc, collector=collector)
+    # remote servers usually negotiate OAuth at connect time (MCP authorization); config alone cannot tell
+    return Claim.unknown(UnknownReason.NOT_COLLECTED, locator=loc, collector=collector)
+
+
+def emit_server_credentials(
+    result: CollectionResult, decl: ServerDecl, server_id: str, prov: Provenance
+) -> None:
+    """``Identity`` + ``CredentialBinding`` + ``holdsCredential`` for each credential-carrying env/header name."""
+    server_slug = server_id.split(":", 1)[1]
+    entries = [("env", name, kind) for name, kind in decl.env.items()] + [
+        ("header", name, kind) for name, kind in decl.headers.items()
+    ]
+    for channel, name, kind in entries:
+        if kind not in {"literal-secret", "placeholder"} and not secretish_name(name):
+            continue
+        ident_id = make_id("ident", f"{server_slug}-{channel}-{name}")
+        cred_id = make_id("cred", f"{server_slug}-{channel}-{name}")
+        storage = (
+            CredentialStorage(kind=CredentialStorageKind.FILE, locator=f"{decl.locator}/{channel}/{name}")
+            if kind == "literal-secret"
+            else CredentialStorage(
+                kind=CredentialStorageKind.KEYCHAIN
+                if decl.client == "vscode" and "input:" in name
+                else CredentialStorageKind.ENV,
+                locator=f"{channel}:{name}",
+            )
+        )
+        result.entities.append(
+            Identity(
+                id=ident_id,
+                name=name,
+                provenance=prov,
+                identity_kind=IdentityKind.API_KEY_REF,
+                ref=f"{channel}:{name}",
+            )
+        )
+        result.entities.append(
+            CredentialBinding(
+                id=cred_id,
+                name=f"{decl.name} {channel} {name}",
+                provenance=prov,
+                subject_ref=server_id,
+                identity_ref=ident_id,
+                credential_kind=CredentialKind.STATIC_LONG_LIVED
+                if kind == "literal-secret"
+                else CredentialKind.UNKNOWN,
+                storage=storage,
+                tags=["inline-secret-in-config"] if kind == "literal-secret" else [],
+            )
+        )
+        result.edges.append(
+            Edge.model_validate(
+                {
+                    "type": EdgeType.HOLDS_CREDENTIAL,
+                    "from": server_id,
+                    "to": cred_id,
+                    "qualifiers": {"channel": channel},
+                    "declaredBy": decl.locator,
+                }
+            )
+        )

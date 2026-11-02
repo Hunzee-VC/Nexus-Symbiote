@@ -1,0 +1,13 @@
+researcher:
+  role: Senior researcher on {topic}
+  goal: Find reliable facts about {topic}
+  backstory: You check every source twice.
+  llm: openai/gpt-4o
+  tools:
+    - SerperDevTool
+  allow_delegation: true
+writer:
+  role: Technical writer
+  goal: Turn research into a short report
+  backstory: You write plainly.
+  llm: anthropic/claude-sonnet-4-5

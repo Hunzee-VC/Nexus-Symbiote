@@ -122,6 +122,8 @@ class WalkReport:
     symlinks: int = 0
     symlink_paths: list[str] = field(default_factory=list)
     excluded: int = 0
+    #: the first :data:`MAX_REPORTED_SYMLINKS` excluded directories (repository-relative)
+    excluded_paths: list[str] = field(default_factory=list)
     truncated_at: int | None = None
 
 
@@ -229,6 +231,8 @@ class CollectContext:
                     within = inside or entry.name in kept
                     if entry.name in self.exclude_dirs and (entry.name == ".git" or not inside):
                         rep.excluded += 1
+                        if len(rep.excluded_paths) < MAX_REPORTED_SYMLINKS:
+                            rep.excluded_paths.append(self.display(entry))
                     elif depth >= max_depth:
                         rep.too_deep.append(self.display(entry))
                     else:

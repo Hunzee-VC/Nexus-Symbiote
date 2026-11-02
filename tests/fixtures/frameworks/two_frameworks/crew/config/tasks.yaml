@@ -1,0 +1,9 @@
+research_task:
+  description: Research {topic} and list the key facts.
+  expected_output: Ten bullet points.
+  agent: researcher
+report_task:
+  description: Write a report from the research.
+  expected_output: A one-page report.
+  agent: writer
+  human_input: true
