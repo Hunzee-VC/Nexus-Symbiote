@@ -23,6 +23,7 @@ CASES = (
     "test_project_reconciliation.py::test_cli_rejects_omitted_instruction_with_forged_complete_coverage",
     "test_project_reconciliation.py::test_cli_rejects_forged_discovery_projection_in_combined_bom",
     "test_project_reconciliation.py::test_known_package_url_cannot_be_replaced_with_another_package",
+    "test_shadowscan_relationships.py::test_project_reconciliation_binds_imported_dependency_claims",
     "test_diff_profiles.py::test_mcp_endpoint_substitution_after_scan",
     "test_shadowscan_bridge_security.py::test_import_ignores_supplier_policy",
     "test_runtime_authorization.py::test_revoked_trust_signer_cannot_reinstate_itself",
