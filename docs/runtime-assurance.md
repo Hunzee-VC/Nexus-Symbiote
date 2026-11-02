@@ -76,7 +76,10 @@ must be `stdio+launcher:sha256:<64 lowercase hex characters>` for that launcher.
 The pin and launcher path come from operator-controlled configuration, not the
 scanned project. The adapter refuses arguments, project environment and working
 directory, reconnects, repeated calls, invalid JSON-RPC and list pagination beyond
-its limits. The whole session has a bounded deadline.
+its limits. Protocol reads and writes share a deadline starting after launcher
+staging and process startup. This does not bound staging, authentication,
+scope resolution, state storage or other synchronous gateway work. Operators
+must impose an external end-to-end deadline on the invocation and its adapters.
 
 Use `invoke_pinned_stdio(gateway, call, command=..., sha256=..., snapshot=...,
 trust=..., bom=..., approval=...)`. It ignores the gateway's separate `describe`
