@@ -14,33 +14,52 @@ def test_public_inventory_corpus_has_honest_denominators():
     assert report["unknown_negative_labels"] == 5
     assert report["unlabeled_predictions"] == 0
     assert report["label_bounds"]["recall"] == {
-        "label_count": 18, "observed_count": 18, "unknown_count": 0,
-        "lower": 1.0, "upper": 1.0,
+        "label_count": 18,
+        "observed_count": 18,
+        "unknown_count": 0,
+        "lower": 1.0,
+        "upper": 1.0,
     }
     assert report["label_bounds"]["specificity"] == {
-        "label_count": 7, "observed_count": 2, "unknown_count": 5,
-        "lower": 2 / 7, "upper": 1.0,
+        "label_count": 7,
+        "observed_count": 2,
+        "unknown_count": 5,
+        "lower": 2 / 7,
+        "upper": 1.0,
     }
 
 
 def test_label_bounds_keep_unknowns_and_empty_denominators_visible():
     bounds = runpy.run_path(str(ROOT / "benchmarks/inventory/run_inventory.py"))["label_bounds"]
     scores = {
-        "tp": 2, "fn": 1, "unknown_positive_labels": 2,
-        "tn": 1, "fp": 1, "unknown_negative_labels": 2,
+        "tp": 2,
+        "fn": 1,
+        "unknown_positive_labels": 2,
+        "tn": 1,
+        "fp": 1,
+        "unknown_negative_labels": 2,
     }
     result = bounds(scores)
     assert result["recall"] == {
-        "label_count": 5, "observed_count": 3, "unknown_count": 2,
-        "lower": 0.4, "upper": 0.8,
+        "label_count": 5,
+        "observed_count": 3,
+        "unknown_count": 2,
+        "lower": 0.4,
+        "upper": 0.8,
     }
     assert result["specificity"] == {
-        "label_count": 4, "observed_count": 2, "unknown_count": 2,
-        "lower": 0.25, "upper": 0.75,
+        "label_count": 4,
+        "observed_count": 2,
+        "unknown_count": 2,
+        "lower": 0.25,
+        "upper": 0.75,
     }
-    assert bounds({key: 0 for key in scores})["recall"] == {
-        "label_count": 0, "observed_count": 0, "unknown_count": 0,
-        "lower": None, "upper": None,
+    assert bounds(dict.fromkeys(scores, 0))["recall"] == {
+        "label_count": 0,
+        "observed_count": 0,
+        "unknown_count": 0,
+        "lower": None,
+        "upper": None,
     }
 
 
