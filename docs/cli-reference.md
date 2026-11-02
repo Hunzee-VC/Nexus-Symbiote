@@ -161,8 +161,8 @@ nexus-symbiote risk [OPTIONS] AIBOM_PATH
 |---|---|
 | `--threshold` `FLOAT` | Fail threshold score |
 | `--json-output` | Output as JSON |
-| `--project` `DIRECTORY` | Reconcile the supplied BOM against this project's static evidence before scoring. |
-| `--signature-policy` `FILE` | Explicit operator signer policy for model recollection; requires --project. |
+| `--project` `PATH` | Reconcile the supplied BOM against this project's static evidence before scoring; a failed reconciliation reports an unknown risk level and a null score |
+| `--signature-policy` `PATH` | Explicit operator signer policy for model recollection; requires --project |
 | `--fail-on-severity` `critical\|high\|medium\|low\|info\|none` | Fail on any finding at or above this severity (default: from policy, built-in critical); none disables it. |
 | `--no-project-policy` | Use built-in policy without reading configuration from the target. |
 

@@ -2,7 +2,7 @@
 
 Prior versions used a serializer that was not RFC 8785 compliant. The corrected
 serializer may produce different SHA-256 digests for the same tool definition,
-particularly for floating point numbers and non-BMP property names. New scanner
+particularly for floating point numbers and non-BMP property names. Current scanner
 findings record `definition_hash_version: rfc8785-jcs-v2`. The v2 profile also
 binds supported descriptor annotations; v1 and absent profiles require
 recollection before verification.

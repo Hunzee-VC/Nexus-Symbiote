@@ -176,7 +176,7 @@ def test_workflow_pins_structure_and_release_privilege_separation():
 
     upload = index(lambda s: s.get("name") == "Upload distributions")
     # The attested bytes are uploaded before anything runs tests, writes evidence
-    # or installs dependencies for the wheel smoke test.
+    # or installs packages into the evidence environment.
     assert upload < index(lambda s: s.get("run") == "python -m pytest")
     assert upload < index(lambda s: "evidence/" in s.get("run", ""))
     assert upload < index(lambda s: 'release-smoke/bin/python" -m pip install' in s.get("run", ""))
@@ -185,12 +185,15 @@ def test_workflow_pins_structure_and_release_privilege_separation():
     publish_step = next(s for s in jobs["publish"]["steps"] if "pypi-publish" in s["uses"])
     assert "test.pypi.org/legacy/" in publish_step["with"]["repository-url"]
     assert "upload.pypi.org/legacy/" in publish_step["with"]["repository-url"]
-    assert set(jobs["publish"]["needs"]) == {"build", "attest", "verify-provenance"}
-    for name in ["attest", "publish"]:
-        assert all("run" not in step for step in jobs[name]["steps"])
+    assert set(jobs["publish"]["needs"]) == {"build", "attest", "verify"}
+    assert jobs["publish"]["permissions"] == {"id-token": "write"}
+    assert "id-token" not in jobs["verify"]["permissions"]
+    for name in ["compatibility", "attest", "verify", "publish"]:
         downloads = [s for s in jobs[name]["steps"] if "download-artifact" in s.get("uses", "")]
         assert downloads
         assert all(s["with"]["digest-mismatch"] == "error" for s in downloads)
+    for name in ["attest", "publish"]:
+        assert all("run" not in step for step in jobs[name]["steps"])
 
 
 def test_release_floating_dependencies_cannot_replace_attestation_or_publication_inputs():
@@ -279,3 +282,39 @@ def test_real_entry_point_ignores_untrusted_python_path_and_policy(tmp_path, val
         if c["component_type"] == "model"
     ]
     assert [c["serialization_safety"] for c in models] == ["unsafe-code-execution"]
+
+
+@pytest.mark.parametrize("extension", ["yml", "yaml"])
+def test_workflow_checker_main_rejects_unsafe_workflows_under_either_extension(
+    tmp_path, monkeypatch, extension
+):
+    spec = importlib.util.spec_from_file_location(
+        "workflow_checker_main", Path(__file__).parents[1] / "scripts" / "check_workflows.py"
+    )
+    assert spec is not None and spec.loader is not None
+    checker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(checker)
+    root = Path(__file__).parents[1]
+    (tmp_path / ".github/workflows").mkdir(parents=True)
+    (tmp_path / "action.yml").write_text((root / "action.yml").read_text())
+    workflow = tmp_path / ".github/workflows" / f"untrusted.{extension}"
+    workflow.write_text(
+        "on: pull_request\n"
+        "jobs:\n"
+        "  test:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - uses: actions/checkout@v4\n"
+        "      - run: echo ${{ github.head_ref }}\n"
+    )
+    monkeypatch.chdir(tmp_path)
+    assert checker.main() == 1
+    workflow.write_text(
+        "on: pull_request\n"
+        "jobs:\n"
+        "  test:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - run: echo safe\n"
+    )
+    assert checker.main() == 0

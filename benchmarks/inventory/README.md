@@ -29,7 +29,7 @@ deployments. The release statement signs the new results along with existing
 corpus and scanner materials.
 
 The manifest's `version` identifies the corpus and labels, not the result wire
-format; adding these result fields alone does not change it. The additional
+format; it is unchanged because the cases and labels are unchanged. The additional
 result fields are additive. Consumers that reject unknown JSON fields must update
 their parser. New result bytes require a new evidence statement and signature;
 previously signed results remain verifiable using their original statement.

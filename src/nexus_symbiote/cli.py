@@ -716,7 +716,7 @@ def validate(
             valid = False
     # Graph integrity is structural and cannot be disabled by a coverage policy.
     if bom.graph_issues():
-        console.print("  ERROR: " + "; ".join(bom.graph_issues()))
+        console.print("  ERROR: " + _safe("; ".join(bom.graph_issues())), soft_wrap=True)
         valid = False
     if not valid:
         raise click.exceptions.Exit(1)

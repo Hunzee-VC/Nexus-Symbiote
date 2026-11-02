@@ -12,8 +12,10 @@ from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.hashing import hash_tool_definition
 from nexus_symbiote.core.models import ClaimEvidence, MCPServerComponent, ToolComponent
-from nexus_symbiote.scanners.mcp import MCPScanner
+from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV, MCPScanner
 from nexus_symbiote.validators.completeness import CompletenessValidator
+
+KEY = "k" * 40
 
 
 def _baseline(
@@ -77,7 +79,8 @@ def test_changed_local_descriptor_rejects_unchanged_baseline(tmp_path, field):
 @pytest.mark.parametrize(
     "change", ["package", "argument", "environment", "endpoint-path", "command"]
 )
-def test_changed_launcher_rejects_unchanged_baseline(tmp_path, change):
+def test_changed_launcher_rejects_unchanged_baseline(tmp_path, monkeypatch, change):
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
     root, output, config = _baseline(
         tmp_path,
         endpoint="https://example.test/original" if change == "endpoint-path" else None,
@@ -170,3 +173,92 @@ def test_static_binding_ignores_json_key_order_and_omits_plaintext_secrets(tmp_p
     second = MCPScanner().scan(tmp_path)
     reordered = next(c for c in second.components if isinstance(c, MCPServerComponent))
     assert server.properties["static_config_hash"] == reordered.properties["static_config_hash"]
+
+
+def _server(tmp_path: Path, config: dict) -> MCPServerComponent:
+    (tmp_path / ".mcp.json").write_text(json.dumps({"mcpServers": {"db": config}}))
+    result = MCPScanner().scan(tmp_path)
+    assert not result.scan_failures, result.scan_failures
+    return next(c for c in result.components if isinstance(c, MCPServerComponent))
+
+
+def _db(password: str, path: str = "/v1") -> dict:
+    return {
+        "command": "npx",
+        "args": ["-y", "@acme/postgres-mcp@2.1.0", "--password", password],
+        "env": {"PGPASSWORD": password},
+        "url": f"https://db.example.test{path}",
+    }
+
+
+def test_exported_structure_binding_cannot_confirm_a_secret(tmp_path, monkeypatch):
+    monkeypatch.delenv(SOURCE_BINDING_KEY_ENV, raising=False)
+    first = _server(tmp_path, _db("Summer2024!"))
+    second = _server(tmp_path, _db("Winter2025?", path="/v2"))
+    assert first.properties["static_config_hash"] == second.properties["static_config_hash"]
+    assert "static_value_binding" not in first.properties
+    assert "Summer2024!" not in first.model_dump_json()
+
+
+def test_keyed_value_binding_detects_value_drift_without_exporting_the_key(tmp_path, monkeypatch):
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    first = _server(tmp_path, _db("Summer2024!"))
+    again = _server(tmp_path, _db("Summer2024!"))
+    rotated = _server(tmp_path, _db("Winter2025?"))
+    assert first.properties["static_value_binding"].startswith("hmac-sha256:")
+    assert first.properties["static_value_binding"] == again.properties["static_value_binding"]
+    assert first.properties["static_value_binding"] != rotated.properties["static_value_binding"]
+    exported = first.model_dump_json()
+    assert KEY not in exported and "Summer2024!" not in exported
+
+
+def test_keyed_bom_fails_closed_when_validated_without_its_key(tmp_path, monkeypatch):
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    root, output, _ = _baseline(tmp_path)
+    monkeypatch.delenv(SOURCE_BINDING_KEY_ENV)
+    run = _validate(root, output)
+    assert run.exit_code == 1, run.output
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, "j" * 40)
+    run = _validate(root, output)
+    assert run.exit_code == 1, run.output
+
+
+def test_short_source_binding_key_is_rejected(tmp_path, monkeypatch):
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, "too-short")
+    (tmp_path / ".mcp.json").write_text(json.dumps({"mcpServers": {"db": _db("x")}}))
+    result = MCPScanner().scan(tmp_path)
+    assert result.scan_failures
+    assert not any(isinstance(c, MCPServerComponent) for c in result.components)
+
+
+@pytest.mark.parametrize(
+    "launcher",
+    [
+        ["uvx", "--from", "docs-server==1.2.3", "--index-url", "{index}", "docs-server"],
+        ["pipx", "run", "--spec", "docs-server==1.2.3", "--index-url", "{index}", "docs-server"],
+    ],
+)
+def test_unkeyed_binding_detects_package_index_swaps(tmp_path, monkeypatch, launcher):
+    monkeypatch.delenv(SOURCE_BINDING_KEY_ENV, raising=False)
+
+    def server(index: str) -> MCPServerComponent:
+        args = [part.format(index=index) for part in launcher[1:]]
+        return _server(tmp_path, {"command": launcher[0], "args": args})
+
+    trusted = server("https://pypi.internal.test/simple")
+    swapped = server("https://evil.test/simple")
+    assert trusted.properties["static_config_hash"] != swapped.properties["static_config_hash"]
+
+
+def test_unkeyed_binding_ignores_index_credentials(tmp_path, monkeypatch):
+    monkeypatch.delenv(SOURCE_BINDING_KEY_ENV, raising=False)
+
+    def server(password: str) -> MCPServerComponent:
+        index = f"https://ci:{password}@pypi.internal.test/simple?token={password}"
+        args = ["--from", "docs-server==1.2.3", "--index-url", index, "docs-server"]
+        return _server(tmp_path, {"command": "uvx", "args": args})
+
+    first = server("Summer2024!")
+    second = server("Winter2025x")
+    assert first.properties["static_config_hash"] == second.properties["static_config_hash"]
+    assert "Summer2024!" not in first.model_dump_json()

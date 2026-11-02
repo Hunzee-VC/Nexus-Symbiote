@@ -63,9 +63,10 @@ jobs:
           test "$(find dist -name 'nexus_symbiote-*-py3-none-any.whl' | wc -l)" -eq 1
           test "$(find dist -name 'nexus_symbiote-*.tar.gz' | wc -l)" -eq 1
           test "$(find dist -type f | wc -l)" -eq 2
+          sha256sum dist/* > "$RUNNER_TEMP/distributions.sha256"
       - run: python -m twine check --strict dist/*
-      # Upload before any later step runs tests or installs dependencies. The
-      # compatibility, attest and publish jobs use these bytes, selected by ID.
+      # Upload before any step resolves or runs unpinned dependencies. The attest
+      # and publish jobs use these bytes, which later steps here cannot change.
       - name: Upload distributions
         id: distributions
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -107,6 +108,9 @@ jobs:
           "$RUNNER_TEMP/release-smoke/bin/python" -m nexus_symbiote scan "$GITHUB_WORKSPACE" --report-only -f cyclonedx -o "$GITHUB_WORKSPACE/evidence/project.cdx.json"
       - name: Package the installed wheel's inventory benchmark
         run: |
+          # Evidence below is derived from dist/; fail closed unless it still holds
+          # exactly the bytes that were uploaded before any test or install ran.
+          sha256sum --strict -c "$RUNNER_TEMP/distributions.sha256"
           "$RUNNER_TEMP/release-smoke/bin/python" benchmarks/inventory/evidence.py prepare "$RUNNER_TEMP/inventory-benchmark"
           sha256sum dist/*.whl > "$RUNNER_TEMP/inventory-benchmark/wheel.sha256"
           tar -C "$RUNNER_TEMP/inventory-benchmark" -czf evidence/inventory-benchmark.tar.gz results.json statement.json wheel.sha256
@@ -199,12 +203,12 @@ jobs:
           name: inventory-benchmark-attestation
           path: ${{ steps.inventory.outputs.bundle-path }}
           if-no-files-found: error
-  # Verify the retained attestation against the exact candidate bytes before any
-  # upload. This job runs shell, so it holds no OIDC or write permissions.
-  verify-provenance:
+  verify:
     needs: [build, attest]
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Verification runs shell and a token-bearing CLI, so it stays out of the
+    # OIDC-holding jobs; publish depends on it and remains shell-free.
     permissions:
       contents: read
       attestations: read
@@ -225,12 +229,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          shopt -s nullglob
+          shopt -s nullglob dotglob
           bundles=(attestation/*)
+          (( ${#bundles[@]} == 1 ))
+          test -s "${bundles[0]}"
           wheels=(dist/*.whl)
           sdists=(dist/*.tar.gz)
-          (( ${#bundles[@]} == 1 && ${#wheels[@]} == 1 && ${#sdists[@]} == 1 ))
-          test -s "${bundles[0]}"
+          everything=(dist/*)
+          (( ${#wheels[@]} == 1 && ${#sdists[@]} == 1 && ${#everything[@]} == 2 ))
+          for artifact in "${everything[@]}"; do
+            [[ -f "$artifact" && ! -L "$artifact" ]]
+          done
           for artifact in "${wheels[@]}" "${sdists[@]}"; do
             gh attestation verify "$artifact" \
               --bundle "${bundles[0]}" \
@@ -241,7 +250,7 @@ jobs:
           done
   publish:
     if: inputs.publish != 'none' && github.ref == 'refs/heads/main'
-    needs: [build, attest, verify-provenance]
+    needs: [build, attest, verify]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # The environment is named after the index: each index's trusted publisher
