@@ -8,7 +8,7 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 REDACTED = "***"
-_URL = re.compile(r"[a-zA-Z][a-zA-Z0-9+.-]*://[^\s\"'<>]+")
+_URL = re.compile(r"(?<![a-zA-Z0-9+.-])[a-zA-Z0-9+.-]+://[^\s\"'<>]+")
 _ASSIGNMENT = re.compile(
     r"(?i)(\b(?:api[-_]?key|access[-_]?token|auth[-_]?token|token|password|passwd|secret)\s*[:=]\s*)[^\s,;]+"
 )
@@ -53,3 +53,34 @@ def redact_metadata(value: Any, secrets: Iterable[str] = ()) -> Any:
     if isinstance(value, list):
         return [redact_metadata(item, secrets) for item in value]
     return value
+
+
+_SCHEMA_LITERALS = frozenset({"default", "const", "enum", "example", "examples"})
+_SCHEMA_MAPS = frozenset(
+    {"properties", "patternProperties", "$defs", "definitions", "dependentSchemas", "dependencies"}
+)
+
+
+def _schema_projection(value: Any, *, named_schemas: bool = False) -> Any:
+    """Drop embedded instance data. Property and definition names are not keywords."""
+    if isinstance(value, list):
+        return [_schema_projection(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: _schema_projection(item, named_schemas=not named_schemas and key in _SCHEMA_MAPS)
+            for key, item in value.items()
+            if named_schemas or key not in _SCHEMA_LITERALS
+        }
+    return value
+
+
+def redact_descriptor(descriptor: dict[str, Any], secrets: Iterable[str] = ()) -> dict[str, Any]:
+    """Project an MCP descriptor for display; its original digest binds omitted literals."""
+    safe = {}
+    for key, value in descriptor.items():
+        if key in {"inputSchema", "outputSchema"}:
+            value = _schema_projection(value)
+        elif key not in {"name", "title", "description", "annotations", "_meta"}:
+            key = redact_text(key, secrets)
+        safe[key] = redact_metadata(value, secrets)
+    return safe

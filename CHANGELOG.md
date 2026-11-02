@@ -12,6 +12,10 @@ Alpha release of the AgentBOM toolkit under the Hunzee-VC organization.
 - Read Claude's declared `permissions.defaultMode`, recognize bare broad tool grants, and retain allowances across collected settings layers without claiming effective authorization.
 - Add independent runtime signing quorums for snapshots, trust status and action approvals; preserve them through pinned stdio invocation.
 - Reject runtime CLI FIFO, symlink and oversized inputs through the bounded regular-file reader.
+- Detect same-version MCP launcher package substitutions in project validation and drift checks. Review older baselines that lack the launcher identity.
+- Reconcile locally collected security fields and findings before accepting supplied BOMs. Project-backed risk scoring rejects a conflicting inventory.
+- Omit schema literals from MCP descriptor exports and corroborate the original static definition against project evidence.
+- Reject contradictory native ShadowScan finding counts and conflicting public fields during CycloneDX and SPDX recovery. Emit only unconditional dependencies in the standard CycloneDX graph.
 - Require successful canonical CI-workflow evidence for the exact publication source SHA, in addition to protected-branch settings.
 - Enforce offline tracked-source hygiene and vendored schema provenance digests in the required quality job.
 - Check trust-status signers against the previous tenant revocation list and recheck the accepted status when consuming a tool approval. Upgrading an existing gateway may require replaying its last accepted trust status.

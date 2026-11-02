@@ -2257,6 +2257,19 @@
           "default": null,
           "title": "Command"
         },
+        "launcher_package": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Declared ecosystem and package name or image repository, when safely identified",
+          "title": "Launcher Package"
+        },
         "args": {
           "items": {
             "type": "string"
@@ -3806,6 +3819,19 @@
           "default": null,
           "description": "JCS canonical hash of (name, description, inputSchema, annotations)",
           "title": "Definition Hash"
+        },
+        "redacted_definition_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Digest of the displayed descriptor when sensitive content was removed; the original definition_hash remains the source fingerprint",
+          "title": "Redacted Definition Hash"
         },
         "capabilities": {
           "anyOf": [

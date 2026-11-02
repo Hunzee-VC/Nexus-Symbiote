@@ -7,6 +7,7 @@ attestation occurs here. Report bytes remain a separate sensitive artifact.
 from __future__ import annotations
 
 import hashlib
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -275,7 +276,15 @@ class ShadowScanImporter(Scanner):
             raise ValueError("invalid ShadowScan report envelope")
         if not isinstance(stats, list) or not isinstance(summary, dict):
             raise ValueError("ShadowScan report must include stats and summary")
+        # The producer's summary describes the final, filtered findings. Connector
+        # statistics can legitimately count observations before merging/filtering.
+        if "total" in summary or "finding_identity_schema" in data:
+            total = summary.get("total")
+            if type(total) is not int or total != len(findings):
+                raise ValueError("ShadowScan summary total disagrees with findings")
         complete = summary.get("complete") is True and bool(stats)
+        if "status" in summary and summary["status"] != "complete":
+            complete = False
         for stat in stats:
             if (
                 not isinstance(stat, dict)
@@ -331,6 +340,16 @@ class ShadowScanImporter(Scanner):
                 result.unmapped_indexes.append(index)
             else:
                 result.components.append(comp)
+        for key, field_name in (("by_surface", "surface"), ("by_kind", "kind")):
+            if key not in summary:
+                continue
+            counts = summary[key]
+            if (
+                not isinstance(counts, dict)
+                or any(type(count) is not int for count in counts.values())
+                or counts != dict(Counter(finding[field_name] for finding in findings))
+            ):
+                raise ValueError(f"ShadowScan summary {key} disagrees with findings")
         return result
 
     @staticmethod

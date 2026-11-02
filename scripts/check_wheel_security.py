@@ -29,10 +29,15 @@ CASES = (
     "test_ide_permission_semantics.py::test_cli_does_not_report_unrestricted_shell_declaration_as_clean",
     "test_shadowscan_relationships.py::test_project_reconciliation_binds_imported_dependency_claims",
     "test_diff_profiles.py::test_mcp_endpoint_substitution_after_scan",
+    "test_action_artifact_redaction.py::test_staged_artifact_omits_descriptor_credential",
+    "test_descriptor_redaction.py",
+    "test_mcp_launcher_identity.py",
+    "test_local_projection_gates.py",
     "test_shadowscan_bridge_security.py::test_import_ignores_supplier_policy",
     "test_runtime_authorization.py::test_revoked_trust_signer_cannot_reinstate_itself",
     "test_runtime_authorization.py::test_revocation_during_final_authentication_denies_pending_invocation",
     "test_export_conformance.py::test_spdx_aggregation_keeps_revisions_and_references_distinct",
+    "test_projection_integrity.py",
 )
 
 
@@ -66,12 +71,18 @@ def main() -> int:
     print(f"Testing {wheel.name} sha256={digest} from {origin}", flush=True)
 
     with TemporaryDirectory(prefix="symbiote-wheel-check-") as scratch:
+        tests = Path(scratch) / "tests"
+        tests.mkdir()
+        shutil.copyfile(TESTS / "__init__.py", tests / "__init__.py")
         for filename in {node.split("::", 1)[0] for node in CASES}:
-            shutil.copyfile(TESTS / filename, Path(scratch) / filename)
-        shutil.copytree(TESTS / "fixtures", Path(scratch) / "fixtures")
+            shutil.copyfile(TESTS / filename, tests / filename)
+        shutil.copytree(TESTS / "fixtures", tests / "fixtures")
+        scripts = tests.parent / "scripts"
+        scripts.mkdir()
+        shutil.copyfile(TESTS.parent / "scripts/run_action.py", scripts / "run_action.py")
         previous = Path.cwd()
         try:
-            os.chdir(scratch)
+            os.chdir(tests)
             os.environ["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
             required = RequireExecution()
             status = pytest.main(["-v", "--import-mode=importlib", *CASES], plugins=[required])

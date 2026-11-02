@@ -38,9 +38,30 @@ def test_recursive_literal_registration_is_source_evidence(tmp_path):
 
 
 @pytest.mark.parametrize("method", ["tool", "registerTool"])
-def test_legacy_and_current_registration_names(tmp_path, method):
-    result = _scan(tmp_path, IMPORT + SERVER + f'server.{method}("read", {{}}, handler);')
+@pytest.mark.parametrize("access", [".{}", '["{}"]', "['{}']", "[`{}`]"])
+def test_legacy_and_current_registration_names(tmp_path, method, access):
+    result = _scan(
+        tmp_path, IMPORT + SERVER + f'server{access.format(method)}("read", {{}}, handler);'
+    )
     assert [t.name for t in _tools(result)] == ["read"]
+
+
+@pytest.mark.parametrize("index", ["methodName", "`register${methodName}`", r'"regis\x74erTool"'])
+def test_computed_method_on_bound_server_marks_coverage_incomplete(tmp_path, index):
+    source = IMPORT + SERVER + f'server[{index}]("hidden", {{}}, handler);\n'
+    source += 'other[methodName](); server["registerPrompt"]("decoy", {}, handler);'
+    result = _scan(tmp_path, source)
+    assert not _tools(result)
+    assert [x for x in result.surfaces_excluded if "src/server.ts" in x] == [
+        "src/server.ts:3 (unresolved MCP method name)"
+    ]
+
+
+def test_bracket_registration_requires_a_bound_receiver(tmp_path):
+    source = IMPORT + SERVER + 'function f(server) { server["tool"]("fake", handler); }'
+    result = _scan(tmp_path, source)
+    assert not _tools(result)
+    assert any("unresolved MCP registration receiver" in x for x in result.surfaces_excluded)
 
 
 def test_comments_strings_and_unrelated_imports_are_not_sdk_declarations(tmp_path):
