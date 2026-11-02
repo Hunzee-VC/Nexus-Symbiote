@@ -63,6 +63,7 @@ class ScanResult:
     source_report_digest: str | None = None
     source_report_format: str | None = None
     source_report_status: str | None = None
+    source_projection_limitations: list[str] | None = None
     source_unmapped_count: int = 0
     source_unmapped_indexes: list[int] = field(default_factory=list)
 

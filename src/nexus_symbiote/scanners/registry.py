@@ -39,8 +39,8 @@ class RegistryScanner(Scanner):
             result.components.extend(self._scan_npm(files.root, result))
             result.components.extend(self._scan_pip(files.root, result))
             result.components.extend(self._scan_docker(files.root, result))
-        if not result.components and not result.scan_failures:
-            result.surfaces_excluded.append("registry (no AI-related dependencies found)")
+        if not result.components and not result.scan_failures and not result.surfaces_excluded:
+            result.surfaces_scanned.append("registry (no AI-related dependencies found)")
         return result
 
     def _read(self, path: Path, result: ScanResult) -> str | None:

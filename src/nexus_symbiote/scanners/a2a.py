@@ -67,8 +67,8 @@ class A2AScanner(Scanner):
                     except (TypeError, ValueError):
                         result.scan_failures.append(f"{relative}: invalid A2A client field types")
             self._scan_code_patterns(files.root, result)
-        if not result.components and not result.scan_failures:
-            result.surfaces_excluded.append("a2a (no A2A configurations found)")
+        if not result.components and not result.scan_failures and not result.surfaces_excluded:
+            result.surfaces_scanned.append("a2a (no A2A configurations found)")
         return result
 
     def _parse_agent_card(

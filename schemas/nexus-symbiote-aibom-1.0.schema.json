@@ -1212,6 +1212,22 @@
           "default": null,
           "title": "Source Report Status"
         },
+        "source_projection_limitations": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Limitations of the imported discovery projection, independent of static repository coverage",
+          "title": "Source Projection Limitations"
+        },
         "source_unmapped_count": {
           "default": 0,
           "minimum": 0,

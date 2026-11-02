@@ -177,14 +177,24 @@ class ShadowScanImporter(Scanner):
                 result.source_unmapped_count = imported.unmapped_count
                 result.source_unmapped_indexes = imported.unmapped_indexes
                 result.surfaces_scanned.append("shadowscan:report")
-                result.surfaces_excluded.extend(imported.limitations)
+                result.source_projection_limitations = list(imported.limitations)
+                if imported.unmapped_count:
+                    result.surfaces_excluded.append("ShadowScan report contains unmapped entries")
+                if imported.source_format == "shadowscan-cyclonedx":
+                    result.surfaces_excluded.append(
+                        "ShadowScan CycloneDX source is a lossy projection"
+                    )
                 if imported.source_status != "complete":
                     result.scan_failures.append(
                         "ShadowScan source report is incomplete or has unknown status"
                     )
                 break
-        if not result.source_report_digest and not result.scan_failures:
-            result.surfaces_excluded.append("shadowscan-report (no report found)")
+        if (
+            not result.source_report_digest
+            and not result.scan_failures
+            and not result.surfaces_excluded
+        ):
+            result.surfaces_scanned.append("shadowscan-report (no report found)")
         return result
 
     def import_report(self, report_path: Path) -> ImportedReport:

@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import base64
 import json
+import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from threading import Event
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -274,6 +277,133 @@ def test_new_revocation_is_remembered_even_when_call_is_denied(tmp_path):
     with pytest.raises(AuthorizationError, match="rollback"):
         invoke(values)
     assert values[-1] == []
+
+
+def test_revoked_trust_signer_cannot_reinstate_itself(tmp_path):
+    values = list(fixture(tmp_path))
+    gateway, _, _, snapshot, status, _, _, _, authority, executed = values
+    other = Ed25519PrivateKey.generate()
+    other_id = key_id(other.public_key())
+    gateway.trust_keys[other_id] = other.public_key()
+    revoked = status.model_copy(
+        update={
+            "serial": 2,
+            "revoked_signers": (other_id,),
+            "revoked_tools": (snapshot.tools[0].definition_digest,),
+        }
+    )
+    with pytest.raises(AuthorizationError, match="tool or endpoint is revoked"):
+        invoke(values, trust=sign_contract(revoked, "trust", (authority,)))
+    gateway.state = StateStore(tmp_path / "state.sqlite")
+    clear = status.model_copy(update={"serial": 3})
+    with pytest.raises(AuthorizationError, match="previously revoked"):
+        invoke(values, trust=sign_contract(clear, "trust", (other,)))
+    assert executed == []
+
+    # A still-authorized issuer may restore B. B can then issue a later status.
+    with pytest.raises(AuthorizationError, match="operation-bound approval required"):
+        invoke(values, trust=sign_contract(clear, "trust", (authority,)), approval=None)
+    later = status.model_copy(update={"serial": 4})
+    assert invoke(values, trust=sign_contract(later, "trust", (other,))) == "executed"
+    assert len(executed) == 1
+
+
+def test_legacy_trust_head_requires_exact_status_for_migration(tmp_path):
+    values = fixture(tmp_path)
+    gateway, _, _, _, status, _, _, _, authority, _ = values
+    legacy = tmp_path / "legacy.sqlite"
+    other = Ed25519PrivateKey.generate()
+    other_id = key_id(other.public_key())
+    gateway.trust_keys[other_id] = other.public_key()
+    expired = status.model_copy(
+        update={
+            "revoked_signers": (other_id,),
+            "not_before": NOW - timedelta(hours=2),
+            "not_after": NOW - timedelta(hours=1),
+        }
+    )
+    db = sqlite3.connect(legacy)
+    with db:
+        db.execute("CREATE TABLE heads (scope TEXT PRIMARY KEY, serial INTEGER, digest TEXT)")
+        db.execute(
+            "INSERT INTO heads VALUES (?, ?, ?)",
+            ("trust:acme", expired.serial, digest(expired.model_dump(mode="json"))),
+        )
+        db.execute("CREATE TABLE nonces (nonce TEXT PRIMARY KEY)")
+        db.execute("INSERT INTO nonces VALUES ('legacy-consumed-nonce')")
+    db.close()
+
+    gateway.state = StateStore(legacy)
+    next_status = status.model_copy(update={"serial": 2})
+    with pytest.raises(AuthorizationError, match="restore the recorded trust status"):
+        invoke(values, trust=sign_contract(next_status, "trust", (other,)))
+    with pytest.raises(AuthorizationError, match="does not match"):
+        gateway.state.restore_trust_status(status)
+    gateway.state.restore_trust_status(expired)
+    with pytest.raises(AuthorizationError, match="expired"):
+        invoke(values, trust=sign_contract(expired, "trust", (authority,)))
+    with pytest.raises(AuthorizationError, match="previously revoked"):
+        invoke(values, trust=sign_contract(next_status, "trust", (other,)))
+    with pytest.raises(AuthorizationError, match="already been used"):
+        gateway.state.record((), "legacy-consumed-nonce")
+    assert invoke(values, trust=sign_contract(next_status, "trust", (authority,))) == "executed"
+
+
+def test_concurrent_trust_advance_rejects_inflight_call_without_consuming_nonce(tmp_path):
+    values = fixture(tmp_path)
+    gateway, _, _, _, status, _, _, _, authority, executed = values
+    second = StateStore(tmp_path / "state.sqlite")
+    other_id = key_id(Ed25519PrivateKey.generate().public_key())
+    revoked = status.model_copy(update={"serial": 2, "revoked_signers": (other_id,)})
+    describe = gateway.describe
+
+    def observe_new_status(server, tool):
+        second.accept_trust_status(revoked, {key_id(authority.public_key())})
+        return describe(server, tool)
+
+    gateway.describe = observe_new_status
+    with pytest.raises(AuthorizationError, match="rollback/fork"):
+        invoke(values)
+    assert executed == []
+    gateway.describe = describe
+    assert invoke(values, trust=sign_contract(revoked, "trust", (authority,))) == "executed"
+
+
+def test_revocation_during_final_authentication_denies_pending_invocation(tmp_path):
+    values = fixture(tmp_path)
+    gateway, _, _, snapshot, status, _, _, _, authority, executed = values
+    context = gateway.authenticate()
+    first_auth = True
+    final_auth_started = Event()
+    resume_final_auth = Event()
+
+    def authenticate():
+        nonlocal first_auth
+        if first_auth:
+            first_auth = False
+        else:
+            final_auth_started.set()
+            assert resume_final_auth.wait(timeout=5)
+        return context
+
+    gateway.authenticate = authenticate
+    second = StateStore(tmp_path / "state.sqlite")
+    revoked = status.model_copy(
+        update={"serial": 2, "revoked_tools": (snapshot.tools[0].definition_digest,)}
+    )
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pending = pool.submit(invoke, values)
+        try:
+            assert final_auth_started.wait(timeout=5)
+            second.accept_trust_status(revoked, {key_id(authority.public_key())})
+        finally:
+            resume_final_auth.set()
+        with pytest.raises(AuthorizationError, match="rollback/fork"):
+            pending.result(timeout=5)
+    assert executed == []
+    # Preserve the original approval when admission fails.
+    restored = status.model_copy(update={"serial": 3})
+    assert invoke(values, trust=sign_contract(restored, "trust", (authority,))) == "executed"
 
 
 def test_expiry_is_rechecked_after_slow_adapter(tmp_path):

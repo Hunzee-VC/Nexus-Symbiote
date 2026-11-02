@@ -457,6 +457,10 @@ class CompletenessClaim(InventoryModel):
     )
     source_report_format: Literal["shadowscan-json", "shadowscan-cyclonedx"] | None = None
     source_report_status: Literal["complete", "incomplete", "unknown"] | None = None
+    source_projection_limitations: list[str] | None = Field(
+        default=None,
+        description="Limitations of the imported discovery projection, independent of static repository coverage",
+    )
     source_unmapped_count: int = Field(default=0, ge=0)
     source_unmapped_indexes: list[Annotated[int, Field(ge=0)]] = Field(default_factory=list)
 

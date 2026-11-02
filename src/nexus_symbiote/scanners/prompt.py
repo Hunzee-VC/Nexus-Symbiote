@@ -169,11 +169,11 @@ class PromptScanner(Scanner):
                             trust_tier=TrustTier.INTERNAL_UNVERIFIED,
                         )
                     )
-                if not found:
-                    result.surfaces_excluded.append(f"skills ({skill_dir} no readable skill files)")
+                if not found and not result.scan_failures and not result.surfaces_excluded:
+                    result.surfaces_scanned.append(f"skills ({skill_dir} no skill files found)")
 
-        if not result.components and not result.scan_failures:
-            result.surfaces_excluded.append("prompts (no instruction files found)")
+        if not result.components and not result.scan_failures and not result.surfaces_excluded:
+            result.surfaces_scanned.append("prompts (no instruction files found)")
 
         return result
 

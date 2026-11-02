@@ -95,8 +95,8 @@ class RAGScanner(Scanner):
                         ],
                     )
                 )
-        if not result.components and not result.scan_failures:
-            result.surfaces_excluded.append("rag (no RAG configuration found)")
+        if not result.components and not result.scan_failures and not result.surfaces_excluded:
+            result.surfaces_scanned.append("rag (no RAG configuration found)")
         return result
 
     def _read_config(self, path: Path, files: ConfinedCollection, result: ScanResult) -> Any:

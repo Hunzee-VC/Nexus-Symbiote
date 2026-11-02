@@ -2,12 +2,24 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import AssuranceLevel, ComponentType
+from nexus_symbiote.core.hashing import canonical_json
+from nexus_symbiote.core.models import (
+    AnyComponent,
+    ClaimEvidence,
+    MCPServerComponent,
+    RegistryEntryComponent,
+)
 from nexus_symbiote.scanner_catalog import BUILTIN_SCANNER_NAMES
+
+if TYPE_CHECKING:
+    from nexus_symbiote.scanners.base import ScanResult
 
 REQUIRED_SCANNERS = BUILTIN_SCANNER_NAMES
 
@@ -186,53 +198,173 @@ class CompletenessValidator:
 
         return report
 
-    def validate_against_project(self, bom: AIBOM, project_root: Path) -> CompletenessReport:
+    def validate_against_project(
+        self, bom: AIBOM, project_root: Path, *, exclude_paths: Sequence[str] = ()
+    ) -> CompletenessReport:
+        """Recollect the supported static inventory under caller-selected scope.
+
+        Supplied statuses, exclusions, and paths cannot select or disable a collector.
+        Only the local built-in collectors run. None executes project code or uses
+        remote discovery. Integrity and signer policy are checked separately.
+        """
+        from nexus_symbiote.graph import assemble_repository_agent
+        from nexus_symbiote.scanners import ALL_SCANNERS
+
         report = self.validate(bom)
+        root = project_root.absolute()
+        observed: dict[str, AnyComponent] = {}
 
-        from nexus_symbiote.scanners.mcp import MCP_CONFIG_FILES
-        from nexus_symbiote.scanners.prompt import INSTRUCTION_FILES
-
-        has_mcp = any((project_root / f).exists() for f in MCP_CONFIG_FILES)
-        has_prompt = any((project_root / f).exists() for f in INSTRUCTION_FILES)
-        has_models = any(
-            f.suffix.lower() in (".safetensors", ".pt", ".pth", ".gguf", ".onnx", ".pkl")
-            for f in project_root.rglob("*")
-            if ".git" not in f.parts
-        )
-
-        bom_types = {c.component_type for c in bom.components}
-
-        if has_mcp and ComponentType.MCP_SERVER not in bom_types:
-            report.issues.append(
-                CompletenessIssue(
-                    surface="mcp-config",
-                    description="Project has MCP config files but AIBOM has no MCP server components.",
-                    severity="error",
-                )
-            )
+        def incomplete(surface: str, description: str) -> None:
             report.is_complete = False
+            report.issues.append(CompletenessIssue(surface, description, "error"))
 
-        if has_prompt and ComponentType.PROMPT_TEMPLATE not in bom_types:
-            report.issues.append(
-                CompletenessIssue(
-                    surface="prompts",
-                    description="Project has instruction files but AIBOM has no prompt components.",
-                    severity="error",
+        for scanner_type in ALL_SCANNERS:
+            scanner = scanner_type()
+            scanner.configure(exclude_paths=exclude_paths)
+            try:
+                local = scanner.scan(root)
+            except Exception:
+                incomplete(
+                    scanner.name, "Local collector failed; inventory could not be reconciled."
                 )
-            )
-            report.is_complete = False
+                continue
+            for reason in (*local.scan_failures, *local.surfaces_excluded):
+                incomplete(scanner.name, f"Local collection incomplete: {reason}")
+            if scanner.name == "shadowscan":
+                for reason in self._discovery_mismatches(bom, local):
+                    incomplete(scanner.name, reason)
+            for component in local.components:
+                previous = observed.setdefault(component.bom_ref, component)
+                if previous != component:
+                    incomplete(scanner.name, f"Conflicting local reference: {component.bom_ref}")
 
-        if has_models and ComponentType.MODEL not in bom_types:
-            report.issues.append(
-                CompletenessIssue(
-                    surface="model-weights",
-                    description="Project has model files but AIBOM has no model components.",
-                    severity="error",
+        expected = AIBOM(components=list(observed.values()))
+        try:
+            agent = assemble_repository_agent(expected, root)
+        except (OSError, ValueError, RecursionError):
+            incomplete("agent.yaml", "Local agent manifest could not be reconciled.")
+        else:
+            if agent.properties.get("identity_source") == "repository-path":
+                # An inferred, checkout-specific root is not itself a project artifact.
+                expected.components.remove(agent)
+
+        supplied = {c.bom_ref: c for c in bom.components}
+        for actual in expected.components:
+            declared = supplied.get(actual.bom_ref)
+            if declared is None or not self._same_subject(root, declared, actual):
+                source_kind = {
+                    ComponentType.PROMPT_TEMPLATE: "instruction files",
+                    ComponentType.MODEL: "model files",
+                    ComponentType.MCP_CLIENT: "MCP inventory",
+                    ComponentType.MCP_SERVER: "MCP inventory",
+                }.get(actual.component_type, actual.component_type.value)
+                incomplete(
+                    actual.bom_ref,
+                    f"Missing or mismatched local component from {source_kind}: {actual.bom_ref}",
                 )
-            )
-            report.is_complete = False
-
         return report
+
+    @staticmethod
+    def _discovery_mismatches(bom: AIBOM, local: ScanResult) -> list[str]:
+        """Bind every embedded ShadowScan assertion to the freshly projected report."""
+        problems: list[str] = []
+        claim = bom.metadata.completeness
+        if claim is not None:
+            if claim.source_report_digest != local.source_report_digest:
+                problems.append("Local discovery report differs from the recorded digest.")
+            if (
+                claim.source_report_format != local.source_report_format
+                or claim.source_report_status != local.source_report_status
+                or claim.source_unmapped_count != local.source_unmapped_count
+                or claim.source_unmapped_indexes != local.source_unmapped_indexes
+                or claim.source_projection_limitations != local.source_projection_limitations
+                or (claim.scope == "repository+shadowscan") != bool(local.source_report_digest)
+            ):
+                problems.append(
+                    "Local discovery report scope or coverage differs from the projection."
+                )
+            if local.source_report_digest and (
+                claim.assurance_level != AssuranceLevel.OBSERVED
+                or "shadowscan:report" not in claim.surfaces_scanned
+                or not {
+                    "runtime",
+                    "effective-identity",
+                    "effective-authorization",
+                    "live-tools",
+                    "network",
+                }.issubset(claim.unobserved_surfaces)
+            ):
+                problems.append("Static discovery coverage or assurance is misrepresented.")
+
+        actual = {c.bom_ref: c for c in local.components}
+        for supplied in bom.components:
+            component = actual.pop(supplied.bom_ref, None)
+            if component is None:
+                if (
+                    supplied.bom_ref.startswith("shadowscan:")
+                    or supplied.properties.get("collection_mode") == "imported-unverified-report"
+                    or any(key.startswith("shadowscan:") for key in supplied.properties)
+                    or "discovery_report_entry" in supplied.claims
+                ):
+                    problems.append(f"Unexpected discovery report component: {supplied.bom_ref}")
+                continue
+            # The combined scan annotates the direct projection at inventory creation.
+            # Its timestamp is generated locally; it is not an upstream observation.
+            component = component.model_copy(
+                update={
+                    "claims": {
+                        **component.claims,
+                        "discovery_report_entry": ClaimEvidence(
+                            assurance=AssuranceLevel.DECLARED,
+                            method="imported-discovery-report",
+                            scope="source-report",
+                            collector="shadowscan",
+                            locator=component.source_path,
+                            observed_at=bom.metadata.timestamp,
+                        ),
+                    }
+                }
+            )
+            if canonical_json(supplied.model_dump(mode="json")) != canonical_json(
+                component.model_dump(mode="json")
+            ):
+                problems.append(
+                    f"Component differs from the discovery report projection: {supplied.bom_ref}"
+                )
+        problems.extend(f"Missing discovery report component: {ref}" for ref in actual)
+        return problems
+
+    @staticmethod
+    def _same_subject(root: Path, supplied: AnyComponent, local: AnyComponent) -> bool:
+        # Lexical comparison accepts in-root absolute and relative representations
+        # without following a manifest-selected symlink or normalizing traversal.
+        source = root / supplied.source_path if supplied.source_path is not None else None
+        expected = root / local.source_path if local.source_path is not None else None
+        if (
+            supplied.component_type != local.component_type
+            or supplied.name != local.name
+            or (local.version is not None and supplied.version != local.version)
+            or source != expected
+        ):
+            return False
+        if isinstance(local, RegistryEntryComponent) and local.package_url is not None:
+            return isinstance(supplied, RegistryEntryComponent) and (
+                supplied.package_url == local.package_url
+                and supplied.registry_type == local.registry_type
+            )
+        if (
+            isinstance(local, MCPServerComponent)
+            and local.properties.get("collection_mode") == "static-config"
+        ):
+            # Compare only the transport, redacted launcher and endpoint origin
+            # actually available from static configuration. A live observation
+            # can supply extra descriptor evidence without changing this subject.
+            return isinstance(supplied, MCPServerComponent) and (
+                supplied.transport,
+                supplied.command,
+                supplied.endpoint_url,
+            ) == (local.transport, local.command, local.endpoint_url)
+        return True
 
     def _find_orphan_refs(self, bom: AIBOM) -> list[tuple[str, str]]:
         all_refs = {c.bom_ref for c in bom.components}

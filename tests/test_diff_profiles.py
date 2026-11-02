@@ -1,8 +1,14 @@
-"""Fingerprint migrations must preserve both drift detection and honest unknowns."""
+"""Supply-chain drift signals from MCP fingerprints and connection declarations."""
 
+import json
+
+import pytest
+from click.testing import CliRunner
+
+from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.hashing import TOOL_DEFINITION_HASH_VERSION
-from nexus_symbiote.core.models import ToolComponent
+from nexus_symbiote.core.models import MCPServerComponent, ToolComponent
 from nexus_symbiote.diff.differ import AIBOMDiffer
 
 
@@ -40,3 +46,63 @@ def test_legacy_profile_requires_reapproval_even_when_digest_looks_equal():
         assert result.has_changes
         assert result.components_modified[0].severity == "high"
         assert "re-approve" in result.components_modified[0].details[0]
+
+
+def test_mcp_endpoint_substitution_after_scan(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    runner = CliRunner()
+    snapshots = []
+    for index, host in enumerate(("trusted.example", "trusted.example", "attacker.example")):
+        config = {"mcpServers": {"payments": {"url": f"https://{host}/mcp?token=private-value"}}}
+        (project / ".mcp.json").write_text(json.dumps(config))
+        path = tmp_path / f"snapshot-{index}.json"
+        result = runner.invoke(
+            main,
+            [
+                "scan",
+                str(project),
+                "--scanner",
+                "mcp",
+                "--report-only",
+                "--no-project-policy",
+                "-o",
+                str(path),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "private-value" not in path.read_text()
+        snapshots.append(path)
+
+    def compare(left, right, *flags, expected_exit=0):
+        result = runner.invoke(main, ["diff", str(left), str(right), "--json-output", *flags])
+        assert result.exit_code == expected_exit, result.output
+        return json.loads(result.output)
+
+    assert not compare(snapshots[0], snapshots[1], "--fail-on-alert")["has_changes"]
+    changed = compare(snapshots[1], snapshots[2])
+    assert compare(snapshots[1], snapshots[2], "--fail-on-alert", expected_exit=1) == changed
+    assert changed["has_changes"]
+    assert changed["total_changes"] == 1
+    modified = changed["components_modified"][0]
+    assert modified["name"] == "payments"
+    assert "endpoint" in modified["details"][0]
+    assert changed["security_alerts"][0]["severity"] == "critical"
+    assert changed["security_alerts"][0]["component"] == modified["bom_ref"]
+    args = ["diff", str(snapshots[1]), str(snapshots[2])]
+    report = runner.invoke(main, args)
+    gated = runner.invoke(main, [*args, "--fail-on-alert"])
+    assert report.exit_code == 0 and gated.exit_code == 1
+    assert gated.output == report.output
+    assert "MCP server endpoint changed" in gated.output
+
+
+@pytest.mark.parametrize("field", ["endpoint_url", "transport", "command"])
+def test_mcp_connection_drift_does_not_echo_untrusted_values(field):
+    server = MCPServerComponent(bom_ref="server:payments", name="payments")
+    old = server.model_copy(update={field: "private-old-value"})
+    new = server.model_copy(update={field: "private-new-value"})
+    for replacement in (new, server):
+        result = AIBOMDiffer().diff(AIBOM(components=[old]), AIBOM(components=[replacement]))
+        assert result.security_alerts[0]["severity"] == "critical"
+        assert "private-" not in json.dumps(result.to_dict())

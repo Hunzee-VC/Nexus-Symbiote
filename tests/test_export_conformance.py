@@ -128,6 +128,39 @@ def test_spdx_references_are_resolved_and_qualified():
     assert any("unresolved" in e for e in validate_spdx(document))
 
 
+def test_spdx_aggregation_keeps_revisions_and_references_distinct():
+    bom = fixture_bom()
+    # A producer can update a BOM without changing its serial number or local references.
+    bom.metadata.serial_number = "urn:uuid:be293054-64c2-494e-87f6-fceeaabe4a85"
+    exporter = SPDXGenerator()
+    graphs = []
+    versions = ("1.2.3", "9.8.7")
+    for version in versions:
+        bom.get_component("tool:send").version = version
+        graphs.append(exporter.generate(bom)["@graph"])
+
+    combined = {
+        "@context": "https://spdx.org/rdf/3.0.1/spdx-context.jsonld",
+        "@graph": [*graphs[0], *graphs[1]],
+    }
+    assert validate_spdx(combined) == []
+    nodes = {node.get("spdxId", node.get("@id")): node for node in combined["@graph"]}
+    assert len(nodes) == len(combined["@graph"])
+    for graph, version in zip(graphs, versions, strict=True):
+        document = graph[0]
+        (root,) = document["rootElement"]
+        (edge,) = (
+            nodes[ref]
+            for ref in document["element"]
+            if nodes[ref].get("relationshipType") == "usesTool"
+        )
+        assert edge["from"] == root
+        (tool,) = edge["to"]
+        assert tool in document["element"]
+        assert nodes[tool]["software_packageVersion"] == version
+        assert nodes[tool]["creationInfo"] == document["creationInfo"]
+
+
 def test_spdx_independent_consumer_round_trip():
     from spdx_python_model.bindings import v3_0_1 as spdx
 

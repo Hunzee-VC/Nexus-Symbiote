@@ -322,6 +322,27 @@ def test_complete_source_import_cannot_pass_inventory_gate(tmp_path):
     assert not RiskScorer().passes_gate(AIBOM.load(output))[0]
 
 
+@pytest.mark.parametrize("use_parent", [False, True])
+def test_import_ignores_supplier_policy(tmp_path, use_parent):
+    incoming = tmp_path / "incoming"
+    incoming.mkdir()
+    report = incoming / "report.json"
+    report.write_text(json.dumps(_report()))
+    policy_dir = tmp_path if use_parent else incoming
+    (policy_dir / ".nexus-symbiote.yaml").write_text("scan: {failure_mode: report-only}\n")
+    runner = CliRunner()
+    output = tmp_path / "gated.json"
+    args = ["import-shadowscan", str(report), "-o"]
+    gated = runner.invoke(main, [*args, str(output)])
+    assert gated.exit_code == 1 and "Imported claims" in gated.output
+    exploratory = tmp_path / "exploratory.json"
+    result = runner.invoke(main, [*args, str(exploratory), "--report-only"])
+    assert result.exit_code == 0, result.output
+    for path in (output, exploratory):
+        inventory = AIBOM.load(path)
+        assert RiskScorer().score(inventory).severity_counts["critical"] > 0
+
+
 def test_verify_direct_projection_rejects_copied_digest_and_ignored_fields(tmp_path):
     report, target = tmp_path / "report.json", tmp_path / "bom.json"
     # Include CRLF so a reader normalizing newlines would fail the digest check.

@@ -271,8 +271,8 @@ class ModelScanner(Scanner):
                     if path.suffix.lower() in MODEL_EXTENSIONS
                 }
             )
-            if not model_dirs:
-                result.surfaces_excluded.append("model-weights (no model files found)")
+            if not model_dirs and not result.scan_failures and not result.surfaces_excluded:
+                result.surfaces_scanned.append("model-weights (no model files found)")
             for model_dir in model_dirs:
                 result.surfaces_scanned.append(str(model_dir))
                 result.components.extend(self._scan_model_directory(model_dir))

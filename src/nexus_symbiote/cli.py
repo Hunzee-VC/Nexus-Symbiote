@@ -121,6 +121,7 @@ def scan(
     from nexus_symbiote.graph import assemble_repository_agent, validate_graph
     from nexus_symbiote.policy import PolicyError
     from nexus_symbiote.signature_policy import load_signature_policies
+    from nexus_symbiote.utils.confined import DEFAULT_EXCLUDES
     from nexus_symbiote.validators.risk import RiskScorer
 
     policy = _policy(root, ignore_project=no_project_policy)
@@ -150,6 +151,7 @@ def scan(
     source_report_digest = None
     source_report_format = None
     source_report_status = None
+    source_projection_limitations = None
     source_unmapped_count = 0
     source_unmapped_indexes: list[int] = []
     scanner_status: dict[str, str] = dict.fromkeys(all_scanners, "unknown")
@@ -172,6 +174,7 @@ def scan(
                 source_report_digest = result.source_report_digest
                 source_report_format = result.source_report_format
                 source_report_status = result.source_report_status
+                source_projection_limitations = result.source_projection_limitations
                 source_unmapped_count = result.source_unmapped_count
                 source_unmapped_indexes = result.source_unmapped_indexes
             for comp in result.components:
@@ -221,6 +224,7 @@ def scan(
         source_report_digest=source_report_digest,
         source_report_format=source_report_format,
         source_report_status=source_report_status,
+        source_projection_limitations=source_projection_limitations,
         source_unmapped_count=source_unmapped_count,
         source_unmapped_indexes=source_unmapped_indexes,
         surfaces_scanned=sorted(set(surfaces_scanned)),
@@ -231,7 +235,9 @@ def scan(
         scanner_status=scanner_status,
         collectors_requested=list(selected),
         collectors_completed=completed,
-        exclusions=list(policy.scan.exclude_paths),
+        exclusions=sorted(
+            {*policy.scan.exclude_paths, *(f"**/{name}" for name in DEFAULT_EXCLUDES)}
+        ),
         unobserved_surfaces=[
             "runtime",
             "effective-identity",
@@ -302,7 +308,6 @@ def import_shadowscan(
     """
     from nexus_symbiote.scanners.shadowscan import ShadowScanImporter
 
-    policy = _policy(Path(report_path).parent)
     importer = ShadowScanImporter()
     try:
         imported = importer.read_report(Path(report_path))
@@ -324,10 +329,6 @@ def import_shadowscan(
         from nexus_symbiote.generators.spdx import SPDXGenerator
 
         out_data = SPDXGenerator().generate_json(aibom)
-    elif output_format == "sarif":
-        from nexus_symbiote.generators.sarif import SARIFGenerator
-
-        out_data = SARIFGenerator().generate_json(aibom)
     else:
         out_data = aibom.to_json()
 
@@ -338,20 +339,11 @@ def import_shadowscan(
     console.print(
         f"Imported {len(imported.components)} components and saved {output}; discovery coverage remains partial."
     )
-    if imported.source_status != "complete" and not report_only:
+    if report_only:
+        return
+    if imported.source_status != "complete":
         raise click.ClickException("ShadowScan source report is incomplete; the BOM is partial")
-
-    from nexus_symbiote.validators.risk import RiskScorer
-
-    passed, report = RiskScorer(
-        fail_threshold=policy.risk.fail_threshold,
-        warn_threshold=policy.risk.warn_threshold,
-        ignore_categories=policy.risk.ignore_categories,
-        fail_on_severity=policy.risk.fail_on_severity,
-    ).passes_gate(aibom)
-    if not passed and not (report_only or policy.scan.failure_mode == "report-only"):
-        err_console.print("[red]Imported claims do not establish complete verified coverage[/]")
-        raise click.exceptions.Exit(1)
+    raise click.ClickException("Imported claims do not establish complete verified coverage")
 
 
 @main.command("verify-artifact")
@@ -559,7 +551,9 @@ def validate(
     if policy.validation.require_completeness:
         cv = CompletenessValidator()
         c_report = (
-            cv.validate_against_project(bom, Path(project).resolve())
+            cv.validate_against_project(
+                bom, Path(project).resolve(), exclude_paths=policy.scan.exclude_paths
+            )
             if project
             else cv.validate(bom)
         )
@@ -703,7 +697,10 @@ def risk(
 @click.argument("old_path", type=click.Path(exists=True))
 @click.argument("new_path", type=click.Path(exists=True))
 @click.option("--json-output", is_flag=True, help="Output as JSON")
-def diff(old_path: str, new_path: str, json_output: bool) -> None:
+@click.option(
+    "--fail-on-alert", is_flag=True, help="Exit with status 1 if the diff reports a security alert."
+)
+def diff(old_path: str, new_path: str, json_output: bool, fail_on_alert: bool = False) -> None:
     """Compare two AIBOM snapshots for supply-chain drift."""
     try:
         old_bom = AIBOM.load(Path(old_path))
@@ -747,6 +744,9 @@ def diff(old_path: str, new_path: str, json_output: bool) -> None:
             console.print(f"\n[yellow]~{len(result.components_modified)} modified[/]")
             for c in result.components_modified:
                 console.print(f"  ~ {c.name}: {'; '.join(c.details)}")
+
+    if fail_on_alert and result.security_alerts:
+        raise click.exceptions.Exit(1)
 
 
 @main.command()

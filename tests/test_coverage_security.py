@@ -32,8 +32,8 @@ def test_unselected_scanners_remain_unknown(tmp_path):
     )
     assert result.exit_code != 0
     bom = AIBOM.load(output)
-    assert bom.metadata.completeness.scanner_status["model"] == "partial"
-    assert bom.metadata.completeness.surfaces_excluded
+    assert bom.metadata.completeness.scanner_status["model"] == "complete"
+    assert not bom.metadata.completeness.surfaces_excluded
     assert bom.metadata.completeness.scanner_status["mcp"] == "unknown"
     assert not CompletenessValidator().validate(bom).is_complete
 
