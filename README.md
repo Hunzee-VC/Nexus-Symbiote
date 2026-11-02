@@ -65,8 +65,8 @@ Inspect the exit status and the inventory's coverage, exclusions and failures. A
 The eight built-in collectors are `shadowscan`, `mcp`, `model`, `prompt`, `rag`, `registry`, `a2a` and `ide_agents`.
 
 ```bash
-# From a reviewed checkout — scan the examples/ fixture
-nexus-symbiote scan examples --no-project-policy --report-only -o demo-agentbom.json
+# From a reviewed checkout — scan the offline demo project (walkthrough: examples/README.md)
+nexus-symbiote scan examples/demo-agent --no-project-policy --report-only -o demo-agentbom.json
 nexus-symbiote summary demo-agentbom.json
 ```
 

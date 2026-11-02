@@ -1,0 +1,10 @@
+{
+  "name": "support-research-assistant",
+  "version": "0.3.0",
+  "url": "https://agents.example.com/support/a2a",
+  "skills": [
+    {"id": "answer-question", "name": "Answer a product question"},
+    {"id": "summarize-ticket", "name": "Summarize a support ticket"}
+  ],
+  "authentication": {"schemes": ["bearer"]}
+}
