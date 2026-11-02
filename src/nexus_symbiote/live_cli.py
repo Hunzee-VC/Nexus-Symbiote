@@ -8,6 +8,7 @@ from pathlib import Path
 
 import click
 
+from nexus_symbiote import modes
 from nexus_symbiote.scanners.live_mcp import discover_tools
 from nexus_symbiote.utils.files import write_output_file
 
@@ -24,11 +25,17 @@ from nexus_symbiote.utils.files import write_output_file
     "--token-env",
     help="Environment variable holding a bearer token; the token is never written to evidence",
 )
-@click.option("-o", "--output", type=click.Path(path_type=Path))
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(path_type=Path),
+    help="Write the observation to this file instead of standard output.",
+)
 def discover_mcp(
     endpoint: str, allowed_origin: tuple[str, ...], token_env: str | None, output: Path | None
 ) -> None:
-    """Observe tools/list without executing tools or starting local servers."""
+    """Live: observe tools/list without executing tools or starting local servers."""
+    modes.require_live("discover-mcp")
     token = os.environ.get(token_env) if token_env else None
     if token_env and not token:
         raise click.ClickException("the explicitly selected token environment variable is empty")

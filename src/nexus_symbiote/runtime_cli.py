@@ -49,8 +49,18 @@ def runtime_group() -> None:
 
 
 @runtime_group.command("keygen")
-@click.option("--private-key", type=click.Path(path_type=Path), required=True)
-@click.option("--public-key", type=click.Path(path_type=Path), required=True)
+@click.option(
+    "--private-key",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="New PEM private key file, created with mode 0600; must not exist.",
+)
+@click.option(
+    "--public-key",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="New PEM public key file; must not exist.",
+)
 def keygen(private_key: Path, public_key: Path) -> None:
     """Create an Ed25519 key pair without overwriting existing files."""
     if private_key.exists() or public_key.exists() or private_key == public_key:
@@ -77,12 +87,25 @@ def keygen(private_key: Path, public_key: Path) -> None:
 @runtime_group.command("sign")
 @click.argument("contract_path", type=click.Path(exists=True, path_type=Path))
 @click.option(
-    "--kind", type=click.Choice(["snapshot", "approval", "trust", "model"]), required=True
+    "--kind",
+    type=click.Choice(["snapshot", "approval", "trust", "model"]),
+    required=True,
+    help="Contract purpose; a signature is valid only for this purpose.",
 )
 @click.option(
-    "--key", "keys", multiple=True, required=True, type=click.Path(exists=True, path_type=Path)
+    "--key",
+    "keys",
+    multiple=True,
+    required=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Ed25519 private key PEM; repeat for multiple signers.",
 )
-@click.option("--out", type=click.Path(path_type=Path), required=True)
+@click.option(
+    "--out",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="Signed envelope file to create; must not exist.",
+)
 def sign(contract_path: Path, kind: str, keys: tuple[Path, ...], out: Path) -> None:
     """Sign an explicit contract; signatures do not establish unmeasured facts."""
     try:
@@ -115,7 +138,10 @@ def sign(contract_path: Path, kind: str, keys: tuple[Path, ...], out: Path) -> N
 @runtime_group.command("verify")
 @click.argument("envelope_path", type=click.Path(exists=True, path_type=Path))
 @click.option(
-    "--kind", type=click.Choice(["snapshot", "approval", "trust", "model"]), required=True
+    "--kind",
+    type=click.Choice(["snapshot", "approval", "trust", "model"]),
+    required=True,
+    help="Expected contract purpose; a contract signed for another purpose is rejected.",
 )
 @click.option(
     "--public-key",
@@ -123,9 +149,19 @@ def sign(contract_path: Path, kind: str, keys: tuple[Path, ...], out: Path) -> N
     multiple=True,
     required=True,
     type=click.Path(exists=True, path_type=Path),
+    help="Trusted Ed25519 public key PEM; repeat to build the trusted key ring.",
 )
-@click.option("--threshold", type=click.IntRange(min=1), default=1)
-@click.option("--bom", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "--threshold",
+    type=click.IntRange(min=1),
+    default=1,
+    help="Minimum number of distinct trusted signatures (default: 1).",
+)
+@click.option(
+    "--bom",
+    type=click.Path(exists=True, path_type=Path),
+    help="The exact companion BOM; required for snapshot contracts.",
+)
 def verify(
     envelope_path: Path, kind: str, keys: tuple[Path, ...], threshold: int, bom: Path | None
 ) -> None:

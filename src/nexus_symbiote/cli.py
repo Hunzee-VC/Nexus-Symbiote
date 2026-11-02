@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
+from typing import Any
 
 import click
 from rich.console import Console
 from rich.table import Table
 
-from nexus_symbiote import __version__
+from nexus_symbiote import __version__, modes
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import AssuranceLevel
 from nexus_symbiote.core.models import AIBOMMetadata, CompletenessClaim
@@ -35,6 +37,14 @@ def _policy(root: Path, *, ignore_project: bool = False) -> Policy:
         return load_policy(root) or default_policy()
     except PolicyError as exc:
         raise click.ClickException(str(exc)) from exc
+
+
+def _load_bom(path: str | Path) -> AIBOM:
+    # Parser and validation messages can quote attacker-controlled input; keep them out.
+    try:
+        return AIBOM.load(Path(path))
+    except (OSError, ValueError, RecursionError) as exc:
+        raise click.ClickException(f"{path} is not a valid native AIBOM file.") from exc
 
 
 SCANNER_REGISTRY: dict[str, type] = {}
@@ -66,10 +76,64 @@ def _get_scanners() -> dict[str, type]:
     return SCANNER_REGISTRY
 
 
-@click.group()
+_MODE_FLAGS = frozenset({"--offline", "--live"})
+
+
+class _RootGroup(click.Group):
+    """Root group that turns mode refusals into clear, nonzero CLI errors."""
+
+    def invoke(self, ctx: click.Context) -> Any:
+        try:
+            return super().invoke(ctx)
+        except click.NoSuchOption as exc:
+            if exc.option_name not in _MODE_FLAGS:
+                raise
+            raise click.UsageError(
+                f"No such option: {exc.option_name}. Mode flags go before the command: "
+                f"nexus-symbiote {exc.option_name} <command> ...",
+                ctx=exc.ctx,
+            ) from None
+        except modes.LiveModeRequiredError as exc:
+            raise click.UsageError(str(exc)) from None
+        except modes.OfflineViolation as exc:
+            raise click.ClickException(
+                f"offline mode blocked {exc} before the command completed. This command "
+                "never needs the network or a subprocess; please report this as a defect."
+            ) from None
+
+
+@click.group(cls=_RootGroup)
 @click.version_option(version=__version__, prog_name="nexus-symbiote")
-def main() -> None:
-    """Nexus SymBiote — Agent Bill of Materials for AI supply chain security."""
+@click.option(
+    "--offline",
+    "offline_flag",
+    is_flag=True,
+    help="Refuse network access and process creation (the default).",
+)
+@click.option(
+    "--live",
+    "live_flag",
+    is_flag=True,
+    help=(
+        "Allow the network and process steps of the live commands "
+        "(discover-mcp, advisories, verify-live). Other commands stay offline."
+    ),
+)
+@click.pass_context
+def main(ctx: click.Context, offline_flag: bool, live_flag: bool) -> None:
+    """Nexus SymBiote — Agent Bill of Materials for AI supply chain security.
+
+    Every command runs offline by default: no name resolution, network
+    connections or subprocesses. Only discover-mcp, advisories and verify-live
+    reach outside local files, and only in live mode: pass --live before the
+    command or set NEXUS_SYMBIOTE_MODE=live.
+    """
+    try:
+        requested = modes.resolve(offline=offline_flag, live=live_flag, environ=os.environ)
+    except ValueError as exc:
+        raise click.UsageError(str(exc), ctx=ctx) from None
+    ctx.meta["nexus_symbiote.mode"] = requested
+    ctx.with_resource(modes.enforce(modes.command_mode(requested.mode, ctx.invoked_subcommand)))
 
 
 @main.command()
@@ -303,6 +367,7 @@ def scan(
     "output_format",
     type=click.Choice(["json", "cyclonedx", "spdx", "sarif"]),
     default="json",
+    help="Output format (default: json). sarif is refused: it cannot carry imported coverage.",
 )
 @click.option("--report-only", is_flag=True, help="Emit imported claims without a CI gate failure")
 def import_shadowscan(
@@ -532,7 +597,7 @@ def validate(
     no_project_policy: bool = False,
 ) -> None:
     """Validate an AIBOM for completeness and integrity."""
-    bom = AIBOM.load(Path(aibom_path))
+    bom = _load_bom(aibom_path)
 
     from nexus_symbiote.signature_policy import load_signature_policies
     from nexus_symbiote.validators.completeness import CompletenessValidator
@@ -620,6 +685,7 @@ def validate(
     "--fail-on-severity",
     type=click.Choice(["critical", "high", "medium", "low", "info", "none"]),
     default=None,
+    help="Fail on any finding at or above this severity (default: from policy, built-in critical); none disables it.",
 )
 @click.option(
     "--no-project-policy",
@@ -634,7 +700,7 @@ def risk(
     no_project_policy: bool = False,
 ) -> None:
     """Score supply-chain risks in an AIBOM."""
-    bom = AIBOM.load(Path(aibom_path))
+    bom = _load_bom(aibom_path)
 
     from nexus_symbiote.validators.risk import RiskScorer
 
@@ -709,16 +775,8 @@ def risk(
 )
 def diff(old_path: str, new_path: str, json_output: bool, fail_on_alert: bool = False) -> None:
     """Compare two AIBOM snapshots for supply-chain drift."""
-    try:
-        old_bom = AIBOM.load(Path(old_path))
-    except Exception:
-        click.echo(f"Error: {old_path} is not a valid native AIBOM file.", err=True)
-        sys.exit(1)
-    try:
-        new_bom = AIBOM.load(Path(new_path))
-    except Exception:
-        click.echo(f"Error: {new_path} is not a valid native AIBOM file.", err=True)
-        sys.exit(1)
+    old_bom = _load_bom(old_path)
+    new_bom = _load_bom(new_path)
 
     from nexus_symbiote.diff.differ import AIBOMDiffer
 
@@ -760,7 +818,7 @@ def diff(old_path: str, new_path: str, json_output: bool, fail_on_alert: bool = 
 @click.argument("aibom_path", type=click.Path(exists=True))
 def summary(aibom_path: str) -> None:
     """Print a summary of an AIBOM."""
-    bom = AIBOM.load(Path(aibom_path))
+    bom = _load_bom(aibom_path)
     s = bom.summary()
 
     console.print("[bold]AIBOM Summary[/]")
@@ -781,13 +839,14 @@ def summary(aibom_path: str) -> None:
 @main.command("blast-radius")
 @click.argument("aibom_path", type=click.Path(exists=True))
 @click.argument("component_ref")
-@click.option("--json-output", is_flag=True)
+@click.option("--json-output", is_flag=True, help="Output as JSON")
 def blast_radius_command(aibom_path: str, component_ref: str, json_output: bool) -> None:
     """Show repository dependencies potentially affected by a component compromise."""
     from nexus_symbiote.graph import blast_radius
 
+    bom = _load_bom(aibom_path)
     try:
-        result = blast_radius(AIBOM.load(Path(aibom_path)), component_ref)
+        result = blast_radius(bom, component_ref)
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
     if json_output:

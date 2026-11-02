@@ -9,6 +9,7 @@ from pathlib import Path
 
 import click
 
+from nexus_symbiote import modes
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.utils.files import write_output_file
 
@@ -16,25 +17,35 @@ from nexus_symbiote.utils.files import write_output_file
 def register_supply_chain_commands(main: click.Group) -> None:
     @main.command("verify-live")
     @click.argument("aibom_path", type=click.Path(exists=True))
-    @click.option("--project", type=click.Path(exists=True), default=".")
+    @click.option(
+        "--project",
+        type=click.Path(exists=True),
+        default=".",
+        help="Untrusted project root (default: current directory); the launch policy must be outside it.",
+    )
     @click.option(
         "--launch-policy",
         required=True,
         type=click.Path(exists=True, dir_okay=False, path_type=Path),
         help="Operator-owned JSON outside the project: exact server references to absolute commands and SHA-256 pins.",
     )
-    @click.option("--json-output", is_flag=True)
-    @click.option("--record", is_flag=True)
+    @click.option("--json-output", is_flag=True, help="Output the verification report as JSON.")
+    @click.option(
+        "--record",
+        is_flag=True,
+        help="Print an unsigned candidate BOM with the observed descriptors instead of a report.",
+    )
     def verify_live(
         aibom_path: str, project: str, launch_policy: Path, json_output: bool, record: bool
     ) -> None:
-        """Observe independently pinned stdio launchers; optionally emit an unsigned candidate.
+        """Live: observe independently pinned stdio launchers; optionally emit an unsigned candidate.
 
         The operator must provision policy outside the untrusted checkout. Pins
         cover launcher bytes; use an externally isolated worker to restrict its
         host dependencies, filesystem, identity and egress. Project settings do
         not supply launch authority. Descriptor matches do not establish safety.
         """
+        modes.require_live("verify-live")
         from nexus_symbiote.core.hashing import open_regular_file, parse_json_strict
         from nexus_symbiote.live.verify import record_candidate, verify_mcp_servers
 
@@ -81,6 +92,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
         "--baseline-path",
         type=click.Path(path_type=Path),
         default=".nexus-symbiote-baseline.json",
+        help="Where to write the unsigned baseline (default: .nexus-symbiote-baseline.json).",
     )
     @click.pass_context
     def baseline(ctx: click.Context, project_path: str, baseline_path: Path) -> None:
@@ -118,7 +130,12 @@ def register_supply_chain_commands(main: click.Group) -> None:
 
     @main.command()
     @click.argument("aibom_path", type=click.Path(exists=True, path_type=Path))
-    @click.option("-o", "--output", type=click.Path(path_type=Path))
+    @click.option(
+        "-o",
+        "--output",
+        type=click.Path(path_type=Path),
+        help="Write the VEX document to this file instead of standard output.",
+    )
     def vex(aibom_path: Path, output: Path | None) -> None:
         """Export schema-validated findings in triage, without asserting exploitability."""
         from nexus_symbiote.generators.vex import VEXGenerator
@@ -136,9 +153,15 @@ def register_supply_chain_commands(main: click.Group) -> None:
 
     @main.command()
     @click.argument("aibom_path", type=click.Path(exists=True, path_type=Path))
-    @click.option("-o", "--output", type=click.Path(path_type=Path))
+    @click.option(
+        "-o",
+        "--output",
+        type=click.Path(path_type=Path),
+        help="Write the advisory report to this file instead of standard output.",
+    )
     def advisories(aibom_path: Path, output: Path | None) -> None:
-        """Explicitly query OSV for exact PyPI/npm package URLs in the inventory."""
+        """Live: query OSV for exact PyPI/npm package URLs in the inventory."""
+        modes.require_live("advisories")
         from nexus_symbiote.advisories import fetch_advisories
 
         if output and output.resolve() == aibom_path.resolve():
