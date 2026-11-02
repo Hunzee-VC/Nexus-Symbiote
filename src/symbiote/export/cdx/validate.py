@@ -86,6 +86,36 @@ def _element_count(doc: dict[str, Any]) -> int:
     return sum(len(doc.get(k) or []) for k in ("components", "services", "dependencies"))
 
 
+def referential_errors(doc: dict[str, Any]) -> list[str]:
+    """What JSON Schema cannot express: every ``bom-ref`` unique, every dependency reference resolvable."""
+    refs: dict[str, str] = {}
+    errors: list[str] = []
+    stack: list[tuple[str, Any]] = [("metadata/component", (doc.get("metadata") or {}).get("component"))]
+    stack += [(f"components/{i}", c) for i, c in enumerate(doc.get("components") or [])]
+    stack += [(f"services/{i}", c) for i, c in enumerate(doc.get("services") or [])]
+    while stack:
+        where, node = stack.pop()
+        if not isinstance(node, dict):
+            continue
+        ref = node.get("bom-ref")
+        if isinstance(ref, str):
+            if ref in refs:
+                errors.append(f"{where}: duplicate bom-ref {ref!r:.120} (also at {refs[ref]})")
+            else:
+                refs[ref] = where
+        stack += [(f"{where}/components/{i}", c) for i, c in enumerate(node.get("components") or [])]
+        stack += [(f"{where}/services/{i}", c) for i, c in enumerate(node.get("services") or [])]
+    for i, dep in enumerate(doc.get("dependencies") or []):
+        if not isinstance(dep, dict):
+            continue
+        for target in [dep.get("ref"), *(dep.get("dependsOn") or []), *(dep.get("provides") or [])]:
+            if isinstance(target, str) and target not in refs:
+                errors.append(
+                    f"dependencies/{i}: reference {target!r:.120} resolves to no component or service"
+                )
+    return sorted(errors)[:200]
+
+
 def validate_cyclonedx(doc: dict[str, Any], version: str | None = None) -> list[str]:
     """Return schema violations (empty when valid). Also runs cyclonedx-python-lib's strict validator when present."""
     version = version or str(doc.get("specVersion", "1.7"))
@@ -95,6 +125,9 @@ def validate_cyclonedx(doc: dict[str, Any], version: str | None = None) -> list[
         f"{'/'.join(str(p) for p in e.absolute_path) or '$'}: {e.message[:300]}"
         for e in sorted(_validator(version).iter_errors(doc), key=lambda e: list(e.absolute_path))
     ]
+    if errors:
+        return errors
+    errors = referential_errors(doc)
     if errors:
         return errors
     if _element_count(doc) > SECOND_VALIDATOR_ELEMENT_BUDGET:
@@ -114,4 +147,4 @@ def validate_cyclonedx(doc: dict[str, Any], version: str | None = None) -> list[
     return errors
 
 
-__all__ = ["SECOND_VALIDATOR_ELEMENT_BUDGET", "validate_cyclonedx"]
+__all__ = ["SECOND_VALIDATOR_ELEMENT_BUDGET", "referential_errors", "validate_cyclonedx"]

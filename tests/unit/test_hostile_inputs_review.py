@@ -261,3 +261,39 @@ def test_click_is_a_declared_dependency() -> None:
     pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
     deps = tomllib.loads(pyproject.read_text())["project"]["dependencies"]
     assert any(d.startswith("click") for d in deps)  # cli/update_cmd.py imports click directly
+
+
+def test_cyclonedx_referential_integrity() -> None:
+    base = {"bomFormat": "CycloneDX", "specVersion": "1.7", "version": 1}
+    dup = {
+        **base,
+        "components": [
+            {"type": "library", "name": "a", "bom-ref": "x"},
+            {"type": "library", "name": "b", "bom-ref": "x"},
+        ],
+    }
+    assert any("duplicate bom-ref" in e for e in validate_cyclonedx(dup))
+    nested = {
+        **base,
+        "components": [
+            {
+                "type": "library",
+                "name": "a",
+                "bom-ref": "x",
+                "components": [{"type": "file", "name": "f", "bom-ref": "x"}],
+            }
+        ],
+    }
+    assert any("duplicate bom-ref" in e for e in validate_cyclonedx(nested))
+    dangling = {
+        **base,
+        "components": [{"type": "library", "name": "a", "bom-ref": "x"}],
+        "dependencies": [{"ref": "x", "dependsOn": ["missing"]}],
+    }
+    assert any("resolves to no component" in e for e in validate_cyclonedx(dangling))
+    ok = {
+        **base,
+        "components": [{"type": "library", "name": "a", "bom-ref": "x"}],
+        "dependencies": [{"ref": "x", "dependsOn": []}],
+    }
+    assert validate_cyclonedx(ok) == []
