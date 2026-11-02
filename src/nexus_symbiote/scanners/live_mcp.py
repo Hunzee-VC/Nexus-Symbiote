@@ -273,7 +273,10 @@ class _DeadlineSocket:
 
 class _PinnedHTTPSConnection(http.client.HTTPSConnection):
     def __init__(self, host: str, port: int, family: int, address: str, timeout: float) -> None:
-        self._tls_context = ssl.create_default_context()
+        context = ssl.create_default_context()
+        # Explicit: a system OpenSSL policy must not lower the floor below TLS 1.2.
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        self._tls_context = context
         super().__init__(host, port, timeout=timeout, context=self._tls_context)
         self._family = family
         self._address = address

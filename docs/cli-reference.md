@@ -177,7 +177,7 @@ nexus-symbiote runtime keygen [OPTIONS]
 | Option | Description |
 |---|---|
 | `--private-key` `PATH` | New PEM private key file, created with mode 0600; must not exist. (required) |
-| `--public-key` `PATH` | New PEM public key file; must not exist. (required) |
+| `--public-key` `PATH` | New PEM public key file, created with mode 0600; must not exist. (required) |
 
 ### `runtime sign`
 

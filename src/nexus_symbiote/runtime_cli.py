@@ -94,7 +94,7 @@ def runtime_group() -> None:
     "--public-key",
     type=click.Path(path_type=Path),
     required=True,
-    help="New PEM public key file; must not exist.",
+    help="New PEM public key file, created with mode 0600; must not exist.",
 )
 def keygen(private_key: Path, public_key: Path) -> None:
     """Create an Ed25519 key pair without overwriting existing files."""
@@ -114,7 +114,6 @@ def keygen(private_key: Path, public_key: Path) -> None:
         key.public_key().public_bytes(
             serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
         ),
-        0o644,
     )
     click.echo(json.dumps({"key_id": key_id(key.public_key())}))
 

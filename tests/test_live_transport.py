@@ -244,3 +244,13 @@ def test_real_http_parser_uses_pinned_tls_adapter_and_connection_close(monkeypat
     assert result.body == b"{}"
     assert raw.connected == [("93.184.216.34", 443)]
     assert secured.closed
+
+
+def test_pinned_https_context_requires_tls12_and_verified_hostnames():
+    connection = live._PinnedHTTPSConnection(
+        "fixture.example", 443, socket.AF_INET, "93.184.216.34", 1.0
+    )
+    context = connection._tls_context
+    assert context.minimum_version >= ssl.TLSVersion.TLSv1_2
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert context.check_hostname is True

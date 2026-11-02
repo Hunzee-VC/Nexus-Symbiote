@@ -156,3 +156,52 @@ def test_concurrent_worker_capacity_exhaustion_denies_without_waiting():
     finally:
         for _ in range(acquired):
             validation._WORKER_SLOTS.release()
+
+
+def test_worker_blocks_every_optional_format_checker_jsonschema_imports():
+    # A new optional checker in jsonschema must be reviewed here: an expensive one
+    # spends the CPU budget meant for the untrusted schema and arguments.
+    import ast
+    import importlib.util
+
+    spec = importlib.util.find_spec("jsonschema._format")
+    assert spec is not None and spec.origin is not None
+    with open(spec.origin, encoding="utf-8") as stream:
+        tree = ast.parse(stream.read())
+    optional = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Try, ast.With)):
+            for child in ast.walk(node):
+                if isinstance(child, ast.Import):
+                    optional.update(alias.name.split(".")[0] for alias in child.names)
+                elif isinstance(child, ast.ImportFrom) and child.module and not child.level:
+                    optional.add(child.module.split(".")[0])
+    optional -= {"jsonschema"}
+    assert optional
+    assert optional <= set(validation._UNUSED_FORMAT_MODULES)
+
+
+def test_worker_import_skips_format_checkers_and_fits_the_cpu_budget():
+    probe = (
+        "import resource, sys\n"
+        "from nexus_symbiote.runtime_validation import _UNUSED_FORMAT_MODULES, "
+        "_disable_unused_format_checkers\n"
+        "_disable_unused_format_checkers()\n"
+        "from jsonschema import Draft202012Validator\n"
+        "Draft202012Validator({'type': 'object'}).validate({})\n"
+        "loaded = [n for n in _UNUSED_FORMAT_MODULES if sys.modules.get(n) is not None]\n"
+        "usage = resource.getrusage(resource.RUSAGE_SELF)\n"
+        "print(loaded, usage.ru_utime + usage.ru_stime)\n"
+    )
+    result = subprocess.run(  # noqa: S603
+        [sys.executable, "-I", "-c", probe],
+        capture_output=True,
+        text=True,
+        env={"PATH": os.defpath},
+        timeout=60,
+        check=True,
+    )
+    loaded, cpu = result.stdout.rsplit(" ", 1)
+    assert loaded == "[]"
+    # The worker's RLIMIT_CPU is 1 second; startup and imports must leave most of it.
+    assert float(cpu) < 0.5
