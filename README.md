@@ -117,6 +117,10 @@ Collection is static by default and does not execute project modules, model load
 
 MCP references include the relative configuration path and declared name. Recollect and review legacy snapshots that used name-only identities. Python source declaration collection has bounded application-file coverage and reports unresolved or dynamic registrations as gaps. See [TypeScript inventory](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/typescript-inventory.md), [ShadowScan integration](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/shadowscan-integration.md) and [runtime assurance](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/runtime-assurance.md) for the exact supported contracts.
 
+Project validation binds static MCP records to the original configuration before export redaction and compares configured tool fingerprints with fresh local evidence. Changing a package at the same version, launcher arguments, environment values, endpoint paths or declared descriptors invalidates the old snapshot. Legacy snapshots without this binding need recollection; see [source reconciliation and migration](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/verification-source-binding.md).
+
+IDE permission records describe collected project declarations. Claude's `permissions.defaultMode` and broad tool allowances are retained, while user/managed policy, workspace trust, deny/ask precedence and session flags remain outside effective-authorization verification. Scanner failures emit application-owned diagnostic codes; raw exception text and invalid model configuration values are omitted from failure reports.
+
 ## Commands and exit codes
 
 | Command | Purpose |

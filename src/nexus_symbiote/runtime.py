@@ -239,7 +239,8 @@ def verify_contract(
     *,
     threshold: int = 1,
 ) -> tuple[ApprovedSnapshot | ActionApproval | TrustStatus | HostedModelAttestation, set[str]]:
-    if threshold < 1 or not trusted_keys:
+    _validate_threshold(threshold)
+    if not trusted_keys:
         raise AuthorizationError("positive threshold and purpose-specific trusted keys required")
     try:
         payload = base64.b64decode(envelope.payload, validate=True)
@@ -284,6 +285,24 @@ def verify_contract(
         return contract, accepted
     except (ValueError, TypeError, KeyError) as exc:
         raise AuthorizationError(str(exc)) from exc
+
+
+def _validate_threshold(threshold: int) -> None:
+    # Envelope admits at most 32 signatures. Reject bool and coercible values so
+    # an operator's quorum policy has one unambiguous, achievable meaning.
+    if type(threshold) is not int or not 1 <= threshold <= 32:
+        raise AuthorizationError("quorum threshold must be an integer between 1 and 32")
+
+
+def _validate_key_quorum(threshold: int, trusted_keys: Mapping[str, Ed25519PublicKey]) -> None:
+    authorized = {
+        identifier for identifier, public in trusted_keys.items() if identifier == key_id(public)
+    }
+    # An empty ring with the default threshold remains a disabled purpose, as
+    # before. It can never verify a contract; an explicit larger quorum is a
+    # configuration error. Aliases for the same key do not create more signers.
+    if (trusted_keys or threshold > 1) and threshold > len(authorized):
+        raise AuthorizationError("quorum threshold exceeds distinct authorized signing keys")
 
 
 def _window(contract: ValidWindow, now: datetime, maximum: timedelta) -> None:
@@ -421,10 +440,23 @@ class ReferenceGateway(Generic[T]):
         execute: Callable[[ToolCall], T],
         approval_actors: Mapping[str, str] | None = None,
         clock: Callable[[], datetime] | None = None,
+        snapshot_threshold: int = 1,
+        approval_threshold: int = 1,
+        trust_threshold: int = 1,
     ) -> None:
+        for threshold, keys in (
+            (snapshot_threshold, snapshot_keys),
+            (approval_threshold, approval_keys),
+            (trust_threshold, trust_keys),
+        ):
+            _validate_threshold(threshold)
+            _validate_key_quorum(threshold, keys)
         self.snapshot_keys = dict(snapshot_keys)
         self.approval_keys = dict(approval_keys)
         self.trust_keys = dict(trust_keys)
+        self.snapshot_threshold = snapshot_threshold
+        self.approval_threshold = approval_threshold
+        self.trust_threshold = trust_threshold
         self.state = state
         self.authenticate = authenticate
         self.describe = describe
@@ -453,14 +485,18 @@ class ReferenceGateway(Generic[T]):
             raise AuthorizationError("tool arguments exceed the supported JSON budget") from exc
         timestamp = self.clock()
         context = self.authenticate()
-        statuses, trust_signers = verify_contract(trust, "trust", self.trust_keys)
+        statuses, trust_signers = verify_contract(
+            trust, "trust", self.trust_keys, threshold=self.trust_threshold
+        )
         if not isinstance(statuses, TrustStatus):
             raise AuthorizationError("unexpected contract")
         _window(statuses, timestamp, timedelta(hours=1))
         if statuses.tenant != context.tenant:
             raise AuthorizationError("trust status tenant mismatch")
         trust_head = self.state.accept_trust_status(statuses, trust_signers)
-        approved, snapshot_signers = verify_contract(snapshot, "snapshot", self.snapshot_keys)
+        approved, snapshot_signers = verify_contract(
+            snapshot, "snapshot", self.snapshot_keys, threshold=self.snapshot_threshold
+        )
         if not isinstance(approved, ApprovedSnapshot):
             raise AuthorizationError("unexpected snapshot")
         _window(approved, timestamp, timedelta(hours=24))
@@ -532,7 +568,9 @@ class ReferenceGateway(Generic[T]):
         if grant.require_approval:
             if approval is None:
                 raise AuthorizationError("operation-bound approval required")
-            verified_approval, signers = verify_contract(approval, "approval", self.approval_keys)
+            verified_approval, signers = verify_contract(
+                approval, "approval", self.approval_keys, threshold=self.approval_threshold
+            )
             if not isinstance(verified_approval, ActionApproval):
                 raise AuthorizationError("unexpected approval")
             consent = verified_approval

@@ -15,6 +15,7 @@ from nexus_symbiote.core.models import (
     ClaimEvidence,
     MCPServerComponent,
     RegistryEntryComponent,
+    ToolComponent,
 )
 from nexus_symbiote.scanner_catalog import BUILTIN_SCANNER_NAMES
 
@@ -214,9 +215,9 @@ class CompletenessValidator:
         root = project_root.absolute()
         observed: dict[str, AnyComponent] = {}
 
-        def incomplete(surface: str, description: str) -> None:
+        def incomplete(surface: str, description: str, severity: str = "error") -> None:
             report.is_complete = False
-            report.issues.append(CompletenessIssue(surface, description, "error"))
+            report.issues.append(CompletenessIssue(surface, description, severity))
 
         for scanner_type in ALL_SCANNERS:
             scanner = scanner_type()
@@ -251,6 +252,21 @@ class CompletenessValidator:
         supplied = {c.bom_ref: c for c in bom.components}
         for actual in expected.components:
             declared = supplied.get(actual.bom_ref)
+            if (
+                isinstance(actual, MCPServerComponent)
+                and actual.properties.get("collection_mode") == "static-config"
+                and isinstance(declared, MCPServerComponent)
+                and (
+                    not declared.properties.get("static_config_hash")
+                    or declared.properties.get("static_config_hash_profile")
+                    != actual.properties["static_config_hash_profile"]
+                )
+            ):
+                incomplete(
+                    actual.bom_ref,
+                    "Static MCP source binding is unknown in this snapshot; re-collect it before reconciliation.",
+                    "unknown",
+                )
             if declared is None or not self._same_subject(root, declared, actual):
                 source_kind = {
                     ComponentType.PROMPT_TEMPLATE: "instruction files",
@@ -369,14 +385,41 @@ class CompletenessValidator:
             isinstance(local, MCPServerComponent)
             and local.properties.get("collection_mode") == "static-config"
         ):
-            # Compare only the transport, redacted launcher and endpoint origin
-            # actually available from static configuration. A live observation
-            # can supply extra descriptor evidence without changing this subject.
-            return isinstance(supplied, MCPServerComponent) and (
-                supplied.transport,
-                supplied.command,
-                supplied.endpoint_url,
-            ) == (local.transport, local.command, local.endpoint_url)
+            # Redaction hides executable arguments and endpoint paths. Compare
+            # the original, versioned source binding as well; matching package
+            # versions or redacted strings do not identify the same launcher.
+            # No live observation can supply missing static source evidence.
+            return (
+                isinstance(supplied, MCPServerComponent)
+                and (
+                    supplied.transport,
+                    supplied.command,
+                    supplied.endpoint_url,
+                )
+                == (local.transport, local.command, local.endpoint_url)
+                and all(
+                    supplied.properties.get(field) == local.properties[field]
+                    for field in ("static_config_hash", "static_config_hash_profile")
+                )
+            )
+        if (
+            isinstance(local, ToolComponent)
+            and local.properties.get("collection_mode") == "static-config"
+        ):
+            # IntegrityValidator checks the supplied descriptor's consistency
+            # with its own digest. Reconciliation must independently compare
+            # that digest to the original descriptor freshly read from config.
+            # A served descriptor is a different observation scope and cannot
+            # replace this source binding merely by asserting live provenance.
+            return isinstance(supplied, ToolComponent) and (
+                supplied.mcp_server_ref,
+                supplied.definition_hash_version,
+                supplied.definition_hash,
+            ) == (
+                local.mcp_server_ref,
+                local.definition_hash_version,
+                local.definition_hash,
+            )
         return True
 
     def _find_orphan_refs(self, bom: AIBOM) -> list[tuple[str, str]]:

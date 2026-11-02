@@ -50,6 +50,20 @@ Verification requires the expected purpose, an authorized key set, distinct
 signers, subject consistency, schema validity and current validity window.
 The CLI reports contract verification separately from invocation authorization.
 
+`ReferenceGateway` accepts independent `snapshot_threshold`, `approval_threshold`
+and `trust_threshold` keyword arguments. Each defaults to `1`; set a larger value
+when the operator policy requires multiple distinct authorized signers for that
+purpose. Values must be integers from 1 through 32 and cannot exceed the number
+of distinct, correctly identified public keys in that purpose's key ring.
+Booleans and duplicate aliases do not establish a quorum. An empty key ring is
+allowed only with the default threshold and disables verification for that
+purpose; it never approves an unsigned contract. The pinned stdio adapter carries
+the gateway's thresholds into the same-process invocation. Multi-signer action
+approvals still bind every accepted signer to the contract's authorized actor.
+
+Runtime CLI contract and key inputs must be bounded regular files. Symlinks and
+FIFOs are rejected rather than followed or waited on.
+
 ## Gateway adapters
 
 Construct `ReferenceGateway` with these callbacks:
