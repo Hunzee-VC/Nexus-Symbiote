@@ -55,6 +55,7 @@ class PinnedStdioSession:
         self._process: subprocess.Popen[bytes] | None = None
         self._deadline = 0.0
         self._next_id = 1
+        self._lookup_attempted = False
         self._described: str | None = None
         self._called = False
         self._used = False
@@ -108,6 +109,11 @@ class PinnedStdioSession:
                 hello.get("protocolVersion") != PROTOCOL
                 or not isinstance(hello.get("capabilities"), dict)
                 or not isinstance(hello["capabilities"].get("tools"), dict)
+                or not isinstance(hello.get("serverInfo"), dict)
+                or not all(
+                    isinstance(hello["serverInfo"].get(key), str) and bool(hello["serverInfo"][key])
+                    for key in ("name", "version")
+                )
             ):
                 raise AuthorizationError("MCP tool capability not negotiated")
             self._send({"method": "notifications/initialized"})
@@ -118,7 +124,9 @@ class PinnedStdioSession:
 
     def _send(self, message: dict[str, Any]) -> None:
         proc = self._process
-        if proc is None or proc.stdin is None or proc.poll() is not None:
+        # Do not poll/reap before cleanup: keeping the child waitable prevents
+        # PID reuse before killpg, including when the server exits early.
+        if proc is None or proc.stdin is None:
             raise AuthorizationError("pinned session is closed")
         payload = memoryview(canonical_bytes({"jsonrpc": "2.0", **message}) + b"\n")
         if len(payload) > 1024 * 1024:
@@ -148,9 +156,9 @@ class PinnedStdioSession:
         return msg["result"]  # type: ignore[no-any-return]
 
     def describe(self, server_id: str, tool_name: str) -> ServedTool:
-        if server_id != self.server_id or self._described is not None:
+        if server_id != self.server_id or self._lookup_attempted:
             raise AuthorizationError("session server mismatch or repeated descriptor lookup")
-        self._described = tool_name
+        self._lookup_attempted = True
         tools: dict[str, dict[str, Any]] = {}
         cursors: set[str] = set()
         params: dict[str, Any] = {}
@@ -175,6 +183,7 @@ class PinnedStdioSession:
             if "nextCursor" not in result:
                 if tool_name not in tools:
                     raise AuthorizationError("approved tool missing from session")
+                self._described = tool_name
                 return ServedTool(
                     endpoint_identity=self.endpoint_identity, definition=tools[tool_name]
                 )
@@ -204,21 +213,23 @@ class PinnedStdioSession:
     def __exit__(self, *_: object) -> None:
         proc = self._process
         self._process = None
-        if proc is not None:
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            try:
-                proc.wait(timeout=5)
-            finally:
-                if proc.stdin is not None:
-                    proc.stdin.close()
-                if proc.stdout is not None:
-                    proc.stdout.close()
-        if self._directory is not None:
-            self._directory.cleanup()
-            self._directory = None
+        try:
+            if proc is not None:
+                try:
+                    try:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    proc.wait(timeout=5)
+                finally:
+                    if proc.stdin is not None:
+                        proc.stdin.close()
+                    if proc.stdout is not None:
+                        proc.stdout.close()
+        finally:
+            if self._directory is not None:
+                self._directory.cleanup()
+                self._directory = None
 
 
 def invoke_pinned_stdio(
