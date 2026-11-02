@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import collections
 import json
 import sys
 from pathlib import Path
@@ -262,24 +263,52 @@ def scan(
             "--shadowscan-scope", help="root (findings about this repository) | estate (every finding)."
         ),
     ] = "root",
+    valid_for: Annotated[
+        int | None,
+        typer.Option(
+            "--valid-for",
+            help="Validity window in days (sets snapshot.validity.not_after; AB-STD-05).",
+            min=1,
+        ),
+    ] = None,
+    profile: Annotated[
+        str | None,
+        typer.Option(
+            "--profile",
+            help="Evaluate conformance at this level after the scan: minimal | standard | verified (exit 5 when not attained).",
+        ),
+    ] = None,
     as_json: JsonFlag = False,
 ) -> None:
     """Zero-config collection: produce a declared AgentBOM snapshot (companion, CycloneDX 1.7, SPDX 3.0.1) from a repository."""
+    from datetime import UTC, datetime, timedelta
+
     from symbiote.confined import write_scan_output
     from symbiote.digest import bytes_digest
     from symbiote.export.companion import companion_bytes
+    from symbiote.model.common import Validity
+    from symbiote.model.entities import CycloneDXLink, Links, SpdxLink
     from symbiote.scan import scan as run_scan
     from symbiote.snapshot.state import ChainConflictError
 
     if fmt not in ("companion", "cyclonedx", "spdx", "all"):
         console.print(f"[red]unknown format {fmt!r}[/red]")
         raise typer.Exit(exit_codes.USAGE)
+    if profile is not None and profile not in ("minimal", "standard", "verified"):
+        console.print("[red]--profile must be minimal, standard or verified[/red]")
+        raise typer.Exit(exit_codes.USAGE)
+    if not path.is_dir():
+        console.print(f"[red]{path}[/red]: not a directory (nothing to scan)")
+        raise typer.Exit(exit_codes.IO)
+    now = datetime(2000, 1, 1, tzinfo=UTC) if deterministic else datetime.now(UTC)
+    validity = Validity(not_before=now, not_after=now + timedelta(days=valid_for)) if valid_for else None
     try:
         outcome = run_scan(
             path,
             agent_name=name,
             home=Path.home() if user_scope else None,
             deterministic=deterministic,
+            now=now,
             include_text=include_text,
             policy=not no_policy,
             store=store,
@@ -287,70 +316,142 @@ def scan(
                 **({"shadowscan_report": str(shadowscan_report.resolve())} if shadowscan_report else {}),
                 "shadowscan_scope": shadowscan_scope,
             },
+            validity=validity,
         )
     except ChainConflictError as exc:
         console.print(f"[red]anti-rollback conflict[/red]: {exc}")
         raise typer.Exit(exit_codes.ROLLBACK) from None
     bom = outcome.bom
     written: dict[str, str] = {}
-    companion = companion_bytes(bom)
     companion_path = out / "agentbom.json"
-    write_scan_output(companion_path, companion)
-    written["companion"] = str(companion_path)
-    companion_digest = bytes_digest(companion)
+    # Exports reference the companion by its snapshot digest (the Merkle root), which the companion states and
+    # `symbiote verify` recomputes; the companion then links each export by the digest of the bytes written.
+    # Neither `links` nor `loss_report` is a committed leaf, so adding them after sealing keeps the root intact.
     errors: dict[str, list[str]] = {}
+    links_update: dict[str, Any] = {}
+    loss_report = None
     if fmt in ("cyclonedx", "all"):
         from symbiote.export.cdx import export_cyclonedx, validate_cyclonedx
 
         doc, loss = export_cyclonedx(
             bom,
             include_text=include_text,
-            companion_digest=companion_digest,
+            companion_digest=bom.snapshot.digest,
             companion_ref=companion_path.name,
         )
         errors["cyclonedx"] = validate_cyclonedx(doc)
-        write_scan_output(out / "agentbom.cdx.json", (json.dumps(doc, indent=2) + "\n").encode())
+        cdx_bytes = (json.dumps(doc, indent=2) + "\n").encode("utf-8")
+        write_scan_output(out / "agentbom.cdx.json", cdx_bytes)
         write_scan_output(
             out / "agentbom.cdx.loss.json", (json.dumps(loss.to_json_dict(), indent=2) + "\n").encode()
         )
         written["cyclonedx"] = str(out / "agentbom.cdx.json")
+        serial = str(doc.get("serialNumber", ""))
+        links_update["cyclonedx"] = CycloneDXLink(
+            serial_number=serial,
+            version=int(doc.get("version", 1)),
+            bom_link=f"urn:cdx:{serial.removeprefix('urn:uuid:')}/{doc.get('version', 1)}",
+            digest=bytes_digest(cdx_bytes),
+        )
+        loss_report = loss
     if fmt in ("spdx", "all"):
         from symbiote.export.spdx import export_spdx, validate_spdx
 
         sdoc, sloss = export_spdx(
             bom,
             include_text=include_text,
-            companion_digest=companion_digest,
+            companion_digest=bom.snapshot.digest,
             companion_ref=companion_path.name,
         )
         errors["spdx"] = validate_spdx(sdoc)
-        write_scan_output(out / "agentbom.spdx.json", (json.dumps(sdoc, indent=2) + "\n").encode())
+        spdx_bytes = (json.dumps(sdoc, indent=2) + "\n").encode("utf-8")
+        write_scan_output(out / "agentbom.spdx.json", spdx_bytes)
         write_scan_output(
             out / "agentbom.spdx.loss.json", (json.dumps(sloss.to_json_dict(), indent=2) + "\n").encode()
         )
         written["spdx"] = str(out / "agentbom.spdx.json")
+        doc_iri = next(
+            (
+                str(n.get("spdxId") or n.get("@id"))
+                for n in sdoc.get("@graph", [])
+                if str(n.get("type", "")).endswith("SpdxDocument")
+            ),
+            "",
+        )
+        links_update["spdx"] = SpdxLink(document_iri=doc_iri, digest=bytes_digest(spdx_bytes))
+        if loss_report is None:
+            loss_report = sloss
+    if links_update or loss_report is not None:
+        changes: dict[str, Any] = {}
+        if links_update:
+            changes["links"] = Links(**links_update)
+        if loss_report is not None:
+            changes["loss_report"] = loss_report
+        bom = bom.replace(**changes)
+    companion = companion_bytes(bom)
+    write_scan_output(companion_path, companion)
+    written["companion"] = str(companion_path)
+    evidence = {
+        "cyclonedx_valid": not errors["cyclonedx"] if "cyclonedx" in errors else None,
+        "spdx_valid": not errors["spdx"] if "spdx" in errors else None,
+        "companion_digest": bytes_digest(companion),
+        "snapshot_digest": bom.snapshot.digest,
+        "produced_at": now.isoformat(),
+    }
+    validation_path = out / "agentbom.validation.json"
+    write_scan_output(
+        validation_path,
+        (
+            json.dumps(
+                {"schema": "symbiote.validation/v1", **{k: v for k, v in evidence.items() if v is not None}},
+                indent=2,
+            )
+            + "\n"
+        ).encode(),
+    )
+    written["validation"] = str(validation_path)
+    conformance_report = None
+    if profile is not None:
+        from symbiote.policy import evaluate_conformance
+
+        conformance_report = evaluate_conformance(
+            bom,
+            profile,
+            evidence={k: v for k, v in evidence.items() if v is not None},  # type: ignore[arg-type]
+        )
     coverage = {s.value: c.status.value for s, c in bom.coverage.surfaces.items()}
     summary = {
         "agent": bom.subject,
         "snapshot": bom.snapshot.digest,
         "serial": bom.snapshot.serial,
         "kind": bom.snapshot.kind.value,
+        "validUntil": bom.snapshot.validity.not_after.isoformat()
+        if bom.snapshot.validity.not_after
+        else None,
         "entities": outcome.counts,
         "edges": len(bom.edges),
         "coverage": coverage,
         "collectors": [c.to_json_dict() for c in bom.coverage.collectors],
         "warnings": outcome.warnings,
         "written": written,
-        "cyclonedxValid": not errors["cyclonedx"] if "cyclonedx" in errors else None,
+        "cyclonedxValid": evidence["cyclonedx_valid"],
         "cyclonedxErrors": errors.get("cyclonedx", [])[:20],
-        "spdxValid": not errors["spdx"] if "spdx" in errors else None,
+        "spdxValid": evidence["spdx_valid"],
         "spdxErrors": errors.get("spdx", [])[:20],
+        "links": bom.links.to_json_dict(),
+        "lossReport": {
+            "items": len(loss_report.items),
+            "securityRelevantDropped": len(loss_report.security_relevant_dropped),
+        }
+        if loss_report is not None
+        else None,
         "findings": outcome.policy.counts() if outcome.policy else None,
         "flags": {f.flag.value: f.value.value for f in bom.derived.flags if f.value.value != "false"},
         "chainIssues": [
             {"check": i.check_id, "severity": i.severity.value, "message": i.message}
             for i in outcome.chain_issues
         ],
+        "conformance": conformance_report.to_json() if conformance_report is not None else None,
     }
     lines = [
         f"[bold]{bom.subject}[/bold]  snapshot {bom.snapshot.digest[:23]}…  ({bom.snapshot.kind.value}, serial {bom.snapshot.serial})",
@@ -381,9 +482,20 @@ def scan(
                 if not errors[key]
                 else f"[red]{label} validation errors[/red]: " + "; ".join(errors[key][:3])
             )
+    if conformance_report is not None:
+        lines.append(
+            f"conformance: requested {conformance_report.requested}, attained {conformance_report.attained or 'none'}"
+            + (
+                ""
+                if conformance_report.passed
+                else " — run `symbiote conformance` with --evidence for the reasons"
+            )
+        )
     emit(summary, as_json, "\n".join(lines))
     if any(errors.values()):
         raise typer.Exit(exit_codes.SCHEMA)
+    if conformance_report is not None and not conformance_report.passed:
+        raise typer.Exit(exit_codes.COVERAGE)
 
 
 @app.command()
@@ -413,6 +525,20 @@ def validate(files: list[Path], as_json: JsonFlag = False) -> None:
 
             errors = validate_spdx(data)
             fmt = "spdx-3.0.1"
+        elif isinstance(data, dict) and {"direction", "sourceFormat", "targetFormat"} <= set(data):
+            from pydantic import ValidationError
+
+            from symbiote.model.entities import LossReport
+
+            try:
+                LossReport.model_validate(data)
+                errors = []
+            except ValidationError as exc:
+                errors = [str(e.get("msg")) for e in exc.errors()][:10]
+            fmt = "agentbom-loss-report"
+        elif isinstance(data, dict) and data.get("schema") == "symbiote.validation/v1":
+            errors = [] if isinstance(data.get("snapshot_digest"), str) else ["snapshot_digest missing"]
+            fmt = "symbiote-validation-evidence"
         else:
             errors = ["not a companion, CycloneDX or SPDX 3 document"]
             fmt = "unknown"
@@ -769,7 +895,14 @@ def policy_check(
     }
     lines = [
         f"{len(result.findings)} finding(s) from {len(result.checks_run)} checks; flags: "
-        + ", ".join(f"{f.flag.value}={f.value.value}" for f in result.flags if f.value.value != "false")
+        + ", ".join(
+            f"{flag}={value}" + (f" x{count}" if count > 1 else "")
+            for (flag, value), count in sorted(
+                collections.Counter(
+                    (f.flag.value, f.value.value) for f in result.flags if f.value.value != "false"
+                ).items()
+            )
+        )
     ]
     for f in result.findings:
         colour = {"critical": "red", "high": "red", "medium": "yellow", "low": "cyan", "info": "white"}[
@@ -849,6 +982,13 @@ def policy_export_rego(
 def conformance(
     companion: Path,
     level: Annotated[str, typer.Option("--level", help="minimal | standard | verified")] = "minimal",
+    evidence: Annotated[
+        Path | None,
+        typer.Option(
+            "--evidence",
+            help="Validation evidence JSON (`agentbom.validation.json` written by `symbiote scan`, or any object with cyclonedx_valid / spdx_valid / … keys). Defaults to the companion's sibling file when present.",
+        ),
+    ] = None,
     as_json: JsonFlag = False,
 ) -> None:
     """Evaluate AgentBOM conformance requirements (spec/conformance.md) up to the requested level."""
@@ -857,7 +997,22 @@ def conformance(
     if level not in ("minimal", "standard", "verified"):
         console.print("[red]level must be minimal, standard or verified[/red]")
         raise typer.Exit(exit_codes.USAGE)
-    report = evaluate_conformance(load_companion_or_exit(companion), level)  # type: ignore[arg-type]
+    evidence_path = evidence or companion.with_name("agentbom.validation.json")
+    facts: dict[str, Any] = {}
+    if evidence_path.is_file():
+        try:
+            loaded = json.loads(evidence_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            console.print(f"[red]{evidence_path}[/red]: {exc}")
+            raise typer.Exit(exit_codes.IO) from None
+        if not isinstance(loaded, dict):
+            console.print(f"[red]{evidence_path}[/red]: evidence must be a JSON object")
+            raise typer.Exit(exit_codes.SCHEMA)
+        facts = {k: v for k, v in loaded.items() if k != "schema"}
+    elif evidence is not None:
+        console.print(f"[red]{evidence}[/red]: not found")
+        raise typer.Exit(exit_codes.IO)
+    report = evaluate_conformance(load_companion_or_exit(companion), level, evidence=facts)  # type: ignore[arg-type]
     data = report.to_json()
     lines = [
         f"requested {report.requested}; attained {report.attained or 'none'} — {'PASS' if report.passed else 'NOT ATTAINED'}",

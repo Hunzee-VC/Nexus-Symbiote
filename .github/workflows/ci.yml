@@ -51,6 +51,39 @@ jobs:
           printf '{"name":"echo","inputSchema":{"type":"object"}}' > /tmp/tool.json
           symbiote digest tooldef /tmp/tool.json --json
 
+  shadowscan-interop:
+    name: Nexus ShadowScan interop (inventory round trip)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install Symbiote and ShadowScan (separate environments)
+        run: |
+          uv venv .venv --python 3.13
+          . .venv/bin/activate
+          uv pip install -e ".[dev]"
+          deactivate
+          uv venv .venv-shadowscan --python 3.13
+          .venv-shadowscan/bin/python -m pip install --quiet "NexusShadowScan>=0.1.4,<0.2"
+          .venv-shadowscan/bin/shadowscan --version
+      - name: Generated inventories register the example agent in ShadowScan
+        run: |
+          . .venv/bin/activate
+          SYMBIOTE_SHADOWSCAN_BIN="$PWD/.venv-shadowscan/bin/shadowscan" pytest -q tests/unit/test_shadowscan.py
+      - name: Round trip on the example (ShadowScan report -> observed snapshot -> inventory -> ShadowScan)
+        run: |
+          . .venv/bin/activate
+          .venv-shadowscan/bin/shadowscan code examples/triage-agent --format json -o /tmp/ss.json
+          symbiote shadowscan import /tmp/ss.json -o /tmp/observed --deterministic
+          symbiote scan examples/triage-agent -o /tmp/declared --deterministic --format companion
+          symbiote shadowscan inventory /tmp/declared/agentbom.json -o /tmp/inventory --scan-root "$PWD/examples/triage-agent"
+          .venv-shadowscan/bin/shadowscan inventory check /tmp/inventory
+          .venv-shadowscan/bin/shadowscan code examples/triage-agent --inventory /tmp/inventory --format json -o /tmp/ss-registered.json
+          python -c "import json,sys; r=json.load(open('/tmp/ss-registered.json')); s=r['summary']; print(s['total'], 'findings,', s['shadow'], 'shadow'); sys.exit(0 if s['shadow']==0 and r['inventory_present'] else 1)"
+          symbiote shadowscan reconcile /tmp/declared/agentbom.json /tmp/ss.json
+
   rego-parity:
     name: Rego export parity (OPA)
     runs-on: ubuntu-latest

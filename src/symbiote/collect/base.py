@@ -404,8 +404,11 @@ def run_collectors(
                 executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="symbiote-collector")
                 continue
             except Exception as exc:
+                # PARTIAL, not NOT_ATTEMPTED: the collector ran and failed. Recording
+                # a crash as not-attempted let merge_surface read the surface as
+                # 'queried' off another collector's clean run (I2 laundering).
                 results.append(
-                    _failed(collector, f"error: {type(exc).__name__}: {exc}", CoverageStatus.NOT_ATTEMPTED)
+                    _failed(collector, f"error: {type(exc).__name__}: {exc}", CoverageStatus.PARTIAL)
                 )
                 continue
             result.elapsed_ms = int((time.monotonic() - started) * 1000)
@@ -446,6 +449,10 @@ def merge_surface(a: SurfaceCoverage, b: SurfaceCoverage) -> SurfaceCoverage:
         status in (CoverageStatus.UNREACHABLE, CoverageStatus.PERMISSION_DENIED)
         and CoverageStatus.QUERIED in ran
     ):
+        status = CoverageStatus.PARTIAL
+    if status is CoverageStatus.QUERIED and any(not s.ok for s in (*a.sources, *b.sources)):
+        # A fragment carrying a failed source run never merges into 'queried':
+        # a responsible collector failed, so the surface is at best partial (I2).
         status = CoverageStatus.PARTIAL
     truncated = [t for t in (a.truncated_at, b.truncated_at) if t is not None]
     return SurfaceCoverage(

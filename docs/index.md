@@ -25,6 +25,12 @@ format can express.
 ## Where to go next
 
 - [Quickstart](quickstart.md) — install and run the first commands.
-- [Concepts](concepts/four-planes.md) — the ideas behind the model.
+- [The gap analysis](gap-analysis.md) — why CycloneDX 1.7 and SPDX 3.0.1 are not enough for agents, the
+  22-gap register, the minimum viable AgentBOM, and how Symbiote closes each gap.
+- [Concepts](concepts/four-planes.md) — the ideas behind the model, including the [trust model](concepts/trust-model.md).
+- Guides — [collectors](guides/collectors.md), [policy and conformance](guides/policy-and-conformance.md),
+  [attestation and enforcement](guides/attestation-and-enforcement.md), [CI](guides/ci.md).
+- Formats — how an AgentBOM appears in [CycloneDX 1.7](formats/cyclonedx.md) and [SPDX 3.0.1](formats/spdx.md).
+- [CLI reference](reference/cli.md) — every command, flag and exit code, with real output.
 - [Specification](spec/README.md) — the normative profile Symbiote implements.
-- [Research](research/README.md) — the gap analysis of CycloneDX 1.7 and SPDX 3.0.1 for agents.
+- [Research](research/README.md) — the design inputs: brief, proposals, attack-lens gap register, verified claims.

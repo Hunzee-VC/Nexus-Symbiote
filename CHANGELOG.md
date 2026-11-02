@@ -44,3 +44,27 @@ schema, predicate types) is versioned independently of the tool; see `spec/versi
 - Fixed: SPDX `software_File.contentType` (crashed exports with evidence or instructions); SPDX schema validation
   skips the official `oneOf` schema above 400 graph elements (minutes per document) and says so; collector
   results can hand root-agent facts (`root_updates`), flags and foreign properties back to the scan runner.
+- WP15 documentation: `docs/gap-analysis.md`, the publishable gap analysis of CycloneDX 1.7 and
+  SPDX 3.0.1 for agents (four planes, field-exact format review, the 22-gap register with OWASP ASI
+  and MITRE ATLAS mappings, the minimum viable AgentBOM, the Symbiote mapping, and the corrections
+  to the source analysis), exported as `docs/research/gap-analysis.docx`; a CLI reference generated
+  from real `--help` output and verified runs (`docs/reference/cli.md`); format pages for CycloneDX
+  and SPDX with real excerpts (`docs/formats/`); guides for collectors, policy and conformance,
+  attestation and enforcement, and CI (`docs/guides/`); a trust-model concept page; the research
+  proposals and ADRs in the site navigation.
+
+### Changed
+- `symbiote scan` now writes the companion last with `links` to the CycloneDX and SPDX documents (BOM-Link,
+  document IRI, digests of the written bytes) and the loss report, writes `agentbom.validation.json`, accepts
+  `--valid-for DAYS` and `--profile LEVEL` (conformance evaluated with the validation evidence; exit 5 when
+  not attained), refuses a non-directory path (exit 6) and reports `cyclonedxValid`/`spdxValid` as `null` when
+  the format was not exported. A zero-config scan of the example attains Minimal conformance.
+- `symbiote conformance --evidence` reads validation evidence (default: the sibling `agentbom.validation.json`);
+  `symbiote validate` recognises loss reports and validation evidence; `policy check` groups repeated flags;
+  collectors whose module is missing are reported as scan warnings instead of being skipped silently.
+- README: the status table now distinguishes the merged WP10 observed-layer modules (available
+  through the Python API) from the pending WP9 static collectors and the CLI wiring, and links the
+  gap analysis and the interoperability story (k8s-aibom import, OWASP AIBOM guide).
+- Docs site: `docs/SECURITY.md`, `docs/THREAT-MODEL.md` and `docs/CODE_OF_CONDUCT.md` replace the
+  lowercase symlinks so links from `CONTRIBUTING.md` and `SECURITY.md` resolve under
+  `mkdocs build --strict`; the quickstart quotes verified output and uses `openssl genpkey`.

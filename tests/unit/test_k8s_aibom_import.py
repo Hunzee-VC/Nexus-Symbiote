@@ -200,3 +200,25 @@ def test_export_preserves_the_imported_artifact_claim(minimal_bom):
         assert DIGEST_HEX in payload
         assert "artifact-digest-claim" in payload or "artifactDigestClaim" in payload
         assert "manifestRoot" not in payload
+
+
+def test_oversized_inline_bom_is_refused_before_decoding() -> None:
+    cr = as_cr(bom())
+    cr["status"]["bomDocument"] = {"inline": {"data": "A" * 500_000}}
+    with pytest.raises(K8sAibomError, match="inline bound"):
+        extract_bom_document(cr)
+
+
+def test_colon_dialect_signature_properties_do_not_crash() -> None:
+    doc = {
+        "bomFormat": "CycloneDX",
+        "components": [
+            {
+                "type": "machine-learning-model",
+                "name": "llama",
+                "properties": [{"name": "k8s-aibom:signature:status", "value": "verified"}],
+            }
+        ],
+    }
+    result = import_k8s_aibom(doc, now=NOW)  # the colon dialect must parse, not IndexError
+    assert result.models and result.models[0].signature is not None
