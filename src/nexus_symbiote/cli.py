@@ -25,9 +25,21 @@ if TYPE_CHECKING:
     from nexus_symbiote.utils.crypto import SigstoreArtifactPolicy
 
 console = Console(stderr=True)
+err_console = console
 
 
-err_console = Console(stderr=True)
+def _scanner_error_summary(exc: Exception) -> str:
+    # Exception messages can include Pydantic input values, parser snippets or
+    # credentials. Only application-owned diagnostic codes cross this boundary.
+    from pydantic import ValidationError
+
+    if isinstance(exc, ValidationError):
+        return "component validation failed (scanner-validation-error)"
+    if isinstance(exc, OSError):
+        return "collection I/O failed (scanner-io-error)"
+    if isinstance(exc, (ValueError, TypeError, RecursionError)):
+        return "invalid or unsupported input (scanner-input-error)"
+    return "collector failed (scanner-internal-error)"
 
 
 def _policy(root: Path, *, ignore_project: bool = False) -> Policy:
@@ -229,8 +241,9 @@ def scan(
                 completed.append(name)
             console.print(f"    Found [green]{len(result.components)}[/] components")
         except Exception as exc:
-            err_console.print(f"  [red]Scanner '{name}' failed:[/] {exc}")
-            scan_failures.append(f"{name}: {exc}")
+            summary = _scanner_error_summary(exc)
+            err_console.print(f"  [red]Scanner '{name}' failed:[/] {summary}")
+            scan_failures.append(f"{name}: {summary}")
             scanner_status[name] = "failed"
     try:
         assemble_repository_agent(aibom, root)

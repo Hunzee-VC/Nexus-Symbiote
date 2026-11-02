@@ -1,9 +1,17 @@
 # Changelog
 
-## Unreleased
+## [0.1.0] - 2026-11-02
+
+Alpha release of the AgentBOM toolkit under the Hunzee-VC organization.
 
 ### Security
 
+- Bind static MCP server configuration before redaction and reconcile configured tool fingerprints against fresh source evidence; require recollection of legacy snapshots without the binding.
+- Reject same-version MCP package substitutions, argument and endpoint-path drift, and edited supplied descriptors during project validation.
+- Replace raw scanner exception text with safe diagnostic codes and record malformed model metadata using field names only.
+- Read Claude's declared `permissions.defaultMode`, recognize bare broad tool grants, and retain allowances across collected settings layers without claiming effective authorization.
+- Add independent runtime signing quorums for snapshots, trust status and action approvals; preserve them through pinned stdio invocation.
+- Reject runtime CLI FIFO, symlink and oversized inputs through the bounded regular-file reader.
 - Detect same-version MCP launcher package substitutions in project validation and drift checks. Review older baselines that lack the launcher identity.
 - Reconcile locally collected security fields and findings before accepting supplied BOMs. Project-backed risk scoring rejects a conflicting inventory.
 - Omit schema literals from MCP descriptor exports and corroborate the original static definition against project evidence.
@@ -34,3 +42,8 @@
 - Exercise supported Python versions, built-wheel installation, Action abuse cases, and exporter conformance in CI.
 - Add manually requested release candidates, distribution checksums, release evidence, build attestations, and environment-gated OIDC publication.
 - Align documentation with MIT licensing and the alpha support boundary.
+- Canonical repository moved to Hunzee-VC/Nexus-Symbiote; documentation and package metadata updated accordingly.
+
+## Unreleased
+
+(empty for now)

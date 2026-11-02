@@ -2,7 +2,10 @@
 
 Prior versions used a serializer that was not RFC 8785 compliant. The corrected
 serializer may produce different SHA-256 digests for the same tool definition,
-particularly for floating point numbers and non-BMP property names. Current scanner findings record `definition_hash_version: rfc8785-jcs-v2`.
+particularly for floating point numbers and non-BMP property names. New scanner
+findings record `definition_hash_version: rfc8785-jcs-v2`. The v2 profile also
+binds supported descriptor annotations; v1 and absent profiles require
+recollection before verification.
 An absent or unsupported version is not treated as verified. A bare
 `sha256:` digest does not identify which serializer produced it.
 
@@ -39,3 +42,10 @@ public fields. Re-export the recovered inventory to give standard consumers
 the corrected graph. Keep the original export when a downstream consumer
 discards fields such as the CycloneDX incomplete-composition claim. Recovery
 requires that evidence to remain present.
+
+Current CycloneDX 1.7 and SPDX 3.0.1 exports are checked against pinned official
+schemas and exercised by independent consumer-library round trips. These checks
+do not certify semantic equivalence or admission authority.
+
+Static MCP configuration source binding is a separate versioned contract. See
+[source reconciliation and snapshot migration](verification-source-binding.md).

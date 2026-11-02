@@ -225,9 +225,9 @@ class CompletenessValidator:
         root = project_root.absolute()
         observed: dict[str, AnyComponent] = {}
 
-        def incomplete(surface: str, description: str) -> None:
+        def incomplete(surface: str, description: str, severity: str = "error") -> None:
             report.is_complete = False
-            report.issues.append(CompletenessIssue(surface, description, "error"))
+            report.issues.append(CompletenessIssue(surface, description, severity))
 
         for scanner_type in ALL_SCANNERS:
             scanner = (
@@ -270,6 +270,21 @@ class CompletenessValidator:
         supplied = {c.bom_ref: c for c in bom.components}
         for actual in expected.components:
             declared = supplied.pop(actual.bom_ref, None)
+            if (
+                isinstance(actual, MCPServerComponent)
+                and actual.properties.get("collection_mode") == "static-config"
+                and isinstance(declared, MCPServerComponent)
+                and (
+                    not declared.properties.get("static_config_hash")
+                    or declared.properties.get("static_config_hash_profile")
+                    != actual.properties["static_config_hash_profile"]
+                )
+            ):
+                incomplete(
+                    actual.bom_ref,
+                    "Static MCP source binding is unknown in this snapshot; re-collect it before reconciliation.",
+                    "unknown",
+                )
             if (
                 declared is None
                 or not self._same_subject(root, declared, actual)
@@ -473,22 +488,50 @@ class CompletenessValidator:
             isinstance(local, MCPServerComponent)
             and local.properties.get("collection_mode") == "static-config"
         ):
-            # A legacy record missing the current launcher package cannot bind it.
-            # Live observations may add descriptor evidence to the same subject.
-            return isinstance(supplied, MCPServerComponent) and (
-                supplied.transport,
-                supplied.command,
-                supplied.endpoint_url,
-                supplied.launcher_package,
-                supplied.version,
-                supplied.version_pinned,
+            # Redaction hides executable arguments and endpoint paths. Compare the
+            # declared launcher identity and the original, versioned source binding;
+            # a legacy record missing either cannot bind the subject. No live
+            # observation can supply missing static source evidence.
+            return (
+                isinstance(supplied, MCPServerComponent)
+                and (
+                    supplied.transport,
+                    supplied.command,
+                    supplied.endpoint_url,
+                    supplied.launcher_package,
+                    supplied.version,
+                    supplied.version_pinned,
+                )
+                == (
+                    local.transport,
+                    local.command,
+                    local.endpoint_url,
+                    local.launcher_package,
+                    local.version,
+                    local.version_pinned,
+                )
+                and all(
+                    supplied.properties.get(field) == local.properties[field]
+                    for field in ("static_config_hash", "static_config_hash_profile")
+                )
+            )
+        if (
+            isinstance(local, ToolComponent)
+            and local.properties.get("collection_mode") == "static-config"
+        ):
+            # IntegrityValidator checks the supplied descriptor's consistency
+            # with its own digest. Reconciliation must independently compare
+            # that digest to the original descriptor freshly read from config.
+            # A served descriptor is a different observation scope and cannot
+            # replace this source binding merely by asserting live provenance.
+            return isinstance(supplied, ToolComponent) and (
+                supplied.mcp_server_ref,
+                supplied.definition_hash_version,
+                supplied.definition_hash,
             ) == (
-                local.transport,
-                local.command,
-                local.endpoint_url,
-                local.launcher_package,
-                local.version,
-                local.version_pinned,
+                local.mcp_server_ref,
+                local.definition_hash_version,
+                local.definition_hash,
             )
         return True
 
