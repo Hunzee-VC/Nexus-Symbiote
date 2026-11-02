@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## [0.1.0] - 2026-11-02
+
+Alpha release of the AgentBOM toolkit under the Hunzee-VC organization.
 
 ### Security
 
@@ -30,3 +32,8 @@
 - Exercise supported Python versions, built-wheel installation, Action abuse cases, and exporter conformance in CI.
 - Add manually requested release candidates, distribution checksums, release evidence, build attestations, and environment-gated OIDC publication.
 - Align documentation with MIT licensing and the alpha support boundary.
+- Canonical repository moved to Hunzee-VC/Nexus-Symbiote; documentation and package metadata updated accordingly.
+
+## Unreleased
+
+(empty for now)

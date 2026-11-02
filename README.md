@@ -1,16 +1,17 @@
 # Nexus SymBiote
 
-[![CI](https://github.com/aisecnomad/nexus-symbiote/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/aisecnomad/nexus-symbiote/actions/workflows/ci.yml)
-[![CodeQL](https://github.com/aisecnomad/nexus-symbiote/actions/workflows/codeql.yml/badge.svg)](https://github.com/aisecnomad/nexus-symbiote/actions/workflows/codeql.yml)
-[![License](https://img.shields.io/github/license/aisecnomad/nexus-symbiote)](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/LICENSE)
+[![CI](https://github.com/Hunzee-VC/Nexus-Symbiote/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Hunzee-VC/Nexus-Symbiote/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/Hunzee-VC/Nexus-Symbiote/actions/workflows/codeql.yml/badge.svg)](https://github.com/Hunzee-VC/Nexus-Symbiote/actions/workflows/codeql.yml)
+[![Coverage](https://img.shields.io/badge/coverage-CI%20enforced-brightgreen)](https://github.com/Hunzee-VC/Nexus-Symbiote/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/Hunzee-VC/Nexus-Symbiote)](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/LICENSE)
 
 **Agent Bill of Materials: inventory, integrity evidence, policy checks and standard exports for AI agent supply chains.**
 
 Nexus SymBiote is an alpha toolkit for creating and reviewing an Agent Bill of Materials (AgentBOM). It inventories supported MCP configurations, model artifacts, prompts and skills, retrieval settings, A2A cards, IDE configurations and package declarations. It checks integrity and coverage, scores findings under policy, compares snapshots, and exports reviewable BOMs.
 
-[Nexus-ShadowScan](https://github.com/aisecnomad/Nexus-ShadowScan) is the primary multi-surface discovery engine. SymBiote consumes its reports and adds local artifact and supply-chain verification. Imported discovery remains a source claim; it does not establish deployment, effective access or authorization.
+[Nexus-ShadowScan](https://github.com/Hunzee-VC/Nexus-ShadowScan) is the primary multi-surface discovery engine. SymBiote consumes its reports and adds local artifact and supply-chain verification. Imported discovery remains a source claim; it does not establish deployment, effective access or authorization.
 
-**A successful scan is an inventory result.** It does not establish that a model is benign, that a tool backend obeys its description, or that every agent action was mediated. Read the [security model](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/security-model.md) and [security policy](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/SECURITY.md) before using results in an approval process.
+**A successful scan is an inventory result.** It does not establish that a model is benign, that a tool backend obeys its description, or that every agent action was mediated. Read the [security model](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/security-model.md) and [security policy](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/SECURITY.md) before using results in an approval process.
 
 ## Install from reviewed source
 
@@ -19,8 +20,8 @@ The distribution and command are `nexus-symbiote`; the Python import package is 
 Until a published release's ownership, source revision and provenance have been verified, install from a reviewed checkout. Replace `REVIEWED_COMMIT_SHA` with the immutable revision you reviewed:
 
 ```bash
-git clone https://github.com/aisecnomad/nexus-symbiote.git
-cd nexus-symbiote
+git clone https://github.com/Hunzee-VC/Nexus-Symbiote.git
+cd Nexus-Symbiote
 git checkout --detach REVIEWED_COMMIT_SHA
 python -m venv .venv
 . .venv/bin/activate
@@ -29,7 +30,14 @@ python -m pip install --no-deps --no-build-isolation .
 nexus-symbiote --version
 ```
 
-The core runtime/build lock excludes optional signing and independent consumer libraries. Source extras are `.[sigstore]`, `.[cyclonedx]` and `.[all]`. For the locked development and integration environment, use [CONTRIBUTING.md](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/CONTRIBUTING.md) or `make install-locked` from the reviewed checkout. Publication and trusted-publisher configuration follow the separate [release procedure](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/releasing.md).
+**Hash-pinned proof (v0.1.0+):** Once published, verify a release the same way:
+
+```bash
+python -m pip install --require-hashes --only-binary=:all: -r https://github.com/Hunzee-VC/Nexus-Symbiote/releases/download/v0.1.0/requirements-action.lock
+# or from the release assets after verifying the checksums and provenance
+```
+
+The core runtime/build lock excludes optional signing and independent consumer libraries. Source extras are `.[sigstore]`, `.[cyclonedx]` and `.[all]`. For the locked development and integration environment, use [CONTRIBUTING.md](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/CONTRIBUTING.md) or `make install-locked` from the reviewed checkout. Publication and trusted-publisher configuration follow the separate [release procedure](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/releasing.md).
 
 ## Quick start
 
@@ -51,6 +59,21 @@ nexus-symbiote diff reviewed.json agentbom.json --fail-on-alert
 ```
 
 Inspect the exit status and the inventory's coverage, exclusions and failures. A command may write evidence and still return a failing gate. Standalone imports require a new output path and retain partial coverage; `--report-only` is an explicit inspection mode. For trusted local projects, standalone `scan`, `validate` and `risk` load project policy by default. Pass `--no-project-policy` when the scanned checkout must not choose your verification policy.
+
+## Show the collectors (60s demo)
+
+The eight built-in collectors are `shadowscan`, `mcp`, `model`, `prompt`, `rag`, `registry`, `a2a` and `ide_agents`.
+
+```bash
+# From a reviewed checkout — scan the examples/ fixture
+nexus-symbiote scan examples --no-project-policy --report-only -o demo-agentbom.json
+nexus-symbiote summary demo-agentbom.json
+```
+
+[![Asciinema recording of collector demo](https://asciinema.org/a/placeholder.svg)](https://asciinema.org/a/placeholder)  
+*60-second recording of `scan examples` exercising the collectors (record and replace this link after v0.1.0 tag).*
+
+A completed search can find no matching files; unsupported declarations and failed reads remain coverage gaps. Collection is static by default.
 
 ## Why Nexus SymBiote
 
@@ -95,7 +118,7 @@ Collection is static by default and does not execute project modules, model load
 | Impact analysis | Potential graph reachability through recorded relationships, not proof that an exploit executed |
 | GitHub Action | One collected inventory, caller-owned gates and optional SARIF upload; disabled or skipped gates are visible policy choices |
 
-MCP references include the relative configuration path and declared name. Recollect and review legacy snapshots that used name-only identities. Python source declaration collection has bounded application-file coverage and reports unresolved or dynamic registrations as gaps. See [TypeScript inventory](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/typescript-inventory.md), [ShadowScan integration](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/shadowscan-integration.md) and [runtime assurance](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/runtime-assurance.md) for the exact supported contracts.
+MCP references include the relative configuration path and declared name. Recollect and review legacy snapshots that used name-only identities. Python source declaration collection has bounded application-file coverage and reports unresolved or dynamic registrations as gaps. See [TypeScript inventory](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/typescript-inventory.md), [ShadowScan integration](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/shadowscan-integration.md) and [runtime assurance](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/runtime-assurance.md) for the exact supported contracts.
 
 ## Commands and exit codes
 
@@ -155,7 +178,7 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-      - uses: aisecnomad/nexus-symbiote@<reviewed-40-character-commit-sha>
+      - uses: Hunzee-VC/Nexus-Symbiote@<reviewed-40-character-commit-sha>
         with:
           scan-path: .
           output-file: agentbom.json
@@ -167,7 +190,7 @@ jobs:
 
 The Action installs its reviewed source and derives exports and findings from one native inventory. It ignores policy files supplied by the scanned checkout. Inputs are passed as data; collection failures fail the Action even when later validation is disabled. A risk threshold of `0` disables the Action's risk gate. Disabling `validate` or `risk-check` is not evidence that verification passed.
 
-Enable SARIF upload only when repository code scanning and the event's permissions support it, adding `security-events: write` to the job. Fork PRs may have restricted tokens; retained evidence is the fallback. Treat Action source as executable code and do not use `pull_request_target` to run an untrusted PR checkout with deployment credentials. See [action.yml](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/action.yml) for inputs and outputs.
+Enable SARIF upload only when repository code scanning and the event's permissions support it, adding `security-events: write` to the job. Fork PRs may have restricted tokens; retained evidence is the fallback. Treat Action source as executable code and do not use `pull_request_target` to run an untrusted PR checkout with deployment credentials. See [action.yml](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/action.yml) for inputs and outputs.
 
 ## Data handling and safety
 
@@ -179,12 +202,12 @@ Use independent expected digests and signer/issuer policies. A signature or regi
 
 | Topic | Link |
 | --- | --- |
-| Security model and reporting | [Security model](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/security-model.md) · [SECURITY.md](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/SECURITY.md) |
-| Runtime and deployment evidence | [Runtime assurance](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/runtime-assurance.md) · [Deployment evidence](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/deployment-evidence.md) |
-| Discovery and source inventory | [ShadowScan integration](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/shadowscan-integration.md) · [TypeScript inventory](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/typescript-inventory.md) |
-| Development and controls | [CONTRIBUTING.md](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/CONTRIBUTING.md) · [Repository controls](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/repository-controls.md) |
-| Releases and changes | [Releasing](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/releasing.md) · [CHANGELOG.md](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/CHANGELOG.md) · [ROADMAP.md](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/ROADMAP.md) |
-| Historical reconciliation | [Closed-PR audit](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/audits/closed-pr-review-2026-11-02.md) |
+| Security model and reporting | [Security model](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/security-model.md) · [SECURITY.md](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/SECURITY.md) |
+| Runtime and deployment evidence | [Runtime assurance](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/runtime-assurance.md) · [Deployment evidence](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/deployment-evidence.md) |
+| Discovery and source inventory | [ShadowScan integration](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/shadowscan-integration.md) · [TypeScript inventory](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/typescript-inventory.md) |
+| Development and controls | [CONTRIBUTING.md](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/CONTRIBUTING.md) · [Repository controls](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/repository-controls.md) |
+| Releases and changes | [Releasing](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/releasing.md) · [CHANGELOG.md](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/CHANGELOG.md) · [ROADMAP.md](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/ROADMAP.md) |
+| Historical reconciliation | [Closed-PR audit](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/audits/closed-pr-review-2026-11-02.md) |
 
 ## Benchmarks
 
@@ -193,24 +216,24 @@ python scripts/check_security_regressions.py --out security-regressions.json
 python benchmarks/inventory/run_inventory.py
 ```
 
-The [security corpus](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/benchmarks/README.md) and [inventory corpus](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/benchmarks/inventory/README.md) contain inspectable fixtures, labels and provenance. The security runner records corpus and source digests, unknowns, denominators, elapsed time and Python allocation measurements. Credential-redaction and coverage controls remain separate from detection counts. These finite regression cases establish no representative field accuracy, complete collection or percentile ranking.
+The [security corpus](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/benchmarks/README.md) and [inventory corpus](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/benchmarks/inventory/README.md) contain inspectable fixtures, labels and provenance. The security runner records corpus and source digests, unknowns, denominators, elapsed time and Python allocation measurements. Credential-redaction and coverage controls remain separate from detection counts. These finite regression cases establish no representative field accuracy, complete collection or percentile ranking.
 
 ## Project status
 
-Nexus SymBiote is **alpha**. APIs, formats and policy semantics may change, and no production SLA or long-term support commitment is offered. Workflows define verification gates, but their presence does not establish that hosted jobs ran or that branch protection is active. The observed hosted verification and enforcement blockers are tracked in [issue #74](https://github.com/aisecnomad/Nexus-Symbiote/issues/74); see the dated [audit](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/audits/closed-pr-review-2026-11-02.md) for local evidence and limits.
+Nexus SymBiote is **alpha**. APIs, formats and policy semantics may change, and no production SLA or long-term support commitment is offered. Workflows define verification gates, but their presence does not establish that hosted jobs ran or that branch protection is active. The observed hosted verification and enforcement blockers are tracked in [issue #74](https://github.com/Hunzee-VC/Nexus-Symbiote/issues/74); see the dated [audit](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/audits/closed-pr-review-2026-11-02.md) for local evidence and limits.
 
-Package publication requires an explicit maintainer request, successful exact-source verification and the configured publication controls. This README does not establish package-index ownership, active environment protection or a verified release.
+Package publication requires an explicit maintainer request, successful exact-source verification and the configured publication controls. This README does not establish package-index ownership, active environment protection or a verified release. Canonical repository is now under the Hunzee-VC organization.
 
 ## Community and contributing
 
 | I want to… | Go to |
 | --- | --- |
-| Report a security issue | [SECURITY.md](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/SECURITY.md) |
-| Report a bug or request a feature | [GitHub Issues](https://github.com/aisecnomad/nexus-symbiote/issues) |
-| Contribute code | [CONTRIBUTING.md](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/CONTRIBUTING.md) |
-| Understand governance and ownership | [GOVERNANCE.md](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/GOVERNANCE.md) · [MAINTAINERS.md](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/MAINTAINERS.md) |
-| Find support guidance | [SUPPORT.md](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/SUPPORT.md) |
+| Report a security issue | [SECURITY.md](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/SECURITY.md) |
+| Report a bug or request a feature | [GitHub Issues](https://github.com/Hunzee-VC/Nexus-Symbiote/issues) |
+| Contribute code | [CONTRIBUTING.md](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/CONTRIBUTING.md) |
+| Understand governance and ownership | [GOVERNANCE.md](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/GOVERNANCE.md) · [MAINTAINERS.md](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/MAINTAINERS.md) |
+| Find support guidance | [SUPPORT.md](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/SUPPORT.md) |
 
 ## License
 
-[MIT](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/LICENSE) — Copyright (c) 2026 AISecNomad.
+[MIT](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/LICENSE) — Copyright (c) 2026 AISecNomad.
