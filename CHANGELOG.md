@@ -30,3 +30,6 @@
 - Exercise supported Python versions, built-wheel installation, Action abuse cases, and exporter conformance in CI.
 - Add manually requested release candidates, distribution checksums, release evidence, build attestations, and environment-gated OIDC publication.
 - Align documentation with MIT licensing and the alpha support boundary.
+- Rehearse releases on TestPyPI through the same pipeline as PyPI: the release workflow's `publish` input is now `none`, `testpypi` or `pypi`, each with its own protected environment and trusted publisher.
+- Build release distributions from a `git archive` export of the commit with `SOURCE_DATE_EPOCH`, and upload them before tests, evidence collection or the unpinned smoke installation run. Previously evidence written during the run could enter the sdist, and a dependency resolved without hashes ran before the distributions were hashed and uploaded. Attest and publish jobs now reject artifact digest mismatches.
+- Check `.yaml` workflows as well as `.yml` for unpinned Actions and expressions in shell source.

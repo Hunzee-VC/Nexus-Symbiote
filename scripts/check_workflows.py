@@ -75,7 +75,13 @@ def check(path: Path) -> list[str]:
 def main() -> int:
     errors = [
         error
-        for path in [Path("action.yml"), *Path(".github/workflows").glob("*.yml")]
+        # GitHub runs workflows with either extension; checking only one would let
+        # an unpinned or shell-injecting workflow through under the other.
+        for path in [
+            Path("action.yml"),
+            *sorted(Path(".github/workflows").glob("*.yml")),
+            *sorted(Path(".github/workflows").glob("*.yaml")),
+        ]
         for error in check(path)
     ]
     for error in errors:
