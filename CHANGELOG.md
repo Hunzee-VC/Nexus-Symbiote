@@ -13,6 +13,7 @@
 - Install the Action's checked-out source instead of an independently moving package-index release.
 - Generate requested exports and SARIF from one collected native inventory.
 - Pin third-party Actions to verified commit references and disable persisted checkout credentials.
+- Add a pinned CodeQL workflow for push, pull request, and weekly schedule; hosted analysis requires runner availability and code-scanning entitlement.
 
 ### Delivery
 

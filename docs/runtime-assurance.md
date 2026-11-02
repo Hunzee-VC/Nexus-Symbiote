@@ -83,6 +83,37 @@ Revocation and required operation approvals are checked before schema evaluation
 The worker cannot retrieve schema references from the network. Validation failure
 does not consume an approval nonce or advance snapshot state.
 
+### Pinned stdio integration
+
+`nexus_symbiote.live.session.invoke_pinned_stdio` is an opt-in POSIX adapter that
+starts a private copy of an independently pinned standalone launcher, enumerates
+its tools, authorizes the requested operation, and sends `tools/call` through the
+same still-running process and streams. The approved `ToolGrant.endpoint_identity`
+must be `stdio+launcher:sha256:<64 lowercase hex characters>` for that launcher.
+The pin and launcher path come from operator-controlled configuration, not the
+scanned project. The adapter refuses arguments, project environment and working
+directory, reconnects, repeated calls, invalid JSON-RPC and list pagination beyond
+its limits. Protocol reads and writes share a deadline starting after launcher
+staging and process startup. This does not bound staging, authentication,
+scope resolution, state storage or other synchronous gateway work. Operators
+must impose an external end-to-end deadline on the invocation and its adapters.
+
+Use `invoke_pinned_stdio(gateway, call, command=..., sha256=..., snapshot=...,
+trust=..., bom=..., approval=...)`. It ignores the gateway's separate `describe`
+and `execute` callbacks and uses the same process for both steps. Authenticate
+the workload and derive scope using trusted gateway callbacks. Keep all other
+network and process paths from bypassing this gateway.
+
+Same-process binding does not establish that a server's implementation or
+remote backend is immutable, safe or honest; a server can change behavior between
+listing and invocation, including during a tool call. The pin covers launcher
+bytes only, not interpreters, shared libraries or dependencies. A launcher is
+executed before the authorization check, so only operator-approved launchers may
+be used. Run it in an externally provisioned sandbox with restricted identity,
+filesystem and egress. The adapter does not create that sandbox or mediate other
+calls. `PinnedStdioSession` is a transport primitive and must not be invoked
+directly as an authorization decision.
+
 The SQLite `StateStore` atomically records snapshot and trust-status high-water
 marks and consumes approval nonces. Fresh authenticated revocation knowledge is
 retained even when the current operation is denied. Failed signature or binding

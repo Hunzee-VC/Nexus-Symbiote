@@ -31,9 +31,10 @@ The importer maps native `agent`, `mcp-server` and `local-model` findings. It
 also accepts ShadowScan's CycloneDX 1.6/1.7 components and services, marking the
 projection partial. Unmapped entries are counted with source indexes. For
 CycloneDX, the index is into components followed by services. The source report
-and its scope, timestamps, detailed evidence, identities and graph remain the
-authoritative discovery record; those fields are not duplicated into the BOM.
-This reduces leakage but does not turn the BOM into a complete evidence graph.
+and its scope, timestamps, detailed evidence, identities and full graph remain
+the authoritative discovery record. Only supported, mapped-endpoint CycloneDX
+dependencies are projected as declared claims; the rest of those fields remain
+in the report. This reduces leakage but does not create a complete evidence graph.
 
 All imported components have declared assurance and unknown trust. The importer
 does not run ShadowScan, execute tools, fetch endpoints, infer agent autonomy, or
@@ -42,6 +43,17 @@ flags remain source-reported heuristics; an inventory mismatch is not proof of
 unauthorized activity. Output contains report and source-ID digests and indexes,
 not raw source descriptions, locations or snippets. Both artifacts may still be
 sensitive and must be handled accordingly.
+
+The projection profile `nexus-symbiote/shadowscan-projection/v1` identifies the
+SymBiote mapping, not a ShadowScan report schema or authenticated producer
+version. CycloneDX `dependsOn` edges are copied only when both endpoints map to
+components. They remain declared, source-reported relationships, with the exact
+report digest and dependency-array index recorded on the edge. Unmapped endpoint
+edges are counted as limitations; raw source identifiers are not included. This
+does not verify deployment, association or authorization. The native ShadowScan
+format has no general dependency graph, and this importer does not infer one from
+fields that merely mention a model. Consumers of standards exports must retain
+the SymBiote extension to preserve the edge assurance and provenance.
 
 At present the bridge does not resolve agents across tenants or reports, verify
 live MCP identities, or map every ShadowScan finding type, model association or
@@ -88,6 +100,10 @@ The digest and `source_projection_limitations` record the external evidence
 separately. Imported assets retain declared assurance and unknown trust, and
 the CycloneDX composition remains incomplete. Incomplete sources, unmapped
 entries and lossy CycloneDX inputs keep the default repository gate closed.
+
+Project validation also compares imported dependency endpoints, relationship types,
+assurance, provenance and multiplicity against the local report projection. Missing,
+modified or additional edges involving imported components fail reconciliation.
 
 ### Verify the native import and its producer
 
