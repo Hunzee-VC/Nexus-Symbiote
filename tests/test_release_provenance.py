@@ -17,8 +17,12 @@ def test_publish_verification_gate_checks_every_distribution(tmp_path, case):
     workflow = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())
     publish = workflow["jobs"]["publish"]
     steps = publish["steps"]
-    verify = next(step for step in steps if step.get("name") == "Verify exact distributions and source provenance")
-    publish_index = next(i for i, step in enumerate(steps) if step.get("name") == "Publish with OIDC trusted publishing")
+    verify = next(
+        step for step in steps if step.get("name") == "Verify exact distributions and source provenance"
+    )
+    publish_index = next(
+        i for i, step in enumerate(steps) if step.get("name") == "Publish with OIDC trusted publishing"
+    )
     assert steps.index(verify) < publish_index
     assert "attest" in publish["needs"]
     (tmp_path / "dist").mkdir()
