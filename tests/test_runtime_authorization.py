@@ -130,6 +130,45 @@ def test_gateway_executes_approved_call_and_consumes_approval(tmp_path):
     assert len(values[-1]) == 1
 
 
+def test_scope_resolver_cannot_modify_request_during_resolution(tmp_path):
+    values = fixture(tmp_path)
+    gateway = values[0]
+
+    def mutate(call):
+        call.arguments["to"] = "admin@example.test"
+        return "send", "mailbox:team"
+
+    gateway.resolve_scope = mutate
+    with pytest.raises(AuthorizationError, match="resolver modified"):
+        invoke(values)
+    assert values[-1] == []
+
+
+def test_scope_resolver_cannot_mutate_request_after_approval_check(tmp_path):
+    values = fixture(tmp_path)
+    gateway, original, _, _, _, _, _, _, _, executed = values
+    context = gateway.authenticate()
+    retained = []
+    auth_calls = 0
+
+    def resolve(call):
+        retained.append(call)
+        return "send", "mailbox:team"
+
+    def authenticate():
+        nonlocal auth_calls
+        auth_calls += 1
+        if auth_calls == 2:
+            retained[0].arguments["to"] = "admin@example.test"
+        return context
+
+    gateway.resolve_scope = resolve
+    gateway.authenticate = authenticate
+    assert invoke(values) == "executed"
+    assert executed[0].arguments == {"to": "team@example.test"}
+    assert original.arguments == {"to": "team@example.test"}
+
+
 @pytest.mark.parametrize(
     "failure",
     [
@@ -461,3 +500,4 @@ def test_approval_actor_must_match_authorized_key(tmp_path):
 def test_noncanonical_input_rejected(raw):
     with pytest.raises(AuthorizationError):
         strict_json(raw)
+

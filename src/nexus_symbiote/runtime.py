@@ -476,7 +476,14 @@ class ReferenceGateway(Generic[T]):
             raise AuthorizationError("snapshot is revoked")
         if (snapshot_signers | trust_signers) & set(statuses.revoked_signers):
             raise AuthorizationError("signer is revoked")
-        effective_action, effective_resource = self.resolve_scope(call)
+        # Pydantic's frozen models do not freeze nested dictionaries. Give the
+        # resolver an independent request so it cannot retain a reference to the
+        # authorized arguments and change them later, after approval is checked.
+        request_bytes = canonical_bytes(call.model_dump(mode="json"))
+        scope_call = ToolCall.model_validate(strict_json(request_bytes))
+        effective_action, effective_resource = self.resolve_scope(scope_call)
+        if canonical_bytes(scope_call.model_dump(mode="json")) != request_bytes:
+            raise AuthorizationError("scope resolver modified the request")
         if (effective_action, effective_resource) != (call.action, call.resource):
             raise AuthorizationError("operation labels do not match the actual tool arguments")
         grant = next(
@@ -567,3 +574,4 @@ class ReferenceGateway(Generic[T]):
             check_time=check_time,
         )
         return self.execute(call)
+
