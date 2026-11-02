@@ -16,17 +16,26 @@ ruff check src tests scripts
 ruff format --check src tests scripts
 mypy src/nexus_symbiote
 python scripts/check_workflows.py
+python scripts/check_security_regressions.py --out security-regressions.json
+python -m pytest --cov=nexus_symbiote --cov-branch --cov-report=json:coverage.json
+python scripts/check_coverage.py coverage.json
 python -m build
 python -m twine check dist/*
 ```
 
 The lock records the full CI dependency set. The wheel smoke test separately checks a minimal runtime installation. Regenerate the lock after changing declared dependencies; inspect new packages, hashes, supported Python markers, and license implications. Never resolve or publish dependencies from an untrusted pull request with release credentials.
 
+The consuming GitHub Action creates a private virtual environment and installs `requirements-action.lock` with required hashes and binary distributions only. This smaller lock contains the core runtime and Hatchling dependencies copied from the reviewed CI lock, without development or optional signing packages. Refresh both locks when dependencies change, then install the Action lock and the source with `--no-deps --no-build-isolation` in a clean environment. The CI security-regression job exercises that runtime dependency boundary.
+
+`Verified CI` aggregates the full test matrix, coverage, quality, distribution and security-regression jobs. Missing, failed, cancelled and skipped prerequisites fail that stable check. Branch protection must require it; see [repository controls](docs/repository-controls.md). The coverage gate independently requires at least 90% statement coverage and 75% branch coverage, using exact counts rather than rounded display percentages. The reviewed baseline was 91.72% statements and 79.42% branches. These floors prevent regression and are not a completeness claim. Use the Python 3.12 CI environment for comparable measurements; raise floors as missing paths gain tests.
+
 ## Architecture boundaries
 
 Nexus-ShadowScan is the primary discovery engine. Preserve the `import-shadowscan` workflow when changing collection or graph code. Imported claims, local observations, approved snapshots, and mediated operations have different assurance. Keep A2A, IDE, and registry declarations explicit rather than inferring deployment or effective permissions from presence alone.
 
 Run `PYTHONPATH=src python scripts/benchmark_security.py --out benchmark-results.json` after security changes. Review individual cases, corpus/source digests, unknowns, and denominators. Do not replace labels or remove negative fixtures to improve the result. The corpus is a finite regression suite, not representative field efficacy evidence.
+
+CI and release candidates also run `scripts/check_security_regressions.py`. Every committed detection label and control contract must pass; missing cases, abstentions on detection cases, duplicate cases and evaluator errors fail. A passing malformed-input coverage control can deliberately have an unknown detection prediction. The full per-case report is retained even when this gate fails. New labels and changed expectations require review of the fixture and its rationale; passing these fixtures establishes no production accuracy or percentile ranking.
 
 ## Security changes
 

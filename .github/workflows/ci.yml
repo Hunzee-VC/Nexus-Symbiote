@@ -51,8 +51,6 @@ jobs:
     name: Coverage Python 3.12
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      COVERAGE_CORE: sysmon
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -67,20 +65,28 @@ jobs:
       - name: Run full coverage suite with bounded diagnostics
         env:
           PYTEST_LOG: ${{ runner.temp }}/pytest-coverage-python-3.12.log
+          COVERAGE_JSON: ${{ runner.temp }}/coverage-python-3.12.json
         run: |
           set -o pipefail
           timeout --signal=INT --kill-after=30s 25m \
             bash --noprofile --norc -e -o pipefail -c '
               python -m pytest -vv -o faulthandler_timeout=120 --durations=20 \
-                --cov=nexus_symbiote --cov-report=term-missing \
+                --cov=nexus_symbiote --cov-branch --cov-report=term-missing \
+                --cov-report="json:$COVERAGE_JSON" \
                 2>&1 | tee "$PYTEST_LOG"
             '
+      - name: Enforce statement and branch coverage floors
+        env:
+          COVERAGE_JSON: ${{ runner.temp }}/coverage-python-3.12.json
+        run: python scripts/check_coverage.py "$COVERAGE_JSON"
       - name: Preserve coverage diagnostics
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: pytest-log-coverage-python-3.12
-          path: ${{ runner.temp }}/pytest-coverage-python-3.12.log
+          path: |
+            ${{ runner.temp }}/pytest-coverage-python-3.12.log
+            ${{ runner.temp }}/coverage-python-3.12.json
           if-no-files-found: error
           retention-days: 7
   quality:
@@ -132,3 +138,59 @@ jobs:
           "$RUNNER_TEMP/wheel-smoke/bin/python" -m nexus_symbiote scan "$RUNNER_TEMP/wheel-fixture" --report-only -f cyclonedx -o wheel-agentbom.cdx.json
           "$RUNNER_TEMP/wheel-smoke/bin/python" -m nexus_symbiote scan "$RUNNER_TEMP/wheel-fixture" --report-only -f spdx -o wheel-agentbom.spdx.json
           "$RUNNER_TEMP/wheel-smoke/bin/python" -c 'import json; d=json.load(open("wheel-agentbom.json")); assert "components" in d'
+  security-regressions:
+    name: Committed security regression contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Install the Action's locked runtime and reviewed source
+        run: |
+          python -m pip install --require-hashes --only-binary=:all: -r requirements-action.lock
+          python -m pip install --no-deps --no-build-isolation .
+          python -m pip check
+      - name: Enforce each committed security case
+        env:
+          REGRESSION_REPORT: ${{ runner.temp }}/security-regressions.json
+        run: python scripts/check_security_regressions.py --out "$REGRESSION_REPORT"
+      - name: Retain per-case security evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: security-regression-evidence
+          path: ${{ runner.temp }}/security-regressions.json
+          if-no-files-found: error
+          retention-days: 14
+  verified:
+    name: Verified CI
+    if: always()
+    needs: [test, coverage, quality, distribution, security-regressions]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every verification job to succeed
+        env:
+          CI_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          results = json.loads(os.environ["CI_RESULTS"])
+          expected = {"test", "coverage", "quality", "distribution", "security-regressions"}
+          if not isinstance(results, dict) or set(results) != expected:
+              print("Verification metadata does not contain exactly the required jobs")
+              sys.exit(1)
+          failed = [
+              name for name, result in results.items()
+              if not isinstance(result, dict) or result.get("result") != "success"
+          ]
+          if failed:
+              print("Verification did not succeed: " + ", ".join(sorted(failed)))
+          sys.exit(bool(failed))
+          PY

@@ -52,7 +52,12 @@ runs:
       shell: bash
       env:
         SYMBIOTE_ACTION_PATH: ${{ github.action_path }}
-      run: python -I -m pip install -- "$SYMBIOTE_ACTION_PATH"
+      run: |
+        action_venv="$(mktemp -d "$RUNNER_TEMP/nexus-symbiote-action-XXXXXX")"
+        python -I -m venv "$action_venv"
+        "$action_venv/bin/python" -I -m pip install --require-hashes --only-binary=:all: -r "$SYMBIOTE_ACTION_PATH/requirements-action.lock"
+        "$action_venv/bin/python" -I -m pip install --no-deps --no-build-isolation -- "$SYMBIOTE_ACTION_PATH"
+        echo "$action_venv/bin" >> "$GITHUB_PATH"
     - name: Collect once and apply validation gates
       id: scan
       shell: bash
