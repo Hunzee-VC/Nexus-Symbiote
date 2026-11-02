@@ -9,6 +9,8 @@ from click.testing import CliRunner
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import ComponentType
+from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
+from nexus_symbiote.generators.spdx import SPDXGenerator
 from nexus_symbiote.scanners.shadowscan import PROJECTION_PROFILE, ShadowScanImporter
 
 FIXTURE = Path(__file__).parent / "fixtures/shadowscan-producer/cyclonedx-agent-model.json"
@@ -41,6 +43,15 @@ def test_unmapped_endpoints_are_accounted_for_without_exposing_identifiers():
     assert len(report.dependencies) == 1
     assert any("1 source dependency edges" in item for item in report.limitations)
     assert "CANARY" not in repr(report)
+
+
+@pytest.mark.parametrize("generator", [CycloneDXGenerator, SPDXGenerator])
+def test_portable_round_trip_retains_source_edge_assurance(generator):
+    report = ShadowScanImporter().read_report(FIXTURE)
+    exporter = generator()
+    recovered = exporter.recover(exporter.generate(report.to_native_bom()))
+    assert recovered.dependencies == report.dependencies
+    assert recovered.metadata.completeness.source_report_digest == report.digest
 
 
 @pytest.mark.parametrize(
