@@ -343,7 +343,9 @@ class RegistryScanner(Scanner):
             content = self._read(path, result)
             if content is None:
                 continue
-            for raw_image in re.findall(r"(?:FROM|image:\s*)\s*([^\s]+)", content):
+            # One whitespace quantifier only: two adjacent ones backtrack quadratically
+            # when a file ends in "image:" followed by a long run of whitespace.
+            for raw_image in re.findall(r"(?:FROM|image:)\s*([^\s]+)", content):
                 if not any(
                     word in raw_image.lower()
                     for word in ("vllm", "ollama", "triton", "tgi", "llama", "model")

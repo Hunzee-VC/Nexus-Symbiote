@@ -284,6 +284,7 @@ class AIBOMDiffer:
                 ("endpoint", old.endpoint_url, new.endpoint_url),
                 ("transport", old.transport, new.transport),
                 ("launch command", old.command, new.command),
+                ("launcher package", old.launcher_package, new.launcher_package),
             ):
                 if before != after:
                     # External or legacy inventories may contain credentials in these fields.
@@ -432,6 +433,7 @@ class AIBOMDiffer:
             "hashes",
             "serialization_safety",
             "signing_status",
+            "launcher_package",
         }
         # These special cases cover only some transitions; retain the generic
         # comparison for all other version/profile changes.
@@ -522,8 +524,11 @@ class AIBOMDiffer:
                 )
 
     def _generate_security_alerts(self, report: DiffReport) -> None:
+        # An in-place change is at least as consequential as an addition, which
+        # always alerts: a version bump, a swapped lockfile integrity value or a
+        # replaced tool body is rated medium, and must still fail the CI gate.
         for change in report.components_modified:
-            if change.severity in {"high", "critical"}:
+            if change.severity in {"medium", "high", "critical"}:
                 report.security_alerts.append(
                     {
                         "severity": change.severity,

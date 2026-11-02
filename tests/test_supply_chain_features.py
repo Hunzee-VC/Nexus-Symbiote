@@ -225,7 +225,7 @@ def test_verify_live_never_launches_project_command(tmp_path):
     source = tmp_path / "bom.json"
     source.write_text(AIBOM().to_json())
     result = CliRunner().invoke(
-        main, ["verify-live", str(source), "--project", str(tmp_path), "--record"]
+        main, ["--live", "verify-live", str(source), "--project", str(tmp_path), "--record"]
     )
     assert result.exit_code != 0 and "--launch-policy" in result.output
     assert not marker.exists()
@@ -236,7 +236,7 @@ def test_advisories_cli_fails_when_inventory_identity_is_unknown(tmp_path):
     path.write_text(
         AIBOM(components=[_package().model_copy(update={"package_url": None})]).to_json()
     )
-    result = CliRunner().invoke(main, ["advisories", str(path)])
+    result = CliRunner().invoke(main, ["--live", "advisories", str(path)])
     assert result.exit_code == 1
     assert json.loads(result.output)["complete"] is False
 

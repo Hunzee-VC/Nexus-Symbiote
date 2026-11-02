@@ -27,7 +27,8 @@ an operator-supplied expected digest. To verify a Sigstore bundle as well, pass
 policy must come from a trusted source. This verifies the selected artifact, not
 its association with a discovery finding, deployment, or safety.
 
-The importer maps native `agent`, `mcp-server` and `local-model` findings. It
+The importer maps native `agent`, `mcp-server` and `local-model` findings,
+including MCP tool observations distinguished by resource type. It
 also accepts ShadowScan's CycloneDX 1.6/1.7 components and services, marking the
 projection partial. Unmapped entries are counted with source indexes. For
 CycloneDX, the index is into components followed by services. The source report
@@ -44,7 +45,7 @@ unauthorized activity. Output contains report and source-ID digests and indexes,
 not raw source descriptions, locations or snippets. Both artifacts may still be
 sensitive and must be handled accordingly.
 
-The projection profile `nexus-symbiote/shadowscan-projection/v1` identifies the
+The projection profile `nexus-symbiote/shadowscan-projection/v2` identifies the
 SymBiote mapping, not a ShadowScan report schema or authenticated producer
 version. CycloneDX `dependsOn` edges are copied only when both endpoints map to
 components. They remain declared, source-reported relationships, with the exact
@@ -55,6 +56,19 @@ format has no general dependency graph, and this importer does not infer one fro
 fields that merely mention a model. Consumers of standards exports must retain
 the SymBiote extension to preserve the edge assurance and provenance.
 
+ShadowScan's endpoint connector can report an MCP tool using kind `mcp-server`
+and resource type `mcp-tool`. Version 2 projects that exact combination as a
+declared, unverified tool rather than as a server. It does not infer a server
+association, tool definition hash, endpoint identity or authorization. Conflicting
+tool and kind claims remain unmapped. Native JSON uses `resource_type` and
+CycloneDX uses the `shadowscan:resource-type` property. This mapping follows the
+[ShadowScan endpoint producer at 1a821e5](https://github.com/aisecnomad/Nexus-ShadowScan/blob/1a821e5763e9340ea96564b0606d1ab581fde90e/shadowscan/connectors/endpoint/runtime.py)
+and its [CycloneDX reporter](https://github.com/aisecnomad/Nexus-ShadowScan/blob/1a821e5763e9340ea96564b0606d1ab581fde90e/shadowscan/reporters/cyclonedx.py).
+Version 1 projections used the server type for these findings; retain the
+original importer to reproduce or verify a v1 projection, then regenerate and
+review v2 inventories before comparison or approval. Producer schema and
+version changes require compatibility testing; the report remains untrusted.
+
 At present the bridge does not resolve agents across tenants or reports, verify
 live MCP identities, or map every ShadowScan finding type, model association or
 dependency. A complete ShadowScan run is only complete for its configured scope;
@@ -63,6 +77,12 @@ for imported discovery because its finding projection does not retain complete
 coverage and provenance.
 
 ## Import and policy gates
+
+The native importer compares reported totals and supplied per-kind and
+per-surface counts with the final findings array. A contradictory summary is an
+invalid report, including in report-only mode. Individual connector counts can
+precede filtering or deduplication and can legitimately differ from the final
+array.
 
 Standalone import records partial coverage even when the source reports a completed
 scan. It writes the evidence and exits with status 1. Pass `--report-only` to

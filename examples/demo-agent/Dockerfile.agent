@@ -1,0 +1,2 @@
+# Sample data for the Nexus SymBiote offline demo; it is inventoried, never built.
+FROM ollama/ollama:latest

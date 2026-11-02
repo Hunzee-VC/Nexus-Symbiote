@@ -1,0 +1,10 @@
+{
+  "sources": [
+    {
+      "name": "product-notes",
+      "type": "vector-store",
+      "embedding_model": "text-embedding-3-small",
+      "source_uris": ["https://docs.example.com/product-notes"]
+    }
+  ]
+}

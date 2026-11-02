@@ -18,6 +18,7 @@ from nexus_symbiote.core.hashing import (
 from nexus_symbiote.core.models import MCPServerComponent, ToolComponent
 from nexus_symbiote.graph import validate_graph
 from nexus_symbiote.live.stdio import list_pinned_tools
+from nexus_symbiote.utils.secrets import redact_descriptor
 
 
 @dataclass
@@ -191,7 +192,8 @@ def verify_mcp_servers(
                     status = "match" if f"{algorithm}:{expected}" == live[name] else "changed"
                 except ValueError:
                     status = "unverifiable"
-            result.tool_findings.append(LiveToolFinding(name, live[name], status, tool))
+            safe = redact_descriptor(tool)
+            result.tool_findings.append(LiveToolFinding(safe["name"], live[name], status, safe))
         for old in approved:
             if old.name not in live:
                 result.tool_findings.append(
@@ -252,6 +254,12 @@ def record_candidate(bom: AIBOM, report: LiveVerifyReport) -> None:
             tool.description_text = descriptor.get("description", "")
             tool.input_schema = descriptor["inputSchema"]
             tool.annotations = descriptor.get("annotations") or {}
+            display_hash = hash_tool_definition(
+                tool.name, tool.description_text or "", tool.input_schema, tool.annotations
+            )
+            tool.redacted_definition_hash = (
+                display_hash if display_hash != finding.definition_hash else None
+            )
             tool.assurance_level = AssuranceLevel.OBSERVED
             tool.claims["tool_definition"] = ClaimEvidence(
                 assurance=AssuranceLevel.OBSERVED,
