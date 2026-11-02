@@ -97,9 +97,21 @@ jobs:
           name: release-distributions
           path: dist
       - name: Attest distribution provenance
+        id: distributions
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
         with:
           subject-path: dist/*
+      - name: Retain distribution attestation bundle
+        env:
+          BUNDLE_PATH: ${{ steps.distributions.outputs.bundle-path }}
+        run: |
+          mkdir -p attestation
+          cp -- "$BUNDLE_PATH" attestation/distribution-attestation.jsonl
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: distribution-attestation
+          path: attestation/distribution-attestation.jsonl
+          if-no-files-found: error
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: release-evidence
@@ -124,12 +136,37 @@ jobs:
       name: pypi
       url: https://pypi.org/p/nexus-symbiote
     permissions:
+      contents: read
+      attestations: read
       id-token: write
     steps:
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: release-distributions
           path: dist
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: distribution-attestation
+          path: attestation
+      - name: Verify exact distributions and source provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s attestation/distribution-attestation.jsonl
+          shopt -s nullglob
+          wheels=(dist/*.whl)
+          sdists=(dist/*.tar.gz)
+          (( ${#wheels[@]} == 1 && ${#sdists[@]} == 1 ))
+          for artifact in "${wheels[@]}" "${sdists[@]}"; do
+            gh attestation verify "$artifact" \
+              --bundle attestation/distribution-attestation.jsonl \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+              --source-ref refs/heads/main --source-digest "$GITHUB_SHA" \
+              --deny-self-hosted-runners
+          done
       - name: Publish with OIDC trusted publishing
         uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0
         with:
