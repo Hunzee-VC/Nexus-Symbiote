@@ -43,6 +43,17 @@ unauthorized activity. Output contains report and source-ID digests and indexes,
 not raw source descriptions, locations or snippets. Both artifacts may still be
 sensitive and must be handled accordingly.
 
+The projection profile `nexus-symbiote/shadowscan-projection/v1` identifies the
+SymBiote mapping, not a ShadowScan report schema or authenticated producer
+version. CycloneDX `dependsOn` edges are copied only when both endpoints map to
+components. They remain declared, source-reported relationships, with the exact
+report digest and dependency-array index recorded on the edge. Unmapped endpoint
+edges are counted as limitations; raw source identifiers are not included. This
+does not verify deployment, association or authorization. The native ShadowScan
+format has no general dependency graph, and this importer does not infer one from
+fields that merely mention a model. Consumers of standards exports must retain
+the SymBiote extension to preserve the edge assurance and provenance.
+
 At present the bridge does not resolve agents across tenants or reports, verify
 live MCP identities, or map every ShadowScan finding type, model association or
 dependency. A complete ShadowScan run is only complete for its configured scope;

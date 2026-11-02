@@ -1,0 +1,127 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "serialNumber": "urn:uuid:a3d5e5ee-0b59-504d-84e2-ec5279397798",
+  "version": 1,
+  "metadata": {
+    "tools": {
+      "components": [
+        {
+          "type": "application",
+          "name": "ShadowScan",
+          "version": "0.1.4",
+          "externalReferences": [
+            {
+              "type": "vcs",
+              "url": "https://github.com/aisecnomad/Nexus-ShadowScan"
+            }
+          ]
+        }
+      ]
+    },
+    "properties": [
+      {
+        "name": "shadowscan:scan:status",
+        "value": "complete"
+      },
+      {
+        "name": "shadowscan:scan:findings",
+        "value": "1"
+      },
+      {
+        "name": "shadowscan:scan:credential-findings-excluded",
+        "value": "0"
+      },
+      {
+        "name": "shadowscan:scan:connectors",
+        "value": "code.filesystem"
+      },
+      {
+        "name": "shadowscan:scan:inventory-size",
+        "value": "0"
+      }
+    ],
+    "timestamp": "2026-01-01T00:00:00Z"
+  },
+  "components": [
+    {
+      "bom-ref": "shadowscan:model:e00fdc96a87ae239",
+      "type": "machine-learning-model",
+      "name": "example/model:1"
+    },
+    {
+      "bom-ref": "ss-ec1a1506a41db25e",
+      "type": "application",
+      "name": "synthetic",
+      "group": "code",
+      "description": "agent discovered by code.filesystem",
+      "properties": [
+        {
+          "name": "shadowscan:finding-id",
+          "value": "ss-ec1a1506a41db25e"
+        },
+        {
+          "name": "shadowscan:surface",
+          "value": "code"
+        },
+        {
+          "name": "shadowscan:kind",
+          "value": "agent"
+        },
+        {
+          "name": "shadowscan:connector",
+          "value": "code.filesystem"
+        },
+        {
+          "name": "shadowscan:resource",
+          "value": "synthetic-agent"
+        },
+        {
+          "name": "shadowscan:resource-type",
+          "value": "repository"
+        },
+        {
+          "name": "shadowscan:heuristic-risk",
+          "value": "info"
+        },
+        {
+          "name": "shadowscan:heuristic-risk-score",
+          "value": "0"
+        },
+        {
+          "name": "shadowscan:confidence",
+          "value": "0.00"
+        },
+        {
+          "name": "shadowscan:likelihood",
+          "value": "weak"
+        },
+        {
+          "name": "shadowscan:threats",
+          "value": "maestro-2025:L3"
+        },
+        {
+          "name": "shadowscan:controls",
+          "value": "aiuc-1-2026q2:E, iso-iec-42001-2023:A.3.2, nist-ai-rmf-1.0:GOVERN-2.1"
+        }
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "ss-ec1a1506a41db25e",
+      "dependsOn": [
+        "shadowscan:model:e00fdc96a87ae239"
+      ]
+    }
+  ],
+  "compositions": [
+    {
+      "aggregate": "unknown",
+      "assemblies": [
+        "shadowscan:model:e00fdc96a87ae239",
+        "ss-ec1a1506a41db25e"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,84 @@
+"""Contract and hostile-input tests for ShadowScan CycloneDX associations."""
+
+import json
+from pathlib import Path
+
+import pytest
+from click.testing import CliRunner
+
+from nexus_symbiote.cli import main
+from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote.core.enums import ComponentType
+from nexus_symbiote.scanners.shadowscan import PROJECTION_PROFILE, ShadowScanImporter
+
+FIXTURE = Path(__file__).parent / "fixtures/shadowscan-producer/cyclonedx-agent-model.json"
+
+
+def test_actual_producer_projection_preserves_declared_edge_and_omits_raw_names():
+    report = ShadowScanImporter().read_report(FIXTURE)
+    assert len(report.components) == 2
+    assert len(report.dependencies) == 1
+    by_ref = {c.bom_ref: c for c in report.components}
+    edge = report.dependencies[0]
+    assert by_ref[edge.source_ref].component_type == ComponentType.AGENT
+    assert by_ref[edge.target_ref].component_type == ComponentType.MODEL
+    assert edge.relationship == "depends-on" and edge.assurance_level == "declared"
+    assert report.digest in edge.conditions
+    assert "dependencies index 0" in edge.conditions
+    assert all(
+        c.properties["shadowscan:projection-profile"] == PROJECTION_PROFILE
+        for c in report.components
+    )
+    assert "synthetic-agent" not in repr(report)
+    assert "example/model:1" not in repr(report)
+    assert report.to_native_bom().dependencies == report.dependencies
+
+
+def test_unmapped_endpoints_are_accounted_for_without_exposing_identifiers():
+    data = json.loads(FIXTURE.read_text())
+    data["dependencies"][0]["dependsOn"].append("unmapped-secret-CANARY")
+    report = ShadowScanImporter().parse_report(json.dumps(data))
+    assert len(report.dependencies) == 1
+    assert any("1 source dependency edges" in item for item in report.limitations)
+    assert "CANARY" not in repr(report)
+
+
+@pytest.mark.parametrize(
+    "dependencies",
+    [
+        {},
+        [None],
+        [{"ref": "a", "dependsOn": "b"}],
+        [{"ref": "a", "dependsOn": ["b", "b"]}],
+        [{"ref": "a"}, {"ref": "a"}],
+        [{"ref": "a", "dependsOn": ["b"] * 10_001}],
+    ],
+)
+def test_malformed_or_oversized_edges_fail_closed(dependencies):
+    data = json.loads(FIXTURE.read_text())
+    data["dependencies"] = dependencies
+    with pytest.raises(ValueError):
+        ShadowScanImporter().parse_report(json.dumps(data))
+
+
+def test_direct_import_scan_and_projection_verification_preserve_edges(tmp_path):
+    report = tmp_path / "shadowscan.json"
+    report.write_bytes(FIXTURE.read_bytes())
+    direct, scanned = tmp_path / "direct.json", tmp_path / "scanned.json"
+    runner = CliRunner()
+    imported = runner.invoke(
+        main, ["import-shadowscan", str(report), "-o", str(direct), "--report-only"]
+    )
+    assert imported.exit_code == 0, imported.output
+    checked = runner.invoke(main, ["verify-discovery", str(direct), str(report), "--projection"])
+    assert checked.exit_code == 0, checked.output
+    scan = runner.invoke(
+        main,
+        ["scan", str(tmp_path), "--scanner", "shadowscan", "-o", str(scanned), "--report-only"],
+    )
+    assert scan.exit_code == 0, scan.output
+    for path in (direct, scanned):
+        bom = AIBOM.load(path)
+        edges = [edge for edge in bom.dependencies if edge.assurance_level == "declared"]
+        assert len(edges) == 1 and edges[0].relationship == "depends-on"
+        assert "example/model:1" not in path.read_text()
