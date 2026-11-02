@@ -3,7 +3,9 @@
 Finds the registry entries whose ``packages[].identifier`` (and registry type) match a dependency, and reports
 the server's registry status (``active``/``deprecated``/``deleted``) and its latest published version. The search
 is bounded (a few pages) and matching is exact on the package identifier: a server merely *named* like the
-package is not attributed to it.
+package is not attributed to it. A search cut short (page limit reached, or a next-page cursor of an unexpected
+shape) never reads as "no server lists this package": it raises :class:`SearchTruncated` when nothing matched,
+and sets ``McpRegistryEntry.truncated`` otherwise.
 """
 
 from __future__ import annotations
@@ -14,11 +16,18 @@ from datetime import UTC, datetime
 from typing import Any, Final
 from urllib.parse import urlencode
 
-from symbiote.advisories.http import HttpClient, MalformedResponse
+from symbiote.advisories.http import HttpClient, HttpError, MalformedResponse
 from symbiote.advisories.npm import parse_time
 from symbiote.advisories.types import ReleaseInfo
 
-__all__ = ["MCP_REGISTRY", "McpRegistryEntry", "lookup_server", "parse_servers", "search_term"]
+__all__ = [
+    "MCP_REGISTRY",
+    "McpRegistryEntry",
+    "SearchTruncated",
+    "lookup_server",
+    "parse_servers",
+    "search_term",
+]
 
 MCP_REGISTRY: Final = "https://registry.modelcontextprotocol.io"
 MAX_PAGES: Final = 3
@@ -41,6 +50,12 @@ class McpRegistryEntry:
     #: Every version of the server seen (registry versions, not necessarily package versions).
     versions: list[ReleaseInfo] = field(default_factory=list)
     source: str = ""
+    #: The search stopped before its last page: other entries (or versions) may exist.
+    truncated: bool = False
+
+
+class SearchTruncated(HttpError):  # noqa: N818 - reads as an outcome, like NotFound
+    """The bounded search ended before the registry's last page and found no matching server."""
 
 
 def search_term(identifier: str) -> str | None:
@@ -51,6 +66,18 @@ def search_term(identifier: str) -> str | None:
 
 def _text(value: object, limit: int = 256) -> str | None:
     return value[:limit] if isinstance(value, str) and value else None
+
+
+def _same_identifier(listed: object, identifier: str, registry_type: str) -> bool:
+    if not isinstance(listed, str):
+        return False
+    if registry_type == "pypi":  # PEP 503: names compare case-insensitively with -_. folded
+        return _pep503(listed) == _pep503(identifier)
+    return listed == identifier
+
+
+def _pep503(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name[:256]).lower()
 
 
 def parse_servers(
@@ -72,7 +99,7 @@ def parse_servers(
             continue
         hit = any(
             isinstance(p, dict)
-            and p.get("identifier") == identifier
+            and _same_identifier(p.get("identifier"), identifier, registry_type)
             and str(p.get("registryType", p.get("registry_type", ""))).lower() == registry_type
             for p in packages
         )
@@ -87,6 +114,11 @@ def parse_servers(
         nxt = md.get("nextCursor", md.get("next_cursor"))
         if isinstance(nxt, str) and _CURSOR.fullmatch(nxt):
             cursor = nxt
+        elif nxt is not None and nxt != "":
+            # A next page exists but its cursor cannot be followed safely: the search would end incomplete.
+            raise MalformedResponse(
+                "MCP Registry returned a next-page cursor of an unexpected shape", url=url
+            )
     return matches, cursor
 
 
@@ -96,7 +128,7 @@ def lookup_server(client: HttpClient, *, ecosystem: str, identifier: str) -> Mcp
     Raises an HTTP error when the registry cannot be read (the caller records it; absence is not concluded).
     """
     registry_type = _REGISTRY_TYPE.get(ecosystem)
-    term = search_term(identifier)
+    term = search_term(_pep503(identifier) if registry_type == "pypi" else identifier)
     if registry_type is None or term is None:
         return None
     found: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
@@ -114,7 +146,13 @@ def lookup_server(client: HttpClient, *, ecosystem: str, identifier: str) -> Mcp
         found.extend(page)
         if cursor is None:
             break
+    truncated = cursor is not None
     if not found:
+        if truncated:
+            raise SearchTruncated(
+                f"MCP Registry search for {term!r} truncated after {MAX_PAGES} pages without a match",
+                url=first_url,
+            )
         return None
     # A package may be listed by several server names; prefer the one with the most versions seen.
     by_name: dict[str, list[tuple[dict[str, Any], dict[str, Any]]]] = {}
@@ -150,4 +188,5 @@ def lookup_server(client: HttpClient, *, ecosystem: str, identifier: str) -> Mcp
         published_at=parse_time(meta.get("publishedAt")),
         versions=versions,
         source=first_url,
+        truncated=truncated,
     )

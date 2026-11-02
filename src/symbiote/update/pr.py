@@ -3,10 +3,17 @@
 The flow is deliberately boring and reviewable:
 
 1. require a clean working tree (nothing of the user's is ever swept into the commit);
-2. create ``symbiote/deps/<dependency>-<version>`` from ``base`` (default: the current branch);
-3. apply the edits (:func:`symbiote.update.patch.apply_proposals`) and commit *only* the edited files;
-4. ``git push --set-upstream origin <branch>`` — never ``--force``, never the default branch;
-5. ``gh pr create --draft`` with a body rendering every proposal (signals, advisories, review notes).
+2. if a pull request for ``symbiote/deps/<dependency>-<version>`` already exists (open, closed or merged), return
+   its URL and change nothing: the same proposal is never re-opened, so a scheduled daily run is idempotent;
+   a remote branch of that name without a pull request is an error (it is not ours to reuse);
+3. create the branch from ``base`` (default: the current branch);
+4. apply the edits (:func:`symbiote.update.patch.apply_proposals`) and commit *only* the edited files;
+5. ``git push --set-upstream origin <branch>`` — never ``--force``, never the default branch;
+6. ``gh pr create --draft`` with a body rendering every proposal (signals, advisories, review notes).
+
+If any step after creating the branch fails, the original branch is checked out again, the half-made local
+branch is deleted and, when the push had succeeded but the pull request could not be opened, the just-pushed
+branch is deleted from the remote so the next run starts clean.
 
 It never merges. Every subprocess runs a fixed argv list (no shell) with an explicit ``cwd`` and a timeout;
 credentials stay with ``git``/``gh`` (their own config or ``GH_TOKEN``) and are never printed: process output
@@ -16,6 +23,7 @@ included in errors is scrubbed of token-shaped strings first.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import shlex
@@ -41,6 +49,9 @@ _SECRETS: Final = re.compile(
     r"(?<=://)[^/\s:@]{1,256}:[^/\s@]{1,256}(?=@)|(?i:bearer)\s+[A-Za-z0-9._~+/=-]{8,512})"
 )
 _CONTROL: Final = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+#: Everything that can end a line or a Markdown code span (including tab, newline and Unicode separators).
+_CODE_BREAK: Final = re.compile(r"[\x00-\x1f\x7f\x85\u2028\u2029]")
+_MAX_PR_LIST: Final = 256 * 1024
 
 
 class PullRequestError(RuntimeError):
@@ -81,7 +92,8 @@ def _md(text: str, limit: int = 600) -> str:
 
 
 def _code(text: str) -> str:
-    return "`" + _CONTROL.sub(" ", text).replace("`", "'")[:200] + "`"
+    """Untrusted text as an inline code span that cannot be closed or broken out of (no backtick, no newline)."""
+    return "`" + _CODE_BREAK.sub(" ", text).replace("`", "'")[:200] + "`"
 
 
 def _commit_message(proposals: Sequence[UpdateProposal]) -> str:
@@ -212,6 +224,42 @@ def _default_branch(git: str, root: Path) -> str | None:
     return None
 
 
+def _head_ref(git: str, root: Path) -> str:
+    """The branch to return to on failure (or the commit, when HEAD is detached)."""
+    proc = _run([git, "symbolic-ref", "--quiet", "--short", "HEAD"], root, check=False)
+    if proc.returncode == 0 and proc.stdout.strip():
+        return proc.stdout.strip()
+    return _run([git, "rev-parse", "--verify", "HEAD"], root).stdout.strip()
+
+
+def _existing_pr(gh: str, root: Path, branch: str) -> str | None:
+    """URL of a pull request (any state) whose head is ``branch``; ``None`` when there is none."""
+    proc = _run(
+        [gh, "pr", "list", "--head", branch, "--state", "all", "--limit", "5", "--json", "url,state"],
+        root,
+        timeout=_NET_TIMEOUT,
+    )
+    raw = proc.stdout.strip()
+    if len(raw) > _MAX_PR_LIST:
+        raise PullRequestError("`gh pr list` returned an oversized answer")
+    try:
+        items = json.loads(raw or "[]")
+    except ValueError:
+        raise PullRequestError("`gh pr list` returned unparseable output") from None
+    if not isinstance(items, list):
+        raise PullRequestError("`gh pr list` returned an unexpected answer")
+    ranked = sorted(
+        (i for i in items if isinstance(i, dict) and isinstance(i.get("url"), str)),
+        key=lambda i: i.get("state") != "OPEN",
+    )
+    return _scrub(_CODE_BREAK.sub("", ranked[0]["url"]))[:500] if ranked else None
+
+
+def _remote_branch_exists(git: str, root: Path, branch: str) -> bool:
+    proc = _run([git, "ls-remote", "--heads", REMOTE, f"refs/heads/{branch}"], root, timeout=_NET_TIMEOUT)
+    return bool(proc.stdout.strip())
+
+
 def _show(argv: Sequence[str]) -> str:
     return "$ " + shlex.join([Path(argv[0]).name, *argv[1:]])
 
@@ -284,6 +332,11 @@ def open_pull_request(
     if dry_run:
         lines = [_show(c) for c in commands]
         lines.insert(2, f"# apply edits to: {', '.join(files)}")
+        lines.insert(
+            1,
+            f"# no-op if `gh pr list --head {branch} --state all` finds a pull request; "
+            f"error if {REMOTE} already has the branch",
+        )
         return "\n".join(lines) + "\n"
 
     status = _run(commands[0], root)
@@ -296,19 +349,50 @@ def open_pull_request(
         or not branch.startswith(BRANCH_PREFIX)
     ):
         raise PullRequestError("refusing to push to the base or default branch")
+    existing = _existing_pr(gh, root, branch)
+    if existing is not None:
+        return existing  # the same proposal was already opened (or reviewed and closed): nothing to do
+    if _remote_branch_exists(git, root, branch):
+        raise PullRequestError(
+            f"branch {branch} exists on {REMOTE} without a pull request; delete it to propose again"
+        )
     exists = _run([git, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], root, check=False)
     if exists.returncode == 0:
-        raise PullRequestError(f"branch {branch} already exists; delete it or merge the open pull request")
+        raise PullRequestError(
+            f"branch {branch} already exists locally; delete it or merge the open pull request"
+        )
+    original = _head_ref(git, root)
     _run(commands[1], root)
+    pushed = False
     try:
-        written = apply_proposals(root, with_edits)
-    except (PatchError, OSError) as exc:
-        raise PullRequestError(f"applying the edits failed on branch {branch}: {exc}") from None
-    if sorted(written) != files:
-        raise PullRequestError("the edited files differ from the planned files")
-    _run(commands[2], root)
-    _run(commands[3], root, stdin=message)
-    _run(commands[4], root, timeout=_NET_TIMEOUT)
-    proc = _run(commands[5], root, timeout=_NET_TIMEOUT, stdin=body)
+        try:
+            written = apply_proposals(root, with_edits)
+        except (PatchError, OSError) as exc:
+            raise PullRequestError(f"applying the edits failed on branch {branch}: {exc}") from None
+        if sorted(written) != files:
+            raise PullRequestError("the edited files differ from the planned files")
+        _run(commands[2], root)
+        _run(commands[3], root, stdin=message)
+        _run(commands[4], root, timeout=_NET_TIMEOUT)
+        pushed = True
+        proc = _run(commands[5], root, timeout=_NET_TIMEOUT, stdin=body)
+    except BaseException:
+        _rollback(git, root, original=original, branch=branch, pushed=pushed)
+        raise
     url = next((ln.strip() for ln in reversed(proc.stdout.splitlines()) if ln.strip()), "")
     return _scrub(url)
+
+
+def _rollback(git: str, root: Path, *, original: str, branch: str, pushed: bool) -> None:
+    """Best effort: back to the original branch, drop the half-made branch (and the just-pushed remote one)."""
+    steps: list[tuple[list[str], float]] = [
+        ([git, "checkout", "--force", "--quiet", original], _GIT_TIMEOUT),
+        ([git, "branch", "-D", branch], _GIT_TIMEOUT),
+    ]
+    if pushed:
+        steps.append(([git, "push", REMOTE, "--delete", branch], _NET_TIMEOUT))
+    for argv, timeout in steps:
+        try:
+            _run(argv, root, timeout=timeout, check=False)
+        except PullRequestError:
+            continue

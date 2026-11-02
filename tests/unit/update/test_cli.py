@@ -54,6 +54,7 @@ def _releases() -> list[ReleaseInfo]:
 
 
 def _queried(**kw: Any) -> DependencyIntel:
+    kw.setdefault("recommended", _releases()[1])
     return DependencyIntel(ref=REF, checked_at=NOW, coverage="queried", releases=_releases(), **kw)
 
 
@@ -172,3 +173,84 @@ def test_open_pr_failure_exits_six(agent: Path, monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(update_pkg, "open_pull_request", fail)
     _advise(monkeypatch, lambda: [_queried()])
     assert _run(str(agent), "--open-pr").exit_code == 6
+
+
+def test_partial_coverage_is_reported_and_exits_six(agent: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Finding: OSV failed, registry answered, no proposal: must not exit 0 as if clean.
+    def make() -> list[DependencyIntel]:
+        intel = DependencyIntel(ref=REF, checked_at=NOW, coverage="partial", releases=_releases())
+        intel.errors.append("OSV lookup failed: timed out")
+        return [intel]
+
+    _advise(monkeypatch, make)
+    result = _run(str(agent), "--json")
+    assert result.exit_code == 6, result.output
+    data = json.loads(result.stdout)
+    assert data["proposals"] == [] and data["lookupFailures"] == 1
+    [cov] = data["coverage"]
+    assert cov["coverage"] == "partial" and cov["lookupFailed"] is True
+    assert cov["errors"] == ["OSV lookup failed: timed out"]
+    text = _run(str(agent))
+    assert text.exit_code == 6
+    assert "OSV lookup failed: timed out" in text.output and "partial" in text.output
+
+
+def test_partial_coverage_without_failure_is_listed_but_not_an_error(
+    agent: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def make() -> list[DependencyIntel]:
+        intel = DependencyIntel(ref=REF, checked_at=NOW, coverage="partial")
+        intel.errors.append("no vulnerability advisor for pkg:nuget packages")
+        return [intel]
+
+    _advise(monkeypatch, make)
+    result = _run(str(agent), "--json")
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)
+    assert data["coverage"][0]["lookupFailed"] is False and data["lookupFailures"] == 0
+
+
+def test_floating_oci_image_gets_advice_and_fail_on_threshold(
+    agent: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    oci = DependencyRef(DependencyKind.MCP_SERVER_PACKAGE, "oci", "ghcr.io/acme/mcp", None)
+
+    def make() -> list[DependencyIntel]:
+        intel = DependencyIntel(ref=oci, checked_at=NOW, coverage="not-attempted")
+        intel.errors.append("no advisor for OCI images yet")
+        intel.signals.append(Signal(SignalKind.FLOATING, "medium", "not pinned to a digest"))
+        return [intel]
+
+    _advise(monkeypatch, make)
+    result = _run(str(agent), "--json")
+    assert result.exit_code == 0, result.output  # medium is below the default fail-on (high)
+    data = json.loads(result.stdout)
+    assert [(p["kind"], p["edits"]) for p in data["proposals"]] == [("pin", [])]
+    assert data["coverage"][0]["coverage"] == "not-attempted"
+    assert data["coverage"][0]["signals"][0]["kind"] == "floating"
+    assert _run(str(agent), "--fail-on", "medium").exit_code == 1
+    assert _run(str(agent), "--fail-on", "bogus").exit_code == 2
+
+
+def test_unresolved_drift_signal_counts_toward_fail_on(agent: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    peer = DependencyRef(DependencyKind.A2A_PEER, "a2a", "https://peer.example", None)
+
+    def make() -> list[DependencyIntel]:
+        intel = DependencyIntel(ref=peer, checked_at=NOW, coverage="not-attempted")
+        intel.signals.append(Signal(SignalKind.DEFINITION_DRIFT, "high", "agent card changed"))
+        return [intel]
+
+    _advise(monkeypatch, make)
+    result = _run(str(agent), "--json")
+    assert result.exit_code == 1, result.output
+    assert json.loads(result.stdout)["unresolvedSignals"][0]["kind"] == "definition-drift"
+
+
+def test_unexpected_exception_exits_six_not_one(agent: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom() -> list[DependencyIntel]:
+        raise RuntimeError("defect")
+
+    _advise(monkeypatch, boom)
+    result = _run(str(agent))
+    assert result.exit_code == 6
+    assert "RuntimeError" in result.output

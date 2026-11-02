@@ -1,0 +1,5 @@
+# Run every due agent every 10 minutes (the critical-tier cadence); agents that are not due are skipped.
+# The monitor lock prevents two ticks from overlapping. Exit codes: 0 clean, 1 findings, 6 error or incomplete, 7 rollback.
+# Install with `crontab -e`. SYMBIOTE_WEBHOOK_URL should come from a protected file, not from this line;
+# `set -a` exports the KEY=VALUE lines of that (systemd EnvironmentFile-style) file to the symbiote process.
+*/10 * * * * cd /srv/agents && set -a && . /etc/symbiote/monitor.env && set +a && /opt/symbiote/bin/symbiote monitor tick --config symbiote-monitor.yaml --json >> /var/log/symbiote/monitor.jsonl 2>> /var/log/symbiote/monitor.err

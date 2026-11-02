@@ -108,9 +108,10 @@ def parse_time(value: object) -> datetime | None:
         return None
     try:
         dt = datetime.fromisoformat(value.replace("Z", "+00:00") if value.endswith("Z") else value)
-    except ValueError:
+        # Converting an edge-of-range value ("0001-01-01T00:00:00+05:00") overflows: treat it as malformed.
+        return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
+    except (ValueError, OverflowError):
         return None
-    return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
 
 
 def _text(value: object) -> str | None:

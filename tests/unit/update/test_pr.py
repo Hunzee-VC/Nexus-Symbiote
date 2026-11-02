@@ -21,8 +21,15 @@ pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git not ins
 
 CONFIG = '{\n  "mcpServers": {\n    "srv": {"command": "npx", "args": ["-y", "server-pkg"]}\n  }\n}\n'
 FAKE_GH = """#!/bin/sh
+if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
+  printf '%s\\n' "$@" >> "$FAKE_GH_LOG.list"
+  if [ -f "$FAKE_GH_STATE" ]; then cat "$FAKE_GH_STATE"; else echo '[]'; fi
+  exit 0
+fi
+if [ -n "$FAKE_GH_FAIL" ]; then echo "gh: HTTP 502" >&2; exit 1; fi
 printf '%s\\n' "$@" > "$FAKE_GH_LOG"
 cat > "$FAKE_GH_BODY"
+echo '[{"url":"https://github.example/acme/agent/pull/7","state":"OPEN"}]' > "$FAKE_GH_STATE"
 echo "https://github.example/acme/agent/pull/7"
 """
 
@@ -71,6 +78,8 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("PATH", f"{bindir}:{Path(shutil.which('git') or '/usr/bin/git').parent}")
     monkeypatch.setenv("FAKE_GH_LOG", str(tmp_path / "gh-args.txt"))
     monkeypatch.setenv("FAKE_GH_BODY", str(tmp_path / "gh-body.md"))
+    monkeypatch.setenv("FAKE_GH_STATE", str(tmp_path / "gh-state.json"))
+    monkeypatch.delenv("FAKE_GH_FAIL", raising=False)
     remote = tmp_path / "remote.git"
     subprocess.run(["git", "init", "--bare", "-q", "-b", "main", str(remote)], check=True)
     work = tmp_path / "work"
@@ -98,6 +107,29 @@ def test_branch_name_and_body() -> None:
     assert "GHSA-1234-5678-9abc" in body
     assert "- [ ] Re-capture the served tool definitions" in body
     assert "@attacker" not in body and "<script>" not in body  # untrusted text cannot mention or inject HTML
+
+
+def test_code_spans_cannot_break_out() -> None:
+    p = make_proposal()
+    p.signals = [
+        Signal(
+            SignalKind.VULNERABLE,
+            "high",
+            "x",
+            "GHSA-1\n\n@acme/security-team <img src=https://evil.example/x.png>",
+        )
+    ]
+    p.dependency = DependencyRef(DependencyKind.MCP_SERVER_PACKAGE, "npm", "pkg\r\n\n# heading\t`x`", None)
+    body = render_pr_body([p])
+    for line in body.splitlines():
+        if "@acme" in line or "<img" in line or "heading" in line:
+            # only ever inside a single-line code span
+            assert line.count("`") >= 2
+            start, end = line.index("`"), line.rindex("`")
+            for needle in ("@acme", "<img", "# heading"):
+                if needle in line:
+                    assert start < line.index(needle) < end
+    assert "\n\n@acme" not in body and "\n# heading" not in body
 
 
 def test_dry_run_lists_commands_without_side_effects(tmp_path: Path) -> None:
@@ -142,12 +174,56 @@ def test_opens_draft_pr_in_temporary_repository(repo: Path, tmp_path: Path) -> N
     assert "re-approve the toolset digest" in body
     assert (repo / "untracked-notes.txt").exists()
     assert "untracked-notes.txt" in git(repo, "status", "--porcelain")
-    # a second run refuses to reuse the branch
+    # a second run finds the open pull request and changes nothing
     git(repo, "checkout", "-q", "main")
+    head = git(repo, "rev-parse", "HEAD")
     q = make_proposal()
     q.edits = locate_edits(repo, q)
-    with pytest.raises(PullRequestError, match="already exists"):
-        open_pull_request(repo, [q])
+    assert open_pull_request(repo, [q]) == "https://github.example/acme/agent/pull/7"
+    assert git(repo, "rev-parse", "--abbrev-ref", "HEAD") == "main"
+    assert git(repo, "rev-parse", "HEAD") == head
+
+
+def test_rerun_from_fresh_clone_is_a_no_op(repo: Path, tmp_path: Path) -> None:
+    # Finding: day 2 runs in a fresh CI clone (no local branch) while day 1's PR is still open.
+    p = make_proposal()
+    p.edits = locate_edits(repo, p)
+    open_pull_request(repo, [p])
+    remote_head = git(tmp_path / "remote.git", "rev-parse", "symbiote/deps/server-pkg-1.4.2")
+    clone = tmp_path / "clone"
+    subprocess.run(["git", "clone", "-q", str(tmp_path / "remote.git"), str(clone)], check=True)
+    q = make_proposal()
+    q.edits = locate_edits(clone, q)
+    assert open_pull_request(clone, [q]) == "https://github.example/acme/agent/pull/7"
+    assert git(clone, "rev-parse", "--abbrev-ref", "HEAD") == "main"
+    assert git(clone, "branch", "--list", "symbiote/*") == ""
+    assert git(tmp_path / "remote.git", "rev-parse", "symbiote/deps/server-pkg-1.4.2") == remote_head
+
+
+def test_remote_branch_without_pr_is_refused_before_any_change(repo: Path, tmp_path: Path) -> None:
+    git(repo, "push", "-q", "origin", "main:symbiote/deps/server-pkg-1.4.2")
+    p = make_proposal()
+    p.edits = locate_edits(repo, p)
+    with pytest.raises(PullRequestError, match="without a pull request"):
+        open_pull_request(repo, [p])
+    assert git(repo, "rev-parse", "--abbrev-ref", "HEAD") == "main"
+    assert (repo / ".mcp.json").read_text() == CONFIG
+
+
+def test_failure_after_checkout_restores_branch_and_cleans_up(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_GH_FAIL", "1")
+    p = make_proposal()
+    p.edits = locate_edits(repo, p)
+    with pytest.raises(PullRequestError, match="failed"):
+        open_pull_request(repo, [p])
+    assert git(repo, "rev-parse", "--abbrev-ref", "HEAD") == "main"
+    assert git(repo, "branch", "--list", "symbiote/*") == ""
+    assert (repo / ".mcp.json").read_text() == CONFIG
+    assert git(repo, "status", "--porcelain", "--untracked-files=no") == ""
+    # the just-pushed branch was removed from the remote, so the next run starts clean
+    assert git(tmp_path / "remote.git", "branch", "--list", "symbiote/*") == ""
 
 
 def test_refuses_dirty_working_tree(repo: Path) -> None:

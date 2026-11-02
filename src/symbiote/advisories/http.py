@@ -5,7 +5,7 @@ Every registry response is untrusted input. The client therefore:
 * speaks HTTPS only (plain HTTP is accepted for loopback hosts, which serve local mirrors and test fixtures),
   and never follows a redirect to a non-HTTPS URL;
 * caps the bytes it reads (``Content-Length`` is checked first, then the stream is read in chunks) and the
-  wall-clock time a request may take;
+  wall-clock time a body may take to arrive (checked after every ``recv``, so a trickling server is cut off);
 * parses JSON with a size cap and a nesting-depth limit (deeply nested documents are refused, not recursed);
 * retries once on a transient failure (connection error, timeout, 429, 502, 503, 504);
 * keeps an optional on-disk TTL cache keyed by SHA-256 of method, URL and body;
@@ -240,6 +240,8 @@ class HttpClient:
         if self.offline:
             raise Unreachable("offline mode and no fresh cache entry", url=url)
         raw = self._fetch_with_retry(method, url, body, accept)
+        if len(raw) > self.max_bytes:  # defence in depth: the transport already reads at most the cap
+            raise ResponseTooLarge(f"response exceeds the {self.max_bytes}-byte cap", url=url)
         value = parse_json(raw, url=url)
         self._cache_put(key, url, raw)
         return value
@@ -316,12 +318,16 @@ class HttpClient:
             raise _Transient(f"connection failed: {type(exc).__name__}") from None
 
     def _read_capped(self, resp: IO[bytes], url: str, deadline: float) -> bytes:
+        # ``read1`` returns after at most one ``recv``, so a server trickling bytes cannot hold a read open past
+        # the deadline (``read(n)`` would block until ``n`` bytes or EOF): a request is bounded by the deadline
+        # plus one socket timeout.
+        read: Callable[[int], bytes] = getattr(resp, "read1", resp.read)
         chunks: list[bytes] = []
         total = 0
         while True:
             if time.monotonic() > deadline:
                 raise _Transient("timed out while reading the response")
-            chunk = resp.read(_CHUNK)
+            chunk = read(_CHUNK)
             if not chunk:
                 break
             total += len(chunk)

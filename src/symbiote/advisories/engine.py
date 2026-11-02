@@ -13,7 +13,10 @@ Rules that keep the answer honest:
 * ``recommended`` is the newest release that passes the :class:`UpdatePolicy` — outside the cooldown (the
   security cooldown when the current version has advisories), within the current major unless ``allow_major``,
   not yanked or deprecated, no provenance downgrade, no newly added install script, and confirmed free of OSV
-  advisories. If OSV cannot confirm a candidate, nothing is recommended;
+  advisories. If OSV cannot confirm a candidate, nothing is recommended; under ``require_provenance_continuity``
+  a candidate whose provenance is unknown (the provenance source was unreachable) is not recommended either;
+* ``fresh-release`` is raised for the newest release inside the cooldown *and* for the release in use when it is
+  itself inside the cooldown (``high`` for a floating reference, which adopts it automatically);
 * history signals (provenance, install scripts, publisher) compare a release with the releases published
   before it, so a malicious release published *after* a good one (the ``cline@2.3.0`` pattern) is caught even
   though a later release restores provenance.
@@ -65,7 +68,7 @@ __all__ = ["MAX_CANDIDATE_LOOKUPS", "check_dependencies", "check_dependency"]
 MAX_CANDIDATE_LOOKUPS: Final = 5
 #: Releases newer than the current one whose history signals are reported.
 MAX_ANALYSED_RELEASES: Final = 20
-#: How many earlier releases form the "usual publishers" window.
+#: How many distinct earlier publishing accounts form the "usual publishers" window.
 PUBLISHER_WINDOW: Final = 5
 
 SignalSeverity = Literal["critical", "high", "medium", "low", "info"]
@@ -99,6 +102,10 @@ class _Registry:
     yank_reasons: dict[str, str] = field(default_factory=dict)
     status: str | None = None
     status_reason: str | None = None
+    #: False when the provenance source could not be read (PyPI Simple API down): ``None`` then means unknown.
+    provenance_checked: bool = True
+    #: version -> files without provenance, for releases that mix attested and unattested files (PyPI).
+    unattested_files: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
     def find(self, version: str) -> ReleaseInfo | None:
         k = self.key(version)
@@ -152,6 +159,8 @@ def _fetch_registry(client: HttpClient, ref: DependencyRef) -> tuple[_Registry, 
             yank_reasons=project.yank_reasons,
             status=project.status,
             status_reason=project.status_reason,
+            provenance_checked=project.provenance_checked,
+            unattested_files=project.unattested_files,
         ),
         errors,
     )
@@ -170,7 +179,7 @@ def _age(release: ReleaseInfo, now: datetime) -> timedelta | None:
 
 
 def _fmt_age(delta: timedelta) -> str:
-    hours = int(delta.total_seconds() // 3600)
+    hours = max(0, int(delta.total_seconds() // 3600))
     return f"{hours} hours" if hours < 48 else f"{hours // 24} days"
 
 
@@ -230,6 +239,11 @@ class _History:
         return None
 
     def usual_publishers(self, release: ReleaseInfo) -> list[str]:
+        """The last :data:`PUBLISHER_WINDOW` *distinct* accounts that published before ``release``.
+
+        Counting accounts (not releases) keeps a returning maintainer from being reported as a new publisher
+        after a run of releases by a co-maintainer.
+        """
         out: list[str] = []
         for prev in reversed(self.before(release)):
             if prev.publisher and prev.publisher not in out:
@@ -238,16 +252,29 @@ class _History:
                 break
         return out
 
-    def recent_publishers(self, release: ReleaseInfo) -> set[str]:
-        prior = [r.publisher for r in self.before(release) if r.publisher]
-        return set(prior[-PUBLISHER_WINDOW:])
+
+def _attested(reg: _Registry, release: ReleaseInfo) -> bool:
+    """The release carried build provenance, on all its files or (a mixed PyPI release) on some of them."""
+    return bool(release.has_provenance) or release.version in reg.unattested_files
 
 
 def _history_signals(reg: _Registry, hist: _History, release: ReleaseInfo, *, role: str) -> list[Signal]:
     out: list[Signal] = []
-    if release.has_provenance is False:
+    mixed = reg.unattested_files.get(release.version)
+    if release.has_provenance is False and mixed:
+        out.append(
+            Signal(
+                SignalKind.PROVENANCE_DOWNGRADE,
+                "high",
+                f"{role} {reg.name}@{release.version} mixes attested and unattested files; "
+                f"{', '.join(mixed)} carry no build provenance and an installer may choose them "
+                "(a file added to an attested release with a stolen upload token looks like this)",
+                reference=release.version,
+            )
+        )
+    elif release.has_provenance is False:
         prev = hist.last_known(release, "has_provenance")
-        if prev is not None and prev.has_provenance:
+        if prev is not None and _attested(reg, prev):
             out.append(
                 Signal(
                     SignalKind.PROVENANCE_DOWNGRADE,
@@ -270,7 +297,7 @@ def _history_signals(reg: _Registry, hist: _History, release: ReleaseInfo, *, ro
                 )
             )
     if release.publisher:
-        recent = hist.recent_publishers(release)
+        recent = hist.usual_publishers(release)
         if recent and release.publisher not in recent:
             usual = ", ".join(sorted(recent))
             out.append(
@@ -278,7 +305,7 @@ def _history_signals(reg: _Registry, hist: _History, release: ReleaseInfo, *, ro
                     SignalKind.PUBLISHER_CHANGED,
                     "high" if release.has_provenance is False else "medium",
                     f"{role} {reg.name}@{release.version} was published by {release.publisher!r}, not by the "
-                    f"account(s) that published the previous releases ({usual})",
+                    f"account(s) that published its earlier releases ({usual})",
                     reference=release.version,
                 )
             )
@@ -486,6 +513,29 @@ def _release_signals(
         add(_history_signals(reg, hist, release, role="newer release"))
 
     cooldown = timedelta(days=policy.cooldown_days)
+    # The release in use can itself be fresh: a floating reference runs whatever was published minutes ago (the
+    # worm window the cooldown exists for), and a pin may have been bumped to a release nobody has vetted yet.
+    in_use_age = _age(in_use, now) if in_use is not None else None
+    if in_use is not None and in_use_age is not None and in_use_age < cooldown:
+        floating = ref.version is None
+        add(
+            [
+                Signal(
+                    SignalKind.FRESH_RELEASE,
+                    "high" if floating else "medium",
+                    f"{reg.name}@{in_use.version}, "
+                    + ("which the floating reference runs today," if floating else "the version in use,")
+                    + f" was published {_fmt_age(in_use_age)} ago, inside the {policy.cooldown_days}-day "
+                    "cooldown: "
+                    + (
+                        "it is adopted automatically at every start; pin a release outside the cooldown"
+                        if floating
+                        else "it has not had time to be vetted by the ecosystem"
+                    ),
+                    reference=in_use.version,
+                )
+            ]
+        )
     fresh = [
         r
         for r in newer
@@ -530,10 +580,13 @@ def _rejection(
         return "inside the cooldown"
     if not policy.allow_major and base_major is not None and reg.major(cand.version) != base_major:
         return "different major version"
-    if policy.require_provenance_continuity and cand.has_provenance is False:
+    if policy.require_provenance_continuity and cand.has_provenance is not True:
+        if not reg.provenance_checked:
+            # Unknown is not clean: without the provenance source, continuity cannot be confirmed.
+            return "provenance unknown"
         prev = hist.last_known(cand, "has_provenance")
-        if (current is not None and current.has_provenance) or (prev is not None and prev.has_provenance):
-            return "provenance downgrade"
+        if (current is not None and _attested(reg, current)) or (prev is not None and _attested(reg, prev)):
+            return "provenance downgrade" if cand.has_provenance is False else "provenance unknown"
     if policy.block_new_install_scripts and cand.has_install_script:
         baseline = current if current is not None else hist.last_known(cand, "has_install_script")
         if baseline is not None and baseline.has_install_script is False:
@@ -569,6 +622,7 @@ def _recommend(
         and (allow_pre or not reg.prerelease(r.version))
     ]
     lookups = 0
+    unknown_provenance: list[str] = []
     for cand in reversed(candidates):
         why = _rejection(
             cand,
@@ -580,6 +634,8 @@ def _recommend(
             now=now,
             policy=policy,
         )
+        if why == "provenance unknown":
+            unknown_provenance.append(cand.version)
         if why is not None:
             continue
         if lookups >= MAX_CANDIDATE_LOOKUPS:
@@ -597,6 +653,12 @@ def _recommend(
         intel.recommended = cand
         break
     rec = intel.recommended
+    skipped = [v for v in unknown_provenance if rec is None or reg.key(v) > reg.key(rec.version)]
+    if skipped:
+        intel.errors.append(
+            f"provenance unknown for {', '.join(skipped[:5])}: continuity cannot be confirmed, so "
+            + ("they were not recommended" if len(skipped) > 1 else "it was not recommended")
+        )
     if rec is not None and base_key is not None:
         intel.signals.append(
             Signal(
@@ -626,6 +688,10 @@ def _mcp_registry(ref: DependencyRef, client: HttpClient, intel: DependencyIntel
     if entry is None:
         return True
     intel.sources.append(entry.source)
+    if entry.truncated:
+        intel.errors.append(
+            f"MCP Registry search truncated: other entries for {identifier} may exist on later pages"
+        )
     if entry.status in ("deprecated", "deleted"):
         intel.signals.append(
             Signal(
@@ -714,6 +780,25 @@ def _not_attempted(ref: DependencyRef, intel: DependencyIntel, why: str) -> None
                 f"{ref.name} is not pinned to a digest or revision: it resolves to whatever is current at every start",
             )
         )
+    elif ref.version is None and ref.ecosystem == "mcp-registry" and _is_unresolved_package(ref):
+        intel.signals.append(
+            Signal(
+                SignalKind.FLOATING,
+                "high",
+                f"{ref.name} launches a package from a git, tarball or other non-registry source without a pinned "
+                "digest: it runs whatever that source serves at every start, and no advisory covers it",
+            )
+        )
+
+
+def _is_unresolved_package(ref: DependencyRef) -> bool:
+    """A launcher package recorded without a package URL (see :mod:`symbiote.advisories.inventory`)."""
+    return (
+        ref.ecosystem == "mcp-registry"
+        and not ref.purl
+        and ref.kind is not DependencyKind.MCP_SERVER_REMOTE
+        and "://" not in ref.name
+    )
 
 
 def check_dependency(
@@ -735,6 +820,13 @@ def check_dependency(
                 Signal(SignalKind.FLOATING, "medium", f"{ref.name} is not pinned to an exact version")
             )
         intel.coverage = "partial" if ok else "unreachable"
+    elif _is_unresolved_package(ref):
+        _not_attempted(
+            ref,
+            intel,
+            "the launcher package has no package URL (git, tarball or other non-registry source): no registry or "
+            "advisory database can be consulted for it",
+        )
     elif ref.ecosystem == "mcp-registry":
         _not_attempted(
             ref,
@@ -771,7 +863,7 @@ def check_dependencies(
     for ref in refs:
         try:
             out.append(check_dependency(ref, client=client, now=now, policy=policy))
-        except (HttpError, InvalidPackageName, ValueError, KeyError, TypeError) as exc:
+        except Exception as exc:  # one dependency's failure must not cost the others their result
             # A defect or a response shape no parser anticipated: report it, never as a clean result.
             intel = DependencyIntel(ref=ref, checked_at=now, coverage="unreachable")
             intel.errors.append(f"internal error while checking: {type(exc).__name__}: {exc}")

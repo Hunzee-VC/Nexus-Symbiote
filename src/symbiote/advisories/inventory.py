@@ -18,7 +18,10 @@ declared, so an update can be proposed in the right place. References are de-dup
 
 Package types symbiote has no registry advisor for (NuGet, Go, ...) are recorded with ecosystem
 ``mcp-registry`` when they back an MCP server (the MCP Registry is the one source that lists them); software
-components of such types are not inventoried.
+components of such types are not inventoried. A launcher package with no package URL at all (``npx -y
+github:owner/repo``, a tarball URL, ``uvx --from git+https://...``) is recorded too, with ecosystem
+``mcp-registry``, no ``purl``, the server's name, and ``version=None`` when it floats: no advisor can answer for
+it, and the engine reports it as ``not-attempted`` with a ``floating`` signal instead of dropping it.
 """
 
 from __future__ import annotations
@@ -115,18 +118,24 @@ class _Builder:
         return sorted(self._refs.values(), key=lambda r: (r.ecosystem, r.name, r.version or "", r.kind.value))
 
 
-def _package_ref(server: ToolServer, pkg: PackageRef, locators: tuple[str, ...]) -> DependencyRef | None:
-    if not pkg.purl:
-        return None
-    p = parse_purl(pkg.purl)
-    if p is None:
-        return None
-    ecosystem: Ecosystem = _PURL_ECOSYSTEM.get(p.type, "mcp-registry")
+def _package_ref(server: ToolServer, pkg: PackageRef, locators: tuple[str, ...]) -> DependencyRef:
     kind = (
         DependencyKind.MCP_SERVER_PACKAGE
         if server.server_kind is ToolServerKind.MCP
         else DependencyKind.TOOL_PLUGIN
     )
+    p = parse_purl(pkg.purl) if pkg.purl else None
+    if p is None:
+        # A git, tarball or other non-registry launcher source: keep it visible (it is usually floating).
+        return DependencyRef(
+            kind=kind,
+            ecosystem="mcp-registry",
+            name=f"{pkg.launcher.value}:{server.name or server.id}",
+            version=None if pkg.floating else pkg.digest,
+            subjects=(server.id,),
+            locators=locators,
+        )
+    ecosystem: Ecosystem = _PURL_ECOSYSTEM.get(p.type, "mcp-registry")
     version = None if pkg.floating else (p.version or pkg.digest)
     return DependencyRef(
         kind=kind,
@@ -146,7 +155,7 @@ def _servers(bom: AgentBOM, out: _Builder) -> None:
         pkg = pkg_claim.value if pkg_claim is not None else None
         if pkg is not None and pkg_claim is not None:
             ref = _package_ref(server, pkg, _locators(pkg_claim.locator, prov))
-            if ref is not None:
+            if ref.purl is not None or server.endpoint is None:  # else the endpoint below identifies it
                 out.add(ref)
                 continue
         endpoint_claim = server.endpoint

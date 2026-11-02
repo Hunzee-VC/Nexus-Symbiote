@@ -3,7 +3,9 @@
 ``MAL-*`` records (the OpenSSF malicious-packages feed) mark a release as malicious. Severity comes from the
 record's ``database_specific.severity`` (GitHub advisories: ``LOW``/``MODERATE``/``HIGH``/``CRITICAL``), then
 from an affected entry's ``ecosystem_specific``/``database_specific`` severity, then from a CVSS v3 base vector
-(scored here), else ``unknown``. ``fixed_in`` lists the ``fixed`` events of the ranges that name this package.
+(scored here), else ``unknown``. ``fixed_in`` lists the ``fixed`` events of the ``ECOSYSTEM``/``SEMVER`` ranges
+that name this package (``GIT`` ranges are skipped: their events are commit hashes, not installable versions).
+Records marked ``withdrawn`` no longer apply and are skipped.
 """
 
 from __future__ import annotations
@@ -36,6 +38,7 @@ _WORDS: Final[dict[str, Severity]] = {
 }
 _MAX_TEXT: Final = 300
 _MAX_VULNS: Final = 500
+_VERSION_RANGES: Final = frozenset({"ECOSYSTEM", "SEMVER"})
 
 # CVSS v3.x base metric weights (FIRST CVSS v3.1 specification §7.4).
 _AV: Final = {"N": 0.85, "A": 0.62, "L": 0.55, "P": 0.2}
@@ -136,7 +139,9 @@ def _fixed(affected: Iterable[dict[str, Any]]) -> tuple[str, ...]:
     for entry in affected:
         ranges = entry.get("ranges")
         for rng in ranges if isinstance(ranges, list) else []:
-            events = rng.get("events") if isinstance(rng, dict) else None
+            if not isinstance(rng, dict) or rng.get("type") not in _VERSION_RANGES:
+                continue  # GIT ranges name commits; an unknown range type names nothing installable
+            events = rng.get("events")
             for ev in events if isinstance(events, list) else []:
                 fixed = ev.get("fixed") if isinstance(ev, dict) else None
                 if isinstance(fixed, str) and fixed not in out:
@@ -162,6 +167,9 @@ def parse_vulns(vulns: object, *, name: str, ecosystem: str) -> list[Advisory]:
         vid = vuln.get("id")
         if not isinstance(vid, str) or not _ID.fullmatch(vid):
             continue
+        withdrawn = vuln.get("withdrawn")
+        if isinstance(withdrawn, str) and withdrawn:
+            continue  # the database retracted it
         aliases_raw = vuln.get("aliases")
         aliases = tuple(
             a

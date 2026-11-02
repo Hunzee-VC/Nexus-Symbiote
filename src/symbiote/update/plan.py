@@ -7,16 +7,23 @@ each intel record's ``checked_at``, so planning is deterministic.
 
 Decision order for one dependency (the first that applies wins):
 
-1. ``security`` — the current version is vulnerable or malicious: the *lowest* release that fixes every
-   advisory and passes the policy (security cooldown); otherwise ``replace`` (remove or replace the server).
+1. ``security`` — the current version is vulnerable or malicious: the engine's ``recommended`` release (the
+   release the advisors confirmed free of advisories and inside the policy, security cooldown applied);
+   otherwise ``replace`` (remove or replace the server), naming the advisories' fixed versions as a hint only.
 2. ``retire-model`` — a hosted model with an announced retirement: its documented successor, as advice.
 3. ``pin`` — a floating reference: pin to the recommended version (or OCI digest).
-4. ``version`` — the newest release that passes the policy (cooldown, provenance continuity, no new install
-   script, same major unless ``allow_major``).
+4. ``version`` — the recommended release, re-checked against the policy (cooldown, provenance continuity, no
+   new install script, same major unless ``allow_major``).
 5. ``replace`` — the dependency is deprecated or its pinned version yanked and nothing else applies.
 
+Only ``intel.recommended`` is ever proposed as an editable version: the advisors set it only after OSV
+confirmed the exact release free of advisories, and leave it ``None`` when that could not be confirmed. The
+planner re-checks it against the policy (defence in depth) but never substitutes a release of its own choosing,
+because it cannot know whether such a release is itself vulnerable.
+
 A lookup that failed (``coverage`` ``unreachable``/``not-attempted``) yields no proposal: it is reported by the
-caller as missing coverage, never as "up to date".
+caller as missing coverage, never as "up to date". The one exception is a floating OCI image or Hugging Face
+reference, which the advisors flag (``floating``) without resolving: it gets non-editable ``pin`` advice.
 """
 
 from __future__ import annotations
@@ -215,19 +222,29 @@ class _Context:
         return [rel for _, rel in out]
 
 
+def _line(key: VersionKey) -> tuple[int, int]:
+    return key[0][0], key[0][1]
+
+
 def _fixes(advisory: Advisory, version: str) -> bool:
-    """True when ``version`` is at or above a fixed version of ``advisory`` on the same release line."""
+    """Heuristic: is ``version`` outside every range that ``advisory.fixed_in`` closes?
+
+    Fixed versions often belong to several release lines (backports: ``1.4.5`` and ``1.5.2``). A version is
+    treated as fixed only when it is at or above every fixed version on its own ``major.minor`` line and
+    either such a fix exists on that line or it is at or above every fixed version. So ``1.5.0`` is *not* fixed
+    by ``(1.4.5, 1.5.2)`` (the 1.5 line is fixed only from 1.5.2), while ``1.4.6`` and ``1.6.0`` are. Used only
+    for hints and review notes: proposals rely on the advisors' exact-version confirmation.
+    """
     key = version_key(version)
     if key is None:
         return False
-    fixed = [(f, version_key(f)) for f in advisory.fixed_in]
-    keyed = [(f, k) for f, k in fixed if k is not None]
+    keyed = [k for k in (version_key(f) for f in advisory.fixed_in) if k is not None]
     if not keyed:
         return False
-    same_major = [k for _, k in keyed if k[0][0] == key[0][0]]
-    if same_major:
-        return any(k <= key for k in same_major)
-    return all(k <= key for _, k in keyed)
+    same_line = [k for k in keyed if _line(k) == _line(key)]
+    if same_line:
+        return all(k <= key for k in same_line)
+    return all(k <= key for k in keyed)
 
 
 def _review_notes(ref: DependencyRef, kind: UpdateKind) -> list[str]:
@@ -299,6 +316,48 @@ def _proposal(  # noqa: PLR0917 - internal constructor, every argument is requir
     )
 
 
+def _confirmed(ctx: _Context, *, cooldown_days: int) -> tuple[ReleaseInfo | None, list[str]]:
+    """The engine's ``recommended`` release when it is newer than the current one and passes the policy.
+
+    ``recommended`` is the only release the advisors confirmed free of advisories for its exact version; any
+    other release in ``intel.releases`` may itself be vulnerable, so it is never proposed. Returns the release
+    (or ``None``) and the reasons it was refused.
+    """
+    rec = ctx.intel.recommended
+    if rec is None:
+        return None, []
+    rkey = version_key(rec.version)
+    if rkey is None or rec.version == ctx.current_version:
+        return None, []
+    if ctx.current_key is not None and rkey <= ctx.current_key:
+        return None, []
+    full = ctx.by_version.get(rec.version, rec)
+    reasons: list[str] = []
+    cur_major = _major(ctx.current_version) if ctx.current_version else None
+    if not ctx.policy.allow_major and cur_major is not None and rkey[0][0] != cur_major:
+        reasons.append("major-version change (allow_major is off)")
+    verdict = ctx.check(full, cooldown_days=cooldown_days)
+    reasons.extend(verdict.reasons)
+    if reasons:
+        return None, [f"{rec.version}: {'; '.join(reasons)}"]
+    return full, list(verdict.notes)
+
+
+def _lowest_named_fix(ctx: _Context, fixable: Sequence[Advisory]) -> str | None:
+    """The lowest version newer than the current one that the advisories' ``fixed_in`` say fixes all of them."""
+    if not fixable or not all(a.fixed_in for a in fixable):
+        return None
+    names = {f for a in fixable for f in a.fixed_in if version_key(f) is not None}
+    names |= {r.version for r in ctx.newer_candidates()}
+    for ver in sorted(names, key=lambda v: version_key(v) or ((), 0, 0)):
+        key = version_key(ver)
+        if key is None or (ctx.current_key is not None and key <= ctx.current_key):
+            continue
+        if all(_fixes(a, ver) for a in fixable):
+            return ver
+    return None
+
+
 def _plan_security(ctx: _Context) -> UpdateProposal | None:
     intel = ctx.intel
     vuln_signals = [s for s in intel.signals if s.kind in (SignalKind.VULNERABLE, SignalKind.MALICIOUS)]
@@ -317,57 +376,46 @@ def _plan_security(ctx: _Context) -> UpdateProposal | None:
     current = ctx.current_version or "(floating)"
     cited = _advisory_text(advisories) or _signal_text(vuln_signals)
     fixable = [a for a in advisories if not a.malicious]
-    rejected: list[str] = []
-    chosen: ReleaseInfo | None = None
-    chosen_notes: tuple[str, ...] = ()
-    unverified = False
-    if fixable and all(a.fixed_in for a in fixable):
-        candidates = [r for r in ctx.newer_candidates() if all(_fixes(a, r.version) for a in fixable)]
-        if not ctx.intel.releases:
-            # No release metadata at all: fall back to the advisories' own fixed versions, flagged as unverified.
-            keys = sorted(
-                {f for a in fixable for f in a.fixed_in if version_key(f) is not None},
-                key=lambda v: version_key(v) or ((), 0, 0),
-            )
-            for ver in keys:
-                key = version_key(ver)
-                if ctx.current_key is not None and key is not None and key <= ctx.current_key:
-                    continue
-                if all(_fixes(a, ver) for a in fixable) and ver not in ctx.flagged:
-                    chosen, unverified = ReleaseInfo(version=ver), True
-                    break
-        for rel in candidates if chosen is None else ():
-            verdict = ctx.check(rel, cooldown_days=ctx.policy.security_cooldown_days)
-            if verdict.ok:
-                chosen, chosen_notes = rel, verdict.notes
-                break
-            rejected.append(f"{rel.version}: {'; '.join(verdict.reasons)}")
-    if chosen is None and ctx.intel.recommended is not None:
-        rec = ctx.intel.recommended
-        rkey = version_key(rec.version)
-        newer = rkey is not None and (ctx.current_key is None or rkey > ctx.current_key)
-        fixes_all = all(_fixes(a, rec.version) for a in fixable) if all(a.fixed_in for a in fixable) else True
-        if newer and fixes_all and rec.version != ctx.current_version:
-            verdict = ctx.check(rec, cooldown_days=ctx.policy.security_cooldown_days)
-            if verdict.ok:
-                chosen, chosen_notes = rec, verdict.notes
+    hint = _lowest_named_fix(ctx, fixable)
+    chosen, chosen_notes = _confirmed(ctx, cooldown_days=ctx.policy.security_cooldown_days)
     if chosen is None:
-        why = f" Candidate releases were rejected: {'; '.join(rejected)}." if rejected else ""
+        rejected = chosen_notes
+        why = f" The recommended release was refused: {'; '.join(rejected)}." if rejected else ""
+        if hint is not None and not malicious:
+            hint_rel = ctx.by_version.get(hint)
+            facts = (
+                f"{hint} ({_age_text(hint_rel, ctx.now)}) could not be confirmed free of advisories and inside "
+                "the policy"
+                if hint_rel is not None
+                else f"no release metadata for {hint} was available (age, provenance and install scripts "
+                "unknown)"
+            )
+            title = f"No verified fix for {name} {current}: review {hint} by hand"
+            rationale = (
+                f"{name} {current} is affected by {cited}. The advisories name {hint} as the lowest fixed "
+                f"version, but {facts}, so no edit is proposed: an unverified release is not adopted "
+                f"automatically.{why}"
+            )
+            extra = [
+                f"Check {hint} on the registry (age, build provenance, install scripts, publisher) and query OSV "
+                "for it before upgrading by hand; re-run `symbiote update` once the lookups succeed."
+            ]
+            return _proposal(ctx, "replace", f"(verify {hint} by hand)", title, rationale, severity, extra)
         return _proposal(
             ctx,
             "replace",
             "(remove or replace)",
             f"Remove or replace {name} {current}: {'malicious release' if malicious else 'no safe fixed version'}",
-            f"{name} {current} is affected by {cited} and no fixed release passes the update policy "
-            f"(security cooldown {ctx.policy.security_cooldown_days} days, provenance continuity, no new install "
-            f"script).{why}",
+            f"{name} {current} is affected by {cited} and no release was confirmed free of advisories and "
+            f"inside the update policy (security cooldown {ctx.policy.security_cooldown_days} days, provenance "
+            f"continuity, no new install script).{why}",
             severity,
         )
     notes = list(chosen_notes)
-    if unverified:
+    if hint is not None and hint != chosen.version:
         notes.append(
-            f"Release metadata for {chosen.version} was unavailable: its age, provenance and install scripts "
-            "were not verified; check them on the registry before merging."
+            f"The advisories name {hint} as the lowest fixed version; {chosen.version} is proposed because it is "
+            "the release the advisors confirmed free of advisories."
         )
     cur_major, new_major = (
         (_major(ctx.current_version) if ctx.current_version else None),
@@ -380,15 +428,14 @@ def _plan_security(ctx: _Context) -> UpdateProposal | None:
             "The running version is a known malicious release: rotate every credential the server could read "
             "and review its activity logs."
         )
-    lowest = "the lowest release that fixes all of them" if fixable else "the recommended clean release"
     return _proposal(
         ctx,
         "security",
         chosen.version,
         f"Upgrade {name} from {current} to {chosen.version} (security)",
-        f"{name} {current} is affected by {cited}. {chosen.version} is {lowest} and passes the update policy "
-        f"({_age_text(chosen, ctx.now)}; security cooldown {ctx.policy.security_cooldown_days} days). "
-        f"Signals: {_signal_text(ctx.intel.signals) or 'none'}.",
+        f"{name} {current} is affected by {cited}. {chosen.version} was confirmed free of advisories and passes "
+        f"the update policy ({_age_text(chosen, ctx.now)}; security cooldown "
+        f"{ctx.policy.security_cooldown_days} days). Signals: {_signal_text(ctx.intel.signals) or 'none'}.",
         severity,
         notes,
     )
@@ -430,22 +477,6 @@ def _plan_retire(ctx: _Context) -> UpdateProposal | None:
     )
 
 
-def _best_version(ctx: _Context, *, cooldown_days: int) -> tuple[ReleaseInfo | None, list[str], list[str]]:
-    """Newest release passing the policy (and the major-version rule); also the rejection reasons."""
-    cur_major = _major(ctx.current_version) if ctx.current_version else None
-    rejected: list[str] = []
-    for rel in reversed(ctx.newer_candidates()):
-        major = _major(rel.version)
-        if not ctx.policy.allow_major and cur_major is not None and major != cur_major:
-            rejected.append(f"{rel.version}: major-version change (allow_major is off)")
-            continue
-        verdict = ctx.check(rel, cooldown_days=cooldown_days)
-        if verdict.ok:
-            return rel, list(verdict.notes), rejected
-        rejected.append(f"{rel.version}: {'; '.join(verdict.reasons)}")
-    return None, [], rejected
-
-
 def _plan_pin(ctx: _Context) -> UpdateProposal | None:
     ref = ctx.intel.ref
     floating = ref.version is None or any(s.kind is SignalKind.FLOATING for s in ctx.intel.signals)
@@ -461,20 +492,11 @@ def _plan_pin(ctx: _Context) -> UpdateProposal | None:
             target = ctx.intel.current.version
             notes.append("Pinned to the digest the tag resolves to today; verify the image before merging.")
     else:
-        if (
-            rec is not None
-            and version_key(rec.version) is not None
-            and ctx.check(rec, cooldown_days=ctx.policy.cooldown_days).ok
-        ):
-            target = rec.version
-        if target is None:
-            # A floating reference has no "current" version: consider every known release.
-            saved = ctx.current_key, ctx.current_version
-            ctx.current_key, ctx.current_version = None, None
-            best, best_notes, _ = _best_version(ctx, cooldown_days=ctx.policy.cooldown_days)
-            ctx.current_key, ctx.current_version = saved
-            if best is not None:
-                target, notes = best.version, best_notes
+        chosen, notes = _confirmed(ctx, cooldown_days=ctx.policy.cooldown_days)
+        if chosen is not None:
+            target = chosen.version
+        else:
+            notes = []
     if target is None:
         return None
     floating_sigs = [s for s in ctx.intel.signals if s.kind is SignalKind.FLOATING]
@@ -495,11 +517,36 @@ def _plan_pin(ctx: _Context) -> UpdateProposal | None:
     )
 
 
+def _plan_unresolved_pin(ctx: _Context) -> UpdateProposal | None:
+    """Advice (no edit) for a floating OCI image or Hugging Face reference the advisors could not resolve."""
+    ref = ctx.intel.ref
+    if ref.ecosystem not in ("oci", "huggingface") or not ctx.policy.pin_floating:
+        return None
+    floating_sigs = [s for s in ctx.intel.signals if s.kind is SignalKind.FLOATING]
+    if not floating_sigs:
+        return None
+    what = "image digest (@sha256:…)" if ref.ecosystem == "oci" else "commit revision"
+    severity = _raise_to(_max_severity((s.severity for s in floating_sigs), "medium"), "medium")
+    return _proposal(
+        ctx,
+        "pin",
+        f"(pin to a reviewed {what})",
+        f"Pin {ref.name} to an immutable {what}",
+        f"{ref.name} is referenced without an immutable {what}: every start fetches whatever is current, the "
+        f"rug-pull channel. SymBiote has no advisor for {ref.ecosystem} yet, so it cannot choose or verify the "
+        f"{what}; pin by hand to one you have reviewed. Signals: {_signal_text(ctx.intel.signals)}.",
+        severity,
+        [
+            f"Resolve the {what} you have reviewed and pin the reference to it; no edit is proposed automatically."
+        ],
+    )
+
+
 def _plan_version(ctx: _Context) -> UpdateProposal | None:
     ref = ctx.intel.ref
     if ctx.current_key is None:
         return None
-    best, notes, _rejected = _best_version(ctx, cooldown_days=ctx.policy.cooldown_days)
+    best, notes = _confirmed(ctx, cooldown_days=ctx.policy.cooldown_days)
     if best is None:
         return None
     severity = _max_severity(
@@ -518,9 +565,9 @@ def _plan_version(ctx: _Context) -> UpdateProposal | None:
         "version",
         best.version,
         f"Update {ref.name} from {ctx.current_version} to {best.version}",
-        f"{best.version} is the newest release of {ref.name} that passes the update policy "
-        f"({_age_text(best, ctx.now)}; cooldown {ctx.policy.cooldown_days} days, provenance continuity, no new "
-        f"install script{'' if ctx.policy.allow_major else ', same major version'}). "
+        f"{best.version} is the release of {ref.name} the advisors recommend: confirmed free of advisories and "
+        f"inside the update policy ({_age_text(best, ctx.now)}; cooldown {ctx.policy.cooldown_days} days, "
+        f"provenance continuity, no new install script{'' if ctx.policy.allow_major else ', same major version'}). "
         f"Signals: {_signal_text(ctx.intel.signals) or 'none'}.",
         severity,
         notes,
@@ -565,9 +612,12 @@ def plan_updates(
         if key in seen:
             continue
         seen.add(key)
-        if item.coverage in ("unreachable", "not-attempted"):
-            continue
         ctx = _Context(item, pol)
+        if item.coverage in ("unreachable", "not-attempted"):
+            advice = _plan_unresolved_pin(ctx) if item.coverage == "not-attempted" else None
+            if advice is not None:
+                proposals.append(advice)
+            continue
         for planner in (_plan_security, _plan_retire, _plan_pin, _plan_version, _plan_replace):
             proposal = planner(ctx)
             if proposal is not None:

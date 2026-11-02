@@ -1,0 +1,36 @@
+# /etc/systemd/system/symbiote-monitor.service - one monitoring tick (started by symbiote-monitor.timer).
+[Unit]
+Description=Symbiote continuous assurance tick (re-scan and re-verify due agents)
+Documentation=https://github.com/symbiote-agentbom/symbiote/blob/main/spec/monitoring.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=symbiote
+Group=symbiote
+WorkingDirectory=/srv/agents
+# SYMBIOTE_WEBHOOK_URL=... lives here (mode 0600, owned by root); it is never logged.
+EnvironmentFile=-/etc/symbiote/monitor.env
+ExecStart=/opt/symbiote/bin/symbiote monitor tick --config /srv/agents/symbiote-monitor.yaml --json
+# Exit 1 (findings) is a successful run of the monitor; failures are 6 (cycle error) and 7 (chain conflict).
+SuccessExitStatus=1
+TimeoutStartSec=30min
+StateDirectory=symbiote
+ReadWritePaths=/srv/agents/.symbiote
+
+# Hardening: the monitor only reads agent directories, writes its state, and makes HTTPS lookups.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=

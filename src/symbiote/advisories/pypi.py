@@ -3,8 +3,10 @@
 The JSON API gives every release with its files' upload times and yank state. The Simple API (PEP 691) adds,
 per file, a ``provenance`` URL when the file carries a PEP 740 attestation, and the project's PEP 792 status
 (``active``/``archived``/``quarantined``/``deprecated``). Provenance is taken from the *presence* of that URL; the
-attestation itself is not fetched or verified here. When the Simple API cannot be read, provenance stays
-``None`` (unknown).
+attestation itself is not fetched or verified here. A release has provenance only when *every* one of its files
+is attested: an installer may pick any file, so one unattested wheel added to an attested release (a stolen
+upload token) is a downgrade, and such files are listed in ``PypiProject.unattested_files``. When the Simple API
+cannot be read, provenance stays ``None`` (unknown).
 
 ``has_install_script`` approximates "installing this release runs the project's build code": ``True`` when a
 release ships only source distributions, ``False`` when it ships a wheel, ``None`` when it has no files.
@@ -48,6 +50,7 @@ _PEP440: Final = re.compile(
 _PRE_ORDER: Final = {"a": 0, "alpha": 0, "b": 1, "beta": 1, "c": 2, "rc": 2, "pre": 2, "preview": 2}
 _MAX_TEXT: Final = 500
 _STATUS: Final = frozenset({"active", "archived", "quarantined", "deprecated"})
+_MAX_LISTED_FILES: Final = 5
 
 Pep440Key = tuple[int, tuple[int, ...], tuple[int, int], tuple[int, int], tuple[int, int]]
 
@@ -106,6 +109,8 @@ class PypiProject:
     files: dict[str, str] = field(default_factory=dict)
     #: True once the Simple API was read and applied.
     provenance_checked: bool = False
+    #: version -> unattested files, for releases that mix attested and unattested files.
+    unattested_files: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
     def release(self, version: str) -> ReleaseInfo | None:
         key = pep440_key(version)
@@ -176,15 +181,16 @@ def apply_simple_index(project: PypiProject, data: object) -> None:
     """Attach PEP 740 provenance presence and the PEP 792 status from a Simple API JSON response."""
     if not isinstance(data, dict) or not isinstance(data.get("files"), list):
         raise MalformedResponse("Simple API response has no 'files' list", url=project.source)
-    with_prov: dict[str, list[bool]] = {}
+    with_prov: dict[str, list[tuple[str, bool]]] = {}
     for f in data["files"]:
         if not isinstance(f, dict):
             continue
-        version = project.files.get(str(f.get("filename")))
+        fname = str(f.get("filename"))
+        version = project.files.get(fname)
         if version is None:
             continue
         prov = f.get("provenance")
-        with_prov.setdefault(version, []).append(isinstance(prov, str) and bool(prov))
+        with_prov.setdefault(version, []).append((fname, isinstance(prov, str) and bool(prov)))
     status = data.get("project-status")
     if isinstance(status, dict) and status.get("status") in _STATUS:
         project.status = str(status["status"])
@@ -192,14 +198,17 @@ def apply_simple_index(project: PypiProject, data: object) -> None:
         project.status_reason = str(reason)[:_MAX_TEXT] if isinstance(reason, str) and reason else None
     updated: list[ReleaseInfo] = []
     for r in project.releases:
-        flags = with_prov.get(r.version)
-        if flags:
-            # One attested file is enough to say the release carries provenance.
+        files = with_prov.get(r.version)
+        if files:
+            # Every file must be attested: an installer may pick any of them.
+            unattested = sorted({name for name, attested in files if not attested})
+            if unattested and len(unattested) < len({name for name, _ in files}):
+                project.unattested_files[r.version] = tuple(unattested[:_MAX_LISTED_FILES])
             updated.append(
                 ReleaseInfo(
                     version=r.version,
                     published_at=r.published_at,
-                    has_provenance=any(flags),
+                    has_provenance=not unattested,
                     has_install_script=r.has_install_script,
                     publisher=r.publisher,
                     deprecated=r.deprecated,
