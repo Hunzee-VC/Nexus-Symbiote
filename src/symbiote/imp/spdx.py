@@ -11,7 +11,9 @@ unknown keeps the failure class the ``EdgeQualifiers`` carry (``spec/spdx-mappin
 
 from __future__ import annotations
 
+import base64
 import copy
+import json
 import re
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -19,6 +21,7 @@ from typing import Any
 
 from spdx_python_model.bindings import v3_0_1 as m
 
+from symbiote.export.cdx.emit import EVIDENCE_MEDIA_TYPE, EVIDENCE_NAME, EVIDENCE_URI
 from symbiote.export.spdx.emit import NOASSERTION_ELEMENT, NONE_ELEMENT, TERMS
 from symbiote.export.spdx.validate import validate_spdx
 from symbiote.imp._common import (
@@ -291,6 +294,15 @@ class _Decoded:
                     extras[ref] = el
                     continue
                 ev = el.exts.get("Evidence", {})
+                data: list[dict[str, Any]] = [{"contents": {"url": el.hashes[0] if el.hashes else None}}]
+                if ev.get("uri"):
+                    data.append({"name": EVIDENCE_URI, "contents": {"url": str(ev["uri"])}})
+                for item, value in (
+                    (EVIDENCE_NAME, ev.get("name")),
+                    (EVIDENCE_MEDIA_TYPE, getattr(el.obj, "contentType", None)),
+                ):
+                    if value:
+                        data.append({"name": item, "contents": {"attachment": {"content": str(value)}}})
                 evidence.append(
                     {
                         "bom-ref": ref,
@@ -298,7 +310,7 @@ class _Decoded:
                         "description": getattr(el.obj, "description", None),
                         "created": ev.get("created"),
                         "expires": ev.get("expires"),
-                        "data": [{"contents": {"url": el.hashes[0] if el.hashes else ev.get("uri")}}],
+                        "data": data,
                     }
                 )
                 extras[ref] = el
@@ -342,13 +354,17 @@ class _Decoded:
                 ctype = "data"
             elif el.cls == "software_File":
                 ctype = "file"
+            is_agent = el.cls == "ai_AIPackage" and purpose == "application"
             comp: dict[str, Any] = {
                 "type": ctype,
                 "bom-ref": ref,
                 "name": el.name or ref.split(":", 1)[-1],
                 "version": getattr(el.obj, "software_packageVersion", None),
-                "description": getattr(el.obj, "description", None)
-                or getattr(el.obj, "ai_informationAboutApplication", None),
+                # an agent's CycloneDX ``description`` is its purpose; its own description, if any, comes
+                # back from the mirrored ``agentbom:description`` property
+                "description": getattr(el.obj, "ai_informationAboutApplication", None)
+                if is_agent
+                else getattr(el.obj, "description", None),
                 "purl": getattr(el.obj, "software_packageUrl", None),
                 "hashes": el.cdx_hashes(),
                 "mime-type": getattr(el.obj, "contentType", None) if el.cls == "software_File" else None,
@@ -367,7 +383,7 @@ class _Decoded:
                 comp["supplier"] = _clean({"name": p.name, "url": urls or None})
             if kind_prop == "tool" or purpose == "specification":
                 comp["type"] = "data"
-                comp["data"] = [{"type": "definition", "name": el.name or ref.rsplit("/", 1)[-1]}]
+                comp["data"] = [_tool_definition_data(el, el.name or ref.rsplit("/", 1)[-1])]
             elif el.cls == "dataset_DatasetPackage":
                 tlp = _suffix(getattr(el.obj, "dataset_confidentialityLevel", None))
                 dl = getattr(el.obj, "software_downloadLocation", None)
@@ -444,7 +460,8 @@ class _Decoded:
                             "bom-ref": tref,
                             "name": tref[len(src) + 1 :],
                             "hashes": script.get("hashes"),
-                            "properties": [{"name": "agentbom:kind", "value": "skill-script"}],
+                            "properties": script.get("properties")
+                            or [{"name": "agentbom:kind", "value": "skill-script"}],
                         }
                     )
                 )
@@ -559,6 +576,36 @@ class _Decoded:
                     }
                 )
         return out
+
+
+def _tool_definition_data(el: _Element, name: str) -> dict[str, Any]:
+    """The CycloneDX ``definition`` data entry, with the ``--include-text`` attachment when the extension has it."""
+    data: dict[str, Any] = {"type": "definition", "name": name}
+    ext = el.exts.get("ToolDefinition", {})
+    if "inputSchema" not in ext:
+        return data
+    payload: dict[str, Any] = {"name": name}
+    description = getattr(el.obj, "description", None)
+    if ext.get("title") is not None:
+        payload["title"] = ext["title"]
+    if description is not None:
+        payload["description"] = description
+    for key in ("inputSchema", "outputSchema"):
+        raw = ext.get(key)
+        if raw is None:
+            continue
+        try:
+            payload[key] = json.loads(raw) if isinstance(raw, str) else raw
+        except ValueError:
+            continue
+    data["contents"] = {
+        "attachment": {
+            "contentType": "application/json",
+            "encoding": "base64",
+            "content": base64.b64encode(json.dumps(payload).encode("utf-8")).decode("ascii"),
+        }
+    }
+    return data
 
 
 def _clean(obj: dict[str, Any]) -> dict[str, Any]:
@@ -705,13 +752,17 @@ class _SpdxEnricher:
             )
             existing = draft.get(iid)
             if isinstance(existing, Identity):
-                if el.name and el.name not in (existing.name, existing.ref):
+                if "name" in ident_ext:
+                    if existing.name != ident_ext["name"]:
+                        draft.replace(existing.replace(name=str(ident_ext["name"])))
+                elif el.name and el.name not in (existing.name, existing.ref):
                     draft.replace(existing.replace(name=el.name))
                 continue
+            name = ident_ext.get("name") if "name" in ident_ext else el.name
             draft.add(
                 Identity(
                     id=iid,
-                    name=el.name if el.name != ident_ext.get("ref") else None,
+                    name=name if name != ident_ext.get("ref") or "name" in ident_ext else None,
                     identity_kind=kind,
                     ref=str(ident_ext["ref"]),
                     issuer=ident_ext.get("issuer"),
@@ -758,6 +809,7 @@ class _SpdxEnricher:
                     scopes = _as_list(data.get("scopesGranted"))
                     binding = CredentialBinding(
                         id=cid,
+                        name=data.get("name"),
                         subject_ref=subject,
                         identity_ref=identity_ref,
                         credential_kind=enum_or_none(E.CredentialKind, data.get("kind"))
