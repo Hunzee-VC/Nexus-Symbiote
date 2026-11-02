@@ -170,7 +170,11 @@ def local_signed_bundle(tmp_path, monkeypatch):
     from sigstore.models import Bundle
     from sigstore.verify import Verifier
     from sigstore.verify.verifier import _hashedrekord_from_parts
-    from sigstore_protobuf_specs.dev.sigstore.common.v1 import HashAlgorithm
+
+    try:
+        from sigstore_models.common.v1 import HashAlgorithm
+    except ImportError:
+        from sigstore_protobuf_specs.dev.sigstore.common.v1 import HashAlgorithm
 
     artifact = tmp_path / "artifact.bin"
     artifact.write_bytes(b"genuinely signed local artifact")
