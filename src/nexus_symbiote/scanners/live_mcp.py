@@ -35,7 +35,7 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
 from nexus_symbiote.core.hashing import hash_canonical
-from nexus_symbiote.utils.secrets import redact_metadata, redact_text
+from nexus_symbiote.utils.secrets import redact_descriptor, redact_text
 
 PROTOCOL_VERSION = "2025-06-18"
 _RESOLVER_SLOTS = threading.BoundedSemaphore(2)
@@ -512,7 +512,7 @@ def _tool(raw: Any, secrets: list[str]) -> ObservedTool:
     # Full raw descriptor is the digest subject. Shown metadata is redacted and
     # cannot be used to recompute this digest without obtaining original evidence.
     digest = hash_canonical(raw)
-    safe = cast(dict[str, Any], redact_metadata(raw, secrets))
+    safe = redact_descriptor(raw, secrets)
     return ObservedTool(safe["name"], safe, digest, lints)
 
 

@@ -64,6 +64,12 @@ coverage and provenance.
 
 ## Import and policy gates
 
+The native importer compares reported totals and supplied per-kind and
+per-surface counts with the final findings array. A contradictory summary is an
+invalid report, including in report-only mode. Individual connector counts can
+precede filtering or deduplication and can legitimately differ from the final
+array.
+
 Standalone import records partial coverage even when the source reports a completed
 scan. It writes the evidence and exits with status 1. Pass `--report-only` to
 accept that result for inspection. The command ignores project policy in the

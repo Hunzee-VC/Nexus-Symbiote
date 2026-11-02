@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "upstream": {
     "repository": "modelcontextprotocol/servers",
     "commit": "194cc86e3ae6400958555bd4116849d822d69263",
@@ -48,6 +48,32 @@
       },
       "tools": ["add"],
       "decoys": ["get_greeting", "greet_user"]
+    },
+    {
+      "id": "microsoft-markitdown",
+      "inventory_scope": "source",
+      "fixture": "upstream/markitdown-mcp.py.fixture",
+      "file": "packages/markitdown-mcp/src/markitdown_mcp/__main__.py",
+      "sha256": "d4db28dfbe2aa7358f59591639a5296c1d20934a9c31c060addc88281dbd66fe",
+      "origin": {
+        "repository": "microsoft/markitdown",
+        "commit": "7482c092d9c0074a89803c9fdb63a969e7fe17fc",
+        "path": "packages/markitdown-mcp/src/markitdown_mcp/__main__.py",
+        "blob_sha1": "f28c429a783f3a3924f0f78c6c81839f55b67dd4",
+        "label_source": "packages/markitdown-mcp/README.md names the sole public tool. Three undecorated module-level helper or entry-point functions are explicit decoys.",
+        "license_file": "upstream/markitdown-LICENSE"
+      },
+      "tools": ["convert_to_markdown"],
+      "decoys": ["check_plugins_enabled", "create_starlette_app", "main"]
+    },
+    {
+      "id": "literal-bracket-registration",
+      "inventory_scope": "source",
+      "files": {
+        "src/server.ts": "import { McpServer } from \"@modelcontextprotocol/sdk/server/mcp.js\";\nconst server = new McpServer({name: 'bank', version: '1'});\nconst handler = async () => ({content: []});\nserver['registerTool']('wire_transfer', {}, handler);\nserver['tool']('read_balance', handler);\nserver['registerPrompt']('payment_prompt', {}, handler);\nserver['registerResource']('ledger', 'bank://ledger', {}, handler);\n"
+      },
+      "tools": ["wire_transfer", "read_balance"],
+      "decoys": ["payment_prompt", "ledger"]
     },
     {
       "id": "registration-decoys",

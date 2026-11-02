@@ -284,6 +284,7 @@ class AIBOMDiffer:
                 ("endpoint", old.endpoint_url, new.endpoint_url),
                 ("transport", old.transport, new.transport),
                 ("launch command", old.command, new.command),
+                ("launcher package", old.launcher_package, new.launcher_package),
             ):
                 if before != after:
                     # External or legacy inventories may contain credentials in these fields.
@@ -432,6 +433,7 @@ class AIBOMDiffer:
             "hashes",
             "serialization_safety",
             "signing_status",
+            "launcher_package",
         }
         # These special cases cover only some transitions; retain the generic
         # comparison for all other version/profile changes.

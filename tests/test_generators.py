@@ -77,7 +77,7 @@ class TestCycloneDXGenerator:
         assert result["specVersion"] == "1.7"
         assert "serialNumber" in result
         assert len(result["components"]) == 4
-        assert len(result["dependencies"]) == 1
+        assert result["dependencies"] == []
 
     def test_component_types_mapped(self):
         gen = CycloneDXGenerator()
@@ -105,9 +105,13 @@ class TestCycloneDXGenerator:
     def test_dependency_mapping(self):
         gen = CycloneDXGenerator()
         result = gen.generate(_sample_aibom())
-        dep = result["dependencies"][0]
-        assert dep["ref"] == "agent:main"
-        assert "tool:read_file" in dep["dependsOn"]
+        assert result["dependencies"] == []
+        assert any(
+            prop["name"] == "nexus-symbiote:dependency:relationship"
+            and json.loads(prop["value"])
+            == {"from": "agent:main", "to": "tool:read_file", "type": "invokes"}
+            for prop in result["metadata"]["properties"]
+        )
 
     def test_generate_json_valid(self):
         gen = CycloneDXGenerator()
@@ -406,9 +410,7 @@ class TestCycloneDXGeneratorFull:
     def test_multiple_dependency_types(self):
         gen = CycloneDXGenerator()
         result = gen.generate(_full_component_aibom())
-        deps = result["dependencies"]
-        assert len(deps) == 1
-        assert set(deps[0]["dependsOn"]) == {"model:gpt-4o", "tool:read_file"}
+        assert result["dependencies"] == []
         recovered = CycloneDXGenerator.recover(result)
         assert {d.relationship for d in recovered.dependencies} == {"trained-on", "invokes"}
 

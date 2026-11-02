@@ -4,6 +4,10 @@
 
 ### Security
 
+- Detect same-version MCP launcher package substitutions in project validation and drift checks. Review older baselines that lack the launcher identity.
+- Reconcile locally collected security fields and findings before accepting supplied BOMs. Project-backed risk scoring rejects a conflicting inventory.
+- Omit schema literals from MCP descriptor exports and corroborate the original static definition against project evidence.
+- Reject contradictory native ShadowScan finding counts and conflicting public fields during CycloneDX and SPDX recovery. Emit only unconditional dependencies in the standard CycloneDX graph.
 - Require successful canonical CI-workflow evidence for the exact publication source SHA, in addition to protected-branch settings.
 - Enforce offline tracked-source hygiene and vendored schema provenance digests in the required quality job.
 - Check trust-status signers against the previous tenant revocation list and recheck the accepted status when consuming a tool approval. Upgrading an existing gateway may require replaying its last accepted trust status.

@@ -9,8 +9,8 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_public_inventory_corpus_has_honest_denominators():
     report = runpy.run_path(str(ROOT / "benchmarks/inventory/run_inventory.py"))["run"]()
     assert report["passed"], report
-    assert report["counts"] == {"tp": 18, "fp": 0, "fn": 0, "tn": 2}
-    assert report["denominators"] == {"expected_tools": 18, "explicit_decoys": 2}
+    assert report["counts"] == {"tp": 21, "fp": 0, "fn": 0, "tn": 7}
+    assert report["denominators"] == {"expected_tools": 21, "explicit_decoys": 7}
     assert report["unknown_negative_labels"] == 5
     assert report["unlabeled_predictions"] == 0
 
