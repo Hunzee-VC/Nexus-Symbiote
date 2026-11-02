@@ -1,4 +1,4 @@
-"""Typer application: version, schema, digest, validate, merkle, attest, verify."""
+"""Typer application: version, schema, digest, validate, merkle, attest, verify, import, convert."""
 
 from __future__ import annotations
 
@@ -1110,6 +1110,289 @@ def diff(
     wanted = set(fail_on_change or [])
     if wanted and any(e.type.value in wanted for e in delta.events):
         raise typer.Exit(exit_codes.FINDINGS)
+
+
+# ------------------------------------------------------------------------------------------- import / convert
+
+_IMPORT_FORMATS = ("auto", "cdx", "cyclonedx", "spdx", "k8s-aibom", "cdxgen", "harness-aibom")
+_CONVERT_TARGETS = ("cyclonedx", "cdx", "spdx", "companion")
+_ENTITY_COUNT_KEYS = (
+    "agents",
+    "tool_servers",
+    "tools",
+    "instructions",
+    "models",
+    "data_sources",
+    "identities",
+    "credential_bindings",
+    "grants",
+    "software",
+    "deployments",
+)
+
+
+def _read_document(path: Path) -> Any:
+    """Parse a JSON document strictly (duplicate keys rejected); fall back to the standard parser with a warning."""
+    from symbiote.digest import parse_json_strict
+    from symbiote.digest.jcs import UndigestableError
+
+    raw = sys.stdin.buffer.read() if str(path) == "-" else path.read_bytes()
+    try:
+        return parse_json_strict(raw)
+    except UndigestableError as exc:
+        console.print(f"[yellow]warning[/yellow] input is not strict JSON ({exc}); parsing leniently")
+        return json.loads(raw.decode("utf-8"))
+
+
+def _is_companion(data: Any) -> bool:
+    return (
+        isinstance(data, dict)
+        and "snapshot" in data
+        and "subject" in data
+        and data.get("specVersion") is not None
+    )
+
+
+def _import_document(data: Any, fmt: str, as_kind: str | None) -> tuple[Any, Any]:
+    """Dispatch to the CycloneDX or SPDX importer; returns ``(bom, loss_report)``."""
+    from symbiote.imp import import_cyclonedx, import_spdx
+    from symbiote.model.enums import SnapshotKind
+
+    kind = SnapshotKind(as_kind) if as_kind else None
+    if not isinstance(data, dict):
+        raise ValueError("input is not a JSON object")
+    if fmt == "spdx" or (fmt == "auto" and "@context" in data):
+        return import_spdx(data, as_kind=kind)
+    dialect = None if fmt in ("auto", "cdx", "cyclonedx") else fmt
+    return import_cyclonedx(data, as_kind=kind, dialect=dialect)
+
+
+def _loss_summary(report: Any, *, rows: bool) -> dict[str, Any]:
+    return {
+        "direction": report.direction,
+        "items": len(report.items),
+        "securityRelevantDropped": len(report.security_relevant_dropped),
+        "lossless": report.lossless,
+        "rows": [i.to_json_dict() for i in report.items] if rows else None,
+    }
+
+
+def _loss_table(label: str, report: Any) -> str:
+    rows = [
+        f"{label}: {report.direction} ({report.source_format} -> {report.target_format}); "
+        f"{len(report.items)} item(s), {len(report.security_relevant_dropped)} security-relevant dropped, "
+        f"lossless={'yes' if report.lossless else 'no'}"
+    ]
+    for i in report.items:
+        colour = "red" if i.severity.value == "security-relevant" else "white"
+        rows.append(
+            f"  [{colour}]{i.severity.value:18s}[/{colour}] {i.reason.value:26s} {i.preserved_in.value:16s} {i.path}"
+            + (f"  ({i.field})" if i.field else "")
+        )
+    return "\n".join(rows)
+
+
+@app.command("import")
+def import_document(
+    file: Annotated[
+        Path, typer.Argument(help="CycloneDX 1.5-1.7 JSON, k8s-aibom AIBOM resource, or SPDX 3.0.1 JSON-LD.")
+    ],
+    fmt: Annotated[
+        str, typer.Option("--format", help="cdx | spdx | k8s-aibom | cdxgen | harness-aibom | auto")
+    ] = "auto",
+    as_kind: Annotated[
+        str | None,
+        typer.Option("--as", help="declared | observed | deployed (default: what the document implies)."),
+    ] = None,
+    out: Annotated[Path, typer.Option("-o", "--out", help="Companion document to write.")] = Path(
+        "agentbom.json"
+    ),
+    loss_report: Annotated[
+        bool, typer.Option("--loss-report", help="Print the loss table and write <out>.loss.json.")
+    ] = False,
+    strict: Annotated[
+        bool, typer.Option("--strict", help="Exit 8 when a security-relevant field was dropped.")
+    ] = False,
+    as_json: JsonFlag = False,
+) -> None:
+    """Import a foreign BOM into a re-finalised AgentBOM companion, with a loss report and honest assurance tagging."""
+    from symbiote.export.companion import companion_bytes
+    from symbiote.imp import CycloneDXImportError, SpdxImportError
+
+    if fmt not in _IMPORT_FORMATS:
+        console.print(f"[red]unknown format {fmt!r}[/red] (expected one of {', '.join(_IMPORT_FORMATS)})")
+        raise typer.Exit(exit_codes.USAGE)
+    if as_kind not in (None, "declared", "observed", "deployed"):
+        console.print("[red]--as must be declared, observed or deployed[/red]")
+        raise typer.Exit(exit_codes.USAGE)
+    try:
+        data = _read_document(file)
+    except (OSError, ValueError) as exc:
+        console.print(f"[red]cannot read {file}[/red]: {exc}")
+        raise typer.Exit(exit_codes.IO) from None
+    try:
+        bom, report = _import_document(data, fmt, as_kind)
+    except (CycloneDXImportError, SpdxImportError) as exc:
+        emit(
+            {"file": str(file), "ok": False, "errors": exc.errors[:50]},
+            as_json,
+            "[red]import failed[/red]: " + "; ".join(exc.errors[:5]),
+        )
+        raise typer.Exit(exit_codes.SCHEMA) from None
+    except ValueError as exc:
+        console.print(f"[red]import failed[/red]: {exc}")
+        raise typer.Exit(exit_codes.SCHEMA) from None
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(companion_bytes(bom))
+    written = {"companion": str(out)}
+    if loss_report:
+        loss_path = out.with_name(out.name + ".loss.json")
+        loss_path.write_text(json.dumps(report.to_json_dict(), indent=2) + "\n", encoding="utf-8")
+        written["lossReport"] = str(loss_path)
+    dialect = next(
+        (f.value for f in bom.foreign_properties if f.name == "agentbom:import:dialect"), "unknown"
+    )
+    counts = {k: len(getattr(bom, k)) for k in _ENTITY_COUNT_KEYS if getattr(bom, k)}
+    summary = {
+        "file": str(file),
+        "dialect": dialect,
+        "sourceFormat": report.source_format,
+        "agent": bom.subject,
+        "snapshot": bom.snapshot.digest,
+        "kind": bom.snapshot.kind.value,
+        "entities": counts,
+        "edges": len(bom.edges),
+        "foreignProperties": len(bom.foreign_properties),
+        "loss": _loss_summary(report, rows=loss_report),
+        "written": written,
+    }
+    lines = [
+        f"imported {file} ({dialect} dialect, {report.source_format}) -> {bom.subject} "
+        f"{bom.snapshot.digest[:23]}... ({bom.snapshot.kind.value})",
+        "entities: "
+        + ", ".join(f"{k}={v}" for k, v in counts.items())
+        + f"; edges={len(bom.edges)}; foreign properties={len(bom.foreign_properties)}",
+        f"written: {out}",
+        _loss_table("loss report", report)
+        if loss_report
+        else f"loss: {len(report.items)} item(s), {len(report.security_relevant_dropped)} security-relevant "
+        "dropped (use --loss-report for the table)",
+    ]
+    emit(summary, as_json, "\n".join(lines))
+    if strict and report.security_relevant_dropped:
+        raise typer.Exit(exit_codes.LOSS)
+
+
+@app.command()
+def convert(
+    source: Annotated[Path, typer.Argument(help="Companion, CycloneDX or SPDX document to convert.")],
+    out: Annotated[Path, typer.Option("-o", "--out", help="Output file.")],
+    to: Annotated[str, typer.Option("--to", help="cyclonedx | spdx | companion")] = "cyclonedx",
+    loss_report: Annotated[
+        bool, typer.Option("--loss-report", help="Print the loss table(s) and write <out>.loss.json.")
+    ] = False,
+    strict: Annotated[
+        bool, typer.Option("--strict", help="Exit 8 when a security-relevant field was dropped.")
+    ] = False,
+    include_text: Annotated[
+        bool, typer.Option("--include-text", help="Embed tool descriptions and schemas in the output.")
+    ] = False,
+    as_json: JsonFlag = False,
+) -> None:
+    """Convert between the companion, CycloneDX 1.7 and SPDX 3.0.1 representations with a loss report."""
+    from symbiote.export.companion import (
+        CompanionValidationError,
+        companion_bytes,
+        export_companion,
+        load_companion,
+    )
+    from symbiote.imp import CycloneDXImportError, SpdxImportError
+
+    if to not in _CONVERT_TARGETS:
+        console.print(f"[red]unknown target {to!r}[/red] (expected one of {', '.join(_CONVERT_TARGETS)})")
+        raise typer.Exit(exit_codes.USAGE)
+    try:
+        data = _read_document(source)
+    except (OSError, ValueError) as exc:
+        console.print(f"[red]cannot read {source}[/red]: {exc}")
+        raise typer.Exit(exit_codes.IO) from None
+    reports: list[tuple[str, Any]] = []
+    try:
+        if _is_companion(data):
+            bom = load_companion(json.dumps(data))
+            source_format = "agentbom-companion"
+        else:
+            bom, import_loss = _import_document(data, "auto", None)
+            reports.append(("import", import_loss))
+            source_format = import_loss.source_format
+    except (CycloneDXImportError, SpdxImportError, CompanionValidationError) as exc:
+        emit(
+            {"source": str(source), "ok": False, "errors": exc.errors[:50]},
+            as_json,
+            "[red]conversion failed[/red]: " + "; ".join(exc.errors[:5]),
+        )
+        raise typer.Exit(exit_codes.SCHEMA) from None
+    except ValueError as exc:
+        console.print(f"[red]conversion failed[/red]: {exc}")
+        raise typer.Exit(exit_codes.SCHEMA) from None
+    errors: list[str] = []
+    if to in ("cyclonedx", "cdx"):
+        from symbiote.export.cdx import export_cyclonedx, validate_cyclonedx
+
+        doc, export_loss = export_cyclonedx(bom, include_text=include_text)
+        payload = (json.dumps(doc, indent=2) + "\n").encode("utf-8")
+        errors = validate_cyclonedx(doc)
+        target_format = "cyclonedx-1.7"
+    elif to == "spdx":
+        from symbiote.export.spdx import export_spdx, validate_spdx
+
+        doc, export_loss = export_spdx(bom, include_text=include_text)
+        payload = (json.dumps(doc, indent=2) + "\n").encode("utf-8")
+        errors = validate_spdx(doc)
+        target_format = "spdx-3.0.1"
+    else:
+        _, export_loss = export_companion(bom)
+        payload = companion_bytes(bom)
+        target_format = "agentbom-companion"
+    reports.append(("export", export_loss))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(payload)
+    written = {"output": str(out)}
+    if loss_report:
+        loss_path = out.with_name(out.name + ".loss.json")
+        loss_path.write_text(
+            json.dumps({label: r.to_json_dict() for label, r in reports}, indent=2) + "\n", encoding="utf-8"
+        )
+        written["lossReport"] = str(loss_path)
+    dropped = [i for _, r in reports for i in r.security_relevant_dropped]
+    summary = {
+        "source": str(source),
+        "sourceFormat": source_format,
+        "targetFormat": target_format,
+        "agent": bom.subject,
+        "snapshot": bom.snapshot.digest,
+        "valid": not errors,
+        "errors": errors[:20],
+        "loss": {label: _loss_summary(r, rows=loss_report) for label, r in reports},
+        "written": written,
+    }
+    lines = [
+        f"converted {source} ({source_format}) -> {out} ({target_format})",
+        "[green]output validates against the official schema[/green]"
+        if not errors
+        else "[red]output validation errors[/red]: " + "; ".join(errors[:3]),
+    ]
+    for label, r in reports:
+        lines.append(
+            _loss_table(label, r)
+            if loss_report
+            else f"{label} loss: {len(r.items)} item(s), {len(r.security_relevant_dropped)} security-relevant dropped"
+        )
+    emit(summary, as_json, "\n".join(lines))
+    if errors:
+        raise typer.Exit(exit_codes.SCHEMA)
+    if strict and dropped:
+        raise typer.Exit(exit_codes.LOSS)
 
 
 def main() -> None:

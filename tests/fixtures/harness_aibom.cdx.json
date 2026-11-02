@@ -1,0 +1,130 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "serialNumber": "urn:uuid:4e5f6a7b-8c9d-4e0f-9a1b-2c3d4e5f6a7b",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-10-28T09:30:00Z",
+    "tools": {
+      "components": [
+        {"type": "application", "name": "agent-harness-aibom", "version": "0.4.1"}
+      ]
+    },
+    "component": {
+      "type": "application",
+      "bom-ref": "harness:claude-code:triage-agent",
+      "name": "triage-agent",
+      "version": "2.3.1",
+      "properties": [
+        {"name": "harness-aibom:harness", "value": "claude-code"},
+        {"name": "harness-aibom:harness-version", "value": "2.0.31"},
+        {"name": "harness-aibom:source", "value": ".claude/settings.json"}
+      ]
+    }
+  },
+  "components": [
+    {
+      "type": "file",
+      "bom-ref": "instruction:project/CLAUDE.md",
+      "name": "CLAUDE.md",
+      "mime-type": "text/markdown",
+      "hashes": [{"alg": "SHA-256", "content": "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90"}],
+      "properties": [
+        {"name": "harness-aibom:component-type", "value": "instruction"},
+        {"name": "harness-aibom:path", "value": "CLAUDE.md"},
+        {"name": "harness-aibom:scope", "value": "project"}
+      ]
+    },
+    {
+      "type": "file",
+      "bom-ref": "instruction:user/CLAUDE.md",
+      "name": "CLAUDE.md",
+      "mime-type": "text/markdown",
+      "hashes": [{"alg": "SHA-256", "content": "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0"}],
+      "properties": [
+        {"name": "harness-aibom:component-type", "value": "instruction"},
+        {"name": "harness-aibom:path", "value": "~/.claude/CLAUDE.md"},
+        {"name": "harness-aibom:scope", "value": "user"}
+      ]
+    },
+    {
+      "type": "file",
+      "bom-ref": "hook:PreToolUse/0",
+      "name": ".claude/hooks/guard.sh",
+      "hashes": [{"alg": "SHA-256", "content": "5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d"}],
+      "properties": [
+        {"name": "harness-aibom:component-type", "value": "hook"},
+        {"name": "harness-aibom:hook-event", "value": "PreToolUse"},
+        {"name": "harness-aibom:matcher", "value": "Bash"},
+        {"name": "harness-aibom:source", "value": ".claude/settings.json#/hooks/PreToolUse/0"}
+      ]
+    },
+    {
+      "type": "file",
+      "bom-ref": "skill:code-review",
+      "name": ".claude/skills/code-review/SKILL.md",
+      "hashes": [{"alg": "SHA-256", "content": "9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f"}],
+      "properties": [
+        {"name": "harness-aibom:component-type", "value": "skill"},
+        {"name": "harness-aibom:allowed-tools", "value": "Read, Grep, Bash(git diff:*)"},
+        {"name": "harness-aibom:scope", "value": "project"}
+      ]
+    },
+    {
+      "type": "machine-learning-model",
+      "bom-ref": "model:claude-sonnet-4-5",
+      "name": "claude-sonnet-4-5",
+      "properties": [
+        {"name": "harness-aibom:component-type", "value": "model"},
+        {"name": "harness-aibom:provider", "value": "anthropic"},
+        {"name": "harness-aibom:model", "value": "claude-sonnet-4-5"},
+        {"name": "harness-aibom:source", "value": ".claude/settings.json#/model"}
+      ]
+    }
+  ],
+  "services": [
+    {
+      "bom-ref": "mcp:github",
+      "name": "github",
+      "endpoints": ["https://api.githubcopilot.com/mcp/"],
+      "authenticated": true,
+      "properties": [
+        {"name": "harness-aibom:component-type", "value": "mcp-server"},
+        {"name": "harness-aibom:transport", "value": "http"},
+        {"name": "harness-aibom:url", "value": "https://api.githubcopilot.com/mcp/"},
+        {"name": "harness-aibom:auth", "value": "bearer"},
+        {"name": "harness-aibom:headers", "value": "Authorization"},
+        {"name": "harness-aibom:source", "value": ".mcp.json#/mcpServers/github"},
+        {"name": "harness-aibom:scope", "value": "project"}
+      ]
+    },
+    {
+      "bom-ref": "mcp:filesystem",
+      "name": "filesystem",
+      "properties": [
+        {"name": "harness-aibom:component-type", "value": "mcp-server"},
+        {"name": "harness-aibom:transport", "value": "stdio"},
+        {"name": "harness-aibom:command", "value": "npx"},
+        {"name": "harness-aibom:args", "value": "-y @modelcontextprotocol/server-filesystem /srv/repos"},
+        {"name": "harness-aibom:env", "value": "FS_ROOT"},
+        {"name": "harness-aibom:pinning", "value": "floating"},
+        {"name": "harness-aibom:source", "value": ".mcp.json#/mcpServers/filesystem"},
+        {"name": "harness-aibom:scope", "value": "project"}
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "harness:claude-code:triage-agent",
+      "dependsOn": [
+        "instruction:project/CLAUDE.md",
+        "instruction:user/CLAUDE.md",
+        "hook:PreToolUse/0",
+        "skill:code-review",
+        "model:claude-sonnet-4-5",
+        "mcp:github",
+        "mcp:filesystem"
+      ]
+    }
+  ]
+}
