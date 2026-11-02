@@ -79,20 +79,18 @@ def test_sigstore_verifier_applies_identity_and_checks_artifact(
     verify = ModuleType("sigstore.verify")
     verify_policy = ModuleType("sigstore.verify.policy")
     hashes = ModuleType("sigstore.hashes")
-    protobuf_common = ModuleType("sigstore_protobuf_specs.dev.sigstore.common.v1")
+    models_common = ModuleType("sigstore_models.common.v1")
     models.Bundle = SimpleNamespace(from_json=lambda _: object())
     verify.Verifier = Verifier
     verify_policy.Identity = Identity
     hashes.Hashed = Hashed
-    protobuf_common.HashAlgorithm = HashAlgorithm
+    models_common.HashAlgorithm = HashAlgorithm
     monkeypatch.setitem(sys.modules, "sigstore", pkg)
     monkeypatch.setitem(sys.modules, "sigstore.models", models)
     monkeypatch.setitem(sys.modules, "sigstore.verify", verify)
     monkeypatch.setitem(sys.modules, "sigstore.verify.policy", verify_policy)
     monkeypatch.setitem(sys.modules, "sigstore.hashes", hashes)
-    monkeypatch.setitem(
-        sys.modules, "sigstore_protobuf_specs.dev.sigstore.common.v1", protobuf_common
-    )
+    monkeypatch.setitem(sys.modules, "sigstore_models.common.v1", models_common)
     result = verify_sigstore_bundle(artifact, bundle, "trusted", "issuer")
     assert result.verified
     assert calls == [("trusted", "issuer")]

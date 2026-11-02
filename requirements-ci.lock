@@ -1533,7 +1533,9 @@ trove-classifiers==2026.9.21.13 \
 tuf==7.0.1 \
     --hash=sha256:5ada1db78da3518fa851e28588f4b2249b8662a28ae528f54afa2a1de541fb31 \
     --hash=sha256:d30434bda6e079ab303fb30d1b3006d939a10ca34783b1573d61cd9b802fa45c
-    # via sigstore
+    # via
+    #   nexus-symbiote (pyproject.toml)
+    #   sigstore
 twine==6.2.0 \
     --hash=sha256:418ebf08ccda9a8caaebe414433b0ba5e25eb5e4a927667122fbe8f829f985d8 \
     --hash=sha256:e5ed0d2fd70c9959770dce51c8f39c8945c574e18173a7b81802dab51b4b75cf

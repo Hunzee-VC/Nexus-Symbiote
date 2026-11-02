@@ -157,7 +157,6 @@ def local_signed_bundle(tmp_path, monkeypatch):
     No network, Fulcio identity or public signing service is involved.
     """
     pytest.importorskip("sigstore")
-    import base64
     from datetime import UTC, datetime, timedelta
     from types import SimpleNamespace
 
@@ -170,11 +169,7 @@ def local_signed_bundle(tmp_path, monkeypatch):
     from sigstore.models import Bundle
     from sigstore.verify import Verifier
     from sigstore.verify.verifier import _hashedrekord_from_parts
-
-    try:
-        from sigstore_models.common.v1 import HashAlgorithm
-    except ImportError:
-        from sigstore_protobuf_specs.dev.sigstore.common.v1 import HashAlgorithm
+    from sigstore_models.common.v1 import HashAlgorithm
 
     artifact = tmp_path / "artifact.bin"
     artifact.write_bytes(b"genuinely signed local artifact")
@@ -206,9 +201,7 @@ def local_signed_bundle(tmp_path, monkeypatch):
         _inner=SimpleNamespace(
             message_signature=SimpleNamespace(signature=signature, message_digest=None)
         ),
-        # sigstore 3 reads the base64 entry body; sigstore 4 reads the typed entry.
         log_entry=SimpleNamespace(
-            body=base64.b64encode(body).decode(),
             _inner=SimpleNamespace(
                 kind_version=SimpleNamespace(kind="hashedrekord", version="0.0.1"),
                 canonicalized_body=body,

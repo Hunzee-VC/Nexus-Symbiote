@@ -6,6 +6,7 @@ Alpha release of the AgentBOM toolkit under the Hunzee-VC organization.
 
 ### Security
 
+- Raise dependency minimums past known advisories: cryptography 50, sigstore 4.4 with tuf 7, and pytest 9.0.3 for development. Sigstore 3.x is no longer supported.
 - Lock dependency versions without known advisories (cryptography 50.0.2, sigstore 4.5.1, tuf 7.0.1, pytest 9.2.0) so the required OSV audit of the locked environment passes.
 - Keep unused jsonschema format checkers out of the runtime validation worker. With the cyclonedx or all extras installed, their import cost exceeded the worker's CPU limit and every runtime authorization failed closed.
 - Require TLS 1.2 or later explicitly in the pinned HTTPS transport, and create `runtime keygen` public keys with mode 0600 like private keys.

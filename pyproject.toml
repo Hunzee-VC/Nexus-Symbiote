@@ -48,7 +48,7 @@ dependencies = [
     "pyyaml>=6.0,<7",
     "jsonschema>=4.23,<5",
     "referencing>=0.35,<1",
-    "cryptography>=43,<51",
+    "cryptography>=50,<51",
     "tree-sitter>=0.25,<0.26",
     "tree-sitter-typescript>=0.23,<0.24",
 ]
@@ -58,24 +58,27 @@ cyclonedx = [
     "cyclonedx-python-lib[json-validation]>=11.12,<12",
 ]
 sigstore = [
-    "sigstore>=3.6.7,<5",
+    "sigstore>=4.4,<5",
+    "tuf>=7,<8",
 ]
 yaml = [
     "pyyaml>=6.0,<7",
 ]
 all = [
     "cyclonedx-python-lib[json-validation]>=11.12,<12",
-    "sigstore>=3.6.7,<5",
+    "sigstore>=4.4,<5",
+    "tuf>=7,<8",
     "pyyaml>=6.0,<7",
 ]
 dev = [
-    "pytest>=8.0,<10",
+    "pytest>=9.0.3,<10",
     "pytest-cov>=5.0,<6",
     "ruff>=0.4,<1",
     "mypy>=1.10,<2",
     "types-PyYAML>=6.0,<7",
     "types-jsonschema>=4.23,<5",
-    "sigstore>=3.6.7,<5",
+    "sigstore>=4.4,<5",
+    "tuf>=7,<8",
     "build>=1.2,<2",
     "twine>=6.0,<8",
     "hypothesis>=6.0,<7",
