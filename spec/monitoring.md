@@ -66,7 +66,8 @@ Advisors (network, bounded, cached, never executing content):
 Signals (`symbiote.advisories.types.SignalKind`): `vulnerable`, `malicious`, `newer-version`, `fresh-release`
 (newest release younger than the cooldown), `provenance-downgrade` (earlier releases carried build provenance and
 this one does not: the `cline@2.3.0` pattern), `install-script-added`, `publisher-changed`, `deprecated`,
-`yanked`, `floating`, `retiring-model`, `definition-drift`. A lookup that fails is `coverage: unreachable` and
+`yanked`, `not-published` (absent from the public registry: a private package exposed to dependency
+confusion unless its public name is claimed, or a removed one), `floating`, `retiring-model`, `definition-drift`. A lookup that fails is `coverage: unreachable` and
 produces no "clean" conclusion.
 
 ## 4. Update proposals (`symbiote update`)

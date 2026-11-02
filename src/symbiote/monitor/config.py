@@ -56,10 +56,7 @@ def available_collectors() -> frozenset[str]:
 
 
 def _policy_type() -> type[UpdatePolicy]:
-    # Imported lazily, and after ``symbiote.advisories``: importing ``symbiote.update`` first currently trips a
-    # circular import (update.types -> advisories -> advisories.engine -> update.types).
-    import symbiote.advisories  # noqa: F401
-    from symbiote.update.types import UpdatePolicy
+    from symbiote.update.types import UpdatePolicy  # lazily: keeps loading a config free of the update stack
 
     return UpdatePolicy
 

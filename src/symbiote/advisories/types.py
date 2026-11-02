@@ -53,6 +53,9 @@ class SignalKind(StrEnum):
     PUBLISHER_CHANGED = "publisher-changed"  # a different account published this release
     DEPRECATED = "deprecated"  # registry deprecation or MCP Registry status deprecated/deleted
     YANKED = "yanked"  # PyPI yank / npm unpublish of the pinned version
+    #: the name is absent from the public registry: a private package (dependency-confusion exposure if the
+    #: public name is unclaimed) or one that was removed
+    NOT_PUBLISHED = "not-published"
     FLOATING = "floating"  # the reference resolves to "latest" at every start
     RETIRING_MODEL = "retiring-model"  # a hosted model snapshot or alias has an announced retirement date
     DEFINITION_DRIFT = (

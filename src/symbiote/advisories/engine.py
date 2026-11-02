@@ -27,7 +27,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any, Final, Literal
+from typing import TYPE_CHECKING, Any, Final, Literal
 
 from symbiote.advisories.http import HttpClient, HttpError, NotFound
 from symbiote.advisories.inventory import parse_purl
@@ -60,7 +60,9 @@ from symbiote.advisories.types import (
     Signal,
     SignalKind,
 )
-from symbiote.update.types import UpdatePolicy
+
+if TYPE_CHECKING:  # update.types imports advisories.types; import it lazily to avoid a cycle
+    from symbiote.update.types import UpdatePolicy
 
 __all__ = ["MAX_CANDIDATE_LOOKUPS", "check_dependencies", "check_dependency"]
 
@@ -365,9 +367,11 @@ def _check_package(
         intel.sources.append(url)
         intel.signals.append(
             Signal(
-                SignalKind.YANKED,
-                "high",
-                f"{ref.name} is not in the {ref.ecosystem} registry (removed, unpublished or never published)",
+                SignalKind.NOT_PUBLISHED,
+                "medium",
+                f"{ref.name} is not on the public {ref.ecosystem} registry: if it is a private package, make sure "
+                "installs resolve only from your private index and claim the public name (dependency confusion); "
+                "if it was removed, find out why before the next install",
                 reference=ref.version,
             )
         )
@@ -805,7 +809,7 @@ def check_dependency(
     ref: DependencyRef, *, client: HttpClient, now: datetime, policy: UpdatePolicy | None = None
 ) -> DependencyIntel:
     """Intelligence for one dependency (see :func:`check_dependencies`)."""
-    policy = policy or UpdatePolicy()
+    policy = policy or _default_policy()
     now = now.replace(tzinfo=UTC) if now.tzinfo is None else now.astimezone(UTC)
     intel = DependencyIntel(ref=ref, checked_at=now, coverage="not-attempted")
     if ref.ecosystem in _PACKAGE_ECOSYSTEMS:
@@ -869,3 +873,9 @@ def check_dependencies(
             intel.errors.append(f"internal error while checking: {type(exc).__name__}: {exc}")
             out.append(intel)
     return out
+
+
+def _default_policy() -> UpdatePolicy:
+    from symbiote.update.types import UpdatePolicy
+
+    return UpdatePolicy()

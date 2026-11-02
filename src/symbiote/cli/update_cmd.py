@@ -34,7 +34,16 @@ _SEVERITIES: Final[tuple[str, ...]] = ("critical", "high", "medium", "low", "inf
 _NO_ADVISOR: Final[tuple[str, ...]] = ("no vulnerability advisor", "no advisor")
 #: Signal kinds that are a risk in themselves (not facts about a candidate release).
 _RISK_SIGNALS: Final = frozenset(
-    {"vulnerable", "malicious", "floating", "deprecated", "yanked", "definition-drift", "retiring-model"}
+    {
+        "vulnerable",
+        "malicious",
+        "floating",
+        "deprecated",
+        "yanked",
+        "not-published",
+        "definition-drift",
+        "retiring-model",
+    }
 )
 
 

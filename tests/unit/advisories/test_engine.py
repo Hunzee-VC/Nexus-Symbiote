@@ -241,7 +241,9 @@ def test_package_missing_from_registry() -> None:
     client = _client()
     client.routes[NPM_CLI] = NotFound("HTTP 404", url=NPM_CLI, status=404)
     intel = _one(_npm(), client)
-    assert SignalKind.YANKED in _kinds(intel)
+    assert SignalKind.NOT_PUBLISHED in _kinds(intel)
+    assert SignalKind.YANKED not in _kinds(intel)  # absent is not the same as yanked: it may be private
+    assert any("dependency confusion" in s.detail for s in intel.signals)
     assert intel.recommended is None
 
 

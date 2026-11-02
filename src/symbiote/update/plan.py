@@ -448,11 +448,10 @@ def _plan_retire(ctx: _Context) -> UpdateProposal | None:
     retiring = [s for s in ctx.intel.signals if s.kind is SignalKind.RETIRING_MODEL]
     if not retiring:
         return None
-    successor = (
-        ctx.intel.recommended.version
-        if ctx.intel.recommended is not None
-        else next((s.reference for s in retiring if s.reference), None)
-    )
+    # only an explicitly recommended successor counts; a signal's ``reference`` names the retiring model itself
+    successor = ctx.intel.recommended.version if ctx.intel.recommended is not None else None
+    if successor == ref.name:
+        successor = None
     severity = _max_severity((s.severity for s in retiring), "medium")
     details = "; ".join(s.detail for s in retiring)
     if successor:

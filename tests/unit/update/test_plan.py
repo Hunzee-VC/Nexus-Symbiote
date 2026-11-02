@@ -266,7 +266,8 @@ def test_new_install_script_and_publisher_change() -> None:
 
 
 def test_retire_model_proposes_successor_as_advice() -> None:
-    sig = Signal(SignalKind.RETIRING_MODEL, "high", "retires on 2027-01-05", "model-b-2026")
+    # the engine names the retiring model in ``reference`` and the documented successor in ``recommended``
+    sig = Signal(SignalKind.RETIRING_MODEL, "high", "retires on 2027-01-05", "model-a-2025")
     i = intel(
         "model-a-2025",
         [],
@@ -274,6 +275,7 @@ def test_retire_model_proposes_successor_as_advice() -> None:
         kind=DependencyKind.HOSTED_MODEL,
         ecosystem="hosted-model",
         signals=[sig],
+        recommended=ReleaseInfo(version="model-b-2026"),
     )
     [p] = plan_updates([i])
     assert (p.kind, p.proposed, p.severity) == ("retire-model", "model-b-2026", "high")
@@ -301,3 +303,22 @@ def test_at_most_one_proposal_per_dependency_sorted_by_severity() -> None:
     floating = intel(None, [rel("3.0.0", 30)], name="other", recommended=rel("3.0.0", 30))
     out = plan_updates([floating, vuln, vuln])
     assert [(p.dependency.name, p.kind) for p in out] == [("server-pkg", "security"), ("other", "pin")]
+
+
+def test_retire_model_without_successor_never_proposes_the_same_model() -> None:
+    sig = Signal(SignalKind.RETIRING_MODEL, "high", "claude-x retires on 2026-11-30 (28 days)", "claude-x")
+    i = intel(
+        None, [], name="claude-x", kind=DependencyKind.HOSTED_MODEL, ecosystem="hosted-model", signals=[sig]
+    )
+    [p] = plan_updates([i])
+    assert p.kind == "retire-model"
+    assert p.proposed != "claude-x" and "successor" in p.proposed
+    assert "documents claude-x as its successor" not in p.rationale
+    assert "No successor is documented." in p.rationale
+    assert not p.edits
+
+
+def test_package_missing_from_public_registry_is_not_told_to_remove_itself() -> None:
+    sig = Signal(SignalKind.NOT_PUBLISHED, "medium", "internal-tools is not on the public pypi registry")
+    i = intel("1.4.2", [], name="internal-tools", ecosystem="pypi", signals=[sig])
+    assert plan_updates([i]) == []  # an unresolved signal for the reviewer, never a "remove or replace"
