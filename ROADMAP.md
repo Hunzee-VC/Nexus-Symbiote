@@ -4,10 +4,10 @@ Nexus SymBiote is an early alpha focused on Agent Bill of Materials (AgentBOM) g
 
 ## Near term (alpha hardening)
 
-- [x] CodeQL code scanning on main and pull requests.
+- [x] Add a pinned CodeQL workflow for main and pull requests. Successful hosted analysis still requires available runners and code-scanning entitlement.
 - [ ] Public release of a reviewed 0.1.x (or 0.2.0) with signed provenance and PyPI trusted publishing.
 - [ ] Expand security regression corpus and document known false-positive/negative classes.
-- [ ] Additional scanners or deeper support for popular agent frameworks (LangGraph, CrewAI, OpenAI Agents SDK, Google ADK, etc.) and more MCP client/host configurations.
+- [ ] Deeper verification and BOM adapters for popular agent frameworks (LangGraph, CrewAI, OpenAI Agents SDK, Google ADK, etc.) and MCP configurations, with Nexus-ShadowScan as the primary discovery scanner.
 - [ ] Stronger live-observation path documentation and operator guidance for isolated workers.
 - [ ] Example repositories and end-to-end tutorials that combine Nexus-ShadowScan discovery with SymBiote inventory and policy.
 
