@@ -77,6 +77,48 @@ def _split_npm_spec(spec: str) -> tuple[str, str | None]:
     return name, (version or None) if sep else None
 
 
+_TARBALL = re.compile(r"\.(?:tgz|tar\.gz|tar)$", re.IGNORECASE)
+
+
+def _npm_version_is_local(version: str) -> bool:
+    """Whether the part after ``name@`` names a local directory or tarball rather than a registry version."""
+    return (
+        version in (".", "..")
+        or version.startswith(("./", "../", "/", "~/", "file:", ".\\", "..\\"))
+        or bool(re.match(r"^[A-Za-z]:[\\/]", version))
+        or bool(_TARBALL.search(version))
+        or (
+            "/" in version
+            and not version.startswith(("github:", "git+", "git:", "gitlab:", "bitbucket:", "http"))
+        )
+    )
+
+
+def _with_registry_override(facts: LaunchFacts, flag: str, value: str | None) -> LaunchFacts:
+    """A package resolved through an operator-chosen index is not the public-registry package of that name.
+
+    The purl gains a ``repository_url`` qualifier (so the server identity digest changes when the index does),
+    the reference no longer counts as pinned, and the flag is recorded.
+    """
+    if facts.purl is None or facts.package_name is None:
+        return facts
+    from dataclasses import replace
+
+    purl = PackageURL.from_string(facts.purl)
+    qualifiers = dict(purl.qualifiers or {})
+    if value and flag in ("--index-url", "--index", "--default-index", "-i", "--registry"):
+        qualifiers["repository_url"] = value
+    return replace(
+        facts,
+        purl=PackageURL(
+            purl.type, purl.namespace, purl.name, purl.version, qualifiers or None, purl.subpath
+        ).to_string(),
+        pinned=False,
+        float_reason=f"registry-override:{flag.lstrip('-')}",
+        risky_flags=(*facts.risky_flags, f"registry-override:{flag.lstrip('-')}"),
+    )
+
+
 def _npm_facts(spec: str, detail: str) -> LaunchFacts:
     if spec.startswith(("./", "../", "/", "file:")) or re.match(r"^[A-Za-z]:[\\/]", spec):
         return LaunchFacts(Launcher.NPX, detail, local_path=spec)
@@ -97,6 +139,16 @@ def _npm_facts(spec: str, detail: str) -> LaunchFacts:
             Launcher.NPX, detail, ecosystem="npm", package_name=spec, pinned=False, float_reason="url"
         )
     name, version = _split_npm_spec(spec)
+    if version is not None and _npm_version_is_local(version):
+        # npm-package-arg: ``name@.``, ``name@../dir``, ``name@x.tgz`` resolve to a directory or tarball on
+        # disk; the registry name is only an alias and must not become the package identity.
+        return LaunchFacts(Launcher.NPX, detail, local_path=version, risky_flags=("local-alias",))
+    if version is not None and version.startswith(("http://", "https://")):
+        return LaunchFacts(
+            Launcher.NPX, detail, ecosystem="npm", package_name=version, pinned=False, float_reason="url"
+        )
+    if version is not None and version.startswith(("github:", "git+", "git:", "gitlab:", "bitbucket:")):
+        return _npm_facts(version, detail)
     namespace, _, short = name.rpartition("/")
     if version is None:
         reason: str | None = "no-version"
@@ -142,6 +194,23 @@ _NPX_VALUE_FLAGS: Final = frozenset(
 
 
 def _parse_npx(args: Sequence[str], detail: str) -> LaunchFacts:
+    facts = _parse_npx_spec(args, detail)
+    override = _find_flag(args, ("--registry",))
+    return _with_registry_override(facts, *override) if override else facts
+
+
+def _find_flag(args: Sequence[str], flags: Sequence[str]) -> tuple[str, str | None] | None:
+    """The first of ``flags`` anywhere in ``args`` (``--flag value`` or ``--flag=value``)."""
+    for i, arg in enumerate(args):
+        for flag in flags:
+            if arg == flag:
+                return flag, args[i + 1] if i + 1 < len(args) else None
+            if arg.startswith(flag + "="):
+                return flag, arg.split("=", 1)[1]
+    return None
+
+
+def _parse_npx_spec(args: Sequence[str], detail: str) -> LaunchFacts:
     packages: list[str] = []
     i = 0
     while i < len(args):
@@ -262,7 +331,11 @@ def _parse_uvx(args: Sequence[str], detail: str) -> LaunchFacts:
     spec = from_spec or (args[i] if i < len(args) else None)
     if spec is None:
         return LaunchFacts(Launcher.UVX, detail)
-    return _pypi_facts(spec, detail, Launcher.UVX)
+    facts = _pypi_facts(spec, detail, Launcher.UVX)
+    override = _find_flag(
+        args, ("--index-url", "--index", "--default-index", "--extra-index-url", "--find-links", "-f")
+    )
+    return _with_registry_override(facts, *override) if override else facts
 
 
 def _parse_pipx(args: Sequence[str]) -> LaunchFacts:
@@ -282,7 +355,21 @@ def _parse_pipx(args: Sequence[str]) -> LaunchFacts:
             spec = spec or arg
             break
         i += 1
-    return _pypi_facts(spec, "pipx run", Launcher.UVX) if spec else LaunchFacts(Launcher.UVX, "pipx run")
+    if not spec:
+        return LaunchFacts(Launcher.UVX, "pipx run")
+    facts = _pypi_facts(spec, "pipx run", Launcher.UVX)
+    override = _find_flag(rest, ("--index-url", "-i"))
+    if override is None:
+        pip_args = _find_flag(rest, ("--pip-args",))
+        if (
+            pip_args
+            and pip_args[1]
+            and any(
+                f in pip_args[1] for f in ("--index-url", "--extra-index-url", "--find-links", "-i ", "-f ")
+            )
+        ):
+            override = ("--pip-args", None)
+    return _with_registry_override(facts, *override) if override else facts
 
 
 # --------------------------------------------------------------------------------------------- OCI
