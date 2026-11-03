@@ -234,7 +234,8 @@ class MCPScanner(Scanner):
         # to enumerate every application's secret flags, retain positions only.
         # Environment names remain credential references; values never leave.
         secrets = [value for value in env.values() if isinstance(value, str) and value]
-        assert self._files is not None
+        if self._files is None:
+            raise RuntimeError("_build_mcp_server_component called outside a _collection context")
         config_scope = config_path.relative_to(self._files.root).as_posix()
         server_ref = (
             "mcp-server:" + hash_canonical({"config": config_scope, "name": name}).split(":", 1)[1]
@@ -579,7 +580,8 @@ class MCPScanner(Scanner):
         }.get(config_name)
 
     def _scan_code_mcp_clients(self, root: Path, result: ScanResult) -> None:
-        assert self._files is not None
+        if self._files is None:
+            raise RuntimeError("_scan_code_mcp_clients called outside a _collection context")
         sources = list(self._files.iter_files())
         from nexus_symbiote.scanners.python_tools import collect_python_tools
         from nexus_symbiote.scanners.ts_tools import collect_typescript
