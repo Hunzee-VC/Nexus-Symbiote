@@ -16,7 +16,7 @@ The lead maintainer is responsible for:
 - Maintaining CI, branch protection, and repository controls
 - Setting project direction and roadmap priorities
 
-These are ownership responsibilities, not a claim that external CI, branch protection or publication settings are already active. See [repository controls](docs/repository-controls.md) and [issue #74](https://github.com/aisecnomad/Nexus-Symbiote/issues/74) for verification status and remediation.
+These are ownership responsibilities, not a claim that external CI, branch protection or publication settings are already active. See [repository controls](docs/repository-controls.md) and [issue #74](https://github.com/Hunzee-VC/Nexus-Symbiote/issues/74) for verification status and remediation.
 
 ## Becoming a maintainer
 

@@ -104,11 +104,14 @@ INSTRUCTION_FILES: dict[str, str] = {
     "CLAUDE.md": "system-prompt",
     ".claude/CLAUDE.md": "system-prompt",
     "AGENTS.md": "system-prompt",
+    "CODEX.md": "system-prompt",
+    "codex.md": "system-prompt",
     ".cursorrules": "rules-file",
     ".clinerules": "rules-file",
     ".windsurfrules": "rules-file",
     ".github/copilot-instructions.md": "instruction",
     ".github/AGENTS.md": "instruction",
+    ".codex/instructions.md": "instruction",
     "system_prompt.txt": "system-prompt",
     "system_prompt.md": "system-prompt",
 }
@@ -130,11 +133,11 @@ class PromptScanner(Scanner):
                 full_path = files.root / rel_path
                 result.surfaces_scanned.append(str(full_path))
                 try:
-                    content.decode("utf-8")
+                    text = content.decode("utf-8")
                 except UnicodeDecodeError:
                     result.scan_failures.append(f"{rel_path}: invalid UTF-8 instruction")
                     continue
-                comp = self._scan_instruction_file(full_path, rel_path, prompt_type, content)
+                comp = self._scan_instruction_file(full_path, rel_path, prompt_type, content, text)
                 result.components.append(comp)
 
             for skill_dir in SKILL_DIRECTORIES:
@@ -178,7 +181,7 @@ class PromptScanner(Scanner):
         return result
 
     def _scan_instruction_file(
-        self, path: Path, rel_path: str, prompt_type: str, raw: bytes
+        self, path: Path, rel_path: str, prompt_type: str, raw: bytes, text: str
     ) -> PromptComponent:
         content_hash = hash_bytes(raw)
         file_size = len(raw)
@@ -194,7 +197,7 @@ class PromptScanner(Scanner):
                 )
             )
 
-        risks.extend(detect_invisible_characters(raw.decode("utf-8"), rel_path))
+        risks.extend(detect_invisible_characters(text, rel_path))
 
         return PromptComponent(
             bom_ref=f"prompt:{rel_path}",

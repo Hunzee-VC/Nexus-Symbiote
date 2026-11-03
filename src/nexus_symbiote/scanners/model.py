@@ -104,6 +104,52 @@ def _recognized_binary_pickle(stream: BinaryIO, prefix: bytes, size: int) -> boo
     return True
 
 
+def _tensor_span(entry: object, data_bytes: int) -> tuple[int, int]:
+    if not isinstance(entry, dict) or set(entry) != {"dtype", "shape", "data_offsets"}:
+        raise ValueError("Invalid tensor descriptor")
+    dtype, shape, offsets = entry["dtype"], entry["shape"], entry["data_offsets"]
+    if not isinstance(dtype, str) or dtype not in _DTYPE_BYTES:
+        raise ValueError("Unsupported tensor dtype")
+    if (
+        not isinstance(shape, list)
+        or len(shape) > 64
+        or not all(type(n) is int and n >= 0 for n in shape)
+    ):
+        raise ValueError("Invalid tensor shape")
+    if (
+        not isinstance(offsets, list)
+        or len(offsets) != 2
+        or not all(type(n) is int and 0 <= n <= data_bytes for n in offsets)
+    ):
+        raise ValueError("Invalid tensor offsets")
+    start, end = offsets
+    elements = 1
+    for dim in shape:
+        elements *= dim
+    if end < start or end - start != elements * _DTYPE_BYTES[dtype]:
+        raise ValueError("Tensor shape and offsets disagree")
+    return start, end
+
+
+def _check_safetensors_header(header: dict[str, object], data_bytes: int) -> None:
+    spans: list[tuple[int, int]] = []
+    for name, entry in header.items():
+        if name == "__metadata__":
+            if not isinstance(entry, dict) or not all(
+                isinstance(k, str) and isinstance(v, str) for k, v in entry.items()
+            ):
+                raise ValueError("Invalid SafeTensors metadata")
+            continue
+        spans.append(_tensor_span(entry, data_bytes))
+    cursor = 0
+    for start, end in sorted(spans):
+        if start != cursor:
+            raise ValueError("Tensor buffer contains holes or overlaps")
+        cursor = end
+    if cursor != data_bytes:
+        raise ValueError("Tensor buffer is not fully indexed")
+
+
 def inspect_model_format(
     path: Path, *, stream: BinaryIO | None = None
 ) -> tuple[SerializationSafety, str]:
@@ -146,46 +192,7 @@ def inspect_model_format(
             header = parse_json_strict(raw_header, max_bytes=MAX_MODEL_HEADER_BYTES)
             if not isinstance(header, dict):
                 raise ValueError("SafeTensors header must be an object")
-            data_bytes = size - 8 - length
-            spans: list[tuple[int, int]] = []
-            for name, entry in header.items():
-                if name == "__metadata__":
-                    if not isinstance(entry, dict) or not all(
-                        isinstance(k, str) and isinstance(v, str) for k, v in entry.items()
-                    ):
-                        raise ValueError("Invalid SafeTensors metadata")
-                    continue
-                if not isinstance(entry, dict) or set(entry) != {"dtype", "shape", "data_offsets"}:
-                    raise ValueError("Invalid tensor descriptor")
-                dtype, shape, offsets = entry["dtype"], entry["shape"], entry["data_offsets"]
-                if not isinstance(dtype, str) or dtype not in _DTYPE_BYTES:
-                    raise ValueError("Unsupported tensor dtype")
-                if (
-                    not isinstance(shape, list)
-                    or len(shape) > 64
-                    or not all(type(n) is int and n >= 0 for n in shape)
-                ):
-                    raise ValueError("Invalid tensor shape")
-                if (
-                    not isinstance(offsets, list)
-                    or len(offsets) != 2
-                    or not all(type(n) is int and 0 <= n <= data_bytes for n in offsets)
-                ):
-                    raise ValueError("Invalid tensor offsets")
-                start, end = offsets
-                elements = 1
-                for dim in shape:
-                    elements *= dim
-                if end < start or end - start != elements * _DTYPE_BYTES[dtype]:
-                    raise ValueError("Tensor shape and offsets disagree")
-                spans.append((start, end))
-            cursor = 0
-            for start, end in sorted(spans):
-                if start != cursor:
-                    raise ValueError("Tensor buffer contains holes or overlaps")
-                cursor = end
-            if cursor != data_bytes:
-                raise ValueError("Tensor buffer is not fully indexed")
+            _check_safetensors_header(header, size - 8 - length)
         return SerializationSafety.SAFE, "Bounded SafeTensors header, shapes and offsets checked"
     except (OSError, ValueError, RecursionError, UnicodeError):
         return SerializationSafety.UNKNOWN, "Malformed or unsupported SafeTensors structure"
@@ -286,7 +293,8 @@ class ModelScanner(Scanner):
         tokenizer_hash = self._hash_tokenizer(model_dir)
         chat_template_hash = self._hash_chat_template(model_dir, config)
 
-        assert self._files is not None
+        if self._files is None:
+            raise RuntimeError("_scan_model_directory called outside a _collection context")
         for path in self._discovered_paths:
             if path.parent != model_dir:
                 continue
@@ -355,7 +363,8 @@ class ModelScanner(Scanner):
         return components
 
     def _read_model_config(self, model_dir: Path) -> dict[str, Any] | None:
-        assert self._files is not None
+        if self._files is None:
+            raise RuntimeError("_read_model_config called outside a _collection context")
         for cfg_name in MODEL_CONFIG_FILES:
             cfg_path = model_dir / cfg_name
             if cfg_path in self._discovered_paths:

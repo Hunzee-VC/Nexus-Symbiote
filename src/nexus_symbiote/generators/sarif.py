@@ -63,7 +63,7 @@ class SARIFGenerator(Generator):
                         "helpUri": (
                             risk.references[0]
                             if risk.references
-                            else "https://github.com/aisecnomad/nexus-symbiote"
+                            else "https://github.com/Hunzee-VC/Nexus-Symbiote"
                         ),
                         "properties": {"security-severity": SECURITY_SEVERITY[risk.severity]},
                     }
@@ -117,7 +117,7 @@ class SARIFGenerator(Generator):
                         "driver": {
                             "name": "nexus-symbiote",
                             "version": __version__,
-                            "informationUri": "https://github.com/aisecnomad/nexus-symbiote",
+                            "informationUri": "https://github.com/Hunzee-VC/Nexus-Symbiote",
                             "rules": list(rules.values()),
                         }
                     },

@@ -20,7 +20,7 @@ The checked-in [protection proposal](config/github-main-protection.json) require
 
 Until a second authorized reviewer exists, applying that configuration as written would block the sole maintainer from merging their own pull requests, since GitHub does not count self-approval toward a required review. [`config/github-main-protection-interim.json`](config/github-main-protection-interim.json) drops only the review requirement — `Verified CI` remains enforced for everyone, including administrators, and force pushes and branch deletion remain disabled. Treat it as a temporary floor, not a replacement for the full proposal.
 
-This file does not apply GitHub settings. At the 2026-11-02 audit, live `main` metadata reported `protected: false`, and inspected hosted jobs had no recorded runner or steps. Those observations and required remediation are tracked in [issue #74](https://github.com/aisecnomad/Nexus-Symbiote/issues/74). See [repository controls](docs/repository-controls.md) for the actual verification boundary and administrator setup.
+This file does not apply GitHub settings. At the 2026-11-02 audit, live `main` metadata reported `protected: false`, and inspected hosted jobs had no recorded runner or steps. Those observations and required remediation are tracked in [issue #74](https://github.com/Hunzee-VC/Nexus-Symbiote/issues/74). See [repository controls](docs/repository-controls.md) for the actual verification boundary and administrator setup.
 
 Do not claim active merge enforcement from a workflow file, governance statement or local passing suite. Verify live settings and successful checks for the revision being considered.
 

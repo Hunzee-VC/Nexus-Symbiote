@@ -7,7 +7,7 @@ Nexus SymBiote is alpha security tooling maintained by one developer. This guide
 | I need to… | Go to |
 | --- | --- |
 | Report a security vulnerability | [SECURITY.md](SECURITY.md); request a private reporting channel |
-| Report a bug or request a feature | [GitHub Issues](https://github.com/aisecnomad/nexus-symbiote/issues) |
+| Report a bug or request a feature | [GitHub Issues](https://github.com/Hunzee-VC/Nexus-Symbiote/issues) |
 | Install or develop from reviewed source | [README.md](README.md) · [CONTRIBUTING.md](CONTRIBUTING.md) |
 | Understand evidence and trust | [Security model](docs/security-model.md) · [Runtime assurance](docs/runtime-assurance.md) |
 | Import discovery | [ShadowScan integration](docs/shadowscan-integration.md) |
@@ -74,7 +74,7 @@ python -m pytest --cov=nexus_symbiote --cov-branch --cov-report=json:coverage.js
 python scripts/check_coverage.py coverage.json
 ```
 
-These are local checks. They do not apply GitHub protection, qualify another platform, establish a successful hosted workflow or publish a package. Current hosted verification and enforcement remediation is tracked in [issue #74](https://github.com/aisecnomad/Nexus-Symbiote/issues/74).
+These are local checks. They do not apply GitHub protection, qualify another platform, establish a successful hosted workflow or publish a package. Current hosted verification and enforcement remediation is tracked in [issue #74](https://github.com/Hunzee-VC/Nexus-Symbiote/issues/74).
 
 ## Response expectations
 

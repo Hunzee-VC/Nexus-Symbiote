@@ -84,7 +84,8 @@ class DiscoveryTransport(Protocol):
 
     def request(
         self, endpoint: str, body: bytes, headers: dict[str, str], *, timeout: float, max_bytes: int
-    ) -> HTTPReply: ...
+    ) -> HTTPReply:
+        """Send one bounded request and return the complete reply."""
 
 
 @dataclass
