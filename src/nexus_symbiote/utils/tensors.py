@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from typing import BinaryIO
 
 from nexus_symbiote.core.hashing import hash_bytes, hash_canonical, parse_json_strict
-from nexus_symbiote.utils.confined import MAX_HASH_BYTES, ConfinedCollection
+from nexus_symbiote.utils.confined import MAX_HASH_BYTES
 
 MAX_HEADER_BYTES = 1024 * 1024
 DTYPE_BYTES = {
@@ -92,23 +91,3 @@ def fingerprint_stream(stream: BinaryIO, *, artifact_size: int | None = None) ->
         ),
         "tensor_count": str(len(inventory)),
     }
-
-
-def safetensors_fingerprint(
-    path: Path, *, root: Path, expected_digest: str | None = None
-) -> dict[str, str]:
-    """Bind metadata and complete-file hash to one confined artifact observation."""
-    from nexus_symbiote.core.enums import SerializationSafety
-    from nexus_symbiote.scanners.model import inspect_model_artifact
-
-    metadata: dict[str, str] = {}
-    with (
-        ConfinedCollection(root, [], max_total_bytes=MAX_HASH_BYTES) as files,
-        files.open_regular(path, max_bytes=MAX_HASH_BYTES) as stream,
-    ):
-        safety, _, digest = inspect_model_artifact(path, stream=stream, metadata=metadata)
-    if safety != SerializationSafety.SAFE or not metadata:
-        raise ValueError("SafeTensors metadata could not be corroborated")
-    if expected_digest is not None and expected_digest != digest:
-        raise ValueError("Tensor metadata belongs to different artifact bytes")
-    return metadata

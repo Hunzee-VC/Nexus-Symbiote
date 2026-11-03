@@ -19,7 +19,7 @@ Keep credentials, private inventories and customer data out of public reports. U
 
 Use Python 3.11 or later in an isolated environment and follow the source-first installation in [README.md](README.md). Until release ownership, source and provenance are verified, an unqualified package-index install is not the recommended verification path.
 
-Confined file operations and pinned stdio launchers require POSIX descriptor-relative and no-follow primitives. Unsupported platforms fail closed. The configured hosted matrix targets Ubuntu/Python 3.11–3.13; it does not qualify macOS or Windows. A platform classifier or a successful package import is not evidence that all security primitives work on that platform.
+Confined file operations and pinned stdio launchers require POSIX descriptor-relative and no-follow primitives. Unsupported platforms fail closed. The configured hosted matrix targets Ubuntu/Python 3.11–3.14; it does not qualify macOS or Windows. A platform classifier or a successful package import is not evidence that all security primitives work on that platform.
 
 If an optional integration is missing, source extras are `.[sigstore]`, `.[cyclonedx]` and `.[all]`. The locked development environment installs the reviewed optional test/integration dependencies:
 

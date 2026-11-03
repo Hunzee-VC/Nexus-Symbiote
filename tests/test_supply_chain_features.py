@@ -23,9 +23,8 @@ from nexus_symbiote.generators.validation import validate_cyclonedx
 from nexus_symbiote.generators.vex import VEXGenerator
 from nexus_symbiote.scanners.live_mcp import HTTPReply
 from nexus_symbiote.scanners.mcp import MCPScanner
-from nexus_symbiote.scanners.model import ModelScanner
+from nexus_symbiote.scanners.model import ModelScanner, safetensors_fingerprint
 from nexus_symbiote.scanners.registry import RegistryScanner
-from nexus_symbiote.utils.tensors import safetensors_fingerprint
 from nexus_symbiote.validators.integrity import IntegrityValidator
 
 

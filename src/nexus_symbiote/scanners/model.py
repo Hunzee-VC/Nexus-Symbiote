@@ -23,7 +23,9 @@ from nexus_symbiote.core.enums import (
 from nexus_symbiote.core.hashing import open_regular_file, parse_json_strict
 from nexus_symbiote.core.models import ModelComponent, RiskAssessment
 from nexus_symbiote.scanners.base import Scanner, ScanResult
+from nexus_symbiote.utils.confined import MAX_HASH_BYTES, ConfinedCollection, descriptor_binding
 from nexus_symbiote.utils.crypto import SigstoreArtifactPolicy, verify_sigstore_bundle
+from nexus_symbiote.utils.tensors import fingerprint_stream
 
 MODEL_EXTENSIONS = {
     ".safetensors": ("safetensors", "safe-tensors"),
@@ -239,19 +241,30 @@ def inspect_model_artifact(
     while observed.read(65536):
         pass
     if metadata is not None and safety == SerializationSafety.SAFE:
-        from nexus_symbiote.utils.tensors import fingerprint_stream
-
         metadata.update(
             fingerprint_stream(io.BytesIO(observed.prefix), artifact_size=before.st_size)
         )
     after = os.fstat(stream.fileno())
-    if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
-        after.st_size,
-        after.st_mtime_ns,
-        after.st_ctime_ns,
-    ):
+    if descriptor_binding(before) != descriptor_binding(after):
         raise OSError("model artifact changed during inspection and hashing")
     return safety, explanation, "sha256:" + observed.digest.hexdigest()
+
+
+def safetensors_fingerprint(
+    path: Path, *, root: Path, expected_digest: str | None = None
+) -> dict[str, str]:
+    """Bind metadata and complete-file hash to one confined artifact observation."""
+    metadata: dict[str, str] = {}
+    with (
+        ConfinedCollection(root, [], max_total_bytes=MAX_HASH_BYTES) as files,
+        files.open_regular(path, max_bytes=MAX_HASH_BYTES) as stream,
+    ):
+        safety, _, digest = inspect_model_artifact(path, stream=stream, metadata=metadata)
+    if safety != SerializationSafety.SAFE or not metadata:
+        raise ValueError("SafeTensors metadata could not be corroborated")
+    if expected_digest is not None and expected_digest != digest:
+        raise ValueError("Tensor metadata belongs to different artifact bytes")
+    return metadata
 
 
 class ModelScanner(Scanner):

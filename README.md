@@ -74,7 +74,7 @@ The full walkthrough, including validation, exports, and ShadowScan import, is i
 
 ### Prerequisites
 
-- Python 3.11+ on Linux (CI covers Ubuntu with Python 3.11–3.13)
+- Python 3.11+ on Linux (CI covers Ubuntu with Python 3.11–3.14)
 - Git (for source installation)
 
 ### Install
