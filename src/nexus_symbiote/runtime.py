@@ -33,6 +33,9 @@ from nexus_symbiote.runtime_validation import (
 
 PAYLOAD_TYPE: Literal["application/vnd.in-toto+json"] = "application/vnd.in-toto+json"
 STATEMENT_TYPE = "https://in-toto.io/Statement/v1"
+# These predicate types are signed into attestations and checked by verifiers. They keep
+# the original namespace on purpose, even after the repository moved. Changing them is a
+# versioned wire-format decision, not a rename.
 PREDICATES = {
     "snapshot": "https://github.com/aisecnomad/nexus-symbiote/attestation/approved-snapshot/v1",
     "approval": "https://github.com/aisecnomad/nexus-symbiote/attestation/action-approval/v1",
