@@ -27,7 +27,7 @@ def test_committed_merge_conflicts_are_reported(tmp_path):
 
 def test_local_links_resolve_from_document_and_ignore_examples_and_web(tmp_path):
     (tmp_path / "docs").mkdir()
-    (tmp_path / "README.md").write_text("Root")
+    (tmp_path / "README.md").write_text("# Anchor\n")
     doc = tmp_path / "docs" / "guide.md"
     doc.write_text(
         "[root](../README.md#anchor)\n[web](https://example.invalid/unfetched)\n"
@@ -36,6 +36,64 @@ def test_local_links_resolve_from_document_and_ignore_examples_and_web(tmp_path)
     assert hygiene.source_issues(tmp_path, [Path("docs/guide.md")]) == []
     doc.write_text("[broken](missing.md)\n[escape](../../outside.md)\n")
     assert len(hygiene.source_issues(tmp_path, [Path("docs/guide.md")])) == 2
+
+
+def test_heading_anchors_follow_github_slugs():
+    text = (
+        "# Install from `source`\n## Why: offline, by default\n## FAQ\n## FAQ\n"
+        "### [Linked](https://example.invalid) **bold** heading ###\n"
+        '<a id="explicit"></a>\n```md\n# Not a heading\n```\n'
+    )
+    assert hygiene.heading_anchors(text) == {
+        "install-from-source",
+        "why-offline-by-default",
+        "faq",
+        "faq-1",
+        "linked-bold-heading",
+        "explicit",
+    }
+
+
+def test_link_fragments_must_name_an_existing_heading(tmp_path):
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "guide.md").write_text("# Guide\n## Install from source\n")
+    page = tmp_path / "README.md"
+    page.write_text(
+        "## Usage\n[same](#usage) [other](docs/guide.md#install-from-source)\n"
+        '<a href="#usage">html</a> [line](docs/guide.md#L2) [code](scripts/x.py#main)\n'
+    )
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "x.py").write_text("")
+    assert hygiene.source_issues(tmp_path, [Path("README.md")]) == []
+    page.write_text(
+        '[a](#missing) [b](docs/guide.md#install) <a href="#gone">c</a>\n```md\n[d](#x)\n```\n'
+    )
+    issues = hygiene.source_issues(tmp_path, [Path("README.md")])
+    assert len(issues) == 3 and all("missing heading" in issue for issue in issues)
+
+
+def test_absolute_links_into_this_repository_must_resolve(tmp_path):
+    _project(tmp_path)
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "guide.md").write_text("# Guide\n## Install\n")
+    (tmp_path / "docs" / "banner.jpg").write_bytes(b"\xff\xd8")
+    base = "https://github.com/canonical-org/widget"
+    readme = tmp_path / "README.md"
+    readme.write_text(
+        f"[guide]({base}/blob/main/docs/guide.md#install) [dir]({base}/tree/main/docs)\n"
+        '<img src="https://raw.githubusercontent.com/Canonical-Org/Widget/main/docs/banner.jpg">\n'
+        f"[issue]({base}/issues/1) [other](https://github.com/other/widget/blob/main/x.md)\n"
+    )
+    files = [Path("README.md")]
+    assert hygiene.self_link_issues(tmp_path, files) == []
+    readme.write_text(
+        f"[gone]({base}/blob/main/docs/missing.md) [anchor]({base}/blob/main/docs/guide.md#nope)\n"
+        "![raw](https://raw.githubusercontent.com/Canonical-Org/Widget/main/missing.png)\n"
+        f"[escape]({base}/blob/main/../outside.md)\n"
+    )
+    issues = hygiene.self_link_issues(tmp_path, files)
+    assert len(issues) == 4
+    assert sum("missing heading" in issue for issue in issues) == 1
 
 
 def test_source_symlink_is_not_read(tmp_path):

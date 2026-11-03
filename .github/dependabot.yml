@@ -7,6 +7,10 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "ci"
+    # Workflows and action.yml pin the same actions by commit; move them together.
+    groups:
+      github-actions:
+        patterns: ["*"]
 
   - package-ecosystem: pip
     directory: /

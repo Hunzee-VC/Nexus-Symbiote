@@ -54,6 +54,9 @@ coverage: ## Run tests with coverage reporting
 security-regressions: ## Run the committed security regression contracts
 	PYTHONPATH=src python scripts/check_security_regressions.py --out security-regressions.json
 
+.PHONY: check
+check: quality coverage security-regressions clean-dist build check-dist ## Run the offline subset of the required CI checks
+
 # ── Build ────────────────────────────────────────────────────
 
 .PHONY: build
@@ -74,6 +77,10 @@ wheel-smoke: build ## Check the exact wheel in a temporary locked environment
 	"$$smoke_dir/bin/python" -I scripts/check_wheel_security.py dist/*.whl
 
 # ── Clean ────────────────────────────────────────────────────
+
+.PHONY: clean-dist
+clean-dist: ## Remove built distributions so check-dist inspects only a fresh build
+	rm -rf dist/
 
 .PHONY: clean
 clean: ## Remove build artifacts and caches
