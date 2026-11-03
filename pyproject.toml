@@ -81,7 +81,6 @@ dev = [
     "tuf>=7,<8",
     "build>=1.2,<2",
     "twine>=6.0,<8",
-    "hypothesis>=6.0,<7",
     "spdx-python-model>=0.0.6,<1",
     "cyclonedx-python-lib[json-validation]>=11.12,<12",
     "hatchling>=1.25,<2",

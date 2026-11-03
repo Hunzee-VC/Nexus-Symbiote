@@ -62,15 +62,13 @@ Inspect the exit status and the inventory's coverage, exclusions and failures. A
 
 ## Show the collectors
 
-The eight built-in collectors are `shadowscan`, `mcp`, `model`, `prompt`, `rag`, `registry`, `a2a` and `ide_agents`.
-
 ```bash
 # From a reviewed checkout — scan the examples/ fixture
 nexus-symbiote scan examples --no-project-policy --report-only -o demo-agentbom.json
 nexus-symbiote summary demo-agentbom.json
 ```
 
-A completed search can find no matching files; unsupported declarations and failed reads remain coverage gaps. Collection is static by default.
+The collectors and their coverage semantics are described under [How it works](#how-it-works).
 
 ## Why Nexus SymBiote
 
@@ -101,7 +99,7 @@ The eight built-in collector names are `shadowscan`, `mcp`, `model`, `prompt`, `
 
 Collection is static by default and does not execute project modules, model loaders, hooks or MCP launch commands. Configuration presence does not prove that a server is running or that its live tool definitions match the declaration. `verify-live` is a separate explicit execution operation requiring an independently pinned launcher policy and external isolation. `discover-mcp` is an explicit HTTPS observation operation. Neither command calls tools.
 
-Project validation compares static MCP records and configured tool fingerprints with fresh local evidence. A structure binding detects added or removed arguments, environment variables and tools. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` set, a keyed binding also detects same-version package swaps and changed argument, environment and endpoint values, without exporting anything a secret could be guessed from. Legacy snapshots without this binding need recollection; see [source reconciliation and migration](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/verification-source-binding.md).
+Project validation compares static MCP records and configured tool fingerprints with fresh local evidence. A structure binding detects added or removed arguments, environment variables and tools. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` set, a keyed binding also detects same-version package swaps and changed argument, environment and endpoint values, without exporting anything a secret could be guessed from. Legacy snapshots without this binding need recollection; see [source reconciliation and migration](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/verification-source-binding.md).
 
 ## Key capabilities and limits
 

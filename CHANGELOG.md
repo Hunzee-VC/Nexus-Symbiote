@@ -61,4 +61,16 @@ Alpha release of the AgentBOM toolkit under the Hunzee-VC organization.
 
 ## Unreleased
 
-(empty for now)
+### Fixed
+
+- Report a collector that produced a conflicting duplicate component or a dangling dependency edge as failed in `collectors_completed`, not only in `scanner_status`. A clean `ScanResult` no longer lets an orchestration-level failure be recorded as completed collection, or raise the inventory's completeness assurance to `observed` on its own. Gates were already failing through `scan_failures`; the emitted coverage record was the inaccurate part.
+
+### Changed
+
+- Enforce the canonical repository owner for tracked documentation and workflow metadata in the required quality job. Absolute GitHub URLs are outside the inline local-link check, so the `aisecnomad` to `Hunzee-VC` transfer had left stale links in `CITATION.cff`, `README.md`, `SUPPORT.md`, `GOVERNANCE.md`, `MAINTAINERS.md`, both issue templates, `examples/README.md`, `benchmarks/inventory/README.md` and `docs/repository-controls.md`. Dated audits keep the owner recorded at the time.
+- Drop the unused `hypothesis` development dependency. Remove it from `requirements-ci.lock` at the next lock refresh.
+- Remove the duplicated collector list and coverage-gap sentence from the README; both are stated under "How it works".
+
+### Notes
+
+- Attestation predicate URIs, `tool_vendor` and vendored schema provenance keep the original owner deliberately. The predicates are stable type identifiers, `tool_vendor` is compared by `diff` and would surface as metadata drift against every existing baseline, and `copiedFrom` is a historical provenance record.

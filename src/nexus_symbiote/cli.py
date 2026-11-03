@@ -312,6 +312,11 @@ def scan(
             surfaces_scanned.extend(result.surfaces_scanned)
             surfaces_excluded.extend(result.surfaces_excluded)
             scan_failures.extend(result.scan_failures)
+            # A collector that produced a conflicting duplicate component or a
+            # dangling dependency edge has failed even when its own ScanResult
+            # reports no failure. Derive both coverage records from the same
+            # delta so the emitted claim cannot list a failed collector as
+            # completed, or call the inventory OBSERVED on the strength of it.
             scanner_status[name] = (
                 "failed"
                 if len(scan_failures) > failure_count
@@ -319,7 +324,7 @@ def scan(
                 if result.surfaces_excluded
                 else "complete"
             )
-            if not result.scan_failures:
+            if scanner_status[name] != "failed":
                 completed.append(name)
             console.print(f"    Found [green]{len(result.components)}[/] components")
         except Exception as exc:

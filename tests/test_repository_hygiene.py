@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -77,3 +79,63 @@ def test_vendored_schema_provenance_cannot_silently_drift(tmp_path, mutation):
         record["file"] = "../outside.json"
     source.write_text(json.dumps(manifest))
     assert hygiene.vendor_issues(tmp_path)
+
+
+def _project(root: Path, homepage: str = "https://github.com/Canonical-Org/Widget") -> None:
+    root.joinpath("pyproject.toml").write_text(
+        f'[project]\nname = "widget"\nversion = "1.0.0"\n[project.urls]\nHomepage = "{homepage}"\n'
+    )
+
+
+def test_stale_owner_links_to_this_repository_are_reported(tmp_path):
+    _project(tmp_path)
+    tmp_path.joinpath("SUPPORT.md").write_text(
+        "[issues](https://github.com/old-owner/Widget/issues)\n"
+    )
+    issues = hygiene.owner_issues(tmp_path, [Path("SUPPORT.md")])
+    assert issues == ["SUPPORT.md: links to old-owner/Widget instead of Canonical-Org/Widget"]
+
+
+def test_canonical_owner_and_unrelated_repositories_are_accepted(tmp_path):
+    _project(tmp_path)
+    tmp_path.joinpath("README.md").write_text(
+        "[canonical](https://github.com/Canonical-Org/Widget/blob/main/X.md)\n"
+        "[case](https://github.com/canonical-org/widget)\n"
+        "[sibling](https://github.com/old-owner/OtherProject)\n"
+        "[profile](https://github.com/old-owner)\n"
+        "[pypi](https://pypi.org/p/Widget)\n"
+    )
+    assert hygiene.owner_issues(tmp_path, [Path("README.md")]) == []
+
+
+def test_stale_owner_slug_outside_a_url_is_reported(tmp_path):
+    _project(tmp_path)
+    tmp_path.joinpath("docs.md").write_text("    gh attestation verify x --repo old-owner/widget\n")
+    assert len(hygiene.owner_issues(tmp_path, [Path("docs.md")])) == 1
+
+
+def test_dated_audits_keep_the_owner_recorded_at_the_time(tmp_path):
+    _project(tmp_path)
+    audit = tmp_path / "docs" / "audits"
+    audit.mkdir(parents=True)
+    audit.joinpath("a.md").write_text("[run](https://github.com/old-owner/Widget/actions/runs/1)\n")
+    assert hygiene.owner_issues(tmp_path, [Path("docs/audits/a.md")]) == []
+
+
+def test_unparseable_homepage_fails_closed(tmp_path):
+    _project(tmp_path, homepage="https://example.invalid/widget")
+    assert hygiene.owner_issues(tmp_path, [Path("README.md")]) == [
+        "canonical repository owner could not be determined"
+    ]
+
+
+def test_tracked_repository_passes_its_own_owner_check():
+    root = Path(__file__).parents[1]
+    listing = subprocess.run(  # noqa: S603 - fixed read-only Git operation
+        [shutil.which("git") or "git", "-C", str(root), "ls-files", "-z"],
+        capture_output=True,
+        check=True,
+        timeout=10,
+    )
+    files = [Path(value) for value in listing.stdout.decode().split("\0") if value]
+    assert hygiene.owner_issues(root, files) == []
