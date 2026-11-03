@@ -85,7 +85,7 @@ Eight built-in collectors read declared configuration and artifacts from the pro
 | Collector | Reads | Records |
 | --- | --- | --- |
 | `mcp` | `.mcp.json`, `mcp.json`, `.claude/mcp.json`, `.cursor/mcp.json`, `claude_desktop_config.json`, and MCP server source in Python and TypeScript | MCP clients and servers, launchers and pinned versions, transports, endpoints, tool fingerprints |
-| `model` | `.safetensors`, `.gguf`, `.ggml`, `.onnx` and pickle-family files (`.pkl`, `.pickle`, `.pt`, `.pth`, `.bin`, `.joblib`), with their configuration files | Whole-file SHA-256, serialization safety, SafeTensors structure, signature status |
+| `model` | `.safetensors`, `.gguf`, `.ggml`, `.onnx`, Keras (`.h5`, `.hdf5`, `.keras`), TensorFlow `saved_model.pb`, and pickle-family files (`.pkl`, `.pickle`, `.pt`, `.pth`, `.bin`, `.joblib`, `.ckpt`, `.pdparams`), with their configuration files | Whole-file SHA-256, serialization safety, SafeTensors structure, signature status |
 | `prompt` | `CLAUDE.md`, `AGENTS.md`, `CODEX.md`, Copilot and Codex instructions, `system_prompt.*`, `.claude/skills/`, `.claude/commands/` | Instruction and skill digests, hidden-character findings |
 | `rag` | `rag_config.*`, `retrieval_config.json`, `vector_store_config.json`, knowledge-base configuration | Declared retrieval sources and their controls |
 | `registry` | `package.json` and `package-lock.json`, `requirements*.txt`, `pyproject.toml`, `Dockerfile`, `docker-compose.yml` | AI-related package identities, pins and lockfile integrity; container images and digest pins |

@@ -55,19 +55,6 @@ class SerializationSafety(str, Enum):
     UNKNOWN = "unknown"
 
 
-SERIALIZATION_FORMAT_SAFETY: dict[str, SerializationSafety] = {
-    "safetensors": SerializationSafety.SAFE,
-    "onnx": SerializationSafety.SAFE,
-    "pickle": SerializationSafety.UNSAFE_CODE_EXECUTION,
-    "pt": SerializationSafety.UNSAFE_CODE_EXECUTION,
-    "pth": SerializationSafety.UNSAFE_CODE_EXECUTION,
-    "bin": SerializationSafety.UNSAFE_CODE_EXECUTION,
-    "joblib": SerializationSafety.UNSAFE_CODE_EXECUTION,
-    "gguf": SerializationSafety.UNSAFE_TEMPLATE_INJECTION,
-    "ggml": SerializationSafety.SAFE,
-}
-
-
 class RiskSeverity(str, Enum):
     CRITICAL = "critical"
     HIGH = "high"
