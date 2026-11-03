@@ -9,17 +9,29 @@ required status check on `main`; running a workflow alone does not enforce it.
 
 `config/github-main-protection.json` is a proposed GitHub branch-protection
 configuration. It binds `Verified CI` to the GitHub Actions app (ID 15368) and
-requires an up-to-date branch, that successful check, one
-independent approval including approval of the last push, resolved discussions,
-and enforcement for administrators. It disables branch deletion and force pushes.
-The configuration file is not an applied repository setting. The approval
-requirement needs another authorized reviewer.
+requires an up-to-date branch, that successful check and resolved discussions,
+with enforcement for administrators. It disables branch deletion and force pushes.
+The configuration file is not an applied repository setting.
+
+It does not require an approving review. With a single maintainer and
+administrator enforcement, a required approval would block every change the
+maintainer authors, because GitHub does not let an author approve their own pull
+request. When a second authorized reviewer joins, add this block and reapply:
+
+```json
+"required_pull_request_reviews": {
+  "dismiss_stale_reviews": true,
+  "require_code_owner_reviews": false,
+  "required_approving_review_count": 1,
+  "require_last_push_approval": true
+}
+```
 
 After reviewing the exact configuration, an administrator with the appropriate
 GitHub plan and repository Administration permission can apply it with:
 
 ```sh
-gh api --method PUT repos/aisecnomad/Nexus-Symbiote/branches/main/protection \
+gh api --method PUT repos/Hunzee-VC/Nexus-Symbiote/branches/main/protection \
   --input config/github-main-protection.json
 ```
 
@@ -27,7 +39,7 @@ Do not place an administrative token in CI. The publication preflight uses
 only repository contents-read and Actions-read permissions:
 
 ```sh
-python scripts/check_repository_controls.py --repo aisecnomad/Nexus-Symbiote --branch main --sha "$GITHUB_SHA"
+python scripts/check_repository_controls.py --repo Hunzee-VC/Nexus-Symbiote --branch main --sha "$GITHUB_SHA"
 ```
 
 The preflight requires `GH_TOKEN` or `GITHUB_TOKEN`. It checks GitHub's live

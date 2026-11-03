@@ -77,3 +77,27 @@ def test_vendored_schema_provenance_cannot_silently_drift(tmp_path, mutation):
         record["file"] = "../outside.json"
     source.write_text(json.dumps(manifest))
     assert hygiene.vendor_issues(tmp_path)
+
+
+def test_legacy_repository_urls_are_rejected_outside_dated_audits(tmp_path):
+    (tmp_path / "docs" / "audits").mkdir(parents=True)
+    guide = tmp_path / "guide.md"
+    guide.write_text(
+        "[repo](https://github.com/aisecnomad/Nexus-Symbiote/issues)\n"
+        "[profile](https://github.com/aisecnomad)\n"
+        "[canonical](https://github.com/Hunzee-VC/Nexus-Symbiote)\n"
+    )
+    workflow = tmp_path / "ci.yml"
+    workflow.write_text("run: gh api repos/AISecNomad/nexus-symbiote/branches/main\n")
+    audit = tmp_path / "docs" / "audits" / "record.md"
+    audit.write_text("[run](https://github.com/aisecnomad/Nexus-Symbiote/actions/runs/1)\n")
+    source = tmp_path / "runtime.py"
+    source.write_text('PREDICATE = "https://github.com/aisecnomad/nexus-symbiote/attestation/v1"\n')
+    issues = hygiene.source_issues(
+        tmp_path,
+        [Path("guide.md"), Path("ci.yml"), Path("docs/audits/record.md"), Path("runtime.py")],
+    )
+    assert issues == [
+        "guide.md: legacy repository URL: github.com/aisecnomad/Nexus-Symbiote",
+        "ci.yml: legacy repository URL: repos/AISecNomad/nexus-symbiote",
+    ]

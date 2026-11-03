@@ -1,4 +1,4 @@
-"""Check tracked source conflicts, inline local doc links, versions and vendor digests offline."""
+"""Check tracked source conflicts, doc links, legacy repository URLs, versions and vendor digests."""
 
 from __future__ import annotations
 
@@ -16,6 +16,11 @@ VENDOR = Path("src/nexus_symbiote/generators/schemas/vendor")
 MAX_FILE_BYTES = 2 * 1024 * 1024
 LINK = re.compile(r'!?\[[^\]\n]*\]\((<[^>\n]+>|[^)\s]+)(?:\s+"[^"\n]*")?\)')
 MARKER = re.compile(r"^(?:<{7}|>{7}|\|{7})(?: .*)?$", re.M)
+# The repository moved from the maintainer's account to Hunzee-VC. Dated audit
+# records keep the URLs they observed; signed predicate types are protocol
+# identifiers in source code and are out of scope for this documentation check.
+LEGACY_REPOSITORY = re.compile(r"(?:github\.com/|repos/|--repo\s+)aisecnomad/[\w.-]+", re.I)
+HISTORICAL_RECORDS = Path("docs/audits")
 
 
 def read_file(root: Path, relative: Path) -> bytes:
@@ -45,6 +50,9 @@ def source_issues(root: Path, files: list[Path]) -> list[str]:
             continue
         if MARKER.search(text):
             errors.append(f"{relative}: unresolved merge conflict marker")
+        if relative.suffix != ".py" and HISTORICAL_RECORDS not in relative.parents:
+            for legacy in LEGACY_REPOSITORY.finditer(text):
+                errors.append(f"{relative}: legacy repository URL: {legacy[0]}")
         if relative.suffix != ".md":
             continue
         fence = ""
