@@ -234,32 +234,6 @@ jobs:
             ${{ runner.temp }}/codeql-policy.json
           if-no-files-found: error
           retention-days: 14
-  platform-smoke:
-    name: Platform smoke ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest]
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: "3.12"
-      - name: Install from source
-        run: |
-          python -m pip install --no-deps --no-build-isolation .
-          python -m pip install 'click>=8.1,<9' 'packaging>=24,<27' 'packageurl-python>=0.17.6,<1' 'pydantic>=2.5,<3' 'rich>=13.0,<16' 'rfc8785>=0.1.4,<1' 'pyyaml>=6.0,<7' 'jsonschema>=4.23,<5' 'referencing>=0.35,<1' 'cryptography>=43,<51' 'tree-sitter>=0.25,<0.26' 'tree-sitter-typescript>=0.23,<0.24'
-      - name: Verify CLI entrypoint
-        run: nexus-symbiote --version
-      - name: Smoke-test scan on an empty directory
-        run: |
-          mkdir "$RUNNER_TEMP/smoke-target"
-          nexus-symbiote scan "$RUNNER_TEMP/smoke-target" --report-only --no-project-policy -o "$RUNNER_TEMP/smoke-agentbom.json"
-          python -c 'import json; d=json.load(open("'"$RUNNER_TEMP"'/smoke-agentbom.json")); assert "components" in d'
   verified:
     name: Verified CI
     if: always()

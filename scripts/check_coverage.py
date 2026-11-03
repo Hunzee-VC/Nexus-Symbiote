@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-# Baseline on the reviewed 1,028-test suite: 91.72% statements and 79.42% branches.
+# Baseline on the reviewed 1,470-test suite: 92.25% statements and 84.05% branches.
 # Keep modest platform headroom; raise these deliberately as missing paths are tested.
 MIN_STATEMENT_PERCENT = 90
 MIN_BRANCH_PERCENT = 75

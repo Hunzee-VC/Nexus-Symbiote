@@ -484,7 +484,7 @@ class AIBOMMetadata(InventoryModel):
     timestamp: datetime | None = None
     tool_name: str = "nexus-symbiote"
     tool_version: str | None = None
-    tool_vendor: str = "Hunzee-VC"
+    tool_vendor: str = "aisecnomad"
     authors: list[str] = Field(default_factory=list)
     completeness: CompletenessClaim | None = None
 
