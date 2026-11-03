@@ -345,6 +345,7 @@ def _source_identity() -> dict[str, Any]:
                     git_sha=revision.stdout.strip(), git_dirty=bool(dirty.stdout.strip())
                 )
         except (OSError, subprocess.TimeoutExpired):
+            # Revision identity is optional evidence; a checkout without git keeps the rest.
             pass
     return identity
 

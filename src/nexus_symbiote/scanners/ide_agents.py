@@ -168,11 +168,15 @@ class IDEAgentScanner(Scanner):
                             "permission_evidence": "declaration-only",
                             "effective_authorization_verified": False,
                             "permission_policy_limitations": [
-                                "User and managed settings, workspace trust, per-session flags "
-                                "and runtime controls were not observed.",
+                                (
+                                    "User and managed settings, workspace trust, per-session "
+                                    "flags and runtime controls were not observed."
+                                ),
                                 "Deny and ask rules may narrow declared allow rules.",
-                                "Project/local starting-mode declarations may be ignored "
-                                "by the host or version.",
+                                (
+                                    "Project/local starting-mode declarations may be ignored "
+                                    "by the host or version."
+                                ),
                             ],
                         },
                     )

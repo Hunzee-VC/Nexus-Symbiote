@@ -24,7 +24,6 @@ class Generator(ABC):
     @abstractmethod
     def generate(self, bom: AIBOM) -> dict[str, Any]:
         """Convert an AIBOM into the target format as a dict."""
-        ...
 
     def generate_json(self, bom: AIBOM, indent: int = 2) -> str:
         """Convert an AIBOM into the target format as a JSON string."""

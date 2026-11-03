@@ -123,9 +123,7 @@ class FailingScanner:
 
 
 def test_scanner_failure_nonzero_and_explicit_report_only(tmp_path, monkeypatch):
-    import nexus_symbiote.cli as cli
-
-    monkeypatch.setattr(cli, "_get_scanners", lambda: {"mcp": FailingScanner})
+    monkeypatch.setattr("nexus_symbiote.cli._get_scanners", lambda: {"mcp": FailingScanner})
     runner = CliRunner()
     out = tmp_path / "bom.json"
     args = ["scan", str(tmp_path), "--scanner", "mcp", "-o", str(out)]
@@ -142,8 +140,6 @@ def test_scanner_failure_nonzero_and_explicit_report_only(tmp_path, monkeypatch)
 
 
 def test_policy_exclusions_reach_scanner(tmp_path, monkeypatch):
-    import nexus_symbiote.cli as cli
-
     seen = []
 
     class RecordingScanner(FailingScanner):
@@ -153,7 +149,7 @@ def test_policy_exclusions_reach_scanner(tmp_path, monkeypatch):
         def scan(self, root):
             return ScanResult(scanner_name="mcp")
 
-    monkeypatch.setattr(cli, "_get_scanners", lambda: {"mcp": RecordingScanner})
+    monkeypatch.setattr("nexus_symbiote.cli._get_scanners", lambda: {"mcp": RecordingScanner})
     (tmp_path / ".nexus-symbiote.yaml").write_text(
         "scan: {scanners: [mcp], exclude_paths: [vendor]}"
     )
