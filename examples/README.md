@@ -11,7 +11,7 @@ whole walkthrough below works without network access or credentials.
 Run it from a repository checkout (the wheel does not include the examples):
 
 ```bash
-git clone https://github.com/aisecnomad/nexus-symbiote && cd nexus-symbiote
+git clone https://github.com/Hunzee-VC/Nexus-Symbiote && cd Nexus-Symbiote
 python -m venv .venv && . .venv/bin/activate && pip install .
 ```
 
@@ -87,7 +87,7 @@ location changes.
 
 ### 5. Import a discovery report
 
-[Nexus ShadowScan](https://github.com/aisecnomad/Nexus-ShadowScan) finds agents
+[Nexus ShadowScan](https://github.com/Hunzee-VC/Nexus-ShadowScan) finds agents
 across many surfaces; Nexus SymBiote turns its report into an AgentBOM. A recorded
 ShadowScan 0.1.4 report ships with the tests:
 

@@ -7,8 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-# Last audited baseline (docs/audits/closed-pr-review-2026-11-02.md): 91.56% statements,
-# 82.73% branches.
+# Baseline on the reviewed 1,470-test suite: 92.25% statements and 84.05% branches.
 # Keep modest platform headroom; raise these deliberately as missing paths are tested.
 MIN_STATEMENT_PERCENT = 90
 MIN_BRANCH_PERCENT = 75
