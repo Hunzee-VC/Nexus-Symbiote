@@ -26,6 +26,7 @@ from nexus_symbiote.supply_chain_cli import register_supply_chain_commands
 from nexus_symbiote.utils.files import write_output_file
 
 if TYPE_CHECKING:
+    from nexus_symbiote.scanners.base import ScanResult
     from nexus_symbiote.utils.crypto import SigstoreArtifactPolicy
 
 console = Console(stderr=True)
@@ -179,6 +180,62 @@ def main(ctx: click.Context, offline_flag: bool, live_flag: bool) -> None:
     ctx.with_resource(modes.enforce(modes.command_mode(requested.mode, ctx.invoked_subcommand)))
 
 
+def _merge_scan_result(
+    name: str,
+    result: ScanResult,
+    aibom: AIBOM,
+    collected: dict[str, Any],
+    scan_failures: list[str],
+) -> None:
+    from nexus_symbiote.core.models import ClaimEvidence
+
+    accepted_refs: set[str] = set()
+    for comp in result.components:
+        # Discovery of a file/configuration does not verify every supplier assertion.
+        imported = name == "shadowscan"
+        comp.claims["discovery_report_entry" if imported else "repository_presence"] = (
+            ClaimEvidence(
+                assurance=AssuranceLevel.DECLARED if imported else AssuranceLevel.OBSERVED,
+                method="imported-discovery-report" if imported else "filesystem-inventory",
+                scope="source-report" if imported else "repository",
+                collector=name,
+                locator=comp.source_path,
+                observed_at=aibom.metadata.timestamp,
+            )
+        )
+        if comp.assurance_level is AssuranceLevel.VERIFIED:
+            comp.assurance_level = AssuranceLevel.DECLARED
+        existing = collected.get(comp.bom_ref)
+        if existing is not None and existing != comp:
+            scan_failures.append(f"{name}: conflicting duplicate component {comp.bom_ref}")
+            continue
+        if existing is None:
+            aibom.components.append(comp)
+            collected[comp.bom_ref] = comp
+        accepted_refs.add(comp.bom_ref)
+    for edge in result.dependencies:
+        if edge.source_ref in accepted_refs and edge.target_ref in accepted_refs:
+            aibom.add_dependency(edge)
+        else:
+            scan_failures.append(f"{name}: dependency endpoint was not imported")
+
+
+def _render_aibom(aibom: AIBOM, output_format: str) -> str:
+    if output_format == "cyclonedx":
+        from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
+
+        return CycloneDXGenerator().generate_json(aibom)
+    if output_format == "spdx":
+        from nexus_symbiote.generators.spdx import SPDXGenerator
+
+        return SPDXGenerator().generate_json(aibom)
+    if output_format == "sarif":
+        from nexus_symbiote.generators.sarif import SARIFGenerator
+
+        return SARIFGenerator().generate_json(aibom)
+    return aibom.to_json()
+
+
 @main.command()
 @click.argument("project_path", type=click.Path(exists=True), default=".")
 @click.option("-o", "--output", type=click.Path(), help="Output file path")
@@ -224,7 +281,6 @@ def scan(
         err_console.print(f"[red]Error:[/] '{_safe(project_path)}' is not a directory")
         sys.exit(1)
 
-    from nexus_symbiote.core.models import ClaimEvidence
     from nexus_symbiote.graph import assemble_repository_agent, validate_graph
     from nexus_symbiote.policy import PolicyError
     from nexus_symbiote.utils.confined import DEFAULT_EXCLUDES
@@ -281,35 +337,7 @@ def scan(
                 source_projection_limitations = result.source_projection_limitations
                 source_unmapped_count = result.source_unmapped_count
                 source_unmapped_indexes = result.source_unmapped_indexes
-            accepted_refs: set[str] = set()
-            for comp in result.components:
-                # Discovery of a file/configuration does not verify every supplier assertion.
-                imported = name == "shadowscan"
-                comp.claims["discovery_report_entry" if imported else "repository_presence"] = (
-                    ClaimEvidence(
-                        assurance=AssuranceLevel.DECLARED if imported else AssuranceLevel.OBSERVED,
-                        method="imported-discovery-report" if imported else "filesystem-inventory",
-                        scope="source-report" if imported else "repository",
-                        collector=name,
-                        locator=comp.source_path,
-                        observed_at=aibom.metadata.timestamp,
-                    )
-                )
-                if comp.assurance_level is AssuranceLevel.VERIFIED:
-                    comp.assurance_level = AssuranceLevel.DECLARED
-                existing = collected.get(comp.bom_ref)
-                if existing is not None and existing != comp:
-                    scan_failures.append(f"{name}: conflicting duplicate component {comp.bom_ref}")
-                    continue
-                if existing is None:
-                    aibom.components.append(comp)
-                    collected[comp.bom_ref] = comp
-                accepted_refs.add(comp.bom_ref)
-            for edge in result.dependencies:
-                if edge.source_ref in accepted_refs and edge.target_ref in accepted_refs:
-                    aibom.add_dependency(edge)
-                else:
-                    scan_failures.append(f"{name}: dependency endpoint was not imported")
+            _merge_scan_result(name, result, aibom, collected, scan_failures)
             surfaces_scanned.extend(result.surfaces_scanned)
             surfaces_excluded.extend(result.surfaces_excluded)
             scan_failures.extend(result.scan_failures)
@@ -379,20 +407,7 @@ def scan(
         raise click.ClickException(
             "SARIF cannot preserve imported discovery coverage; use native JSON, CycloneDX or SPDX."
         )
-    if output_format == "cyclonedx":
-        from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
-
-        out_data = CycloneDXGenerator().generate_json(aibom)
-    elif output_format == "spdx":
-        from nexus_symbiote.generators.spdx import SPDXGenerator
-
-        out_data = SPDXGenerator().generate_json(aibom)
-    elif output_format == "sarif":
-        from nexus_symbiote.generators.sarif import SARIFGenerator
-
-        out_data = SARIFGenerator().generate_json(aibom)
-    else:
-        out_data = aibom.to_json()
+    out_data = _render_aibom(aibom, output_format)
 
     if output:
         write_output_file(Path(output), out_data)

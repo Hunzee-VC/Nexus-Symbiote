@@ -266,16 +266,10 @@ class ShadowScanImporter(Scanner):
             )
         return result
 
-    def _from_native(self, data: dict[str, Any], digest: str) -> ImportedReport:
-        findings, stats, summary = data.get("findings"), data.get("stats"), data.get("summary")
-        if (
-            not isinstance(data.get("version"), str)
-            or not isinstance(findings, list)
-            or len(findings) > MAX_FINDINGS
-        ):
-            raise ValueError("invalid ShadowScan report envelope")
-        if not isinstance(stats, list) or not isinstance(summary, dict):
-            raise ValueError("ShadowScan report must include stats and summary")
+    @staticmethod
+    def _native_complete(
+        data: dict[str, Any], findings: list[Any], stats: list[Any], summary: dict[str, Any]
+    ) -> bool:
         # The producer's summary describes the final, filtered findings. Connector
         # statistics can legitimately count observations before merging/filtering.
         if "total" in summary or "finding_identity_schema" in data:
@@ -302,11 +296,10 @@ class ShadowScanImporter(Scanner):
             value = summary.get(key)
             if not isinstance(value, int) or isinstance(value, bool) or value != 0:
                 complete = False
-        result = ImportedReport(
-            digest=digest,
-            source_format="shadowscan-json",
-            source_status="complete" if complete else "incomplete",
-        )
+        return complete
+
+    @staticmethod
+    def _project_native_findings(findings: list[Any], result: ImportedReport) -> None:
         ids: set[str] = set()
         for index, finding in enumerate(findings):
             if (
@@ -329,7 +322,7 @@ class ShadowScanImporter(Scanner):
                 kind,
                 source_id,
                 index,
-                digest,
+                result.digest,
                 surface,
                 level,
                 finding.get("shadow"),
@@ -340,6 +333,9 @@ class ShadowScanImporter(Scanner):
                 result.unmapped_indexes.append(index)
             else:
                 result.components.append(comp)
+
+    @staticmethod
+    def _check_native_breakdowns(summary: dict[str, Any], findings: list[Any]) -> None:
         for key, field_name in (("by_surface", "surface"), ("by_kind", "kind")):
             if key not in summary:
                 continue
@@ -350,6 +346,25 @@ class ShadowScanImporter(Scanner):
                 or counts != dict(Counter(finding[field_name] for finding in findings))
             ):
                 raise ValueError(f"ShadowScan summary {key} disagrees with findings")
+
+    def _from_native(self, data: dict[str, Any], digest: str) -> ImportedReport:
+        findings, stats, summary = data.get("findings"), data.get("stats"), data.get("summary")
+        if (
+            not isinstance(data.get("version"), str)
+            or not isinstance(findings, list)
+            or len(findings) > MAX_FINDINGS
+        ):
+            raise ValueError("invalid ShadowScan report envelope")
+        if not isinstance(stats, list) or not isinstance(summary, dict):
+            raise ValueError("ShadowScan report must include stats and summary")
+        complete = self._native_complete(data, findings, stats, summary)
+        result = ImportedReport(
+            digest=digest,
+            source_format="shadowscan-json",
+            source_status="complete" if complete else "incomplete",
+        )
+        self._project_native_findings(findings, result)
+        self._check_native_breakdowns(summary, findings)
         return result
 
     @staticmethod

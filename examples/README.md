@@ -77,7 +77,7 @@ endpoint and a high alert for the removed version pin, and exits 1:
 
 ```text
 Security Alerts:
-  [CRITICAL] Critical change in 'tickets': MCP server endpoint changed. Review before execution.; endpoint_url changed.
+  [CRITICAL] Critical change in 'tickets': MCP server endpoint changed. Review before execution.; MCP server static source binding changed: launcher, arguments, environment, endpoint or declared tools differ, or the binding key changed. Review before execution.; endpoint_url changed.; properties changed.
   [HIGH] High change in 'notes': Version changed: 2025.8.21 → None; Version pin removed — now floating or unknown.; risks changed.
 ```
 
