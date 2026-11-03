@@ -187,7 +187,8 @@ class A2AScanner(Scanner):
         )
 
     def _scan_code_patterns(self, root: Path, result: ScanResult) -> None:
-        assert self._files is not None
+        if self._files is None:
+            raise RuntimeError("_scan_code_patterns called outside a _collection context")
         sources = [
             path
             for path in self._files.iter_files()

@@ -47,14 +47,16 @@ class RegistryScanner(Scanner):
         return result
 
     def _read(self, path: Path, result: ScanResult) -> str | None:
-        assert self._files is not None
+        if self._files is None:
+            raise RuntimeError("_read called outside a _collection context")
         content = self._files.read_text(path, missing_ok=True)
         if content is not None:
             result.surfaces_scanned.append(str(path))
         return content
 
     def _scan_npm(self, root: Path, result: ScanResult) -> list[RegistryEntryComponent]:
-        assert self._files is not None
+        if self._files is None:
+            raise RuntimeError("_scan_npm called outside a _collection context")
         path = root / "package.json"
         data = self._files.read_json(path, missing_ok=True)
         if data is None:

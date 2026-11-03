@@ -98,3 +98,51 @@ class TestPromptScannerTrojanDetection:
             if r.category in ("invisible_characters", "bidi_override", "tag_characters")
         ]
         assert len(trojan_risks) == 0
+
+    def test_scan_codex_md_uppercase(self, tmp_path):
+        (tmp_path / "CODEX.md").write_text(
+            "You are a Codex agent.‮malicious",
+            encoding="utf-8",
+        )
+        scanner = PromptScanner()
+        result = scanner.scan(tmp_path)
+        comp = next((c for c in result.components if "CODEX.md" in c.name), None)
+        assert comp is not None, "CODEX.md should be scanned as a prompt component"
+        assert comp.prompt_type == "system-prompt"
+        bidi_risks = [r for r in comp.risks if r.category == "bidi_override"]
+        assert len(bidi_risks) == 1
+
+    def test_scan_codex_md_lowercase(self, tmp_path):
+        (tmp_path / "codex.md").write_text(
+            "codex instructions\U000e0001hidden",
+            encoding="utf-8",
+        )
+        scanner = PromptScanner()
+        result = scanner.scan(tmp_path)
+        comp = next((c for c in result.components if "codex.md" in c.name), None)
+        assert comp is not None, "codex.md should be scanned as a prompt component"
+        tag_risks = [r for r in comp.risks if r.category == "tag_characters"]
+        assert len(tag_risks) == 1
+
+    def test_scan_codex_instructions_file(self, tmp_path):
+        codex_dir = tmp_path / ".codex"
+        codex_dir.mkdir()
+        (codex_dir / "instructions.md").write_text(
+            "Clean codex instructions.",
+            encoding="utf-8",
+        )
+        scanner = PromptScanner()
+        result = scanner.scan(tmp_path)
+        comp = next((c for c in result.components if ".codex/instructions.md" in c.name), None)
+        assert comp is not None, ".codex/instructions.md should be scanned as a prompt component"
+        assert comp.prompt_type == "instruction"
+        assert (
+            len(
+                [
+                    r
+                    for r in comp.risks
+                    if r.category in ("bidi_override", "tag_characters", "invisible_characters")
+                ]
+            )
+            == 0
+        )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import sys
@@ -59,7 +60,7 @@ def _policy(root: Path, *, ignore_project: bool = False) -> Policy:
 # C0/C1 controls move the cursor or rewrite earlier output; bidirectional and
 # invisible format characters disguise text. Inventory data may contain any of them.
 _UNSAFE_TEXT = re.compile(
-    "[\x00-\x08\x0b-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]"
+    r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]"
 )
 
 
@@ -493,7 +494,6 @@ def verify_artifact(
 ) -> None:
     """Verify a local artifact's digest and optionally its Sigstore bundle."""
     import hmac
-    import re
 
     from nexus_symbiote.scanners.base import read_regular_text
     from nexus_symbiote.utils.confined import hash_confined_file
@@ -558,7 +558,6 @@ def verify_discovery(
     """Verify source bytes and optionally their native projection and producer."""
     import hashlib
     import hmac
-    import re
 
     from nexus_symbiote.core.hashing import parse_json_strict
     from nexus_symbiote.scanners.base import read_regular_text
@@ -770,7 +769,7 @@ def risk(
     signature_policies = _signer_policies(signature_policy, root)
     policy = _policy(root or Path(aibom_path).parent, ignore_project=no_project_policy)
     threshold = threshold if threshold is not None else policy.risk.fail_threshold
-    if threshold <= 0 or not __import__("math").isfinite(threshold):
+    if threshold <= 0 or not math.isfinite(threshold):
         raise click.BadParameter("threshold must be positive and finite", param_hint="--threshold")
     basis = "supplied-bom"
     if root is not None:
