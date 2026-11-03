@@ -8,11 +8,15 @@ source, an A2A agent card, a container image and a coding-agent configuration.
 It exists to be inventoried. Nothing in it is installed, built or run, and the
 whole walkthrough below works without network access or credentials.
 
-Run it from a repository checkout (the wheel does not include the examples):
+Run it from a repository checkout (the wheel does not include the examples),
+installed with the hash-locked runtime as described in
+[install from reviewed source](../README.md#install-from-reviewed-source):
 
 ```bash
 git clone https://github.com/Hunzee-VC/Nexus-Symbiote && cd Nexus-Symbiote
-python -m venv .venv && . .venv/bin/activate && pip install .
+python -m venv .venv && . .venv/bin/activate
+python -m pip install --require-hashes --only-binary=:all: -r requirements-action.lock
+python -m pip install --no-deps --no-build-isolation .
 ```
 
 ### 1. Inventory the project
@@ -121,5 +125,3 @@ nexus-symbiote summary demo-agentbom.json
 ```
 
 This exercises the eight built-in collectors (`shadowscan`, `mcp`, `model`, `prompt`, `rag`, `registry`, `a2a`, `ide_agents`) against the files in this directory. A completed search may report zero matches for some collectors; that is expected and is recorded as coverage information rather than a failure.
-
-Record a ~60 s asciinema of the above commands and link it from the root README once the v0.1.0 tag exists.

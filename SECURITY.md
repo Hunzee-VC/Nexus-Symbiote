@@ -4,7 +4,7 @@ Nexus SymBiote is alpha security tooling. Inventory, signature verification, and
 
 ## Reporting a vulnerability
 
-Report security-sensitive defects through the repository's **Security > Report a vulnerability** feature when available. If private reporting is unavailable, contact the repository owner through their GitHub profile and request a private reporting channel. Do not put credentials, private BOMs, exploit details, or customer data in a public issue.
+Report security-sensitive defects through the repository's **Security > Report a vulnerability** feature ([open a private report](https://github.com/Hunzee-VC/Nexus-Symbiote/security/advisories/new)) when available. If private reporting is unavailable, contact the repository owner through their GitHub profile and request a private reporting channel. Do not put credentials, private BOMs, exploit details, or customer data in a public issue.
 
 Include the affected commit or distribution version, platform and Python version, reproduction steps with synthetic inputs, expected and observed behavior, and the trust boundary crossed. Keep real credentials and sensitive agent context out of reproduction artifacts.
 

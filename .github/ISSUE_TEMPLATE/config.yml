@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/SECURITY.md
+    about: Report vulnerabilities privately as described in SECURITY.md. Never open a public issue for a security defect.
+  - name: Questions and troubleshooting
+    url: https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/SUPPORT.md
+    about: Common collection, import and validation outcomes, and what to include when you ask for help.
+  - name: Documentation
+    url: https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/README.md
+    about: Every guide, organized by why, what and how.

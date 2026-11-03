@@ -72,11 +72,15 @@ being configured; publication requires a successful preflight.
 
 If GitHub reports an unavailable plan feature or insufficient Administration
 permission, resolve that account setting before claiming branch protection is
-active. The GitHub connection used to prepare this change could read branch
-metadata but was denied branch-protection administration. It did not apply the
-configuration. Review the latest run annotations to resolve failures that happen
+active. Review the latest run annotations to resolve failures that happen
 before any job steps start; a local passing suite does not establish that GitHub
 Actions successfully ran.
+
+Repository rulesets do not substitute for this configuration. The preflight reads
+the classic branch-protection metadata that GitHub reports on the branch, so a
+ruleset, however strict, cannot satisfy it. A ruleset whose target list is empty
+applies to no branch at all, even when its enforcement is `active`. Check what
+actually applies to `main` with `gh api repos/Hunzee-VC/Nexus-Symbiote/rules/branches/main`.
 
 ## Security acceptance evidence
 
@@ -114,19 +118,55 @@ establish absence of vulnerabilities, malicious packages or undisclosed defects.
 
 ## Operator prerequisites
 
-The 2026-11-03 review observed `main` with no classic branch protection
-(`GET /branches/main/protection` returns 404) and one repository ruleset named
-`main` whose `conditions.ref_name.include` list is empty. A ruleset with no
-included refs targets no branch, so its pull-request, code-scanning and
-non-fast-forward rules are inert. Consistent with that, most first-parent
-commits on `main` arrived as direct pushes rather than merged pull requests.
-Secret scanning was also disabled.
+Status of the controls tracked in
+[issue #74](https://github.com/Hunzee-VC/Nexus-Symbiote/issues/74), as observed
+through the GitHub API on 2026-11-03. Re-check live settings before relying on
+any row; this table is a dated record, not enforcement.
 
-An administrator must apply the reviewed protection configuration above (or
-retarget the ruleset to `~DEFAULT_BRANCH` and add `Verified CI` as a required
-check), enable secret scanning, and then observe a successful exact-source CI
-run. `scripts/check_repository_controls.py` reads the live state and fails the
-publication preflight until the enforced check is present. Do not remove the
-acceptance gates to work around an unavailable platform feature. Configure and
-independently verify the `pypi` environment reviewers and main-only deployment
-restriction before requesting publication.
+| Control | Observed state | Required action |
+| --- | --- | --- |
+| Hosted CI matrix and CodeQL | Passing. The earlier failures were a runtime-validation CPU budget and real dependency advisories, fixed in [#97](https://github.com/Hunzee-VC/Nexus-Symbiote/pull/97) and [#98](https://github.com/Hunzee-VC/Nexus-Symbiote/pull/98) | None; keep `Verified CI` required |
+| Branch protection on `main` | Not protected (`protected: false`) | Apply the interim configuration above |
+| Repository ruleset `main` | Enforcement `active`, but its target list is empty, so it applies to no branch; its required-checks list is also empty | Delete it, or deliberately retarget it in addition to classic protection |
+| Private vulnerability reporting | Disabled, although [SECURITY.md](../SECURITY.md) directs reporters to it | Enable it under *Settings → Code security* |
+| Secret scanning and push protection | Disabled | Enable both; they are free for public repositories |
+| `testpypi` and `pypi` environments, trusted publishers | Not verifiable through the integration used for this review | Configure and verify as described in [releasing](releasing.md) |
+
+The repository is public, so branch protection, rulesets, artifact attestations
+and environment protection are available on every GitHub plan; the
+private-repository plan restriction recorded by the 2026-11-02 audit no longer
+applies. An administrator applies these settings. Repository changes cannot.
+Do not remove the acceptance gates to work around an unavailable platform feature.
+
+### Apply the outstanding controls
+
+Run these as a repository administrator, after reviewing each configuration:
+
+```sh
+# 1. Protect main with the solo-maintainer interim configuration
+gh api --method PUT repos/Hunzee-VC/Nexus-Symbiote/branches/main/protection \
+  --input config/github-main-protection-interim.json
+
+# 2. Confirm the publication preflight now accepts the live state
+GH_TOKEN="$(gh auth token)" python scripts/check_repository_controls.py \
+  --repo Hunzee-VC/Nexus-Symbiote --branch main --sha "$(git rev-parse origin/main)"
+
+# 3. Enable private vulnerability reporting
+gh api --method PUT repos/Hunzee-VC/Nexus-Symbiote/private-vulnerability-reporting
+
+# 4. Enable secret scanning and push protection
+gh api --method PATCH repos/Hunzee-VC/Nexus-Symbiote --input - <<'JSON'
+{"security_and_analysis": {"secret_scanning": {"status": "enabled"},
+                           "secret_scanning_push_protection": {"status": "enabled"}}}
+JSON
+
+# 5. Remove the ruleset that targets no branch (or retarget it deliberately)
+gh api --method DELETE repos/Hunzee-VC/Nexus-Symbiote/rulesets/26325547
+```
+
+After step 1, a commit can reach `main`, including the maintainer's own, only
+after its `Verified CI` check has passed on a branch that is up to date with
+`main`. In practice that means a pull request. Step 2
+passes only once the newest CI run for the `main` head has succeeded. Configure
+the `pypi` environment's reviewers and main-only deployment restriction, and
+verify them independently, before requesting publication.

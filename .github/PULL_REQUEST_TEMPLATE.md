@@ -2,6 +2,10 @@
 
 <!-- Explain the concrete problem, resulting behavior, and validation. -->
 
+## Related issues
+
+<!-- For example: Closes #123. Write "None" if there is no issue. -->
+
 ## Type of change
 
 - [ ] Bug fix (non-breaking change that fixes an issue)
@@ -12,6 +16,8 @@
 - [ ] Refactoring (no functional changes)
 
 ## Checklist
+
+`make check` runs the offline subset of the required CI checks. See [CONTRIBUTING.md](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/CONTRIBUTING.md).
 
 - [ ] Tests cover the new or changed behavior
 - [ ] `ruff check src tests scripts` passes

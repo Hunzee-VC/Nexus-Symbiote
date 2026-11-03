@@ -48,23 +48,32 @@ nexus-symbiote scan public-mcp-servers \
 nexus-symbiote summary public.aibom.json
 ```
 
-The summary lists which of the eight built-in collectors ran (`shadowscan`,
-`mcp`, `model`, `prompt`, `rag`, `registry`, `a2a`, `ide_agents`), how many
-components each produced, and which surfaces were excluded. A completed search
-can report zero matches for a collector; that is coverage information, not a
-failure.
+`scan` prints each of the eight built-in collectors (`mcp`, `model`, `prompt`,
+`rag`, `registry`, `shadowscan`, `a2a`, `ide_agents`) as it runs, with the number
+of components it found. `summary` then counts the inventory's components by
+type, its dependencies and its findings by severity. The inventory itself
+records per-collector status, failures and excluded paths:
+
+```bash
+jq '.metadata.completeness | {scanner_status, scan_failures, exclusions}' public.aibom.json
+```
+
+A completed search can report zero matches for a collector; that is coverage
+information, not a failure.
 
 For a target with a lot of dependency manifests, scope the pass to the
-collectors you intend to review:
+collectors you intend to review. Repeat `--scanner` once per collector:
 
 ```bash
 nexus-symbiote scan public-mcp-servers \
   --no-project-policy \
-  --scanner mcp,registry \
+  --scanner mcp --scanner registry \
   -o public.mcp-only.aibom.json
 ```
 
-Omitted collectors remain unknown, not approved.
+This scan writes the inventory but exits 1: omitted collectors are recorded as
+`unknown`, not approved, and the default gate requires all eight. Add
+`--report-only` while you explore, and never treat a scoped scan as an approval.
 
 ## 4. Validate and risk-gate
 

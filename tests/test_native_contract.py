@@ -28,6 +28,19 @@ def test_native_schema_matches_runtime_and_preserves_unknowns():
         AIBOM.model_validate(document)
 
 
+def test_published_examples_match_schema_and_runtime():
+    schemas = Path(__file__).parents[1] / "schemas"
+    validator = Draft202012Validator(
+        json.loads((schemas / "nexus-symbiote-aibom-1.0.schema.json").read_text())
+    )
+    examples = sorted((schemas / "examples").glob("*.json"))
+    assert examples
+    for example in examples:
+        document = json.loads(example.read_text())
+        assert not list(validator.iter_errors(document)), example.name
+        AIBOM.model_validate(document)
+
+
 def test_nested_capability_unknown_semantics_rejected():
     with pytest.raises(ValidationError):
         CapabilityDeclaration.model_validate({"unrecognized_approval_bypass": True})

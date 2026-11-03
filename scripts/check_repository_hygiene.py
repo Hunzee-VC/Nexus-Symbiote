@@ -1,21 +1,32 @@
-"""Check tracked source conflicts, inline local doc links, versions and vendor digests offline."""
+"""Check tracked source conflicts, doc links and anchors, versions and vendor digests offline."""
 
 from __future__ import annotations
 
 import ast
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
 import tomllib
+from collections import Counter
+from collections.abc import Iterator
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 VENDOR = Path("src/nexus_symbiote/generators/schemas/vendor")
 MAX_FILE_BYTES = 2 * 1024 * 1024
 LINK = re.compile(r'!?\[[^\]\n]*\]\((<[^>\n]+>|[^)\s]+)(?:\s+"[^"\n]*")?\)')
+HTML_LINK = re.compile(r"""<(?:a|img)\b[^>]*?\b(?:href|src)=["']([^"'\s]+)["']""", re.I)
+HTML_ANCHOR = re.compile(r"""<a\b[^>]*?\b(?:id|name)=["']([^"']+)["']""", re.I)
+HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$")
+LINE_FRAGMENT = re.compile(r"L\d+(?:-L\d+)?")
 MARKER = re.compile(r"^(?:<{7}|>{7}|\|{7})(?: .*)?$", re.M)
+# Absolute links must stay absolute where the README doubles as the package-index
+# description, so they need their own check against the tracked tree.
+SELF_BLOB = r"https://github\.com/{owner}/{repository}/(?:blob|tree)/main/([^\s()\"'<>?#]+)(?:\?[^\s()\"'<>#]*)?(?:#([^\s()\"'<>]+))?"
+SELF_RAW = r"https://raw\.githubusercontent\.com/{owner}/{repository}/main/([^\s()\"'<>?#]+)()"
 PROJECT_URL = re.compile(r"https://github\.com/([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)")
 # Anchored so a longer URL path cannot look like an owner: the project's own
 # PyPI URL ends in /p/<name>, and GitHub URLs are matched by PROJECT_URL.
@@ -39,8 +50,56 @@ def read_file(root: Path, relative: Path) -> bytes:
     return value
 
 
+def prose_lines(text: str) -> Iterator[str]:
+    """Yield Markdown lines outside fenced code blocks."""
+    fence = ""
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith(("```", "~~~")):
+            marker = stripped[:3]
+            fence = "" if fence == marker else fence if fence else marker
+            continue
+        if not fence:
+            yield line
+
+
+def heading_anchors(text: str) -> set[str]:
+    """Return the fragment identifiers GitHub renders for a Markdown document."""
+    anchors: set[str] = set()
+    seen: Counter[str] = Counter()
+    for line in prose_lines(text):
+        anchors.update(HTML_ANCHOR.findall(line))
+        heading = HEADING.match(line)
+        if heading is None:
+            continue
+        label = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", heading[1])
+        label = re.sub(r"<[^>]*>|[`*]", "", label)
+        slug = re.sub(r"[^\w\- ]", "", label.lower()).replace(" ", "-")
+        anchors.add(f"{slug}-{seen[slug]}" if seen[slug] else slug)
+        seen[slug] += 1
+    return anchors
+
+
+def _anchor_issue(
+    root: Path, relative: Path, target: Path, fragment: str, link: str, cache: dict[Path, set[str]]
+) -> list[str]:
+    if not fragment or target.suffix != ".md" or LINE_FRAGMENT.fullmatch(fragment):
+        return []
+    # Normalize lexically so read_file still refuses a symlinked document.
+    name = Path(os.path.normpath(target.relative_to(root)))
+    if name not in cache:
+        try:
+            cache[name] = heading_anchors(read_file(root, name).decode("utf-8"))
+        except (OSError, ValueError, UnicodeError):
+            return [f"{relative}: linked document is unavailable or unsafe: {link}"]
+    if unquote(fragment) in cache[name]:
+        return []
+    return [f"{relative}: link to a missing heading: {link}"]
+
+
 def source_issues(root: Path, files: list[Path]) -> list[str]:
     errors = []
+    anchors: dict[Path, set[str]] = {}
     for relative in files:
         if relative.suffix not in {".py", ".md", ".toml", ".yml", ".yaml"}:
             continue
@@ -55,19 +114,18 @@ def source_issues(root: Path, files: list[Path]) -> list[str]:
             errors.append(f"{relative}: unresolved merge conflict marker")
         if relative.suffix != ".md":
             continue
-        fence = ""
-        for line in text.splitlines():
-            stripped = line.lstrip()
-            if stripped.startswith(("```", "~~~")):
-                marker = stripped[:3]
-                fence = "" if fence == marker else fence if fence else marker
-                continue
-            if fence:
-                continue
-            for match in LINK.finditer(line):
-                link = match[1].strip("<>")
+        for line in prose_lines(text):
+            links = [match[1].strip("<>") for match in LINK.finditer(line)]
+            for link in [*links, *HTML_LINK.findall(line)]:
                 parsed = urlsplit(link)
-                if parsed.scheme or parsed.netloc or not parsed.path:
+                if parsed.scheme or parsed.netloc:
+                    continue
+                if not parsed.path:
+                    errors.extend(
+                        _anchor_issue(
+                            root, relative, root / relative, parsed.fragment, link, anchors
+                        )
+                    )
                     continue
                 local = unquote(parsed.path)
                 target = (
@@ -77,6 +135,8 @@ def source_issues(root: Path, files: list[Path]) -> list[str]:
                 )
                 if not target.resolve().is_relative_to(root.resolve()) or not target.exists():
                     errors.append(f"{relative}: missing or escaping inline local link: {link}")
+                    continue
+                errors.extend(_anchor_issue(root, relative, target, parsed.fragment, link, anchors))
     return errors
 
 
@@ -127,6 +187,64 @@ def owner_issues(root: Path, files: list[Path]) -> list[str]:
             f"{relative}: links to {value}/{repository} instead of {owner}/{repository}"
             for value in sorted(stale)
         )
+    return errors
+
+
+def self_link_issues(root: Path, files: list[Path]) -> list[str]:
+    """Require absolute links into this repository's main branch to resolve locally."""
+    try:
+        owner, repository = canonical_repository(root)
+    except (OSError, ValueError, KeyError, TypeError):
+        # owner_issues already reports an undeterminable canonical repository.
+        return []
+    names = {"owner": re.escape(owner), "repository": re.escape(repository)}
+    patterns = [re.compile(value.format(**names), re.I) for value in (SELF_BLOB, SELF_RAW)]
+    errors: list[str] = []
+    anchors: dict[Path, set[str]] = {}
+    for relative in files:
+        if relative.suffix not in OWNER_TEXT_SUFFIXES:
+            continue
+        if any(prefix in relative.parents for prefix in OWNER_EXEMPT_PREFIXES):
+            continue
+        try:
+            text = read_file(root, relative).decode("utf-8")
+        except (OSError, ValueError, UnicodeError):
+            errors.append(f"{relative}: source is unavailable or unsafe")
+            continue
+        for pattern in patterns:
+            for match in pattern.finditer(text):
+                target = root / unquote(match[1]).rstrip(".,/")
+                if not target.resolve().is_relative_to(root.resolve()) or not target.exists():
+                    errors.append(
+                        f"{relative}: links to a path missing from this repository: {match[0]}"
+                    )
+                    continue
+                errors.extend(_anchor_issue(root, relative, target, match[2], match[0], anchors))
+    return errors
+
+
+def readme_link_issues(root: Path) -> list[str]:
+    """Reject relative links in the README that doubles as the package-index description.
+
+    twine does not render Markdown descriptions, so no build check notices a
+    relative link or image that will not resolve on the package index.
+    """
+    try:
+        project = tomllib.loads(read_file(root, Path("pyproject.toml")).decode())["project"]
+        readme = project["readme"]
+        relative = Path(readme if isinstance(readme, str) else readme["file"])
+        text = read_file(root, relative).decode("utf-8")
+    except (OSError, ValueError, KeyError, TypeError, UnicodeError):
+        return ["package-index README could not be determined or read"]
+    errors = []
+    for line in prose_lines(text):
+        links = [match[1].strip("<>") for match in LINK.finditer(line)]
+        for link in [*links, *HTML_LINK.findall(line)]:
+            parsed = urlsplit(link)
+            if not parsed.scheme and not parsed.netloc and parsed.path:
+                errors.append(
+                    f"{relative}: relative link will not resolve on the package index: {link}"
+                )
     return errors
 
 
@@ -197,6 +315,8 @@ def main() -> int:
         errors = [
             *source_issues(root, files),
             *owner_issues(root, files),
+            *self_link_issues(root, files),
+            *readme_link_issues(root),
             *version_issues(root),
             *vendor_issues(root),
         ]
