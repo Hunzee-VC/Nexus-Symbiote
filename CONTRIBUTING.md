@@ -4,7 +4,7 @@ Nexus SymBiote's compatibility baseline is the `nexus_symbiote` Python package a
 
 ## Development
 
-Use Python 3.11 through 3.13 and an isolated virtual environment. From a checkout:
+Use Python 3.11 through 3.13 on Linux and an isolated virtual environment. `make install-locked` installs the locked environment, and `make check` runs the offline subset of the required CI checks: quality, the coverage-gated test suite, the security regression contracts and the distribution build. The individual commands, from a checkout:
 
 ```bash
 python -m venv .venv
@@ -28,7 +28,7 @@ The lock records the full CI dependency set. The wheel smoke test separately che
 
 The consuming GitHub Action creates a private virtual environment and installs `requirements-action.lock` with required hashes and binary distributions only. This smaller lock contains the core runtime and Hatchling dependencies copied from the reviewed CI lock, without development or optional signing packages. Refresh both locks when dependencies change, then install the Action lock and the source with `--no-deps --no-build-isolation` in a clean environment. The CI security-regression job exercises that runtime dependency boundary.
 
-`Verified CI` aggregates the full test matrix, coverage, quality, distribution and security-regression jobs. Missing, failed, cancelled and skipped prerequisites fail that stable check. Branch protection must require it; see [repository controls](docs/repository-controls.md). The coverage gate independently requires at least 90% statement coverage and 75% branch coverage, using exact counts rather than rounded display percentages. The reviewed baseline was 91.72% statements and 79.42% branches. These floors prevent regression and are not a completeness claim. Use the Python 3.12 CI environment for comparable measurements; raise floors as missing paths gain tests.
+`Verified CI` aggregates the full test matrix, coverage, quality, distribution and security-regression jobs. Missing, failed, cancelled and skipped prerequisites fail that stable check. Branch protection must require it; see [repository controls](docs/repository-controls.md). The coverage gate independently requires at least 90% statement coverage and 75% branch coverage, using exact counts rather than rounded display percentages. On 2026-11-03 the 1,507-test suite measured 92.35% of statements and 84.23% of branches on Python 3.12. These floors prevent regression and are not a completeness claim. Use the Python 3.12 CI environment for comparable measurements; raise floors as missing paths gain tests.
 
 ## Architecture boundaries
 
@@ -48,6 +48,6 @@ Exporter changes must validate against the pinned official schema and preserve r
 
 Explain the concrete problem, resulting behavior, validation, and material limitations. Keep changes focused and include applicable documentation. Do not claim production enforcement for execution paths that bypass the adapter. Add no network access, executable discovery, or credential collection without an explicit design and tests.
 
-The quality job also checks tracked source for conflict markers, inline local documentation links, package/distribution version agreement and the vendored schemas' recorded SHA-256 digests. These checks are offline and do not authenticate an upstream publisher. Review changes to schema bytes and their provenance manifest together. Keep experimental-branch merges and manually ported changes distinct from ancestry on `main`; the [closed-PR audit](docs/audits/closed-pr-review-2026-11-02.md) records that distinction.
+The quality job also checks tracked source for conflict markers; documentation links, including heading anchors and absolute links into this repository; package/distribution version agreement; and the vendored schemas' recorded SHA-256 digests. The README is also the package-index description, so its links stay absolute; the check confirms that each one still resolves to a tracked file and heading. These checks are offline and do not authenticate an upstream publisher. Review changes to schema bytes and their provenance manifest together. Keep experimental-branch merges and manually ported changes distinct from ancestry on `main`; the [closed-PR audit](docs/audits/closed-pr-review-2026-11-02.md) records that distinction.
 
 Read [SECURITY.md](SECURITY.md) before reporting security-sensitive defects. This project is licensed under MIT as specified in [LICENSE](LICENSE).

@@ -8,7 +8,8 @@ Nexus SymBiote is alpha security tooling maintained by one developer. This guide
 | --- | --- |
 | Report a security vulnerability | [SECURITY.md](SECURITY.md); request a private reporting channel |
 | Report a bug or request a feature | [GitHub Issues](https://github.com/Hunzee-VC/Nexus-Symbiote/issues) |
-| Install or develop from reviewed source | [README.md](README.md) · [CONTRIBUTING.md](CONTRIBUTING.md) |
+| Find any guide | [Documentation hub](docs/README.md), organized by why, what and how |
+| Install or develop from reviewed source | [Install from reviewed source](README.md#install-from-reviewed-source) · [CONTRIBUTING.md](CONTRIBUTING.md) |
 | Understand evidence and trust | [Security model](docs/security-model.md) · [Runtime assurance](docs/runtime-assurance.md) |
 | Import discovery | [ShadowScan integration](docs/shadowscan-integration.md) |
 | Review controls and releases | [Repository controls](docs/repository-controls.md) · [Releasing](docs/releasing.md) |
@@ -17,7 +18,7 @@ Keep credentials, private inventories and customer data out of public reports. U
 
 ## Installation and platform requirements
 
-Use Python 3.11 or later in an isolated environment and follow the source-first installation in [README.md](README.md). Until release ownership, source and provenance are verified, an unqualified package-index install is not the recommended verification path.
+Use Python 3.11 or later in an isolated environment and follow the [source-first installation](README.md#install-from-reviewed-source). Until release ownership, source and provenance are verified, an unqualified package-index install is not the recommended verification path.
 
 Confined file operations and pinned stdio launchers require POSIX descriptor-relative and no-follow primitives. Unsupported platforms fail closed. The configured hosted matrix targets Ubuntu/Python 3.11–3.13; it does not qualify macOS or Windows. A platform classifier or a successful package import is not evidence that all security primitives work on that platform.
 

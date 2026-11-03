@@ -105,6 +105,8 @@ core-metadata-version = "2.4"
 
 [tool.hatch.build.targets.sdist]
 core-metadata-version = "2.4"
+# README images are served from the repository by absolute URL; they are not build inputs.
+exclude = ["/docs/assets"]
 
 [tool.ruff]
 target-version = "py311"
