@@ -89,7 +89,7 @@ jobs:
             evidence/dependency-advisories.json
           if-no-files-found: warn
       - run: ruff check src tests scripts && ruff format --check src tests scripts
-      - run: mypy src/nexus_symbiote
+      - run: mypy src/nexus_symbiote scripts
       - run: python scripts/check_workflows.py
       - name: Run security acceptance against the exact built wheel
         run: |

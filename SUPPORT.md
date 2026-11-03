@@ -67,7 +67,7 @@ From the locked development environment:
 python -m pytest
 ruff check src tests scripts
 ruff format --check src tests scripts
-mypy src/nexus_symbiote
+mypy src/nexus_symbiote scripts
 python scripts/check_workflows.py
 python scripts/check_repository_hygiene.py
 python scripts/check_security_regressions.py --out security-regressions.json

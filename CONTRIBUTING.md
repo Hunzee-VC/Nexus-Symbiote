@@ -14,7 +14,7 @@ python -m pip install --no-deps --no-build-isolation -e .
 python -m pytest
 ruff check src tests scripts
 ruff format --check src tests scripts
-mypy src/nexus_symbiote
+mypy src/nexus_symbiote scripts
 python scripts/check_workflows.py
 python scripts/check_repository_hygiene.py
 python scripts/check_security_regressions.py --out security-regressions.json
@@ -47,6 +47,8 @@ Exporter changes must validate against the pinned official schema and preserve r
 ## Pull requests
 
 Explain the concrete problem, resulting behavior, validation, and material limitations. Keep changes focused and include applicable documentation. Do not claim production enforcement for execution paths that bypass the adapter. Add no network access, executable discovery, or credential collection without an explicit design and tests.
+
+During the interim single-maintainer period (see [repository controls](docs/repository-controls.md)), keep every change on a pull request and leave behavior- or security-changing pull requests open for a soak window of at least 24 hours before merging; re-read the full rendered diff after `Verified CI` completes and treat it as the reviewed artifact. Small documentation-only fixes may merge once CI is green. High-volume days of self-merged reviews are where defects slip through; the soak window is the control that compensates for the absent second reviewer.
 
 The quality job also checks tracked source for conflict markers; documentation links, including heading anchors and absolute links into this repository; package/distribution version agreement; and the vendored schemas' recorded SHA-256 digests. The README is also the package-index description, and `twine check` does not render Markdown, so the check rejects relative links and images in it and confirms that each absolute one still resolves to a tracked file and heading. These checks are offline and do not authenticate an upstream publisher. Review changes to schema bytes and their provenance manifest together. Keep experimental-branch merges and manually ported changes distinct from ancestry on `main`; the [closed-PR audit](docs/audits/closed-pr-review-2026-11-02.md) records that distinction.
 

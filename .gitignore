@@ -13,7 +13,7 @@ build/
 
 # Virtual environments
 .env
-.venv/
+.venv*/
 venv/
 
 # Quality and testing caches
