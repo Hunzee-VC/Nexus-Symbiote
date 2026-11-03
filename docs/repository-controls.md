@@ -15,10 +15,30 @@ and enforcement for administrators. It disables branch deletion and force pushes
 The configuration file is not an applied repository setting. The approval
 requirement needs another authorized reviewer.
 
+`config/github-main-protection-interim.json` is the same configuration with
+`required_pull_request_reviews` set to `null`. Use it only while the project
+has no second authorized reviewer: applying the full configuration's
+`required_approving_review_count: 1` with `enforce_admins: true` and no
+bypass actor/restrictions on a single-maintainer repository blocks the
+maintainer from merging their own pull requests, because GitHub does not
+count self-approval toward a required review. The interim file still binds
+`Verified CI` to the GitHub Actions app, enforces it for administrators, and
+disables force pushes and branch deletion — `scripts/check_repository_controls.py`
+only checks for those properties plus the enforced status check, not for
+required reviews, so the interim configuration satisfies the same
+publication preflight. Switch to the full configuration once a second
+reviewer can approve changes, rather than leaving the weaker one in place
+indefinitely.
+
 After reviewing the exact configuration, an administrator with the appropriate
 GitHub plan and repository Administration permission can apply it with:
 
 ```sh
+# Solo-maintainer interim: no required review, same enforced status check
+gh api --method PUT repos/Hunzee-VC/Nexus-Symbiote/branches/main/protection \
+  --input config/github-main-protection-interim.json
+
+# Full target configuration, once a second reviewer is available
 gh api --method PUT repos/Hunzee-VC/Nexus-Symbiote/branches/main/protection \
   --input config/github-main-protection.json
 ```
