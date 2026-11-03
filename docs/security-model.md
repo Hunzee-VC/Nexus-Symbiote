@@ -34,6 +34,14 @@ A mediated action needs a trusted approver, snapshot binding, authenticated work
 
 For hosted models, an alias is a locator. Provider-reported revisions and behavioral canaries do not establish measured weight identity. Preserve identity assurance and unknowns explicitly. For retrieval and memory, record the source and index versions, effective reader/writer permissions, and derived records requiring invalidation after withdrawal.
 
+## Known false-positive and false-negative classes
+
+These are current behaviors, not guarantees. Review them before relying on a gate.
+
+- **Model format by extension.** `.pkl`, `.pickle`, `.pt`, `.pth`, `.bin` and `.joblib` are rated as potentially code-executing on file extension alone, before any content is read. A non-pickle `.bin` file (firmware, game data) is therefore a critical finding, which fails the default gate. Formats with no structural validator (`.onnx`, `.gguf`, `.ggml`) are reported as unknown, not safe.
+- **Risk score scale.** The aggregate score is the uncapped sum of finding weights (critical 10, high 7, medium 4, low 1). It grows with inventory size and is not a percentage, although the Action accepts thresholds from 0 to 100. Any critical finding fails the default gate regardless of the aggregate.
+- **Free-text redaction.** Redaction removes known secret values and `name=value` or `name: value` pairs whose name contains `api_key`, `access_key`, `secret_key`, `private_key`, `token`, `password`, `passwd` or `secret`. Credentials in other shapes, such as quoted JSON keys or values containing spaces, are not recognized by pattern; structured collectors rely on scrubbing known environment values instead.
+- **Hosted CI.** A configured workflow is not evidence that it ran; see `docs/repository-controls.md`.
 ## What results do and do not establish
 
 A successful scan is an inventory result. It does not establish that a model is benign, that a tool backend obeys its description, or that every agent action was mediated. Inspect the exit status and the inventory's coverage, exclusions and failures: a command may write evidence and still return a failing gate, and exit code `0` for informational commands, report-only output and skipped gates does not establish approval.

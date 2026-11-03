@@ -116,7 +116,8 @@ class Scanner(ABC):
         self, path: Path, result: ScanResult, *, missing_ok: bool = True
     ) -> dict[str, Any] | None:
         """Read a bounded static JSON/YAML mapping and retain parse failures."""
-        assert self._files is not None
+        if self._files is None:
+            raise RuntimeError("_read_mapping called outside a _collection context")
         if path.suffix.lower() == ".json":
             data = self._files.read_json(path, missing_ok=missing_ok)
         else:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import sys
@@ -340,6 +341,11 @@ def scan(
             surfaces_scanned.extend(result.surfaces_scanned)
             surfaces_excluded.extend(result.surfaces_excluded)
             scan_failures.extend(result.scan_failures)
+            # A collector that produced a conflicting duplicate component or a
+            # dangling dependency edge has failed even when its own ScanResult
+            # reports no failure. Derive both coverage records from the same
+            # delta so the emitted claim cannot list a failed collector as
+            # completed, or call the inventory OBSERVED on the strength of it.
             scanner_status[name] = (
                 "failed"
                 if len(scan_failures) > failure_count
@@ -347,7 +353,7 @@ def scan(
                 if result.surfaces_excluded
                 else "complete"
             )
-            if not result.scan_failures:
+            if scanner_status[name] != "failed":
                 completed.append(name)
             console.print(f"    Found [green]{len(result.components)}[/] components")
         except Exception as exc:
@@ -778,7 +784,7 @@ def risk(
     signature_policies = _signer_policies(signature_policy, root)
     policy = _policy(root or Path(aibom_path).parent, ignore_project=no_project_policy)
     threshold = threshold if threshold is not None else policy.risk.fail_threshold
-    if threshold <= 0 or not __import__("math").isfinite(threshold):
+    if threshold <= 0 or not math.isfinite(threshold):
         raise click.BadParameter("threshold must be positive and finite", param_hint="--threshold")
     basis = "supplied-bom"
     if root is not None:

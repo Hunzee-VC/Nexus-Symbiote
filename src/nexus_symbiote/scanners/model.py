@@ -293,7 +293,8 @@ class ModelScanner(Scanner):
         tokenizer_hash = self._hash_tokenizer(model_dir)
         chat_template_hash = self._hash_chat_template(model_dir, config)
 
-        assert self._files is not None
+        if self._files is None:
+            raise RuntimeError("_scan_model_directory called outside a _collection context")
         for path in self._discovered_paths:
             if path.parent != model_dir:
                 continue
@@ -362,7 +363,8 @@ class ModelScanner(Scanner):
         return components
 
     def _read_model_config(self, model_dir: Path) -> dict[str, Any] | None:
-        assert self._files is not None
+        if self._files is None:
+            raise RuntimeError("_read_model_config called outside a _collection context")
         for cfg_name in MODEL_CONFIG_FILES:
             cfg_path = model_dir / cfg_name
             if cfg_path in self._discovered_paths:
