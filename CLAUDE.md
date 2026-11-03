@@ -37,7 +37,7 @@ make check            # offline subset of the required CI checks
 ## Documentation
 
 - `docs/README.md` is the documentation hub, organized by why, what and how. Add new guides there.
-- `README.md` is also the PyPI long description (`readme` in `pyproject.toml`). Keep its links and images absolute (`https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/<path>`); relative paths do not resolve on PyPI. `make hygiene` checks that every absolute link resolves to a tracked file and heading.
+- `README.md` is also the PyPI long description (`readme` in `pyproject.toml`). Keep its links and images absolute (`https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/<path>`); relative paths do not resolve on PyPI, and `twine check` does not render Markdown. `make hygiene` rejects relative README links and checks that every absolute link resolves to a tracked file and heading.
 - Every command and result shown in the docs must be reproducible from the current tree; re-run them when behavior changes.
 
 ## Key conventions
