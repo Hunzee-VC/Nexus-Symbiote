@@ -1,3 +1,5 @@
+![Nexus Symbiote](Symbiote.jpeg)
+
 # Nexus SymBiote
 
 [![CI](https://github.com/Hunzee-VC/Nexus-Symbiote/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Hunzee-VC/Nexus-Symbiote/actions/workflows/ci.yml)
