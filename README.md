@@ -9,13 +9,22 @@
 
 Nexus SymBiote is an alpha toolkit for creating and reviewing an Agent Bill of Materials (AgentBOM). It inventories supported MCP configurations, model artifacts, prompts and skills, retrieval settings, A2A cards, IDE configurations and package declarations. It checks integrity and coverage, scores findings under policy, compares snapshots, and exports reviewable BOMs.
 
+## Quick nav
+
+- **Try it:** [Install](#install-from-reviewed-source) · [Quick start](#quick-start) · [Scan a public agent (tutorial)](docs/tutorials/scanning-a-public-agent.md)
+- **Understand it:** [What it does and doesn't prove](#what-it-does-and-doesnt-prove) · [How it works](#how-it-works) · [Commands and exit codes](#commands-and-exit-codes)
+- **Use it in CI:** [GitHub Action](#github-action) · [Export formats](#export-formats)
+- **Depth:** [Security model](docs/security-model.md) · [Runtime assurance](docs/runtime-assurance.md) · [ShadowScan integration](docs/shadowscan-integration.md)
+
+## What it does and doesn't prove
+
 [Nexus-ShadowScan](https://github.com/Hunzee-VC/Nexus-ShadowScan) is the primary multi-surface discovery engine. SymBiote consumes its reports and adds local artifact and supply-chain verification. Imported discovery remains a source claim; it does not establish deployment, effective access or authorization.
 
-**A successful scan is an inventory result.** It does not establish that a model is benign, that a tool backend obeys its description, or that every agent action was mediated. Read the [security model](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/security-model.md) and [security policy](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/SECURITY.md) before using results in an approval process.
+**A successful scan is an inventory result.** It does not establish that a model is benign, that a tool backend obeys its description, or that every agent action was mediated. Read the [security model](docs/security-model.md) and [security policy](SECURITY.md) before using results in an approval process.
 
 ## Install from reviewed source
 
-The distribution and command are `nexus-symbiote`; the Python import package is `nexus_symbiote`. Python 3.11 or later is required. Confined file operations and pinned stdio launchers require supported POSIX primitives. The configured hosted matrix targets Ubuntu with Python 3.11–3.13; macOS and Windows are not qualified by that matrix.
+The distribution and command are `nexus-symbiote`; the Python import package is `nexus_symbiote`. Python 3.11 or later is required. Confined file operations and pinned stdio launchers require supported POSIX primitives. The configured hosted matrix targets Ubuntu with Python 3.11–3.13; macOS and Windows are not qualified by that matrix. A separate [`Platform smoke`](.github/workflows/platform-smoke.yml) workflow exercises the CLI and the test suite on `macos-latest` without gating the Verified CI aggregation; promoting macOS to a qualified platform is tracked separately.
 
 Until a published release's ownership, source revision and provenance have been verified, install from a reviewed checkout. Replace `REVIEWED_COMMIT_SHA` with the immutable revision you reviewed:
 
@@ -101,7 +110,7 @@ The eight built-in collector names are `shadowscan`, `mcp`, `model`, `prompt`, `
 
 Collection is static by default and does not execute project modules, model loaders, hooks or MCP launch commands. Configuration presence does not prove that a server is running or that its live tool definitions match the declaration. `verify-live` is a separate explicit execution operation requiring an independently pinned launcher policy and external isolation. `discover-mcp` is an explicit HTTPS observation operation. Neither command calls tools.
 
-Project validation compares static MCP records and configured tool fingerprints with fresh local evidence. A structure binding detects added or removed arguments, environment variables and tools. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` set, a keyed binding also detects same-version package swaps and changed argument, environment and endpoint values, without exporting anything a secret could be guessed from. Legacy snapshots without this binding need recollection; see [source reconciliation and migration](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/verification-source-binding.md).
+Project validation compares static MCP records and configured tool fingerprints with fresh local evidence. A structure binding detects added or removed arguments, environment variables and tools. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` set, a keyed binding also detects same-version package swaps and changed argument, environment and endpoint values, without exporting anything a secret could be guessed from. Legacy snapshots without this binding need recollection; see [source reconciliation and migration](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/verification-source-binding.md).
 
 ## Key capabilities and limits
 
