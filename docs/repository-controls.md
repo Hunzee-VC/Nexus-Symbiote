@@ -164,8 +164,9 @@ JSON
 gh api --method DELETE repos/Hunzee-VC/Nexus-Symbiote/rulesets/26325547
 ```
 
-After step 1, every change to `main`, including the maintainer's own, needs a
-pull request whose `Verified CI` check passes on an up-to-date branch. Step 2
+After step 1, a commit can reach `main`, including the maintainer's own, only
+after its `Verified CI` check has passed on a branch that is up to date with
+`main`. In practice that means a pull request. Step 2
 passes only once the newest CI run for the `main` head has succeeded. Configure
 the `pypi` environment's reviewers and main-only deployment restriction, and
 verify them independently, before requesting publication.

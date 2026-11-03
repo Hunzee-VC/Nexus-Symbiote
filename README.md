@@ -28,7 +28,7 @@
 Nexus SymBiote generates an **Agent Bill of Materials (AgentBOM)**: an evidence-backed inventory of the MCP servers, models, instructions and skills, retrieval sources, A2A agent cards, IDE agent settings and container images that an AI agent is assembled from. It reads a project **without running it**, flags supply-chain risk, fails CI when a reviewed agent drifts, and exports CycloneDX 1.7, SPDX 3.0.1, SARIF and VEX.
 
 ```bash
-nexus-symbiote scan ./my-agent --no-project-policy -o agentbom.json   # inventory, offline
+nexus-symbiote scan ./my-agent --no-project-policy -o agentbom.json    # inventory, offline
 nexus-symbiote risk agentbom.json --no-project-policy --threshold 50   # gate on risk
 nexus-symbiote diff reviewed.json agentbom.json --fail-on-alert        # gate on drift
 ```
