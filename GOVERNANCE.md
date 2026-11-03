@@ -16,9 +16,7 @@ Security-sensitive changes require a stated trust boundary and abuse case, a reg
 
 ## Repository controls and current status
 
-The checked-in [protection proposal](config/github-main-protection.json) requires `Verified CI`, up-to-date branches, independent review including the last push, resolved conversations, administrator enforcement, and no force pushes or branch deletion. It permits merge commits; it does not require linear history. The proposed independent approval requires another authorized reviewer beyond the sole maintainer's own changes.
-
-Until a second authorized reviewer exists, applying that configuration as written would block the sole maintainer from merging their own pull requests, since GitHub does not count self-approval toward a required review. [`config/github-main-protection-interim.json`](config/github-main-protection-interim.json) drops only the review requirement — `Verified CI` remains enforced for everyone, including administrators, and force pushes and branch deletion remain disabled. Treat it as a temporary floor, not a replacement for the full proposal.
+The checked-in [protection proposal](config/github-main-protection.json) requires `Verified CI`, up-to-date branches, resolved conversations, administrator enforcement, and no force pushes or branch deletion. It permits merge commits; it does not require linear history. It does not yet require an independent approval: under administrator enforcement that would block the sole maintainer's own changes. Add the review requirement described in [repository controls](docs/repository-controls.md) when a second authorized reviewer joins.
 
 This file does not apply GitHub settings. At the 2026-11-02 audit, live `main` metadata reported `protected: false`, and inspected hosted jobs had no recorded runner or steps. Those observations and required remediation are tracked in [issue #74](https://github.com/Hunzee-VC/Nexus-Symbiote/issues/74). See [repository controls](docs/repository-controls.md) for the actual verification boundary and administrator setup.
 
