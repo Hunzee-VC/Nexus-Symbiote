@@ -219,6 +219,7 @@ class PinnedStdioSession:
                     try:
                         os.killpg(proc.pid, signal.SIGKILL)
                     except ProcessLookupError:
+                        # The process group already exited; wait() still reaps it.
                         pass
                     proc.wait(timeout=5)
                 finally:

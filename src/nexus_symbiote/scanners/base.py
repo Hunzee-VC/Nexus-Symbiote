@@ -101,7 +101,6 @@ class Scanner(ABC):
     @abstractmethod
     def scan(self, project_root: Path) -> ScanResult:
         """Scan a project directory and return discovered components."""
-        ...
 
     def _safe_read_json(self, path: Path) -> dict[str, Any] | list[Any] | None:
         # Compatibility for scanner helpers; scans should open a _collection so

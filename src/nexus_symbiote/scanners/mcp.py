@@ -235,7 +235,7 @@ class MCPScanner(Scanner):
         # Environment names remain credential references; values never leave.
         secrets = [value for value in env.values() if isinstance(value, str) and value]
         if self._files is None:
-            raise RuntimeError("_build_mcp_server_component called outside a _collection context")
+            raise RuntimeError("_parse_server called outside a _collection context")
         config_scope = config_path.relative_to(self._files.root).as_posix()
         server_ref = (
             "mcp-server:" + hash_canonical({"config": config_scope, "name": name}).split(":", 1)[1]

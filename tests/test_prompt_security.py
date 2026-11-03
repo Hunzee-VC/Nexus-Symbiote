@@ -136,4 +136,13 @@ class TestPromptScannerTrojanDetection:
         comp = next((c for c in result.components if ".codex/instructions.md" in c.name), None)
         assert comp is not None, ".codex/instructions.md should be scanned as a prompt component"
         assert comp.prompt_type == "instruction"
-        assert len([r for r in comp.risks if r.category in ("bidi_override", "tag_characters", "invisible_characters")]) == 0
+        assert (
+            len(
+                [
+                    r
+                    for r in comp.risks
+                    if r.category in ("bidi_override", "tag_characters", "invisible_characters")
+                ]
+            )
+            == 0
+        )
