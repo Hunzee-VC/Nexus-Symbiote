@@ -1,8 +1,8 @@
 # Changelog
 
-## [0.1.0] - 2026-11-02
+## [0.1.0] - Unreleased
 
-Alpha release of the AgentBOM toolkit under the Hunzee-VC organization.
+First alpha of the AgentBOM toolkit under the Hunzee-VC organization. Not yet tagged or published; the date is set when the release is tagged.
 
 ### Security
 
@@ -45,6 +45,9 @@ Alpha release of the AgentBOM toolkit under the Hunzee-VC organization.
 
 ### Delivery
 
+- Lead the README with what a scan of the demo agent finds; move result limits and export semantics into the security model's "What results do and do not establish" section. Remove the static coverage badge and the link to a release asset that does not exist yet.
+- Point documentation, issue templates, citation metadata and SARIF `informationUri` at Hunzee-VC/Nexus-Symbiote, and reject legacy-owner repository URLs in the repository hygiene check. Runtime and benchmark predicate-type identifiers are unchanged because signed evidence binds to them.
+- Split the most complex collector and CLI functions without behavior changes, and add hypothesis property tests for strict JSON parsing, tool fingerprints, the runtime JSON budget, origin redaction and SafeTensors inspection.
 - Scope exported SPDX document and element identifiers to each inventory revision so different package versions can coexist in a combined graph.
 - Run security regressions against the exact wheel built by CI and the release workflow.
 - Emit standard package identifiers for portable BOM consumers while retaining
@@ -59,6 +62,17 @@ Alpha release of the AgentBOM toolkit under the Hunzee-VC organization.
 - Check `.yaml` workflows as well as `.yml` for unpinned Actions and expressions in shell source.
 - Canonical repository moved to Hunzee-VC/Nexus-Symbiote; documentation and package metadata updated accordingly.
 
-## Unreleased
+### Fixed
 
-(empty for now)
+- Report a collector that produced a conflicting duplicate component or a dangling dependency edge as failed in `collectors_completed`, not only in `scanner_status`. A clean `ScanResult` no longer lets an orchestration-level failure be recorded as completed collection, or raise the inventory's completeness assurance to `observed` on its own. Gates were already failing through `scan_failures`; the emitted coverage record was the inaccurate part.
+
+### Changed
+
+- Enforce the canonical repository owner for tracked documentation and workflow metadata in the required quality job. Absolute GitHub URLs are outside the inline local-link check, so the `aisecnomad` to `Hunzee-VC` transfer had left stale links in `CITATION.cff`, `README.md`, `SUPPORT.md`, `GOVERNANCE.md`, `MAINTAINERS.md`, both issue templates, `examples/README.md`, `benchmarks/inventory/README.md` and `docs/repository-controls.md`. Dated audits keep the owner recorded at the time.
+- Remove the duplicated collector list and coverage-gap sentence from the README; both are stated under "How it works".
+
+### Notes
+
+- Attestation predicate URIs, `tool_vendor` and vendored schema provenance keep the original owner deliberately. The predicates are stable type identifiers, `tool_vendor` is compared by `diff` and would surface as metadata drift against every existing baseline, and `copiedFrom` is a historical provenance record.
+- Add `config/github-main-protection-interim.json`, a branch-protection configuration identical to `config/github-main-protection.json` except that it does not require pull-request review. Applying the full proposal as written on a single-maintainer repository blocks the maintainer from merging their own pull requests, because GitHub does not count self-approval toward a required review; the interim configuration still enforces `Verified CI` for everyone, including administrators, and still disables force pushes and branch deletion. `scripts/check_repository_controls.py` does not check for required reviews, so the interim configuration satisfies the same publication preflight as the full one. See [repository controls](docs/repository-controls.md) and [issue #74](https://github.com/Hunzee-VC/Nexus-Symbiote/issues/74).
+- Fix a stale repository-owner reference in `docs/repository-controls.md`'s preflight example left over from the move to the Hunzee-VC organization.

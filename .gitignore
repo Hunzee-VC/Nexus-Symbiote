@@ -54,3 +54,4 @@ Thumbs.db
 evidence/
 benchmark-results.json
 security-regressions.json
+.hypothesis/

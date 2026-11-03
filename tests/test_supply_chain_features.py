@@ -330,3 +330,13 @@ def test_readme_commands_exist():
     readme = (Path(__file__).parents[1] / "README.md").read_text()
     commands = re.findall(r"^nexus-symbiote ([a-z][a-z-]+)\b", readme, re.MULTILINE)
     assert set(commands).issubset(main.commands)
+
+
+def test_baseline_runs_the_registered_scan_and_publishes_on_pass(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "AGENTS.md").write_text("Use read-only tools.\n")
+    target = tmp_path / "baseline.json"
+    result = CliRunner().invoke(main, ["baseline", str(project), "--baseline-path", str(target)])
+    assert result.exit_code == 0, result.output
+    assert json.loads(target.read_text())["components"]

@@ -101,7 +101,6 @@ class Scanner(ABC):
     @abstractmethod
     def scan(self, project_root: Path) -> ScanResult:
         """Scan a project directory and return discovered components."""
-        ...
 
     def _safe_read_json(self, path: Path) -> dict[str, Any] | list[Any] | None:
         # Compatibility for scanner helpers; scans should open a _collection so
@@ -117,7 +116,8 @@ class Scanner(ABC):
         self, path: Path, result: ScanResult, *, missing_ok: bool = True
     ) -> dict[str, Any] | None:
         """Read a bounded static JSON/YAML mapping and retain parse failures."""
-        assert self._files is not None
+        if self._files is None:
+            raise RuntimeError("_read_mapping called outside a _collection context")
         if path.suffix.lower() == ".json":
             data = self._files.read_json(path, missing_ok=missing_ok)
         else:

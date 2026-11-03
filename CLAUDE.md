@@ -18,10 +18,9 @@ src/nexus_symbiote/
 ## Build and test
 
 ```bash
-pip install -e ".[dev]"
-pytest
-ruff check src/ tests/
-mypy src/
+make install-locked   # hash-locked CI environment plus an editable install
+make quality          # ruff, format check, mypy strict, workflow and hygiene checks
+make test             # full pytest suite; `make coverage` enforces the CI floors
 ```
 
 ## Key conventions
