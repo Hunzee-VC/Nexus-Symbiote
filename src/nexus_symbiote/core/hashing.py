@@ -74,6 +74,65 @@ def normalize_digest(expected_hash: str, algorithm: str | None = None) -> tuple[
     return algorithm, digest.lower()
 
 
+def descriptor_binding(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
+    """Return the open-descriptor evidence that must stay fixed across one observation.
+
+    Size, mtime and ctime alone cannot detect a rename-over: when the replacement
+    lands within the same coarse-grained kernel timestamp tick, the unlinked
+    inode's ctime equals its previous value. The link count of the inode behind
+    the descriptor drops to zero on unlink, so it is compared as well, together
+    with the device and inode identity. A replaced inode that is never unlinked,
+    such as a file in an overlayfs lower layer, keeps all of these values; only
+    the pathname's current identity (``pathname_identity``) reveals that swap.
+    """
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_nlink,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+
+
+def _open_parent_no_follow(absolute: Path) -> int:
+    if (
+        not hasattr(os, "O_NOFOLLOW")
+        or not hasattr(os, "O_DIRECTORY")
+        or os.open not in os.supports_dir_fd
+    ):
+        raise OSError("Descriptor-relative no-follow file access is unavailable")
+    parent_fd = os.open(absolute.anchor, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in absolute.parts[1:-1]:
+            next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent_fd)
+            os.close(parent_fd)
+            parent_fd = next_fd
+    except BaseException:
+        os.close(parent_fd)
+        raise
+    return parent_fd
+
+
+def pathname_identity(path: Path) -> tuple[int, int] | None:
+    """Return the device and inode that ``path`` resolves to now, or ``None``.
+
+    Resolution matches ``open_regular_file``: no symlink is followed in any
+    component. Compare the result with the open descriptor's identity after a
+    read to prove the pathname still names the bytes that were read.
+    """
+    absolute = Path(os.path.abspath(path))
+    try:
+        parent_fd = _open_parent_no_follow(absolute)
+        try:
+            info = os.stat(absolute.name, dir_fd=parent_fd, follow_symlinks=False)
+        finally:
+            os.close(parent_fd)
+    except OSError:
+        return None
+    return (info.st_dev, info.st_ino)
+
+
 def open_regular_file(path: Path) -> BinaryIO:
     """Open a regular file without following any symlink or blocking on a FIFO.
 
@@ -81,19 +140,9 @@ def open_regular_file(path: Path) -> BinaryIO:
     replacement between a check and the final open. Fail closed on platforms
     without the required no-follow APIs.
     """
-    if (
-        not hasattr(os, "O_NOFOLLOW")
-        or not hasattr(os, "O_DIRECTORY")
-        or os.open not in os.supports_dir_fd
-    ):
-        raise OSError("Descriptor-relative no-follow file access is unavailable")
     absolute = Path(os.path.abspath(path))
-    parent_fd = os.open(absolute.anchor, os.O_RDONLY | os.O_DIRECTORY)
+    parent_fd = _open_parent_no_follow(absolute)
     try:
-        for part in absolute.parts[1:-1]:
-            next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent_fd)
-            os.close(parent_fd)
-            parent_fd = next_fd
         flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0)
         fd = os.open(absolute.name, flags, dir_fd=parent_fd)
     finally:

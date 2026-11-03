@@ -16,31 +16,14 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, BinaryIO, cast
 
+from nexus_symbiote.core.hashing import descriptor_binding
+
 MAX_FILE_BYTES = 4 * 1024 * 1024
 MAX_ENTRIES = 20_000
 MAX_DEPTH = 32
 MAX_TOTAL_BYTES = 32 * 1024 * 1024
 MAX_HASH_BYTES = 5 * 1024 * 1024 * 1024
 DEFAULT_EXCLUDES = frozenset({".git", "node_modules", "__pycache__", ".venv", "venv"})
-
-
-def descriptor_binding(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
-    """Return the open-descriptor evidence that must stay fixed across one observation.
-
-    Size, mtime and ctime alone cannot detect a rename-over: when the replacement
-    lands within the same coarse-grained kernel timestamp tick, the unlinked
-    inode's ctime equals its previous value. The link count of the inode behind
-    the descriptor drops to zero on unlink, so it is compared as well, together
-    with the device and inode identity.
-    """
-    return (
-        info.st_dev,
-        info.st_ino,
-        info.st_nlink,
-        info.st_size,
-        info.st_mtime_ns,
-        info.st_ctime_ns,
-    )
 
 
 class CollectionError(ValueError):
@@ -263,7 +246,9 @@ class ConfinedCollection:
                 if length > self.max_file_bytes:
                     raise CollectionError("file byte limit exceeded")
                 after = os.fstat(fd)
-                if descriptor_binding(before) != descriptor_binding(after):
+                if descriptor_binding(before) != descriptor_binding(after) or not self._resolves_to(
+                    relative, after
+                ):
                     raise CollectionError("file changed during collection")
                 return b"".join(chunks)
             finally:
@@ -320,11 +305,40 @@ class ConfinedCollection:
         try:
             yield cast(BinaryIO, stream)
             after = os.fstat(fd)
-            if descriptor_binding(before) != descriptor_binding(after):
+            if descriptor_binding(before) != descriptor_binding(after) or not self._resolves_to(
+                relative, after
+            ):
                 self._fail(relative, "file changed during collection")
                 raise OSError("artifact changed during collection")
         finally:
             stream.close()
+
+    def path_identity(self, path: str | Path) -> tuple[int, int] | None:
+        """Return the device and inode a confined pathname resolves to now.
+
+        Resolution is descriptor-relative from the pinned root and never follows
+        a symlink, so a symlink at the pathname reports its own identity and
+        cannot match a stream opened with ``O_NOFOLLOW``. ``None`` means the
+        pathname is unavailable, excluded by policy or outside the collection
+        boundary; treat it as a failed observation, never as a match.
+        """
+        try:
+            relative = self._relative(path)
+            if self.excluded(relative) or not relative.parts:
+                return None
+            parent = self._open_parent(relative)
+            try:
+                info = os.stat(relative.name, dir_fd=parent, follow_symlinks=False)
+            finally:
+                os.close(parent)
+        except (OSError, CollectionError):
+            return None
+        return (info.st_dev, info.st_ino)
+
+    def _resolves_to(self, relative: Path, info: os.stat_result) -> bool:
+        # The descriptor's own status cannot reveal a replaced inode that is never
+        # unlinked (an overlayfs lower layer) or an A-B-A swap during the read.
+        return self.path_identity(relative) == (info.st_dev, info.st_ino)
 
     def hash_file(self, path: str | Path, *, max_bytes: int | None = None) -> str | None:
         """Stream SHA-256 beneath the root, with explicit individual/total bounds.
@@ -363,7 +377,9 @@ class ConfinedCollection:
                         raise CollectionError("byte limit exceeded")
                     digest.update(chunk)
                 after = os.fstat(fd)
-                if descriptor_binding(before) != descriptor_binding(after):
+                if descriptor_binding(before) != descriptor_binding(after) or not self._resolves_to(
+                    relative, after
+                ):
                     raise CollectionError("file changed during collection")
                 return "sha256:" + digest.hexdigest()
             finally:

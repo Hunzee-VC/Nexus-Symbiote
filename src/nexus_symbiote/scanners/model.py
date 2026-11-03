@@ -20,10 +20,10 @@ from nexus_symbiote.core.enums import (
     SerializationSafety,
     TrustTier,
 )
-from nexus_symbiote.core.hashing import open_regular_file, parse_json_strict
+from nexus_symbiote.core.hashing import descriptor_binding, open_regular_file, parse_json_strict
 from nexus_symbiote.core.models import ModelComponent, RiskAssessment
 from nexus_symbiote.scanners.base import Scanner, ScanResult
-from nexus_symbiote.utils.confined import MAX_HASH_BYTES, ConfinedCollection, descriptor_binding
+from nexus_symbiote.utils.confined import MAX_HASH_BYTES, ConfinedCollection
 from nexus_symbiote.utils.crypto import SigstoreArtifactPolicy, verify_sigstore_bundle
 from nexus_symbiote.utils.tensors import fingerprint_stream
 
@@ -231,7 +231,10 @@ def inspect_model_artifact(
 
     The caller must hold a confined regular-file context.
     A pathname replacement cannot substitute different bytes between inspection
-    and hashing because neither operation reopens that pathname.
+    and hashing because neither operation reopens that pathname. The confined
+    stream also refuses the observation unless the pathname still resolves to
+    this descriptor when the caller's read ends, so the verdict and digest are
+    never attributed to a pathname that now names other bytes.
     """
     before = os.fstat(stream.fileno())
     if before.st_size > MAX_HASH_SIZE:
