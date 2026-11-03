@@ -9,8 +9,11 @@ from urllib.parse import urlsplit, urlunsplit
 
 REDACTED = "***"
 _URL = re.compile(r"(?<![a-zA-Z0-9+.-])[a-zA-Z0-9+.-]+://[^\s\"'<>]+")
+# No leading word boundary: "_" is a word character, so a boundary would skip
+# GITHUB_TOKEN= and client_secret=. Fixed alternatives keep matching linear.
 _ASSIGNMENT = re.compile(
-    r"(?i)(\b(?:api[-_]?key|access[-_]?token|auth[-_]?token|token|password|passwd|secret)\s*[:=]\s*)[^\s,;]+"
+    r"(?i)((?:api[-_]?key|access[-_]?key|secret[-_]?key|private[-_]?key|token|password|passwd|secret)"
+    r"\s*[:=]\s*)[^\s,;]+"
 )
 _AUTH = re.compile(r"(?i)(\b(?:Bearer|Basic)\s+)[A-Za-z0-9_+/=.-]+")
 
