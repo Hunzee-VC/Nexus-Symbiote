@@ -86,7 +86,7 @@ def test_action_lock_reuses_reviewed_hashes_and_closes_runtime_dependencies():
         assert block == ci[name][1]
         assert "--hash=sha256:" in block
     project = tomllib.loads((ROOT / "pyproject.toml").read_text())
-    for python in ("3.11", "3.12", "3.13"):
+    for python in ("3.11", "3.12", "3.13", "3.14"):
         env = default_environment()
         env.update(python_version=python, python_full_version=python + ".0", extra="")
         pending = [*project["project"]["dependencies"], "hatchling"]

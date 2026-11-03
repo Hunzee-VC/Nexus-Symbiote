@@ -8,6 +8,7 @@ from click.testing import CliRunner
 
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote.graph import validate_graph
 from nexus_symbiote.scanner_catalog import BUILTIN_SCANNER_NAMES
 from nexus_symbiote.validators.completeness import CompletenessValidator
 
@@ -41,7 +42,7 @@ def test_cli_rejects_omitted_instruction_with_forged_complete_coverage(tmp_path)
             component.prompt_refs.remove(hidden)
     bom.dependencies = [edge for edge in bom.dependencies if edge.target_ref != hidden]
     bom.metadata.completeness.exclusions = ["AGENTS.md"]
-    assert not bom.graph_issues()
+    assert not validate_graph(bom)
     bom.save(target)
 
     run = CliRunner().invoke(

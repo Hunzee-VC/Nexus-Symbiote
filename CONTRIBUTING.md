@@ -4,7 +4,7 @@ Nexus SymBiote's compatibility baseline is the `nexus_symbiote` Python package a
 
 ## Development
 
-Use Python 3.11 through 3.13 and an isolated virtual environment. From a checkout:
+Use Python 3.11 through 3.14 and an isolated virtual environment. From a checkout:
 
 ```bash
 python -m venv .venv

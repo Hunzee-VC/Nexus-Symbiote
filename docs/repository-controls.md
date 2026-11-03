@@ -114,14 +114,19 @@ establish absence of vulnerabilities, malicious packages or undisclosed defects.
 
 ## Operator prerequisites
 
-The review observed `main` unprotected, no required-check enforcement, and hosted
-CI/CodeQL jobs failing before any runner steps started. The API did not establish
-the startup failure's cause. Rulesets reported that the current private-repository
-plan does not enable the feature; protection administration was unavailable to
-the integration. These changes do not activate account features or change those
-remote settings. An administrator must resolve those account/runner prerequisites,
-enable the required code-scanning entitlement and permissions, apply the reviewed
-protection configuration above, and observe a successful exact-source CI run.
-Do not remove the acceptance gates to work around an unavailable platform feature.
-Configure and independently verify the `pypi` environment reviewers and main-only
-deployment restriction before requesting publication.
+The 2026-11-03 review observed `main` with no classic branch protection
+(`GET /branches/main/protection` returns 404) and one repository ruleset named
+`main` whose `conditions.ref_name.include` list is empty. A ruleset with no
+included refs targets no branch, so its pull-request, code-scanning and
+non-fast-forward rules are inert. Consistent with that, most first-parent
+commits on `main` arrived as direct pushes rather than merged pull requests.
+Secret scanning was also disabled.
+
+An administrator must apply the reviewed protection configuration above (or
+retarget the ruleset to `~DEFAULT_BRANCH` and add `Verified CI` as a required
+check), enable secret scanning, and then observe a successful exact-source CI
+run. `scripts/check_repository_controls.py` reads the live state and fails the
+publication preflight until the enforced check is present. Do not remove the
+acceptance gates to work around an unavailable platform feature. Configure and
+independently verify the `pypi` environment reviewers and main-only deployment
+restriction before requesting publication.

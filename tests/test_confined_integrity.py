@@ -8,7 +8,7 @@ import pytest
 
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.models import ModelComponent, PromptComponent
-from nexus_symbiote.utils.confined import hash_confined_file
+from nexus_symbiote.utils.confined import descriptor_binding, hash_confined_file
 from nexus_symbiote.validators.integrity import IntegrityValidator
 
 
@@ -88,3 +88,26 @@ def test_fifo_rejected_without_blocking(tmp_path: Path) -> None:
     os.mkfifo(tmp_path / "pipe")
     with pytest.raises(OSError):
         hash_confined_file(tmp_path, "pipe")
+
+
+def test_descriptor_binding_detects_rename_over_without_timestamp_change(tmp_path):
+    """A rename-over inside one coarse timestamp tick must still change the binding."""
+    target = tmp_path / "artifact.bin"
+    target.write_bytes(b"original")
+    fd = os.open(target, os.O_RDONLY)
+    try:
+        before = os.fstat(fd)
+        replacement = tmp_path / "replacement.bin"
+        replacement.write_bytes(b"replaced")
+        # Pin the replacement's timestamps to the original so size/mtime/ctime
+        # alone cannot distinguish the two inodes.
+        os.utime(replacement, ns=(before.st_atime_ns, before.st_mtime_ns))
+        replacement.replace(target)
+        after = os.fstat(fd)
+        assert after.st_nlink == 0
+        assert descriptor_binding(before) != descriptor_binding(after)
+        # Pathname-based observation now sees different bytes than the descriptor.
+        assert target.read_bytes() == b"replaced"
+        assert os.read(fd, 16) == b"original"
+    finally:
+        os.close(fd)

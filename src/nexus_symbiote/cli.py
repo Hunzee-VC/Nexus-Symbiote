@@ -19,6 +19,7 @@ from nexus_symbiote import __version__, modes
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import AssuranceLevel
 from nexus_symbiote.core.models import AIBOMMetadata, CompletenessClaim
+from nexus_symbiote.graph import validate_graph
 from nexus_symbiote.live_cli import register_live_commands
 from nexus_symbiote.policy import Policy
 from nexus_symbiote.runtime_cli import register_runtime_commands
@@ -281,7 +282,7 @@ def scan(
         err_console.print(f"[red]Error:[/] '{_safe(project_path)}' is not a directory")
         sys.exit(1)
 
-    from nexus_symbiote.graph import assemble_repository_agent, validate_graph
+    from nexus_symbiote.graph import assemble_repository_agent
     from nexus_symbiote.policy import PolicyError
     from nexus_symbiote.utils.confined import DEFAULT_EXCLUDES
     from nexus_symbiote.validators.risk import RiskScorer
@@ -734,8 +735,9 @@ def validate(
             console.print("  ERROR: observed assurance requires claim provenance")
             valid = False
     # Graph integrity is structural and cannot be disabled by a coverage policy.
-    if bom.graph_issues():
-        console.print("  ERROR: " + _safe("; ".join(bom.graph_issues())), soft_wrap=True)
+    graph_issues = validate_graph(bom)
+    if graph_issues:
+        console.print("  ERROR: " + _safe("; ".join(graph_issues)), soft_wrap=True)
         valid = False
     if not valid:
         raise click.exceptions.Exit(1)
