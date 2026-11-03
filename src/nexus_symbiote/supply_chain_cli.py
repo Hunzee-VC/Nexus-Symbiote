@@ -101,8 +101,17 @@ def register_supply_chain_commands(main: click.Group) -> None:
         The file is unsigned. Operators must review and authenticate the baseline
         before using it as an authority for runtime admission.
         """
-        from nexus_symbiote.cli import scan
         from nexus_symbiote.validators.risk import RiskScorer
+
+        # Resolve the registered command instead of importing cli, which imports this module.
+        root = ctx.find_root()
+        scan = (
+            root.command.get_command(root, "scan")
+            if isinstance(root.command, click.Group)
+            else None
+        )
+        if scan is None:
+            raise click.ClickException("scan command is unavailable")
 
         target = baseline_path.absolute()
         fd, temporary = tempfile.mkstemp(prefix=".nexus-baseline-", dir=target.parent)
