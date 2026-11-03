@@ -1,19 +1,46 @@
-![Nexus Symbiote](Symbiote.jpeg)
+<p align="center">
+  <img src="Symbiote.jpeg" alt="Nexus SymBiote — Agent Bill of Materials for AI supply chains" width="700">
+</p>
 
-# Nexus SymBiote
+<h1 align="center">Nexus SymBiote</h1>
 
-[![CI](https://github.com/Hunzee-VC/Nexus-Symbiote/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Hunzee-VC/Nexus-Symbiote/actions/workflows/ci.yml)
-[![CodeQL](https://github.com/Hunzee-VC/Nexus-Symbiote/actions/workflows/codeql.yml/badge.svg)](https://github.com/Hunzee-VC/Nexus-Symbiote/actions/workflows/codeql.yml)
-[![License](https://img.shields.io/github/license/Hunzee-VC/Nexus-Symbiote)](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/LICENSE)
+<p align="center">
+  <strong>Know what your AI agent is built from — before you trust it.</strong>
+</p>
 
-**An Agent Bill of Materials (AgentBOM) for AI agent supply chains.** Nexus SymBiote reads an agent project without running it, lists what the agent is built from — MCP servers, models, prompts and skills, retrieval sources, A2A cards, IDE agent settings and container images — flags supply-chain risks, catches drift between reviewed snapshots, and exports CycloneDX 1.7, SPDX 3.0.1, SARIF or native JSON.
+<p align="center">
+  <a href="https://github.com/Hunzee-VC/Nexus-Symbiote/actions/workflows/ci.yml"><img src="https://github.com/Hunzee-VC/Nexus-Symbiote/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="https://github.com/Hunzee-VC/Nexus-Symbiote/actions/workflows/codeql.yml"><img src="https://github.com/Hunzee-VC/Nexus-Symbiote/actions/workflows/codeql.yml/badge.svg" alt="CodeQL"></a>
+  <a href="https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Hunzee-VC/Nexus-Symbiote" alt="License"></a>
+  <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
+</p>
 
-## What a scan finds
+---
 
-The bundled [demo agent](https://github.com/Hunzee-VC/Nexus-Symbiote/tree/main/examples/demo-agent) is a small synthetic support assistant. Scanning it records 11 components across 9 types and these findings (risk score 33, below the default fail threshold of 50):
+## Why
+
+AI agents are assembled from MCP servers, foundation models, system prompts, retrieval sources, A2A agent cards, IDE extensions, and container images. Together these form a **supply chain** — but unlike traditional software, no one inventories it. A single unpinned MCP server, a swapped model weight file, or a drifted endpoint can silently change what your agent does and who it talks to.
+
+Traditional SBOMs track packages and libraries. They don't cover agent-specific surfaces: tool definitions, prompt instructions, model provenance, or the trust boundaries between components. **You can't secure what you can't see.**
+
+Nexus SymBiote generates an **Agent Bill of Materials (AgentBOM)** — a complete, verifiable inventory of everything an AI agent is built from — so you can review it, gate it, and catch when it changes.
+
+## What
+
+Nexus SymBiote reads an agent project **without running it**, lists what the agent is built from, flags supply-chain risks, catches drift between reviewed snapshots, and exports standard formats:
+
+- **Inventories** MCP servers, models, prompts, retrieval sources, A2A cards, IDE agent settings, container images, and package dependencies
+- **Scores risk** with configurable policy gates (completeness, integrity, risk threshold)
+- **Detects drift** between snapshots — catches endpoint swaps, version unpinning, capability escalation, and dependency substitution
+- **Exports** CycloneDX 1.7, SPDX 3.0.1, SARIF, VEX, or native JSON
+- **Runs offline** by default — no network, no subprocess execution, no trust in the scanned project
+
+## See it in action
+
+The bundled [demo agent](examples/demo-agent) is a small synthetic support assistant. Scanning it records 11 components across 9 types with these findings (risk score 33, below the default fail threshold of 50):
 
 | Severity | Component | Finding |
-| --- | --- | --- |
+|----------|-----------|---------|
 | high | `memory` MCP server | Unpinned package reference (`@latest`) |
 | high | `models/intent-classifier.safetensors` | No verified, artifact-bound signature |
 | high | `ollama/ollama:latest` container image | No immutable digest pin |
@@ -27,11 +54,32 @@ Float a pinned server and repoint an endpoint, and `diff --fail-on-alert` exits 
 [HIGH] High change in 'notes': Version changed: 2025.8.21 → None; Version pin removed ...
 ```
 
-The full walkthrough, including validation, exports and ShadowScan import, is in [examples/README.md](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/examples/README.md).
+The full walkthrough, including validation, exports, and ShadowScan import, is in [examples/README.md](examples/README.md).
 
-## Install
+---
 
-Python 3.11+ on Linux is required (the CI matrix covers Ubuntu with Python 3.11–3.13). No release has been published yet, so install from a reviewed checkout with the hash-locked runtime:
+## Table of contents
+
+- [Getting started](#getting-started)
+- [How it works](#how-it-works)
+- [Coverage](#coverage)
+- [GitHub Action](#github-action)
+- [What a scan does not prove](#what-a-scan-does-not-prove)
+- [Documentation](#documentation)
+- [Project status](#project-status)
+- [Contributing](#contributing)
+- [License](#license)
+
+## Getting started
+
+### Prerequisites
+
+- Python 3.11+ on Linux (CI covers Ubuntu with Python 3.11–3.13)
+- Git (for source installation)
+
+### Install
+
+No release has been published yet. Install from a reviewed checkout with hash-locked dependencies:
 
 ```bash
 git clone https://github.com/Hunzee-VC/Nexus-Symbiote.git
@@ -43,16 +91,16 @@ python -m pip install --no-deps --no-build-isolation .
 nexus-symbiote --version
 ```
 
-Optional extras are `.[sigstore]`, `.[cyclonedx]` and `.[all]`. For development, use `make install-locked` (see [CONTRIBUTING.md](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/CONTRIBUTING.md)).
+Optional extras: `.[sigstore]` for Sigstore verification, `.[cyclonedx]` for CycloneDX library integration, `.[all]` for both. For development, use `make install-locked` (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 
-## Quick start
+### Quick start
 
 ```bash
-# Inventory a project; --no-project-policy stops an untrusted checkout from choosing your policy
+# Inventory a project (--no-project-policy prevents an untrusted checkout from choosing your policy)
 nexus-symbiote scan /path/to/agent-project --no-project-policy -o agentbom.json
 nexus-symbiote summary agentbom.json
 
-# Check completeness and integrity against the project, then apply the risk gate
+# Check completeness and integrity, then apply the risk gate
 nexus-symbiote validate agentbom.json --project /path/to/agent-project --no-project-policy
 nexus-symbiote risk agentbom.json --threshold 50 --no-project-policy
 
@@ -63,29 +111,55 @@ nexus-symbiote diff reviewed.json agentbom.json --fail-on-alert
 nexus-symbiote import-shadowscan shadowscan-report.json -o imported-agentbom.json --report-only
 ```
 
-Every command is offline by default: no network, name resolution or subprocesses. Only `discover-mcp`, `advisories` and `verify-live` reach outside local files, and only with `--live`. Exit code `0` means the command completed in its selected mode, `1` means a gate or verification failed, and `2` is a usage error.
+Every command is offline by default: no network, no name resolution, no subprocesses. Only `discover-mcp`, `advisories`, and `verify-live` reach outside local files, and only with `--live`. Exit codes: `0` = success, `1` = gate/verification failed, `2` = usage error.
 
-## What it covers
+## How it works
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        nexus-symbiote scan                      │
+│                                                                 │
+│   Agent Project          Collectors              Output         │
+│  ┌──────────────┐    ┌───────────────┐    ┌──────────────────┐  │
+│  │ .mcp.json    │───▶│ mcp           │───▶│                  │  │
+│  │ models/      │───▶│ model         │    │  AgentBOM        │  │
+│  │ prompts/     │───▶│ prompt        │    │  (native JSON)   │  │
+│  │ rag configs  │───▶│ rag           │    │                  │  │
+│  │ agent cards  │───▶│ a2a           │    │  → CycloneDX 1.7 │  │
+│  │ IDE settings │───▶│ ide_agents    │    │  → SPDX 3.0.1    │  │
+│  │ registries   │───▶│ registry      │    │  → SARIF          │  │
+│  │ shadowscan   │───▶│ shadowscan    │    │  → VEX            │  │
+│  └──────────────┘    └───────────────┘    └──────────────────┘  │
+│                                                                 │
+│   validate ──▶ completeness + integrity                         │
+│   risk     ──▶ finding scores + policy gate                     │
+│   diff     ──▶ snapshot comparison + drift alerts               │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+1. **Collect** — Eight built-in collectors read project files without executing anything. Each extracts component identities, versions, hashes, endpoints, and trust metadata.
+2. **Assemble** — Results merge into an AgentBOM: a structured inventory with component types, relationships, risk findings, and completeness metadata.
+3. **Verify** — `validate` checks completeness and integrity against the source project. `risk` scores findings and applies a configurable threshold gate.
+4. **Compare** — `diff` compares two snapshots and flags security-relevant changes: endpoint swaps, version unpinning, capability changes, and dependency substitution.
+5. **Export** — Native JSON, CycloneDX 1.7, SPDX 3.0.1, SARIF, or VEX. Standard formats integrate with existing security toolchains.
+
+## Coverage
 
 | Area | What is recorded |
-| --- | --- |
-| Collectors | `mcp`, `model`, `prompt`, `rag`, `registry`, `a2a`, `ide_agents` and `shadowscan` (select with `--scanner`) |
-| Model files | Whole-file hashes, SafeTensors structure checks, pickle detection without loading, optional Sigstore verification |
-| MCP | Client and server references, pinned versions, transports, endpoints and tool fingerprints |
-| Drift | Component, capability, endpoint, integrity and dependency changes between snapshots |
-| Policy gates | Completeness, integrity and risk decisions under a policy you choose |
-| Exports | Native JSON, CycloneDX 1.7, SPDX 3.0.1 and SARIF (`-f`), plus VEX via `vex` |
-| Runtime | Ed25519-signed snapshots, approvals and trust status for a reference gateway (`runtime`) |
+|------|-----------------|
+| **Collectors** | `mcp`, `model`, `prompt`, `rag`, `registry`, `a2a`, `ide_agents`, and `shadowscan` (select with `--scanner`) |
+| **Model files** | Whole-file hashes, SafeTensors structure checks, pickle detection without loading, optional Sigstore verification |
+| **MCP** | Client and server references, pinned versions, transports, endpoints, and tool fingerprints |
+| **Drift** | Component, capability, endpoint, integrity, and dependency changes between snapshots |
+| **Policy gates** | Completeness, integrity, and risk decisions under a policy you choose |
+| **Exports** | Native JSON, CycloneDX 1.7, SPDX 3.0.1, and SARIF (`-f`), plus VEX via `vex` |
+| **Runtime** | Ed25519-signed snapshots, approvals, and trust status for a reference gateway (`runtime`) |
 
-All commands are listed in the [CLI reference](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/cli-reference.md).
-
-## What a scan does not prove
-
-A scan is an inventory. It does not show that a model is benign, that a tool's backend matches its description, or that every agent action was mediated. Unknown evidence never passes a gate, and failed or skipped collection is reported as a gap rather than as absence. Read [what results do and do not establish](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/security-model.md#what-results-do-and-do-not-establish) before using results in an approval process, and treat exported BOMs as sensitive: they can reveal infrastructure, permissions and endpoints.
+All commands are listed in the [CLI reference](docs/cli-reference.md).
 
 ## GitHub Action
 
-Pin the Action to a reviewed 40-character commit:
+Pin the Action to a reviewed 40-character commit SHA:
 
 ```yaml
 name: Agent inventory
@@ -109,26 +183,48 @@ jobs:
           sarif-upload: 'false'
 ```
 
-The Action ignores policy files in the scanned checkout and fails on collection errors even when validation is disabled. A `risk-threshold` of `0` disables the risk gate. For SARIF upload, add `security-events: write` to the job. Don't use `pull_request_target` to scan untrusted PRs with credentials. Inputs and outputs are listed in [action.yml](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/action.yml).
+The Action ignores policy files in the scanned checkout and fails on collection errors even when validation is disabled. A `risk-threshold` of `0` disables the risk gate. For SARIF upload, add `security-events: write` to the job. Don't use `pull_request_target` to scan untrusted PRs with credentials. Inputs and outputs are listed in [action.yml](action.yml).
+
+## What a scan does not prove
+
+A scan is an inventory, not a verdict. It does not show that a model is benign, that a tool's backend matches its description, or that every agent action was mediated. Unknown evidence never passes a gate, and failed or skipped collection is reported as a gap rather than as absence.
+
+Read [what results do and do not establish](docs/security-model.md#what-results-do-and-do-not-establish) before using results in an approval process. Treat exported BOMs as sensitive: they can reveal infrastructure, permissions, and endpoints.
 
 ## Documentation
 
 | Topic | Link |
-| --- | --- |
-| Security model and result limits | [Security model](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/security-model.md) · [SECURITY.md](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/SECURITY.md) |
-| Runtime and deployment evidence | [Runtime assurance](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/runtime-assurance.md) · [Deployment evidence](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/deployment-evidence.md) |
-| Discovery and source inventory | [ShadowScan integration](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/shadowscan-integration.md) · [TypeScript inventory](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/typescript-inventory.md) · [Source binding](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/verification-source-binding.md) |
-| Offline and live modes | [Offline and live modes](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/offline-and-live-modes.md) |
-| Development and controls | [CONTRIBUTING.md](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/CONTRIBUTING.md) · [Repository controls](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/repository-controls.md) |
-| Releases and changes | [Releasing](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/releasing.md) · [CHANGELOG.md](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/CHANGELOG.md) · [ROADMAP.md](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/ROADMAP.md) |
-| Benchmarks | [Security corpus](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/benchmarks/README.md) · [Inventory corpus](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/benchmarks/inventory/README.md) |
+|-------|------|
+| Security model and result limits | [Security model](docs/security-model.md) · [SECURITY.md](SECURITY.md) |
+| CLI commands and options | [CLI reference](docs/cli-reference.md) |
+| Runtime and deployment evidence | [Runtime assurance](docs/runtime-assurance.md) · [Deployment evidence](docs/deployment-evidence.md) |
+| Discovery and source inventory | [ShadowScan integration](docs/shadowscan-integration.md) · [TypeScript inventory](docs/typescript-inventory.md) · [Source binding](docs/verification-source-binding.md) |
+| Offline and live modes | [Offline and live modes](docs/offline-and-live-modes.md) |
+| npm lockfile evidence | [npm lockfile evidence](docs/npm-lockfile-evidence.md) |
+| Development and controls | [CONTRIBUTING.md](CONTRIBUTING.md) · [Repository controls](docs/repository-controls.md) |
+| Releases and changes | [Releasing](docs/releasing.md) · [CHANGELOG.md](CHANGELOG.md) · [ROADMAP.md](ROADMAP.md) |
+| Benchmarks | [Security corpus](benchmarks/README.md) · [Inventory corpus](benchmarks/inventory/README.md) |
+| Tutorials | [Scanning a public agent](docs/tutorials/scanning-a-public-agent.md) |
 
 ## Project status
 
-Nexus SymBiote is **alpha**: APIs, formats and policy semantics may change, and there is no SLA. [Nexus-ShadowScan](https://github.com/Hunzee-VC/Nexus-ShadowScan) is the companion discovery engine; SymBiote adds local artifact and supply-chain verification. Open hosted-verification and publication prerequisites are tracked in [issue #74](https://github.com/Hunzee-VC/Nexus-Symbiote/issues/74).
+Nexus SymBiote is **alpha** — APIs, formats, and policy semantics may change. There is no SLA.
 
-To report a security issue, see [SECURITY.md](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/SECURITY.md). For bugs and feature requests, use [GitHub Issues](https://github.com/Hunzee-VC/Nexus-Symbiote/issues). Governance is described in [GOVERNANCE.md](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/GOVERNANCE.md).
+[Nexus-ShadowScan](https://github.com/Hunzee-VC/Nexus-ShadowScan) is the companion discovery engine; SymBiote adds local artifact and supply-chain verification. Open hosted-verification and publication prerequisites are tracked in [issue #74](https://github.com/Hunzee-VC/Nexus-Symbiote/issues/74).
+
+See the [ROADMAP](ROADMAP.md) for planned work.
+
+## Contributing
+
+Contributions are welcome — especially tested scanner coverage, documentation, and regression fixtures.
+
+- **Bugs and features:** [GitHub Issues](https://github.com/Hunzee-VC/Nexus-Symbiote/issues)
+- **Security vulnerabilities:** See [SECURITY.md](SECURITY.md)
+- **Development setup and review contract:** [CONTRIBUTING.md](CONTRIBUTING.md)
+- **Governance and decisions:** [GOVERNANCE.md](GOVERNANCE.md)
+- **Code of conduct:** [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- **Support and troubleshooting:** [SUPPORT.md](SUPPORT.md)
 
 ## License
 
-[MIT](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/LICENSE) — Copyright (c) 2026 AISecNomad.
+[MIT](LICENSE) — Copyright (c) 2026 AISecNomad.
