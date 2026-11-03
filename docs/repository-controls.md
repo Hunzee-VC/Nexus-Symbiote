@@ -126,8 +126,8 @@ any row; this table is a dated record, not enforcement.
 | Control | Observed state | Required action |
 | --- | --- | --- |
 | Hosted CI matrix and CodeQL | Passing. The earlier failures were a runtime-validation CPU budget and real dependency advisories, fixed in [#97](https://github.com/Hunzee-VC/Nexus-Symbiote/pull/97) and [#98](https://github.com/Hunzee-VC/Nexus-Symbiote/pull/98) | None; keep `Verified CI` required |
-| Branch protection on `main` | Not protected (`protected: false`) | Apply the interim configuration above |
-| Repository ruleset `main` | Enforcement `active`, but its target list is empty, so it applies to no branch; its required-checks list is also empty | Delete it, or deliberately retarget it in addition to classic protection |
+| Branch protection on `main` | Not protected: `protected: false`, and `GET /branches/main/protection` returns 404. 20 of the 92 first-parent commits on `main` were pushed directly rather than merged through a pull request | Apply the interim configuration above |
+| Repository ruleset `main` | Enforcement `active`, but `conditions.ref_name.include` is empty, so it targets no branch and its pull-request, code-scanning and non-fast-forward rules are inert; its required-checks list is also empty | Delete it, or deliberately retarget it in addition to classic protection |
 | Private vulnerability reporting | Disabled, although [SECURITY.md](../SECURITY.md) directs reporters to it | Enable it under *Settings → Code security* |
 | Secret scanning and push protection | Disabled | Enable both; they are free for public repositories |
 | `testpypi` and `pypi` environments, trusted publishers | Not verifiable through the integration used for this review | Configure and verify as described in [releasing](releasing.md) |
