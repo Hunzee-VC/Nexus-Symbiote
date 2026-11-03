@@ -79,6 +79,7 @@ First alpha of the AgentBOM toolkit under the Hunzee-VC organization. Not yet ta
 
 - Enforce the canonical repository owner for tracked documentation and workflow metadata in the required quality job. Absolute GitHub URLs are outside the inline local-link check, so the `aisecnomad` to `Hunzee-VC` transfer had left stale links in `CITATION.cff`, `README.md`, `SUPPORT.md`, `GOVERNANCE.md`, `MAINTAINERS.md`, both issue templates, `examples/README.md`, `benchmarks/inventory/README.md` and `docs/repository-controls.md`. Dated audits keep the owner recorded at the time.
 - Check documentation links for missing heading anchors, and require absolute links into this repository's `main` branch to resolve to tracked files and headings. Absolute links had no check at all, although the README must use them for PyPI. On the previous `main` the stricter check found one broken anchor, in the public-agent tutorial.
+- Reject relative links and images in the README named by `pyproject.toml`, which is also the PyPI description. `twine check` does not render Markdown, so nothing caught the 32 relative links, banner included, that the previous `main` would have published broken.
 
 ### Notes
 

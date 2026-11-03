@@ -223,6 +223,31 @@ def self_link_issues(root: Path, files: list[Path]) -> list[str]:
     return errors
 
 
+def readme_link_issues(root: Path) -> list[str]:
+    """Reject relative links in the README that doubles as the package-index description.
+
+    twine does not render Markdown descriptions, so no build check notices a
+    relative link or image that will not resolve on the package index.
+    """
+    try:
+        project = tomllib.loads(read_file(root, Path("pyproject.toml")).decode())["project"]
+        readme = project["readme"]
+        relative = Path(readme if isinstance(readme, str) else readme["file"])
+        text = read_file(root, relative).decode("utf-8")
+    except (OSError, ValueError, KeyError, TypeError, UnicodeError):
+        return ["package-index README could not be determined or read"]
+    errors = []
+    for line in prose_lines(text):
+        links = [match[1].strip("<>") for match in LINK.finditer(line)]
+        for link in [*links, *HTML_LINK.findall(line)]:
+            parsed = urlsplit(link)
+            if not parsed.scheme and not parsed.netloc and parsed.path:
+                errors.append(
+                    f"{relative}: relative link will not resolve on the package index: {link}"
+                )
+    return errors
+
+
 def version_issues(root: Path) -> list[str]:
     try:
         project = tomllib.loads(read_file(root, Path("pyproject.toml")).decode())["project"][
@@ -291,6 +316,7 @@ def main() -> int:
             *source_issues(root, files),
             *owner_issues(root, files),
             *self_link_issues(root, files),
+            *readme_link_issues(root),
             *version_issues(root),
             *vendor_issues(root),
         ]

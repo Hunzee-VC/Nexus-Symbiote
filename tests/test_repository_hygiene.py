@@ -96,6 +96,29 @@ def test_absolute_links_into_this_repository_must_resolve(tmp_path):
     assert sum("missing heading" in issue for issue in issues) == 1
 
 
+@pytest.mark.parametrize(
+    "readme", ['"README.md"', '{file = "README.md", content-type = "text/markdown"}']
+)
+def test_package_index_readme_links_must_be_absolute(tmp_path, readme):
+    tmp_path.joinpath("pyproject.toml").write_text(f"[project]\nreadme = {readme}\n")
+    page = tmp_path / "README.md"
+    page.write_text(
+        "[docs](https://example.invalid/docs.md) [top](#usage) [mail](mailto:a@example.invalid)\n"
+        '<img src="https://example.invalid/banner.jpg">\n```md\n[local](docs/guide.md)\n```\n'
+    )
+    assert hygiene.readme_link_issues(tmp_path) == []
+    page.write_text('[docs](docs/guide.md) <img src="banner.jpg"> ![logo](img/logo.png)\n')
+    issues = hygiene.readme_link_issues(tmp_path)
+    assert len(issues) == 3 and all("package index" in issue for issue in issues)
+
+
+def test_undeclared_package_index_readme_fails_closed(tmp_path):
+    tmp_path.joinpath("pyproject.toml").write_text('[project]\nname = "widget"\n')
+    assert hygiene.readme_link_issues(tmp_path) == [
+        "package-index README could not be determined or read"
+    ]
+
+
 def test_source_symlink_is_not_read(tmp_path):
     outside = tmp_path.parent / (tmp_path.name + "-outside")
     outside.write_text("source")
