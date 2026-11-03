@@ -80,14 +80,11 @@ def test_offline_guard_refuses_network_and_process_creation(operation):
 
 def test_offline_violation_escapes_broad_exception_handlers():
     caught_as_exception = False
-    with modes.enforce(modes.Mode.OFFLINE):
+    with modes.enforce(modes.Mode.OFFLINE), pytest.raises(modes.OfflineViolation):
         try:
-            try:
-                socket.getaddrinfo("example.com", 443)
-            except Exception:
-                caught_as_exception = True
-        except modes.OfflineViolation:
-            pass
+            socket.getaddrinfo("example.com", 443)
+        except Exception:
+            caught_as_exception = True
     assert not caught_as_exception
 
 
@@ -100,9 +97,14 @@ def test_guard_is_removed_after_the_block_even_when_it_raises():
         os.system,
     )
     assert "connect" not in vars(socket.socket)
-    with pytest.raises(RuntimeError), modes.enforce(modes.Mode.OFFLINE):
-        assert modes.current() is modes.Mode.OFFLINE
-        raise RuntimeError("body failed")
+
+    def failing_body() -> None:
+        with modes.enforce(modes.Mode.OFFLINE):
+            assert modes.current() is modes.Mode.OFFLINE
+            raise RuntimeError("body failed")
+
+    with pytest.raises(RuntimeError):
+        failing_body()
     assert modes.current() is None
     assert "connect" not in vars(socket.socket)
     assert (
