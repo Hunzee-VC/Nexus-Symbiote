@@ -28,13 +28,9 @@ src/nexus_symbiote/
 Match CI by installing the hash-locked environment first:
 
 ```bash
-python -m pip install --require-hashes -r requirements-ci.lock
-python -m pip install --no-deps --no-build-isolation -e .
-pytest
-ruff check src tests scripts
-ruff format --check src tests scripts
-mypy src/nexus_symbiote
-python scripts/check_repository_hygiene.py
+make install-locked   # hash-locked CI environment plus an editable install
+make quality          # ruff, format check, mypy strict, workflow and hygiene checks
+make test             # full pytest suite; `make coverage` enforces the CI floors
 ```
 
 ## Key conventions

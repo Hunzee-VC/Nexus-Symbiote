@@ -117,7 +117,8 @@ def test_cyclonedx_recovery_requires_preserved_public_incomplete_claim(compositi
     document = CycloneDXGenerator().generate(bom)
     # Some standard readers omit compositions on reserialization. Losing the public
     # coverage warning is substantive even when the native extension survives.
-    assert document.pop("compositions") == [{"aggregate": "incomplete"}]
+    removed = document.pop("compositions")
+    assert removed == [{"aggregate": "incomplete"}]
     if composition:
         document["compositions"] = composition
     with pytest.raises(ValueError, match="projection conflicts"):

@@ -7,7 +7,7 @@ Nexus SymBiote is alpha security tooling maintained by one developer. This guide
 | I need to… | Go to |
 | --- | --- |
 | Report a security vulnerability | [SECURITY.md](SECURITY.md); request a private reporting channel |
-| Report a bug or request a feature | [GitHub Issues](https://github.com/Hunzee-VC/nexus-symbiote/issues) |
+| Report a bug or request a feature | [GitHub Issues](https://github.com/Hunzee-VC/Nexus-Symbiote/issues) |
 | Install or develop from reviewed source | [README.md](README.md) · [CONTRIBUTING.md](CONTRIBUTING.md) |
 | Understand evidence and trust | [Security model](docs/security-model.md) · [Runtime assurance](docs/runtime-assurance.md) |
 | Import discovery | [ShadowScan integration](docs/shadowscan-integration.md) |

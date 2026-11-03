@@ -84,8 +84,8 @@ commit you intend to verify. Check the provenance before extracting the archive.
 
 ```sh
 gh attestation verify inventory-benchmark.tar.gz \
-  --repo Hunzee-VC/Nexus-symbiote \
-  --signer-workflow Hunzee-VC/Nexus-symbiote/.github/workflows/release.yml \
+  --repo Hunzee-VC/Nexus-Symbiote \
+  --signer-workflow Hunzee-VC/Nexus-Symbiote/.github/workflows/release.yml \
   --source-ref refs/heads/main --source-digest "${RELEASE_COMMIT:?set the expected commit}" \
   --deny-self-hosted-runners
 ```

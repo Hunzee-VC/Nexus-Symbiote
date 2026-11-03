@@ -70,4 +70,5 @@ def write_output_file(
             try:
                 os.unlink(temp, dir_fd=parent)
             except FileNotFoundError:
+                # The rename already consumed the temporary file.
                 pass

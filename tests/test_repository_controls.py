@@ -64,7 +64,7 @@ def test_malformed_check_metadata_fails(key, value):
 
 def test_no_network_request_without_credentials():
     with pytest.raises(ValueError, match="token"):
-        controls.fetch_branch("aisecnomad/Nexus-Symbiote", "main", "")
+        controls.fetch_branch("Hunzee-VC/Nexus-Symbiote", "main", "")
 
 
 def test_no_arbitrary_network_origin():

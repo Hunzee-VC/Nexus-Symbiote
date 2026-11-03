@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import sys
@@ -25,6 +26,7 @@ from nexus_symbiote.supply_chain_cli import register_supply_chain_commands
 from nexus_symbiote.utils.files import write_output_file
 
 if TYPE_CHECKING:
+    from nexus_symbiote.scanners.base import ScanResult
     from nexus_symbiote.utils.crypto import SigstoreArtifactPolicy
 
 console = Console(stderr=True)
@@ -59,7 +61,7 @@ def _policy(root: Path, *, ignore_project: bool = False) -> Policy:
 # C0/C1 controls move the cursor or rewrite earlier output; bidirectional and
 # invisible format characters disguise text. Inventory data may contain any of them.
 _UNSAFE_TEXT = re.compile(
-    "[\x00-\x08\x0b-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]"
+    r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]"
 )
 
 
@@ -178,6 +180,62 @@ def main(ctx: click.Context, offline_flag: bool, live_flag: bool) -> None:
     ctx.with_resource(modes.enforce(modes.command_mode(requested.mode, ctx.invoked_subcommand)))
 
 
+def _merge_scan_result(
+    name: str,
+    result: ScanResult,
+    aibom: AIBOM,
+    collected: dict[str, Any],
+    scan_failures: list[str],
+) -> None:
+    from nexus_symbiote.core.models import ClaimEvidence
+
+    accepted_refs: set[str] = set()
+    for comp in result.components:
+        # Discovery of a file/configuration does not verify every supplier assertion.
+        imported = name == "shadowscan"
+        comp.claims["discovery_report_entry" if imported else "repository_presence"] = (
+            ClaimEvidence(
+                assurance=AssuranceLevel.DECLARED if imported else AssuranceLevel.OBSERVED,
+                method="imported-discovery-report" if imported else "filesystem-inventory",
+                scope="source-report" if imported else "repository",
+                collector=name,
+                locator=comp.source_path,
+                observed_at=aibom.metadata.timestamp,
+            )
+        )
+        if comp.assurance_level is AssuranceLevel.VERIFIED:
+            comp.assurance_level = AssuranceLevel.DECLARED
+        existing = collected.get(comp.bom_ref)
+        if existing is not None and existing != comp:
+            scan_failures.append(f"{name}: conflicting duplicate component {comp.bom_ref}")
+            continue
+        if existing is None:
+            aibom.components.append(comp)
+            collected[comp.bom_ref] = comp
+        accepted_refs.add(comp.bom_ref)
+    for edge in result.dependencies:
+        if edge.source_ref in accepted_refs and edge.target_ref in accepted_refs:
+            aibom.add_dependency(edge)
+        else:
+            scan_failures.append(f"{name}: dependency endpoint was not imported")
+
+
+def _render_aibom(aibom: AIBOM, output_format: str) -> str:
+    if output_format == "cyclonedx":
+        from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
+
+        return CycloneDXGenerator().generate_json(aibom)
+    if output_format == "spdx":
+        from nexus_symbiote.generators.spdx import SPDXGenerator
+
+        return SPDXGenerator().generate_json(aibom)
+    if output_format == "sarif":
+        from nexus_symbiote.generators.sarif import SARIFGenerator
+
+        return SARIFGenerator().generate_json(aibom)
+    return aibom.to_json()
+
+
 @main.command()
 @click.argument("project_path", type=click.Path(exists=True), default=".")
 @click.option("-o", "--output", type=click.Path(), help="Output file path")
@@ -223,7 +281,6 @@ def scan(
         err_console.print(f"[red]Error:[/] '{_safe(project_path)}' is not a directory")
         sys.exit(1)
 
-    from nexus_symbiote.core.models import ClaimEvidence
     from nexus_symbiote.graph import assemble_repository_agent, validate_graph
     from nexus_symbiote.policy import PolicyError
     from nexus_symbiote.utils.confined import DEFAULT_EXCLUDES
@@ -280,38 +337,15 @@ def scan(
                 source_projection_limitations = result.source_projection_limitations
                 source_unmapped_count = result.source_unmapped_count
                 source_unmapped_indexes = result.source_unmapped_indexes
-            accepted_refs: set[str] = set()
-            for comp in result.components:
-                # Discovery of a file/configuration does not verify every supplier assertion.
-                imported = name == "shadowscan"
-                comp.claims["discovery_report_entry" if imported else "repository_presence"] = (
-                    ClaimEvidence(
-                        assurance=AssuranceLevel.DECLARED if imported else AssuranceLevel.OBSERVED,
-                        method="imported-discovery-report" if imported else "filesystem-inventory",
-                        scope="source-report" if imported else "repository",
-                        collector=name,
-                        locator=comp.source_path,
-                        observed_at=aibom.metadata.timestamp,
-                    )
-                )
-                if comp.assurance_level is AssuranceLevel.VERIFIED:
-                    comp.assurance_level = AssuranceLevel.DECLARED
-                existing = collected.get(comp.bom_ref)
-                if existing is not None and existing != comp:
-                    scan_failures.append(f"{name}: conflicting duplicate component {comp.bom_ref}")
-                    continue
-                if existing is None:
-                    aibom.components.append(comp)
-                    collected[comp.bom_ref] = comp
-                accepted_refs.add(comp.bom_ref)
-            for edge in result.dependencies:
-                if edge.source_ref in accepted_refs and edge.target_ref in accepted_refs:
-                    aibom.add_dependency(edge)
-                else:
-                    scan_failures.append(f"{name}: dependency endpoint was not imported")
+            _merge_scan_result(name, result, aibom, collected, scan_failures)
             surfaces_scanned.extend(result.surfaces_scanned)
             surfaces_excluded.extend(result.surfaces_excluded)
             scan_failures.extend(result.scan_failures)
+            # A collector that produced a conflicting duplicate component or a
+            # dangling dependency edge has failed even when its own ScanResult
+            # reports no failure. Derive both coverage records from the same
+            # delta so the emitted claim cannot list a failed collector as
+            # completed, or call the inventory OBSERVED on the strength of it.
             scanner_status[name] = (
                 "failed"
                 if len(scan_failures) > failure_count
@@ -319,7 +353,7 @@ def scan(
                 if result.surfaces_excluded
                 else "complete"
             )
-            if not result.scan_failures:
+            if scanner_status[name] != "failed":
                 completed.append(name)
             console.print(f"    Found [green]{len(result.components)}[/] components")
         except Exception as exc:
@@ -373,20 +407,7 @@ def scan(
         raise click.ClickException(
             "SARIF cannot preserve imported discovery coverage; use native JSON, CycloneDX or SPDX."
         )
-    if output_format == "cyclonedx":
-        from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
-
-        out_data = CycloneDXGenerator().generate_json(aibom)
-    elif output_format == "spdx":
-        from nexus_symbiote.generators.spdx import SPDXGenerator
-
-        out_data = SPDXGenerator().generate_json(aibom)
-    elif output_format == "sarif":
-        from nexus_symbiote.generators.sarif import SARIFGenerator
-
-        out_data = SARIFGenerator().generate_json(aibom)
-    else:
-        out_data = aibom.to_json()
+    out_data = _render_aibom(aibom, output_format)
 
     if output:
         write_output_file(Path(output), out_data)
@@ -488,7 +509,6 @@ def verify_artifact(
 ) -> None:
     """Verify a local artifact's digest and optionally its Sigstore bundle."""
     import hmac
-    import re
 
     from nexus_symbiote.scanners.base import read_regular_text
     from nexus_symbiote.utils.confined import hash_confined_file
@@ -553,7 +573,6 @@ def verify_discovery(
     """Verify source bytes and optionally their native projection and producer."""
     import hashlib
     import hmac
-    import re
 
     from nexus_symbiote.core.hashing import parse_json_strict
     from nexus_symbiote.scanners.base import read_regular_text
@@ -765,7 +784,7 @@ def risk(
     signature_policies = _signer_policies(signature_policy, root)
     policy = _policy(root or Path(aibom_path).parent, ignore_project=no_project_policy)
     threshold = threshold if threshold is not None else policy.risk.fail_threshold
-    if threshold <= 0 or not __import__("math").isfinite(threshold):
+    if threshold <= 0 or not math.isfinite(threshold):
         raise click.BadParameter("threshold must be positive and finite", param_hint="--threshold")
     basis = "supplied-bom"
     if root is not None:
