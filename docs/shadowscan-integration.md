@@ -62,8 +62,8 @@ declared, unverified tool rather than as a server. It does not infer a server
 association, tool definition hash, endpoint identity or authorization. Conflicting
 tool and kind claims remain unmapped. Native JSON uses `resource_type` and
 CycloneDX uses the `shadowscan:resource-type` property. This mapping follows the
-[ShadowScan endpoint producer at 1a821e5](https://github.com/aisecnomad/Nexus-ShadowScan/blob/1a821e5763e9340ea96564b0606d1ab581fde90e/shadowscan/connectors/endpoint/runtime.py)
-and its [CycloneDX reporter](https://github.com/aisecnomad/Nexus-ShadowScan/blob/1a821e5763e9340ea96564b0606d1ab581fde90e/shadowscan/reporters/cyclonedx.py).
+[ShadowScan endpoint producer at 1a821e5](https://github.com/Hunzee-VC/Nexus-ShadowScan/blob/1a821e5763e9340ea96564b0606d1ab581fde90e/shadowscan/connectors/endpoint/runtime.py)
+and its [CycloneDX reporter](https://github.com/Hunzee-VC/Nexus-ShadowScan/blob/1a821e5763e9340ea96564b0606d1ab581fde90e/shadowscan/reporters/cyclonedx.py).
 Version 1 projections used the server type for these findings; retain the
 original importer to reproduce or verify a v1 projection, then regenerate and
 review v2 inventories before comparison or approval. Producer schema and

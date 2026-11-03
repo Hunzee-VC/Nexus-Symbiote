@@ -19,7 +19,7 @@ After reviewing the exact configuration, an administrator with the appropriate
 GitHub plan and repository Administration permission can apply it with:
 
 ```sh
-gh api --method PUT repos/aisecnomad/Nexus-Symbiote/branches/main/protection \
+gh api --method PUT repos/Hunzee-VC/Nexus-Symbiote/branches/main/protection \
   --input config/github-main-protection.json
 ```
 
@@ -27,7 +27,7 @@ Do not place an administrative token in CI. The publication preflight uses
 only repository contents-read and Actions-read permissions:
 
 ```sh
-python scripts/check_repository_controls.py --repo aisecnomad/Nexus-Symbiote --branch main --sha "$GITHUB_SHA"
+python scripts/check_repository_controls.py --repo Hunzee-VC/Nexus-Symbiote --branch main --sha "$GITHUB_SHA"
 ```
 
 The preflight requires `GH_TOKEN` or `GITHUB_TOKEN`. It checks GitHub's live

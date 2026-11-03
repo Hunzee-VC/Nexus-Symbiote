@@ -9,6 +9,7 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from nexus_symbiote.cli import main
+from nexus_symbiote.core.aibom import DependencyEdge
 from nexus_symbiote.core.models import PromptComponent
 from nexus_symbiote.scanners.base import Scanner, ScanResult
 from nexus_symbiote.scanners.registry import RegistryScanner
@@ -78,3 +79,66 @@ def test_conflicting_duplicate_is_a_collection_failure(tmp_path, monkeypatch):
         "s1: conflicting duplicate component prompt:shared"
         in bom["metadata"]["completeness"]["scan_failures"]
     )
+
+
+def _scan_with_edge(tmp_path: Path, monkeypatch, edge: DependencyEdge) -> dict:
+    class Dangling(Scanner):
+        def scan(self, project_root: Path) -> ScanResult:
+            return ScanResult(
+                scanner_name="s0",
+                components=[PromptComponent(bom_ref="prompt:only", name="only.md")],
+                dependencies=[edge],
+            )
+
+    Dangling.name = "s0"
+    monkeypatch.setattr("nexus_symbiote.cli._get_scanners", lambda: {"s0": Dangling})
+    output = tmp_path / "bom.json"
+    result = CliRunner().invoke(
+        main,
+        [
+            "scan",
+            str(tmp_path),
+            "--report-only",
+            "--no-project-policy",
+            "--scanner",
+            "s0",
+            "-o",
+            str(output),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    return json.loads(output.read_text())
+
+
+def test_conflicting_duplicate_collector_is_not_reported_completed(tmp_path, monkeypatch):
+    first = PromptComponent(bom_ref="prompt:shared", name="shared.md")
+    second = first.model_copy(update={"name": "other.md"})
+    coverage = _scan(tmp_path, monkeypatch, first, second)["metadata"]["completeness"]
+    assert coverage["scanner_status"]["s1"] == "failed"
+    assert "s1" not in coverage["collectors_completed"]
+    assert coverage["collectors_completed"] == ["s0"]
+
+
+def test_dangling_dependency_collector_is_not_reported_completed(tmp_path, monkeypatch):
+    edge = DependencyEdge(
+        source_ref="prompt:only", target_ref="prompt:absent", relationship="invokes"
+    )
+    coverage = _scan_with_edge(tmp_path, monkeypatch, edge)["metadata"]["completeness"]
+    assert "s0: dependency endpoint was not imported" in coverage["scan_failures"]
+    assert coverage["scanner_status"]["s0"] == "failed"
+    assert coverage["collectors_completed"] == []
+
+
+def test_only_orchestration_failures_still_downgrade_inventory_assurance(tmp_path, monkeypatch):
+    edge = DependencyEdge(
+        source_ref="prompt:only", target_ref="prompt:absent", relationship="invokes"
+    )
+    coverage = _scan_with_edge(tmp_path, monkeypatch, edge)["metadata"]["completeness"]
+    assert coverage["assurance_level"] == "declared"
+
+
+def test_clean_collector_is_still_reported_completed(tmp_path, monkeypatch):
+    prompt = PromptComponent(bom_ref="prompt:shared", name="shared.md")
+    coverage = _scan(tmp_path, monkeypatch, prompt)["metadata"]["completeness"]
+    assert coverage["scanner_status"]["s0"] == "complete"
+    assert coverage["collectors_completed"] == ["s0"]

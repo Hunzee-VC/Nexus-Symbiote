@@ -16,6 +16,14 @@ VENDOR = Path("src/nexus_symbiote/generators/schemas/vendor")
 MAX_FILE_BYTES = 2 * 1024 * 1024
 LINK = re.compile(r'!?\[[^\]\n]*\]\((<[^>\n]+>|[^)\s]+)(?:\s+"[^"\n]*")?\)')
 MARKER = re.compile(r"^(?:<{7}|>{7}|\|{7})(?: .*)?$", re.M)
+PROJECT_URL = re.compile(r"https://github\.com/([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)")
+# Anchored so a longer URL path cannot look like an owner: the project's own
+# PyPI URL ends in /p/<name>, and GitHub URLs are matched by PROJECT_URL.
+OWNER_SLUG = "(?<![A-Za-z0-9._/-])([A-Za-z0-9._-]+)/{0}(?![A-Za-z0-9._-])"
+OWNER_TEXT_SUFFIXES = frozenset({".md", ".yml", ".yaml", ".cff"})
+# Dated audits record what was inspected under the owner live at the time.
+# Rewriting their links would falsify the record rather than fix a stale one.
+OWNER_EXEMPT_PREFIXES = (Path("docs/audits"),)
 
 
 def read_file(root: Path, relative: Path) -> bytes:
@@ -69,6 +77,56 @@ def source_issues(root: Path, files: list[Path]) -> list[str]:
                 )
                 if not target.resolve().is_relative_to(root.resolve()) or not target.exists():
                     errors.append(f"{relative}: missing or escaping inline local link: {link}")
+    return errors
+
+
+def canonical_repository(root: Path) -> tuple[str, str]:
+    """Derive the canonical owner/repository from the declared project homepage."""
+    homepage = tomllib.loads(read_file(root, Path("pyproject.toml")).decode())["project"]["urls"][
+        "Homepage"
+    ]
+    match = PROJECT_URL.fullmatch(str(homepage).rstrip("/"))
+    if match is None:
+        raise ValueError("project Homepage is not a GitHub repository URL")
+    return match[1], match[2]
+
+
+def owner_issues(root: Path, files: list[Path]) -> list[str]:
+    """Reject links to this repository under a stale owner.
+
+    Absolute GitHub URLs are deliberately skipped by the inline local-link
+    check, so a repository transfer can leave them pointing at the previous
+    owner and survive review on redirects alone.
+    """
+    try:
+        owner, repository = canonical_repository(root)
+    except (OSError, ValueError, KeyError, TypeError):
+        return ["canonical repository owner could not be determined"]
+    errors = []
+    for relative in files:
+        if relative.suffix not in OWNER_TEXT_SUFFIXES:
+            continue
+        if any(prefix in relative.parents for prefix in OWNER_EXEMPT_PREFIXES):
+            continue
+        try:
+            text = read_file(root, relative).decode("utf-8")
+        except (OSError, ValueError, UnicodeError):
+            errors.append(f"{relative}: source is unavailable or unsafe")
+            continue
+        # The bare owner/repo slug is matched too: a transfer leaves it stale in
+        # command examples, where it is an argument rather than a link.
+        slug = re.compile(OWNER_SLUG.format(re.escape(repository)), re.I)
+        owners = {match[1] for match in slug.finditer(text)}
+        owners.update(
+            match[1]
+            for match in PROJECT_URL.finditer(text)
+            if match[2].lower() == repository.lower()
+        )
+        stale = {value for value in owners if value.lower() != owner.lower()}
+        errors.extend(
+            f"{relative}: links to {value}/{repository} instead of {owner}/{repository}"
+            for value in sorted(stale)
+        )
     return errors
 
 
@@ -136,7 +194,12 @@ def main() -> int:
             timeout=10,
         )
         files = [Path(value) for value in result.stdout.decode().split("\0") if value]
-        errors = [*source_issues(root, files), *version_issues(root), *vendor_issues(root)]
+        errors = [
+            *source_issues(root, files),
+            *owner_issues(root, files),
+            *version_issues(root),
+            *vendor_issues(root),
+        ]
     except (OSError, ValueError, subprocess.SubprocessError):
         print("Repository hygiene could not inspect the tracked source.")
         return 1

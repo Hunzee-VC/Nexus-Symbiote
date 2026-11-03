@@ -18,7 +18,7 @@ Security-sensitive changes require a stated trust boundary and abuse case, a reg
 
 The checked-in [protection proposal](config/github-main-protection.json) requires `Verified CI`, up-to-date branches, independent review including the last push, resolved conversations, administrator enforcement, and no force pushes or branch deletion. It permits merge commits; it does not require linear history. The proposed independent approval requires another authorized reviewer beyond the sole maintainer's own changes.
 
-This file does not apply GitHub settings. At the 2026-11-02 audit, live `main` metadata reported `protected: false`, and inspected hosted jobs had no recorded runner or steps. Those observations and required remediation are tracked in [issue #74](https://github.com/aisecnomad/Nexus-Symbiote/issues/74). See [repository controls](docs/repository-controls.md) for the actual verification boundary and administrator setup.
+This file does not apply GitHub settings. At the 2026-11-02 audit, live `main` metadata reported `protected: false`, and inspected hosted jobs had no recorded runner or steps. Those observations and required remediation are tracked in [issue #74](https://github.com/Hunzee-VC/Nexus-Symbiote/issues/74). See [repository controls](docs/repository-controls.md) for the actual verification boundary and administrator setup.
 
 Do not claim active merge enforcement from a workflow file, governance statement or local passing suite. Verify live settings and successful checks for the revision being considered.
 
