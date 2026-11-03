@@ -31,7 +31,14 @@ Match CI by installing the hash-locked environment first:
 make install-locked   # hash-locked CI environment plus an editable install
 make quality          # ruff, format check, mypy strict, workflow and hygiene checks
 make test             # full pytest suite; `make coverage` enforces the CI floors
+make check            # offline subset of the required CI checks
 ```
+
+## Documentation
+
+- `docs/README.md` is the documentation hub, organized by why, what and how. Add new guides there.
+- `README.md` is also the PyPI long description (`readme` in `pyproject.toml`). Keep its links and images absolute (`https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/<path>`); relative paths do not resolve on PyPI. `make hygiene` checks that every absolute link resolves to a tracked file and heading.
+- Every command and result shown in the docs must be reproducible from the current tree; re-run them when behavior changes.
 
 ## Key conventions
 
