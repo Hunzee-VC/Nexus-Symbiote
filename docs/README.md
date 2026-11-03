@@ -13,7 +13,7 @@ Read these before you use any result in an approval decision.
 
 | Page | Read it to understand |
 | --- | --- |
-| [Security model](security-model.md) | Declared, observed, approved and mediated evidence; [what results do and do not establish](security-model.md#what-results-do-and-do-not-establish); known false-positive and false-negative classes |
+| [Security model](security-model.md) | [Design principles](security-model.md#design-principles); declared, observed, approved and mediated evidence; [what results do and do not establish](security-model.md#what-results-do-and-do-not-establish); known false-positive and false-negative classes |
 | [Offline and live modes](offline-and-live-modes.md#why) | Why every command is offline by default, and how that is enforced |
 | [Security policy](../SECURITY.md) | Security boundaries, supported versions and how to report a vulnerability |
 | [Governance](../GOVERNANCE.md) | Who decides, how changes are reviewed, and which controls are actually active |
