@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import sys
@@ -763,7 +764,7 @@ def risk(
     signature_policies = _signer_policies(signature_policy, root)
     policy = _policy(root or Path(aibom_path).parent, ignore_project=no_project_policy)
     threshold = threshold if threshold is not None else policy.risk.fail_threshold
-    if threshold <= 0 or not __import__("math").isfinite(threshold):
+    if threshold <= 0 or not math.isfinite(threshold):
         raise click.BadParameter("threshold must be positive and finite", param_hint="--threshold")
     basis = "supplied-bom"
     if root is not None:
