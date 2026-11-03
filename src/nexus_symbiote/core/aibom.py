@@ -134,11 +134,6 @@ class AIBOM(BaseModel):
         data = parse_json_strict(raw.decode("utf-8"), max_bytes=limit)
         return cls.model_validate(data)
 
-    def graph_issues(self) -> list[str]:
-        from nexus_symbiote.graph import validate_graph
-
-        return validate_graph(self)
-
     def summary(self) -> dict[str, Any]:
         type_counts: dict[str, int] = {}
         for c in self.components:

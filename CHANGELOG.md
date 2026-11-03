@@ -8,6 +8,7 @@ First alpha of the AgentBOM toolkit under the Hunzee-VC organization. Not yet ta
 
 ### Security
 
+- Bind confined reads, streams, hashes and model inspection to the open descriptor's device, inode and link count as well as its size and timestamps. A rename-over that lands within the same coarse-grained kernel timestamp tick previously left the replaced inode's size, mtime and ctime unchanged, so the swap went undetected and the replacement bytes could be classified as a safe tensor container. The unlinked inode's link count drops to zero regardless of timestamp granularity.
 - Raise dependency minimums past known advisories: cryptography 50, sigstore 4.4 with tuf 7, and pytest 9.0.3 for development. Sigstore 3.x is no longer supported.
 - Lock dependency versions without known advisories (cryptography 50.0.2, sigstore 4.5.1, tuf 7.0.1, pytest 9.2.0) so the required OSV audit of the locked environment passes.
 - Keep unused jsonschema format checkers out of the runtime validation worker. With the cyclonedx or all extras installed, their import cost exceeded the worker's CPU limit and every runtime authorization failed closed.
@@ -77,6 +78,9 @@ First alpha of the AgentBOM toolkit under the Hunzee-VC organization. Not yet ta
 
 ### Changed
 
+- Remove the import cycles between `utils.tensors` and `scanners.model` and between `core.aibom` and `graph` that CodeQL reported. `safetensors_fingerprint` now lives in `nexus_symbiote.scanners.model`; `AIBOM.graph_issues()` is removed in favour of `nexus_symbiote.graph.validate_graph(bom)`.
+- Add Python 3.14 to the hosted test matrix and package classifiers.
+- Restore the `mypy <3` and `pytest-cov <8` development ranges that #109 reverted after Dependabot raised them in #100 and #101.
 - Enforce the canonical repository owner for tracked documentation and workflow metadata in the required quality job. Absolute GitHub URLs are outside the inline local-link check, so the `aisecnomad` to `Hunzee-VC` transfer had left stale links in `CITATION.cff`, `README.md`, `SUPPORT.md`, `GOVERNANCE.md`, `MAINTAINERS.md`, both issue templates, `examples/README.md`, `benchmarks/inventory/README.md` and `docs/repository-controls.md`. Dated audits keep the owner recorded at the time.
 - Check documentation links for missing heading anchors, and require absolute links into this repository's `main` branch to resolve to tracked files and headings. Absolute links had no check at all, although the README must use them for PyPI. On the previous `main` the stricter check found one broken anchor, in the public-agent tutorial.
 - Reject relative links and images in the README named by `pyproject.toml`, which is also the PyPI description. `twine check` does not render Markdown, so nothing caught the 32 relative links, banner included, that the previous `main` would have published broken.

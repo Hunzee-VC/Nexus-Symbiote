@@ -24,6 +24,25 @@ MAX_HASH_BYTES = 5 * 1024 * 1024 * 1024
 DEFAULT_EXCLUDES = frozenset({".git", "node_modules", "__pycache__", ".venv", "venv"})
 
 
+def descriptor_binding(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
+    """Return the open-descriptor evidence that must stay fixed across one observation.
+
+    Size, mtime and ctime alone cannot detect a rename-over: when the replacement
+    lands within the same coarse-grained kernel timestamp tick, the unlinked
+    inode's ctime equals its previous value. The link count of the inode behind
+    the descriptor drops to zero on unlink, so it is compared as well, together
+    with the device and inode identity.
+    """
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_nlink,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+
+
 class CollectionError(ValueError):
     """A collection input exceeded the supported safe boundary."""
 
@@ -244,11 +263,7 @@ class ConfinedCollection:
                 if length > self.max_file_bytes:
                     raise CollectionError("file byte limit exceeded")
                 after = os.fstat(fd)
-                if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
-                    after.st_size,
-                    after.st_mtime_ns,
-                    after.st_ctime_ns,
-                ):
+                if descriptor_binding(before) != descriptor_binding(after):
                     raise CollectionError("file changed during collection")
                 return b"".join(chunks)
             finally:
@@ -305,11 +320,7 @@ class ConfinedCollection:
         try:
             yield cast(BinaryIO, stream)
             after = os.fstat(fd)
-            if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
-                after.st_size,
-                after.st_mtime_ns,
-                after.st_ctime_ns,
-            ):
+            if descriptor_binding(before) != descriptor_binding(after):
                 self._fail(relative, "file changed during collection")
                 raise OSError("artifact changed during collection")
         finally:
@@ -352,11 +363,7 @@ class ConfinedCollection:
                         raise CollectionError("byte limit exceeded")
                     digest.update(chunk)
                 after = os.fstat(fd)
-                if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
-                    after.st_size,
-                    after.st_mtime_ns,
-                    after.st_ctime_ns,
-                ):
+                if descriptor_binding(before) != descriptor_binding(after):
                     raise CollectionError("file changed during collection")
                 return "sha256:" + digest.hexdigest()
             finally:

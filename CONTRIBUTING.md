@@ -4,7 +4,7 @@ Nexus SymBiote's compatibility baseline is the `nexus_symbiote` Python package a
 
 ## Development
 
-Use Python 3.11 through 3.13 on Linux and an isolated virtual environment. `make install-locked` installs the locked environment, and `make check` runs the offline subset of the required CI checks: quality, the coverage-gated test suite, the security regression contracts and the distribution build. The individual commands, from a checkout:
+Use Python 3.11 through 3.14 on Linux and an isolated virtual environment. `make install-locked` installs the locked environment, and `make check` runs the offline subset of the required CI checks: quality, the coverage-gated test suite, the security regression contracts and the distribution build. The individual commands, from a checkout:
 
 ```bash
 python -m venv .venv

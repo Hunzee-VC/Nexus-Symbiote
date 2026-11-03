@@ -165,7 +165,7 @@ class IntegrityValidator:
         declared = {key: value for key, value in declared.items() if value is not None}
         if not declared:
             return
-        from nexus_symbiote.utils.tensors import safetensors_fingerprint
+        from nexus_symbiote.scanners.model import safetensors_fingerprint
 
         try:
             if project_root is None or comp.source_path is None:
