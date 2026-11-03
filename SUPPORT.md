@@ -75,7 +75,7 @@ python -m pytest --cov=nexus_symbiote --cov-branch --cov-report=json:coverage.js
 python scripts/check_coverage.py coverage.json
 ```
 
-These are local checks. They do not apply GitHub protection, qualify another platform, establish a successful hosted workflow or publish a package. Current hosted verification and enforcement remediation is tracked in [issue #74](https://github.com/Hunzee-VC/Nexus-Symbiote/issues/74).
+These are local checks. They do not apply GitHub protection, qualify another platform, establish a successful hosted workflow or publish a package. The remaining enforcement steps are in the [repository controls runbook](docs/repository-controls.md#operator-prerequisites); [issue #74](https://github.com/Hunzee-VC/Nexus-Symbiote/issues/74) records the remediation history.
 
 ## Response expectations
 

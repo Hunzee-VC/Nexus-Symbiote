@@ -52,5 +52,5 @@ The earlier `fix/audit-remediation` branch also recorded a false rug-pull alert 
 
 ## Issues
 
-- **#1**, the multi-session build-coordination board from 2026-11-01, is obsolete: the sessions, the branches it names and the separate foundation package were superseded by `main`.
-- **#74** tracks hosted verification and repository enforcement. Hosted CI and CodeQL were restored by #97 and #98. Branch protection, private vulnerability reporting, secret scanning and the inert ruleset need repository administration; the [runbook](../repository-controls.md#operator-prerequisites) applies them and the publication preflight refuses to publish until protection is enforced. PyPI trusted publishing needs the package-index account.
+- **#1**, the multi-session build-coordination board from 2026-11-01, was closed as obsolete: the sessions, the branches it names and the separate foundation package were superseded by `main`.
+- **#74** was closed with each item's status recorded. Hosted CI and CodeQL were restored by #97 and #98. Branch protection, private vulnerability reporting, secret scanning and the inert ruleset need repository administration; the [runbook](../repository-controls.md#operator-prerequisites) applies them and the publication preflight refuses to publish until protection is enforced. PyPI trusted publishing needs the package-index account. Both remaining actions are tracked in the [roadmap](../../ROADMAP.md).

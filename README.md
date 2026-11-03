@@ -339,7 +339,7 @@ The [documentation hub](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/do
 
 ## Project status
 
-Nexus SymBiote is **alpha** with a single maintainer: APIs, formats and policy semantics may change, and there is no SLA. Hosted CI, including CodeQL, runs on every push and pull request. Branch protection and PyPI trusted publishing remain open in [issue #74](https://github.com/Hunzee-VC/Nexus-Symbiote/issues/74). Planned work is in the [roadmap](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/ROADMAP.md) and changes are in the [changelog](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/CHANGELOG.md).
+Nexus SymBiote is **alpha** with a single maintainer: APIs, formats and policy semantics may change, and there is no SLA. Hosted CI, including CodeQL, runs on every push and pull request. Branch protection and PyPI trusted publishing still need administrator action; [issue #74](https://github.com/Hunzee-VC/Nexus-Symbiote/issues/74) records their status and the [roadmap](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/ROADMAP.md) tracks them. Planned work is in the [roadmap](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/ROADMAP.md) and changes are in the [changelog](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/CHANGELOG.md).
 
 [Nexus-ShadowScan](https://github.com/Hunzee-VC/Nexus-ShadowScan) is the companion discovery engine. It finds agents across many surfaces, and Nexus SymBiote turns its reports into AgentBOMs and adds local artifact and supply-chain verification.
 
