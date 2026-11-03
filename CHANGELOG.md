@@ -45,6 +45,8 @@ First alpha of the AgentBOM toolkit under the Hunzee-VC organization. Not yet ta
 
 ### Delivery
 
+- Restructure the README around a Why/What/How narrative: add the problem statement motivating AgentBOMs, a capabilities summary, an ASCII architecture diagram, a table of contents, and a contributing section linking all community files. Switch documentation links from absolute GitHub URLs to relative paths and add the CLI reference, npm lockfile evidence guide, and tutorials to the documentation table. Add a Python version badge.
+- Optimize the hero image from 3.5 MB to 225 KB (resize to 1400 px, quality 85, strip metadata) to reduce clone size and improve page load.
 - Lead the README with what a scan of the demo agent finds; move result limits and export semantics into the security model's "What results do and do not establish" section. Remove the static coverage badge and the link to a release asset that does not exist yet.
 - Point documentation, issue templates, citation metadata and SARIF `informationUri` at Hunzee-VC/Nexus-Symbiote, and reject legacy-owner repository URLs in the repository hygiene check. Runtime and benchmark predicate-type identifiers are unchanged because signed evidence binds to them.
 - Split the most complex collector and CLI functions without behavior changes, and add hypothesis property tests for strict JSON parsing, tool fingerprints, the runtime JSON budget, origin redaction and SafeTensors inspection.
