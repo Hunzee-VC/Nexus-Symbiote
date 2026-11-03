@@ -61,4 +61,5 @@ Alpha release of the AgentBOM toolkit under the Hunzee-VC organization.
 
 ## Unreleased
 
-(empty for now)
+- Add `config/github-main-protection-interim.json`, a branch-protection configuration identical to `config/github-main-protection.json` except that it does not require pull-request review. Applying the full proposal as written on a single-maintainer repository blocks the maintainer from merging their own pull requests, because GitHub does not count self-approval toward a required review; the interim configuration still enforces `Verified CI` for everyone, including administrators, and still disables force pushes and branch deletion. `scripts/check_repository_controls.py` does not check for required reviews, so the interim configuration satisfies the same publication preflight as the full one. See [repository controls](docs/repository-controls.md) and [issue #74](https://github.com/Hunzee-VC/Nexus-Symbiote/issues/74).
+- Fix a stale `aisecnomad/Nexus-Symbiote` reference in `docs/repository-controls.md`'s preflight example left over from the move to the Hunzee-VC organization.
