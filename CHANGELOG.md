@@ -1,8 +1,8 @@
 # Changelog
 
-## [0.1.0] - Unreleased
+## [0.1.0] - 2026-11-02
 
-First alpha of the AgentBOM toolkit under the Hunzee-VC organization. Not yet tagged or published; the date is set when the release is tagged.
+Alpha release of the AgentBOM toolkit under the Hunzee-VC organization.
 
 ### Security
 
@@ -45,9 +45,6 @@ First alpha of the AgentBOM toolkit under the Hunzee-VC organization. Not yet ta
 
 ### Delivery
 
-- Lead the README with what a scan of the demo agent finds; move result limits and export semantics into the security model's "What results do and do not establish" section. Remove the static coverage badge and the link to a release asset that does not exist yet.
-- Point documentation, issue templates, citation metadata and SARIF `informationUri` at Hunzee-VC/Nexus-Symbiote, and reject legacy-owner repository URLs in the repository hygiene check. Runtime and benchmark predicate-type identifiers are unchanged because signed evidence binds to them.
-- Split the most complex collector and CLI functions without behavior changes, and add hypothesis property tests for strict JSON parsing, tool fingerprints, the runtime JSON budget, origin redaction and SafeTensors inspection.
 - Scope exported SPDX document and element identifiers to each inventory revision so different package versions can coexist in a combined graph.
 - Run security regressions against the exact wheel built by CI and the release workflow.
 - Emit standard package identifiers for portable BOM consumers while retaining
@@ -61,6 +58,8 @@ First alpha of the AgentBOM toolkit under the Hunzee-VC organization. Not yet ta
 - Build release distributions from a `git archive` export of the commit with `SOURCE_DATE_EPOCH`, and upload them before tests, evidence collection or the unpinned smoke installation run. Previously evidence written during the run could enter the sdist, and a dependency resolved without hashes ran before the distributions were hashed and uploaded. Attest and publish jobs now reject artifact digest mismatches.
 - Check `.yaml` workflows as well as `.yml` for unpinned Actions and expressions in shell source.
 - Canonical repository moved to Hunzee-VC/Nexus-Symbiote; documentation and package metadata updated accordingly.
+
+## Unreleased
 
 ### Fixed
 
