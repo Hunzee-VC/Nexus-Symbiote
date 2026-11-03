@@ -1,8 +1,8 @@
 # Changelog
 
-## [0.1.0] - 2026-11-02
+## [Unreleased]
 
-Alpha release of the AgentBOM toolkit under the Hunzee-VC organization.
+Candidate for the first alpha, 0.1.0. Not yet tagged or published.
 
 ### Security
 
@@ -58,7 +58,3 @@ Alpha release of the AgentBOM toolkit under the Hunzee-VC organization.
 - Build release distributions from a `git archive` export of the commit with `SOURCE_DATE_EPOCH`, and upload them before tests, evidence collection or the unpinned smoke installation run. Previously evidence written during the run could enter the sdist, and a dependency resolved without hashes ran before the distributions were hashed and uploaded. Attest and publish jobs now reject artifact digest mismatches.
 - Check `.yaml` workflows as well as `.yml` for unpinned Actions and expressions in shell source.
 - Canonical repository moved to Hunzee-VC/Nexus-Symbiote; documentation and package metadata updated accordingly.
-
-## Unreleased
-
-(empty for now)

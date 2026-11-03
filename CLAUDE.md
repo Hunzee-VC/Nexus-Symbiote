@@ -8,20 +8,33 @@ Agent Bill of Materials (AgentBOM) generator and validator for AI agent supply c
 src/nexus_symbiote/
   core/        — Domain models (Pydantic v2), enums, AIBOM container, RFC 8785 JCS hashing
   scanners/    — Component discovery (MCP, model weights, prompts, RAG, registry, A2A, IDE agents, ShadowScan reports)
-  generators/  — BOM output (native JSON, CycloneDX 1.7, SPDX 3.0)
+  generators/  — Exports: native JSON, CycloneDX 1.7, SPDX 3.0, SARIF, VEX
   validators/  — Completeness, integrity, and risk scoring
-  diff/        — AIBOM version comparison
-  utils/       — Sigstore verification, file hash utilities
-  cli.py       — Click CLI entrypoint
+  diff/        — AIBOM version comparison and the snapshot alert gate
+  live/        — Opt-in observations through independently pinned local MCP launchers
+  utils/       — Confined bounded reads, Sigstore/artifact verification, file hash utilities
+  runtime.py   — Signed, operation-bound authorization for integrations that mediate tool calls
+  runtime_validation.py, runtime_cli.py — Offline schema validation worker; `runtime` commands
+  policy.py, signature_policy.py       — Caller-selected policy and operator signer policy
+  graph.py, lineage.py                 — Repository association graph, blast radius, lineage
+  advisories.py                        — Explicit, bounded OSV queries for exact package identities
+  modes.py                             — Offline by default; live mode is opt-in
+  scanner_catalog.py                   — Built-in collector universe for coverage checks
+  cli.py, live_cli.py, supply_chain_cli.py — Click CLI entrypoints
 ```
 
 ## Build and test
 
+Match CI by installing the hash-locked environment first:
+
 ```bash
-pip install -e ".[dev]"
+python -m pip install --require-hashes -r requirements-ci.lock
+python -m pip install --no-deps --no-build-isolation -e .
 pytest
-ruff check src/ tests/
-mypy src/
+ruff check src tests scripts
+ruff format --check src tests scripts
+mypy src/nexus_symbiote
+python scripts/check_repository_hygiene.py
 ```
 
 ## Key conventions

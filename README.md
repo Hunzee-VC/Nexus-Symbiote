@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/Hunzee-VC/Nexus-Symbiote/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Hunzee-VC/Nexus-Symbiote/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/Hunzee-VC/Nexus-Symbiote/actions/workflows/codeql.yml/badge.svg)](https://github.com/Hunzee-VC/Nexus-Symbiote/actions/workflows/codeql.yml)
-[![Coverage](https://img.shields.io/badge/coverage-CI%20enforced-brightgreen)](https://github.com/Hunzee-VC/Nexus-Symbiote/actions/workflows/ci.yml)
+[![Coverage floors](https://img.shields.io/badge/coverage-floors%2090%25%20stmt%20%2F%2075%25%20branch-brightgreen)](https://github.com/Hunzee-VC/Nexus-Symbiote/actions/workflows/ci.yml)
 [![License](https://img.shields.io/github/license/Hunzee-VC/Nexus-Symbiote)](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/LICENSE)
 
 **Agent Bill of Materials: inventory, integrity evidence, policy checks and standard exports for AI agent supply chains.**
@@ -101,7 +101,7 @@ The eight built-in collector names are `shadowscan`, `mcp`, `model`, `prompt`, `
 
 Collection is static by default and does not execute project modules, model loaders, hooks or MCP launch commands. Configuration presence does not prove that a server is running or that its live tool definitions match the declaration. `verify-live` is a separate explicit execution operation requiring an independently pinned launcher policy and external isolation. `discover-mcp` is an explicit HTTPS observation operation. Neither command calls tools.
 
-Project validation compares static MCP records and configured tool fingerprints with fresh local evidence. A structure binding detects added or removed arguments, environment variables and tools. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` set, a keyed binding also detects same-version package swaps and changed argument, environment and endpoint values, without exporting anything a secret could be guessed from. Legacy snapshots without this binding need recollection; see [source reconciliation and migration](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/verification-source-binding.md).
+Project validation compares static MCP records and configured tool fingerprints with fresh local evidence. A structure binding detects added or removed arguments, environment variables and tools. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` set, a keyed binding also detects same-version package swaps and changed argument, environment and endpoint values, without exporting anything a secret could be guessed from. Legacy snapshots without this binding need recollection; see [source reconciliation and migration](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/verification-source-binding.md).
 
 ## Key capabilities and limits
 
