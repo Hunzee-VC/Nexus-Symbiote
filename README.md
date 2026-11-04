@@ -124,19 +124,21 @@ A scan is an inventory, not a verdict. It does not show that a model is benign, 
 
 ### Install a verified release
 
-Requires Python 3.11+ on Linux. Releases are built from `main` by the [release workflow](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/.github/workflows/release.yml) and published to PyPI through OIDC trusted publishing with build attestations. Download the exact files, verify them against the attestation, then install:
+Requires Python 3.11+ on Linux. Releases are built from `main` by the [release workflow](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/.github/workflows/release.yml) and published to PyPI through OIDC trusted publishing with build attestations. Install the hash-locked runtime from the release tag, download the exact wheel, verify it against the attestation, then install it without resolving anything else:
 
 ```bash
 python -m venv .venv && . .venv/bin/activate
+curl -fsSLO https://raw.githubusercontent.com/Hunzee-VC/Nexus-Symbiote/v0.1.0/requirements-action.lock
+python -m pip install --require-hashes --only-binary=:all: -r requirements-action.lock
 python -m pip download --no-deps --only-binary=:all: nexus-symbiote==0.1.0 -d dist
 gh attestation verify dist/nexus_symbiote-0.1.0-py3-none-any.whl --repo Hunzee-VC/Nexus-Symbiote \
   --signer-workflow Hunzee-VC/Nexus-Symbiote/.github/workflows/release.yml \
   --source-ref refs/heads/main --deny-self-hosted-runners
-python -m pip install dist/nexus_symbiote-0.1.0-py3-none-any.whl
+python -m pip install --no-deps dist/nexus_symbiote-0.1.0-py3-none-any.whl
 nexus-symbiote --version
 ```
 
-Do not install a file that fails verification. Add `--source-digest <commit>` with the commit named on the GitHub release to pin the exact source. [Releasing](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/releasing.md) describes what the attestation does and does not establish.
+Do not install a file that fails verification. Add `--source-digest <commit>` with the commit named on the GitHub release to pin the exact source; the signed `v0.1.0` tag names the same commit, so the lock file and the wheel come from one reviewed revision. [Releasing](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/releasing.md) describes what the attestation does and does not establish.
 
 ### Install from reviewed source
 
