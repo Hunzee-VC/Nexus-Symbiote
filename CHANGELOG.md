@@ -2,9 +2,9 @@
 
 Notable changes to Nexus SymBiote, newest release first. Within a release, security changes come first, and changes that need action from users are marked **Breaking**.
 
-## [0.1.0] - Unreleased
+## [0.1.0] - 2026-11-04
 
-First alpha of the AgentBOM toolkit under the Hunzee-VC organization. Not yet tagged or published; the date is set when the release is tagged.
+First alpha of the AgentBOM toolkit under the Hunzee-VC organization.
 
 ### Security
 

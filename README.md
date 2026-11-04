@@ -34,7 +34,7 @@ nexus-symbiote diff reviewed.json agentbom.json --fail-on-alert        # gate on
 ```
 
 > [!NOTE]
-> **Alpha.** Interfaces, formats and policy semantics may change, and no package has been published yet. Install from a reviewed commit, as shown under [How](#how).
+> **Alpha.** Interfaces, formats and policy semantics may change. Install the published release only after verifying its build attestation, or install a reviewed commit from source; both are shown under [How](#how).
 
 ## Why
 
@@ -120,11 +120,27 @@ A scan is an inventory, not a verdict. It does not show that a model is benign, 
 
 ## How
 
-**Install from a reviewed commit, inventory the agent, then let CI hold the line.**
+**Install a verified release or a reviewed commit, inventory the agent, then let CI hold the line.**
+
+### Install a verified release
+
+Requires Python 3.11+ on Linux. Releases are built from `main` by the [release workflow](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/.github/workflows/release.yml) and published to PyPI through OIDC trusted publishing with build attestations. Download the exact files, verify them against the attestation, then install:
+
+```bash
+python -m venv .venv && . .venv/bin/activate
+python -m pip download --no-deps --only-binary=:all: nexus-symbiote==0.1.0 -d dist
+gh attestation verify dist/nexus_symbiote-0.1.0-py3-none-any.whl --repo Hunzee-VC/Nexus-Symbiote \
+  --signer-workflow Hunzee-VC/Nexus-Symbiote/.github/workflows/release.yml \
+  --source-ref refs/heads/main --deny-self-hosted-runners
+python -m pip install dist/nexus_symbiote-0.1.0-py3-none-any.whl
+nexus-symbiote --version
+```
+
+Do not install a file that fails verification. Add `--source-digest <commit>` with the commit named on the GitHub release to pin the exact source. [Releasing](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/releasing.md) describes what the attestation does and does not establish.
 
 ### Install from reviewed source
 
-Requires Python 3.11+ on Linux. No release has been published yet — install a commit you have reviewed, with the hash-locked runtime:
+Requires Python 3.11+ on Linux. To run exactly the commit you reviewed, install it with the hash-locked runtime:
 
 ```bash
 git clone https://github.com/Hunzee-VC/Nexus-Symbiote.git
@@ -253,7 +269,7 @@ The [documentation hub](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/do
 
 ## Project status
 
-Nexus SymBiote is **alpha** with a single maintainer: APIs, formats and policy semantics may change, and there is no SLA. CI, including CodeQL, runs on every push and pull request. Branch protection and PyPI trusted publishing still need administrator action: [issue #74](https://github.com/Hunzee-VC/Nexus-Symbiote/issues/74) records their status, and they are tracked with the rest of the planned work in the [roadmap](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/ROADMAP.md) and changes are in the [changelog](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/CHANGELOG.md).
+Nexus SymBiote is **alpha** with a single maintainer: APIs, formats and policy semantics may change, and there is no SLA. CI, including CodeQL, runs on every push and pull request. A release is published only by the environment-gated [release workflow](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/releasing.md), after its preflight has confirmed branch protection and a successful `Verified CI` run for the exact commit. Planned work is tracked in the [roadmap](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/ROADMAP.md) and changes are in the [changelog](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/CHANGELOG.md).
 
 [Nexus-ShadowScan](https://github.com/Hunzee-VC/Nexus-ShadowScan) is the companion discovery engine — it finds agents across many surfaces, and Nexus SymBiote turns its reports into AgentBOMs with local artifact and supply-chain verification.
 
