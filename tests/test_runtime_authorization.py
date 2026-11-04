@@ -17,6 +17,7 @@ from nexus_symbiote.runtime import (
     ApprovedSnapshot,
     AuthorizationError,
     Envelope,
+    EnvelopeSignature,
     ExecutionContext,
     ReferenceGateway,
     ServedTool,
@@ -24,6 +25,8 @@ from nexus_symbiote.runtime import (
     ToolCall,
     ToolGrant,
     TrustStatus,
+    _pae,
+    canonical_bytes,
     digest,
     key_id,
     sign_contract,
@@ -500,3 +503,34 @@ def test_approval_actor_must_match_authorized_key(tmp_path):
 def test_noncanonical_input_rejected(raw):
     with pytest.raises(AuthorizationError):
         strict_json(raw)
+
+
+def test_non_canonical_predicate_is_rejected_so_one_contract_has_one_digest(tmp_path):
+    values = fixture(tmp_path)
+    snapshot, key = values[3], values[6]
+    envelope = sign_contract(snapshot, "snapshot", (key,))
+    ring = {key_id(key.public_key()): key.public_key()}
+    statement = json.loads(base64.b64decode(envelope.payload))
+    canonical = digest(snapshot.model_dump(mode="json"))
+    assert "sha256:" + statement["subject"][0]["digest"]["sha256"] == canonical
+    # The same contract encoded differently, as another DSSE signer may emit it.
+    predicate = {
+        name: value[:-1] + "+00:00" if isinstance(value, str) and value.endswith("Z") else value
+        for name, value in statement["predicate"].items()
+    }
+    assert ApprovedSnapshot.model_validate(predicate) == snapshot
+    assert digest(predicate) != canonical
+    statement["predicate"] = predicate
+    statement["subject"] = [
+        {"name": "snapshot", "digest": {"sha256": digest(predicate).split(":", 1)[1]}}
+    ]
+    payload = canonical_bytes(statement)
+    signature = EnvelopeSignature(
+        key_id=key_id(key.public_key()),
+        signature=base64.b64encode(key.sign(_pae(payload))).decode(),
+    )
+    altered = Envelope(payload=base64.b64encode(payload).decode(), signatures=(signature,))
+    with pytest.raises(AuthorizationError, match="canonical"):
+        verify_contract(altered, "snapshot", ring)
+    contract, _ = verify_contract(envelope, "snapshot", ring)
+    assert digest(contract.model_dump(mode="json")) == canonical

@@ -280,6 +280,11 @@ def verify_contract(
             contract = TrustStatus.model_validate(statement["predicate"])
         else:
             contract = HostedModelAttestation.model_validate(statement["predicate"])
+        # One contract must have one digest: revocation and approval bind to the
+        # canonical form, so a predicate encoded differently by another signer
+        # would otherwise verify under a subject digest nothing can revoke.
+        if digest(statement["predicate"]) != digest(contract.model_dump(mode="json")):
+            raise AuthorizationError("predicate is not in canonical contract form")
         subject = [
             {"name": kind, "digest": {"sha256": digest(statement["predicate"]).split(":", 1)[1]}}
         ]
