@@ -18,7 +18,7 @@ Collectors must preserve coverage limitations, denied reads, unsupported inputs,
 ## Design principles
 
 1. **Never runs what it inspects.** Collection is static. It does not execute project modules, model loaders, repository hooks or MCP launch commands.
-2. **Offline by default, enforced at run time.** Every command refuses name resolution, network connections and process creation unless you opt into live mode for one of three commands.
+2. **Offline by default, enforced at run time.** Every command runs under a tripwire that makes this package and its dependencies fail closed on name resolution, network connections and process creation unless you opt into live mode for one of three commands. It is not a sandbox; add an operating-system network boundary where one is required.
 3. **Unknown is not safe.** Missing evidence, failed reads and skipped collectors are recorded as gaps, and default gates fail on them instead of passing silently.
 4. **Claims are not evidence.** Declared, observed, approved and mediated states stay separate. A supplier label or an adjacent signature file never upgrades trust by itself, and `--no-project-policy` stops an untrusted checkout from choosing its own gates.
 5. **Standards first.** One native inventory exports to CycloneDX 1.7, SPDX 3.0.1, SARIF 2.1.0 and VEX. Standard exports carry the full native inventory in a digest-bound extension, so a consumer that keeps it loses nothing.

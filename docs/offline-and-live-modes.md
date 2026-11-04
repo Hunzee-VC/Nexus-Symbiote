@@ -74,7 +74,7 @@ are always offline, so they need no configuration.
 For the duration of an offline command, the CLI replaces these Python entry points
 with functions that raise `OfflineViolation`:
 
-- sockets: `connect`, `connect_ex`, `listen`, `sendto`, `sendmsg`;
+- `socket.socket` methods: `connect`, `connect_ex`, `listen`, `sendto`, `sendmsg`;
 - name resolution: `getaddrinfo`, `gethostbyname`, `gethostbyname_ex`,
   `gethostbyaddr` and `getnameinfo`, in both `socket` and `_socket`;
 - `socket.create_connection` and `socket.create_server`;
@@ -86,6 +86,13 @@ with functions that raise `OfflineViolation`:
 with exit status 1 and asks you to report a defect; a scan stops before it writes
 its inventory. The original functions are restored when the command ends.
 
+The C socket type (`_socket.socket`, also named `socket.SocketType`) is immutable
+and cannot be patched, so a CPython audit hook raises the same `OfflineViolation`
+for the `socket.connect`, `socket.sendto` and `socket.sendmsg` events, the name
+resolution events and the process creation events while an offline command runs.
+That also covers references captured before the command started. An audit hook
+cannot be removed, so it stays installed and is inert outside an offline command.
+
 The test suite runs every static command through the CLI with this guard in place,
 and checks that Sigstore's offline verifier (used for signature checks) loads its
 embedded trust root without network access.
@@ -94,7 +101,11 @@ embedded trust root without network access.
 
 The guard is a tripwire for this package and its Python dependencies, **not a
 sandbox**. Native code that calls the operating system directly bypasses it, and
-a process started by `verify-live` is not covered at all. Where you need a hard
+a process started by `verify-live` is not covered at all. `listen`, `accept`, `send`
+and `recv` raise no audit event, so code that constructs `_socket.socket` directly,
+or wraps an inherited descriptor, can still accept or use an existing connection.
+No code from the scanned project runs inside the process, so these limits concern
+deliberate in-process evasion, not crafted input. Where you need a hard
 boundary, add an operating-system control as well: a network namespace (for
 example `unshare --net --map-root-user`), a container started with
 `--network none`, or a deny-all egress policy. Run `verify-live` launchers under an

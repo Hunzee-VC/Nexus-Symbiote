@@ -8,9 +8,12 @@ it. A project policy file never selects the mode: it lives in the checkout
 being inventoried, which is untrusted input.
 
 The offline guard is a tripwire for this package and its Python dependencies,
-not a sandbox. Native code that calls the operating system directly bypasses
-it. Where a hard boundary is required, also run the tool without network
-access, for example in a network namespace or behind a deny-all egress policy.
+not a sandbox. It replaces the Python entry points and adds a CPython audit
+hook that fires for the C socket type as well (``_socket.socket``, also named
+``socket.SocketType``, is immutable and cannot be patched). Native code that
+calls the operating system directly bypasses it. Where a hard boundary is
+required, also run the tool without network access, for example in a network
+namespace or behind a deny-all egress policy.
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ import enum
 import os
 import socket
 import subprocess
+import sys
 import threading
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
@@ -52,6 +56,25 @@ _PROCESS_FUNCTIONS = (
     "execve",
 )
 _MISSING = object()
+# CPython raises these audit events inside the C implementations, so they also
+# catch _socket.socket methods, references captured before the guard, and
+# connect_ex (which raises socket.connect). listen, accept, send and recv have
+# no audit event; the attribute patches above remain the guard for those.
+_AUDIT_EVENTS = {
+    "socket.connect": "network access (socket.connect)",
+    "socket.sendto": "network access (socket.sendto)",
+    "socket.sendmsg": "network access (socket.sendmsg)",
+    "socket.getaddrinfo": "name resolution (socket.getaddrinfo)",
+    "socket.gethostbyname": "name resolution (socket.gethostbyname)",
+    "socket.gethostbyaddr": "name resolution (socket.gethostbyaddr)",
+    "socket.getnameinfo": "name resolution (socket.getnameinfo)",
+    "os.system": "process creation (os.system)",
+    "os.fork": "process creation (os.fork)",
+    "os.forkpty": "process creation (os.forkpty)",
+    "os.posix_spawn": "process creation (os.posix_spawn)",
+    "os.exec": "process creation (os.exec)",
+    "subprocess.Popen": "process creation (subprocess)",
+}
 
 
 class Mode(enum.Enum):
@@ -111,6 +134,26 @@ def resolve(*, offline: bool, live: bool, environ: Mapping[str, str]) -> Resolve
 
 _lock = threading.Lock()
 _active: Mode | None = None
+_audit_hook_installed = False
+
+
+def _audit(event: str, _args: tuple[Any, ...]) -> None:
+    if _active is Mode.OFFLINE:
+        operation = _AUDIT_EVENTS.get(event)
+        if operation is not None:
+            raise OfflineViolation(operation)
+
+
+def _install_audit_hook() -> None:
+    """Install the process-wide tripwire once.
+
+    An audit hook cannot be removed, so instead of being installed and restored
+    with the attribute patches it stays and checks ``_active`` on every event.
+    """
+    global _audit_hook_installed
+    if not _audit_hook_installed:
+        sys.addaudithook(_audit)
+        _audit_hook_installed = True
 
 
 def current() -> Mode | None:
@@ -200,7 +243,10 @@ def enforce(mode: Mode) -> Iterator[None]:
             nested = True
         else:
             nested = False
-            patches = _guard() if mode is Mode.OFFLINE else []
+            patches = []
+            if mode is Mode.OFFLINE:
+                _install_audit_hook()
+                patches = _guard()
             _active = mode
     if nested:
         yield
