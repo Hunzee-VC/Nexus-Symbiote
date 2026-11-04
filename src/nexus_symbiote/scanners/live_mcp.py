@@ -168,11 +168,16 @@ def _public_ip(value: str) -> bool:
     mapped = getattr(address, "ipv4_mapped", None)
     if mapped is not None:
         address = mapped
+    # Embedded-IPv4 forms can reach the IPv4 address they carry, and none of
+    # them names a legitimate public service: refuse them outright. ::/96 is the
+    # deprecated IPv4-compatible range and ::ffff:0:0:0/96 is SIIT translation.
     if isinstance(address, ipaddress.IPv6Address) and (
         address.sixtofour is not None
         or address.teredo is not None
         or address in ipaddress.ip_network("64:ff9b::/96")
         or address in ipaddress.ip_network("64:ff9b:1::/48")
+        or address in ipaddress.ip_network("::/96")
+        or address in ipaddress.ip_network("::ffff:0:0:0/96")
     ):
         return False
     return bool(address.is_global and not address.is_multicast and not address.is_unspecified)

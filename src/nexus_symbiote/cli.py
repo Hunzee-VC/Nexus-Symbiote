@@ -61,8 +61,10 @@ def _policy(root: Path, *, ignore_project: bool = False) -> Policy:
 
 # C0/C1 controls move the cursor or rewrite earlier output; bidirectional and
 # invisible format characters disguise text. Inventory data may contain any of them.
+# Line breaks are included: a file name or component name containing one could
+# forge whole output lines, and in CI a line starting with "::" is a workflow command.
 _UNSAFE_TEXT = re.compile(
-    r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]"
+    r"[\x00-\x08\x0a-\x1f\x7f-\x9f\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]"
 )
 
 

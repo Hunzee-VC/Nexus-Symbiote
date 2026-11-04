@@ -8,7 +8,6 @@ import pytest
 
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.enums import (
-    SERIALIZATION_FORMAT_SAFETY,
     AutonomyLevel,
     CapabilityClass,
     ComponentType,
@@ -45,9 +44,9 @@ class TestEnums:
         assert RiskSeverity.CRITICAL in severities
         assert RiskSeverity.INFO in severities
 
-    def test_serialization_safety_map(self):
-        assert SERIALIZATION_FORMAT_SAFETY["safetensors"] == SerializationSafety.SAFE
-        assert SERIALIZATION_FORMAT_SAFETY["pickle"] == SerializationSafety.UNSAFE_CODE_EXECUTION
+    def test_serialization_safety_values(self):
+        assert SerializationSafety.SAFE.value == "safe"
+        assert SerializationSafety.UNSAFE_CODE_EXECUTION.value == "unsafe-code-execution"
 
     def test_trust_tier_values(self):
         assert TrustTier.INTERNAL_VERIFIED.value == "internal-verified"

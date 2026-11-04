@@ -9,7 +9,7 @@ from click.testing import CliRunner
 
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
-from nexus_symbiote.core.models import MCPServerComponent, PromptComponent
+from nexus_symbiote.core.models import CompletenessClaim, MCPServerComponent, PromptComponent
 
 MARKUP = "[link=https://attacker.example/approve]docs[/link][conceal]"
 CONTROLS = "\x1b]8;;https://attacker.example\x07x\x1b]8;;\x07\x1b[1A\x1b[2K\rfake\u202egpj.exe"
@@ -86,3 +86,39 @@ def test_risk_project_failure_reasons_print_without_terminal_controls(tmp_path):
     assert "evil" in result.output and "fake" in result.output
     for character in ("\x1b", "\r", "‮"):
         assert character not in result.output
+
+
+WORKFLOW_COMMAND = "x\n::error title=Spoofed::All checks passed\n::add-mask::CRITICAL\u2028y"
+
+
+def _injected_lines(output: str) -> list[str]:
+    return [line for line in output.splitlines() if line.lstrip().startswith("::")]
+
+
+def test_line_breaks_in_inventory_text_cannot_forge_output_lines(tmp_path):
+    old, new = tmp_path / "old.json", tmp_path / "new.json"
+    old.write_text(AIBOM().to_json())
+    new.write_text(
+        AIBOM(components=[PromptComponent(bom_ref="prompt:1", name=WORKFLOW_COMMAND)]).to_json()
+    )
+    result = CliRunner().invoke(main, ["diff", str(old), str(new)])
+    assert not _injected_lines(result.output)
+    assert (
+        "x\ufffd::error title=Spoofed::All checks passed\ufffd::add-mask::CRITICAL\ufffdy"
+        in result.output
+    )
+
+
+def test_validate_prints_hostile_collection_paths_on_one_line(tmp_path):
+    bom = AIBOM(components=[PromptComponent(bom_ref="prompt:1", name="CLAUDE.md")])
+    bom.metadata.completeness = CompletenessClaim(
+        scope="repository",
+        surfaces_scanned=["."],
+        scan_failures=[WORKFLOW_COMMAND + ".pkl: nonregular file excluded"],
+    )
+    path = tmp_path / "bom.json"
+    path.write_text(bom.to_json())
+    result = CliRunner().invoke(main, ["validate", str(path), "--no-project-policy"])
+    assert result.exit_code == 1
+    assert "::error title=Spoofed" in result.output
+    assert not _injected_lines(result.output)

@@ -51,6 +51,10 @@ class FakeSocket:
         "fe80::1",
         "fc00::1",
         "::ffff:127.0.0.1",
+        "::7f00:1",
+        "::a9fe:a9fe",
+        "::ffff:0:7f00:1",
+        "::ffff:0:a00:1",
     ],
 )
 def test_literal_nonpublic_destinations_refused(address):

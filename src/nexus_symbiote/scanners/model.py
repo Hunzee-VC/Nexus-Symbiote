@@ -20,10 +20,10 @@ from nexus_symbiote.core.enums import (
     SerializationSafety,
     TrustTier,
 )
-from nexus_symbiote.core.hashing import open_regular_file, parse_json_strict
+from nexus_symbiote.core.hashing import descriptor_binding, open_regular_file, parse_json_strict
 from nexus_symbiote.core.models import ModelComponent, RiskAssessment
 from nexus_symbiote.scanners.base import Scanner, ScanResult
-from nexus_symbiote.utils.confined import MAX_HASH_BYTES, ConfinedCollection, descriptor_binding
+from nexus_symbiote.utils.confined import MAX_HASH_BYTES, ConfinedCollection
 from nexus_symbiote.utils.crypto import SigstoreArtifactPolicy, verify_sigstore_bundle
 from nexus_symbiote.utils.tensors import fingerprint_stream
 
@@ -38,7 +38,14 @@ MODEL_EXTENSIONS = {
     ".joblib": ("joblib", "scikit-learn"),
     ".gguf": ("gguf", "llama.cpp"),
     ".ggml": ("ggml", "llama.cpp-legacy"),
+    ".ckpt": ("ckpt", "pytorch-checkpoint"),
+    ".pdparams": ("pdparams", "paddlepaddle"),
+    ".h5": ("hdf5", "keras-hdf5"),
+    ".hdf5": ("hdf5", "keras-hdf5"),
+    ".keras": ("keras", "keras"),
 }
+# Generic protobuf files are not models; only the SavedModel graph name is.
+NAMED_MODEL_FILES = {"saved_model.pb": ("pb", "tensorflow-savedmodel")}
 
 MODEL_CONFIG_FILES = [
     "config.json",
@@ -79,7 +86,12 @@ _DTYPE_BYTES = {
     "U64": 8,
     "F64": 8,
 }
-_UNSAFE_SUFFIXES = {".pickle", ".pkl", ".pt", ".pth", ".bin", ".joblib"}
+_UNSAFE_SUFFIXES = {".pickle", ".pkl", ".pt", ".pth", ".bin", ".joblib", ".ckpt", ".pdparams"}
+
+
+def model_format(path: Path) -> tuple[str, str] | None:
+    """Return the (format key, format name) of a supported model file, or ``None``."""
+    return MODEL_EXTENSIONS.get(path.suffix.lower()) or NAMED_MODEL_FILES.get(path.name.lower())
 
 
 def _recognized_binary_pickle(stream: BinaryIO, prefix: bytes, size: int) -> bool:
@@ -231,7 +243,10 @@ def inspect_model_artifact(
 
     The caller must hold a confined regular-file context.
     A pathname replacement cannot substitute different bytes between inspection
-    and hashing because neither operation reopens that pathname.
+    and hashing because neither operation reopens that pathname. The confined
+    stream also refuses the observation unless the pathname still resolves to
+    this descriptor when the caller's read ends, so the verdict and digest are
+    never attributed to a pathname that now names other bytes.
     """
     before = os.fstat(stream.fileno())
     if before.st_size > MAX_HASH_SIZE:
@@ -285,11 +300,7 @@ class ModelScanner(Scanner):
         ) as files:
             self._discovered_paths = tuple(files.root / path for path in files.iter_files())
             model_dirs = sorted(
-                {
-                    path.parent
-                    for path in self._discovered_paths
-                    if path.suffix.lower() in MODEL_EXTENSIONS
-                }
+                {path.parent for path in self._discovered_paths if model_format(path) is not None}
             )
             if not model_dirs and not result.scan_failures and not result.surfaces_excluded:
                 result.surfaces_scanned.append("model-weights (no model files found)")
@@ -311,11 +322,11 @@ class ModelScanner(Scanner):
         for path in self._discovered_paths:
             if path.parent != model_dir:
                 continue
-            ext = path.suffix.lower()
-            if ext not in MODEL_EXTENSIONS:
+            detected = model_format(path)
+            if detected is None:
                 continue
 
-            fmt_key, fmt_name = MODEL_EXTENSIONS[ext]
+            fmt_key, fmt_name = detected
             fingerprint: dict[str, str] = {}
             try:
                 with self._files.open_regular(path, max_bytes=MAX_HASH_SIZE) as stream:
