@@ -33,7 +33,6 @@ nexus-symbiote risk agentbom.json --no-project-policy --threshold 50   # gate on
 nexus-symbiote diff reviewed.json agentbom.json --fail-on-alert        # gate on drift
 ```
 
-> [!NOTE]
 > **Alpha.** Interfaces, formats and policy semantics may change. Install the published release only after verifying its build attestation, or install a reviewed commit from source; both are shown under [How](#how).
 
 ## Why

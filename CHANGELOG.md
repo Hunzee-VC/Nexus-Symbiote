@@ -48,6 +48,7 @@ First alpha of the AgentBOM toolkit under the Hunzee-VC organization.
 - Scan container image references in linear time. A `docker-compose.yml` ending in `image:` followed by a long run of whitespace took minutes, and over a day at the 4 MiB read limit.
 - Index collected components during `scan` instead of searching the whole inventory for each one. A project declaring 10,000 MCP tools now scans in 4.3 s instead of 10.9 s, with identical output. Very large tool declarations still need a collection limit.
 - Print inventory-derived text literally in human-readable output. Rich markup and terminal-control, bidirectional or invisible characters in a component name could add hyperlinks, conceal text or rewrite earlier lines, for example to hide a critical `diff` alert. As a result `validate` again shows which component each issue belongs to, and the `risk` findings table keeps its severity column in an 80-column terminal.
+- Document that hard links inside a scanned root are collected as regular files. Confined reads are descriptor-relative and refuse symlinks; they do not establish inode provenance. Run collection with the content author's privileges and keep `fs.protected_hardlinks=1`.
 
 ### Delivery
 
