@@ -386,3 +386,20 @@ def test_agent_manifest_reuses_instruction_digest_and_rejects_changed_bytes(tmp_
     (tmp_path / "instruction.txt").write_bytes(b"changed bytes")
     with pytest.raises(PolicyError, match="changed"):
         assemble_repository_agent(AIBOM(components=[prompt]), tmp_path)
+
+
+def test_validation_policy_above_project_root_is_ignored(tmp_path):
+    project = tmp_path / "anc" / "sub" / "project"
+    project.mkdir(parents=True)
+    (project / "AGENTS.md").write_text("Keep receipts.")
+    out = tmp_path / "bom.json"
+    runner = CliRunner()
+    scan = runner.invoke(main, ["scan", str(project), "-o", str(out), "--no-project-policy"])
+    assert scan.exit_code == 0, scan.output
+    (project / "AGENTS.md").write_text("Different instructions.")
+    (tmp_path / "anc" / ".nexus-symbiote.yaml").write_text(
+        "validate: {require_completeness: false, require_integrity: false}"
+    )
+    result = runner.invoke(main, ["validate", str(out), "--project", str(project)])
+    assert result.exit_code == 1
+    assert "SKIPPED by explicit policy" not in result.output
