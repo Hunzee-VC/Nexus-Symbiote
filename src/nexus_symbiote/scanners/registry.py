@@ -360,6 +360,11 @@ class RegistryScanner(Scanner):
     ) -> None:
         filenames = self._requirement_files()
         for filename in filenames:
+            if not filename.isprintable():
+                # Undecodable bytes (lone surrogates) or controls cannot be carried in
+                # the inventory or its exports, so the file is a gap, not data.
+                result.scan_failures.append("requirements file with an unprintable name: not read")
+                continue
             path = root / filename
             content = self._read(path, result)
             if content is None:

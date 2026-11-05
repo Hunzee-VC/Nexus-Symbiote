@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import errno
+import os
 import re
 from pathlib import Path
 
@@ -33,9 +35,25 @@ def neutralize(value: object) -> str:
     return UNSAFE_TEXT.sub("�", str(value))
 
 
+# What the output rules themselves produce: a missing directory, a link or file on
+# the path (O_NOFOLLOW gives ELOOP, ENOTDIR or, on BSD, EMLINK), or a target that is
+# a directory or special file. Anything else, such as EACCES or ENOSPC, is reported
+# by its system message.
+_REFUSALS = frozenset(
+    {errno.ENOENT, errno.ELOOP, errno.EMLINK, errno.ENOTDIR, errno.EISDIR, errno.EINVAL}
+)
+
+
+def output_failure(exc: BaseException) -> click.ClickException:
+    """A plain command error for an output that was not written; never names the path."""
+    if isinstance(exc, OSError) and exc.errno is not None and exc.errno not in _REFUSALS:
+        return click.ClickException(f"Cannot write the output file: {os.strerror(exc.errno)}.")
+    return click.ClickException(OUTPUT_REFUSED)
+
+
 def write_cli_output(path: Path, data: str, *, overwrite: bool = True) -> None:
-    """Write a selected output file, turning any refusal into a plain command error."""
+    """Write a selected output file, turning any failure into a plain command error."""
     try:
         write_output_file(path, data, overwrite=overwrite)
     except (OSError, ValueError) as exc:
-        raise click.ClickException(OUTPUT_REFUSED) from exc
+        raise output_failure(exc) from exc

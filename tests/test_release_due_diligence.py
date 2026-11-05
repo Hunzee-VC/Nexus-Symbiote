@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import ast
+import errno
 import hashlib
 import json
+import os
 import sys
 import warnings
 from pathlib import Path
@@ -393,6 +395,66 @@ def test_baseline_and_import_refuse_unwritable_outputs_without_a_traceback(tmp_p
     imported = runner.invoke(main, ["import-shadowscan", str(report), "-o", "/", "--report-only"])
     assert imported.exit_code == 1 and "Cannot create output" in imported.output
     assert imported.exception.__class__ is SystemExit
+
+
+@pytest.mark.parametrize(
+    ("error", "message"),
+    [
+        (PermissionError(errno.EACCES, "denied", "/private/x"), "file: Permission denied."),
+        (OSError(errno.ENOSPC, "full", "/private/x"), "file: No space left on device."),
+        (OSError(errno.ELOOP, "link", "/private/x"), "no directory on the path may be"),
+        (OSError(errno.EINVAL, "special", "/private/x"), "must not be a directory, device"),
+        (ValueError("bad"), "its directory must exist"),
+    ],
+)
+def test_an_unwritable_output_reports_its_reason_without_the_path(
+    tmp_path, monkeypatch, error, message
+):
+    def refuse(*_args, **_kwargs):
+        raise error
+
+    monkeypatch.setattr("nexus_symbiote.utils.terminal.write_output_file", refuse)
+    (tmp_path / "AGENTS.md").write_text("Keep receipts.")
+    result = CliRunner().invoke(
+        main, ["scan", str(tmp_path), "--no-project-policy", "-o", str(tmp_path / "out.json")]
+    )
+    assert result.exit_code == 1 and result.exception.__class__ is SystemExit
+    assert "Cannot write the output file" in result.output and message in result.output
+    assert "/private/x" not in result.output
+
+
+def test_a_requirements_file_with_an_undecodable_name_is_a_gap_not_a_crash(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "AGENTS.md").write_text("Keep receipts.")
+    (project / "requirements.txt").write_text("openai==1.40.0\n")
+    try:
+        fd = os.open(os.fsencode(project) + b"/requirements-\xff.txt", os.O_WRONLY | os.O_CREAT)
+    except OSError:
+        pytest.skip("file system rejects names that are not UTF-8")
+    os.write(fd, b"openai==1.41.0\n")
+    os.close(fd)
+    result = RegistryScanner().scan(project)
+    assert result.scan_failures == ["requirements file with an unprintable name: not read"]
+    assert [c.version for c in result.components] == ["==1.40.0"]
+    runner = CliRunner()
+    for fmt in ("json", "cyclonedx", "spdx"):
+        out = tmp_path / f"{fmt}.json"
+        scanned = runner.invoke(
+            main,
+            [
+                "scan",
+                str(project),
+                "--no-project-policy",
+                "--report-only",
+                "-f",
+                fmt,
+                "-o",
+                str(out),
+            ],
+        )
+        assert scanned.exit_code == 0, scanned.output
+        json.loads(out.read_text(encoding="utf-8"))
 
 
 def test_output_paths_are_refused_cleanly_and_parent_references_resolve(tmp_path, monkeypatch):

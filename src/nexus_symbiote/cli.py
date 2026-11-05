@@ -25,8 +25,8 @@ from nexus_symbiote.policy import Policy
 from nexus_symbiote.runtime_cli import register_runtime_commands
 from nexus_symbiote.supply_chain_cli import register_supply_chain_commands
 from nexus_symbiote.utils.files import write_output_file
-from nexus_symbiote.utils.terminal import OUTPUT_REFUSED, write_cli_output
 from nexus_symbiote.utils.terminal import UNSAFE_TEXT as _UNSAFE_TEXT
+from nexus_symbiote.utils.terminal import output_failure, write_cli_output
 
 if TYPE_CHECKING:
     from nexus_symbiote.scanners.base import ScanResult
@@ -1075,7 +1075,7 @@ def init(force: bool, path: str) -> None:
     try:
         exists = target.exists()
     except OSError as exc:
-        raise click.ClickException(OUTPUT_REFUSED) from exc
+        raise output_failure(exc) from exc
     if exists and not force:
         err_console.print(
             f"[yellow]Warning:[/] {_safe(target)} already exists. Use --force to overwrite."

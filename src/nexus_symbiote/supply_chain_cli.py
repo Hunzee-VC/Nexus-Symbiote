@@ -11,7 +11,7 @@ import click
 
 from nexus_symbiote import modes
 from nexus_symbiote.core.aibom import AIBOM
-from nexus_symbiote.utils.terminal import OUTPUT_REFUSED, neutralize, write_cli_output
+from nexus_symbiote.utils.terminal import neutralize, output_failure, write_cli_output
 
 
 def _load_inventory(path: Path) -> AIBOM:
@@ -32,7 +32,7 @@ def _refuse_source_overwrite(output: Path | None, source: Path) -> None:
             output.exists() and os.path.samefile(output, source)
         )
     except (OSError, RuntimeError) as exc:
-        raise click.ClickException(OUTPUT_REFUSED) from exc
+        raise output_failure(exc) from exc
     if same:
         raise click.BadParameter("output must not overwrite the source inventory")
 
@@ -140,7 +140,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
         try:
             fd, temporary = tempfile.mkstemp(prefix=".nexus-baseline-", dir=target.parent)
         except OSError as exc:
-            raise click.ClickException(OUTPUT_REFUSED) from exc
+            raise output_failure(exc) from exc
         os.close(fd)
         staged = Path(temporary)
         try:
