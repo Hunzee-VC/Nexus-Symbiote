@@ -131,6 +131,7 @@ any row; this table is a dated record, not enforcement.
 | Private vulnerability reporting | Disabled, although [SECURITY.md](../SECURITY.md) directs reporters to it | Enable it under *Settings → Code security* |
 | Secret scanning and push protection | Disabled | Enable both; they are free for public repositories |
 | `testpypi` and `pypi` environments, trusted publishers | Not verifiable through the integration used for this review | Configure and verify as described in [releasing](releasing.md) |
+| Release tags `v*` | No ruleset protects tags, so anyone with write access can move or delete `v0.1.0` after publication. The README's verified-release install resolves the tag to a commit and requires the wheel's attestation to name it, so a moved tag fails verification instead of swapping the dependency lock | Apply [the release-tag ruleset](../config/github-release-tag-ruleset.json) before creating the first release tag |
 
 The repository is public, so branch protection, rulesets, artifact attestations
 and environment protection are available on every GitHub plan; the
@@ -162,6 +163,10 @@ JSON
 
 # 5. Remove the ruleset that targets no branch (or retarget it deliberately)
 gh api --method DELETE repos/Hunzee-VC/Nexus-Symbiote/rulesets/26325547
+
+# 6. Stop release tags from being moved or deleted once created
+gh api --method POST repos/Hunzee-VC/Nexus-Symbiote/rulesets \
+  --input config/github-release-tag-ruleset.json
 ```
 
 After step 1, a commit can reach `main`, including the maintainer's own, only

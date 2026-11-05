@@ -123,21 +123,26 @@ A scan is an inventory, not a verdict. It does not show that a model is benign, 
 
 ### Install a verified release
 
-Requires Python 3.11+ on Linux. Releases are built from `main` by the [release workflow](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/.github/workflows/release.yml) and published to PyPI through OIDC trusted publishing with build attestations. Install the hash-locked runtime from the release tag, download the exact wheel, verify it against the attestation, then install it without resolving anything else:
+Requires Python 3.11+ on Linux and the [GitHub CLI](https://cli.github.com/), signed in with `gh auth login`. Releases are built from `main` by the [release workflow](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/.github/workflows/release.yml) and published to PyPI through OIDC trusted publishing with build attestations. The block resolves the `v0.1.0` tag to its commit, downloads the exact wheel, verifies its attestation against that commit, and only then installs the hash-locked runtime from the same commit and the wheel without resolving anything else:
 
 ```bash
-python -m venv .venv && . .venv/bin/activate
-curl -fsSLO https://raw.githubusercontent.com/Hunzee-VC/Nexus-Symbiote/v0.1.0/requirements-action.lock
-python -m pip install --require-hashes --only-binary=:all: -r requirements-action.lock
-python -m pip download --no-deps --only-binary=:all: nexus-symbiote==0.1.0 -d dist
-gh attestation verify dist/nexus_symbiote-0.1.0-py3-none-any.whl --repo Hunzee-VC/Nexus-Symbiote \
-  --signer-workflow Hunzee-VC/Nexus-Symbiote/.github/workflows/release.yml \
-  --source-ref refs/heads/main --deny-self-hosted-runners
-python -m pip install --no-deps dist/nexus_symbiote-0.1.0-py3-none-any.whl
-nexus-symbiote --version
+(
+  set -euo pipefail
+  commit="$(gh api repos/Hunzee-VC/Nexus-Symbiote/commits/v0.1.0 --jq .sha)"
+  python -m venv .venv
+  .venv/bin/python -m pip download --no-deps --only-binary=:all: nexus-symbiote==0.1.0 -d dist
+  gh attestation verify dist/nexus_symbiote-0.1.0-py3-none-any.whl --repo Hunzee-VC/Nexus-Symbiote \
+    --signer-workflow Hunzee-VC/Nexus-Symbiote/.github/workflows/release.yml \
+    --source-ref refs/heads/main --source-digest "$commit" --deny-self-hosted-runners
+  curl -fsSL -o requirements-action.lock \
+    "https://raw.githubusercontent.com/Hunzee-VC/Nexus-Symbiote/$commit/requirements-action.lock"
+  .venv/bin/python -m pip install --require-hashes --only-binary=:all: -r requirements-action.lock
+  .venv/bin/python -m pip install --no-deps dist/nexus_symbiote-0.1.0-py3-none-any.whl
+)
+. .venv/bin/activate && nexus-symbiote --version
 ```
 
-Do not install a file that fails verification. Add `--source-digest <commit>` with the commit named on the GitHub release to pin the exact source; the signed `v0.1.0` tag names the same commit, so the lock file and the wheel come from one reviewed revision. [Releasing](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/releasing.md) describes what the attestation does and does not establish.
+The block stops at the first failing command, including a missing or signed-out `gh`, so nothing is installed unless the wheel's attestation names the commit that `v0.1.0` points at. The lock file is fetched from that same commit, so the wheel and its dependency set come from one attested revision. Paste it as one block; running the lines one at a time loses that guarantee. [Releasing](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/releasing.md) describes what the attestation does and does not establish.
 
 ### Install from reviewed source
 
