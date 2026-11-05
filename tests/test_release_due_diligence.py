@@ -52,29 +52,94 @@ def test_registry_reads_every_root_requirements_file_with_hash_continuations(tmp
     assert str(tmp_path / "requirements-gpu.txt") in result.surfaces_scanned
 
 
+CONFLICT = "PyPI package '{}' is declared more than once with requirements that conflict."
+
+
 def test_registry_keeps_one_component_per_package_across_requirements_files(tmp_path):
     (tmp_path / "AGENTS.md").write_text("Keep receipts.")
-    (tmp_path / "requirements.txt").write_text("openai==1.3.0\ntorch==2.3.0\n")
-    (tmp_path / "requirements-lock.txt").write_text("openai==1.3.0\ntorch>=2\n")
+    (tmp_path / "requirements.txt").write_text(
+        "openai==1.3.0\ntorch==2.3.0\ntransformers==4.40.0\nlangchain @ https://a.example/l.whl\n"
+    )
+    (tmp_path / "requirements-lock.txt").write_text(
+        "openai==1.3.0\ntorch>=2\ntransformers<4.40\nlangchain==0.2.5\n"
+    )
     result = RegistryScanner().scan(tmp_path)
     assert result.scan_failures == []
     by_name = {c.name: c for c in result.components}
-    assert sorted(by_name) == ["openai", "torch"]
+    assert sorted(by_name) == ["langchain", "openai", "torch", "transformers"]
     assert str(by_name["openai"].source_path).endswith("requirements.txt")
     assert by_name["openai"].risks == []
-    assert by_name["torch"].version == "==2.3.0"
-    assert [r.detail for r in by_name["torch"].risks] == [
-        "PyPI package 'torch' is declared more than once in the requirements files, "
-        "with different requirements."
+    assert by_name["openai"].properties["declarations"] == [
+        "requirements-lock.txt: openai==1.3.0",
+        "requirements.txt: openai==1.3.0",
     ]
+    # A range that the other file's pin satisfies is a compiled lock, not a conflict.
+    assert by_name["torch"].version == "==2.3.0"
+    assert by_name["torch"].risks == []
     assert by_name["torch"].properties["declarations"] == [
         "requirements-lock.txt: torch>=2",
         "requirements.txt: torch==2.3.0",
     ]
+    for name in ("transformers", "langchain"):
+        assert CONFLICT.format(name) in [r.detail for r in by_name[name].risks]
     scanned = CliRunner().invoke(
         main, ["scan", str(tmp_path), "--no-project-policy", "-o", str(tmp_path / "bom.json")]
     )
     assert "conflicting duplicate component" not in scanned.output
+
+
+@pytest.mark.parametrize(
+    ("one", "other", "conflict"),
+    [
+        ("torch==2.3.0", "torch==2.3", False),
+        ("torch==2.3.0", "torch>=2.2,<2.4", False),
+        ("torch>=2.2", "torch==2.3.0+cu121", False),
+        ("torch==2.3.0 ; sys_platform == 'linux'", "torch==2.3.0", False),
+        ("torch[cuda]==2.3.0", "torch==2.3.0", False),
+        ("torch>=2.2", "torch<2.2", False),
+        ("torch", "torch==2.3.0", False),
+        ("torch==2.3.0", "torch==2.2.2", True),
+        ("torch==2.3.0+cpu", "torch==2.3.0+cu121", True),
+        ("torch==2.1.0", "torch>=2.2", True),
+        ("torch===2.3.0-custom", "torch==2.3.0", True),
+        ("torch @ https://a.example/t.whl", "torch==2.3.0", True),
+        ("torch @ https://a.example/t.whl", "torch @ https://b.example/t.whl", True),
+        ("torch @ https://a.example/x.whl", "torch @ https://a.example/y.whl", False),
+    ],
+)
+def test_only_declarations_that_cannot_both_hold_conflict(one, other, conflict):
+    assert RegistryScanner._conflict(one, other) is conflict
+    assert RegistryScanner._conflict(other, one) is conflict
+
+
+def test_ranges_with_pins_in_a_lock_file_leave_the_default_gate_as_on_main(tmp_path):
+    # Main read only requirements.txt here: seven ranges, 7 x 4 = 28. Reading the
+    # lock file must record its pins without adding a finding per package.
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "AGENTS.md").write_text("Keep receipts.")
+    pins = {
+        "anthropic": ("0.34", "0.34.2"),
+        "openai": ("1.40", "1.51.0"),
+        "langchain": ("0.3", "0.3.3"),
+        "langchain-anthropic": ("0.2", "0.2.3"),
+        "chromadb": ("0.5", "0.5.11"),
+        "transformers": ("4.40", "4.44.2"),
+        "torch": ("2.2", "2.3.0"),
+    }
+    (project / "requirements.txt").write_text(
+        "".join(f"{name}>={low}\n" for name, (low, _) in pins.items())
+    )
+    (project / "requirements-lock.txt").write_text(
+        "".join(f"{name}=={pin}\n" for name, (_, pin) in pins.items())
+    )
+    runner = CliRunner()
+    bom = tmp_path / "bom.json"
+    scanned = runner.invoke(main, ["scan", str(project), "--no-project-policy", "-o", str(bom)])
+    assert scanned.exit_code == 0, scanned.output
+    risk = runner.invoke(main, ["risk", str(bom), "--json-output"])
+    assert risk.exit_code == 0, risk.output
+    assert json.loads(risk.stdout)["overall_score"] == 28.0
 
 
 def test_requirements_file_names_match_without_regard_to_case(tmp_path):
@@ -96,13 +161,7 @@ def test_differing_declarations_in_one_requirements_file_get_one_finding(tmp_pat
     )
     (component,) = RegistryScanner().scan(tmp_path).components
     details = [r.detail for r in component.risks]
-    assert (
-        details.count(
-            "PyPI package 'torch' is declared more than once in the requirements files, "
-            "with different requirements."
-        )
-        == 1
-    )
+    assert details.count(CONFLICT.format("torch")) == 1
     assert len(component.properties["declarations"]) == 2
 
 
@@ -141,7 +200,7 @@ def test_lines_the_collector_does_not_follow_leave_the_default_gate_as_on_main(t
 def test_pyproject_ranges_with_compiled_pins_leave_the_default_gate_as_on_main(tmp_path):
     # pip-tools and uv keep ranges in pyproject.toml and the pins that satisfy them
     # in requirements.txt. Main dropped the pyproject.toml declaration without a
-    # finding; it is now recorded, still without a finding.
+    # finding; it is now recorded, and a satisfied range is not a conflict.
     project = tmp_path / "project"
     project.mkdir()
     (project / "AGENTS.md").write_text("Keep receipts.")
@@ -188,6 +247,17 @@ def test_pyproject_ranges_with_compiled_pins_leave_the_default_gate_as_on_main(t
     scanned = runner.invoke(main, ["scan", str(project), "--no-project-policy", "-o", str(bom)])
     assert scanned.exit_code == 0, scanned.output
     assert runner.invoke(main, ["risk", str(bom)]).exit_code == 0
+
+
+def test_a_pyproject_pin_that_contradicts_a_requirements_pin_is_a_conflict(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "agent"\nversion = "0.1.0"\n'
+        'dependencies = ["openai==1.52.0", "anthropic>=0.30"]\n'
+    )
+    (tmp_path / "requirements.txt").write_text("openai==1.51.0\nanthropic==0.34.2\n")
+    by_name = {c.name: c for c in RegistryScanner().scan(tmp_path).components}
+    assert [r.detail for r in by_name["openai"].risks] == [CONFLICT.format("openai")]
+    assert by_name["anthropic"].risks == []
 
 
 def test_a_utf8_byte_order_mark_does_not_hide_the_first_requirement(tmp_path):
