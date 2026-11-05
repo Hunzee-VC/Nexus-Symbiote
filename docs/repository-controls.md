@@ -131,7 +131,7 @@ any row; this table is a dated record, not enforcement.
 | Private vulnerability reporting | Disabled, although [SECURITY.md](../SECURITY.md) directs reporters to it | Enable it under *Settings → Code security* |
 | Secret scanning and push protection | Disabled | Enable both; they are free for public repositories |
 | `testpypi` and `pypi` environments, trusted publishers | Not verifiable through the integration used for this review | Configure and verify as described in [releasing](releasing.md) |
-| Release tags `v*` | No ruleset protects tags, so anyone with write access can move or delete `v0.1.0` after publication. The README's verified-release install resolves the tag to a commit and requires the wheel's attestation to name it, so a moved tag fails verification instead of swapping the dependency lock | Apply [the release-tag ruleset](../config/github-release-tag-ruleset.json) before creating the first release tag |
+| Release tags `v*` | No ruleset protects tags, so anyone with write access can move or delete `v0.1.0` after publication. The README's verified-release install requires the wheel's attestation to name the commit the tag points at. That stops a plain tag move, but not a move to a second commit that differs only in its lock file: release builds are reproducible and candidate runs are attested without approval. Only the ruleset keeps the tag on the published commit | Apply [the release-tag ruleset](../config/github-release-tag-ruleset.json) before creating the first release tag |
 
 The repository is public, so branch protection, rulesets, artifact attestations
 and environment protection are available on every GitHub plan; the
