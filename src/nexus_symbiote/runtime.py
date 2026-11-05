@@ -15,13 +15,20 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import closing, contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Generic, Literal, TypeVar
+from typing import Annotated, Any, Generic, Literal, TypeVar
 
 import rfc8785
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from nexus_symbiote.runtime_validation import (
     MAX_ARGUMENT_BYTES,
@@ -75,6 +82,11 @@ def strict_json(raw: str | bytes) -> Any:
     value = json.loads(raw, object_pairs_hook=pairs, parse_constant=invalid)
     canonical_bytes(value)
     return value
+
+
+# Revocation entries are compared verbatim, so a malformed one would be ignored silently.
+Sha256Digest = Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
+KeyId = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 
 
 class Contract(BaseModel):
@@ -134,10 +146,10 @@ class TrustStatus(ValidWindow):
     version: Literal["1"] = "1"
     tenant: str = Field(min_length=1)
     serial: int = Field(gt=0)
-    revoked_snapshots: tuple[str, ...] = ()
-    revoked_tools: tuple[str, ...] = ()
+    revoked_snapshots: tuple[Sha256Digest, ...] = ()
+    revoked_tools: tuple[Sha256Digest, ...] = ()
     revoked_endpoints: tuple[str, ...] = ()
-    revoked_signers: tuple[str, ...] = ()
+    revoked_signers: tuple[KeyId, ...] = ()
 
 
 class ExecutionContext(Contract):
@@ -217,7 +229,12 @@ def sign_contract(
     }[kind]
     if not isinstance(contract, expected) or not keys:
         raise AuthorizationError("contract type and nonempty signing keys must match purpose")
-    body = contract.model_dump(mode="json")
+    # model_copy(update=...) and model_construct skip validation, so re-validate: the
+    # envelope must carry the canonical form that verify_contract accepts.
+    try:
+        body = expected.model_validate(contract.model_dump(mode="json")).model_dump(mode="json")
+    except ValidationError as exc:
+        raise AuthorizationError("contract does not validate and cannot be signed") from exc
     statement = {
         "_type": STATEMENT_TYPE,
         "predicateType": PREDICATES[kind],
@@ -280,6 +297,11 @@ def verify_contract(
             contract = TrustStatus.model_validate(statement["predicate"])
         else:
             contract = HostedModelAttestation.model_validate(statement["predicate"])
+        # One contract must have one digest: revocation and approval bind to the
+        # canonical form, so a predicate encoded differently by another signer
+        # would otherwise verify under a subject digest nothing can revoke.
+        if digest(statement["predicate"]) != digest(contract.model_dump(mode="json")):
+            raise AuthorizationError("predicate is not in canonical contract form")
         subject = [
             {"name": kind, "digest": {"sha256": digest(statement["predicate"]).split(":", 1)[1]}}
         ]
