@@ -15,13 +15,20 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import closing, contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Generic, Literal, TypeVar
+from typing import Annotated, Any, Generic, Literal, TypeVar
 
 import rfc8785
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from nexus_symbiote.runtime_validation import (
     MAX_ARGUMENT_BYTES,
@@ -77,6 +84,11 @@ def strict_json(raw: str | bytes) -> Any:
     return value
 
 
+# Revocation entries are compared verbatim, so a malformed one would be ignored silently.
+Sha256Digest = Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
+KeyId = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+
+
 class Contract(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
 
@@ -90,7 +102,11 @@ class ValidWindow(Contract):
     def aware(cls, value: datetime) -> datetime:
         if value.utcoffset() is None:
             raise ValueError("timestamps must include a timezone")
-        return value.astimezone(UTC)
+        try:
+            return value.astimezone(UTC)
+        except OverflowError as exc:
+            # Pydantic reports only ValueError and AssertionError as validation errors.
+            raise ValueError("timestamp is out of range in UTC") from exc
 
     @model_validator(mode="after")
     def ordered(self) -> ValidWindow:
@@ -134,10 +150,10 @@ class TrustStatus(ValidWindow):
     version: Literal["1"] = "1"
     tenant: str = Field(min_length=1)
     serial: int = Field(gt=0)
-    revoked_snapshots: tuple[str, ...] = ()
-    revoked_tools: tuple[str, ...] = ()
+    revoked_snapshots: tuple[Sha256Digest, ...] = ()
+    revoked_tools: tuple[Sha256Digest, ...] = ()
     revoked_endpoints: tuple[str, ...] = ()
-    revoked_signers: tuple[str, ...] = ()
+    revoked_signers: tuple[KeyId, ...] = ()
 
 
 class ExecutionContext(Contract):
@@ -217,7 +233,17 @@ def sign_contract(
     }[kind]
     if not isinstance(contract, expected) or not keys:
         raise AuthorizationError("contract type and nonempty signing keys must match purpose")
-    body = contract.model_dump(mode="json")
+    # model_copy(update=...) and model_construct skip validation. Re-validate, and refuse
+    # a contract that differs from its canonical form instead of normalizing it: the
+    # signer's digest of the object it holds must be the digest the envelope binds,
+    # which revocation and approval use.
+    held = contract.model_dump(mode="json")
+    try:
+        body = expected.model_validate(held).model_dump(mode="json")
+    except ValidationError as exc:
+        raise AuthorizationError("contract does not validate and cannot be signed") from exc
+    if digest(body) != digest(held):
+        raise AuthorizationError("contract is not in canonical form and cannot be signed")
     statement = {
         "_type": STATEMENT_TYPE,
         "predicateType": PREDICATES[kind],
@@ -280,6 +306,11 @@ def verify_contract(
             contract = TrustStatus.model_validate(statement["predicate"])
         else:
             contract = HostedModelAttestation.model_validate(statement["predicate"])
+        # One contract must have one digest: revocation and approval bind to the
+        # canonical form, so a predicate encoded differently by another signer
+        # would otherwise verify under a subject digest nothing can revoke.
+        if digest(statement["predicate"]) != digest(contract.model_dump(mode="json")):
+            raise AuthorizationError("predicate is not in canonical contract form")
         subject = [
             {"name": kind, "digest": {"sha256": digest(statement["predicate"]).split(":", 1)[1]}}
         ]

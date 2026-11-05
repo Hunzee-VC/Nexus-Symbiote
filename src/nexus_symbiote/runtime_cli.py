@@ -223,6 +223,7 @@ def verify(
         result: dict[str, Any] = {
             "contract_verified": True,
             "kind": kind,
+            "digest": digest(contract.model_dump(mode="json")),
             "accepted_signers": sorted(accepted),
             "invocation_authorized": False,
         }

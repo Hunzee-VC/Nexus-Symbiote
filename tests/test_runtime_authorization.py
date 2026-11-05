@@ -4,12 +4,13 @@ import base64
 import json
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from threading import Event
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from pydantic import ValidationError
 
 from nexus_symbiote.core.hashing import hash_tool_definition
 from nexus_symbiote.runtime import (
@@ -17,6 +18,7 @@ from nexus_symbiote.runtime import (
     ApprovedSnapshot,
     AuthorizationError,
     Envelope,
+    EnvelopeSignature,
     ExecutionContext,
     ReferenceGateway,
     ServedTool,
@@ -24,6 +26,8 @@ from nexus_symbiote.runtime import (
     ToolCall,
     ToolGrant,
     TrustStatus,
+    _pae,
+    canonical_bytes,
     digest,
     key_id,
     sign_contract,
@@ -500,3 +504,88 @@ def test_approval_actor_must_match_authorized_key(tmp_path):
 def test_noncanonical_input_rejected(raw):
     with pytest.raises(AuthorizationError):
         strict_json(raw)
+
+
+def test_non_canonical_predicate_is_rejected_so_one_contract_has_one_digest(tmp_path):
+    values = fixture(tmp_path)
+    snapshot, key = values[3], values[6]
+    envelope = sign_contract(snapshot, "snapshot", (key,))
+    ring = {key_id(key.public_key()): key.public_key()}
+    statement = json.loads(base64.b64decode(envelope.payload))
+    canonical = digest(snapshot.model_dump(mode="json"))
+    assert "sha256:" + statement["subject"][0]["digest"]["sha256"] == canonical
+    # The same contract encoded differently, as another DSSE signer may emit it.
+    predicate = {
+        name: value[:-1] + "+00:00" if isinstance(value, str) and value.endswith("Z") else value
+        for name, value in statement["predicate"].items()
+    }
+    assert ApprovedSnapshot.model_validate(predicate) == snapshot
+    assert digest(predicate) != canonical
+    statement["predicate"] = predicate
+    statement["subject"] = [
+        {"name": "snapshot", "digest": {"sha256": digest(predicate).split(":", 1)[1]}}
+    ]
+    payload = canonical_bytes(statement)
+    signature = EnvelopeSignature(
+        key_id=key_id(key.public_key()),
+        signature=base64.b64encode(key.sign(_pae(payload))).decode(),
+    )
+    altered = Envelope(payload=base64.b64encode(payload).decode(), signatures=(signature,))
+    with pytest.raises(AuthorizationError, match="canonical"):
+        verify_contract(altered, "snapshot", ring)
+    contract, _ = verify_contract(envelope, "snapshot", ring)
+    assert digest(contract.model_dump(mode="json")) == canonical
+
+
+def test_sign_contract_refuses_a_contract_that_is_not_in_canonical_form(tmp_path):
+    values = fixture(tmp_path)
+    snapshot, key = values[3], values[6]
+    ring = {key_id(key.public_key()): key.public_key()}
+    # model_copy skips validation, so the copy keeps a non-UTC offset the validator would convert.
+    pacific = timezone(timedelta(hours=-8))
+    local = snapshot.model_copy(
+        update={"serial": 2, "not_after": (NOW + timedelta(hours=2)).astimezone(pacific)}
+    )
+    with pytest.raises(AuthorizationError, match="not in canonical form"):
+        sign_contract(local, "snapshot", (key,))
+    renewed = snapshot.model_copy(update={"serial": 2, "not_after": NOW + timedelta(hours=2)})
+    contract, _ = verify_contract(sign_contract(renewed, "snapshot", (key,)), "snapshot", ring)
+    assert digest(contract.model_dump(mode="json")) == digest(renewed.model_dump(mode="json"))
+
+
+def test_sign_contract_refuses_a_copy_that_does_not_validate(tmp_path):
+    values = fixture(tmp_path)
+    snapshot, key = values[3], values[6]
+    inverted = snapshot.model_copy(update={"not_after": snapshot.not_before})
+    with pytest.raises(AuthorizationError, match="does not validate"):
+        sign_contract(inverted, "snapshot", (key,))
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("revoked_snapshots", "a" * 64),
+        ("revoked_snapshots", "SHA256:" + "A" * 64),
+        ("revoked_snapshots", "sha256:" + "A" * 64),
+        ("revoked_tools", "a" * 64),
+        ("revoked_signers", "sha256:" + "a" * 64),
+        ("revoked_signers", "A" * 64),
+    ],
+)
+def test_malformed_revocation_entries_are_rejected_instead_of_ignored(field, value):
+    window = {"not_before": NOW, "not_after": NOW + timedelta(minutes=5)}
+    with pytest.raises(ValidationError):
+        TrustStatus(tenant="acme", serial=1, **window, **{field: (value,)})
+    canonical = "sha256:" + "a" * 64 if field != "revoked_signers" else "a" * 64
+    assert getattr(TrustStatus(tenant="acme", serial=1, **window, **{field: (canonical,)}), field)
+
+
+def test_out_of_range_timestamp_is_a_validation_error_not_an_overflow(tmp_path):
+    values = fixture(tmp_path)
+    status, key = values[4], values[8]
+    # Representable locally, but past datetime.max once converted to UTC.
+    far = datetime(9999, 12, 31, 23, 0, tzinfo=timezone(timedelta(hours=-8)))
+    with pytest.raises(ValidationError, match="out of range"):
+        TrustStatus(tenant="acme", serial=1, not_before=NOW, not_after=far)
+    with pytest.raises(AuthorizationError, match="does not validate"):
+        sign_contract(status.model_copy(update={"not_after": far}), "trust", (key,))
