@@ -8,18 +8,25 @@ it. A project policy file never selects the mode: it lives in the checkout
 being inventoried, which is untrusted input.
 
 The offline guard is a tripwire for this package and its Python dependencies,
-not a sandbox. Native code that calls the operating system directly bypasses
-it. Where a hard boundary is required, also run the tool without network
-access, for example in a network namespace or behind a deny-all egress policy.
+not a sandbox. It replaces the Python entry points and adds a CPython audit
+hook that fires for the C socket type as well (``_socket.socket``, also named
+``socket.SocketType``, is immutable and cannot be patched) and refuses creating
+any socket other than a Unix-domain socket. Native code that
+calls the operating system directly bypasses it. Where a hard boundary is
+required, also run the tool without network access, for example in a network
+namespace or behind a deny-all egress policy.
 """
 
 from __future__ import annotations
 
 import _socket
 import enum
+import functools
+import importlib
 import os
 import socket
 import subprocess
+import sys
 import threading
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
@@ -52,6 +59,36 @@ _PROCESS_FUNCTIONS = (
     "execve",
 )
 _MISSING = object()
+# CPython raises these audit events inside the C implementations, so they also
+# catch _socket.socket methods, references captured before the guard, and
+# connect_ex (which raises socket.connect). listen, accept, send and recv have
+# no audit event; the attribute patches above remain the guard for those.
+# _posixsubprocess.fork_exec has no audit event either; it is patched instead.
+_AUDIT_EVENTS = {
+    "socket.connect": "network access (socket.connect)",
+    "socket.sendto": "network access (socket.sendto)",
+    "socket.sendmsg": "network access (socket.sendmsg)",
+    "socket.getaddrinfo": "name resolution (socket.getaddrinfo)",
+    "socket.gethostbyname": "name resolution (socket.gethostbyname)",
+    "socket.gethostbyaddr": "name resolution (socket.gethostbyaddr)",
+    "socket.getnameinfo": "name resolution (socket.getnameinfo)",
+    "os.system": "process creation (os.system)",
+    "os.fork": "process creation (os.fork)",
+    "os.forkpty": "process creation (os.forkpty)",
+    "os.posix_spawn": "process creation (os.posix_spawn)",
+    "os.exec": "process creation (os.exec)",
+    "subprocess.Popen": "process creation (subprocess)",
+}
+# Parsing a host-name address in connect, sendto or bind resolves it before any
+# event above fires, so only Unix-domain sockets may be created. _socket.socket()
+# reports the default family as -1 before it becomes AF_INET.
+_LOCAL_SOCKET_FAMILY = int(socket.AF_UNIX)
+# These modules open a socket while they are imported, to probe the host: urllib3
+# binds an AF_INET6 socket to ::1 to detect IPv6 support, and requests, sigstore
+# and tuf import it. Importing them before the guard is active lets the probe run;
+# it reaches no network. Inside the guard the refusal is a BaseException, which
+# the probe's `except Exception` cannot absorb.
+_IMPORT_TIME_SOCKET_PROBES = ("urllib3.util.connection",)
 
 
 class Mode(enum.Enum):
@@ -113,6 +150,36 @@ _lock = threading.Lock()
 _active: Mode | None = None
 
 
+def _audit(event: str, args: tuple[Any, ...]) -> None:
+    if _active is not Mode.OFFLINE:
+        return
+    if event == "socket.__new__":
+        if args[1] != _LOCAL_SOCKET_FAMILY:
+            raise OfflineViolation("network access (socket other than Unix-domain)")
+        return
+    operation = _AUDIT_EVENTS.get(event)
+    if operation is not None:
+        raise OfflineViolation(operation)
+
+
+@functools.cache
+def _install_audit_hook() -> None:
+    """Install the process-wide tripwire once.
+
+    An audit hook cannot be removed, so instead of being installed and restored
+    with the attribute patches it stays and checks ``_active`` on every event.
+    """
+    sys.addaudithook(_audit)
+
+
+def _run_import_time_probes() -> None:
+    for name in _IMPORT_TIME_SOCKET_PROBES:
+        try:
+            importlib.import_module(name)
+        except ImportError:
+            continue
+
+
 def current() -> Mode | None:
     """The enforced mode, or None when no command enforces one (library use)."""
     return _active
@@ -169,6 +236,8 @@ def _install(patches: list[tuple[Any, str, Any]]) -> None:
         pass
     else:
         patch(_posixsubprocess, "fork_exec", "process creation (fork_exec)")
+    # subprocess binds its own reference to fork_exec at import time.
+    patch(subprocess, "_fork_exec", "process creation (fork_exec)")
 
 
 def _restore(patches: list[tuple[Any, str, Any]]) -> None:
@@ -200,7 +269,11 @@ def enforce(mode: Mode) -> Iterator[None]:
             nested = True
         else:
             nested = False
-            patches = _guard() if mode is Mode.OFFLINE else []
+            patches = []
+            if mode is Mode.OFFLINE:
+                _run_import_time_probes()
+                _install_audit_hook()
+                patches = _guard()
             _active = mode
     if nested:
         yield
