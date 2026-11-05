@@ -74,17 +74,34 @@ are always offline, so they need no configuration.
 For the duration of an offline command, the CLI replaces these Python entry points
 with functions that raise `OfflineViolation`:
 
-- sockets: `connect`, `connect_ex`, `listen`, `sendto`, `sendmsg`;
+- `socket.socket` methods: `connect`, `connect_ex`, `listen`, `sendto`, `sendmsg`;
 - name resolution: `getaddrinfo`, `gethostbyname`, `gethostbyname_ex`,
   `gethostbyaddr` and `getnameinfo`, in both `socket` and `_socket`;
 - `socket.create_connection` and `socket.create_server`;
 - process creation: `subprocess`, `os.system`, `os.fork`, `os.forkpty`,
-  `os.posix_spawn`, `os.posix_spawnp`, `os.execv` and `os.execve`.
+  `os.posix_spawn`, `os.posix_spawnp`, `os.execv`, `os.execve`, and
+  `_posixsubprocess.fork_exec` together with the reference that `subprocess`
+  keeps to it.
 
 `OfflineViolation` derives from `BaseException`, so a collector's broad
 `except Exception` cannot turn it into a recorded, soft failure. The command stops
 with exit status 1 and asks you to report a defect; a scan stops before it writes
 its inventory. The original functions are restored when the command ends.
+
+The C socket type (`_socket.socket`, also named `socket.SocketType`) is immutable
+and cannot be patched, so a CPython audit hook raises the same `OfflineViolation`
+while an offline command runs. It refuses creating any socket other than a
+Unix-domain socket. An internet socket therefore cannot be opened at all, and the
+name resolution that `connect`, `sendto` and `bind` perform for a host-name address
+never starts. Unix-domain sockets and socket pairs, which asyncio and local
+inter-process communication use, are unaffected. The hook also refuses the
+`socket.connect`, `socket.sendto` and `socket.sendmsg` events, the name resolution
+events and the process creation events. CPython raises these events inside the C
+implementations, so they also cover references to those functions captured before
+the command started. `_posixsubprocess.fork_exec` raises no audit event: only its
+two module attributes listed above are replaced, so another reference to it
+captured earlier is not covered. An audit hook cannot be removed, so it stays
+installed and is inert outside an offline command.
 
 The test suite runs every static command through the CLI with this guard in place,
 and checks that Sigstore's offline verifier (used for signature checks) loads its
@@ -94,7 +111,12 @@ embedded trust root without network access.
 
 The guard is a tripwire for this package and its Python dependencies, **not a
 sandbox**. Native code that calls the operating system directly bypasses it, and
-a process started by `verify-live` is not covered at all. Where you need a hard
+a process started by `verify-live` is not covered at all. A socket object created
+before the command started is not affected by the creation check, and `listen`,
+`accept`, `send` and `recv` raise no audit event, so code that holds one can still
+accept or use an existing connection.
+No code from the scanned project runs inside the process, so these limits concern
+deliberate in-process evasion, not crafted input. Where you need a hard
 boundary, add an operating-system control as well: a network namespace (for
 example `unshare --net --map-root-user`), a container started with
 `--network none`, or a deny-all egress policy. Run `verify-live` launchers under an
