@@ -224,7 +224,7 @@ jobs:
 
 The Action installs its own hash-locked runtime, ignores policy in the scanned checkout, and fails on collection errors. Set `sarif-upload: 'true'` and add `security-events: write` for SARIF upload. Inputs and outputs are in [action.yml](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/action.yml). The repository also ships [pre-commit hooks](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/.pre-commit-hooks.yaml) (`nexus-symbiote-scan` and `nexus-symbiote-risk`).
 
-Every command is offline by default. Only `discover-mcp`, `advisories` and `verify-live` reach the network, and only with `--live`. Use `nexus-symbiote init` to generate a `.nexus-symbiote.yaml` policy file for a trusted project, or pass `--no-project-policy` when the checkout is not yours. Details are in [offline and live modes](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/offline-and-live-modes.md).
+Every command is offline by default. Only `discover-mcp`, `advisories` and `verify-live` reach the network, and only with `--live`. Use `nexus-symbiote init` to generate a `.nexus-symbiote.yaml` policy file for a trusted project (it is read only from the project you scan or name with `--project`, never from a parent directory or from where an inventory file is saved), or pass `--no-project-policy` when the checkout is not yours. Details are in [offline and live modes](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/offline-and-live-modes.md).
 
 ### How it works
 
