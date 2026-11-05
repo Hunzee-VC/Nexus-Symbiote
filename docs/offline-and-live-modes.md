@@ -91,10 +91,13 @@ its inventory. The original functions are restored when the command ends.
 The C socket type (`_socket.socket`, also named `socket.SocketType`) is immutable
 and cannot be patched, so a CPython audit hook raises the same `OfflineViolation`
 while an offline command runs. It refuses creating any socket other than a
-Unix-domain socket. An internet socket therefore cannot be opened at all, and the
-name resolution that `connect`, `sendto` and `bind` perform for a host-name address
-never starts. Unix-domain sockets and socket pairs, which asyncio and local
-inter-process communication use, are unaffected. The hook also refuses the
+Unix-domain socket. An internet socket therefore cannot be opened during the
+command, and the name resolution that `connect`, `sendto` and `bind` perform for a
+host-name address never starts on one. Unix-domain sockets and socket pairs, which
+asyncio and local inter-process communication use, are unaffected. Before the guard
+starts, the CLI imports `urllib3.util.connection`, whose import binds an IPv6 socket
+to `::1` to detect IPv6 support; that probe reaches no network, and running it first
+keeps Sigstore's offline verifier, which imports urllib3, working. The hook also refuses the
 `socket.connect`, `socket.sendto` and `socket.sendmsg` events, the name resolution
 events and the process creation events. CPython raises these events inside the C
 implementations, so they also cover references to those functions captured before
@@ -111,10 +114,12 @@ embedded trust root without network access.
 
 The guard is a tripwire for this package and its Python dependencies, **not a
 sandbox**. Native code that calls the operating system directly bypasses it, and
-a process started by `verify-live` is not covered at all. A socket object created
-before the command started is not affected by the creation check, and `listen`,
-`accept`, `send` and `recv` raise no audit event, so code that holds one can still
-accept or use an existing connection.
+a process started by `verify-live` is not covered at all. A socket created before
+the command started is not affected by the creation check: code that holds one can
+still accept or use an existing connection, because `listen`, `accept`, `send` and
+`recv` raise no audit event, and its `bind`, `connect` or `sendto` on a host-name
+address still resolves the name before any refused event fires. A descriptor opened
+earlier can also be wrapped during the command by declaring a Unix-domain family.
 No code from the scanned project runs inside the process, so these limits concern
 deliberate in-process evasion, not crafted input. Where you need a hard
 boundary, add an operating-system control as well: a network namespace (for

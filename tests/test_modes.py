@@ -397,6 +397,33 @@ def test_sigstore_offline_verifier_needs_no_network_or_process(tmp_path, monkeyp
         Verifier.production(offline=True)
 
 
+def test_offline_guard_lets_import_time_socket_probes_run_in_a_fresh_process(tmp_path):
+    # In a real CLI process, sigstore and urllib3 are first imported inside the guard.
+    pytest.importorskip("sigstore")
+    code = (
+        "from nexus_symbiote import modes\n"
+        "with modes.enforce(modes.Mode.OFFLINE):\n"
+        "    from sigstore.verify import Verifier\n"
+        "    Verifier.production(offline=True)\n"
+        "print('loaded')\n"
+    )
+    env = {
+        **os.environ,
+        "XDG_DATA_HOME": str(tmp_path / "data"),
+        "XDG_CACHE_HOME": str(tmp_path / "cache"),
+    }
+    result = subprocess.run(  # noqa: S603 - the installed interpreter running a fixed script
+        [sys.executable, "-I", "-c", code],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=120,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "loaded"
+
+
 _UNROUTABLE = ("192.0.2.1", 443)
 # RFC 6761 reserves .invalid, so a regression cannot reach a real name server.
 _UNRESOLVABLE = "nexus-symbiote-offline-guard.invalid"
