@@ -64,7 +64,8 @@ def test_registry_keeps_one_component_per_package_across_requirements_files(tmp_
     assert by_name["openai"].risks == []
     assert by_name["torch"].version == "==2.3.0"
     assert [r.detail for r in by_name["torch"].risks] == [
-        "PyPI package 'torch' is declared differently in another dependency manifest."
+        "PyPI package 'torch' is declared more than once in the requirements files, "
+        "with different requirements."
     ]
     assert by_name["torch"].properties["declarations"] == [
         "requirements-lock.txt: torch>=2",
@@ -74,6 +75,35 @@ def test_registry_keeps_one_component_per_package_across_requirements_files(tmp_
         main, ["scan", str(tmp_path), "--no-project-policy", "-o", str(tmp_path / "bom.json")]
     )
     assert "conflicting duplicate component" not in scanned.output
+
+
+def test_requirements_file_names_match_without_regard_to_case(tmp_path):
+    # Main opened the fixed name requirements.txt, which macOS and Windows resolve
+    # to Requirements.txt; the glob must not lose such a file on any platform.
+    (tmp_path / "Requirements.txt").write_text("openai==1.30.1\n")
+    (tmp_path / "REQUIREMENTS-GPU.TXT").write_text("torch==2.3.0\n")
+    result = RegistryScanner().scan(tmp_path)
+    assert result.scan_failures == []
+    assert {c.name: c.version for c in result.components} == {
+        "openai": "==1.30.1",
+        "torch": "==2.3.0",
+    }
+
+
+def test_differing_declarations_in_one_requirements_file_get_one_finding(tmp_path):
+    (tmp_path / "requirements.txt").write_text(
+        "torch==2.3.0 ; sys_platform == 'linux'\ntorch==2.2.2 ; sys_platform == 'darwin'\n"
+    )
+    (component,) = RegistryScanner().scan(tmp_path).components
+    details = [r.detail for r in component.risks]
+    assert (
+        details.count(
+            "PyPI package 'torch' is declared more than once in the requirements files, "
+            "with different requirements."
+        )
+        == 1
+    )
+    assert len(component.properties["declarations"]) == 2
 
 
 @pytest.mark.parametrize(

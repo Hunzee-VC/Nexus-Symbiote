@@ -68,7 +68,7 @@ Eight built-in collectors read declared configuration and artifacts from the pro
 | `model` | `.safetensors`, `.gguf`, `.ggml`, `.onnx`, Keras (`.h5`, `.hdf5`, `.keras`), `saved_model.pb` and pickle-family files (including `.ckpt` and `.pdparams`), with their config | SHA-256 hashes, serialization safety, SafeTensors structure, signature status |
 | `prompt` | `CLAUDE.md`, `AGENTS.md`, `CODEX.md`, Copilot/Codex instructions, skill and command files | Instruction and skill digests, hidden-character findings |
 | `rag` | `rag_config.*`, `retrieval_config.json`, `vector_store_config.json` | Declared retrieval sources and controls |
-| `registry` | `package.json`, lockfiles, `requirements*.txt` in the project root (not the files they include, editable installs, or URL, VCS and path references), `pyproject.toml`, Dockerfiles | AI package identities, pins, lockfile integrity; container images and digests |
+| `registry` | `package.json`, lockfiles, `requirements*.txt` in the project root (includes, editable installs and the targets of URL, VCS and path references are not followed), `pyproject.toml`, Dockerfiles | AI package identities, pins, lockfile integrity; container images and digests |
 | `a2a` | `.well-known/agent.json`, `agent-card.json`, A2A client config | Agent cards, endpoints, declared authentication |
 | `ide_agents` | Settings for Claude Code, Cursor, Codex, Windsurf, Cline, Copilot and others | Agent configuration and declared permissions |
 | `shadowscan` | [Nexus-ShadowScan](https://github.com/Hunzee-VC/Nexus-ShadowScan) reports | Imported discovery claims, kept separate from local evidence |

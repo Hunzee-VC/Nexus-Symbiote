@@ -286,10 +286,13 @@ class RegistryScanner(Scanner):
     def _requirement_files(self) -> list[str]:
         if self._files is None:
             raise RuntimeError("_requirement_files called outside a _collection context")
+        # Case-insensitive, as a fixed-name open is on macOS and Windows file systems.
         names = [
-            n for n in self._files.root_entries() if fnmatch.fnmatchcase(n, "requirements*.txt")
+            n
+            for n in self._files.root_entries()
+            if fnmatch.fnmatchcase(n.lower(), "requirements*.txt")
         ]
-        return sorted(names, key=lambda name: (name != "requirements.txt", name))
+        return sorted(names, key=lambda name: (name.lower() != "requirements.txt", name))
 
     @staticmethod
     def _requirement_lines(content: str) -> list[str]:
@@ -329,8 +332,8 @@ class RegistryScanner(Scanner):
                 first.package_url,
             ):
                 detail = (
-                    f"PyPI package '{first.name}' is declared differently in another "
-                    "dependency manifest."
+                    f"PyPI package '{first.name}' is declared more than once in the "
+                    "requirements files, with different requirements."
                 )
                 if not any(risk.detail == detail for risk in first.risks):
                     first.risks.append(
@@ -338,7 +341,7 @@ class RegistryScanner(Scanner):
                             severity=RiskSeverity.MEDIUM,
                             category="version_pinning",
                             detail=detail,
-                            recommendation="Declare one exact version across dependency manifests and verify artifact hashes.",
+                            recommendation="Declare one exact version, or check that each declaration is intended, and verify artifact hashes.",
                         )
                     )
 
