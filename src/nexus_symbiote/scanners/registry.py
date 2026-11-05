@@ -311,7 +311,9 @@ class RegistryScanner(Scanner):
         kept: dict[str, RegistryEntryComponent] = {}
         sources: dict[str, set[str]] = {}
 
-        def declare(component: RegistryEntryComponent, source: str, reference: str) -> None:
+        def declare(
+            component: RegistryEntryComponent, source: str, reference: str, *, compare: bool = True
+        ) -> None:
             # One component per package across manifests. Every declaration is kept
             # on it, so a change to any of them changes the inventory and its diff.
             sources.setdefault(component.bom_ref, set()).add(f"{source}: {redact_text(reference)}")
@@ -320,7 +322,12 @@ class RegistryScanner(Scanner):
                 kept[component.bom_ref] = component
                 components.append(component)
                 return
-            if (component.version, component.package_url) != (first.version, first.package_url):
+            # pyproject.toml usually holds the ranges that requirements files pin
+            # (pip-tools, uv), so only requirements files are compared.
+            if compare and (component.version, component.package_url) != (
+                first.version,
+                first.package_url,
+            ):
                 detail = (
                     f"PyPI package '{first.name}' is declared differently in another "
                     "dependency manifest."
@@ -340,7 +347,7 @@ class RegistryScanner(Scanner):
         for declaration in self._pyproject_declarations(path, result):
             component = self._pip_component(declaration, path, result)
             if component:
-                declare(component, "pyproject.toml", declaration)
+                declare(component, "pyproject.toml", declaration, compare=False)
         for component in components:
             if len(sources[component.bom_ref]) > 1:
                 component.properties["declarations"] = sorted(sources[component.bom_ref])

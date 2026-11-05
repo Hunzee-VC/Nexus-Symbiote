@@ -108,6 +108,58 @@ def test_lines_the_collector_does_not_follow_leave_the_default_gate_as_on_main(t
     assert scanned.exit_code == 0, scanned.output
 
 
+def test_pyproject_ranges_with_compiled_pins_leave_the_default_gate_as_on_main(tmp_path):
+    # pip-tools and uv keep ranges in pyproject.toml and the pins that satisfy them
+    # in requirements.txt. Main dropped the pyproject.toml declaration without a
+    # finding; it is now recorded, still without a finding.
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "AGENTS.md").write_text("Keep receipts.")
+    (project / ".mcp.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "filesystem": {
+                        "command": "npx",
+                        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/srv/data"],
+                    },
+                    "github": {
+                        "command": "npx",
+                        "args": ["-y", "@modelcontextprotocol/server-github"],
+                        "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"},
+                    },
+                    "fetch": {"command": "uvx", "args": ["mcp-server-fetch"]},
+                }
+            }
+        )
+    )
+    ranges = ["anthropic>=0.34", "openai>=1.40", "langchain>=0.3,<0.4", "chromadb>=0.5"]
+    (project / "pyproject.toml").write_text(
+        '[project]\nname = "agent"\nversion = "0.1.0"\ndependencies = '
+        + json.dumps([*ranges, "langchain-anthropic>=0.2"])
+        + '\n[project.optional-dependencies]\nfast = ["openai>=1.50"]\n'
+    )
+    (project / "requirements.txt").write_text(
+        "anthropic==0.34.2\nopenai==1.51.0\nlangchain==0.3.3\n"
+        "langchain-anthropic==0.2.3\nchromadb==0.5.11\n"
+    )
+    result = RegistryScanner().scan(project)
+    assert result.scan_failures == []
+    by_name = {c.name: c for c in result.components}
+    assert all(c.risks == [] for c in by_name.values())
+    assert by_name["openai"].version == "==1.51.0"
+    assert by_name["openai"].properties["declarations"] == [
+        "pyproject.toml: openai>=1.40",
+        "pyproject.toml: openai>=1.50",
+        "requirements.txt: openai==1.51.0",
+    ]
+    runner = CliRunner()
+    bom = tmp_path / "bom.json"
+    scanned = runner.invoke(main, ["scan", str(project), "--no-project-policy", "-o", str(bom)])
+    assert scanned.exit_code == 0, scanned.output
+    assert runner.invoke(main, ["risk", str(bom)]).exit_code == 0
+
+
 def test_a_utf8_byte_order_mark_does_not_hide_the_first_requirement(tmp_path):
     (tmp_path / "requirements.txt").write_text("\ufeffopenai==1.3.0\n", encoding="utf-8")
     assert [c.name for c in RegistryScanner().scan(tmp_path).components] == ["openai"]
