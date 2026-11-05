@@ -71,6 +71,11 @@ def write_output_file(
                 mode = os.stat(relative.name, dir_fd=parent, follow_symlinks=follow).st_mode
             except FileNotFoundError:
                 break
+            except OSError:
+                if follow:
+                    # A link whose target cannot be reached is itself replaced.
+                    break
+                raise
             if not (stat.S_ISREG(mode) or (stat.S_ISLNK(mode) and not follow)):
                 raise OSError(errno.EINVAL, "output must be a regular file")
         temp = f".nexus-symbiote-{secrets.token_hex(16)}.tmp"

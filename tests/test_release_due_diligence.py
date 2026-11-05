@@ -190,6 +190,96 @@ def test_poetry_forms_without_a_version_are_reported_and_bare_versions_are_pins(
     ]
 
 
+def test_poetry_tables_keep_their_conditions_and_only_ai_gaps_are_reported(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.poetry.dependencies]\n"
+        'torch = {version = "2.0.1", markers = "sys_platform == \'linux\'"}\n'
+        'transformers = {version = "4.40.0", extras = ["torch"]}\n'
+        'openai = {version = "1.3.0", python = ">=3.10,<3.14"}\n'
+        'anthropic = {version = "0.30.0", python = "^3.10"}\n'
+        'internal-utils = {git = "https://github.com/example/internal-utils"}\n'
+        'requests = {path = "../vendored/requests"}\n'
+    )
+    result = RegistryScanner().scan(tmp_path)
+    by_name = {c.name: c for c in result.components}
+    assert sorted(by_name) == ["openai", "torch", "transformers"]
+    torch = by_name["torch"]
+    assert torch.package_url is None and "sys_platform" in torch.version
+    assert [r.category for r in torch.risks] == ["version_pinning"]
+    assert (
+        by_name["transformers"].properties["requested_requirement"] == "transformers[torch]==4.40.0"
+    )
+    assert 'python_version >= "3.10"' in by_name["openai"].version
+    assert result.surfaces_excluded == [
+        "pyproject.toml: unsupported requirement form is not collected"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("content", "gap"),
+    [
+        ("-e .\n", False),
+        ("-e git+https://github.com/psf/requests@v2.31.0#egg=requests\n", False),
+        ("https://files.example/requests-2.31.0-py3-none-any.whl\n", False),
+        ("-e ./subpackage\n", True),
+        ("-e git+https://github.com/openai/openai-python@v1.3.0#egg=openai\n", True),
+        ("https://download.example/torch-2.3.0-cp312-cp312-linux_x86_64.whl\n", True),
+        ("git+https://github.com/example/unknown\n", True),
+    ],
+)
+def test_requirement_gaps_are_reported_only_where_an_ai_package_may_hide(tmp_path, content, gap):
+    (tmp_path / "requirements.txt").write_text(content)
+    result = RegistryScanner().scan(tmp_path)
+    assert bool(result.surfaces_excluded) is gap
+
+
+def test_a_changed_poetry_marker_reaches_the_drift_gate(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "AGENTS.md").write_text("Keep receipts.")
+    manifest = project / "pyproject.toml"
+    manifest.write_text(
+        '[tool.poetry.dependencies]\ntorch = {version = "2.0.1", markers = "sys_platform == \'linux\'"}\n'
+    )
+    runner = CliRunner()
+    args = ["scan", str(project), "--no-project-policy", "--report-only", "-o"]
+    assert runner.invoke(main, [*args, str(tmp_path / "before.json")]).exit_code == 0
+    manifest.write_text(
+        '[tool.poetry.dependencies]\ntorch = {version = "2.0.1", markers = "sys_platform == \'win32\'"}\n'
+    )
+    assert runner.invoke(main, [*args, str(tmp_path / "after.json")]).exit_code == 0
+    drift = runner.invoke(
+        main,
+        ["diff", "--fail-on-alert", str(tmp_path / "before.json"), str(tmp_path / "after.json")],
+    )
+    assert drift.exit_code != 0, drift.output
+
+
+def test_a_link_to_an_unreachable_target_is_replaced_not_refused(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "AGENTS.md").write_text("Keep receipts.")
+    (tmp_path / "regular").write_text("keep")
+    (tmp_path / "dangling").symlink_to(tmp_path / "missing" / "bom.json")
+    (tmp_path / "through-file").symlink_to(tmp_path / "regular" / "bom.json")
+    runner = CliRunner()
+    for name in ("dangling", "through-file"):
+        result = runner.invoke(
+            main,
+            [
+                "scan",
+                str(project),
+                "--no-project-policy",
+                "--report-only",
+                "-o",
+                str(tmp_path / name),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert not (tmp_path / name).is_symlink()
+    assert (tmp_path / "regular").read_text() == "keep"
+
+
 @pytest.mark.skipif(not hasattr(__import__("os"), "mkfifo"), reason="needs FIFOs")
 def test_no_command_replaces_a_fifo_or_a_link_to_one(tmp_path):
     import os

@@ -445,7 +445,7 @@ class RegistryScanner(Scanner):
                             self._unread(
                                 result, f"{filename}: included requirements file is not followed"
                             )
-                        elif option == "--editable":
+                        elif option == "--editable" and self._may_hide_ai_package(value):
                             self._unread(
                                 result, f"{filename}: unsupported requirement form is not collected"
                             )
@@ -458,10 +458,11 @@ class RegistryScanner(Scanner):
                     words.append(word)
                 reference = " ".join(words)
                 if not self._NAMED.match(reference):
-                    # A URL, VCS or path reference names no package this collector can map.
-                    self._unread(
-                        result, f"{filename}: unsupported requirement form is not collected"
-                    )
+                    # A URL, VCS or path reference that may name an AI package is a gap.
+                    if self._may_hide_ai_package(reference):
+                        self._unread(
+                            result, f"{filename}: unsupported requirement form is not collected"
+                        )
                     continue
                 component = self._pip_component(reference, path, result)
                 if component is not None:
@@ -509,22 +510,17 @@ class RegistryScanner(Scanner):
             if not isinstance(table, dict):
                 continue
             for name, value in table.items():
-                version = value.get("version") if isinstance(value, dict) else value
-                if not isinstance(version, str) or (
-                    isinstance(value, dict) and value.keys() & {"git", "url", "path", "file"}
-                ):
-                    # A git, URL, path or multi-constraint dependency names no version
-                    # this collector can map; it is unknown, not absent.
+                if not isinstance(name, str) or name.lower() == "python":
+                    continue
+                reference = self._poetry_reference(name, value)
+                if reference is not None:
+                    declarations.append(reference)
+                elif self._is_ai_package(name):
+                    # A git, URL, path, multi-constraint or untranslatable entry for an
+                    # AI package names no version this collector can map.
                     self._unread(
                         result, "pyproject.toml: unsupported requirement form is not collected"
                     )
-                    continue
-                version = version.strip()
-                if version == "*":
-                    version = ""
-                elif version[:1].isdigit():
-                    version = "==" + version
-                declarations.append(f"{name}{version}")
         return declarations
 
     def _scan_docker(self, root: Path, result: ScanResult) -> list[RegistryEntryComponent]:
@@ -575,6 +571,57 @@ class RegistryScanner(Scanner):
                     )
                 )
         return components
+
+    _PYTHON_BOUND = re.compile(r"(>=|<=|!=|==|>|<)\s*([0-9]+(?:\.[0-9]+)*)")
+
+    @classmethod
+    def _poetry_reference(cls, name: str, value: Any) -> str | None:
+        """A Poetry dependency as a PEP 508 requirement, or None when it cannot be one."""
+        if isinstance(value, str):
+            value = {"version": value}
+        if not isinstance(value, dict) or value.keys() & {"git", "url", "path", "file"}:
+            return None
+        version, extras = value.get("version", "*"), value.get("extras", [])
+        markers, python = value.get("markers"), value.get("python")
+        if (
+            not isinstance(version, str)
+            or not isinstance(extras, list)
+            or not all(isinstance(extra, str) for extra in extras)
+            or not isinstance(markers, (str, type(None)))
+            or not isinstance(python, (str, type(None)))
+        ):
+            return None
+        version = version.strip()
+        if version == "*":
+            version = ""
+        elif version[:1].isdigit():
+            version = "==" + version
+        conditions = [f"({markers})"] if markers and markers.strip() else []
+        if python is not None:
+            # Only plain comparisons translate exactly into python_version markers.
+            bounds = [part.strip() for part in python.split(",")]
+            matches = [cls._PYTHON_BOUND.fullmatch(bound) for bound in bounds]
+            if not bounds or not all(matches):
+                return None
+            conditions.extend(f'python_version {m.group(1)} "{m.group(2)}"' for m in matches if m)
+        reference = name + (f"[{','.join(extras)}]" if extras else "") + version
+        return reference + ("; " + " and ".join(conditions) if conditions else "")
+
+    def _may_hide_ai_package(self, reference: str) -> bool:
+        """Whether a reference the collector cannot map might name an AI package."""
+        value = reference.strip()
+        if value in (".", "./"):
+            # The project itself: its own manifests are read directly.
+            return False
+        egg = re.search(r"[#&]egg=([A-Za-z0-9][A-Za-z0-9._-]*)", value)
+        if egg:
+            return self._is_ai_package(egg.group(1))
+        base = value.split("#", 1)[0].split("?", 1)[0].rstrip("/").rsplit("/", 1)[-1]
+        archive = re.fullmatch(r"([A-Za-z0-9][A-Za-z0-9._]*?)-[0-9].*\.(?:whl|tar\.gz|zip)", base)
+        if archive:
+            return self._is_ai_package(archive.group(1))
+        # No package name can be read from it, so it may be anything.
+        return True
 
     def _is_ai_package(self, name: str) -> bool:
         return any(pattern.search(name) for pattern in AI_PACKAGE_PATTERNS)
