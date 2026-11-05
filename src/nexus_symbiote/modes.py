@@ -22,6 +22,7 @@ from __future__ import annotations
 import _socket
 import enum
 import functools
+import importlib
 import os
 import socket
 import subprocess
@@ -82,6 +83,12 @@ _AUDIT_EVENTS = {
 # event above fires, so only Unix-domain sockets may be created. _socket.socket()
 # reports the default family as -1 before it becomes AF_INET.
 _LOCAL_SOCKET_FAMILY = int(socket.AF_UNIX)
+# These modules open a socket while they are imported, to probe the host: urllib3
+# binds an AF_INET6 socket to ::1 to detect IPv6 support, and requests, sigstore
+# and tuf import it. Importing them before the guard is active lets the probe run;
+# it reaches no network. Inside the guard the refusal is a BaseException, which
+# the probe's `except Exception` cannot absorb.
+_IMPORT_TIME_SOCKET_PROBES = ("urllib3.util.connection",)
 
 
 class Mode(enum.Enum):
@@ -163,6 +170,14 @@ def _install_audit_hook() -> None:
     with the attribute patches it stays and checks ``_active`` on every event.
     """
     sys.addaudithook(_audit)
+
+
+def _run_import_time_probes() -> None:
+    for name in _IMPORT_TIME_SOCKET_PROBES:
+        try:
+            importlib.import_module(name)
+        except ImportError:
+            continue
 
 
 def current() -> Mode | None:
@@ -256,6 +271,7 @@ def enforce(mode: Mode) -> Iterator[None]:
             nested = False
             patches = []
             if mode is Mode.OFFLINE:
+                _run_import_time_probes()
                 _install_audit_hook()
                 patches = _guard()
             _active = mode
