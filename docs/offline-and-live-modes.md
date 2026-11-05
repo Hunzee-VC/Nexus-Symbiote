@@ -93,11 +93,13 @@ and cannot be patched, so a CPython audit hook raises the same `OfflineViolation
 while an offline command runs. It refuses creating any socket other than a
 Unix-domain socket. An internet socket therefore cannot be opened during the
 command, and the name resolution that `connect`, `sendto` and `bind` perform for a
-host-name address never starts on one. Unix-domain sockets and socket pairs, which
-asyncio and local inter-process communication use, are unaffected. Before the guard
-starts, the CLI imports `urllib3.util.connection`, whose import binds an IPv6 socket
-to `::1` to detect IPv6 support; that probe reaches no network, and running it first
-keeps Sigstore's offline verifier, which imports urllib3, working. The hook also refuses the
+host-name address never starts on one. Creating Unix-domain sockets and socket
+pairs is allowed, so asyncio's event loop and `send` and `recv` on a socket pair keep
+working, but `connect`, `listen`, `sendto` and `sendmsg` are refused for every
+socket family, Unix-domain included. When urllib3 is installed, the CLI imports
+`urllib3.util.connection` before the guard starts: that import tries to bind an IPv6
+socket to `::1` to detect IPv6 support, reaches no network, and would otherwise stop
+Sigstore's offline verifier, which imports urllib3. The hook also refuses the
 `socket.connect`, `socket.sendto` and `socket.sendmsg` events, the name resolution
 events and the process creation events. CPython raises these events inside the C
 implementations, so they also cover references to those functions captured before
