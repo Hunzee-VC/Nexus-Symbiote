@@ -104,6 +104,23 @@ def load_policy(project_root: Path) -> Policy | None:
     return None
 
 
+def nearest_policy_file(start: Path) -> Path | None:
+    """Find the closest policy file at or above ``start`` so a caller can say it was not applied.
+
+    Never use the result to load a policy: a file above the project, or beside an
+    inventory written to a shared directory, belongs to whoever controls that directory.
+    """
+    for directory in (start, *start.parents):
+        for name in (".nexus-symbiote.yaml", ".nexus-symbiote.yml"):
+            candidate = directory / name
+            try:
+                if candidate.is_symlink() or candidate.exists():
+                    return candidate
+            except OSError:
+                continue
+    return None
+
+
 def parse_yaml_mapping(text: str) -> dict[str, Any]:
     try:
         import yaml
