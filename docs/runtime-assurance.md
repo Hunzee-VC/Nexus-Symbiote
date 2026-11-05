@@ -53,6 +53,12 @@ Predicates must be in canonical contract form, the form `runtime sign` emits
 encodes the same contract differently is rejected, so one contract has exactly
 one digest. `revoked_snapshots` entries and `ActionApproval.snapshot_digest` use
 that digest, which `runtime verify` prints as `digest`.
+`sign_contract` re-validates a contract before signing it, so a copy made with
+`model_copy(update=...)` is signed in canonical form, or refused if it does not validate.
+`revoked_snapshots` and `revoked_tools` entries must be `sha256:` followed by 64
+lowercase hexadecimal digits, and `revoked_signers` entries must be a 64-digit
+lowercase key ID. Revocation entries are compared verbatim, so any other form is
+rejected when the trust status is signed or verified instead of being ignored.
 The CLI reports contract verification separately from invocation authorization.
 
 `ReferenceGateway` accepts independent `snapshot_threshold`, `approval_threshold`

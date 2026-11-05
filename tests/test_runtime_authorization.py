@@ -4,12 +4,13 @@ import base64
 import json
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from threading import Event
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from pydantic import ValidationError
 
 from nexus_symbiote.core.hashing import hash_tool_definition
 from nexus_symbiote.runtime import (
@@ -534,3 +535,44 @@ def test_non_canonical_predicate_is_rejected_so_one_contract_has_one_digest(tmp_
         verify_contract(altered, "snapshot", ring)
     contract, _ = verify_contract(envelope, "snapshot", ring)
     assert digest(contract.model_dump(mode="json")) == canonical
+
+
+def test_sign_contract_signs_the_canonical_form_of_an_unvalidated_copy(tmp_path):
+    values = fixture(tmp_path)
+    snapshot, key = values[3], values[6]
+    ring = {key_id(key.public_key()): key.public_key()}
+    # model_copy skips validation, so the copy keeps a non-UTC offset the validator would convert.
+    pacific = timezone(timedelta(hours=-8))
+    renewed = snapshot.model_copy(
+        update={"serial": 2, "not_after": (NOW + timedelta(hours=2)).astimezone(pacific)}
+    )
+    contract, _ = verify_contract(sign_contract(renewed, "snapshot", (key,)), "snapshot", ring)
+    assert contract.not_after == NOW + timedelta(hours=2)
+    assert contract.not_after.utcoffset() == timedelta(0)
+
+
+def test_sign_contract_refuses_a_copy_that_does_not_validate(tmp_path):
+    values = fixture(tmp_path)
+    snapshot, key = values[3], values[6]
+    inverted = snapshot.model_copy(update={"not_after": snapshot.not_before})
+    with pytest.raises(AuthorizationError, match="does not validate"):
+        sign_contract(inverted, "snapshot", (key,))
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("revoked_snapshots", "a" * 64),
+        ("revoked_snapshots", "SHA256:" + "A" * 64),
+        ("revoked_snapshots", "sha256:" + "A" * 64),
+        ("revoked_tools", "a" * 64),
+        ("revoked_signers", "sha256:" + "a" * 64),
+        ("revoked_signers", "A" * 64),
+    ],
+)
+def test_malformed_revocation_entries_are_rejected_instead_of_ignored(field, value):
+    window = {"not_before": NOW, "not_after": NOW + timedelta(minutes=5)}
+    with pytest.raises(ValidationError):
+        TrustStatus(tenant="acme", serial=1, **window, **{field: (value,)})
+    canonical = "sha256:" + "a" * 64 if field != "revoked_signers" else "a" * 64
+    assert getattr(TrustStatus(tenant="acme", serial=1, **window, **{field: (canonical,)}), field)
