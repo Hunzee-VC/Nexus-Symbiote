@@ -212,6 +212,8 @@ def test_unparseable_homepage_fails_closed(tmp_path):
 
 def test_tracked_repository_passes_its_own_owner_check():
     root = Path(__file__).parents[1]
+    if not (root / ".git").exists():
+        pytest.skip("needs a Git checkout; an unpacked sdist has no tracked-file list")
     listing = subprocess.run(  # noqa: S603 - fixed read-only Git operation
         [shutil.which("git") or "git", "-C", str(root), "ls-files", "-z"],
         capture_output=True,

@@ -18,6 +18,8 @@ from nexus_symbiote.core.hashing import (
 
 MAX_BUNDLE_BYTES = 4 * 1024 * 1024
 MAX_SIGNED_ARTIFACT_BYTES = 5 * 1024 * 1024 * 1024
+# A fixed message, so callers can report it instead of a generic signature failure.
+SIGSTORE_MISSING = "sigstore package not installed; install nexus-symbiote[sigstore]"
 
 
 @dataclass(frozen=True)
@@ -122,9 +124,7 @@ def verify_sigstore_digest(
             },
         )
     except ImportError:
-        return VerificationResult(
-            False, error="sigstore package not installed; install nexus-symbiote[sigstore]"
-        )
+        return VerificationResult(False, error=SIGSTORE_MISSING)
     except Exception as exc:
         return VerificationResult(
             False, error=f"Sigstore artifact verification failed ({type(exc).__name__})"

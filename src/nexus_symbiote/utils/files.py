@@ -46,8 +46,10 @@ def write_output_file(
 ) -> None:
     """Replace the destination atomically without writing through an existing link."""
     if root is None:
-        # An explicitly selected absolute output may lie anywhere, but never traverse a link.
-        path = path.absolute()
+        # An explicitly selected output may lie anywhere, but never traverse a link.
+        # ".." is resolved lexically; every remaining directory is still opened
+        # without following links, so no link is crossed either way.
+        path = Path(os.path.normpath(path.absolute()))
         root = Path(path.anchor)
     relative = _relative(root, path)
     if os.name != "posix" or not hasattr(os, "O_NOFOLLOW"):

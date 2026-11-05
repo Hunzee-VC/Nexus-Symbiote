@@ -23,10 +23,11 @@ bypass actor/restrictions on a single-maintainer repository blocks the
 maintainer from merging their own pull requests, because GitHub does not
 count self-approval toward a required review. The interim file still binds
 `Verified CI` to the GitHub Actions app, enforces it for administrators, and
-disables force pushes and branch deletion — `scripts/check_repository_controls.py`
-only checks for those properties plus the enforced status check, not for
-required reviews, so the interim configuration satisfies the same
-publication preflight. Switch to the full configuration once a second
+disables force pushes and branch deletion. `scripts/check_repository_controls.py`
+checks only that protection is enabled, that `Verified CI` is required, bound to
+the GitHub Actions app and enforced for administrators, and the CI results; it
+cannot see force-push, deletion or review settings, so the interim configuration
+satisfies the same publication preflight. Switch to the full configuration once a second
 reviewer can approve changes, rather than leaving the weaker one in place
 indefinitely.
 
@@ -62,9 +63,10 @@ newer run cannot be replaced by an older success. Missing or truncated job data,
 an API failure, redirects and an unprotected branch fail closed. The SHA defaults
 to `GITHUB_SHA`; local invocations must supply their reviewed commit explicitly.
 This limited preflight
-does not independently audit approval counts, bypass actors,
-environment configuration or package-index ownership; an administrator must
-review those separately. The preflight checks live state during the build; it
+does not independently audit approval counts, bypass actors, force-push and
+deletion settings, environment configuration or package-index ownership; an
+administrator must review those separately, for example with
+`gh api repos/Hunzee-VC/Nexus-Symbiote/branches/main/protection`. The preflight checks live state during the build; it
 does not lock GitHub settings or cancel a candidate after later administrative
 changes. Review the exact run and current controls at the environment approval.
 Candidate builds remain available while controls are

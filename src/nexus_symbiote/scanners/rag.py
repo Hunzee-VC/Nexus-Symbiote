@@ -12,7 +12,7 @@ from typing import Any
 
 from nexus_symbiote.core.enums import RiskSeverity, TrustTier
 from nexus_symbiote.core.models import RAGSourceComponent, RiskAssessment
-from nexus_symbiote.scanners.base import Scanner, ScanResult
+from nexus_symbiote.scanners.base import Scanner, ScanResult, parse_python
 from nexus_symbiote.utils.confined import ConfinedCollection
 from nexus_symbiote.utils.secrets import redact_text
 
@@ -63,7 +63,7 @@ class RAGScanner(Scanner):
                         result.scan_failures.append(f"{path}: Python syntax collection size limit")
                         continue
                     try:
-                        tree = ast.parse(content)
+                        tree = parse_python(content)
                     except (SyntaxError, ValueError, RecursionError):
                         result.scan_failures.append(f"{path}: invalid Python syntax")
                         continue

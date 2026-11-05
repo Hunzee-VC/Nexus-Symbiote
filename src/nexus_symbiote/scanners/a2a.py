@@ -8,7 +8,7 @@ from typing import Any
 
 from nexus_symbiote.core.enums import RiskSeverity, TrustTier
 from nexus_symbiote.core.models import A2AClientComponent, A2AServerComponent, RiskAssessment
-from nexus_symbiote.scanners.base import Scanner, ScanResult, sanitized_origin
+from nexus_symbiote.scanners.base import Scanner, ScanResult, parse_python, sanitized_origin
 from nexus_symbiote.utils.secrets import redact_text
 
 AGENT_CARD_FILES = [
@@ -206,7 +206,7 @@ class A2AScanner(Scanner):
                 result.scan_failures.append(f"{path}: syntax collection size limit exceeded")
                 continue
             try:
-                tree = ast.parse(content)
+                tree = parse_python(content)
             except (SyntaxError, ValueError, RecursionError):
                 result.scan_failures.append(f"{path}: invalid Python syntax")
                 continue

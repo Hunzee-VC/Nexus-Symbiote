@@ -7,10 +7,11 @@ name = "nexus-symbiote"
 version = "0.1.0"
 description = "Agent Bill of Materials (AgentBOM) — generate, validate, and manage AIBOMs for production AI agent systems"
 readme = "README.md"
-license = "MIT AND Apache-2.0"
+license = "MIT AND Apache-2.0 AND Community-Spec-1.0"
 license-files = [
     "LICENSE",
     "src/nexus_symbiote/generators/schemas/vendor/LICENSE-APACHE-2.0.txt",
+    "src/nexus_symbiote/generators/schemas/vendor/LICENSE-SPDX-3.0.1.txt",
     "src/nexus_symbiote/generators/schemas/vendor/NOTICE.txt",
 ]
 requires-python = ">=3.11"
@@ -48,7 +49,7 @@ dependencies = [
     "click>=8.1,<9",
     "packaging>=24,<27",
     "packageurl-python>=0.17.6,<1",
-    "pydantic>=2.5,<3",
+    "pydantic>=2.10,<3",
     "rich>=13.0,<16",
     "rfc8785>=0.1.4,<1",
     "pyyaml>=6.0.1,<7",

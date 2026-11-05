@@ -18,6 +18,11 @@ nexus-symbiote [--offline | --live] [--version] [--help] COMMAND [ARGS]...
 | `--version` | Print the version and exit. |
 | `--help` | Print help and exit. |
 
+Every `-o`/`--output` file is written atomically and never through a symbolic link:
+its directory must already exist, and no directory on the path may be a symbolic
+link (on macOS, write under `/private/tmp` rather than `/tmp`). `..` is resolved
+lexically. A refused path ends the command with an error and writes nothing.
+
 Mode flags go before the command. Without a flag, `NEXUS_SYMBIOTE_MODE=offline|live`
 selects the mode; without either, the mode is offline. See
 [offline and live modes](offline-and-live-modes.md).

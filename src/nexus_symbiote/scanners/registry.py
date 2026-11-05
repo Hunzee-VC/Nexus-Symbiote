@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import base64
 import binascii
+import fnmatch
 import re
 import tomllib
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import quote
 
@@ -279,17 +280,63 @@ class RegistryScanner(Scanner):
             },
         )
 
+    def _requirement_files(self) -> list[str]:
+        if self._files is None:
+            raise RuntimeError("_requirement_files called outside a _collection context")
+        names = [
+            n for n in self._files.root_entries() if fnmatch.fnmatchcase(n, "requirements*.txt")
+        ]
+        return sorted(names, key=lambda name: (name != "requirements.txt", name))
+
+    @staticmethod
+    def _requirement_lines(content: str) -> list[str]:
+        """Logical lines as pip reads them: a trailing backslash continues the line."""
+        lines: list[str] = []
+        pending = ""
+        for raw in content.splitlines():
+            if raw.endswith("\\") and not raw.lstrip().startswith("#"):
+                pending += raw[:-1] + " "
+                continue
+            lines.append(pending + raw)
+            pending = ""
+        if pending:
+            lines.append(pending)
+        return lines
+
     def _scan_pip(self, root: Path, result: ScanResult) -> list[RegistryEntryComponent]:
         components: list[RegistryEntryComponent] = []
-        for filename in ("requirements.txt", "requirements-dev.txt", "requirements-ml.txt"):
+        filenames = self._requirement_files()
+        for filename in filenames:
             path = root / filename
             content = self._read(path, result)
             if content is None:
                 continue
-            for line in content.splitlines():
-                if not line.strip() or line.lstrip().startswith(("#", "-")):
+            for line in self._requirement_lines(content):
+                text = line.split(" #", 1)[0].strip()
+                if not text or text.startswith("#"):
                     continue
-                component = self._pip_component(line, path, result)
+                if text.startswith("-"):
+                    option, _, value = text.replace("=", " ", 1).partition(" ")
+                    if option[:2] in ("-r", "-c") and len(option) > 2 and option[1] != "-":
+                        option, value = option[:2], option[2:]
+                    target = PurePosixPath(value.strip())
+                    unread = f"{filename}: included requirements file is not followed"
+                    if (
+                        option in ("-r", "--requirement", "-c", "--constraint")
+                        and (len(target.parts) != 1 or target.name not in filenames)
+                        and unread not in result.surfaces_excluded
+                    ):
+                        # An included file outside the root's requirements*.txt is not
+                        # read, so its declarations are unknown rather than absent.
+                        result.surfaces_excluded.append(unread)
+                    continue
+                # Per-requirement options such as --hash follow the requirement itself.
+                words: list[str] = []
+                for word in text.split():
+                    if word.startswith("-"):
+                        break
+                    words.append(word)
+                component = self._pip_component(" ".join(words), path, result)
                 if component:
                     components.append(component)
         path = root / "pyproject.toml"

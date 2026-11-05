@@ -11,7 +11,15 @@ import click
 
 from nexus_symbiote import modes
 from nexus_symbiote.core.aibom import AIBOM
-from nexus_symbiote.utils.files import write_output_file
+from nexus_symbiote.utils.terminal import neutralize, write_cli_output
+
+
+def _load_inventory(path: Path) -> AIBOM:
+    # Parser and validation messages can quote attacker-controlled input; keep them out.
+    try:
+        return AIBOM.load(path)
+    except (OSError, ValueError, RecursionError) as exc:
+        raise click.ClickException(f"{neutralize(path)} is not a valid native AIBOM file.") from exc
 
 
 def register_supply_chain_commands(main: click.Group) -> None:
@@ -132,7 +140,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
             passed, _ = RiskScorer().passes_gate(AIBOM.load(staged))
             if not passed:
                 raise click.ClickException("Baseline was not written: static scan gate failed")
-            write_output_file(target, staged.read_text(encoding="utf-8"))
+            write_cli_output(target, staged.read_text(encoding="utf-8"))
         finally:
             staged.unlink(missing_ok=True)
         click.echo(f"Unsigned baseline staged for review: {target}")
@@ -151,12 +159,13 @@ def register_supply_chain_commands(main: click.Group) -> None:
 
         if output and output.resolve() == aibom_path.resolve():
             raise click.BadParameter("output must not overwrite the source inventory")
+        bom = _load_inventory(aibom_path)
         try:
-            text = VEXGenerator().generate_json(AIBOM.load(aibom_path))
-        except (OSError, ValueError) as exc:
-            raise click.ClickException(str(exc)) from exc
+            text = VEXGenerator().generate_json(bom)
+        except (OSError, ValueError, RecursionError) as exc:
+            raise click.ClickException(neutralize(exc)) from exc
         if output:
-            write_output_file(output, text)
+            write_cli_output(output, text)
         else:
             click.echo(text)
 
@@ -175,13 +184,14 @@ def register_supply_chain_commands(main: click.Group) -> None:
 
         if output and output.resolve() == aibom_path.resolve():
             raise click.BadParameter("output must not overwrite the source inventory")
+        bom = _load_inventory(aibom_path)
         try:
-            report = fetch_advisories(AIBOM.load(aibom_path))
+            report = fetch_advisories(bom)
         except (OSError, ValueError) as exc:
-            raise click.ClickException(str(exc)) from exc
+            raise click.ClickException(neutralize(exc)) from exc
         text = json.dumps(report.to_dict(), indent=2)
         if output:
-            write_output_file(output, text)
+            write_cli_output(output, text)
         else:
             click.echo(text)
         if report.errors:

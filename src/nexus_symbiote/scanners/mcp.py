@@ -46,7 +46,7 @@ from nexus_symbiote.core.models import (
     RiskAssessment,
     ToolComponent,
 )
-from nexus_symbiote.scanners.base import Scanner, ScanResult, sanitized_origin
+from nexus_symbiote.scanners.base import Scanner, ScanResult, parse_python, sanitized_origin
 from nexus_symbiote.utils.secrets import REDACTED, redact_descriptor, redact_text
 
 MCP_CONFIG_FILES = [
@@ -618,7 +618,7 @@ class MCPScanner(Scanner):
                     continue
                 if suffix == ".py":
                     try:
-                        tree = ast.parse(content)
+                        tree = parse_python(content)
                     except (SyntaxError, ValueError, RecursionError):
                         result.scan_failures.append(f"{path}: invalid Python syntax")
                         continue

@@ -68,7 +68,7 @@ Eight built-in collectors read declared configuration and artifacts from the pro
 | `model` | `.safetensors`, `.gguf`, `.ggml`, `.onnx`, Keras (`.h5`, `.hdf5`, `.keras`), `saved_model.pb` and pickle-family files (including `.ckpt` and `.pdparams`), with their config | SHA-256 hashes, serialization safety, SafeTensors structure, signature status |
 | `prompt` | `CLAUDE.md`, `AGENTS.md`, `CODEX.md`, Copilot/Codex instructions, skill and command files | Instruction and skill digests, hidden-character findings |
 | `rag` | `rag_config.*`, `retrieval_config.json`, `vector_store_config.json` | Declared retrieval sources and controls |
-| `registry` | `package.json`, lockfiles, `requirements*.txt`, `pyproject.toml`, Dockerfiles | AI package identities, pins, lockfile integrity; container images and digests |
+| `registry` | `package.json`, lockfiles, `requirements*.txt` in the project root, `pyproject.toml`, Dockerfiles | AI package identities, pins, lockfile integrity; container images and digests |
 | `a2a` | `.well-known/agent.json`, `agent-card.json`, A2A client config | Agent cards, endpoints, declared authentication |
 | `ide_agents` | Settings for Claude Code, Cursor, Codex, Windsurf, Cline, Copilot and others | Agent configuration and declared permissions |
 | `shadowscan` | [Nexus-ShadowScan](https://github.com/Hunzee-VC/Nexus-ShadowScan) reports | Imported discovery claims, kept separate from local evidence |
@@ -130,7 +130,7 @@ Requires Python 3.11+ on Linux, git, and the [GitHub CLI](https://cli.github.com
   set -euo pipefail
   python -m venv --clear .venv
   commit="$(git ls-remote https://github.com/Hunzee-VC/Nexus-Symbiote.git 'refs/tags/v0.1.0^{}' | cut -f1)"
-  test -n "$commit"
+  test -n "$commit" || { echo "tag v0.1.0 not found" >&2; exit 1; }
   .venv/bin/python -m pip download --no-deps --only-binary=:all: nexus-symbiote==0.1.0 -d dist
   gh attestation verify dist/nexus_symbiote-0.1.0-py3-none-any.whl --repo Hunzee-VC/Nexus-Symbiote \
     --signer-workflow Hunzee-VC/Nexus-Symbiote/.github/workflows/release.yml \
@@ -139,11 +139,10 @@ Requires Python 3.11+ on Linux, git, and the [GitHub CLI](https://cli.github.com
     "https://raw.githubusercontent.com/Hunzee-VC/Nexus-Symbiote/$commit/requirements-action.lock"
   .venv/bin/python -m pip install --require-hashes --only-binary=:all: -r requirements-action.lock
   .venv/bin/python -m pip install --no-deps dist/nexus_symbiote-0.1.0-py3-none-any.whl
-)
-. .venv/bin/activate && nexus-symbiote --version
+) && .venv/bin/nexus-symbiote --version
 ```
 
-The subshell first rebuilds `.venv` with `--clear`, then stops at the first failing command, including a missing or signed-out `gh`. After any failure the last line finds no `nexus-symbiote` and fails, so an earlier install cannot stand in for the verified wheel. Nothing is installed unless the release workflow attested these exact wheel bytes for the commit the `v0.1.0` tag points at, and the lock file is fetched from that same commit. Release builds are reproducible, so this check cannot tell the published commit from another one that differs only in its lock file. Keeping the tag on the published commit is the job of the [release-tag ruleset](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/repository-controls.md#operator-prerequisites), which the release procedure applies before the first tag is created. Paste the block as one unit; running the lines one at a time loses these checks. [Releasing](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/releasing.md) describes what the attestation does and does not establish.
+The subshell first rebuilds `.venv` with `--clear`, then stops at the first failing command, including a missing or signed-out `gh` or a missing tag. The version check runs only after every step succeeded, and it runs the program inside `.venv`, so an earlier install elsewhere on your `PATH` cannot stand in for the verified wheel. Activate the environment with `. .venv/bin/activate` to use it. Nothing is installed unless the release workflow attested these exact wheel bytes for the commit the `v0.1.0` tag points at, and the lock file is fetched from that same commit. Release builds are reproducible, so this check cannot tell the published commit from another one that differs only in its lock file. Keeping the tag on the published commit is the job of the [release-tag ruleset](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/repository-controls.md#operator-prerequisites), which the release procedure applies before the first tag is created. Paste the block as one unit; running the lines one at a time loses these checks. [Releasing](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/releasing.md) describes what the attestation does and does not establish.
 
 ### Install from reviewed source
 
@@ -294,4 +293,4 @@ If you use Nexus SymBiote in research or tooling, cite it with the metadata in [
 
 ## License
 
-[MIT](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/LICENSE). Copyright (c) 2026 Emmanuel Dahunsi (AISecNomad). The vendored CycloneDX and SPDX schemas under `src/nexus_symbiote/generators/schemas/vendor/` are Apache-2.0 and ship with their [license](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/src/nexus_symbiote/generators/schemas/vendor/LICENSE-APACHE-2.0.txt) and [notice](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/src/nexus_symbiote/generators/schemas/vendor/NOTICE.txt), so the distribution's license expression is `MIT AND Apache-2.0`.
+[MIT](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/LICENSE). Copyright (c) 2026 Emmanuel Dahunsi (AISecNomad). The vendored schemas under `src/nexus_symbiote/generators/schemas/vendor/` keep their upstream licenses: the CycloneDX schemas are Apache-2.0 ([license](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/src/nexus_symbiote/generators/schemas/vendor/LICENSE-APACHE-2.0.txt)), and the SPDX 3.0.1 schema and context come from the SPDX Specification, which is Community-Spec-1.0 with CC-BY-3.0 for pre-existing portions ([license](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/src/nexus_symbiote/generators/schemas/vendor/LICENSE-SPDX-3.0.1.txt)). The [notice](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/src/nexus_symbiote/generators/schemas/vendor/NOTICE.txt) gives their sources, so the distribution's license expression is `MIT AND Apache-2.0 AND Community-Spec-1.0`.
