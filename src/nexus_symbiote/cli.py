@@ -49,14 +49,44 @@ def _scanner_error_summary(exc: Exception) -> str:
 
 
 def _policy(root: Path, *, ignore_project: bool = False) -> Policy:
-    from nexus_symbiote.policy import PolicyError, default_policy, load_policy
+    policy, _, _ = _policy_with_source(root, ignore_project=ignore_project)
+    return policy
+
+
+def _policy_with_source(
+    root: Path, *, ignore_project: bool = False, warn: bool = True
+) -> tuple[Policy, str, list[str]]:
+    """Load the governing policy and say where it came from and what it relaxes.
+
+    A gate that a checkout-supplied file switched off must be a visible choice, so
+    every relaxation is returned for machine-readable output and, unless the caller
+    emits JSON that already carries it, printed on stderr.
+    """
+    from nexus_symbiote.policy import (
+        PolicyError,
+        default_policy,
+        find_policy_path,
+        load_policy,
+        weakened_settings,
+    )
 
     if ignore_project:
-        return default_policy()
+        return default_policy(), "built-in", []
     try:
-        return load_policy(root) or default_policy()
+        path = find_policy_path(root)
+        policy = load_policy(root) or default_policy()
     except PolicyError as exc:
         raise click.ClickException(str(exc)) from exc
+    if path is None:
+        return policy, "built-in", []
+    source = "project:" + _safe(str(path))
+    weaker = weakened_settings(policy)
+    if weaker and warn:
+        click.echo(
+            f"WARNING: policy {source[8:]} weakens the built-in gates: " + "; ".join(weaker),
+            err=True,
+        )
+    return policy, source, weaker
 
 
 # C0/C1 controls move the cursor or rewrite earlier output; bidirectional and
@@ -670,10 +700,11 @@ def validate(
 
     signature_policies = _signer_policies(signature_policy, Path(project) if project else None)
 
-    policy = _policy(
+    policy, policy_source, _ = _policy_with_source(
         Path(project).resolve() if project else Path(aibom_path).parent,
         ignore_project=no_project_policy,
     )
+    console.print(f"Policy: {policy_source}", soft_wrap=True)
     valid = True
     console.print("[bold]Completeness check[/]")
     if policy.validation.require_completeness:
@@ -786,7 +817,9 @@ def risk(
 
     root = project.resolve() if project else None
     signature_policies = _signer_policies(signature_policy, root)
-    policy = _policy(root or Path(aibom_path).parent, ignore_project=no_project_policy)
+    policy, policy_source, policy_weakened = _policy_with_source(
+        root or Path(aibom_path).parent, ignore_project=no_project_policy, warn=not json_output
+    )
     threshold = threshold if threshold is not None else policy.risk.fail_threshold
     if threshold <= 0 or not math.isfinite(threshold):
         raise click.BadParameter("threshold must be positive and finite", param_hint="--threshold")
@@ -813,6 +846,8 @@ def risk(
                             "risk_level": "unknown",
                             "coverage_status": "unreconciled",
                             "gate_reasons": reasons,
+                            "policy_source": policy_source,
+                            "policy_weakened": policy_weakened,
                         },
                         indent=2,
                     )
@@ -832,7 +867,17 @@ def risk(
     passed, report = scorer.passes_gate(bom)
 
     if json_output:
-        click.echo(json.dumps({**report.to_dict(), "assessment_basis": basis}, indent=2))
+        click.echo(
+            json.dumps(
+                {
+                    **report.to_dict(),
+                    "assessment_basis": basis,
+                    "policy_source": policy_source,
+                    "policy_weakened": policy_weakened,
+                },
+                indent=2,
+            )
+        )
         sys.exit(0 if passed else 1)
 
     level_colors = {

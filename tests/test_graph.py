@@ -386,3 +386,26 @@ def test_agent_manifest_reuses_instruction_digest_and_rejects_changed_bytes(tmp_
     (tmp_path / "instruction.txt").write_bytes(b"changed bytes")
     with pytest.raises(PolicyError, match="changed"):
         assemble_repository_agent(AIBOM(components=[prompt]), tmp_path)
+
+
+def test_policy_source_and_relaxations_are_visible(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "AGENTS.md").write_text("Keep receipts.")
+    out = tmp_path / "bom.json"
+    runner = CliRunner()
+    assert (
+        runner.invoke(main, ["scan", str(project), "-o", str(out), "--no-project-policy"]).exit_code
+        == 0
+    )
+    builtin = runner.invoke(main, ["risk", str(out), "--no-project-policy", "--json-output"])
+    assert json.loads(builtin.output)["policy_source"] == "built-in"
+    (project / ".nexus-symbiote.yaml").write_text("risk: {fail_on_severity: none}\n")
+    relaxed = runner.invoke(main, ["risk", str(out), "--project", str(project), "--json-output"])
+    payload = json.loads(relaxed.stdout)
+    assert payload["policy_source"].startswith("project:")
+    assert payload["policy_weakened"] == ["risk.fail_on_severity=none"]
+    human = runner.invoke(main, ["risk", str(out), "--project", str(project)])
+    assert "weakens the built-in gates: risk.fail_on_severity=none" in human.output
+    shown = runner.invoke(main, ["validate", str(out), "--project", str(project)])
+    assert "Policy: project:" in shown.output

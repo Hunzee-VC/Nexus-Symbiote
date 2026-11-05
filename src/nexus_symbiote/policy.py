@@ -86,7 +86,8 @@ def default_policy() -> Policy:
     return Policy()
 
 
-def load_policy(project_root: Path) -> Policy | None:
+def find_policy_path(project_root: Path) -> Path | None:
+    """Locate the policy file that governs ``project_root``, or None when built-in defaults apply."""
     current = project_root.resolve()
     if current.is_file():
         current = current.parent
@@ -96,10 +97,36 @@ def load_policy(project_root: Path) -> Policy | None:
             if candidate.is_symlink():
                 raise PolicyError(f"policy must not be a symlink: {candidate}")
             if candidate.exists():
-                return _parse_policy(candidate)
+                return candidate
         if current.parent == current:
             return None
         current = current.parent
+
+
+def load_policy(project_root: Path) -> Policy | None:
+    path = find_policy_path(project_root)
+    return None if path is None else _parse_policy(path)
+
+
+def weakened_settings(policy: Policy) -> list[str]:
+    """Name the settings under which this policy gates less strictly than the built-in defaults."""
+    base = Policy()
+    weaker: list[str] = []
+    if not policy.validation.require_completeness:
+        weaker.append("validate.require_completeness=false")
+    if not policy.validation.require_integrity:
+        weaker.append("validate.require_integrity=false")
+    if policy.risk.fail_on_severity == "none":
+        weaker.append("risk.fail_on_severity=none")
+    if policy.risk.fail_threshold > base.risk.fail_threshold:
+        weaker.append(f"risk.fail_threshold={policy.risk.fail_threshold:g}")
+    if policy.risk.ignore_categories:
+        weaker.append("risk.ignore_categories=" + ",".join(policy.risk.ignore_categories))
+    if policy.scan.failure_mode == "report-only":
+        weaker.append("scan.failure_mode=report-only")
+    if set(policy.scan.scanners) < set(base.scan.scanners):
+        weaker.append("scan.scanners=" + ",".join(policy.scan.scanners))
+    return weaker
 
 
 def parse_yaml_mapping(text: str) -> dict[str, Any]:
