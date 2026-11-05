@@ -185,45 +185,35 @@ def test_blast_radius_cli(tmp_path):
     assert json.loads(result.output)["affected_agents"] == ["a"]
 
 
-def test_risk_policy_ignored_categories_and_warning_are_honored(tmp_path):
-    bom = AIBOM(
-        components=[
-            ModelComponent(
-                bom_ref="m",
-                name="m",
-                risks=[
-                    RiskAssessment(
-                        severity=RiskSeverity.CRITICAL,
-                        category="ignored",
-                        detail="ignored explicitly",
-                    ),
-                    RiskAssessment(
-                        severity=RiskSeverity.MEDIUM, category="retained", detail="retained"
-                    ),
-                ],
-            )
-        ]
-    )
-    from nexus_symbiote.core.models import AIBOMMetadata, CompletenessClaim
+def _scanned_project(tmp_path, model_name, *, policy=None, inventory=None):
+    project = tmp_path / "project"
+    (project / "models").mkdir(parents=True)
+    (project / "AGENTS.md").write_text("Use read-only tools.\n")
+    (project / "models" / model_name).write_bytes(b"model bytes")
+    if policy is not None:
+        (project / ".nexus-symbiote.yaml").write_text(policy)
+    inventory = inventory or tmp_path / "bom.json"
+    inventory.parent.mkdir(parents=True, exist_ok=True)
+    args = ["scan", str(project), "--no-project-policy", "--report-only", "-o", str(inventory)]
+    result = CliRunner().invoke(main, args)
+    assert result.exit_code == 0, result.output
+    return project, inventory
 
-    bom.metadata = AIBOMMetadata(
-        completeness=CompletenessClaim(
-            scope="fixture",
-            surfaces_scanned=["fixture"],
-            scanner_status=dict.fromkeys(BUILTIN_SCANNER_NAMES, "complete"),
-        )
+
+def test_risk_policy_ignored_categories_and_warning_are_honored(tmp_path):
+    project, inventory = _scanned_project(
+        tmp_path,
+        "classifier.pkl",
+        policy="risk: {ignore_categories: [serialization_format], warn_threshold: 1}",
     )
-    path = tmp_path / "bom.json"
-    bom.save(path)
-    (tmp_path / ".nexus-symbiote.yaml").write_text(
-        "risk: {ignore_categories: [ignored], warn_threshold: 1}"
-    )
-    result = CliRunner().invoke(main, ["risk", str(path), "--json-output"])
-    assert result.exit_code == 0
-    data = json.loads(result.output)
+    args = ["risk", str(inventory), "--project", str(project), "--json-output"]
+    result = CliRunner().invoke(main, args)
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)
+    assert data["assessment_basis"] == "project-reconciled"
     assert data["ignored_findings"] == 1
     assert data["warning_threshold_exceeded"] is True
-    assert data["severity_counts"] == {"medium": 1}
+    assert data["severity_counts"] == {"high": 1}
 
 
 def test_validation_settings_are_not_ignored(tmp_path):
@@ -233,13 +223,13 @@ def test_validation_settings_are_not_ignored(tmp_path):
     (tmp_path / ".nexus-symbiote.yaml").write_text(
         "validate: {require_completeness: false, require_integrity: false}"
     )
-    result = CliRunner().invoke(main, ["validate", str(path)])
+    result = CliRunner().invoke(main, ["validate", str(path), "--project", str(tmp_path)])
     assert result.exit_code == 0
     assert result.output.count("SKIPPED by explicit policy") == 2
     (tmp_path / ".nexus-symbiote.yaml").write_text(
         "validate: {require_completeness: false, require_integrity: false, minimum_assurance_level: observed}"
     )
-    result = CliRunner().invoke(main, ["validate", str(path)])
+    result = CliRunner().invoke(main, ["validate", str(path), "--project", str(tmp_path)])
     assert result.exit_code != 0
     assert "minimum observed assurance not attained" in result.output
 
@@ -386,3 +376,56 @@ def test_agent_manifest_reuses_instruction_digest_and_rejects_changed_bytes(tmp_
     (tmp_path / "instruction.txt").write_bytes(b"changed bytes")
     with pytest.raises(PolicyError, match="changed"):
         assemble_repository_agent(AIBOM(components=[prompt]), tmp_path)
+
+
+def test_validation_policy_above_project_root_is_ignored(tmp_path):
+    project = tmp_path / "anc" / "sub" / "project"
+    project.mkdir(parents=True)
+    (project / "AGENTS.md").write_text("Keep receipts.")
+    out = tmp_path / "bom.json"
+    runner = CliRunner()
+    scan = runner.invoke(main, ["scan", str(project), "-o", str(out), "--no-project-policy"])
+    assert scan.exit_code == 0, scan.output
+    (project / "AGENTS.md").write_text("Different instructions.")
+    (tmp_path / "anc" / ".nexus-symbiote.yaml").write_text(
+        "validate: {require_completeness: false, require_integrity: false}"
+    )
+    result = runner.invoke(main, ["validate", str(out), "--project", str(project)])
+    assert result.exit_code == 1
+    assert "SKIPPED by explicit policy" not in result.output
+
+
+def test_policy_beside_an_inventory_is_not_applied_without_project(tmp_path):
+    _, inventory = _scanned_project(tmp_path, "classifier.pkl")
+    (tmp_path / ".nexus-symbiote.yaml").write_text(
+        "risk: {fail_on_severity: none, fail_threshold: 100}\n"
+        "validate: {require_completeness: false, require_integrity: false}\n"
+    )
+    runner = CliRunner()
+    risk = runner.invoke(main, ["risk", str(inventory), "--json-output"])
+    assert risk.exit_code == 1
+    assert json.loads(risk.stdout)["gate_reasons"]
+    assert "was not applied" in risk.stderr
+    validate = runner.invoke(main, ["validate", str(inventory)])
+    assert "SKIPPED by explicit policy" not in validate.output
+    assert "was not applied" in validate.stderr
+    quiet = runner.invoke(main, ["risk", str(inventory), "--no-project-policy", "--json-output"])
+    assert "was not applied" not in quiet.stderr
+
+
+def test_project_policy_applies_through_project_and_is_named_otherwise(tmp_path):
+    project, inventory = _scanned_project(
+        tmp_path,
+        "model.onnx",
+        policy='risk: {fail_on_severity: "high"}',
+        inventory=tmp_path / "project" / "build" / "bom.json",
+    )
+    runner = CliRunner()
+    unnamed = runner.invoke(main, ["risk", str(inventory), "--json-output"])
+    assert unnamed.exit_code == 0, unnamed.output
+    assert str(project / ".nexus-symbiote.yaml") in unnamed.stderr
+    named = runner.invoke(
+        main, ["risk", str(inventory), "--project", str(project), "--json-output"]
+    )
+    assert named.exit_code == 1
+    assert json.loads(named.stdout)["gate_reasons"] == ["finding at or above high"]
