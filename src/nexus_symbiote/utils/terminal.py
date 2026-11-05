@@ -9,7 +9,7 @@ from pathlib import Path
 
 import click
 
-from nexus_symbiote.utils.files import write_output_file
+from nexus_symbiote.utils.files import OutputRefusedError, write_output_file
 
 # C0/C1 controls move the cursor or rewrite earlier output; bidirectional and
 # invisible format characters (every Unicode format character, category Cf, as of
@@ -36,17 +36,20 @@ def neutralize(value: object) -> str:
 
 
 # What the output rules themselves produce: a missing directory, a link or file on
-# the path (O_NOFOLLOW gives ELOOP, ENOTDIR or, on BSD, EMLINK), or a target that is
-# a directory or special file. Anything else, such as EACCES or ENOSPC, is reported
-# by its system message.
-_REFUSALS = frozenset(
-    {errno.ENOENT, errno.ELOOP, errno.EMLINK, errno.ENOTDIR, errno.EISDIR, errno.EINVAL}
-)
+# the path (O_NOFOLLOW gives ELOOP, ENOTDIR or, on BSD, EMLINK), or a directory as
+# the target; a special file is OutputRefusedError. Anything else, such as EACCES, ENOSPC
+# or a kernel EINVAL, is reported by its system message.
+_REFUSALS = frozenset({errno.ENOENT, errno.ELOOP, errno.EMLINK, errno.ENOTDIR, errno.EISDIR})
 
 
 def output_failure(exc: BaseException) -> click.ClickException:
     """A plain command error for an output that was not written; never names the path."""
-    if isinstance(exc, OSError) and exc.errno is not None and exc.errno not in _REFUSALS:
+    if (
+        isinstance(exc, OSError)
+        and not isinstance(exc, OutputRefusedError)
+        and exc.errno is not None
+        and exc.errno not in _REFUSALS
+    ):
         return click.ClickException(f"Cannot write the output file: {os.strerror(exc.errno)}.")
     return click.ClickException(OUTPUT_REFUSED)
 

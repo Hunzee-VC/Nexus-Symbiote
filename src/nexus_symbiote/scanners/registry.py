@@ -25,6 +25,7 @@ from nexus_symbiote.core.hashing import extract_version_pin, hash_bytes, parse_j
 from nexus_symbiote.core.models import ClaimEvidence, RegistryEntryComponent, RiskAssessment
 from nexus_symbiote.scanners.base import Scanner, ScanResult, sanitized_origin
 from nexus_symbiote.utils.secrets import redact_text
+from nexus_symbiote.utils.terminal import UNSAFE_TEXT
 
 AI_PACKAGE_PATTERNS = [
     re.compile(r"(?:^|/)@modelcontextprotocol/", re.I),
@@ -287,13 +288,18 @@ class RegistryScanner(Scanner):
     def _requirement_files(self) -> list[str]:
         if self._files is None:
             raise RuntimeError("_requirement_files called outside a _collection context")
-        # Case-insensitive, as a fixed-name open is on macOS and Windows file systems.
+        # Without regard to case, as a fixed-name open is on macOS and Windows file
+        # systems. The exact name, which pip reads on a case-sensitive system, comes
+        # first, then its case variants, then the other files.
         names = [
             n
             for n in self._files.root_entries()
-            if fnmatch.fnmatchcase(n.lower(), "requirements*.txt")
+            if fnmatch.fnmatchcase(n.casefold(), "requirements*.txt")
         ]
-        return sorted(names, key=lambda name: (name.lower() != "requirements.txt", name))
+        return sorted(
+            names,
+            key=lambda n: (n.casefold() != "requirements.txt", n != "requirements.txt", n),
+        )
 
     @staticmethod
     def _requirement_lines(content: str) -> list[str]:
@@ -360,10 +366,14 @@ class RegistryScanner(Scanner):
     ) -> None:
         filenames = self._requirement_files()
         for filename in filenames:
-            if not filename.isprintable():
-                # Undecodable bytes (lone surrogates) or controls cannot be carried in
-                # the inventory or its exports, so the file is a gap, not data.
-                result.scan_failures.append("requirements file with an unprintable name: not read")
+            if UNSAFE_TEXT.search(filename) or any("\ud800" <= c <= "\udfff" for c in filename):
+                # Undecodable bytes (lone surrogates) cannot be carried in the inventory
+                # or its exports, and controls or format characters disguise output, so
+                # the file is a gap, not data. A fixed list, unlike str.isprintable(),
+                # gives the same answer on every supported Python.
+                failure = "requirements file with an unprintable name: not read"
+                if failure not in result.scan_failures:
+                    result.scan_failures.append(failure)
                 continue
             path = root / filename
             content = self._read(path, result)

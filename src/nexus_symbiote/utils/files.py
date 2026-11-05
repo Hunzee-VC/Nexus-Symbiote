@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import errno
 import os
 import secrets
@@ -9,6 +10,10 @@ import stat
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+
+
+class OutputRefusedError(OSError):
+    """The destination is one the output rules never replace."""
 
 
 def _relative(root: Path, path: Path, *, allow_parent: bool = False) -> Path:
@@ -77,7 +82,7 @@ def write_output_file(
                     break
                 raise
             if not (stat.S_ISREG(mode) or (stat.S_ISLNK(mode) and not follow)):
-                raise OSError(errno.EINVAL, "output must be a regular file")
+                raise OutputRefusedError(errno.EINVAL, "output must be a regular file")
         temp = f".nexus-symbiote-{secrets.token_hex(16)}.tmp"
         fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=parent)
         try:
@@ -92,8 +97,7 @@ def write_output_file(
                     temp, relative.name, src_dir_fd=parent, dst_dir_fd=parent, follow_symlinks=False
                 )
         finally:
-            try:
+            # After a rename the name is gone; in a directory that forbids removal
+            # (append-only) the temporary file stays. Neither replaces the outcome.
+            with contextlib.suppress(OSError):
                 os.unlink(temp, dir_fd=parent)
-            except FileNotFoundError:
-                # The rename already consumed the temporary file.
-                pass

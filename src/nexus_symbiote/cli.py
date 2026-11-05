@@ -528,8 +528,10 @@ def import_shadowscan(
 
     try:
         write_output_file(Path(output), out_data, overwrite=False)
-    except (OSError, ValueError) as exc:
+    except FileExistsError as exc:
         raise click.ClickException("Cannot create output; choose a new output path") from exc
+    except (OSError, ValueError) as exc:
+        raise output_failure(exc) from exc
     console.print(
         f"Imported {len(imported.components)} components and saved {output}; discovery coverage remains partial."
     )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import tempfile
@@ -160,7 +161,10 @@ def register_supply_chain_commands(main: click.Group) -> None:
                 raise click.ClickException("Baseline was not written: static scan gate failed")
             write_cli_output(target, staged.read_text(encoding="utf-8"))
         finally:
-            staged.unlink(missing_ok=True)
+            # A directory that forbids removal keeps the staged copy; that must not
+            # replace the command's result.
+            with contextlib.suppress(OSError):
+                staged.unlink(missing_ok=True)
         click.echo(f"Unsigned baseline staged for review: {target}")
 
     @main.command()

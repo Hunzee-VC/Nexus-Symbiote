@@ -19,6 +19,7 @@ from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.scanners.base import parse_python
 from nexus_symbiote.scanners.registry import RegistryScanner
 from nexus_symbiote.utils.crypto import SIGSTORE_MISSING
+from nexus_symbiote.utils.files import OutputRefusedError, write_output_file
 
 FORGED = "x\n::error file=README.md,line=1::forged by inventory\n\x1b[2J\x1b]8;;http://e/\x07"
 
@@ -155,6 +156,21 @@ def test_requirements_file_names_match_without_regard_to_case(tmp_path):
         "openai": "==1.30.1",
         "torch": "==2.3.0",
     }
+
+
+def test_the_exact_requirements_txt_is_kept_ahead_of_its_case_variants(tmp_path):
+    # On a case-sensitive system pip and main read requirements.txt itself, so its
+    # declaration is the component; a variant is recorded beside it.
+    (tmp_path / "Requirements.txt").write_text("torch>=2\n")
+    (tmp_path / "requirements.txt").write_text("torch==2.3.0\n")
+    try:
+        (tmp_path / "requirement\u017f.txt").write_text("openai==1.30.1\n")
+    except OSError:
+        pytest.skip("file system rejects the name")
+    by_name = {c.name: c for c in RegistryScanner().scan(tmp_path).components}
+    assert str(by_name["torch"].source_path).endswith("/requirements.txt")
+    assert by_name["torch"].version == "==2.3.0" and by_name["torch"].risks == []
+    assert by_name["openai"].version == "==1.30.1"
 
 
 def test_differing_declarations_in_one_requirements_file_get_one_finding(tmp_path):
@@ -393,8 +409,15 @@ def test_baseline_and_import_refuse_unwritable_outputs_without_a_traceback(tmp_p
     assert baseline.exception.__class__ is SystemExit
     report = Path(__file__).parent / "fixtures/shadowscan/code-report-0.1.4.json"
     imported = runner.invoke(main, ["import-shadowscan", str(report), "-o", "/", "--report-only"])
-    assert imported.exit_code == 1 and "Cannot create output" in imported.output
+    assert imported.exit_code == 1 and "Cannot write the output file" in imported.output
     assert imported.exception.__class__ is SystemExit
+    existing = tmp_path / "existing.json"
+    existing.write_text("{}")
+    again = runner.invoke(
+        main, ["import-shadowscan", str(report), "-o", str(existing), "--report-only"]
+    )
+    assert again.exit_code == 1 and "choose a new output path" in again.output
+    assert existing.read_text() == "{}"
 
 
 @pytest.mark.parametrize(
@@ -403,7 +426,11 @@ def test_baseline_and_import_refuse_unwritable_outputs_without_a_traceback(tmp_p
         (PermissionError(errno.EACCES, "denied", "/private/x"), "file: Permission denied."),
         (OSError(errno.ENOSPC, "full", "/private/x"), "file: No space left on device."),
         (OSError(errno.ELOOP, "link", "/private/x"), "no directory on the path may be"),
-        (OSError(errno.EINVAL, "special", "/private/x"), "must not be a directory, device"),
+        (
+            OutputRefusedError(errno.EINVAL, "special", "/private/x"),
+            "must not be a directory, device",
+        ),
+        (OSError(errno.EINVAL, "kernel", "/private/x"), "file: Invalid argument."),
         (ValueError("bad"), "its directory must exist"),
     ],
 )
@@ -428,12 +455,11 @@ def test_a_requirements_file_with_an_undecodable_name_is_a_gap_not_a_crash(tmp_p
     project.mkdir()
     (project / "AGENTS.md").write_text("Keep receipts.")
     (project / "requirements.txt").write_text("openai==1.40.0\n")
+    undecodable = project / os.fsdecode(b"requirements-\xff.txt")
     try:
-        fd = os.open(os.fsencode(project) + b"/requirements-\xff.txt", os.O_WRONLY | os.O_CREAT)
-    except OSError:
+        undecodable.write_bytes(b"openai==1.41.0\n")
+    except (OSError, UnicodeEncodeError):
         pytest.skip("file system rejects names that are not UTF-8")
-    os.write(fd, b"openai==1.41.0\n")
-    os.close(fd)
     result = RegistryScanner().scan(project)
     assert result.scan_failures == ["requirements file with an unprintable name: not read"]
     assert [c.version for c in result.components] == ["==1.40.0"]
@@ -455,6 +481,41 @@ def test_a_requirements_file_with_an_undecodable_name_is_a_gap_not_a_crash(tmp_p
         )
         assert scanned.exit_code == 0, scanned.output
         json.loads(out.read_text(encoding="utf-8"))
+
+
+def test_a_cleanup_failure_does_not_replace_a_written_output(tmp_path, monkeypatch):
+    # In an append-only directory the rename or link succeeds but the temporary
+    # file cannot be removed; the output is written and no error is raised.
+    def refuse(*_args, **_kwargs):
+        raise PermissionError(errno.EPERM, "append-only")
+
+    monkeypatch.setattr("nexus_symbiote.utils.files.os.unlink", refuse)
+    for overwrite in (True, False):
+        target = tmp_path / f"out-{overwrite}.json"
+        write_output_file(target, "{}", overwrite=overwrite)
+        assert target.read_text() == "{}"
+
+
+@pytest.mark.parametrize(
+    ("name", "read"),
+    [
+        ("requirements-\u00a0dev.txt", True),
+        ("requirements-\u3000.txt", True),
+        ("requirements-\x1b[2J.txt", False),
+        ("requirements-\u202e.txt", False),
+        ("requirements-\u200b.txt", False),
+    ],
+)
+def test_only_names_that_disguise_output_are_refused(tmp_path, name, read):
+    (tmp_path / "requirements.txt").write_text("openai==1.40.0\n")
+    try:
+        (tmp_path / name).write_text("torch==2.3.0\n")
+    except OSError:
+        pytest.skip("file system rejects the name")
+    result = RegistryScanner().scan(tmp_path)
+    assert ("torch" in [c.name for c in result.components]) is read
+    expected = [] if read else ["requirements file with an unprintable name: not read"]
+    assert result.scan_failures == expected
 
 
 def test_output_paths_are_refused_cleanly_and_parent_references_resolve(tmp_path, monkeypatch):
