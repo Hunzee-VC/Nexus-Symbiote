@@ -8,7 +8,7 @@
 - id: nexus-symbiote-risk
   name: Nexus SymBiote risk gate
   description: Evaluate the inventory produced by the preceding nexus-symbiote-scan hook
-  entry: nexus-symbiote risk .nexus-symbiote-aibom.json
+  entry: nexus-symbiote risk .nexus-symbiote-aibom.json --project .
   language: python
   always_run: true
   pass_filenames: false

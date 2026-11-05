@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
@@ -411,6 +412,26 @@ def test_policy_beside_an_inventory_is_not_applied_without_project(tmp_path):
     assert "was not applied" in validate.stderr
     quiet = runner.invoke(main, ["risk", str(inventory), "--no-project-policy", "--json-output"])
     assert "was not applied" not in quiet.stderr
+
+
+def test_policy_notice_names_the_file_literally(tmp_path):
+    _, inventory = _scanned_project(
+        tmp_path, "classifier.pkl", inventory=tmp_path / "inv[old]" / "bom.json"
+    )
+    (inventory.parent / ".nexus-symbiote.yaml").write_text("risk: {fail_threshold: 100}\n")
+    result = CliRunner().invoke(main, ["risk", str(inventory), "--json-output"])
+    assert str(inventory.parent / ".nexus-symbiote.yaml") in result.stderr
+    assert "\\[old]" not in result.stderr
+
+
+def test_shipped_risk_hook_applies_the_repository_policy_like_the_scan_hook():
+    import yaml
+
+    hooks = yaml.safe_load((Path(__file__).parents[1] / ".pre-commit-hooks.yaml").read_text())
+    entries = {hook["id"]: hook["entry"].split() for hook in hooks}
+    assert entries["nexus-symbiote-scan"][:3] == ["nexus-symbiote", "scan", "."]
+    risk = entries["nexus-symbiote-risk"]
+    assert risk[risk.index("--project") + 1] == "."
 
 
 def test_project_policy_applies_through_project_and_is_named_otherwise(tmp_path):
