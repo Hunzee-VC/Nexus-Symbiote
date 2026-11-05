@@ -23,14 +23,19 @@ echo 'PATH="$PWD/.venv/bin:$PATH"' > .venv/bin/activate
     "venv-python": """#!/bin/sh
 echo "pip $*" >> "$STUB_LOG"
 case "$*" in
-  *"pip download"*) mkdir -p dist && : > dist/nexus_symbiote-0.1.0-py3-none-any.whl ;;
+  *"pip download"*)
+    if [ "$STUB_FAIL" = download ]; then exit 1; fi
+    mkdir -p dist && : > dist/nexus_symbiote-0.1.0-py3-none-any.whl ;;
+  *"--require-hashes"*) if [ "$STUB_FAIL" = lock ]; then exit 1; fi ;;
   *"--no-deps dist/"*)
+    if [ "$STUB_FAIL" = wheel ]; then exit 1; fi
     printf '#!/bin/sh\\necho "nexus-symbiote, version 0.1.0 (verified venv)"\\n' \\
       > .venv/bin/nexus-symbiote
     chmod +x .venv/bin/nexus-symbiote ;;
 esac
 """,
     "git": """#!/bin/sh
+if [ "$STUB_FAIL" = git ]; then exit 128; fi
 if [ -n "$STUB_TAG" ]; then printf '%s\\trefs/tags/v0.1.0^{}\\n' "$STUB_TAG"; fi
 """,
     "gh": """#!/bin/sh
@@ -38,6 +43,7 @@ echo "gh $*" >> "$STUB_LOG"
 exit "${STUB_GH_STATUS:-0}"
 """,
     "curl": """#!/bin/sh
+if [ "$STUB_FAIL" = curl ]; then exit 22; fi
 while [ $# -gt 0 ]; do
   if [ "$1" = -o ]; then : > "$2"; shift; fi
   shift
@@ -57,7 +63,7 @@ def _block() -> str:
     return match.group(1)
 
 
-def _run(tmp_path: Path, *, tag: str = COMMIT, gh_status: int = 0, gh: bool = True):
+def _run(tmp_path: Path, *, tag: str = COMMIT, gh_status: int = 0, gh: bool = True, fail: str = ""):
     stubs = tmp_path / "stubs"
     stubs.mkdir()
     for name, body in STUBS.items():
@@ -76,6 +82,7 @@ def _run(tmp_path: Path, *, tag: str = COMMIT, gh_status: int = 0, gh: bool = Tr
         "STUB_LOG": str(log),
         "STUB_TAG": tag,
         "STUB_GH_STATUS": str(gh_status),
+        "STUB_FAIL": fail,
     }
     result = subprocess.run(  # noqa: S603 - the README block under a fixed interpreter
         [BASH or "bash", "-c", _block()],
@@ -101,13 +108,34 @@ def test_verified_install_prints_the_venv_version_after_every_step_succeeds(tmp_
 
 
 @pytest.mark.parametrize(
-    "failure",
-    [{"gh_status": 1}, {"gh": False}, {"tag": ""}],
-    ids=["attestation-fails", "gh-missing", "tag-missing"],
+    ("failure", "before_attestation"),
+    [
+        ({"gh_status": 1}, True),
+        ({"gh": False}, True),
+        ({"tag": ""}, True),
+        ({"fail": "git"}, True),
+        ({"fail": "download"}, True),
+        ({"fail": "curl"}, False),
+        ({"fail": "lock"}, False),
+        ({"fail": "wheel"}, False),
+    ],
+    ids=[
+        "attestation-fails",
+        "gh-missing",
+        "tag-missing",
+        "git",
+        "download",
+        "curl",
+        "lock",
+        "wheel",
+    ],
 )
-def test_verified_install_stops_and_installs_nothing_after_a_failed_step(tmp_path, failure):
+def test_verified_install_stops_and_installs_nothing_after_a_failed_step(
+    tmp_path, failure, before_attestation
+):
     result, calls, work = _run(tmp_path, **failure)
     assert result.returncode != 0
     assert "version" not in result.stdout
-    assert "--no-deps dist/" not in calls and "--require-hashes" not in calls
     assert not (work / ".venv/bin/nexus-symbiote").exists()
+    if before_attestation:
+        assert "--require-hashes" not in calls and "--no-deps dist/" not in calls

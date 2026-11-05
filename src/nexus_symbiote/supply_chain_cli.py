@@ -26,7 +26,11 @@ def _refuse_source_overwrite(output: Path | None, source: Path) -> None:
     if output is None:
         return
     try:
-        same = output.resolve() == source.resolve()
+        # Path text alone misses a second name for the same file (a hard link, a bind
+        # mount or a case variant), so an existing output is also compared by identity.
+        same = output.resolve() == source.resolve() or (
+            output.exists() and os.path.samefile(output, source)
+        )
     except (OSError, RuntimeError) as exc:
         raise click.ClickException(OUTPUT_REFUSED) from exc
     if same:

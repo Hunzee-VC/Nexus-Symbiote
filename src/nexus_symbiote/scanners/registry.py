@@ -10,7 +10,9 @@ import base64
 import binascii
 import fnmatch
 import re
+import shlex
 import tomllib
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import quote
@@ -333,19 +335,38 @@ class RegistryScanner(Scanner):
             lines.append(pending)
         return lines
 
+    _FLAG_OPTIONS = frozenset({"--no-index", "--pre", "--prefer-binary", "--require-hashes"})
+
     @classmethod
-    def _requirement_option(cls, text: str) -> tuple[str, str]:
-        """Name an option line as pip's parser would, with its value."""
-        token, _, rest = text.strip().partition(" ")
-        token, _, tab_rest = token.partition("\t")
-        rest = (tab_rest + " " + rest).strip()
-        if token.startswith("--"):
-            name, equals, attached = token.partition("=")
-            matches = [option for option in cls._LONG_OPTIONS if option.startswith(name)]
-            if name not in cls._LONG_OPTIONS and len(matches) == 1:
-                name = matches[0]
-            return name, (attached if equals else rest).strip()
-        return cls._SHORT_OPTIONS.get(token[:2], token), (token[2:] or rest).strip()
+    def _requirement_options(cls, text: str) -> list[tuple[str, str]] | None:
+        """Every option on a line and its value, as pip's parser reads them; None if unparsable."""
+        try:
+            tokens = shlex.split(text)
+        except ValueError:
+            return None
+        options: list[tuple[str, str]] = []
+        index = 0
+        while index < len(tokens):
+            token = tokens[index]
+            index += 1
+            if token.startswith("--"):
+                name, equals, value = token.partition("=")
+                matches = [option for option in cls._LONG_OPTIONS if option.startswith(name)]
+                if name not in cls._LONG_OPTIONS and len(matches) == 1:
+                    name = matches[0]
+                if not equals and name not in cls._FLAG_OPTIONS and index < len(tokens):
+                    value = tokens[index]
+                    index += 1
+            elif token.startswith("-") and len(token) > 1:
+                name = cls._SHORT_OPTIONS.get(token[:2], token[:2])
+                value = token[2:]
+                if not value and index < len(tokens):
+                    value = tokens[index]
+                    index += 1
+            else:
+                continue
+            options.append((name, value.strip()))
+        return options
 
     @staticmethod
     def _unread(result: ScanResult, note: str) -> None:
@@ -355,7 +376,50 @@ class RegistryScanner(Scanner):
 
     def _scan_pip(self, root: Path, result: ScanResult) -> list[RegistryEntryComponent]:
         components: list[RegistryEntryComponent] = []
-        declared: dict[str, RegistryEntryComponent] = {}
+        kept: dict[str, RegistryEntryComponent] = {}
+        sources: dict[str, set[str]] = {}
+
+        def declare(component: RegistryEntryComponent, source: str, reference: str) -> None:
+            # One component per package across manifests. Every declaration is kept
+            # on it, so a change to any of them changes the inventory and its diff.
+            sources.setdefault(component.bom_ref, set()).add(f"{source}: {redact_text(reference)}")
+            first = kept.get(component.bom_ref)
+            if first is None:
+                kept[component.bom_ref] = component
+                components.append(component)
+                return
+            if (component.version, component.package_url) != (first.version, first.package_url):
+                detail = (
+                    f"PyPI package '{first.name}' is declared differently in another "
+                    "dependency manifest."
+                )
+                if not any(risk.detail == detail for risk in first.risks):
+                    first.risks.append(
+                        RiskAssessment(
+                            severity=RiskSeverity.MEDIUM,
+                            category="version_pinning",
+                            detail=detail,
+                            recommendation="Declare one exact version across dependency manifests and verify artifact hashes.",
+                        )
+                    )
+
+        self._scan_requirements(root, result, declare)
+        path = root / "pyproject.toml"
+        for declaration in self._pyproject_declarations(path, result):
+            component = self._pip_component(declaration, path, result)
+            if component:
+                declare(component, "pyproject.toml", declaration)
+        for component in components:
+            if len(sources[component.bom_ref]) > 1:
+                component.properties["declarations"] = sorted(sources[component.bom_ref])
+        return components
+
+    def _scan_requirements(
+        self,
+        root: Path,
+        result: ScanResult,
+        declare: Callable[[RegistryEntryComponent, str, str], None],
+    ) -> None:
         filenames = self._requirement_files()
         for filename in filenames:
             path = root / filename
@@ -367,18 +431,24 @@ class RegistryScanner(Scanner):
                 if not text:
                     continue
                 if text.startswith("-"):
-                    option, value = self._requirement_option(text)
-                    target = PurePosixPath(value)
-                    if option in ("--requirement", "--constraint") and (
-                        len(target.parts) != 1 or target.name not in filenames
-                    ):
-                        self._unread(
-                            result, f"{filename}: included requirements file is not followed"
-                        )
-                    elif option == "--editable":
+                    options = self._requirement_options(text)
+                    if options is None:
                         self._unread(
                             result, f"{filename}: unsupported requirement form is not collected"
                         )
+                        continue
+                    for option, value in options:
+                        target = PurePosixPath(value)
+                        if option in ("--requirement", "--constraint") and (
+                            len(target.parts) != 1 or target.name not in filenames
+                        ):
+                            self._unread(
+                                result, f"{filename}: included requirements file is not followed"
+                            )
+                        elif option == "--editable":
+                            self._unread(
+                                result, f"{filename}: unsupported requirement form is not collected"
+                            )
                     continue
                 # Per-requirement options such as --hash follow the requirement itself.
                 words: list[str] = []
@@ -394,43 +464,23 @@ class RegistryScanner(Scanner):
                     )
                     continue
                 component = self._pip_component(reference, path, result)
-                if component is None:
-                    continue
-                first = declared.get(component.bom_ref)
-                if first is None:
-                    declared[component.bom_ref] = component
-                    components.append(component)
-                    continue
-                # One component per package across files; a different declaration
-                # elsewhere is a finding on it, not a second, conflicting component.
-                if (component.version, component.package_url) != (first.version, first.package_url):
-                    detail = (
-                        f"PyPI package '{first.name}' is declared differently in another "
-                        "requirements file."
-                    )
-                    if not any(risk.detail == detail for risk in first.risks):
-                        first.risks.append(
-                            RiskAssessment(
-                                severity=RiskSeverity.MEDIUM,
-                                category="version_pinning",
-                                detail=detail,
-                                recommendation="Declare one exact version across requirements files and verify artifact hashes.",
-                            )
-                        )
-        path = root / "pyproject.toml"
+                if component is not None:
+                    declare(component, filename, reference)
+
+    def _pyproject_declarations(self, path: Path, result: ScanResult) -> list[str]:
         content = self._read(path, result)
         if content is None:
-            return components
+            return []
         try:
             data = tomllib.loads(content)
         except (tomllib.TOMLDecodeError, RecursionError):
             result.scan_failures.append("pyproject.toml: invalid TOML")
-            return components
+            return []
         declarations: list[str] = []
         project = data.get("project", {})
         if not isinstance(project, dict):
             result.scan_failures.append("pyproject.toml: invalid project table")
-            return components
+            return []
         deps = project.get("dependencies", [])
         if isinstance(deps, list) and all(isinstance(value, str) for value in deps):
             declarations.extend(deps)
@@ -452,11 +502,7 @@ class RegistryScanner(Scanner):
                     declarations.append(f"{name}{value}")
                 elif isinstance(value, dict) and isinstance(value.get("version"), str):
                     declarations.append(f"{name}{value['version']}")
-        for declaration in declarations:
-            component = self._pip_component(declaration, path, result)
-            if component and not any(item.name == component.name for item in components):
-                components.append(component)
-        return components
+        return declarations
 
     def _scan_docker(self, root: Path, result: ScanResult) -> list[RegistryEntryComponent]:
         components: list[RegistryEntryComponent] = []
