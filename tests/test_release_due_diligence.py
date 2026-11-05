@@ -7,6 +7,7 @@ import hashlib
 import json
 import sys
 import warnings
+from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
@@ -64,6 +65,96 @@ def test_registry_reports_an_include_it_does_not_read(tmp_path):
     assert unread.surfaces_excluded == [
         "requirements.txt: included requirements file is not followed"
     ]
+
+
+def test_registry_keeps_one_component_per_package_across_requirements_files(tmp_path):
+    (tmp_path / "AGENTS.md").write_text("Keep receipts.")
+    (tmp_path / "requirements.txt").write_text("openai==1.3.0\ntorch==2.3.0\n")
+    (tmp_path / "requirements-lock.txt").write_text("openai==1.3.0\ntorch>=2\n")
+    result = RegistryScanner().scan(tmp_path)
+    assert result.scan_failures == []
+    by_name = {c.name: c for c in result.components}
+    assert sorted(by_name) == ["openai", "torch"]
+    assert str(by_name["openai"].source_path).endswith("requirements.txt")
+    assert by_name["openai"].risks == []
+    assert by_name["torch"].version == "==2.3.0"
+    assert [r.detail for r in by_name["torch"].risks] == [
+        "PyPI package 'torch' is declared differently in another requirements file."
+    ]
+    scanned = CliRunner().invoke(
+        main, ["scan", str(tmp_path), "--no-project-policy", "-o", str(tmp_path / "bom.json")]
+    )
+    assert "conflicting duplicate component" not in scanned.output
+
+
+@pytest.mark.parametrize(
+    ("content", "excluded"),
+    [
+        ("\ufeffopenai==1.3.0\n", []),
+        ("-e git+https://github.com/openai/openai-python@v1.3.0#egg=openai\n", ["unsupported"]),
+        ("--editable=./local-agent\n", ["unsupported"]),
+        ("git+https://github.com/openai/openai-python@v1.3.0#egg=openai\n", ["unsupported"]),
+        ("./wheels/openai-1.3.0-py3-none-any.whl\n", ["unsupported"]),
+        ("-r\tdeps/base.txt\n", ["included"]),
+        ("--requirem deps/base.txt\n", ["included"]),
+        ("--cons=deps/constraints.txt\n", ["included"]),
+        ("-rrequirements-extra.txt\n", []),
+        ("--index-url https://pypi.org/simple\nopenai==1.3.0  \t# pinned\n", []),
+    ],
+)
+def test_registry_records_requirement_forms_it_cannot_collect(tmp_path, content, excluded):
+    (tmp_path / "requirements.txt").write_text(content, encoding="utf-8")
+    (tmp_path / "requirements-extra.txt").write_text("langchain==0.1.0\n")
+    result = RegistryScanner().scan(tmp_path)
+    notes = {
+        "unsupported": "requirements.txt: unsupported requirement form is not collected",
+        "included": "requirements.txt: included requirements file is not followed",
+    }
+    assert result.surfaces_excluded == [notes[key] for key in excluded]
+    assert result.scan_failures == []
+    if not excluded:
+        assert "openai" in {c.name for c in result.components} or "-r" in content
+
+
+def test_output_parent_references_follow_the_kernel_and_never_a_link(tmp_path, monkeypatch):
+    work = tmp_path / "work"
+    (work / "real").mkdir(parents=True)
+    (work / "link").symlink_to(tmp_path / "elsewhere", target_is_directory=True)
+    (tmp_path / "elsewhere").mkdir()
+    inventory = work / "inv.json"
+    inventory.write_text(AIBOM().to_json())
+    original = inventory.read_bytes()
+    monkeypatch.chdir(work)
+    runner = CliRunner()
+    through_link = runner.invoke(main, ["vex", "inv.json", "-o", "link/../inv.json"])
+    assert through_link.exit_code == 1
+    assert "Cannot write the output file" in through_link.output
+    same_file = runner.invoke(main, ["vex", "inv.json", "-o", "real/../inv.json"])
+    assert (
+        same_file.exit_code == 2 and "must not overwrite the source inventory" in same_file.output
+    )
+    assert inventory.read_bytes() == original
+    (work / "loop").symlink_to(work / "loop")
+    loop = runner.invoke(main, ["vex", "inv.json", "-o", "loop/vex.json"])
+    assert loop.exit_code == 1 and "Traceback" not in loop.output
+    assert loop.exception.__class__ is SystemExit
+    beside = runner.invoke(main, ["vex", "inv.json", "-o", "real/../vex.json"])
+    assert beside.exit_code == 0, beside.output
+    assert (work / "vex.json").exists() and not list((tmp_path / "elsewhere").iterdir())
+
+
+def test_baseline_and_import_refuse_unwritable_outputs_without_a_traceback(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "AGENTS.md").write_text("Keep receipts.")
+    runner = CliRunner()
+    baseline = runner.invoke(main, ["baseline", str(project), "-o", str(tmp_path / "no/b.json")])
+    assert baseline.exit_code == 1 and "Cannot write the output file" in baseline.output
+    assert baseline.exception.__class__ is SystemExit
+    report = Path(__file__).parent / "fixtures/shadowscan/code-report-0.1.4.json"
+    imported = runner.invoke(main, ["import-shadowscan", str(report), "-o", "/", "--report-only"])
+    assert imported.exit_code == 1 and "Cannot create output" in imported.output
+    assert imported.exception.__class__ is SystemExit
 
 
 def test_output_paths_are_refused_cleanly_and_parent_references_resolve(tmp_path, monkeypatch):

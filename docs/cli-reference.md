@@ -20,8 +20,9 @@ nexus-symbiote [--offline | --live] [--version] [--help] COMMAND [ARGS]...
 
 Every `-o`/`--output` file is written atomically and never through a symbolic link:
 its directory must already exist, and no directory on the path may be a symbolic
-link (on macOS, write under `/private/tmp` rather than `/tmp`). `..` is resolved
-lexically. A refused path ends the command with an error and writes nothing.
+link (on macOS, write under `/private/tmp` rather than `/tmp`). `..` steps to the
+real parent directory, as the operating system resolves it. A refused path ends the
+command with an error and writes nothing.
 
 Mode flags go before the command. Without a flag, `NEXUS_SYMBIOTE_MODE=offline|live`
 selects the mode; without either, the mode is offline. See

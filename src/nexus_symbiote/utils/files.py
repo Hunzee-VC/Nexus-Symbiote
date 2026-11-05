@@ -9,9 +9,14 @@ from contextlib import contextmanager
 from pathlib import Path
 
 
-def _relative(root: Path, path: Path) -> Path:
+def _relative(root: Path, path: Path, *, allow_parent: bool = False) -> Path:
     relative = path.relative_to(root) if path.is_absolute() else path
-    if not relative.parts or ".." in relative.parts or relative.anchor:
+    if (
+        not relative.parts
+        or relative.anchor
+        or relative.name in ("", "..")
+        or (".." in relative.parts and not allow_parent)
+    ):
         raise ValueError("Expected a file beneath the selected directory")
     return relative
 
@@ -23,6 +28,8 @@ def _parent(root: Path, relative: Path, create_parents: bool) -> Iterator[int]:
     try:
         for part in relative.parts[:-1]:
             try:
+                # ".." of a directory opened without following links is its real
+                # parent, so this reaches exactly what the kernel resolves.
                 child = os.open(part, flags, dir_fd=parent)
             except FileNotFoundError:
                 if not create_parents:
@@ -47,11 +54,11 @@ def write_output_file(
     """Replace the destination atomically without writing through an existing link."""
     if root is None:
         # An explicitly selected output may lie anywhere, but never traverse a link.
-        # ".." is resolved lexically; every remaining directory is still opened
-        # without following links, so no link is crossed either way.
-        path = Path(os.path.normpath(path.absolute()))
+        path = path.absolute()
         root = Path(path.anchor)
-    relative = _relative(root, path)
+        relative = _relative(root, path, allow_parent=True)
+    else:
+        relative = _relative(root, path)
     if os.name != "posix" or not hasattr(os, "O_NOFOLLOW"):
         raise OSError("Secure output requires descriptor-relative no-symlink file operations")
     with _parent(root, relative, create_parents) as parent:

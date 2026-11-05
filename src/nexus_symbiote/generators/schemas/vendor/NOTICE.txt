@@ -13,6 +13,7 @@ Unported (CC-BY-3.0). LICENSE-SPDX-3.0.1.txt is the specification's license file
 at tag 3.0.1, unchanged: https://github.com/spdx/spdx-spec/blob/3.0.1/LICENSE
 Source https://spdx.github.io/spdx-spec/v3.0.1/
 
-SOURCES.json records exact source locations and SHA-256 digests. The copied
-schema/context resource bytes are unchanged. SymBiote validation and projection
+SOURCES.json records exact source locations and the SHA-256 digests of the copied
+files. Each copied schema/context resource equals its source except for one added
+final newline. SymBiote validation and projection
 code is separate from these third-party schema resources.

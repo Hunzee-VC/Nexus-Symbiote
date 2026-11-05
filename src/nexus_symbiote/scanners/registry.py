@@ -280,6 +280,36 @@ class RegistryScanner(Scanner):
             },
         )
 
+    # pip's requirements-file options; a unique prefix of a long option selects it.
+    _LONG_OPTIONS = (
+        "--config-settings",
+        "--constraint",
+        "--editable",
+        "--extra-index-url",
+        "--find-links",
+        "--global-option",
+        "--hash",
+        "--index-url",
+        "--no-binary",
+        "--no-index",
+        "--only-binary",
+        "--pre",
+        "--prefer-binary",
+        "--require-hashes",
+        "--requirement",
+        "--trusted-host",
+        "--use-feature",
+    )
+    _SHORT_OPTIONS = {
+        "-r": "--requirement",
+        "-c": "--constraint",
+        "-e": "--editable",
+        "-i": "--index-url",
+        "-f": "--find-links",
+    }
+    _COMMENT = re.compile(r"(?:^|\s)#.*$")
+    _NAMED = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?\s*(?:[\[(<>=!~;@]|$)")
+
     def _requirement_files(self) -> list[str]:
         if self._files is None:
             raise RuntimeError("_requirement_files called outside a _collection context")
@@ -293,7 +323,7 @@ class RegistryScanner(Scanner):
         """Logical lines as pip reads them: a trailing backslash continues the line."""
         lines: list[str] = []
         pending = ""
-        for raw in content.splitlines():
+        for raw in content.removeprefix("\ufeff").splitlines():
             if raw.endswith("\\") and not raw.lstrip().startswith("#"):
                 pending += raw[:-1] + " "
                 continue
@@ -303,8 +333,29 @@ class RegistryScanner(Scanner):
             lines.append(pending)
         return lines
 
+    @classmethod
+    def _requirement_option(cls, text: str) -> tuple[str, str]:
+        """Name an option line as pip's parser would, with its value."""
+        token, _, rest = text.strip().partition(" ")
+        token, _, tab_rest = token.partition("\t")
+        rest = (tab_rest + " " + rest).strip()
+        if token.startswith("--"):
+            name, equals, attached = token.partition("=")
+            matches = [option for option in cls._LONG_OPTIONS if option.startswith(name)]
+            if name not in cls._LONG_OPTIONS and len(matches) == 1:
+                name = matches[0]
+            return name, (attached if equals else rest).strip()
+        return cls._SHORT_OPTIONS.get(token[:2], token), (token[2:] or rest).strip()
+
+    @staticmethod
+    def _unread(result: ScanResult, note: str) -> None:
+        # What is not read is unknown, not absent: coverage must say so.
+        if note not in result.surfaces_excluded:
+            result.surfaces_excluded.append(note)
+
     def _scan_pip(self, root: Path, result: ScanResult) -> list[RegistryEntryComponent]:
         components: list[RegistryEntryComponent] = []
+        declared: dict[str, RegistryEntryComponent] = {}
         filenames = self._requirement_files()
         for filename in filenames:
             path = root / filename
@@ -312,23 +363,22 @@ class RegistryScanner(Scanner):
             if content is None:
                 continue
             for line in self._requirement_lines(content):
-                text = line.split(" #", 1)[0].strip()
-                if not text or text.startswith("#"):
+                text = self._COMMENT.sub("", line).strip()
+                if not text:
                     continue
                 if text.startswith("-"):
-                    option, _, value = text.replace("=", " ", 1).partition(" ")
-                    if option[:2] in ("-r", "-c") and len(option) > 2 and option[1] != "-":
-                        option, value = option[:2], option[2:]
-                    target = PurePosixPath(value.strip())
-                    unread = f"{filename}: included requirements file is not followed"
-                    if (
-                        option in ("-r", "--requirement", "-c", "--constraint")
-                        and (len(target.parts) != 1 or target.name not in filenames)
-                        and unread not in result.surfaces_excluded
+                    option, value = self._requirement_option(text)
+                    target = PurePosixPath(value)
+                    if option in ("--requirement", "--constraint") and (
+                        len(target.parts) != 1 or target.name not in filenames
                     ):
-                        # An included file outside the root's requirements*.txt is not
-                        # read, so its declarations are unknown rather than absent.
-                        result.surfaces_excluded.append(unread)
+                        self._unread(
+                            result, f"{filename}: included requirements file is not followed"
+                        )
+                    elif option == "--editable":
+                        self._unread(
+                            result, f"{filename}: unsupported requirement form is not collected"
+                        )
                     continue
                 # Per-requirement options such as --hash follow the requirement itself.
                 words: list[str] = []
@@ -336,9 +386,37 @@ class RegistryScanner(Scanner):
                     if word.startswith("-"):
                         break
                     words.append(word)
-                component = self._pip_component(" ".join(words), path, result)
-                if component:
+                reference = " ".join(words)
+                if not self._NAMED.match(reference):
+                    # A URL, VCS or path reference names no package this collector can map.
+                    self._unread(
+                        result, f"{filename}: unsupported requirement form is not collected"
+                    )
+                    continue
+                component = self._pip_component(reference, path, result)
+                if component is None:
+                    continue
+                first = declared.get(component.bom_ref)
+                if first is None:
+                    declared[component.bom_ref] = component
                     components.append(component)
+                    continue
+                # One component per package across files; a different declaration
+                # elsewhere is a finding on it, not a second, conflicting component.
+                if (component.version, component.package_url) != (first.version, first.package_url):
+                    detail = (
+                        f"PyPI package '{first.name}' is declared differently in another "
+                        "requirements file."
+                    )
+                    if not any(risk.detail == detail for risk in first.risks):
+                        first.risks.append(
+                            RiskAssessment(
+                                severity=RiskSeverity.MEDIUM,
+                                category="version_pinning",
+                                detail=detail,
+                                recommendation="Declare one exact version across requirements files and verify artifact hashes.",
+                            )
+                        )
         path = root / "pyproject.toml"
         content = self._read(path, result)
         if content is None:
