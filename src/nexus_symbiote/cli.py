@@ -49,17 +49,50 @@ def _scanner_error_summary(exc: Exception) -> str:
 
 
 def _policy(root: Path, *, ignore_project: bool = False) -> Policy:
-    from nexus_symbiote.policy import PolicyError, default_policy, load_policy
+    policy, _, _ = _policy_with_source(root, ignore_project=ignore_project)
+    return policy
+
+
+def _policy_with_source(
+    root: Path, *, ignore_project: bool = False, warn: bool = True
+) -> tuple[Policy, str, list[str]]:
+    """Load the governing policy and say where it came from and what it relaxes.
+
+    A gate that a checkout-supplied file switched off must be a visible choice, so
+    every relaxation is returned for machine-readable output and, unless the caller
+    emits JSON that already carries it, printed on stderr.
+    """
+    from nexus_symbiote.policy import (
+        PolicyError,
+        default_policy,
+        find_policy_path,
+        load_policy,
+        weakened_settings,
+    )
 
     if ignore_project:
-        return default_policy()
+        return default_policy(), "built-in", []
     try:
-        return load_policy(root) or default_policy()
+        path = find_policy_path(root)
+        policy = load_policy(root) or default_policy()
     except PolicyError as exc:
-        raise click.ClickException(str(exc)) from exc
+        raise _failure(exc) from exc
+    if path is None:
+        return policy, "built-in", []
+    weaker = weakened_settings(policy)
+    if weaker and warn:
+        # The path and the relaxed values come from the checkout, so neither may move
+        # the cursor or start a new line that hides this warning or forges a CI command.
+        shown = _UNSAFE_TEXT.sub(
+            "\ufffd", f"policy {path} weakens the built-in gates: " + "; ".join(weaker)
+        )
+        click.echo("WARNING: " + shown, err=True)
+    return policy, f"project:{path}", weaker
 
 
-def _inventory_policy(project: Path | None, aibom_path: str, *, ignore_project: bool) -> Policy:
+def _inventory_policy(
+    project: Path | None, aibom_path: str, *, ignore_project: bool, warn: bool = True
+) -> tuple[Policy, str, list[str]]:
     """Policy for a command that reads an inventory: only a named project supplies one.
 
     An inventory can be written anywhere, including shared directories such as /tmp,
@@ -68,7 +101,7 @@ def _inventory_policy(project: Path | None, aibom_path: str, *, ignore_project: 
     from nexus_symbiote.policy import default_policy, nearest_policy_file
 
     if project is not None:
-        return _policy(project, ignore_project=ignore_project)
+        return _policy_with_source(project, ignore_project=ignore_project, warn=warn)
     if not ignore_project:
         unapplied = nearest_policy_file(Path(aibom_path).resolve().parent)
         if unapplied is not None:
@@ -78,21 +111,31 @@ def _inventory_policy(project: Path | None, aibom_path: str, *, ignore_project: 
                 "policy is used; name a trusted project with --project to apply its policy.",
                 err=True,
             )
-    return default_policy()
+    return default_policy(), "built-in", []
 
 
 # C0/C1 controls move the cursor or rewrite earlier output; bidirectional and
-# invisible format characters disguise text. Inventory data may contain any of them.
+# invisible format characters (every Unicode format character, category Cf, as of
+# Unicode 15.1) disguise text. Inventory and checkout data may contain any of them.
 # Line breaks are included: a file name or component name containing one could
 # forge whole output lines, and in CI a line starting with "::" is a workflow command.
 _UNSAFE_TEXT = re.compile(
-    r"[\x00-\x08\x0a-\x1f\x7f-\x9f\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]"
+    r"[\x00-\x08\x0a-\x1f\x7f-\x9f\u00ad\u0600-\u0605\u061c\u06dd\u070f\u0890\u0891\u08e2"
+    r"\u180e\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff"
+    r"\ufff9-\ufffb\U000110bd\U000110cd\U00013430-\U0001343f\U0001bca0-\U0001bca3"
+    r"\U0001d173-\U0001d17a\U000e0001\U000e0020-\U000e007f]"
 )
 
 
 def _safe(value: object) -> str:
     """Render untrusted text literally: no Rich markup and no terminal control sequences."""
     return escape(_UNSAFE_TEXT.sub("\ufffd", str(value)))
+
+
+def _failure(exc: Exception) -> click.ClickException:
+    # Policy, graph and inventory errors quote keys, file names and paths from the
+    # checkout or the inventory, so they get the same neutralization as other output.
+    return click.ClickException(_UNSAFE_TEXT.sub("\ufffd", str(exc)))
 
 
 def _load_bom(path: str | Path) -> AIBOM:
@@ -116,7 +159,7 @@ def _signer_policies(path: Path | None, project: Path | None) -> list[SigstoreAr
     try:
         return load_signature_policies(path, project)
     except ValueError as exc:
-        raise click.ClickException(str(exc)) from None
+        raise _failure(exc) from None
 
 
 def _get_scanners() -> dict[str, type]:
@@ -391,7 +434,7 @@ def scan(
     try:
         assemble_repository_agent(aibom, root)
     except (PolicyError, ValueError, OSError) as exc:
-        raise click.ClickException(str(exc)) from exc
+        raise _failure(exc) from exc
     scan_failures.extend(validate_graph(aibom))
     aibom.metadata.completeness = CompletenessClaim(
         scope="repository+shadowscan" if source_report_digest else "repository",
@@ -692,11 +735,12 @@ def validate(
 
     signature_policies = _signer_policies(signature_policy, Path(project) if project else None)
 
-    policy = _inventory_policy(
+    policy, policy_source, _ = _inventory_policy(
         Path(project).resolve() if project else None,
         aibom_path,
         ignore_project=no_project_policy,
     )
+    console.print(f"Policy: {_safe(policy_source)}", soft_wrap=True)
     valid = True
     console.print("[bold]Completeness check[/]")
     if policy.validation.require_completeness:
@@ -812,7 +856,9 @@ def risk(
 
     root = project.resolve() if project else None
     signature_policies = _signer_policies(signature_policy, root)
-    policy = _inventory_policy(root, aibom_path, ignore_project=no_project_policy)
+    policy, policy_source, policy_weakened = _inventory_policy(
+        root, aibom_path, ignore_project=no_project_policy, warn=not json_output
+    )
     threshold = threshold if threshold is not None else policy.risk.fail_threshold
     if threshold <= 0 or not math.isfinite(threshold):
         raise click.BadParameter("threshold must be positive and finite", param_hint="--threshold")
@@ -839,6 +885,8 @@ def risk(
                             "risk_level": "unknown",
                             "coverage_status": "unreconciled",
                             "gate_reasons": reasons,
+                            "policy_source": policy_source,
+                            "policy_weakened": policy_weakened,
                         },
                         indent=2,
                     )
@@ -858,7 +906,17 @@ def risk(
     passed, report = scorer.passes_gate(bom)
 
     if json_output:
-        click.echo(json.dumps({**report.to_dict(), "assessment_basis": basis}, indent=2))
+        click.echo(
+            json.dumps(
+                {
+                    **report.to_dict(),
+                    "assessment_basis": basis,
+                    "policy_source": policy_source,
+                    "policy_weakened": policy_weakened,
+                },
+                indent=2,
+            )
+        )
         sys.exit(0 if passed else 1)
 
     level_colors = {
@@ -993,7 +1051,7 @@ def blast_radius_command(aibom_path: str, component_ref: str, json_output: bool)
     try:
         result = blast_radius(bom, component_ref)
     except ValueError as exc:
-        raise click.ClickException(str(exc)) from exc
+        raise _failure(exc) from exc
     if json_output:
         click.echo(json.dumps(result, indent=2))
     else:

@@ -379,6 +379,59 @@ def test_agent_manifest_reuses_instruction_digest_and_rejects_changed_bytes(tmp_
         assemble_repository_agent(AIBOM(components=[prompt]), tmp_path)
 
 
+def test_policy_source_and_relaxations_are_visible(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "AGENTS.md").write_text("Keep receipts.")
+    out = tmp_path / "bom.json"
+    runner = CliRunner()
+    assert (
+        runner.invoke(main, ["scan", str(project), "-o", str(out), "--no-project-policy"]).exit_code
+        == 0
+    )
+    builtin = runner.invoke(main, ["risk", str(out), "--no-project-policy", "--json-output"])
+    assert json.loads(builtin.output)["policy_source"] == "built-in"
+    (project / ".nexus-symbiote.yaml").write_text("risk: {fail_on_severity: none}\n")
+    relaxed = runner.invoke(main, ["risk", str(out), "--project", str(project), "--json-output"])
+    payload = json.loads(relaxed.stdout)
+    assert payload["policy_source"].startswith("project:")
+    assert payload["policy_weakened"] == ["risk.fail_on_severity=none"]
+    human = runner.invoke(main, ["risk", str(out), "--project", str(project)])
+    assert "weakens the built-in gates: risk.fail_on_severity=none" in human.output
+    shown = runner.invoke(main, ["validate", str(out), "--project", str(project)])
+    assert "Policy: project:" in shown.output
+
+
+def test_policy_relaxation_report_is_exact_and_cannot_rewrite_the_warning(tmp_path):
+    project = tmp_path / "team[ci]"
+    project.mkdir()
+    (project / "AGENTS.md").write_text("Keep receipts.")
+    out = tmp_path / "bom.json"
+    runner = CliRunner()
+    scan = runner.invoke(main, ["scan", str(project), "-o", str(out), "--no-project-policy"])
+    assert scan.exit_code == 0, scan.output
+    hostile = "x\\r\\e[2K\\e[32mPolicy: built-in\\e[0m\\n::notice::forged"
+    policy_file = project / ".nexus-symbiote.yaml"
+    policy_file.write_text(
+        f'risk: {{fail_threshold: 50.000001, ignore_categories: ["{hostile}"]}}\n'
+    )
+    args = ["risk", str(out), "--project", str(project)]
+    report = json.loads(runner.invoke(main, [*args, "--json-output"]).stdout)
+    assert report["policy_source"] == f"project:{policy_file}"
+    assert report["policy_weakened"] == [
+        "risk.fail_threshold=50.000001",
+        "risk.ignore_categories=x\r\x1b[2K\x1b[32mPolicy: built-in\x1b[0m\n::notice::forged",
+    ]
+    stderr = runner.invoke(main, args).stderr
+    assert "\x1b" not in stderr and "\r" not in stderr
+    assert not any(line.startswith("::") for line in stderr.splitlines())
+    (warning,) = [line for line in stderr.splitlines() if "weakens the built-in gates" in line]
+    assert warning.startswith(f"WARNING: policy {policy_file} weakens")
+    assert warning.endswith("::notice::forged")
+    shown = runner.invoke(main, ["validate", str(out), "--project", str(project)])
+    assert f"Policy: project:{policy_file}" in shown.output
+
+
 def test_validation_policy_above_project_root_is_ignored(tmp_path):
     project = tmp_path / "anc" / "sub" / "project"
     project.mkdir(parents=True)
