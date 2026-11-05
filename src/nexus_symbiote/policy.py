@@ -87,19 +87,38 @@ def default_policy() -> Policy:
 
 
 def load_policy(project_root: Path) -> Policy | None:
+    """Load the policy file in ``project_root`` itself; ancestors are never consulted.
+
+    The policy is part of the checkout it governs. A file above the project root
+    belongs to whoever controls that directory, not to the project.
+    """
     current = project_root.resolve()
     if current.is_file():
         current = current.parent
-    while True:
+    for name in (".nexus-symbiote.yaml", ".nexus-symbiote.yml"):
+        candidate = current / name
+        if candidate.is_symlink():
+            raise PolicyError(f"policy must not be a symlink: {candidate}")
+        if candidate.exists():
+            return _parse_policy(candidate)
+    return None
+
+
+def nearest_policy_file(start: Path) -> Path | None:
+    """Find the closest policy file at or above ``start`` so a caller can say it was not applied.
+
+    Never use the result to load a policy: a file above the project, or beside an
+    inventory written to a shared directory, belongs to whoever controls that directory.
+    """
+    for directory in (start, *start.parents):
         for name in (".nexus-symbiote.yaml", ".nexus-symbiote.yml"):
-            candidate = current / name
-            if candidate.is_symlink():
-                raise PolicyError(f"policy must not be a symlink: {candidate}")
-            if candidate.exists():
-                return _parse_policy(candidate)
-        if current.parent == current:
-            return None
-        current = current.parent
+            candidate = directory / name
+            try:
+                if candidate.is_symlink() or candidate.exists():
+                    return candidate
+            except OSError:
+                continue
+    return None
 
 
 def parse_yaml_mapping(text: str) -> dict[str, Any]:
