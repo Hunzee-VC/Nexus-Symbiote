@@ -273,3 +273,6 @@ def test_binding_tags_compare_in_constant_time_and_tolerate_hostile_values():
     assert _binding_equal(None, None)
     assert not _binding_equal("t\u00e9", "te")
     assert not _binding_equal(["x"], "x")
+    assert not _binding_equal("\ud800tag", "tag")
+    assert _binding_equal("\ud800", "\ud800")
+    assert not _binding_equal("\ud800", "\udc00")

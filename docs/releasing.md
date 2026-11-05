@@ -113,10 +113,14 @@ as described below.
   version still installs for anyone who pins it exactly, so yank only together with
   a published fix and a changelog entry naming the defect. Yank rather than merely
   supersede when the published bytes are wrong or vulnerable.
-- Partial upload: if one of the two files uploads and the other fails, a plain
-  re-run fails with "File already exists". Confirm the uploaded file's digest
-  against that run's `SHA256SUMS`, then re-run the publish once from the same commit
-  with `skip-existing: true` set on the publish step for that retry only.
+- Partial upload: if one of the two files uploads and the other fails, do not edit
+  `release.yml` to retry. A new commit changes the bytes of both files, because the
+  sdist ships the workflow and the build timestamp comes from the commit, so the two
+  files of one release would come from different commits. Confirm the uploaded file's
+  digest against that run's `SHA256SUMS`, then use **Re-run failed jobs** on the same
+  run: `publish` downloads that run's `release-distributions` artifact again instead
+  of rebuilding. If the index still refuses the retry, leave the version incomplete
+  and publish the next patch version.
 - Burned TestPyPI version: PyPI can still take the version, but the published bytes
   would not be the rehearsed ones. Prefer bumping and rehearsing again.
 - Name rejected at upload time: the publish job fails before any file lands. Choose a
@@ -176,8 +180,10 @@ benchmark evidence. `project.cdx.json` is a static inventory of the checked-out
 project, not a guarantee of complete runtime or build dependency coverage.
 `installed-distributions.json` records that locked environment and
 `environment.cdx.json` is the same record as a CycloneDX 1.7 SBOM of the installed
-distributions, validated against the vendored schema; it describes what pip
-reports, not file authenticity. `source-revision.json`
+distributions, validated against the vendored schema. Its dependency edges come
+from each distribution's declared requirements, kept only where the requirement's
+marker holds for the inspected interpreter and an active extra; it describes what
+pip reports, not file authenticity. `source-revision.json`
 requires the actual clean checkout to match the workflow's exact `GITHUB_SHA` and
 records the repository, ref and run identity. `SHA256SUMS` covers that source
 record, the release distributions and evidence files. The workflow bundles all

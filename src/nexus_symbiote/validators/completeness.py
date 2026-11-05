@@ -49,10 +49,13 @@ def _binding_equal(supplied: object, local: object) -> bool:
     """Compare binding tags without an early exit at the first differing byte.
 
     Only string pairs take the constant-time path: ``hmac.compare_digest`` raises on
-    ``None``, non-string or non-ASCII values, and a hostile inventory can hold any of them.
+    ``None``, non-string or non-ASCII values, and a hostile inventory can hold any of them,
+    including lone surrogates, which ``surrogatepass`` still encodes to distinct bytes.
     """
     if isinstance(supplied, str) and isinstance(local, str):
-        return hmac.compare_digest(supplied.encode("utf-8"), local.encode("utf-8"))
+        return hmac.compare_digest(
+            supplied.encode("utf-8", "surrogatepass"), local.encode("utf-8", "surrogatepass")
+        )
     return supplied == local
 
 

@@ -137,7 +137,7 @@ def weakened_settings(policy: Policy) -> list[str]:
     if policy.risk.fail_on_severity == "none":
         weaker.append("risk.fail_on_severity=none")
     if policy.risk.fail_threshold > base.risk.fail_threshold:
-        weaker.append(f"risk.fail_threshold={policy.risk.fail_threshold:g}")
+        weaker.append(f"risk.fail_threshold={policy.risk.fail_threshold!r}")
     if policy.risk.ignore_categories:
         weaker.append("risk.ignore_categories=" + ",".join(policy.risk.ignore_categories))
     if policy.scan.failure_mode == "report-only":

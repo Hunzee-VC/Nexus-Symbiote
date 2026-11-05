@@ -394,6 +394,9 @@ class StateStore:
                 "CREATE TABLE IF NOT EXISTS tenant_nonces "
                 "(tenant TEXT NOT NULL, nonce TEXT NOT NULL, PRIMARY KEY (tenant, nonce))"
             )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS tenant_nonces_by_nonce ON tenant_nonces (nonce)"
+            )
         path.chmod(0o600)
 
     @contextmanager
@@ -473,8 +476,13 @@ class StateStore:
                 )
             if nonce is not None:
                 # Rows consumed before nonces were tenant-scoped stay consumed for every
-                # tenant, so an upgrade can never resurrect a used nonce.
+                # tenant, so an upgrade can never resurrect a used nonce. A use without a
+                # tenant is store-wide, so it conflicts with every tenant's earlier use.
                 legacy = db.execute("SELECT 1 FROM nonces WHERE nonce=?", (nonce,)).fetchone()
+                if legacy is None and tenant is None:
+                    legacy = db.execute(
+                        "SELECT 1 FROM tenant_nonces WHERE nonce=?", (nonce,)
+                    ).fetchone()
                 try:
                     if legacy is not None:
                         raise sqlite3.IntegrityError("legacy nonce")

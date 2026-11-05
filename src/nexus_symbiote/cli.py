@@ -79,14 +79,15 @@ def _policy_with_source(
         raise click.ClickException(str(exc)) from exc
     if path is None:
         return policy, "built-in", []
-    source = "project:" + _safe(str(path))
     weaker = weakened_settings(policy)
     if weaker and warn:
-        click.echo(
-            f"WARNING: policy {source[8:]} weakens the built-in gates: " + "; ".join(weaker),
-            err=True,
+        # The path and the relaxed values come from the checkout, so neither may move
+        # the cursor or start a new line that hides this warning or forges a CI command.
+        shown = _UNSAFE_TEXT.sub(
+            "\ufffd", f"policy {path} weakens the built-in gates: " + "; ".join(weaker)
         )
-    return policy, source, weaker
+        click.echo("WARNING: " + shown, err=True)
+    return policy, f"project:{path}", weaker
 
 
 def _inventory_policy(
@@ -729,7 +730,7 @@ def validate(
         aibom_path,
         ignore_project=no_project_policy,
     )
-    console.print(f"Policy: {policy_source}", soft_wrap=True)
+    console.print(f"Policy: {_safe(policy_source)}", soft_wrap=True)
     valid = True
     console.print("[bold]Completeness check[/]")
     if policy.validation.require_completeness:

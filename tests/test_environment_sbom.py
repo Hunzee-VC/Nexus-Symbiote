@@ -15,10 +15,24 @@ from nexus_symbiote.generators.validation import validate_cyclonedx
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from environment_sbom import build_sbom  # noqa: E402
 
+LINUX = {
+    "implementation_name": "cpython",
+    "implementation_version": "3.12.13",
+    "os_name": "posix",
+    "platform_machine": "x86_64",
+    "platform_python_implementation": "CPython",
+    "platform_release": "6.8.0",
+    "platform_system": "Linux",
+    "platform_version": "#1 SMP",
+    "python_full_version": "3.12.13",
+    "python_version": "3.12",
+    "sys_platform": "linux",
+}
+
 INSPECT = {
     "version": "1",
     "pip_version": "26.0",
-    "environment": {"python_full_version": "3.12.13"},
+    "environment": LINUX,
     "installed": [
         {
             "metadata": {
@@ -58,9 +72,62 @@ def test_sbom_is_valid_deterministic_and_limited_to_installed_dependencies():
     ]
 
 
+def _dist(name, *requires, extras=None):
+    record = {"metadata": {"name": name, "version": "1.0", "requires_dist": list(requires)}}
+    if extras is not None:
+        record["requested_extras"] = extras
+    return record
+
+
+def _edges(environment, *records):
+    document = build_sbom(
+        {"environment": environment, "installed": list(records)}, timestamp=datetime.now(UTC)
+    )
+    return {
+        d["ref"].removeprefix("pkg:pypi/").removesuffix("@1.0"): [
+            ref.removeprefix("pkg:pypi/").removesuffix("@1.0") for ref in d["dependsOn"]
+        ]
+        for d in document["dependencies"]
+    }
+
+
+def test_edges_follow_markers_and_active_extras_not_mere_presence():
+    records = (
+        _dist(
+            "nexus-symbiote",
+            "click",
+            "hatchling; extra == 'dev'",
+            "tomli; python_version < '3.11'",
+            "pywin32; sys_platform == 'win32'",
+            "nexus-symbiote[cyclonedx]; extra == 'all'",
+        ),
+        _dist("app", "lib", "lib[Fast]; extra == 'full'", extras=["full"]),
+        _dist(
+            "lib",
+            "speedups; extra == 'fast'",
+            "slowpath; extra == 'slow'",
+            "lib[more]; extra == 'fast'",
+            "other; extra == 'more'",
+        ),
+        *(_dist(name) for name in ("click", "hatchling", "tomli", "pywin32")),
+        *(_dist(name) for name in ("speedups", "slowpath", "other")),
+    )
+    edges = _edges(LINUX, *records)
+    assert edges["nexus-symbiote"] == ["click"]
+    assert edges["app"] == ["lib"]
+    assert edges["lib"] == ["other", "speedups"]
+    windows = _edges({**LINUX, "sys_platform": "win32"}, *records)
+    assert windows["nexus-symbiote"] == ["click", "pywin32"]
+
+
 @pytest.mark.parametrize(
     "broken",
-    [{"installed": "no"}, {"installed": [{"metadata": {"name": "a", "version": "1"}}] * 2}],
+    [
+        {"environment": LINUX, "installed": "no"},
+        {"environment": LINUX, "installed": [{"metadata": {"name": "a", "version": "1"}}] * 2},
+        {"installed": []},
+        {"environment": {"python_full_version": "3.12.13"}, "installed": []},
+    ],
 )
 def test_malformed_or_duplicate_inventories_are_rejected(broken):
     with pytest.raises(ValueError):

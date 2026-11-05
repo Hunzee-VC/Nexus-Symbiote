@@ -517,6 +517,8 @@ def test_nonces_are_scoped_by_tenant_and_legacy_rows_stay_consumed(tmp_path):
     for tenant in ("acme", "globex", None):
         with pytest.raises(AuthorizationError, match="already been used"):
             store.record((), "legacy-consumed-nonce", tenant=tenant)
+    with pytest.raises(AuthorizationError, match="already been used"):
+        store.record((), "shared-nonce")
 
 
 def test_library_validation_errors_name_fields_without_values(tmp_path):
