@@ -102,7 +102,11 @@ class ValidWindow(Contract):
     def aware(cls, value: datetime) -> datetime:
         if value.utcoffset() is None:
             raise ValueError("timestamps must include a timezone")
-        return value.astimezone(UTC)
+        try:
+            return value.astimezone(UTC)
+        except OverflowError as exc:
+            # Pydantic reports only ValueError and AssertionError as validation errors.
+            raise ValueError("timestamp is out of range in UTC") from exc
 
     @model_validator(mode="after")
     def ordered(self) -> ValidWindow:
