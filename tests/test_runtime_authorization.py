@@ -578,3 +578,14 @@ def test_malformed_revocation_entries_are_rejected_instead_of_ignored(field, val
         TrustStatus(tenant="acme", serial=1, **window, **{field: (value,)})
     canonical = "sha256:" + "a" * 64 if field != "revoked_signers" else "a" * 64
     assert getattr(TrustStatus(tenant="acme", serial=1, **window, **{field: (canonical,)}), field)
+
+
+def test_out_of_range_timestamp_is_a_validation_error_not_an_overflow(tmp_path):
+    values = fixture(tmp_path)
+    status, key = values[4], values[8]
+    # Representable locally, but past datetime.max once converted to UTC.
+    far = datetime(9999, 12, 31, 23, 0, tzinfo=timezone(timedelta(hours=-8)))
+    with pytest.raises(ValidationError, match="out of range"):
+        TrustStatus(tenant="acme", serial=1, not_before=NOW, not_after=far)
+    with pytest.raises(AuthorizationError, match="does not validate"):
+        sign_contract(status.model_copy(update={"not_after": far}), "trust", (key,))
