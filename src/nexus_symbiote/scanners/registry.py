@@ -25,7 +25,7 @@ from nexus_symbiote.core.enums import AssuranceLevel, RiskSeverity, TrustTier
 from nexus_symbiote.core.hashing import extract_version_pin, hash_bytes, parse_json_strict
 from nexus_symbiote.core.models import ClaimEvidence, RegistryEntryComponent, RiskAssessment
 from nexus_symbiote.scanners.base import Scanner, ScanResult, sanitized_origin
-from nexus_symbiote.utils.secrets import redact_text
+from nexus_symbiote.utils.secrets import redact_text, redact_url
 from nexus_symbiote.utils.terminal import UNSAFE_TEXT
 
 AI_PACKAGE_PATTERNS = [
@@ -36,6 +36,29 @@ AI_PACKAGE_PATTERNS = [
     re.compile(r"(?:^|/)(?:chromadb|pinecone|qdrant|weaviate|pgvector|faiss)", re.I),
     re.compile(r"(?:^|/)(?:guardrails|nemo[-_]guardrails|rebuff)", re.I),
 ]
+
+
+def _url_origin(url: str) -> str:
+    # The parsed URL as one token: a pattern over the whole line stops at a quote
+    # and would leave the rest of the path, query or a credential behind.
+    return redact_url(url) if "://" in url else url
+
+
+def _recorded(reference: str) -> str:
+    """A requirement as the inventory records it, with a direct URL reduced to its origin."""
+    if "@" not in reference:
+        return redact_text(reference)
+    try:
+        requirement = Requirement(reference)
+    except InvalidRequirement:
+        return redact_text(reference)
+    if not requirement.url:
+        return redact_text(reference)
+    extras = f"[{','.join(sorted(requirement.extras))}]" if requirement.extras else ""
+    text = f"{requirement.name}{extras} @ {_url_origin(requirement.url)}"
+    if requirement.marker:
+        text += f" ; {requirement.marker}"
+    return redact_text(text)
 
 
 def _admits(clause: Specifier, version: str) -> bool:
@@ -74,7 +97,7 @@ class _Declared:
         """Record a declaration; whether it cannot hold with an earlier one."""
         if requirement.url:
             # Only the origin is kept (paths and queries can carry credentials).
-            origin = redact_text(requirement.url)
+            origin = _url_origin(requirement.url)
             conflict = self.plain or bool(self.origins - {origin})
             self.origins.add(origin)
             return conflict
@@ -309,7 +332,7 @@ class RegistryScanner(Scanner):
             # must not silently turn into an unconditional exact package URL.
             spec = str(requirement.specifier)
             if requirement.url:
-                spec = "@ " + requirement.url
+                spec = "@ " + _url_origin(requirement.url)
             if requirement.marker:
                 spec += "; " + str(requirement.marker)
             spec = redact_text(spec)
@@ -343,7 +366,7 @@ class RegistryScanner(Scanner):
             properties={
                 "collection_mode": "manifest-reference",
                 "registry_origin_verified": False,
-                "requested_requirement": redact_text(reference),
+                "requested_requirement": _recorded(reference),
             },
         )
 
@@ -392,7 +415,7 @@ class RegistryScanner(Scanner):
             # One component per package across manifests. Every declaration is kept
             # on it, so a change to any of them changes the inventory and its diff.
             ref = component.bom_ref
-            sources.setdefault(ref, set()).add(f"{source}: {redact_text(reference)}")
+            sources.setdefault(ref, set()).add(f"{source}: {_recorded(reference)}")
             first = kept.get(ref)
             if first is None:
                 kept[ref] = component
@@ -444,7 +467,11 @@ class RegistryScanner(Scanner):
     ) -> None:
         filenames = self._requirement_files()
         for filename in filenames:
-            if UNSAFE_TEXT.search(filename) or any("\ud800" <= c <= "\udfff" for c in filename):
+            if (
+                UNSAFE_TEXT.search(filename)
+                or "\t" in filename
+                or any("\ud800" <= c <= "\udfff" for c in filename)
+            ):
                 # Undecodable bytes (lone surrogates) cannot be carried in the inventory
                 # or its exports, and controls or format characters disguise output, so
                 # the file is a gap, not data. A fixed list, unlike str.isprintable(),

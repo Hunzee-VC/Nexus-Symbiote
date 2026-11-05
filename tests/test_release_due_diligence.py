@@ -169,6 +169,36 @@ def test_many_declarations_of_one_package_scan_in_linear_time(tmp_path):
     assert len(component.properties["declarations"]) == 4002 + 2000
 
 
+def test_a_quote_inside_a_direct_url_does_not_leave_its_tail_behind(tmp_path):
+    (tmp_path / "AGENTS.md").write_text("Keep receipts.")
+    (tmp_path / "requirements.txt").write_text(
+        "torch @ https://files.example/t.whl'alice:PW3@other.example/secret-path\n"
+        "torch @ https://files.example/u.whl ; sys_platform == 'linux'\n"
+    )
+    (component,) = RegistryScanner().scan(tmp_path).components
+    assert component.version == "@ https://files.example"
+    assert component.properties["requested_requirement"] == "torch @ https://files.example"
+    runner = CliRunner()
+    for fmt in ("json", "cyclonedx", "spdx"):
+        out = tmp_path / f"{fmt}.json"
+        scanned = runner.invoke(
+            main,
+            [
+                "scan",
+                str(tmp_path),
+                "--no-project-policy",
+                "--report-only",
+                "-f",
+                fmt,
+                "-o",
+                str(out),
+            ],
+        )
+        assert scanned.exit_code == 0, scanned.output
+        text = out.read_text(encoding="utf-8")
+        assert "PW3" not in text and "secret-path" not in text and "alice" not in text
+
+
 def test_a_pyproject_comment_is_not_compared(tmp_path):
     (tmp_path / "pyproject.toml").write_text(
         '[project]\nname = "agent"\nversion = "0.1.0"\ndependencies = ["openai==1.3.0 # pinned"]\n'
@@ -567,6 +597,7 @@ def test_a_cleanup_failure_does_not_replace_a_written_output(tmp_path, monkeypat
         ("requirements-\x1b[2J.txt", False),
         ("requirements-\u202e.txt", False),
         ("requirements-\u200b.txt", False),
+        ("requirements-\tdev.txt", False),
     ],
 )
 def test_only_names_that_disguise_output_are_refused(tmp_path, name, read):
