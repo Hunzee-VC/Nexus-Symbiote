@@ -23,8 +23,8 @@ UNSAFE_TEXT = re.compile(
 
 OUTPUT_REFUSED = (
     "Cannot write the output file: its directory must exist, no directory on the path "
-    "may be a symbolic link, and an existing file there must be a regular file or a "
-    "link, not a directory, device, FIFO or socket."
+    "may be a symbolic link, and an existing output must not be a directory, device, "
+    "FIFO or socket, or a link to one."
 )
 
 

@@ -10,10 +10,9 @@ import base64
 import binascii
 import fnmatch
 import re
-import shlex
 import tomllib
 from collections.abc import Callable
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
@@ -282,35 +281,7 @@ class RegistryScanner(Scanner):
             },
         )
 
-    # pip's requirements-file options; a unique prefix of a long option selects it.
-    _LONG_OPTIONS = (
-        "--config-settings",
-        "--constraint",
-        "--editable",
-        "--extra-index-url",
-        "--find-links",
-        "--global-option",
-        "--hash",
-        "--index-url",
-        "--no-binary",
-        "--no-index",
-        "--only-binary",
-        "--pre",
-        "--prefer-binary",
-        "--require-hashes",
-        "--requirement",
-        "--trusted-host",
-        "--use-feature",
-    )
-    _SHORT_OPTIONS = {
-        "-r": "--requirement",
-        "-c": "--constraint",
-        "-e": "--editable",
-        "-i": "--index-url",
-        "-f": "--find-links",
-    }
     _COMMENT = re.compile(r"(?:^|\s)#.*$")
-    _NAMED = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?\s*(?:[\[(<>=!~;@]|$)")
 
     def _requirement_files(self) -> list[str]:
         if self._files is None:
@@ -334,45 +305,6 @@ class RegistryScanner(Scanner):
         if pending:
             lines.append(pending)
         return lines
-
-    _FLAG_OPTIONS = frozenset({"--no-index", "--pre", "--prefer-binary", "--require-hashes"})
-
-    @classmethod
-    def _requirement_options(cls, text: str) -> list[tuple[str, str]] | None:
-        """Every option on a line and its value, as pip's parser reads them; None if unparsable."""
-        try:
-            tokens = shlex.split(text)
-        except ValueError:
-            return None
-        options: list[tuple[str, str]] = []
-        index = 0
-        while index < len(tokens):
-            token = tokens[index]
-            index += 1
-            if token.startswith("--"):
-                name, equals, value = token.partition("=")
-                matches = [option for option in cls._LONG_OPTIONS if option.startswith(name)]
-                if name not in cls._LONG_OPTIONS and len(matches) == 1:
-                    name = matches[0]
-                if not equals and name not in cls._FLAG_OPTIONS and index < len(tokens):
-                    value = tokens[index]
-                    index += 1
-            elif token.startswith("-") and len(token) > 1:
-                name = cls._SHORT_OPTIONS.get(token[:2], token[:2])
-                value = token[2:]
-                if not value and index < len(tokens):
-                    value = tokens[index]
-                    index += 1
-            else:
-                continue
-            options.append((name, value.strip()))
-        return options
-
-    @staticmethod
-    def _unread(result: ScanResult, note: str) -> None:
-        # What is not read is unknown, not absent: coverage must say so.
-        if note not in result.surfaces_excluded:
-            result.surfaces_excluded.append(note)
 
     def _scan_pip(self, root: Path, result: ScanResult) -> list[RegistryEntryComponent]:
         components: list[RegistryEntryComponent] = []
@@ -431,24 +363,8 @@ class RegistryScanner(Scanner):
                 if not text:
                     continue
                 if text.startswith("-"):
-                    options = self._requirement_options(text)
-                    if options is None:
-                        self._unread(
-                            result, f"{filename}: unsupported requirement form is not collected"
-                        )
-                        continue
-                    for option, value in options:
-                        target = PurePosixPath(value)
-                        if option in ("--requirement", "--constraint") and (
-                            len(target.parts) != 1 or target.name not in filenames
-                        ):
-                            self._unread(
-                                result, f"{filename}: included requirements file is not followed"
-                            )
-                        elif option == "--editable" and self._may_hide_ai_package(value):
-                            self._unread(
-                                result, f"{filename}: unsupported requirement form is not collected"
-                            )
+                    # Option lines (includes, editable installs, index options) are not
+                    # followed; the README states this limit.
                     continue
                 # Per-requirement options such as --hash follow the requirement itself.
                 words: list[str] = []
@@ -457,13 +373,6 @@ class RegistryScanner(Scanner):
                         break
                     words.append(word)
                 reference = " ".join(words)
-                if not self._NAMED.match(reference):
-                    # A URL, VCS or path reference that may name an AI package is a gap.
-                    if self._may_hide_ai_package(reference):
-                        self._unread(
-                            result, f"{filename}: unsupported requirement form is not collected"
-                        )
-                    continue
                 component = self._pip_component(reference, path, result)
                 if component is not None:
                     declare(component, filename, reference)
@@ -496,31 +405,13 @@ class RegistryScanner(Scanner):
                     result.scan_failures.append("pyproject.toml: invalid optional dependencies")
         tool = data.get("tool", {})
         poetry: Any = tool.get("poetry", {}) if isinstance(tool, dict) else {}
-        tables: list[Any] = []
-        if isinstance(poetry, dict):
-            tables.append(poetry.get("dependencies", {}))
-            groups = poetry.get("group", {})
-            if isinstance(groups, dict):
-                tables.extend(
-                    group.get("dependencies", {})
-                    for group in groups.values()
-                    if isinstance(group, dict)
-                )
-        for table in tables:
-            if not isinstance(table, dict):
-                continue
-            for name, value in table.items():
-                if not isinstance(name, str) or name.lower() == "python":
-                    continue
-                reference = self._poetry_reference(name, value)
-                if reference is not None:
-                    declarations.append(reference)
-                elif self._is_ai_package(name):
-                    # A git, URL, path, multi-constraint or untranslatable entry for an
-                    # AI package names no version this collector can map.
-                    self._unread(
-                        result, "pyproject.toml: unsupported requirement form is not collected"
-                    )
+        poetry_deps = poetry.get("dependencies", {}) if isinstance(poetry, dict) else {}
+        if isinstance(poetry_deps, dict):
+            for name, value in poetry_deps.items():
+                if isinstance(value, str):
+                    declarations.append(f"{name}{value}")
+                elif isinstance(value, dict) and isinstance(value.get("version"), str):
+                    declarations.append(f"{name}{value['version']}")
         return declarations
 
     def _scan_docker(self, root: Path, result: ScanResult) -> list[RegistryEntryComponent]:
@@ -571,57 +462,6 @@ class RegistryScanner(Scanner):
                     )
                 )
         return components
-
-    _PYTHON_BOUND = re.compile(r"(>=|<=|!=|==|>|<)\s*([0-9]+(?:\.[0-9]+)*)")
-
-    @classmethod
-    def _poetry_reference(cls, name: str, value: Any) -> str | None:
-        """A Poetry dependency as a PEP 508 requirement, or None when it cannot be one."""
-        if isinstance(value, str):
-            value = {"version": value}
-        if not isinstance(value, dict) or value.keys() & {"git", "url", "path", "file"}:
-            return None
-        version, extras = value.get("version", "*"), value.get("extras", [])
-        markers, python = value.get("markers"), value.get("python")
-        if (
-            not isinstance(version, str)
-            or not isinstance(extras, list)
-            or not all(isinstance(extra, str) for extra in extras)
-            or not isinstance(markers, (str, type(None)))
-            or not isinstance(python, (str, type(None)))
-        ):
-            return None
-        version = version.strip()
-        if version == "*":
-            version = ""
-        elif version[:1].isdigit():
-            version = "==" + version
-        conditions = [f"({markers})"] if markers and markers.strip() else []
-        if python is not None:
-            # Only plain comparisons translate exactly into python_version markers.
-            bounds = [part.strip() for part in python.split(",")]
-            matches = [cls._PYTHON_BOUND.fullmatch(bound) for bound in bounds]
-            if not bounds or not all(matches):
-                return None
-            conditions.extend(f'python_version {m.group(1)} "{m.group(2)}"' for m in matches if m)
-        reference = name + (f"[{','.join(extras)}]" if extras else "") + version
-        return reference + ("; " + " and ".join(conditions) if conditions else "")
-
-    def _may_hide_ai_package(self, reference: str) -> bool:
-        """Whether a reference the collector cannot map might name an AI package."""
-        value = reference.strip()
-        if value in (".", "./"):
-            # The project itself: its own manifests are read directly.
-            return False
-        egg = re.search(r"[#&]egg=([A-Za-z0-9][A-Za-z0-9._-]*)", value)
-        if egg:
-            return self._is_ai_package(egg.group(1))
-        base = value.split("#", 1)[0].split("?", 1)[0].rstrip("/").rsplit("/", 1)[-1]
-        archive = re.fullmatch(r"([A-Za-z0-9][A-Za-z0-9._]*?)-[0-9].*\.(?:whl|tar\.gz|zip)", base)
-        if archive:
-            return self._is_ai_package(archive.group(1))
-        # No package name can be read from it, so it may be anything.
-        return True
 
     def _is_ai_package(self, name: str) -> bool:
         return any(pattern.search(name) for pattern in AI_PACKAGE_PATTERNS)

@@ -52,21 +52,6 @@ def test_registry_reads_every_root_requirements_file_with_hash_continuations(tmp
     assert str(tmp_path / "requirements-gpu.txt") in result.surfaces_scanned
 
 
-def test_registry_reports_an_include_it_does_not_read(tmp_path):
-    (tmp_path / "requirements-base.txt").write_text("openai==1.2.0\n")
-    (tmp_path / "requirements.txt").write_text(
-        "-r requirements-base.txt\n-r ./requirements-base.txt\n"
-    )
-    followed = RegistryScanner().scan(tmp_path)
-    assert followed.surfaces_excluded == []
-    assert [c.name for c in followed.components] == ["openai"]
-    (tmp_path / "requirements.txt").write_text("-r deps/base.txt\n--requirement=../outside.txt\n")
-    unread = RegistryScanner().scan(tmp_path)
-    assert unread.surfaces_excluded == [
-        "requirements.txt: included requirements file is not followed"
-    ]
-
-
 def test_registry_keeps_one_component_per_package_across_requirements_files(tmp_path):
     (tmp_path / "AGENTS.md").write_text("Keep receipts.")
     (tmp_path / "requirements.txt").write_text("openai==1.3.0\ntorch==2.3.0\n")
@@ -92,37 +77,40 @@ def test_registry_keeps_one_component_per_package_across_requirements_files(tmp_
 
 
 @pytest.mark.parametrize(
-    ("content", "excluded"),
+    "content",
     [
-        ("\ufeffopenai==1.3.0\n", []),
-        ("-e git+https://github.com/openai/openai-python@v1.3.0#egg=openai\n", ["unsupported"]),
-        ("--editable=./local-agent\n", ["unsupported"]),
-        ("git+https://github.com/openai/openai-python@v1.3.0#egg=openai\n", ["unsupported"]),
-        ("./wheels/openai-1.3.0-py3-none-any.whl\n", ["unsupported"]),
-        ("-r\tdeps/base.txt\n", ["included"]),
-        ("--requirem deps/base.txt\n", ["included"]),
-        ("--cons=deps/constraints.txt\n", ["included"]),
-        ("-rrequirements-extra.txt\n", []),
-        ("--index-url https://pypi.org/simple\nopenai==1.3.0  \t# pinned\n", []),
-        ("--index-url https://pypi.org/simple -r ../shared/ai.txt\n", ["included"]),
-        ("--pre -e ./localpkg\n", ["unsupported"]),
-        ("--no-binary :all: --constraint deps/c.txt\n", ["included"]),
-        ('-r "requirements-extra.txt"\n', []),
-        ("-r 'unbalanced\n", ["unsupported"]),
+        "-e .\n",
+        "-e .[dev]\n",
+        "-c constraints.txt\n",
+        "-r requirements/base.txt\n",
+        "--index-url https://pypi.org/simple -r ../shared/ai.txt\n",
+        "-e git+https://github.com/openai/openai-python@v1.3.0#egg=openai\n",
+        "git+https://github.com/example/unknown\n",
+        "https://files.example/python-dateutil-2.8.2.tar.gz\n",
+        "./wheels/openai-1.3.0-py3-none-any.whl\n",
+        "-r 'unbalanced\n",
     ],
 )
-def test_registry_records_requirement_forms_it_cannot_collect(tmp_path, content, excluded):
-    (tmp_path / "requirements.txt").write_text(content, encoding="utf-8")
-    (tmp_path / "requirements-extra.txt").write_text("langchain==0.1.0\n")
-    result = RegistryScanner().scan(tmp_path)
-    notes = {
-        "unsupported": "requirements.txt: unsupported requirement form is not collected",
-        "included": "requirements.txt: included requirements file is not followed",
-    }
-    assert result.surfaces_excluded == [notes[key] for key in excluded]
-    assert result.scan_failures == []
-    if not excluded:
-        assert "openai" in {c.name for c in result.components} or "-r" in content
+def test_lines_the_collector_does_not_follow_leave_the_default_gate_as_on_main(tmp_path, content):
+    # Includes, editable installs and URL, VCS or path references are not followed
+    # and not reported, as before; the README and security model state the limit.
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "AGENTS.md").write_text("Keep receipts.")
+    (project / "requirements.txt").write_text("openai==1.3.0\n")
+    (project / "requirements-dev.txt").write_text("\ufeff" + content)
+    result = RegistryScanner().scan(project)
+    assert result.surfaces_excluded == [] and result.scan_failures == []
+    assert [c.name for c in result.components] == ["openai"]
+    scanned = CliRunner().invoke(
+        main, ["scan", str(project), "--no-project-policy", "-o", str(tmp_path / "bom.json")]
+    )
+    assert scanned.exit_code == 0, scanned.output
+
+
+def test_a_utf8_byte_order_mark_does_not_hide_the_first_requirement(tmp_path):
+    (tmp_path / "requirements.txt").write_text("\ufeffopenai==1.3.0\n", encoding="utf-8")
+    assert [c.name for c in RegistryScanner().scan(tmp_path).components] == ["openai"]
 
 
 def test_a_changed_second_declaration_reaches_the_drift_gate(tmp_path):
@@ -168,91 +156,6 @@ def test_init_refuses_a_symlinked_or_looping_path_without_a_traceback(tmp_path):
     assert not (tmp_path / "real" / ".nexus-symbiote.yaml").exists()
     created = runner.invoke(main, ["init", "--path", str(tmp_path / "real")])
     assert created.exit_code == 0 and (tmp_path / "real" / ".nexus-symbiote.yaml").exists()
-
-
-def test_poetry_forms_without_a_version_are_reported_and_bare_versions_are_pins(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.poetry.dependencies]\n"
-        'python = "^3.11"\n'
-        'torch = "2.0.1"\n'
-        'transformers = "*"\n'
-        'langchain = {git = "https://github.com/langchain-ai/langchain", rev = "v0.1.0"}\n'
-        "[tool.poetry.group.ml.dependencies]\n"
-        'openai = {version = "1.3.0"}\n'
-    )
-    result = RegistryScanner().scan(tmp_path)
-    by_name = {c.name: c for c in result.components}
-    assert sorted(by_name) == ["openai", "torch", "transformers"]
-    assert by_name["torch"].package_url == "pkg:pypi/torch@2.0.1"
-    assert by_name["openai"].package_url == "pkg:pypi/openai@1.3.0"
-    assert result.surfaces_excluded == [
-        "pyproject.toml: unsupported requirement form is not collected"
-    ]
-
-
-def test_poetry_tables_keep_their_conditions_and_only_ai_gaps_are_reported(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        "[tool.poetry.dependencies]\n"
-        'torch = {version = "2.0.1", markers = "sys_platform == \'linux\'"}\n'
-        'transformers = {version = "4.40.0", extras = ["torch"]}\n'
-        'openai = {version = "1.3.0", python = ">=3.10,<3.14"}\n'
-        'anthropic = {version = "0.30.0", python = "^3.10"}\n'
-        'internal-utils = {git = "https://github.com/example/internal-utils"}\n'
-        'requests = {path = "../vendored/requests"}\n'
-    )
-    result = RegistryScanner().scan(tmp_path)
-    by_name = {c.name: c for c in result.components}
-    assert sorted(by_name) == ["openai", "torch", "transformers"]
-    torch = by_name["torch"]
-    assert torch.package_url is None and "sys_platform" in torch.version
-    assert [r.category for r in torch.risks] == ["version_pinning"]
-    assert (
-        by_name["transformers"].properties["requested_requirement"] == "transformers[torch]==4.40.0"
-    )
-    assert 'python_version >= "3.10"' in by_name["openai"].version
-    assert result.surfaces_excluded == [
-        "pyproject.toml: unsupported requirement form is not collected"
-    ]
-
-
-@pytest.mark.parametrize(
-    ("content", "gap"),
-    [
-        ("-e .\n", False),
-        ("-e git+https://github.com/psf/requests@v2.31.0#egg=requests\n", False),
-        ("https://files.example/requests-2.31.0-py3-none-any.whl\n", False),
-        ("-e ./subpackage\n", True),
-        ("-e git+https://github.com/openai/openai-python@v1.3.0#egg=openai\n", True),
-        ("https://download.example/torch-2.3.0-cp312-cp312-linux_x86_64.whl\n", True),
-        ("git+https://github.com/example/unknown\n", True),
-    ],
-)
-def test_requirement_gaps_are_reported_only_where_an_ai_package_may_hide(tmp_path, content, gap):
-    (tmp_path / "requirements.txt").write_text(content)
-    result = RegistryScanner().scan(tmp_path)
-    assert bool(result.surfaces_excluded) is gap
-
-
-def test_a_changed_poetry_marker_reaches_the_drift_gate(tmp_path):
-    project = tmp_path / "project"
-    project.mkdir()
-    (project / "AGENTS.md").write_text("Keep receipts.")
-    manifest = project / "pyproject.toml"
-    manifest.write_text(
-        '[tool.poetry.dependencies]\ntorch = {version = "2.0.1", markers = "sys_platform == \'linux\'"}\n'
-    )
-    runner = CliRunner()
-    args = ["scan", str(project), "--no-project-policy", "--report-only", "-o"]
-    assert runner.invoke(main, [*args, str(tmp_path / "before.json")]).exit_code == 0
-    manifest.write_text(
-        '[tool.poetry.dependencies]\ntorch = {version = "2.0.1", markers = "sys_platform == \'win32\'"}\n'
-    )
-    assert runner.invoke(main, [*args, str(tmp_path / "after.json")]).exit_code == 0
-    drift = runner.invoke(
-        main,
-        ["diff", "--fail-on-alert", str(tmp_path / "before.json"), str(tmp_path / "after.json")],
-    )
-    assert drift.exit_code != 0, drift.output
 
 
 def test_a_link_to_an_unreachable_target_is_replaced_not_refused(tmp_path):
