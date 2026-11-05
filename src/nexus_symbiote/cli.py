@@ -89,6 +89,30 @@ def _policy_with_source(
     return policy, source, weaker
 
 
+def _inventory_policy(
+    project: Path | None, aibom_path: str, *, ignore_project: bool, warn: bool = True
+) -> tuple[Policy, str, list[str]]:
+    """Policy for a command that reads an inventory: only a named project supplies one.
+
+    An inventory can be written anywhere, including shared directories such as /tmp,
+    so its location never selects the policy that gates it.
+    """
+    from nexus_symbiote.policy import default_policy, nearest_policy_file
+
+    if project is not None:
+        return _policy_with_source(project, ignore_project=ignore_project, warn=warn)
+    if not ignore_project:
+        unapplied = nearest_policy_file(Path(aibom_path).resolve().parent)
+        if unapplied is not None:
+            shown = _UNSAFE_TEXT.sub("\ufffd", str(unapplied))
+            click.echo(
+                f"Note: {shown} was not applied. Without --project the built-in "
+                "policy is used; name a trusted project with --project to apply its policy.",
+                err=True,
+            )
+    return default_policy(), "built-in", []
+
+
 # C0/C1 controls move the cursor or rewrite earlier output; bidirectional and
 # invisible format characters disguise text. Inventory data may contain any of them.
 # Line breaks are included: a file name or component name containing one could
@@ -674,7 +698,7 @@ def verify_discovery(
 @click.option(
     "--project",
     type=click.Path(exists=True),
-    help="Project root for cross-validation",
+    help="Project root for cross-validation; the only source of a project policy",
 )
 @click.option(
     "--signature-policy",
@@ -700,8 +724,9 @@ def validate(
 
     signature_policies = _signer_policies(signature_policy, Path(project) if project else None)
 
-    policy, policy_source, _ = _policy_with_source(
-        Path(project).resolve() if project else Path(aibom_path).parent,
+    policy, policy_source, _ = _inventory_policy(
+        Path(project).resolve() if project else None,
+        aibom_path,
         ignore_project=no_project_policy,
     )
     console.print(f"Policy: {policy_source}", soft_wrap=True)
@@ -783,7 +808,10 @@ def validate(
 @click.option(
     "--project",
     type=click.Path(exists=True, file_okay=False, path_type=Path),
-    help="Reconcile the supplied BOM against this project's static evidence before scoring.",
+    help=(
+        "Reconcile the supplied BOM against this project's static evidence before scoring; "
+        "the only source of a project policy."
+    ),
 )
 @click.option(
     "--signature-policy",
@@ -817,8 +845,8 @@ def risk(
 
     root = project.resolve() if project else None
     signature_policies = _signer_policies(signature_policy, root)
-    policy, policy_source, policy_weakened = _policy_with_source(
-        root or Path(aibom_path).parent, ignore_project=no_project_policy, warn=not json_output
+    policy, policy_source, policy_weakened = _inventory_policy(
+        root, aibom_path, ignore_project=no_project_policy, warn=not json_output
     )
     threshold = threshold if threshold is not None else policy.risk.fail_threshold
     if threshold <= 0 or not math.isfinite(threshold):

@@ -2,12 +2,14 @@
 
 Notable changes to Nexus SymBiote, newest release first. Within a release, security changes come first, and changes that need action from users are marked **Breaking**.
 
-## [0.1.0] - Unreleased
+## [0.1.0] - 2026-11-04
 
-First alpha of the AgentBOM toolkit under the Hunzee-VC organization. Not yet tagged or published; the date is set when the release is tagged.
+First alpha of the AgentBOM toolkit under the Hunzee-VC organization.
 
 ### Security
 
+- **Breaking:** read `.nexus-symbiote.yaml` only from the project being scanned or named with `--project`. Policy discovery walked every parent directory up to the filesystem root, so a policy file outside the checkout, in a shared workspace parent or in `/tmp`, could skip `validate` checks, hide paths from `scan` and disable the severity gate. `risk` and `validate` also no longer take a policy from the directory an inventory file sits in, which could be `/tmp` or a shared folder: without `--project` they use the built-in policy and name any `.nexus-symbiote.yaml` they did not apply. A policy kept above several scanned subprojects must be copied into each project root, and a gate that relied on a project policy must pass `--project`, which for `risk` also reconciles the inventory against that project. The shipped `nexus-symbiote-risk` pre-commit hook now passes `--project .`, so it applies the repository's policy as the `nexus-symbiote-scan` hook does.
+- Reject runtime contract predicates that are not in canonical form. A snapshot signed by a generic DSSE tool with the same contract encoded differently (for example `+00:00` timestamps or omitted default fields) verified under a subject digest that differed from the gateway's revocation and approval identity, so revoking that subject digest was silently ineffective. `runtime verify` now prints the canonical `digest`. `sign_contract` refuses a contract that does not validate or is not in canonical form, so the signer's own digest of a contract is always the digest its envelope binds, and revocation entries must be canonical `sha256:` digests (or 64-digit key IDs for signers): a bare-hex or uppercase entry was compared verbatim and silently ignored, and is now rejected. A timestamp that falls outside the representable range once converted to UTC is now a validation error instead of an uncaught `OverflowError`.
 - Make a checkout-supplied policy relaxation visible. `validate` prints the governing policy source, `risk` records `policy_source` and `policy_weakened` in JSON output, and both print a warning on stderr when a project policy switches off a check, lowers the severity gate, raises the threshold, ignores categories, selects report-only collection or a scanner subset. Gate semantics are unchanged; `--no-project-policy` still ignores the file.
 - Scope consumed approval nonces by tenant in the gateway state store. One store-global table let a valid approval in one tenant deny a later approval that reused the same nonce string in another tenant; nonces consumed before the change stay consumed for every tenant. Approvers must draw nonces from a cryptographically secure generator with at least 128 bits.
 - Name fields only in library-path `AuthorizationError` text for contract validation failures, as the `runtime` commands already did; issuer-authored values no longer appear in the message.
@@ -52,6 +54,7 @@ First alpha of the AgentBOM toolkit under the Hunzee-VC organization. Not yet ta
 - Scan container image references in linear time. A `docker-compose.yml` ending in `image:` followed by a long run of whitespace took minutes, and over a day at the 4 MiB read limit.
 - Index collected components during `scan` instead of searching the whole inventory for each one. A project declaring 10,000 MCP tools now scans in 4.3 s instead of 10.9 s, with identical output. Very large tool declarations still need a collection limit.
 - Print inventory-derived text literally in human-readable output. Rich markup and terminal-control, bidirectional or invisible characters in a component name could add hyperlinks, conceal text or rewrite earlier lines, for example to hide a critical `diff` alert. As a result `validate` again shows which component each issue belongs to, and the `risk` findings table keeps its severity column in an 80-column terminal.
+- Document that hard links inside a scanned root are collected as regular files. Confined reads are descriptor-relative and refuse symlinks; they do not establish inode provenance. Run collection with the content author's privileges and keep `fs.protected_hardlinks=1`.
 
 ### Delivery
 

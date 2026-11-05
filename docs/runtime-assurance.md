@@ -50,6 +50,19 @@ in-toto statements. Complete companion content is digest-bound; selective
 disclosure is not supported by this profile. Existing files are not overwritten.
 Verification requires the expected purpose, an authorized key set, distinct
 signers, subject consistency, schema validity and current validity window.
+Predicates must be in canonical contract form, the form `runtime sign` emits
+(`model_dump(mode="json")`): an envelope from another DSSE signer whose predicate
+encodes the same contract differently is rejected, so one contract has exactly
+one digest. `revoked_snapshots` entries and `ActionApproval.snapshot_digest` use
+that digest, which `runtime verify` prints as `digest`.
+`sign_contract` re-validates a contract before signing it and refuses one that does
+not validate or is not already in canonical form, such as a copy made with
+`model_copy(update=...)` that holds a non-UTC timestamp. The signer's digest of the
+contract it holds is therefore the digest the envelope binds.
+`revoked_snapshots` and `revoked_tools` entries must be `sha256:` followed by 64
+lowercase hexadecimal digits, and `revoked_signers` entries must be a 64-digit
+lowercase key ID. Revocation entries are compared verbatim, so any other form is
+rejected when the trust status is signed or verified instead of being ignored.
 The CLI reports contract verification separately from invocation authorization.
 
 `ReferenceGateway` accepts independent `snapshot_threshold`, `approval_threshold`

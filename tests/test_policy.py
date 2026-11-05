@@ -57,12 +57,13 @@ class TestLoadPolicy:
         with pytest.raises(PolicyError):
             load_policy(tmp_path)
 
-    def test_load_searches_parent_dirs(self, tmp_path: Path) -> None:
+    def test_load_ignores_parent_dirs(self, tmp_path: Path) -> None:
         content = 'version: "1.0"\n'
         (tmp_path / ".nexus-symbiote.yaml").write_text(content)
         subdir = tmp_path / "subproject" / "src"
         subdir.mkdir(parents=True)
-        policy = load_policy(subdir)
+        assert load_policy(subdir) is None
+        policy = load_policy(tmp_path)
         assert policy is not None
         assert policy.version == "1.0"
 
