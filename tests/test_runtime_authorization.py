@@ -537,18 +537,20 @@ def test_non_canonical_predicate_is_rejected_so_one_contract_has_one_digest(tmp_
     assert digest(contract.model_dump(mode="json")) == canonical
 
 
-def test_sign_contract_signs_the_canonical_form_of_an_unvalidated_copy(tmp_path):
+def test_sign_contract_refuses_a_contract_that_is_not_in_canonical_form(tmp_path):
     values = fixture(tmp_path)
     snapshot, key = values[3], values[6]
     ring = {key_id(key.public_key()): key.public_key()}
     # model_copy skips validation, so the copy keeps a non-UTC offset the validator would convert.
     pacific = timezone(timedelta(hours=-8))
-    renewed = snapshot.model_copy(
+    local = snapshot.model_copy(
         update={"serial": 2, "not_after": (NOW + timedelta(hours=2)).astimezone(pacific)}
     )
+    with pytest.raises(AuthorizationError, match="not in canonical form"):
+        sign_contract(local, "snapshot", (key,))
+    renewed = snapshot.model_copy(update={"serial": 2, "not_after": NOW + timedelta(hours=2)})
     contract, _ = verify_contract(sign_contract(renewed, "snapshot", (key,)), "snapshot", ring)
-    assert contract.not_after == NOW + timedelta(hours=2)
-    assert contract.not_after.utcoffset() == timedelta(0)
+    assert digest(contract.model_dump(mode="json")) == digest(renewed.model_dump(mode="json"))
 
 
 def test_sign_contract_refuses_a_copy_that_does_not_validate(tmp_path):
