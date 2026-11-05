@@ -41,7 +41,9 @@ as described below.
 4. **Protect `main`** and require reviewed changes and successful `Verified CI`,
    including CodeQL high/critical and dependency-advisory acceptance, following
    [repository controls](repository-controls.md). The workflow cannot create these
-   controls itself.
+   controls itself. Apply the release-tag ruleset described there before creating the
+   first `v*` tag: the README's verified-release install trusts the tag to stay on the
+   published commit.
 
 ## Each release
 

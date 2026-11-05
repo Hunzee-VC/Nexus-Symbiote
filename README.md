@@ -123,13 +123,14 @@ A scan is an inventory, not a verdict. It does not show that a model is benign, 
 
 ### Install a verified release
 
-Requires Python 3.11+ on Linux and the [GitHub CLI](https://cli.github.com/), signed in with `gh auth login`. Releases are built from `main` by the [release workflow](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/.github/workflows/release.yml) and published to PyPI through OIDC trusted publishing with build attestations. The block resolves the `v0.1.0` tag to its commit, downloads the exact wheel, verifies its attestation against that commit, and only then installs the hash-locked runtime from the same commit and the wheel without resolving anything else:
+Requires Python 3.11+ on Linux, git, and the [GitHub CLI](https://cli.github.com/) signed in with `gh auth login`. Releases are built from `main` by the [release workflow](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/.github/workflows/release.yml) and published to PyPI through OIDC trusted publishing with build attestations. The block resolves the signed `v0.1.0` tag to its commit, downloads the exact wheel, verifies its attestation against that commit, and only then installs the hash-locked runtime from the same commit and the wheel without resolving anything else:
 
 ```bash
 (
   set -euo pipefail
-  commit="$(gh api repos/Hunzee-VC/Nexus-Symbiote/commits/v0.1.0 --jq .sha)"
   python -m venv --clear .venv
+  commit="$(git ls-remote https://github.com/Hunzee-VC/Nexus-Symbiote.git 'refs/tags/v0.1.0^{}' | cut -f1)"
+  test -n "$commit"
   .venv/bin/python -m pip download --no-deps --only-binary=:all: nexus-symbiote==0.1.0 -d dist
   gh attestation verify dist/nexus_symbiote-0.1.0-py3-none-any.whl --repo Hunzee-VC/Nexus-Symbiote \
     --signer-workflow Hunzee-VC/Nexus-Symbiote/.github/workflows/release.yml \
@@ -142,7 +143,7 @@ Requires Python 3.11+ on Linux and the [GitHub CLI](https://cli.github.com/), si
 . .venv/bin/activate && nexus-symbiote --version
 ```
 
-The block stops at the first failing command, including a missing or signed-out `gh`. It installs nothing unless the release workflow attested these exact wheel bytes for the commit that `v0.1.0` points at, and it fetches the lock file from that same commit. `--clear` rebuilds `.venv`, so an earlier install cannot stand in for the verified wheel. Release builds are reproducible, so the check cannot tell the published commit from another one that differs only in its lock file; the [release-tag ruleset](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/repository-controls.md#operator-prerequisites) that stops `v0.1.0` from being moved is what keeps the tag on the published commit. Paste the block as one unit; running the lines one at a time loses these checks. [Releasing](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/releasing.md) describes what the attestation does and does not establish.
+The subshell first rebuilds `.venv` with `--clear`, then stops at the first failing command, including a missing or signed-out `gh`. After any failure the last line finds no `nexus-symbiote` and fails, so an earlier install cannot stand in for the verified wheel. Nothing is installed unless the release workflow attested these exact wheel bytes for the commit the `v0.1.0` tag points at, and the lock file is fetched from that same commit. Release builds are reproducible, so this check cannot tell the published commit from another one that differs only in its lock file. Keeping the tag on the published commit is the job of the [release-tag ruleset](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/repository-controls.md#operator-prerequisites), which the release procedure applies before the first tag is created. Paste the block as one unit; running the lines one at a time loses these checks. [Releasing](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/releasing.md) describes what the attestation does and does not establish.
 
 ### Install from reviewed source
 
