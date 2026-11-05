@@ -72,8 +72,9 @@ def _inventory_policy(project: Path | None, aibom_path: str, *, ignore_project: 
     if not ignore_project:
         unapplied = nearest_policy_file(Path(aibom_path).resolve().parent)
         if unapplied is not None:
+            shown = _UNSAFE_TEXT.sub("\ufffd", str(unapplied))
             click.echo(
-                f"Note: {_safe(unapplied)} was not applied. Without --project the built-in "
+                f"Note: {shown} was not applied. Without --project the built-in "
                 "policy is used; name a trusted project with --project to apply its policy.",
                 err=True,
             )
