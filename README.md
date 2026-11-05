@@ -129,7 +129,7 @@ Requires Python 3.11+ on Linux and the [GitHub CLI](https://cli.github.com/), si
 (
   set -euo pipefail
   commit="$(gh api repos/Hunzee-VC/Nexus-Symbiote/commits/v0.1.0 --jq .sha)"
-  python -m venv .venv
+  python -m venv --clear .venv
   .venv/bin/python -m pip download --no-deps --only-binary=:all: nexus-symbiote==0.1.0 -d dist
   gh attestation verify dist/nexus_symbiote-0.1.0-py3-none-any.whl --repo Hunzee-VC/Nexus-Symbiote \
     --signer-workflow Hunzee-VC/Nexus-Symbiote/.github/workflows/release.yml \
@@ -142,7 +142,7 @@ Requires Python 3.11+ on Linux and the [GitHub CLI](https://cli.github.com/), si
 . .venv/bin/activate && nexus-symbiote --version
 ```
 
-The block stops at the first failing command, including a missing or signed-out `gh`, so nothing is installed unless the wheel's attestation names the commit that `v0.1.0` points at. The lock file is fetched from that same commit, so the wheel and its dependency set come from one attested revision. Paste it as one block; running the lines one at a time loses that guarantee. [Releasing](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/releasing.md) describes what the attestation does and does not establish.
+The block stops at the first failing command, including a missing or signed-out `gh`. It installs nothing unless the release workflow attested these exact wheel bytes for the commit that `v0.1.0` points at, and it fetches the lock file from that same commit. `--clear` rebuilds `.venv`, so an earlier install cannot stand in for the verified wheel. Release builds are reproducible, so the check cannot tell the published commit from another one that differs only in its lock file; the [release-tag ruleset](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/repository-controls.md#operator-prerequisites) that stops `v0.1.0` from being moved is what keeps the tag on the published commit. Paste the block as one unit; running the lines one at a time loses these checks. [Releasing](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/releasing.md) describes what the attestation does and does not establish.
 
 ### Install from reviewed source
 
