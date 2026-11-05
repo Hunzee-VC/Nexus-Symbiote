@@ -482,8 +482,8 @@ def test_audit_hook_is_inert_outside_an_offline_block():
 
 def _socket_attempts() -> dict[str, object]:
     attempts: dict[str, object] = {
-        "socket.socket()": lambda: socket.socket(),
-        "_socket.socket()": lambda: _socket.socket(),
+        "socket.socket()": socket.socket,
+        "_socket.socket()": _socket.socket,
         "socket.socket(AF_INET6)": lambda: socket.socket(socket.AF_INET6),
     }
     if hasattr(socket, "AF_NETLINK"):
