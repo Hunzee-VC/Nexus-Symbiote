@@ -495,13 +495,36 @@ class RegistryScanner(Scanner):
                     result.scan_failures.append("pyproject.toml: invalid optional dependencies")
         tool = data.get("tool", {})
         poetry: Any = tool.get("poetry", {}) if isinstance(tool, dict) else {}
-        poetry_deps = poetry.get("dependencies", {}) if isinstance(poetry, dict) else {}
-        if isinstance(poetry_deps, dict):
-            for name, value in poetry_deps.items():
-                if isinstance(value, str):
-                    declarations.append(f"{name}{value}")
-                elif isinstance(value, dict) and isinstance(value.get("version"), str):
-                    declarations.append(f"{name}{value['version']}")
+        tables: list[Any] = []
+        if isinstance(poetry, dict):
+            tables.append(poetry.get("dependencies", {}))
+            groups = poetry.get("group", {})
+            if isinstance(groups, dict):
+                tables.extend(
+                    group.get("dependencies", {})
+                    for group in groups.values()
+                    if isinstance(group, dict)
+                )
+        for table in tables:
+            if not isinstance(table, dict):
+                continue
+            for name, value in table.items():
+                version = value.get("version") if isinstance(value, dict) else value
+                if not isinstance(version, str) or (
+                    isinstance(value, dict) and value.keys() & {"git", "url", "path", "file"}
+                ):
+                    # A git, URL, path or multi-constraint dependency names no version
+                    # this collector can map; it is unknown, not absent.
+                    self._unread(
+                        result, "pyproject.toml: unsupported requirement form is not collected"
+                    )
+                    continue
+                version = version.strip()
+                if version == "*":
+                    version = ""
+                elif version[:1].isdigit():
+                    version = "==" + version
+                declarations.append(f"{name}{version}")
         return declarations
 
     def _scan_docker(self, root: Path, result: ScanResult) -> list[RegistryEntryComponent]:

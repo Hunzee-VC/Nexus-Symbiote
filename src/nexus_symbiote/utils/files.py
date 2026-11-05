@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import secrets
+import stat
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -62,6 +64,15 @@ def write_output_file(
     if os.name != "posix" or not hasattr(os, "O_NOFOLLOW"):
         raise OSError("Secure output requires descriptor-relative no-symlink file operations")
     with _parent(root, relative, create_parents) as parent:
+        # A link is replaced, never followed, but a device, FIFO, socket or directory,
+        # named directly or through that link, is never replaced by a report.
+        for follow in (False, True):
+            try:
+                mode = os.stat(relative.name, dir_fd=parent, follow_symlinks=follow).st_mode
+            except FileNotFoundError:
+                break
+            if not (stat.S_ISREG(mode) or (stat.S_ISLNK(mode) and not follow)):
+                raise OSError(errno.EINVAL, "output must be a regular file")
         temp = f".nexus-symbiote-{secrets.token_hex(16)}.tmp"
         fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=parent)
         try:

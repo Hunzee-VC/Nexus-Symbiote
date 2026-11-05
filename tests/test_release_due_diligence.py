@@ -170,6 +170,45 @@ def test_init_refuses_a_symlinked_or_looping_path_without_a_traceback(tmp_path):
     assert created.exit_code == 0 and (tmp_path / "real" / ".nexus-symbiote.yaml").exists()
 
 
+def test_poetry_forms_without_a_version_are_reported_and_bare_versions_are_pins(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.poetry.dependencies]\n"
+        'python = "^3.11"\n'
+        'torch = "2.0.1"\n'
+        'transformers = "*"\n'
+        'langchain = {git = "https://github.com/langchain-ai/langchain", rev = "v0.1.0"}\n'
+        "[tool.poetry.group.ml.dependencies]\n"
+        'openai = {version = "1.3.0"}\n'
+    )
+    result = RegistryScanner().scan(tmp_path)
+    by_name = {c.name: c for c in result.components}
+    assert sorted(by_name) == ["openai", "torch", "transformers"]
+    assert by_name["torch"].package_url == "pkg:pypi/torch@2.0.1"
+    assert by_name["openai"].package_url == "pkg:pypi/openai@1.3.0"
+    assert result.surfaces_excluded == [
+        "pyproject.toml: unsupported requirement form is not collected"
+    ]
+
+
+@pytest.mark.skipif(not hasattr(__import__("os"), "mkfifo"), reason="needs FIFOs")
+def test_no_command_replaces_a_fifo_or_a_link_to_one(tmp_path):
+    import os
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "AGENTS.md").write_text("Keep receipts.")
+    fifo = tmp_path / "pipe"
+    os.mkfifo(fifo)
+    (tmp_path / "to-pipe").symlink_to(fifo)
+    runner = CliRunner()
+    for target in (fifo, tmp_path / "to-pipe"):
+        result = runner.invoke(
+            main, ["scan", str(project), "--no-project-policy", "--report-only", "-o", str(target)]
+        )
+        assert result.exit_code == 1 and "Cannot write the output file" in result.output
+    assert fifo.is_fifo() and (tmp_path / "to-pipe").is_symlink()
+
+
 def test_output_parent_references_follow_the_kernel_and_never_a_link(tmp_path, monkeypatch):
     work = tmp_path / "work"
     (work / "real").mkdir(parents=True)

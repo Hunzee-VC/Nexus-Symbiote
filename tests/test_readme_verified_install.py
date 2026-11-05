@@ -28,15 +28,15 @@ case "$*" in
     mkdir -p dist && : > dist/nexus_symbiote-0.1.0-py3-none-any.whl ;;
   *"--require-hashes"*) if [ "$STUB_FAIL" = lock ]; then exit 1; fi ;;
   *"--no-deps dist/"*)
-    if [ "$STUB_FAIL" = wheel ]; then exit 1; fi
     printf '#!/bin/sh\\necho "nexus-symbiote, version 0.1.0 (verified venv)"\\n' \\
       > .venv/bin/nexus-symbiote
-    chmod +x .venv/bin/nexus-symbiote ;;
+    chmod +x .venv/bin/nexus-symbiote
+    if [ "$STUB_FAIL" = wheel ]; then exit 1; fi ;;
 esac
 """,
     "git": """#!/bin/sh
-if [ "$STUB_FAIL" = git ]; then exit 128; fi
 if [ -n "$STUB_TAG" ]; then printf '%s\\trefs/tags/v0.1.0^{}\\n' "$STUB_TAG"; fi
+if [ "$STUB_FAIL" = git ]; then exit 128; fi
 """,
     "gh": """#!/bin/sh
 echo "gh $*" >> "$STUB_LOG"
@@ -136,6 +136,9 @@ def test_verified_install_stops_and_installs_nothing_after_a_failed_step(
     result, calls, work = _run(tmp_path, **failure)
     assert result.returncode != 0
     assert "version" not in result.stdout
-    assert not (work / ".venv/bin/nexus-symbiote").exists()
+    if failure != {"fail": "wheel"}:
+        # The wheel stub leaves an entry point behind on purpose: the block must still
+        # stop at the failed install instead of running it.
+        assert not (work / ".venv/bin/nexus-symbiote").exists()
     if before_attestation:
         assert "--require-hashes" not in calls and "--no-deps dist/" not in calls
