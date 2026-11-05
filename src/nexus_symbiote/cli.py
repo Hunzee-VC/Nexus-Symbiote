@@ -76,7 +76,7 @@ def _policy_with_source(
         path = find_policy_path(root)
         policy = load_policy(root) or default_policy()
     except PolicyError as exc:
-        raise click.ClickException(str(exc)) from exc
+        raise _failure(exc) from exc
     if path is None:
         return policy, "built-in", []
     weaker = weakened_settings(policy)
@@ -115,17 +115,27 @@ def _inventory_policy(
 
 
 # C0/C1 controls move the cursor or rewrite earlier output; bidirectional and
-# invisible format characters disguise text. Inventory data may contain any of them.
+# invisible format characters (every Unicode format character, category Cf, as of
+# Unicode 15.1) disguise text. Inventory and checkout data may contain any of them.
 # Line breaks are included: a file name or component name containing one could
 # forge whole output lines, and in CI a line starting with "::" is a workflow command.
 _UNSAFE_TEXT = re.compile(
-    r"[\x00-\x08\x0a-\x1f\x7f-\x9f\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]"
+    r"[\x00-\x08\x0a-\x1f\x7f-\x9f\u00ad\u0600-\u0605\u061c\u06dd\u070f\u0890\u0891\u08e2"
+    r"\u180e\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff"
+    r"\ufff9-\ufffb\U000110bd\U000110cd\U00013430-\U0001343f\U0001bca0-\U0001bca3"
+    r"\U0001d173-\U0001d17a\U000e0001\U000e0020-\U000e007f]"
 )
 
 
 def _safe(value: object) -> str:
     """Render untrusted text literally: no Rich markup and no terminal control sequences."""
     return escape(_UNSAFE_TEXT.sub("\ufffd", str(value)))
+
+
+def _failure(exc: Exception) -> click.ClickException:
+    # Policy, graph and inventory errors quote keys, file names and paths from the
+    # checkout or the inventory, so they get the same neutralization as other output.
+    return click.ClickException(_UNSAFE_TEXT.sub("\ufffd", str(exc)))
 
 
 def _load_bom(path: str | Path) -> AIBOM:
@@ -149,7 +159,7 @@ def _signer_policies(path: Path | None, project: Path | None) -> list[SigstoreAr
     try:
         return load_signature_policies(path, project)
     except ValueError as exc:
-        raise click.ClickException(str(exc)) from None
+        raise _failure(exc) from None
 
 
 def _get_scanners() -> dict[str, type]:
@@ -424,7 +434,7 @@ def scan(
     try:
         assemble_repository_agent(aibom, root)
     except (PolicyError, ValueError, OSError) as exc:
-        raise click.ClickException(str(exc)) from exc
+        raise _failure(exc) from exc
     scan_failures.extend(validate_graph(aibom))
     aibom.metadata.completeness = CompletenessClaim(
         scope="repository+shadowscan" if source_report_digest else "repository",
@@ -1041,7 +1051,7 @@ def blast_radius_command(aibom_path: str, component_ref: str, json_output: bool)
     try:
         result = blast_radius(bom, component_ref)
     except ValueError as exc:
-        raise click.ClickException(str(exc)) from exc
+        raise _failure(exc) from exc
     if json_output:
         click.echo(json.dumps(result, indent=2))
     else:

@@ -72,11 +72,8 @@ def test_sbom_is_valid_deterministic_and_limited_to_installed_dependencies():
     ]
 
 
-def _dist(name, *requires, extras=None):
-    record = {"metadata": {"name": name, "version": "1.0", "requires_dist": list(requires)}}
-    if extras is not None:
-        record["requested_extras"] = extras
-    return record
+def _dist(name, *requires):
+    return {"metadata": {"name": name, "version": "1.0", "requires_dist": list(requires)}}
 
 
 def _edges(environment, *records):
@@ -101,7 +98,8 @@ def test_edges_follow_markers_and_active_extras_not_mere_presence():
             "pywin32; sys_platform == 'win32'",
             "nexus-symbiote[cyclonedx]; extra == 'all'",
         ),
-        _dist("app", "lib", "lib[Fast]; extra == 'full'", extras=["full"]),
+        _dist("root", "app[full]"),
+        _dist("app", "lib", "lib[Fast]; extra == 'full'", "cli-only; extra == 'cli'"),
         _dist(
             "lib",
             "speedups; extra == 'fast'",
@@ -110,10 +108,11 @@ def test_edges_follow_markers_and_active_extras_not_mere_presence():
             "other; extra == 'more'",
         ),
         *(_dist(name) for name in ("click", "hatchling", "tomli", "pywin32")),
-        *(_dist(name) for name in ("speedups", "slowpath", "other")),
+        *(_dist(name) for name in ("speedups", "slowpath", "other", "cli-only")),
     )
     edges = _edges(LINUX, *records)
     assert edges["nexus-symbiote"] == ["click"]
+    assert edges["root"] == ["app"]
     assert edges["app"] == ["lib"]
     assert edges["lib"] == ["other", "speedups"]
     windows = _edges({**LINUX, "sys_platform": "win32"}, *records)

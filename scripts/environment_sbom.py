@@ -116,15 +116,11 @@ def _active_extras(
 ) -> dict[str, set[str]]:
     """Extras in effect for each distribution, as a fixed point.
 
-    An extra is active when pip reports it as requested at install time, or when an
-    applicable requirement of an installed distribution asks for it. Older pip does not
-    report requested extras; those then count as inactive, which omits an edge rather
-    than inventing one.
+    An extra is active when an applicable requirement of an installed distribution
+    asks for it. ``pip inspect`` does not record the extras named on the pip command
+    line, so edges gated only on such an extra are omitted rather than invented.
     """
-    active = {
-        name: {normalize(e) for e in record.get("requested_extras") or [] if isinstance(e, str)}
-        for name, (record, _) in named.items()
-    }
+    active: dict[str, set[str]] = {name: set() for name in named}
     changed = True
     while changed:
         changed = False

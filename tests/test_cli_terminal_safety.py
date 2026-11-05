@@ -122,3 +122,39 @@ def test_validate_prints_hostile_collection_paths_on_one_line(tmp_path):
     assert result.exit_code == 1
     assert "::error title=Spoofed" in result.output
     assert not _injected_lines(result.output)
+
+
+def test_invalid_policy_keys_cannot_forge_output_lines(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "AGENTS.md").write_text("Keep receipts.")
+    inventory = tmp_path / "bom.json"
+    runner = CliRunner()
+    scanned = runner.invoke(
+        main, ["scan", str(project), "-o", str(inventory), "--no-project-policy"]
+    )
+    assert scanned.exit_code == 0, scanned.output
+    (project / ".nexus-symbiote.yaml").write_text(
+        'risk:\n  "x\\e[2K\\r\\n::error title=Policy::forged by checkout\\n": 1\n'
+    )
+    for args in (
+        ["scan", str(project), "-o", str(tmp_path / "again.json")],
+        ["validate", str(inventory), "--project", str(project)],
+        ["risk", str(inventory), "--project", str(project), "--json-output"],
+    ):
+        result = runner.invoke(main, args)
+        assert result.exit_code == 1, args
+        assert "invalid policy" in result.stderr and "�" in result.stderr
+        assert not _injected_lines(result.output)
+        assert "\x1b" not in result.output and "\r" not in result.output
+
+
+def test_every_format_character_is_neutralized():
+    from nexus_symbiote.cli import _safe
+
+    format_characters = (
+        "­؀؅؜۝܏࢐࢑࣢᠎​‏‪"
+        "‮⁠⁤⁦⁯﻿￹￻\U000110bd\U000110cd\U00013430"
+        "\U0001343f\U0001bca0\U0001bca3\U0001d173\U0001d17a\U000e0001\U000e0041\U000e007f"
+    )
+    assert _safe(format_characters) == "�" * len(format_characters)
