@@ -398,6 +398,8 @@ def test_sigstore_offline_verifier_needs_no_network_or_process(tmp_path, monkeyp
 
 
 _UNROUTABLE = ("192.0.2.1", 443)
+# RFC 6761 reserves .invalid, so a regression cannot reach a real name server.
+_UNRESOLVABLE = "nexus-symbiote-offline-guard.invalid"
 _CAPTURED_RESOLVER = _socket.getaddrinfo
 
 
@@ -412,6 +414,13 @@ def _c_type_attempts() -> dict[str, object]:
             b"x", _UNROUTABLE
         ),
         "captured _socket.getaddrinfo": lambda: _CAPTURED_RESOLVER("example.com", 443),
+        # A host-name address is resolved while connect, sendto or bind parse it,
+        # before any connect or sendto audit event could fire.
+        "_socket.socket.connect host name": lambda: _socket.socket().connect((_UNRESOLVABLE, 443)),
+        "_socket.socket.sendto host name": lambda: _socket.socket(
+            socket.AF_INET, socket.SOCK_DGRAM
+        ).sendto(b"x", (_UNRESOLVABLE, 443)),
+        "socket.socket.bind host name": lambda: socket.socket().bind((_UNRESOLVABLE, 0)),
     }
 
 
@@ -442,3 +451,33 @@ def test_audit_hook_is_inert_outside_an_offline_block():
         udp.sendto(b"x", ("127.0.0.1", 9))  # discard port; no guard active
     with modes.enforce(modes.Mode.LIVE), socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp:
         udp.sendto(b"x", ("127.0.0.1", 9))
+
+
+def _socket_attempts() -> dict[str, object]:
+    attempts: dict[str, object] = {
+        "socket.socket()": lambda: socket.socket(),
+        "_socket.socket()": lambda: _socket.socket(),
+        "socket.socket(AF_INET6)": lambda: socket.socket(socket.AF_INET6),
+    }
+    if hasattr(socket, "AF_NETLINK"):
+        attempts["socket.socket(AF_NETLINK)"] = lambda: socket.socket(
+            socket.AF_NETLINK, socket.SOCK_RAW
+        )
+    return attempts
+
+
+@pytest.mark.parametrize("operation", sorted(_socket_attempts()))
+def test_offline_guard_refuses_sockets_other_than_unix_domain(operation):
+    attempt = _socket_attempts()[operation]
+    with modes.enforce(modes.Mode.OFFLINE):
+        with pytest.raises(modes.OfflineViolation, match="other than Unix-domain"):
+            attempt()
+        socket.socket(socket.AF_UNIX).close()
+
+
+@pytest.mark.skipif(not hasattr(subprocess, "_fork_exec"), reason="no captured fork_exec")
+def test_offline_guard_covers_the_fork_exec_reference_subprocess_captured():
+    original = subprocess._fork_exec
+    with modes.enforce(modes.Mode.OFFLINE), pytest.raises(modes.OfflineViolation):
+        subprocess._fork_exec()
+    assert subprocess._fork_exec is original

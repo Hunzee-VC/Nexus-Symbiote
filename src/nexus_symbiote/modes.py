@@ -10,7 +10,8 @@ being inventoried, which is untrusted input.
 The offline guard is a tripwire for this package and its Python dependencies,
 not a sandbox. It replaces the Python entry points and adds a CPython audit
 hook that fires for the C socket type as well (``_socket.socket``, also named
-``socket.SocketType``, is immutable and cannot be patched). Native code that
+``socket.SocketType``, is immutable and cannot be patched) and refuses creating
+any socket other than a Unix-domain socket. Native code that
 calls the operating system directly bypasses it. Where a hard boundary is
 required, also run the tool without network access, for example in a network
 namespace or behind a deny-all egress policy.
@@ -20,6 +21,7 @@ from __future__ import annotations
 
 import _socket
 import enum
+import functools
 import os
 import socket
 import subprocess
@@ -60,6 +62,7 @@ _MISSING = object()
 # catch _socket.socket methods, references captured before the guard, and
 # connect_ex (which raises socket.connect). listen, accept, send and recv have
 # no audit event; the attribute patches above remain the guard for those.
+# _posixsubprocess.fork_exec has no audit event either; it is patched instead.
 _AUDIT_EVENTS = {
     "socket.connect": "network access (socket.connect)",
     "socket.sendto": "network access (socket.sendto)",
@@ -75,6 +78,10 @@ _AUDIT_EVENTS = {
     "os.exec": "process creation (os.exec)",
     "subprocess.Popen": "process creation (subprocess)",
 }
+# Parsing a host-name address in connect, sendto or bind resolves it before any
+# event above fires, so only Unix-domain sockets may be created. _socket.socket()
+# reports the default family as -1 before it becomes AF_INET.
+_LOCAL_SOCKET_FAMILY = int(socket.AF_UNIX)
 
 
 class Mode(enum.Enum):
@@ -134,26 +141,28 @@ def resolve(*, offline: bool, live: bool, environ: Mapping[str, str]) -> Resolve
 
 _lock = threading.Lock()
 _active: Mode | None = None
-_audit_hook_installed = False
 
 
-def _audit(event: str, _args: tuple[Any, ...]) -> None:
-    if _active is Mode.OFFLINE:
-        operation = _AUDIT_EVENTS.get(event)
-        if operation is not None:
-            raise OfflineViolation(operation)
+def _audit(event: str, args: tuple[Any, ...]) -> None:
+    if _active is not Mode.OFFLINE:
+        return
+    if event == "socket.__new__":
+        if args[1] != _LOCAL_SOCKET_FAMILY:
+            raise OfflineViolation("network access (socket other than Unix-domain)")
+        return
+    operation = _AUDIT_EVENTS.get(event)
+    if operation is not None:
+        raise OfflineViolation(operation)
 
 
+@functools.cache
 def _install_audit_hook() -> None:
     """Install the process-wide tripwire once.
 
     An audit hook cannot be removed, so instead of being installed and restored
     with the attribute patches it stays and checks ``_active`` on every event.
     """
-    global _audit_hook_installed
-    if not _audit_hook_installed:
-        sys.addaudithook(_audit)
-        _audit_hook_installed = True
+    sys.addaudithook(_audit)
 
 
 def current() -> Mode | None:
@@ -212,6 +221,8 @@ def _install(patches: list[tuple[Any, str, Any]]) -> None:
         pass
     else:
         patch(_posixsubprocess, "fork_exec", "process creation (fork_exec)")
+    # subprocess binds its own reference to fork_exec at import time.
+    patch(subprocess, "_fork_exec", "process creation (fork_exec)")
 
 
 def _restore(patches: list[tuple[Any, str, Any]]) -> None:
