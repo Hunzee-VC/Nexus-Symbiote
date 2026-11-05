@@ -229,12 +229,17 @@ def sign_contract(
     }[kind]
     if not isinstance(contract, expected) or not keys:
         raise AuthorizationError("contract type and nonempty signing keys must match purpose")
-    # model_copy(update=...) and model_construct skip validation, so re-validate: the
-    # envelope must carry the canonical form that verify_contract accepts.
+    # model_copy(update=...) and model_construct skip validation. Re-validate, and refuse
+    # a contract that differs from its canonical form instead of normalizing it: the
+    # signer's digest of the object it holds must be the digest the envelope binds,
+    # which revocation and approval use.
+    held = contract.model_dump(mode="json")
     try:
-        body = expected.model_validate(contract.model_dump(mode="json")).model_dump(mode="json")
+        body = expected.model_validate(held).model_dump(mode="json")
     except ValidationError as exc:
         raise AuthorizationError("contract does not validate and cannot be signed") from exc
+    if digest(body) != digest(held):
+        raise AuthorizationError("contract is not in canonical form and cannot be signed")
     statement = {
         "_type": STATEMENT_TYPE,
         "predicateType": PREDICATES[kind],
