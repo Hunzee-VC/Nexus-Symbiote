@@ -8,11 +8,14 @@ import hashlib
 import json
 import os
 import sys
+import time
 import warnings
 from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
+from packaging.specifiers import Specifier
+from packaging.version import Version
 
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
@@ -98,6 +101,19 @@ def test_registry_keeps_one_component_per_package_across_requirements_files(tmp_
         ("torch==2.3.0", "torch>=2.2,<2.4", False),
         ("torch>=2.2", "torch==2.3.0+cu121", False),
         ("torch==2.3.0 ; sys_platform == 'linux'", "torch==2.3.0", False),
+        ("torch==2.3.0", "torch==2.3.0+cpu", False),
+        ("torch==2.3.0", "torch===2.3.0+cpu", False),
+        ("torch===2.3", "torch==2.3.0", False),
+        ("torch===2.3.0-custom", "torch===2.3.0-custom", False),
+        ("torch===foo", "torch", False),
+        (
+            "torch==2.2.2 ; platform_machine == 'x86_64'",
+            "torch==2.5.1 ; sys_platform == 'linux'",
+            False,
+        ),
+        ("torch==2.3.0,<3", "torch==2.3.1,<3", True),
+        ("torch==1.8.0", "torch==1.8.0.post1", True),
+        ("torch===foo", "torch>=1", True),
         ("torch[cuda]==2.3.0", "torch==2.3.0", False),
         ("torch>=2.2", "torch<2.2", False),
         ("torch", "torch==2.3.0", False),
@@ -113,6 +129,55 @@ def test_registry_keeps_one_component_per_package_across_requirements_files(tmp_
 def test_only_declarations_that_cannot_both_hold_conflict(one, other, conflict):
     assert RegistryScanner._conflict(one, other) is conflict
     assert RegistryScanner._conflict(other, one) is conflict
+
+
+@pytest.mark.parametrize(
+    ("one", "other"),
+    [
+        ("torch===2.3.0-custom", "torch===2.3.0-custom"),
+        ("torch===foo", "torch"),
+        ("torch===foo", "torch>=1"),
+        ("torch===foo", "torch==2.3.0"),
+        ("torch===2.3", "torch==2.3.0"),
+        ("torch==2.3.0", "torch==2.3.0+cpu"),
+    ],
+)
+def test_conflicts_do_not_depend_on_the_packaging_release(monkeypatch, one, other):
+    # packaging before 26 raises InvalidVersion for a version that is not PEP 440,
+    # even against ===; the dependency range still allows it.
+    native = RegistryScanner._conflict(one, other)
+    original = Specifier.contains
+
+    def strict(self, item, prereleases=None):
+        Version(str(item))
+        return original(self, item, prereleases=prereleases)
+
+    monkeypatch.setattr(Specifier, "contains", strict)
+    assert RegistryScanner._conflict(one, other) is native
+    assert RegistryScanner._conflict(other, one) is native
+
+
+def test_many_declarations_of_one_package_scan_in_linear_time(tmp_path):
+    lines = ["torch>=2.2"] * 4000 + [f"torch>=0.0.{i}" for i in range(4000)]
+    lines += ["torch==2.3.0"] * 2000
+    lines += [f'torch==2.{i}.0 ; python_version == "3.{i}"' for i in range(2000)]
+    (tmp_path / "requirements.txt").write_text("\n".join(lines) + "\n")
+    started = time.perf_counter()
+    (component,) = RegistryScanner().scan(tmp_path).components
+    assert time.perf_counter() - started < 30
+    assert CONFLICT.format("torch") not in [r.detail for r in component.risks]
+    assert len(component.properties["declarations"]) == 4002 + 2000
+
+
+def test_a_pyproject_comment_is_not_compared(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "agent"\nversion = "0.1.0"\ndependencies = ["openai==1.3.0 # pinned"]\n'
+    )
+    (tmp_path / "requirements.txt").write_text("openai==1.3.0\n")
+    result = RegistryScanner().scan(tmp_path)
+    assert result.scan_failures == []
+    (component,) = result.components
+    assert component.risks == []
 
 
 def test_ranges_with_pins_in_a_lock_file_leave_the_default_gate_as_on_main(tmp_path):
@@ -174,13 +239,11 @@ def test_the_exact_requirements_txt_is_kept_ahead_of_its_case_variants(tmp_path)
 
 
 def test_differing_declarations_in_one_requirements_file_get_one_finding(tmp_path):
-    (tmp_path / "requirements.txt").write_text(
-        "torch==2.3.0 ; sys_platform == 'linux'\ntorch==2.2.2 ; sys_platform == 'darwin'\n"
-    )
+    (tmp_path / "requirements.txt").write_text("torch==2.3.0\ntorch==2.2.2\ntorch==2.1.0\n")
     (component,) = RegistryScanner().scan(tmp_path).components
     details = [r.detail for r in component.risks]
     assert details.count(CONFLICT.format("torch")) == 1
-    assert len(component.properties["declarations"]) == 2
+    assert len(component.properties["declarations"]) == 3
 
 
 @pytest.mark.parametrize(

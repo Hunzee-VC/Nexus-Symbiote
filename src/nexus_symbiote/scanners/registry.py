@@ -17,8 +17,9 @@ from typing import Any
 from urllib.parse import quote
 
 from packaging.requirements import InvalidRequirement, Requirement
+from packaging.specifiers import Specifier
 from packaging.utils import canonicalize_name
-from packaging.version import InvalidVersion
+from packaging.version import InvalidVersion, Version
 
 from nexus_symbiote.core.enums import AssuranceLevel, RiskSeverity, TrustTier
 from nexus_symbiote.core.hashing import extract_version_pin, hash_bytes, parse_json_strict
@@ -35,6 +36,69 @@ AI_PACKAGE_PATTERNS = [
     re.compile(r"(?:^|/)(?:chromadb|pinecone|qdrant|weaviate|pgvector|faiss)", re.I),
     re.compile(r"(?:^|/)(?:guardrails|nemo[-_]guardrails|rebuff)", re.I),
 ]
+
+
+def _admits(clause: Specifier, version: str) -> bool:
+    try:
+        return clause.contains(version, prereleases=True)
+    except InvalidVersion:
+        # packaging before 26 raises for a version that is not PEP 440; only
+        # arbitrary equality (===) can name one, as packaging 26 decides.
+        return clause.operator == "===" and clause.version.lower() == version.lower()
+
+
+def _pin_key(pin: Specifier) -> object:
+    if pin.operator == "===":
+        return ("===", pin.version.lower())
+    try:
+        return Version(pin.version)
+    except InvalidVersion:
+        return ("==", pin.version.lower())
+
+
+class _Declared:
+    """What a package's declarations under one set of markers require together.
+
+    Pins are kept once per version and range clauses once each, so a declaration
+    costs a pass over the ranges only when it brings a new pin, and pins that do
+    not conflict with each other are few. Scanning stays linear in the file.
+    """
+
+    def __init__(self) -> None:
+        self.pins: dict[object, Specifier] = {}
+        self.ranges: set[Specifier] = set()
+        self.origins: set[str] = set()
+        self.plain = False
+
+    def add(self, requirement: Requirement) -> bool:
+        """Record a declaration; whether it cannot hold with an earlier one."""
+        if requirement.url:
+            # Only the origin is kept (paths and queries can carry credentials).
+            origin = redact_text(requirement.url)
+            conflict = self.plain or bool(self.origins - {origin})
+            self.origins.add(origin)
+            return conflict
+        conflict = bool(self.origins)
+        self.plain = True
+        clauses = list(requirement.specifier)
+        exact = [c for c in clauses if c.operator in ("==", "===") and not c.version.endswith(".*")]
+        pin = exact[0] if len(exact) == 1 else None
+        for clause in clauses:
+            if clause is pin or clause in self.ranges:
+                continue
+            if any(not _admits(clause, known.version) for known in self.pins.values()):
+                conflict = True
+            self.ranges.add(clause)
+        if pin is not None and _pin_key(pin) not in self.pins:
+            # Two pins conflict only when neither admits the other: ==2.3.0 admits
+            # the local build 2.3.0+cu121 that a lock file records.
+            if any(
+                not (_admits(pin, known.version) or _admits(known, pin.version))
+                for known in self.pins.values()
+            ) or any(not _admits(clause, pin.version) for clause in self.ranges):
+                conflict = True
+            self.pins[_pin_key(pin)] = pin
+        return conflict
 
 
 class RegistryScanner(Scanner):
@@ -320,39 +384,53 @@ class RegistryScanner(Scanner):
         components: list[RegistryEntryComponent] = []
         kept: dict[str, RegistryEntryComponent] = {}
         sources: dict[str, set[str]] = {}
-        references: dict[str, list[str]] = {}
+        seen: dict[str, set[str]] = {}
+        declared: dict[str, dict[str, _Declared]] = {}
+        conflicted: set[str] = set()
 
         def declare(component: RegistryEntryComponent, source: str, reference: str) -> None:
             # One component per package across manifests. Every declaration is kept
             # on it, so a change to any of them changes the inventory and its diff.
-            sources.setdefault(component.bom_ref, set()).add(f"{source}: {redact_text(reference)}")
-            earlier = references.setdefault(component.bom_ref, [])
-            first = kept.get(component.bom_ref)
+            ref = component.bom_ref
+            sources.setdefault(ref, set()).add(f"{source}: {redact_text(reference)}")
+            first = kept.get(ref)
             if first is None:
-                kept[component.bom_ref] = component
+                kept[ref] = component
                 components.append(component)
-            elif any(self._conflict(previous, reference) for previous in earlier):
+            if ref in conflicted or reference in seen.setdefault(ref, set()):
+                return
+            seen[ref].add(reference)
+            try:
+                requirement = Requirement(reference)
+            except InvalidRequirement:
+                # Already a collection failure; there is nothing reliable to compare.
+                return
+            # Declarations under different markers apply to different environments
+            # (uv writes platform splits that way), so only equal markers are compared.
+            marker = str(requirement.marker) if requirement.marker else ""
+            group = declared.setdefault(ref, {}).setdefault(marker, _Declared())
+            if group.add(requirement) and first is not None:
+                conflicted.add(ref)
                 detail = (
                     f"PyPI package '{first.name}' is declared more than once with "
                     "requirements that conflict."
                 )
-                if not any(risk.detail == detail for risk in first.risks):
-                    first.risks.append(
-                        RiskAssessment(
-                            severity=RiskSeverity.MEDIUM,
-                            category="version_pinning",
-                            detail=detail,
-                            recommendation="Check that each declaration is intended, make them agree where possible, and verify artifact hashes.",
-                        )
+                first.risks.append(
+                    RiskAssessment(
+                        severity=RiskSeverity.MEDIUM,
+                        category="version_pinning",
+                        detail=detail,
+                        recommendation="Check that each declaration is intended, make them agree where possible, and verify artifact hashes.",
                     )
-            earlier.append(reference)
+                )
 
         self._scan_requirements(root, result, declare)
         path = root / "pyproject.toml"
         for declaration in self._pyproject_declarations(path, result):
             component = self._pip_component(declaration, path, result)
             if component:
-                declare(component, "pyproject.toml", declaration)
+                # Compare the text _pip_component parsed, without a trailing comment.
+                declare(component, "pyproject.toml", declaration.strip().split(" #", 1)[0].strip())
         for component in components:
             if len(sources[component.bom_ref]) > 1:
                 component.properties["declarations"] = sorted(sources[component.bom_ref])
@@ -486,31 +564,21 @@ class RegistryScanner(Scanner):
 
     @staticmethod
     def _conflict(one: str, other: str) -> bool:
-        """Whether two declarations of a package cannot both hold, markers and extras aside.
+        """Whether two declarations of a package conflict, as the collector decides it.
 
+        Only declarations under the same markers are compared, and extras are not.
         A range and a pin that satisfies it, as pip-tools, uv and lock files write
         them, do not conflict; two ranges are not compared.
         """
         try:
             first, second = Requirement(one), Requirement(other)
         except InvalidRequirement:
-            return one != other
-        if first.url or second.url:
-            # Only the origin is kept (paths and queries can carry credentials).
-            return redact_text(first.url or "") != redact_text(second.url or "")
-        for pinned, bound in ((first, second), (second, first)):
-            specifiers = list(pinned.specifier)
-            if len(specifiers) != 1 or specifiers[0].operator not in ("==", "==="):
-                continue
-            pin = specifiers[0].version
-            if pin.endswith(".*"):
-                continue
-            try:
-                if not bound.specifier.contains(pin, prereleases=True):
-                    return True
-            except InvalidVersion:
-                return True
-        return False
+            return False
+        if str(first.marker or "") != str(second.marker or ""):
+            return False
+        group = _Declared()
+        group.add(first)
+        return group.add(second)
 
     def _is_ai_package(self, name: str) -> bool:
         return any(pattern.search(name) for pattern in AI_PACKAGE_PATTERNS)
