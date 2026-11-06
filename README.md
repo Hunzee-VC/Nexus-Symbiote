@@ -48,8 +48,8 @@ An agent's behavior depends on its configuration as much as its code — MCP ser
 | Endpoint repointing | MCP endpoint moved to another host; A2A card URL to HTTP | Critical/high drift alerts |
 | Executable model files | Pickle checkpoint; `.safetensors` that isn't one | Format classification without loading; SafeTensors header validation |
 | Unsigned weights | Model file with no artifact-bound signature | `UNKNOWN` integrity verdict until signer policy verifies |
-| Hidden instructions | Bidi or zero-width characters in `CLAUDE.md` | Invisible-character findings |
-| Over-broad permissions | IDE agent granted `Bash(*)` or a permissive default | Declared permissions; drift alert on widening |
+| Hidden instructions | Bidi or zero-width characters in `CLAUDE.md` | Invisible-character findings in the instruction files the `prompt` collector reads |
+| Over-broad permissions | IDE agent granted `Bash(*)` or a permissive default | Permission mode and blanket tool grants; drift alert when either widens. Other agent settings are not recorded yet ([known limitations](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/SECURITY.md#known-limitations-in-010)) |
 | Credential exposure | Tokens in MCP env blocks or connection strings | Env vars by name, never value; known secret patterns redacted |
 
 The full trust model, design principles and offline-by-default enforcement are in the [security model](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/security-model.md).
@@ -64,13 +64,13 @@ Eight built-in collectors read declared configuration and artifacts from the pro
 
 | Collector | Reads | Records |
 | --- | --- | --- |
-| `mcp` | MCP config files (`.mcp.json`, `.claude/mcp.json`, `.cursor/mcp.json`, `claude_desktop_config.json`) and server source | Clients, servers, launchers, pinned versions, transports, endpoints, tool fingerprints |
+| `mcp` | MCP config files (`.mcp.json`, `.claude/mcp.json`, `.cursor/mcp.json`, `claude_desktop_config.json`) and server source written in the supported SDK forms | Clients, servers, launchers, pinned versions, transports, endpoints, tool fingerprints |
 | `model` | `.safetensors`, `.gguf`, `.ggml`, `.onnx`, Keras (`.h5`, `.hdf5`, `.keras`), `saved_model.pb` and pickle-family files (including `.ckpt` and `.pdparams`), with their config | SHA-256 hashes, serialization safety, SafeTensors structure, signature status |
-| `prompt` | `CLAUDE.md`, `AGENTS.md`, `CODEX.md`, Copilot/Codex instructions, skill and command files | Instruction and skill digests, hidden-character findings |
+| `prompt` | Instruction files at these paths from the project root: `CLAUDE.md`, `.claude/CLAUDE.md`, `AGENTS.md`, `.github/AGENTS.md`, `CODEX.md`, `codex.md`, `.codex/instructions.md`, `.github/copilot-instructions.md`, `.cursorrules`, `.clinerules`, `.windsurfrules`, `system_prompt.md`, `system_prompt.txt`; skill and command text files (`.md`, `.txt`, `.yaml`, `.yml`, `.json`) | Instruction, skill and command digests; hidden-character findings for those instruction files |
 | `rag` | `rag_config.*`, `retrieval_config.json`, `vector_store_config.json` | Declared retrieval sources and controls |
 | `registry` | In the project root: `package.json` and `package-lock.json` (v2 or v3); `requirements*.txt` (includes and editable installs are not followed; URL and VCS references without a package name, and local paths that do not start with an AI package name, are skipped); `pyproject.toml` (`[project]` dependencies and optional dependencies, `[tool.poetry.dependencies]`); `Dockerfile`, `Dockerfile.agent` and `docker-compose.yml` or `.yaml` | AI package identities, pins, npm lockfile integrity; container images taken as written from the first word after an upper-case `FROM` or `image:` (FROM flags, quotes and ARG substitutions are not resolved) when it contains vllm, ollama, triton, tgi, llama or model, and whether that word ends in a digest |
 | `a2a` | `.well-known/agent.json`, `agent-card.json`, A2A client config | Agent cards, endpoints, declared authentication |
-| `ide_agents` | Settings for Claude Code, Cursor, Codex, Windsurf, Cline, Copilot and others | Agent configuration and declared permissions |
+| `ide_agents` | Settings for Claude Code, Cursor, Codex, Windsurf, Cline, Copilot and others | Which agents are configured, their declared permission mode and, for Claude Code, blanket tool grants; not hooks, deny or ask rules, helpers or other settings |
 | `shadowscan` | [Nexus-ShadowScan](https://github.com/Hunzee-VC/Nexus-ShadowScan) reports | Imported discovery claims, kept separate from local evidence |
 
 ### What it checks
@@ -159,7 +159,7 @@ python -m pip install --no-deps --no-build-isolation .
 nexus-symbiote --version
 ```
 
-Optional extras: `.[sigstore]` for Sigstore verification, `.[cyclonedx]` for CycloneDX library integration, `.[all]` for both. For development: `make install-locked` (see [CONTRIBUTING.md](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/CONTRIBUTING.md)).
+Optional extras: `.[sigstore]` for Sigstore verification; `.[cyclonedx]` installs the CycloneDX Python library, which the test suite uses to cross-check exports (the tool itself does not import it); `.[all]` for both. For development: `make install-locked` (see [CONTRIBUTING.md](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/CONTRIBUTING.md)).
 
 ### Try it in 60 seconds
 
@@ -194,7 +194,7 @@ nexus-symbiote scan /path/to/agent --no-project-policy -o agentbom.json
 nexus-symbiote diff reviewed.json agentbom.json --fail-on-alert
 ```
 
-`--fail-on-alert` fails on any security-relevant change rated medium or higher. A baseline is unsigned — review it before treating it as an approval.
+`--fail-on-alert` fails on any change to the recorded inventory rated medium or higher. It cannot alert on what the collectors do not record: Claude Code hooks, deny and ask rules, skill scripts and subagents are among the [known limitations](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/SECURITY.md#known-limitations-in-010) of this release, so review changes to them separately. A baseline is unsigned — review it before treating it as an approval.
 
 ### GitHub Action
 
@@ -224,7 +224,7 @@ jobs:
 
 The Action installs its own hash-locked runtime, ignores policy in the scanned checkout, and fails on collection errors. Set `sarif-upload: 'true'` and add `security-events: write` for SARIF upload. Inputs and outputs are in [action.yml](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/action.yml). The repository also ships [pre-commit hooks](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/.pre-commit-hooks.yaml) (`nexus-symbiote-scan` and `nexus-symbiote-risk`).
 
-Every command is offline by default. Only `discover-mcp`, `advisories` and `verify-live` reach the network, and only with `--live`. Use `nexus-symbiote init` to generate a `.nexus-symbiote.yaml` policy file for a trusted project (it is read only from the project you scan or name with `--project`, never from a parent directory or from where an inventory file is saved), or pass `--no-project-policy` when the checkout is not yours. Details are in [offline and live modes](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/offline-and-live-modes.md).
+Every command is offline by default. Only `discover-mcp`, `advisories` and `verify-live` reach the network, and only in live mode (`--live` or `NEXUS_SYMBIOTE_MODE=live`). Use `nexus-symbiote init` to generate a `.nexus-symbiote.yaml` policy file for a trusted project (it is read only from the project you scan or name with `--project`, never from a parent directory or from where an inventory file is saved), or pass `--no-project-policy` when the checkout is not yours. Details are in [offline and live modes](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/offline-and-live-modes.md).
 
 ### How it works
 
@@ -276,7 +276,7 @@ The [documentation hub](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/do
 
 ## Project status
 
-Nexus SymBiote is **alpha** with a single maintainer: APIs, formats and policy semantics may change, and there is no SLA. CI, including CodeQL, runs on every push and pull request. A release is published only by the environment-gated [release workflow](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/releasing.md), after its preflight has confirmed branch protection and a successful `Verified CI` run for the exact commit. Planned work is tracked in the [roadmap](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/ROADMAP.md) and changes are in the [changelog](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/CHANGELOG.md).
+Nexus SymBiote is **alpha** with a single maintainer: APIs, formats and policy semantics may change, and there is no SLA. Known detection gaps in this release are listed in [SECURITY.md](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/SECURITY.md#known-limitations-in-010). CI, including CodeQL, runs on every push and pull request. A release is published only by the environment-gated [release workflow](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/releasing.md), after its preflight has confirmed branch protection and a successful `Verified CI` run for the exact commit. Planned work is tracked in the [roadmap](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/ROADMAP.md) and changes are in the [changelog](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/CHANGELOG.md).
 
 [Nexus-ShadowScan](https://github.com/Hunzee-VC/Nexus-ShadowScan) is the companion discovery engine — it finds agents across many surfaces, and Nexus SymBiote turns its reports into AgentBOMs with local artifact and supply-chain verification.
 
