@@ -236,6 +236,13 @@ def test_a_quote_inside_a_direct_url_does_not_leave_its_tail_behind(tmp_path):
         ),
         # A scheme-relative URL.
         ({"requirements.txt": "openai @ //alice:S3CR1@h.example/S3CR2/o.whl\n"}, False),
+        # A continuation that splits //: pip joins it into one credentialed URL.
+        (
+            {"requirements.txt": "torch @ git+https:/\\\n/ghp_S3CR1@github.com/org/S3CR2.git\n"},
+            False,
+        ),
+        # An unparseable line whose first // is not right after the scheme.
+        ({"requirements.txt": "torch==1.0 @ https:/alice:S3CR1@h.example/a//S3CR2.whl\n"}, True),
         # A URL inside a marker literal.
         (
             {
@@ -303,6 +310,27 @@ def test_optional_dependency_groups_are_not_compared_with_each_other(tmp_path):
     by_name = {c.name: c for c in RegistryScanner().scan(tmp_path).components}
     assert CONFLICT.format("torch") not in [r.detail for r in by_name["torch"].risks]
     assert CONFLICT.format("openai") in [r.detail for r in by_name["openai"].risks]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # pip joins continued lines with nothing in between.
+        "openai @ https://files.example/wheels/openai-1.0.0-py3-none-\\\nany.whl\n",
+        "torch==2.3\\\n.0\n",
+        # pip splits options on spaces only; a tab inside a marker literal stays.
+        "torch==2.3.0 ; platform_version == '#1\t-SMP'\n",
+    ],
+)
+def test_lines_pip_reads_as_valid_are_not_collection_failures(tmp_path, text):
+    (tmp_path / "AGENTS.md").write_text("Keep receipts.")
+    (tmp_path / "requirements.txt").write_text(text)
+    result = RegistryScanner().scan(tmp_path)
+    assert result.scan_failures == []
+    scanned = CliRunner().invoke(
+        main, ["scan", str(tmp_path), "--no-project-policy", "-o", str(tmp_path / "bom.json")]
+    )
+    assert scanned.exit_code == 0, scanned.output
 
 
 def test_a_pyproject_comment_is_not_compared(tmp_path):

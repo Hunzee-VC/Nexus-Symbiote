@@ -45,11 +45,15 @@ def _url_origin(url: str) -> str:
 
 
 def _unparsed(text: str) -> str:
-    """Text with no reliable URL boundary, kept only up to the scheme before its first //."""
+    """Text with no reliable URL boundary, kept only up to the word holding its first //.
+
+    Words end at an ASCII space or tab, as in a PEP 508 URL; any other character,
+    including a quote, @, / or another space, may still belong to the URL.
+    """
     cut = text.find("//")
     if cut < 0:
         return redact_text(text)
-    while cut and (text[cut - 1].isalnum() or text[cut - 1] in "+.-:%"):
+    while cut and text[cut - 1] not in " \t":
         cut -= 1
     return redact_text(text[:cut]) + "[redacted-url]"
 
@@ -414,17 +418,26 @@ class RegistryScanner(Scanner):
 
     @staticmethod
     def _requirement_lines(content: str) -> list[str]:
-        """Logical lines as pip reads them: a trailing backslash continues the line."""
+        """Logical lines as pip's join_lines builds them.
+
+        A trailing backslash continues a line and the parts are joined with nothing
+        in between, so a URL or version wrapped mid-token reads as pip reads it.
+        """
         lines: list[str] = []
-        pending = ""
+        pending: list[str] = []
         for raw in content.removeprefix("\ufeff").splitlines():
-            if raw.endswith("\\") and not raw.lstrip().startswith("#"):
-                pending += raw[:-1] + " "
+            comment = raw.lstrip().startswith("#")
+            if raw.endswith("\\") and not comment:
+                pending.append(raw.strip("\\"))
                 continue
-            lines.append(pending + raw)
-            pending = ""
+            if pending:
+                pending.append(" " + raw if comment else raw)
+                lines.append("".join(pending))
+                pending = []
+            else:
+                lines.append(raw)
         if pending:
-            lines.append(pending)
+            lines.append("".join(pending))
         return lines
 
     def _scan_pip(self, root: Path, result: ScanResult) -> list[RegistryEntryComponent]:
@@ -523,8 +536,9 @@ class RegistryScanner(Scanner):
                     continue
                 # Per-requirement options such as --hash follow the requirement itself.
                 words: list[str] = []
-                # pip splits options on ASCII spaces, so a Unicode space stays inside a URL.
-                for word in re.split(r"[ \t]+", text):
+                # pip splits options on spaces only, so a tab or another space
+                # character stays inside the requirement.
+                for word in (w for w in text.split(" ") if w):
                     if word.startswith("-"):
                         break
                     words.append(word)
