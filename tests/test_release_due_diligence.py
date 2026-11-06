@@ -333,6 +333,18 @@ def test_lines_pip_reads_as_valid_are_not_collection_failures(tmp_path, text):
     assert scanned.exit_code == 0, scanned.output
 
 
+def test_requirements_files_share_one_size_budget(tmp_path, monkeypatch):
+    # Every root requirements file is read, so their parsing time is bounded together.
+    monkeypatch.setattr("nexus_symbiote.scanners.registry._REQUIREMENTS_BUDGET", 100)
+    (tmp_path / "requirements.txt").write_text("openai==1.30.1\n" * 4)
+    (tmp_path / "requirements-gpu.txt").write_text("torch==2.3.0\n" * 8)
+    result = RegistryScanner().scan(tmp_path)
+    assert [c.name for c in result.components] == ["openai"]
+    assert result.scan_failures == [
+        "requirements files exceed the combined size limit: the rest were not read"
+    ]
+
+
 def test_a_pyproject_comment_is_not_compared(tmp_path):
     (tmp_path / "pyproject.toml").write_text(
         '[project]\nname = "agent"\nversion = "0.1.0"\ndependencies = ["openai==1.3.0 # pinned"]\n'

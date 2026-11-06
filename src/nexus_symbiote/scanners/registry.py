@@ -79,6 +79,8 @@ def _recorded(reference: str) -> str:
 # Real versions are short. packaging re-parses a clause's version on every
 # comparison, so a declaration with a longer one is recorded but not compared.
 _LONGEST_VERSION = 128
+# All root requirements*.txt files together, in characters.
+_REQUIREMENTS_BUDGET = 4 * 1024 * 1024
 
 
 def _parsed(text: str) -> Version | None:
@@ -508,6 +510,8 @@ class RegistryScanner(Scanner):
         declare: Callable[[RegistryEntryComponent, str, str], None],
     ) -> None:
         filenames = self._requirement_files()
+        unprintable = False
+        remaining = _REQUIREMENTS_BUDGET
         for filename in filenames:
             if (
                 UNSAFE_TEXT.search(filename)
@@ -518,14 +522,24 @@ class RegistryScanner(Scanner):
                 # or its exports, and controls or format characters disguise output, so
                 # the file is a gap, not data. A fixed list, unlike str.isprintable(),
                 # gives the same answer on every supported Python.
-                failure = "requirements file with an unprintable name: not read"
-                if failure not in result.scan_failures:
-                    result.scan_failures.append(failure)
+                if not unprintable:
+                    result.scan_failures.append(
+                        "requirements file with an unprintable name: not read"
+                    )
+                    unprintable = True
                 continue
             path = root / filename
             content = self._read(path, result)
             if content is None:
                 continue
+            remaining -= len(content)
+            if remaining < 0:
+                # Every root requirements file is read, so their parsing time must be
+                # bounded together; what does not fit is a coverage gap.
+                result.scan_failures.append(
+                    "requirements files exceed the combined size limit: the rest were not read"
+                )
+                break
             for line in self._requirement_lines(content):
                 text = self._COMMENT.sub("", line).strip()
                 if not text:
