@@ -273,6 +273,38 @@ def test_no_url_tail_reaches_any_output(tmp_path, files, failures):
         assert not any(s in text for s in ("S3CR1", "S3CR2", "S3CR3", "alice")), fmt
 
 
+@pytest.mark.parametrize(
+    "line",
+    [
+        # One long pin against many clauses, in one declaration.
+        "torch==" + "1." * 30000 + "1" + "".join(f",!=0.{i}" for i in range(20000)),
+        # The same with a local label, whose comparison re-joins the label.
+        "torch==1.0+" + "a." * 30000 + "a" + "".join(f",!=0.{i}" for i in range(20000)),
+    ],
+)
+def test_long_versions_do_not_make_the_comparison_quadratic(tmp_path, line):
+    ranges = "".join(f"torch>=0.{i}\n" for i in range(20000))
+    (tmp_path / "requirements.txt").write_text(line + "\n" + ranges)
+    started = time.perf_counter()
+    (component,) = RegistryScanner().scan(tmp_path).components
+    assert time.perf_counter() - started < 30
+    assert CONFLICT.format("torch") not in [r.detail for r in component.risks]
+
+
+def test_optional_dependency_groups_are_not_compared_with_each_other(tmp_path):
+    # uv's documented pattern: alternative local builds in conflicting extras.
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "agent"\nversion = "0.1.0"\ndependencies = []\n'
+        "[project.optional-dependencies]\n"
+        'cpu = ["torch==2.3.0+cpu"]\n'
+        'cu121 = ["torch==2.3.0+cu121"]\n'
+        'dev = ["openai==1.30.0", "openai==1.31.0"]\n'
+    )
+    by_name = {c.name: c for c in RegistryScanner().scan(tmp_path).components}
+    assert CONFLICT.format("torch") not in [r.detail for r in by_name["torch"].risks]
+    assert CONFLICT.format("openai") in [r.detail for r in by_name["openai"].risks]
+
+
 def test_a_pyproject_comment_is_not_compared(tmp_path):
     (tmp_path / "pyproject.toml").write_text(
         '[project]\nname = "agent"\nversion = "0.1.0"\ndependencies = ["openai==1.3.0 # pinned"]\n'

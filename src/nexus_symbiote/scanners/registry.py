@@ -72,22 +72,26 @@ def _recorded(reference: str) -> str:
     return redact_text(text)
 
 
-def _admits(clause: Specifier, version: str) -> bool:
-    try:
-        return clause.contains(version, prereleases=True)
-    except InvalidVersion:
-        # packaging before 26 raises for a version that is not PEP 440; only
-        # arbitrary equality (===) can name one, as packaging 26 decides.
-        return clause.operator == "===" and clause.version.lower() == version.lower()
+# Real versions are short. packaging re-parses a clause's version on every
+# comparison, so a declaration with a longer one is recorded but not compared.
+_LONGEST_VERSION = 128
 
 
-def _pin_key(pin: Specifier) -> object:
-    if pin.operator == "===":
-        return ("===", pin.version.lower())
+def _parsed(text: str) -> Version | None:
     try:
-        return Version(pin.version)
+        return Version(text)
     except InvalidVersion:
-        return ("==", pin.version.lower())
+        return None
+
+
+def _admits(clause: Specifier, text: str, version: Version | None) -> bool:
+    """Whether a clause admits a pin, given as written and as parsed once."""
+    if clause.operator == "===":
+        # PEP 440 arbitrary equality compares the text, ignoring case; deciding it
+        # here keeps the answer the same on every supported packaging release.
+        return clause.version.lower() == text.lower()
+    # Only arbitrary equality can name a version that is not PEP 440.
+    return version is not None and clause.contains(version, prereleases=True)
 
 
 class _Declared:
@@ -95,11 +99,12 @@ class _Declared:
 
     Pins are kept once per version and range clauses once each, so a declaration
     costs a pass over the ranges only when it brings a new pin, and pins that do
-    not conflict with each other are few. Scanning stays linear in the file.
+    not conflict with each other are few. With versions bounded in length, the
+    work is linear in the size of the files read.
     """
 
     def __init__(self) -> None:
-        self.pins: dict[object, Specifier] = {}
+        self.pins: dict[object, tuple[Specifier, str, Version | None]] = {}
         self.ranges: set[Specifier] = set()
         self.origins: set[str] = set()
         self.plain = False
@@ -112,26 +117,33 @@ class _Declared:
             conflict = self.plain or bool(self.origins - {origin})
             self.origins.add(origin)
             return conflict
+        clauses = list(requirement.specifier)
+        if any(len(clause.version) > _LONGEST_VERSION for clause in clauses):
+            return False
         conflict = bool(self.origins)
         self.plain = True
-        clauses = list(requirement.specifier)
         exact = [c for c in clauses if c.operator in ("==", "===") and not c.version.endswith(".*")]
         pin = exact[0] if len(exact) == 1 else None
         for clause in clauses:
             if clause is pin or clause in self.ranges:
                 continue
-            if any(not _admits(clause, known.version) for known in self.pins.values()):
+            if any(not _admits(clause, text, parsed) for _, text, parsed in self.pins.values()):
                 conflict = True
             self.ranges.add(clause)
-        if pin is not None and _pin_key(pin) not in self.pins:
-            # Two pins conflict only when neither admits the other: ==2.3.0 admits
-            # the local build 2.3.0+cu121 that a lock file records.
-            if any(
-                not (_admits(pin, known.version) or _admits(known, pin.version))
-                for known in self.pins.values()
-            ) or any(not _admits(clause, pin.version) for clause in self.ranges):
-                conflict = True
-            self.pins[_pin_key(pin)] = pin
+        if pin is not None:
+            text, parsed = pin.version, _parsed(pin.version)
+            key: object = (
+                ("===", text.lower()) if pin.operator == "===" or parsed is None else parsed
+            )
+            if key not in self.pins:
+                # Two pins conflict only when neither admits the other: ==2.3.0
+                # admits the local build 2.3.0+cu121 that a lock file records.
+                if any(
+                    not (_admits(pin, known, known_parsed) or _admits(clause, text, parsed))
+                    for clause, known, known_parsed in self.pins.values()
+                ) or any(not _admits(clause, text, parsed) for clause in self.ranges):
+                    conflict = True
+                self.pins[key] = (pin, text, parsed)
         return conflict
 
 
@@ -420,10 +432,12 @@ class RegistryScanner(Scanner):
         kept: dict[str, RegistryEntryComponent] = {}
         sources: dict[str, set[str]] = {}
         seen: dict[str, set[str]] = {}
-        declared: dict[str, dict[str, _Declared]] = {}
+        declared: dict[str, dict[tuple[str, str], _Declared]] = {}
         conflicted: set[str] = set()
 
-        def declare(component: RegistryEntryComponent, source: str, reference: str) -> None:
+        def declare(
+            component: RegistryEntryComponent, source: str, reference: str, group: str = ""
+        ) -> None:
             # One component per package across manifests. Every declaration is kept
             # on it, so a change to any of them changes the inventory and its diff.
             ref = component.bom_ref
@@ -441,10 +455,12 @@ class RegistryScanner(Scanner):
                 # Already a collection failure; there is nothing reliable to compare.
                 return
             # Declarations under different markers apply to different environments
-            # (uv writes platform splits that way), so only equal markers are compared.
+            # (uv writes platform splits that way), and so do different optional-
+            # dependency groups (uv's cpu and cu121 extras), so only equal ones are
+            # compared.
             marker = str(requirement.marker) if requirement.marker else ""
-            group = declared.setdefault(ref, {}).setdefault(marker, _Declared())
-            if group.add(requirement) and first is not None:
+            state = declared.setdefault(ref, {}).setdefault((marker, group), _Declared())
+            if state.add(requirement) and first is not None:
                 conflicted.add(ref)
                 detail = (
                     f"PyPI package '{first.name}' is declared more than once with "
@@ -461,11 +477,12 @@ class RegistryScanner(Scanner):
 
         self._scan_requirements(root, result, declare)
         path = root / "pyproject.toml"
-        for declaration in self._pyproject_declarations(path, result):
+        for declaration, group in self._pyproject_declarations(path, result):
             component = self._pip_component(declaration, path, result)
             if component:
                 # Compare the text _pip_component parsed, without a trailing comment.
-                declare(component, "pyproject.toml", declaration.strip().split(" #", 1)[0].strip())
+                reference = declaration.strip().split(" #", 1)[0].strip()
+                declare(component, "pyproject.toml", reference, group)
         for component in components:
             if len(sources[component.bom_ref]) > 1:
                 component.properties["declarations"] = sorted(sources[component.bom_ref])
@@ -516,7 +533,8 @@ class RegistryScanner(Scanner):
                 if component is not None:
                     declare(component, filename, reference)
 
-    def _pyproject_declarations(self, path: Path, result: ScanResult) -> list[str]:
+    def _pyproject_declarations(self, path: Path, result: ScanResult) -> list[tuple[str, str]]:
+        """Each declaration with its optional-dependency group ("" for none)."""
         content = self._read(path, result)
         if content is None:
             return []
@@ -525,21 +543,21 @@ class RegistryScanner(Scanner):
         except (tomllib.TOMLDecodeError, RecursionError):
             result.scan_failures.append("pyproject.toml: invalid TOML")
             return []
-        declarations: list[str] = []
+        declarations: list[tuple[str, str]] = []
         project = data.get("project", {})
         if not isinstance(project, dict):
             result.scan_failures.append("pyproject.toml: invalid project table")
             return []
         deps = project.get("dependencies", [])
         if isinstance(deps, list) and all(isinstance(value, str) for value in deps):
-            declarations.extend(deps)
+            declarations.extend((value, "") for value in deps)
         else:
             result.scan_failures.append("pyproject.toml: invalid project dependencies")
         optional = project.get("optional-dependencies", {})
         if isinstance(optional, dict):
-            for values in optional.values():
+            for extra, values in optional.items():
                 if isinstance(values, list) and all(isinstance(value, str) for value in values):
-                    declarations.extend(values)
+                    declarations.extend((value, str(extra)) for value in values)
                 else:
                     result.scan_failures.append("pyproject.toml: invalid optional dependencies")
         tool = data.get("tool", {})
@@ -548,9 +566,9 @@ class RegistryScanner(Scanner):
         if isinstance(poetry_deps, dict):
             for name, value in poetry_deps.items():
                 if isinstance(value, str):
-                    declarations.append(f"{name}{value}")
+                    declarations.append((f"{name}{value}", ""))
                 elif isinstance(value, dict) and isinstance(value.get("version"), str):
-                    declarations.append(f"{name}{value['version']}")
+                    declarations.append((f"{name}{value['version']}", ""))
         return declarations
 
     def _scan_docker(self, root: Path, result: ScanResult) -> list[RegistryEntryComponent]:
@@ -606,7 +624,8 @@ class RegistryScanner(Scanner):
     def _conflict(one: str, other: str) -> bool:
         """Whether two declarations of a package conflict, as the collector decides it.
 
-        Only declarations under the same markers are compared, and extras are not.
+        Only declarations under the same markers are compared, and the extras a
+        requirement names are not.
         A range and a pin that satisfies it, as pip-tools, uv and lock files write
         them, do not conflict; two ranges are not compared.
         """
@@ -616,9 +635,9 @@ class RegistryScanner(Scanner):
             return False
         if str(first.marker or "") != str(second.marker or ""):
             return False
-        group = _Declared()
-        group.add(first)
-        return group.add(second)
+        state = _Declared()
+        state.add(first)
+        return state.add(second)
 
     def _is_ai_package(self, name: str) -> bool:
         return any(pattern.search(name) for pattern in AI_PACKAGE_PATTERNS)
