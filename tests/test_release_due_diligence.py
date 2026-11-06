@@ -199,6 +199,80 @@ def test_a_quote_inside_a_direct_url_does_not_leave_its_tail_behind(tmp_path):
         assert "PW3" not in text and "secret-path" not in text and "alice" not in text
 
 
+@pytest.mark.parametrize(
+    ("files", "failures"),
+    [
+        # Unparseable (unquoted marker value): no URL boundary is known.
+        (
+            {
+                "requirements.txt": "torch @ https://h.example/t.whl'alice:S3CR1@o.example/S3CR2"
+                " ; python_version >= 3.8\n"
+            },
+            True,
+        ),
+        # A newly read file with the same line.
+        (
+            {
+                "requirements.txt": "torch==2.3.0\n",
+                "requirements-gpu.txt": "torch @ https://h.example/t.whl<alice:S3CR1@o/S3CR2> x\n",
+            },
+            True,
+        ),
+        # A Poetry value that is a URL.
+        (
+            {
+                "pyproject.toml": "[tool.poetry.dependencies]\n"
+                'torch = "https://alice:S3CR1@h.example/S3CR2/t.whl?sig=S3CR3"\n'
+            },
+            True,
+        ),
+        # pip keeps a no-break space inside a URL; so must the option splitting.
+        (
+            {
+                "requirements.txt": "torch==2.3.0\n"
+                "safetensors @ https://h.example/a\u00a0alice:S3CR1@o.example/S3CR2\n"
+            },
+            False,
+        ),
+        # A scheme-relative URL.
+        ({"requirements.txt": "openai @ //alice:S3CR1@h.example/S3CR2/o.whl\n"}, False),
+        # A URL inside a marker literal.
+        (
+            {
+                "requirements.txt": "torch==2.3.0 ; platform_release == "
+                '"https://h.example/x\'alice:S3CR1@o/S3CR2"\n'
+            },
+            False,
+        ),
+    ],
+)
+def test_no_url_tail_reaches_any_output(tmp_path, files, failures):
+    (tmp_path / "AGENTS.md").write_text("Keep receipts.")
+    for name, text in files.items():
+        (tmp_path / name).write_text(text, encoding="utf-8")
+    result = RegistryScanner().scan(tmp_path)
+    assert bool(result.scan_failures) is failures, result.scan_failures
+    runner = CliRunner()
+    for fmt in ("json", "cyclonedx", "spdx"):
+        out = tmp_path / f"{fmt}.json"
+        scanned = runner.invoke(
+            main,
+            [
+                "scan",
+                str(tmp_path),
+                "--no-project-policy",
+                "--report-only",
+                "-f",
+                fmt,
+                "-o",
+                str(out),
+            ],
+        )
+        assert scanned.exit_code == 0, scanned.output
+        text = out.read_text(encoding="utf-8") + scanned.output
+        assert not any(s in text for s in ("S3CR1", "S3CR2", "S3CR3", "alice")), fmt
+
+
 def test_a_pyproject_comment_is_not_compared(tmp_path):
     (tmp_path / "pyproject.toml").write_text(
         '[project]\nname = "agent"\nversion = "0.1.0"\ndependencies = ["openai==1.3.0 # pinned"]\n'

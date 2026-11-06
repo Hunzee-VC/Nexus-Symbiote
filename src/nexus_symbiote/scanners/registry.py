@@ -41,23 +41,34 @@ AI_PACKAGE_PATTERNS = [
 def _url_origin(url: str) -> str:
     # The parsed URL as one token: a pattern over the whole line stops at a quote
     # and would leave the rest of the path, query or a credential behind.
-    return redact_url(url) if "://" in url else url
+    return redact_url(url) if "//" in url else url
+
+
+def _unparsed(text: str) -> str:
+    """Text with no reliable URL boundary, kept only up to the scheme before its first //."""
+    cut = text.find("//")
+    if cut < 0:
+        return redact_text(text)
+    while cut and (text[cut - 1].isalnum() or text[cut - 1] in "+.-:%"):
+        cut -= 1
+    return redact_text(text[:cut]) + "[redacted-url]"
 
 
 def _recorded(reference: str) -> str:
     """A requirement as the inventory records it, with a direct URL reduced to its origin."""
-    if "@" not in reference:
+    if "//" not in reference:
         return redact_text(reference)
     try:
         requirement = Requirement(reference)
     except InvalidRequirement:
-        return redact_text(reference)
+        return _unparsed(reference)
     if not requirement.url:
-        return redact_text(reference)
+        # A // in a marker literal or an arbitrary-equality version.
+        return _unparsed(reference)
     extras = f"[{','.join(sorted(requirement.extras))}]" if requirement.extras else ""
     text = f"{requirement.name}{extras} @ {_url_origin(requirement.url)}"
     if requirement.marker:
-        text += f" ; {requirement.marker}"
+        text += f" ; {_unparsed(str(requirement.marker))}"
     return redact_text(text)
 
 
@@ -323,18 +334,19 @@ class RegistryScanner(Scanner):
             requirement = Requirement(reference)
         except InvalidRequirement:
             invalid = True
-            spec = redact_text(reference[len(match.group(1)) :].strip())
+            spec = _unparsed(reference[len(match.group(1)) :].strip())
             if result is not None:
                 result.scan_failures.append(f"{path.name}: invalid or unsupported PyPI requirement")
         else:
             name = str(canonicalize_name(requirement.name))
             # Retain markers and URLs as declared, unresolved conditions; they
             # must not silently turn into an unconditional exact package URL.
-            spec = str(requirement.specifier)
             if requirement.url:
                 spec = "@ " + _url_origin(requirement.url)
+            else:
+                spec = _unparsed(str(requirement.specifier))
             if requirement.marker:
-                spec += "; " + str(requirement.marker)
+                spec += "; " + _unparsed(str(requirement.marker))
             spec = redact_text(spec)
         version = extract_version_pin(reference, ecosystem="python") if not invalid else None
         risks = (
@@ -494,7 +506,8 @@ class RegistryScanner(Scanner):
                     continue
                 # Per-requirement options such as --hash follow the requirement itself.
                 words: list[str] = []
-                for word in text.split():
+                # pip splits options on ASCII spaces, so a Unicode space stays inside a URL.
+                for word in re.split(r"[ \t]+", text):
                     if word.startswith("-"):
                         break
                     words.append(word)
