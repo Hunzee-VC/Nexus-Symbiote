@@ -12,7 +12,7 @@ src/nexus_symbiote/
   validators/  — Completeness, integrity, and risk scoring
   diff/        — AIBOM version comparison and the snapshot alert gate
   live/        — Opt-in observations through independently pinned local MCP launchers
-  utils/       — Confined bounded reads, Sigstore/artifact verification, file hash utilities
+  utils/       — Confined bounded reads, Sigstore/artifact verification, file hash utilities, terminal-output neutralization
   runtime.py   — Signed, operation-bound authorization for integrations that mediate tool calls
   runtime_validation.py, runtime_cli.py — Offline schema validation worker; `runtime` commands
   policy.py, signature_policy.py       — Caller-selected policy and operator signer policy

@@ -10,7 +10,7 @@ import click
 
 from nexus_symbiote import modes
 from nexus_symbiote.scanners.live_mcp import discover_tools
-from nexus_symbiote.utils.files import write_output_file
+from nexus_symbiote.utils.terminal import write_cli_output
 
 
 @click.command("discover-mcp")
@@ -42,7 +42,7 @@ def discover_mcp(
     result = discover_tools(endpoint, allowed_origins=allowed_origin, bearer_token=token)
     text = json.dumps(result.to_dict(), indent=2) + "\n"
     if output:
-        write_output_file(output, text)
+        write_cli_output(output, text)
     else:
         click.echo(text, nl=False)
     if not result.complete:

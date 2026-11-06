@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ast
+import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
@@ -50,6 +52,14 @@ def sanitized_origin(value: str) -> str:
         return f"{parsed.scheme.lower()}://{host}" + (f":{port}" if port is not None else "")
     except ValueError:
         return "[redacted]"
+
+
+def parse_python(source: str) -> ast.Module:
+    """Parse scanned source without printing compiler warnings, which quote its raw bytes."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", SyntaxWarning)
+        warnings.simplefilter("ignore", DeprecationWarning)
+        return ast.parse(source)
 
 
 @dataclass

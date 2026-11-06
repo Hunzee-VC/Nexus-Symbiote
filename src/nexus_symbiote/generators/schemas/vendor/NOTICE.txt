@@ -4,11 +4,16 @@ CycloneDX schema resources are from the OWASP CycloneDX specification project.
 Copyright OWASP Foundation. Distributed under Apache License 2.0.
 Source https://github.com/CycloneDX/specification/tree/1.7.2/schema
 
-SPDX generated JSON schema and JSON-LD context resources are from the SPDX
-specification project. Generated artifacts are distributed under Apache License
-2.0; the specification text is separately licensed under CC BY 3.0.
+SPDX JSON schema and JSON-LD context resources are generated from the SPDX
+Specification 3.0.1 by the SPDX project (SPDX Working Group). The SPDX
+Specification is provided under the Community Specification License 1.0
+(Community-Spec-1.0); pre-existing portions from copyright holders who have not
+contributed under that license are provided under Creative Commons Attribution 3.0
+Unported (CC-BY-3.0). LICENSE-SPDX-3.0.1.txt is the specification's license file
+at tag 3.0.1, unchanged: https://github.com/spdx/spdx-spec/blob/3.0.1/LICENSE
 Source https://spdx.github.io/spdx-spec/v3.0.1/
 
-SOURCES.json records exact source locations and SHA-256 digests. The copied
-schema/context resource bytes are unchanged. SymBiote validation and projection
+SOURCES.json records exact source locations and the SHA-256 digests of the copied
+files. Each copied schema/context resource equals its source except for one added
+final newline. SymBiote validation and projection
 code is separate from these third-party schema resources.

@@ -25,6 +25,8 @@ from nexus_symbiote.policy import Policy
 from nexus_symbiote.runtime_cli import register_runtime_commands
 from nexus_symbiote.supply_chain_cli import register_supply_chain_commands
 from nexus_symbiote.utils.files import write_output_file
+from nexus_symbiote.utils.terminal import UNSAFE_TEXT as _UNSAFE_TEXT
+from nexus_symbiote.utils.terminal import output_failure, write_cli_output
 
 if TYPE_CHECKING:
     from nexus_symbiote.scanners.base import ScanResult
@@ -112,19 +114,6 @@ def _inventory_policy(
                 err=True,
             )
     return default_policy(), "built-in", []
-
-
-# C0/C1 controls move the cursor or rewrite earlier output; bidirectional and
-# invisible format characters (every Unicode format character, category Cf, as of
-# Unicode 15.1) disguise text. Inventory and checkout data may contain any of them.
-# Line breaks are included: a file name or component name containing one could
-# forge whole output lines, and in CI a line starting with "::" is a workflow command.
-_UNSAFE_TEXT = re.compile(
-    r"[\x00-\x08\x0a-\x1f\x7f-\x9f\u00ad\u0600-\u0605\u061c\u06dd\u070f\u0890\u0891\u08e2"
-    r"\u180e\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff"
-    r"\ufff9-\ufffb\U000110bd\U000110cd\U00013430-\U0001343f\U0001bca0-\U0001bca3"
-    r"\U0001d173-\U0001d17a\U000e0001\U000e0020-\U000e007f]"
-)
 
 
 def _safe(value: object) -> str:
@@ -478,7 +467,7 @@ def scan(
     out_data = _render_aibom(aibom, output_format)
 
     if output:
-        write_output_file(Path(output), out_data)
+        write_cli_output(Path(output), out_data)
         console.print(f"[bold green]Saved[/] {_safe(output)}")
     else:
         click.echo(out_data)
@@ -539,8 +528,10 @@ def import_shadowscan(
 
     try:
         write_output_file(Path(output), out_data, overwrite=False)
-    except OSError as exc:
+    except FileExistsError as exc:
         raise click.ClickException("Cannot create output; choose a new output path") from exc
+    except (OSError, ValueError) as exc:
+        raise output_failure(exc) from exc
     console.print(
         f"Imported {len(imported.components)} components and saved {output}; discovery coverage remains partial."
     )
@@ -580,7 +571,7 @@ def verify_artifact(
 
     from nexus_symbiote.scanners.base import read_regular_text
     from nexus_symbiote.utils.confined import hash_confined_file
-    from nexus_symbiote.utils.crypto import verify_sigstore_digest
+    from nexus_symbiote.utils.crypto import SIGSTORE_MISSING, verify_sigstore_digest
 
     if not re.fullmatch(r"sha256:[0-9a-f]{64}", expected_digest):
         raise click.ClickException(
@@ -609,6 +600,8 @@ def verify_artifact(
             )
         verified = verify_sigstore_digest(digest, bundle_bytes, signer_identity, issuer)
         if not verified.verified:
+            if verified.error == SIGSTORE_MISSING:
+                raise click.ClickException(SIGSTORE_MISSING)
             raise click.ClickException("Sigstore signature or signer policy verification failed")
         click.echo(
             "Artifact digest and Sigstore signer policy verified. This does not establish artifact safety or a deployment binding."
@@ -645,7 +638,7 @@ def verify_discovery(
     from nexus_symbiote.core.hashing import parse_json_strict
     from nexus_symbiote.scanners.base import read_regular_text
     from nexus_symbiote.scanners.shadowscan import MAX_REPORT_BYTES, ShadowScanImporter
-    from nexus_symbiote.utils.crypto import verify_sigstore_digest
+    from nexus_symbiote.utils.crypto import SIGSTORE_MISSING, verify_sigstore_digest
 
     if any(x is not None for x in (bundle, signer_identity, issuer)) and not all(
         (bundle, signer_identity, issuer)
@@ -687,7 +680,10 @@ def verify_discovery(
             bundle_bytes = read_regular_text(Path(bundle)).encode("utf-8")
         except (OSError, UnicodeError) as exc:
             raise click.ClickException("Cannot safely read the Sigstore bundle") from exc
-        if not verify_sigstore_digest(actual, bundle_bytes, signer_identity, issuer).verified:
+        verified = verify_sigstore_digest(actual, bundle_bytes, signer_identity, issuer)
+        if not verified.verified:
+            if verified.error == SIGSTORE_MISSING:
+                raise click.ClickException(SIGSTORE_MISSING)
             raise click.ClickException(
                 "ShadowScan report signature or signer policy verification failed"
             )
@@ -1076,15 +1072,19 @@ def init(force: bool, path: str) -> None:
     """Initialize a .nexus-symbiote.yaml policy configuration."""
     from nexus_symbiote.policy import DEFAULT_POLICY_YAML
 
-    target = Path(path).resolve() / ".nexus-symbiote.yaml"
-
-    if target.exists() and not force:
+    # absolute(), not resolve(): a symlinked directory is refused like any other output.
+    target = Path(path).absolute() / ".nexus-symbiote.yaml"
+    try:
+        exists = target.exists()
+    except OSError as exc:
+        raise output_failure(exc) from exc
+    if exists and not force:
         err_console.print(
             f"[yellow]Warning:[/] {_safe(target)} already exists. Use --force to overwrite."
         )
         sys.exit(1)
 
-    write_output_file(target, DEFAULT_POLICY_YAML, overwrite=force)
+    write_cli_output(target, DEFAULT_POLICY_YAML, overwrite=force)
     console.print(f"[bold green]Created[/] {_safe(target)}")
     console.print("  Edit this file to customize scan, risk, and validation policies.")
 

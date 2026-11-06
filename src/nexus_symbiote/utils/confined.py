@@ -405,6 +405,16 @@ class ConfinedCollection:
             self._fail(path, "invalid JSON or duplicate keys")
             return None
 
+    def root_entries(self) -> list[str]:
+        """Sorted names directly beneath the pinned root; nothing is opened or followed."""
+        if self._root_fd is None:
+            return []
+        try:
+            return sorted(os.listdir(self._root_fd))
+        except OSError:
+            self._fail(".", "root directory cannot be listed")
+            return []
+
     def iter_files(self, directory: str | Path = ".") -> Iterator[Path]:
         """Yield root-relative file paths, never following directory symlinks."""
         try:

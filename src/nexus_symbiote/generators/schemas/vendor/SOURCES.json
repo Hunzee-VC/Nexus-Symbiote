@@ -24,13 +24,13 @@
       "file": "spdx/spdx-context-3.0.1.jsonld",
       "source": "https://spdx.github.io/spdx-spec/v3.0.1/rdf/spdx-context.jsonld",
       "sha256": "2e54965ca4ca05d6c1ff9100c2e6449ea1cbaf7170d82dd0d4fc5d73511159d6",
-      "license": "Apache-2.0 (generated artifacts); CC-BY-3.0 (specification)"
+      "license": "Community-Spec-1.0 (pre-existing portions CC-BY-3.0)"
     },
     {
       "file": "spdx/spdx-json-schema-3.0.1.json",
       "source": "https://spdx.github.io/spdx-spec/v3.0.1/rdf/schema.json",
       "sha256": "bf586836b9abc14e54fa2a4f215290e5f39cd0d9e5c45646bc5a9b89b7dc6e1f",
-      "license": "Apache-2.0 (generated artifacts); CC-BY-3.0 (specification)"
+      "license": "Community-Spec-1.0 (pre-existing portions CC-BY-3.0)"
     }
   ]
 }

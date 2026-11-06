@@ -78,8 +78,11 @@ as described below.
    ```
 
    Confirm the PEP 740 provenance the index itself publishes: the file page must
-   show a verified provenance entry naming this repository and `release.yml`, or run
-   `pypi-attestations verify pypi --repository https://github.com/Hunzee-VC/Nexus-Symbiote <file URL>`
+   show a verified provenance entry naming this repository and `release.yml`.
+   `pypi-attestations verify pypi` fetches provenance only from PyPI, so for a
+   TestPyPI file download
+   `https://test.pypi.org/integrity/nexus-symbiote/<version>/<file>/provenance` and
+   run `pypi-attestations verify pypi --repository https://github.com/Hunzee-VC/Nexus-Symbiote --provenance-file <provenance> <local file>`
    in a throwaway environment. Open the rendered project page and check the
    headings, the banner and the alpha note.
 
@@ -100,7 +103,13 @@ as described below.
      --deny-self-hosted-runners
    ```
 
-   Create a matching signed tag `v<version>` and release notes, and attach the run's
+   Create a matching signed, annotated tag on the release commit with
+   `git tag -s v<version> <release commit SHA>`, push it, and confirm that
+   `git ls-remote origin 'refs/tags/v<version>^{}'` prints that commit before
+   creating the release with `gh release create v<version> --verify-tag`. The
+   README's verified install resolves the annotated tag; a lightweight tag, which the
+   GitHub release page creates when the tag does not exist yet, breaks it, and the
+   release-tag ruleset prevents replacing the tag. Add release notes, and attach the run's
    `SHA256SUMS`, `release-evidence.tar.gz` and attestation bundles to the release so
    offline verification with `gh attestation verify --bundle` stays possible. Do not
    claim publication succeeded until the package index and the source revision agree.
