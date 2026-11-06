@@ -25,7 +25,7 @@
   <a href="#project-status"><b>Status</b></a>
 </p>
 
-Nexus SymBiote generates an **Agent Bill of Materials (AgentBOM)** — an evidence-backed inventory of the MCP servers, models, instructions, retrieval sources, A2A cards, IDE settings and container images an AI agent is assembled from. It reads a project **without running it**, flags supply-chain risk, fails CI on drift, and exports to CycloneDX 1.7, SPDX 3.0.1, SARIF and VEX.
+Nexus SymBiote generates an **Agent Bill of Materials (AgentBOM)** — an evidence-backed inventory of the MCP servers, models, instructions, retrieval sources, A2A cards, IDE settings and container images an AI agent is assembled from. It reads a project **without running it**, flags supply-chain risk, fails CI on drift in what it records, and exports to CycloneDX 1.7, SPDX 3.0.1, SARIF and VEX.
 
 ```bash
 nexus-symbiote scan ./my-agent --no-project-policy -o agentbom.json    # inventory, offline
@@ -33,7 +33,7 @@ nexus-symbiote risk agentbom.json --no-project-policy --threshold 50   # gate on
 nexus-symbiote diff reviewed.json agentbom.json --fail-on-alert        # gate on drift
 ```
 
-> **Alpha.** Interfaces, formats and policy semantics may change. Install the published release only after verifying its build attestation, or install a reviewed commit from source; both are shown under [How](#how).
+> **Alpha.** Interfaces, formats and policy semantics may change. Install the published release only after verifying its build attestation, or install a reviewed commit from source; both are shown under [How](#how). This release has [known detection gaps](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/SECURITY.md#known-limitations-in-010): what the collectors do not record, no gate or `diff` can alert on.
 
 ## Why
 
@@ -44,12 +44,12 @@ An agent's behavior depends on its configuration as much as its code — MCP ser
 | Risk | What it looks like | What Nexus SymBiote records |
 | --- | --- | --- |
 | Floating dependencies | MCP server at `@latest`; image without digest | Unpinned-version and missing-digest findings |
-| Tool rug pulls | Tool description or schema changed post-review | RFC 8785 tool fingerprints; drift alerts in `diff` |
+| Tool rug pulls | Tool description or schema changed post-review | RFC 8785 fingerprints of tools declared in server source in the supported SDK forms; drift alerts in `diff`. Servers declared only in MCP configuration carry no tool definitions in a static scan; observe them with `discover-mcp` or `verify-live` in live mode |
 | Endpoint repointing | MCP endpoint moved to another host; A2A card URL to HTTP | Critical/high drift alerts |
 | Executable model files | Pickle checkpoint; `.safetensors` that isn't one | Format classification without loading; SafeTensors header validation |
 | Unsigned weights | Model file with no artifact-bound signature | `UNKNOWN` integrity verdict until signer policy verifies |
-| Hidden instructions | Bidi or zero-width characters in `CLAUDE.md` | Invisible-character findings in the instruction files the `prompt` collector reads |
-| Over-broad permissions | IDE agent granted `Bash(*)` or a permissive default | Permission mode and blanket tool grants; drift alert when either widens. Other agent settings are not recorded yet ([known limitations](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/SECURITY.md#known-limitations-in-010)) |
+| Hidden instructions | Bidi or zero-width characters in `CLAUDE.md` | Findings for tag characters, bidi embedding, override and isolate controls, and five zero-width or invisible characters in the instruction files the `prompt` collector reads. Other invisible characters, such as U+FEFF, directional marks and variation selectors, are not detected yet |
+| Over-broad permissions | Claude Code granted `Bash(*)` or a permissive default mode | Claude Code's permission mode and whether its allow list contains a blanket `Bash`, `Edit`, `Write` or `*` grant; a drift alert when the mode changes or the first such grant appears. Further grants, scoped rules, hooks and other settings are not recorded yet ([known limitations](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/SECURITY.md#known-limitations-in-010)) |
 | Credential exposure | Tokens in MCP env blocks or connection strings | Env vars by name, never value; known secret patterns redacted |
 
 The full trust model, design principles and offline-by-default enforcement are in the [security model](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/security-model.md).
@@ -64,22 +64,22 @@ Eight built-in collectors read declared configuration and artifacts from the pro
 
 | Collector | Reads | Records |
 | --- | --- | --- |
-| `mcp` | MCP config files (`.mcp.json`, `.claude/mcp.json`, `.cursor/mcp.json`, `claude_desktop_config.json`) and server source written in the supported SDK forms | Clients, servers, launchers, pinned versions, transports, endpoints, tool fingerprints |
+| `mcp` | MCP config files (`.mcp.json`, `mcp.json`, `.claude/mcp.json`, `.cursor/mcp.json`, `claude_desktop_config.json`) and server source written in the supported SDK forms | Clients, servers, launchers, pinned versions, transports, endpoints, tool fingerprints |
 | `model` | `.safetensors`, `.gguf`, `.ggml`, `.onnx`, Keras (`.h5`, `.hdf5`, `.keras`), `saved_model.pb` and pickle-family files (including `.ckpt` and `.pdparams`), with their config | SHA-256 hashes, serialization safety, SafeTensors structure, signature status |
-| `prompt` | Instruction files at these paths from the project root: `CLAUDE.md`, `.claude/CLAUDE.md`, `AGENTS.md`, `.github/AGENTS.md`, `CODEX.md`, `codex.md`, `.codex/instructions.md`, `.github/copilot-instructions.md`, `.cursorrules`, `.clinerules`, `.windsurfrules`, `system_prompt.md`, `system_prompt.txt`; skill and command text files (`.md`, `.txt`, `.yaml`, `.yml`, `.json`) | Instruction, skill and command digests; hidden-character findings for those instruction files |
+| `prompt` | Instruction files at these paths from the project root: `CLAUDE.md`, `.claude/CLAUDE.md`, `AGENTS.md`, `.github/AGENTS.md`, `CODEX.md`, `codex.md`, `.codex/instructions.md`, `.github/copilot-instructions.md`, `.cursorrules`, `.clinerules`, `.windsurfrules`, `system_prompt.md`, `system_prompt.txt`; skill and command text files (`.md`, `.txt`, `.yaml`, `.yml`, `.json`) under `.claude/skills`, `.claude/commands` and `skills` | Instruction, skill and command digests; hidden-character findings for those instruction files |
 | `rag` | `rag_config.*`, `retrieval_config.json`, `vector_store_config.json` | Declared retrieval sources and controls |
 | `registry` | In the project root: `package.json` and `package-lock.json` (v2 or v3); `requirements*.txt` (includes and editable installs are not followed; URL and VCS references without a package name, and local paths that do not start with an AI package name, are skipped); `pyproject.toml` (`[project]` dependencies and optional dependencies, `[tool.poetry.dependencies]`); `Dockerfile`, `Dockerfile.agent` and `docker-compose.yml` or `.yaml` | AI package identities, pins, npm lockfile integrity; container images taken as written from the first word after an upper-case `FROM` or `image:` (FROM flags, quotes and ARG substitutions are not resolved) when it contains vllm, ollama, triton, tgi, llama or model, and whether that word ends in a digest |
 | `a2a` | `.well-known/agent.json`, `agent-card.json`, A2A client config | Agent cards, endpoints, declared authentication |
-| `ide_agents` | Settings for Claude Code, Cursor, Codex, Windsurf, Cline, Copilot and others | Which agents are configured, their declared permission mode and, for Claude Code, blanket tool grants; not hooks, deny or ask rules, helpers or other settings |
+| `ide_agents` | Settings for Claude Code, Cursor, Codex, Windsurf, Cline, Copilot and others | Which agents are configured, from marker files. For Claude Code, the permission mode and whether its allow list has a blanket grant; for Cursor, Windsurf, Cline and Codex, only an `agent.permissionMode` key in their JSON settings. Not hooks, deny or ask rules, helpers, Codex `config.toml` or other settings |
 | `shadowscan` | [Nexus-ShadowScan](https://github.com/Hunzee-VC/Nexus-ShadowScan) reports | Imported discovery claims, kept separate from local evidence |
 
 ### What it checks
 
 | Command | What it answers |
 | --- | --- |
-| `validate` | Is the inventory complete? Do hashes, signatures and source bindings still match? |
+| `validate` | Did every collector finish without reporting a gap? Do hashes, signatures and source bindings still match? Surfaces the collectors do not support are not gaps ([known limitations](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/SECURITY.md#known-limitations-in-010)) |
 | `risk` | What are the findings, and does the score or worst severity cross your gate? |
-| `diff` | What changed since the reviewed snapshot? Is any change security-relevant? |
+| `diff` | What changed in the recorded inventory since the reviewed snapshot? Is any change security-relevant? Settings and files the collectors do not record are not compared |
 | `verify-artifact`, `verify-discovery` | Do these bytes match a trusted digest, Sigstore identity or ShadowScan report? |
 | `blast-radius` | Which agents and components are associated with a compromised component? |
 | `runtime keygen/sign/verify` | Are signed snapshots, approvals and trust statements valid for a gateway? |
@@ -208,6 +208,7 @@ permissions:
 jobs:
   inventory:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -222,7 +223,7 @@ jobs:
           sarif-upload: 'false'
 ```
 
-The Action installs its own hash-locked runtime, ignores policy in the scanned checkout, and fails on collection errors. Set `sarif-upload: 'true'` and add `security-events: write` for SARIF upload. Inputs and outputs are in [action.yml](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/action.yml). The repository also ships [pre-commit hooks](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/.pre-commit-hooks.yaml) (`nexus-symbiote-scan` and `nexus-symbiote-risk`).
+The Action installs its own hash-locked runtime, ignores policy in the scanned checkout, and fails on collection errors. Keep a job timeout like the one above: hostile input can keep a scan running until the job times out. Run the Action once per workflow run, because its artifact name and SARIF category are fixed ([known limitations](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/SECURITY.md#known-limitations-in-010)). Set `sarif-upload: 'true'` and add `security-events: write` for SARIF upload. Inputs and outputs are in [action.yml](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/action.yml). The repository also ships [pre-commit hooks](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/.pre-commit-hooks.yaml) (`nexus-symbiote-scan` and `nexus-symbiote-risk`).
 
 Every command is offline by default. Only `discover-mcp`, `advisories` and `verify-live` reach the network, and only in live mode (`--live` or `NEXUS_SYMBIOTE_MODE=live`). Use `nexus-symbiote init` to generate a `.nexus-symbiote.yaml` policy file for a trusted project (it is read only from the project you scan or name with `--project`, never from a parent directory or from where an inventory file is saved), or pass `--no-project-policy` when the checkout is not yours. Details are in [offline and live modes](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/offline-and-live-modes.md).
 
@@ -248,7 +249,7 @@ Every command is offline by default. Only `discover-mcp`, `advisories` and `veri
 
 1. **Collect.** Each collector reads its surfaces through confined, size-bounded file reads and returns components, findings and coverage status.
 2. **Assemble.** Results merge into one AgentBOM. Every claim keeps its assurance level: declared, observed or verified.
-3. **Gate.** `validate` checks completeness and integrity; `risk` scores findings against your policy. Unknown evidence fails closed.
+3. **Gate.** `validate` checks completeness and integrity; `risk` scores findings against your policy. Gaps the collectors report fail closed; surfaces they do not support are not reported.
 4. **Compare.** `diff` compares two snapshots semantically and rates each change.
 5. **Export.** Standard formats are generated from the same collection, so every export describes the same evidence.
 
