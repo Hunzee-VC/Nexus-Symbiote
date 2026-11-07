@@ -210,12 +210,12 @@ def test_text_outside_a_from_instruction_is_not_an_image(tmp_path):
     [
         (
             "ARG BASE=ollama/ollama:0.1.0\nFROM $BASE\n",
-            "FROM image with an unresolved substitution not collected",
+            "FROM image substitution not resolved",
             [],
         ),
         (
             "ARG V=0.1.0\nFROM ollama/ollama:${V}\n",
-            "FROM image with an unresolved substitution not collected",
+            "FROM image substitution not resolved",
             ["ollama/ollama:${V}"],
         ),
         ("FROM --platform=linux/amd64\n", "FROM instruction not parsed", []),

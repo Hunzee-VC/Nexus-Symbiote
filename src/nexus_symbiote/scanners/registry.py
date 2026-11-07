@@ -927,7 +927,7 @@ class RegistryScanner(Scanner):
             image, rest = words[start], words[start + 1 :]
             if image.lower() not in stages:
                 if "$" in image:
-                    gaps.append("FROM image with an unresolved substitution not collected")
+                    gaps.append("FROM image substitution not resolved")
                 images.append(image)
             if len(rest) == 2 and rest[0].lower() == "as":
                 stages.add(rest[1].lower())
