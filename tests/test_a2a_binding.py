@@ -25,6 +25,7 @@ from nexus_symbiote.scanners.a2a import (
     A2AScanner,
 )
 from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
+from nexus_symbiote.validators.completeness import CompletenessValidator
 
 KEY = "k" * 40
 
@@ -147,14 +148,14 @@ def test_without_a_key_the_path_is_neither_exported_nor_digested_but_marked_unbo
     first = _server(tmp_path / "a", CARD)
     moved = _server(tmp_path / "b", _moved(CARD))
     assert first.endpoint_url == "https://agents.example.com"
-    assert first.properties["endpoint_path_bound"] is False
+    assert first.properties["source_values_bound"] is False
     assert "static_value_binding" not in first.properties
     # An unkeyed digest that changed with the path would let anyone confirm guesses.
     assert first.properties["static_card_hash"] == moved.properties["static_card_hash"]
     assert any(r.severity == "low" and r.category == "completeness" for r in first.risks)
     assert "trusted" not in first.model_dump_json()
     origin_only = _server(tmp_path / "c", {**CARD, "url": "https://agents.example.com/"})
-    assert origin_only.properties["endpoint_path_bound"] is True
+    assert origin_only.properties["source_values_bound"] is False
     assert not any(r.category == "completeness" for r in origin_only.risks)
 
 
@@ -171,7 +172,7 @@ def test_keyed_binding_ignores_key_order_and_whitespace(tmp_path, monkeypatch):
     for key in ("static_value_binding", "static_value_binding_key_id", "static_card_hash"):
         assert first.properties[key] == second.properties[key]
     assert first.properties["static_value_binding_profile"] == CARD_VALUE_BINDING_PROFILE
-    assert first.properties["endpoint_path_bound"] is True
+    assert first.properties["source_values_bound"] is True
     assert not any(r.category == "completeness" for r in first.risks)
 
 
@@ -222,12 +223,28 @@ def test_validation_with_the_key_rejects_a_baseline_after_a_path_change(tmp_path
     assert "a2a-server:billing-agent" in run.output
 
 
+def test_keyed_baseline_fails_reconciliation_without_its_key(tmp_path, monkeypatch):
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    project = tmp_path / "project"
+    _write_card(project, {**CARD, "url": "https://agents.example.com"})
+    baseline = tmp_path / "baseline.json"
+    _scan(project, baseline)
+    bom = AIBOM.load(baseline)
+    assert CompletenessValidator().validate_against_project(bom, project).is_complete
+    monkeypatch.delenv(SOURCE_BINDING_KEY_ENV)
+    report = CompletenessValidator().validate_against_project(bom, project)
+    assert not report.is_complete
+    assert any("a2a-server:billing-agent" in issue.description for issue in report.issues)
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, "j" * 40)
+    assert not CompletenessValidator().validate_against_project(bom, project).is_complete
+
+
 def test_client_card_url_path_change_is_bound_by_the_key(tmp_path, monkeypatch):
     before = {"name": "planner", "agentCardUrl": "https://agents.example.com/trusted/card.json"}
     after = {**before, "agentCardUrl": "https://agents.example.com/attacker/card.json"}
     unkeyed = _client(tmp_path / "a", before)
     assert unkeyed.agent_card_url == "https://agents.example.com"
-    assert unkeyed.properties["card_url_path_bound"] is False
+    assert unkeyed.properties["source_values_bound"] is False
     assert any(r.severity == "low" and r.category == "completeness" for r in unkeyed.risks)
     assert "trusted" not in unkeyed.model_dump_json()
     assert (
@@ -238,7 +255,7 @@ def test_client_card_url_path_change_is_bound_by_the_key(tmp_path, monkeypatch):
         tmp_path / "c",
         {**before, "agentCardUrl": "https://agents.example.com/.well-known/agent.json"},
     )
-    assert well_known.properties["card_url_path_bound"] is True
+    assert not any(r.category == "completeness" for r in well_known.risks)
     monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
     old, new = _client(tmp_path / "d", before), _client(tmp_path / "e", after)
     assert old.properties["static_value_binding_profile"] == CLIENT_VALUE_BINDING_PROFILE

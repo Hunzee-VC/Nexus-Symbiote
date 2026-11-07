@@ -297,7 +297,7 @@ class A2AScanner(Scanner):
                 "collection_mode": "static-agent-card",
                 "authentication_evidence": "declaration-only",
                 "security_scheme_types": scheme_types,
-                "endpoint_path_bound": path_bound,
+                "source_values_bound": bool(binding),
                 "static_card_hash": structure_hash,
                 "static_card_hash_profile": CARD_STRUCTURE_PROFILE,
                 **binding,
@@ -361,7 +361,7 @@ class A2AScanner(Scanner):
             properties={
                 "collection_mode": "static-config",
                 "remote_agent_contacted": False,
-                "card_url_path_bound": path_bound,
+                "source_values_bound": bool(binding),
                 "static_config_hash": structure_hash,
                 "static_config_hash_profile": CLIENT_STRUCTURE_PROFILE,
                 **binding,
