@@ -122,17 +122,18 @@ establish absence of vulnerabilities, malicious packages or undisclosed defects.
 
 Status of the controls tracked in
 [issue #74](https://github.com/Hunzee-VC/Nexus-Symbiote/issues/74), as observed
-through the GitHub API on 2026-11-03. Re-check live settings before relying on
+through the GitHub API on 2026-11-06. Re-check live settings before relying on
 any row; this table is a dated record, not enforcement.
 
 | Control | Observed state | Required action |
 | --- | --- | --- |
-| Hosted CI matrix and CodeQL | Passing. The earlier failures were a runtime-validation CPU budget and real dependency advisories, fixed in [#97](https://github.com/Hunzee-VC/Nexus-Symbiote/pull/97) and [#98](https://github.com/Hunzee-VC/Nexus-Symbiote/pull/98) | None; keep `Verified CI` required |
-| Branch protection on `main` | Not protected: `protected: false`, and `GET /branches/main/protection` returns 404. 20 of the 92 first-parent commits on `main` were pushed directly rather than merged through a pull request | Apply the interim configuration above |
-| Repository ruleset `main` | Enforcement `active`, but `conditions.ref_name.include` is empty, so it targets no branch and its pull-request, code-scanning and non-fast-forward rules are inert; its required-checks list is also empty | Delete it, or deliberately retarget it in addition to classic protection |
-| Private vulnerability reporting | Disabled, although [SECURITY.md](../SECURITY.md) directs reporters to it | Enable it under *Settings → Code security* |
-| Secret scanning and push protection | Disabled | Enable both; they are free for public repositories |
-| `testpypi` and `pypi` environments, trusted publishers | Not verifiable through the integration used for this review | Configure and verify as described in [releasing](releasing.md) |
+| Hosted CI matrix and CodeQL | Passing on `main` at `d4628a6`, including `Verified CI`, `CodeQL policy` and `Dependency advisories`. The earlier failures were a runtime-validation CPU budget and real dependency advisories, fixed in [#97](https://github.com/Hunzee-VC/Nexus-Symbiote/pull/97) and [#98](https://github.com/Hunzee-VC/Nexus-Symbiote/pull/98) | None; keep `Verified CI` required |
+| Branch protection on `main` | The interim configuration was applied on 2026-11-06: `Verified CI` is required, bound to the GitHub Actions app, on an up-to-date branch and for administrators too; conversations must be resolved; force pushes and deletion are disabled; no review is required | Switch to the full configuration once a second reviewer exists |
+| Repository ruleset `main` | Retargeted on 2026-11-06 to the default branch, where its deletion, non-fast-forward, CodeQL (high or higher), pull-request (no approvals required; the extra approval for unattributed changes is enabled), code-quality, secret-scanning-resolution and Copilot-review rules now apply. Its required-checks list is empty: classic protection supplies the `Verified CI` requirement | Keep it alongside classic protection, which is the only thing the preflight reads |
+| Private vulnerability reporting | Enabled | None |
+| Secret scanning and push protection | Enabled | None |
+| `testpypi` and `pypi` environments | Both exist with @aisecnomad as the required reviewer, *Prevent self-review* off because there is a single maintainer (see [releasing](releasing.md)), and deployments limited to `main`. Administrators can bypass the protection rules | Turn off administrator bypass; turn on *Prevent self-review* once a second reviewer exists |
+| Trusted publishers | The maintainer reports pending publishers on PyPI and TestPyPI, created on 2026-11-06. The GitHub API cannot show them | The first upload to each index confirms them |
 | Release tags `v*` | No ruleset protects tags, so anyone with write access can move or delete `v0.1.0` after publication. The README's verified-release install requires the wheel's attestation to name the commit the tag points at. That stops a plain tag move, but not a move to a second commit that differs only in its lock file: release builds are reproducible and candidate runs are attested without approval. Only the ruleset keeps the tag on the published commit | Apply [the release-tag ruleset](../config/github-release-tag-ruleset.json) before creating the first release tag |
 
 The repository is public, so branch protection, rulesets, artifact attestations
@@ -143,37 +144,25 @@ Do not remove the acceptance gates to work around an unavailable platform featur
 
 ### Apply the outstanding controls
 
-Run these as a repository administrator, after reviewing each configuration:
+The other controls in the table were applied on 2026-11-06; to re-apply branch
+protection, use the interim command above. Run these as a repository
+administrator, after reviewing each configuration:
 
 ```sh
-# 1. Protect main with the solo-maintainer interim configuration
-gh api --method PUT repos/Hunzee-VC/Nexus-Symbiote/branches/main/protection \
-  --input config/github-main-protection-interim.json
-
-# 2. Confirm the publication preflight now accepts the live state
+# 1. Confirm the publication preflight accepts the live state
 GH_TOKEN="$(gh auth token)" python scripts/check_repository_controls.py \
   --repo Hunzee-VC/Nexus-Symbiote --branch main --sha "$(git rev-parse origin/main)"
 
-# 3. Enable private vulnerability reporting
-gh api --method PUT repos/Hunzee-VC/Nexus-Symbiote/private-vulnerability-reporting
-
-# 4. Enable secret scanning and push protection
-gh api --method PATCH repos/Hunzee-VC/Nexus-Symbiote --input - <<'JSON'
-{"security_and_analysis": {"secret_scanning": {"status": "enabled"},
-                           "secret_scanning_push_protection": {"status": "enabled"}}}
-JSON
-
-# 5. Remove the ruleset that targets no branch (or retarget it deliberately)
-gh api --method DELETE repos/Hunzee-VC/Nexus-Symbiote/rulesets/26325547
-
-# 6. Stop release tags from being moved or deleted once created
+# 2. Stop release tags from being moved or deleted once created
 gh api --method POST repos/Hunzee-VC/Nexus-Symbiote/rulesets \
   --input config/github-release-tag-ruleset.json
 ```
 
-After step 1, a commit can reach `main`, including the maintainer's own, only
-after its `Verified CI` check has passed on a branch that is up to date with
-`main`. In practice that means a pull request. Step 2
-passes only once the newest CI run for the `main` head has succeeded. Configure
-the `pypi` environment's reviewers and main-only deployment restriction, and
-verify them independently, before requesting publication.
+Under the interim protection, a commit can reach `main`, including the
+maintainer's own, only after its `Verified CI` check has passed on a branch that
+is up to date with `main`. In practice that means a pull request. Step 1 passes
+only once the newest CI run for the `main` head has succeeded. Turn off
+administrator bypass for the `pypi` and `testpypi` environments under
+*Settings → Environments*, and verify the environments independently before
+requesting publication. Do not delete ruleset `main` (ID 26325547): it now
+protects the default branch.

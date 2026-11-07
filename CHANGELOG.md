@@ -2,9 +2,9 @@
 
 Notable changes to Nexus SymBiote, newest release first. Within a release, security changes come first, and changes that need action from users are marked **Breaking**.
 
-## [0.1.0] - 2026-11-04
+## [0.1.0] - 2026-11-06
 
-First alpha of the AgentBOM toolkit under the Hunzee-VC organization.
+First alpha of the AgentBOM toolkit under the Hunzee-VC organization. Its known detection gaps, including Claude Code settings beyond the permission mode and blanket grants, skill scripts and subagents, are listed under [known limitations](SECURITY.md#known-limitations-in-010); `diff --fail-on-alert` cannot alert on them.
 
 ### Security
 

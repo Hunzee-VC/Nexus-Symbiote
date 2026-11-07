@@ -26,7 +26,12 @@ as described below.
    GitHub Enterprise Cloud. GitHub Actions must also be able to run: check
    *Billing & plans* if jobs end without starting.
 2. **Create two environments**, `testpypi` and `pypi`. Give each required reviewers,
-   enable *Prevent self-review*, and restrict deployments to `main`.
+   enable *Prevent self-review*, and restrict deployments to `main`. While the
+   project has a single maintainer, *Prevent self-review* would leave nobody able to
+   approve a deployment, so leave it off until a second reviewer exists, as with the
+   interim branch protection; the required review still makes every upload wait for
+   an explicit approval. The `main`-only restriction matters because the main-only
+   checks live inside `release.yml`, which a branch could edit.
 3. **Create a pending trusted publisher on each index**, right before the first
    upload, because a pending publisher does not reserve the name:
    - PyPI: <https://pypi.org/manage/account/publishing/>
@@ -49,7 +54,8 @@ as described below.
 
 1. Choose the version. `pyproject.toml` and `src/nexus_symbiote/__init__.py` must
    agree; `scripts/check_repository_hygiene.py` fails CI otherwise. Move the
-   changelog's *Unreleased* entries under the new version.
+   changelog's *Unreleased* entries under the new version, and date its heading with
+   the planned publication day; correct the date afterwards if publication slips.
 2. Freeze `main`: after the release pull request merges, merge nothing else until
    the `pypi` run is approved. `workflow_dispatch --ref main` builds whatever `main`
    is at dispatch time and the preflight requires that exact head, so a Dependabot

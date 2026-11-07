@@ -5,7 +5,9 @@ Nexus SymBiote is an early alpha focused on Agent Bill of Materials (AgentBOM) g
 ## Near term (alpha hardening)
 
 - [x] Add a pinned CodeQL workflow for main and pull requests. Hosted analysis runs, and its high and critical policy is part of the required `Verified CI` check.
-- [ ] Apply branch protection, private vulnerability reporting and secret scanning on GitHub (see [repository controls](docs/repository-controls.md#operator-prerequisites)).
+- [x] Apply branch protection, private vulnerability reporting and secret scanning on GitHub (applied by 2026-11-06; see [repository controls](docs/repository-controls.md#operator-prerequisites)).
+- [ ] Apply the release-tag ruleset before the first `v*` tag, and turn off administrator bypass on the `testpypi` and `pypi` environments.
+- [ ] Close the [known limitations of 0.1.0](SECURITY.md#known-limitations-in-010) in 0.1.1: record Claude Code settings beyond the permission mode (hooks, deny and ask rules, helpers) without exposing secrets, check skill, command and nested instruction files for hidden characters, inventory skill scripts and subagents, report unsupported MCP server forms and name-excluded agent files as coverage gaps, bound the TypeScript and comment-stripping analysis time, handle surrogates and deep nesting in exports, and let the Action run more than once per workflow.
 - [ ] Public release of a reviewed 0.1.x (or 0.2.0) with signed provenance and PyPI trusted publishing.
 - [ ] Decide which collectors, export formats and runtime adapters are supported for 0.1.x and which stay experimental. The project has a single maintainer, so a smaller supported surface is easier to keep correct.
 - [ ] Expand security regression corpus and document known false-positive/negative classes.
