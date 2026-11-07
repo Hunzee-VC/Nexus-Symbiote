@@ -226,7 +226,7 @@ def test_project_reconciliation_rejects_an_edited_content_digest(tmp_path):
         main, ["validate", str(bom), "--project", str(tmp_path / "proj"), "--no-project-policy"]
     )
     assert result.exit_code != 0
-    assert "Local discovery report differs from the recorded digest." in result.output
+    assert "Recorded discovery content digest differs from the local report." in result.output
 
 
 @pytest.mark.parametrize(

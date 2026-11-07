@@ -404,12 +404,13 @@ class CompletenessValidator:
         problems: list[str] = []
         claim = bom.metadata.completeness
         if claim is not None:
-            if (
-                claim.source_report_digest != local.source_report_digest
-                or claim.source_report_content_digest != local.source_report_content_digest
+            if claim.source_report_digest != local.source_report_digest:
+                problems.append("Local discovery report differs from the recorded digest.")
+            elif (
+                claim.source_report_content_digest != local.source_report_content_digest
                 or claim.source_report_content_profile != local.source_report_content_profile
             ):
-                problems.append("Local discovery report differs from the recorded digest.")
+                problems.append("Recorded discovery content digest differs from the local report.")
             if (
                 claim.source_report_format != local.source_report_format
                 or claim.source_report_status != local.source_report_status
