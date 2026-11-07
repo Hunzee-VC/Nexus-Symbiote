@@ -435,7 +435,6 @@ def test_dockerfile_parsing_is_linear(tmp_path):
     assert result.surfaces_excluded == ["Dockerfile: FROM instruction not parsed"]
 
 
-
 def test_heredoc_parsing_is_linear(tmp_path):
     (tmp_path / "Dockerfile").write_text('RUN <<EOF "' + "a" * 3_000_000 + "\n")
     (tmp_path / "Dockerfile.agent").write_text(
@@ -446,6 +445,7 @@ def test_heredoc_parsing_is_linear(tmp_path):
     assert time.monotonic() - started < 5
     assert result.surfaces_excluded == ["Dockerfile: heredoc not parsed"]
     assert [c.name for c in result.components] == ["ollama/ollama:1"]
+
 
 POETRY = '[tool.poetry]\nname = "agent"\nversion = "0.1.0"\n[tool.poetry.dependencies]\npython = "^3.11"\n'
 
