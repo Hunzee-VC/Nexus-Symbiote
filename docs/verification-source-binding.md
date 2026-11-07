@@ -62,17 +62,20 @@ address, fails that check because it does not show TLS.
 
 Several security declarations are recorded in clear:
 
-- `capabilities.oauth_scopes` holds the scopes that the card's requirements name
-  for `oauth2` and `openIdConnect` schemes, from the 0.3 `security` list and from
-  the 1.0 `securityRequirements` list, whose entries take the form
-  `{"schemes": {"<scheme>": {"list": ["<scope>"]}}}`. Scopes are public
+- `capabilities.oauth_scopes` holds the scopes that the requirements of the card
+  and of its skills name for `oauth2` and `openIdConnect` schemes. Requirements
+  come from the 0.3 `security` lists of the card and of each skill, and from the 1.0
+  `securityRequirements` lists of the card and of each skill, whose entries take the
+  form `{"schemes": {"<scheme>": {"list": ["<scope>"]}}}`. Scopes are public
   identifiers (RFC 6749 section 3.3), so scope URIs such as
   `https://www.googleapis.com/auth/drive.readonly` or `api://<app>/access_as_user`
   are kept in full. A scope with user information, a query, a fragment or a
   credential assignment is reduced by the standard redaction, and one in a known
   token format (a JWT or a `ghp_`, `AKIA`, `sk-`, `xox`, `glpat-` or `AIza`
-  prefix) is exported as `***`. A scope change raises a high
-  `capabilities changed` alert.
+  prefix) is exported as `***`. A change to the set of scopes raises a high
+  `capabilities changed` alert. A scope moved between the card and a skill, or
+  between skills, changes only the structure digest below and raises a medium
+  `properties changed` alert.
 - `properties.security_scheme_types` lists the declared scheme types, mapped onto
   `apiKey`, `http`, `oauth2`, `openIdConnect`, `mutualTLS` or `other`. A 0.3
   `type` is matched without regard to case, so `OAuth2` counts as `oauth2`. A 1.0
@@ -92,29 +95,39 @@ Requirement values of schemes that are not declared as `oauth2` or
 `openIdConnect` (`apiKey`, `http`, `mutualTLS`, `other`, or a scheme the card does
 not declare) may be role names or anything else, even a pasted credential, so they
 are not exported. The structure digest below covers them instead, so a change such
-as `read:only` to `admin` raises a medium `properties changed` alert without a key.
-`authentication_required` is true only when every alternative in `security` and in
-`securityRequirements` is non-empty and names only declared schemes that state a
-type, and a legacy `authentication` object lists at least one non-empty scheme
-name. An empty alternative (`{}` or `{"schemes": {}}`) permits anonymous access,
-and an empty list declares no requirement. A `null` `securitySchemes`, `security`,
+as `read:only` to `admin` raises a medium `properties changed` alert without a key,
+in a skill's requirements as in the card's.
+
+`authentication_required` is true only when every alternative in the card's
+`security` and `securityRequirements` is non-empty and names only declared schemes
+that state a type, and a legacy `authentication` object lists at least one
+non-empty scheme name. An empty alternative (`{}` or `{"schemes": {}}`) permits
+anonymous access, and an empty list declares no requirement. The specifications do
+not say how a skill's requirements combine with the card's, so skill requirements
+can make `authentication_required` false but never true. A skill alternative that
+is empty or names an undeclared or untyped scheme makes it false, with a medium
+`authentication` finding that a skill has no non-empty requirement. Requirements
+declared only on skills leave a card without requirements of its own at false. An
+empty skill list adds no requirement, because proto3 JSON does not distinguish it
+from an absent field. A `null` `securitySchemes`, `security`,
 `securityRequirements`, `authentication` or `authentication.schemes` counts as
-absent. These are declarations: they do not show that an endpoint enforces
-authentication.
+absent, and so does a skill's `null` `security` or `securityRequirements`. These are
+declarations: they do not show that an endpoint enforces authentication.
 
 Every A2A server record carries `static_card_hash` (profile
 `nexus-symbiote/a2a-card-structure/v2`) and every client record carries
-`static_config_hash` (profile `nexus-symbiote/a2a-client-structure/v1`). These
-RFC 8785 digests cover field names, security scheme names with their mapped types,
-the exported scopes of each requirement, the requirement values of other scheme
-types, the number of non-empty legacy scheme names, and the shape of each URL: the
-number of path separators, whether a query, fragment or user information is
-present, and the path itself only when it is a public root path (`/` or, for
-clients, `/.well-known/agent.json` or `/.well-known/agent-card.json`). They hold no
-other path, query or tenant value, so a path change on the same origin leaves them
+`static_config_hash` (profile `nexus-symbiote/a2a-client-structure/v1`). These RFC
+8785 digests cover field names, security scheme names with their mapped types, each
+requirement alternative of the card and of each skill (keyed by the skill's exported
+name) with its exported scopes and the values of other scheme types, the number of
+non-empty legacy scheme names, and the shape of each URL: the number of path
+separators, whether a query, fragment or user information is present, and the path
+itself only when it is a public root path (`/` or, for clients,
+`/.well-known/agent.json` or `/.well-known/agent-card.json`). They hold no other
+path, query or tenant value, so a path change on the same origin leaves them
 unchanged. They are unkeyed, so anyone holding the BOM can test guesses against
-them. They reveal field and scheme names, path depth and whether user information
-or a query is present, and they let a BOM holder confirm a guess of the requirement
+them. They reveal field and scheme names, path depth and whether user information or
+a query is present, and they let a BOM holder confirm a guess of the requirement
 values of schemes other than `oauth2` and `openIdConnect`.
 
 With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` set, records also carry
@@ -128,16 +141,20 @@ baseline validated without its key, or with a different key, fails reconciliatio
 The binding needs RFC 8785 JSON values: under the key, a client entry with a value
 such as an unquoted YAML date is a scan failure that names the key.
 
-Without the key, those changes are not detected. A card carries a low
-`completeness` risk naming the key and listing what is unbound when its endpoint,
-a supported or additional interface URL, or a security scheme URL goes beyond its
-exported origin or has none, when a supported interface sets a `tenant`, or when a
-scope was redacted. A client carries it when its `agentCardUrl` goes beyond its
-exported origin and is not one of the root paths above. Values that neither choose
-where a client connects nor what it authorizes, such as descriptions, skill
-details, `protocolBinding` and `protocolVersion`, are bound only by the key, and
-the risk does not list them. `tests/test_a2a_binding.py` holds the test vectors for
-the four profiles, with a second card vector in the A2A 1.0 form.
+Without the key, those changes are not detected. A card carries a low `completeness`
+risk naming the key and listing what is unbound when its endpoint, a supported or
+additional interface URL, or a security scheme URL goes beyond its exported origin
+or has none, when a supported interface sets a `tenant`, or when a scope of the card
+or of a skill was redacted. A client carries it when its `agentCardUrl` goes beyond
+its exported origin and is not one of the root paths above. Other values are bound
+only by the key, and the risk does not list them: descriptions; the id of a skill
+that has a name, and skill descriptions, tags, examples and input or output modes;
+security scheme fields other than their types and URLs, such as an API key's `name`
+and location, an HTTP scheme's `scheme` and `bearerFormat`, an authorization code
+flow's `pkceRequired` and the scope descriptions of a flow; interface transports;
+`protocolBinding`; and `protocolVersion`. `tests/test_a2a_binding.py` holds the test
+vectors for the four profiles, with a second card vector in the A2A 1.0 form. Both
+card vectors include a skill with its own requirements.
 
 ## Upgrade existing snapshots
 

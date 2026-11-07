@@ -858,6 +858,23 @@ def test_skill_requirement_change_fails_the_drift_gate_without_a_key(
     assert unchanged.exit_code == 0, unchanged.output
 
 
+def test_scope_moved_between_skills_changes_only_the_structure_digest(tmp_path):
+    card = copy.deepcopy(CARD)
+    card["skills"] = [
+        {"id": "a", "name": "a", "security": [{"oauth": ["read:only"]}]},
+        {"id": "b", "name": "b", "security": [{"oauth": ["admin"]}]},
+    ]
+    moved = copy.deepcopy(card)
+    moved["skills"][0]["security"] = [{"oauth": ["admin"]}]
+    moved["skills"][1]["security"] = [{"oauth": ["read:only"]}]
+    run, _ = _drift(tmp_path, card, moved)
+    assert run.exit_code == 1, run.output
+    alerts = json.loads(run.stdout)["security_alerts"]
+    assert [(a["severity"], "properties changed" in a["alert"]) for a in alerts] == [
+        ("medium", True)
+    ], alerts
+
+
 def test_skill_scopes_are_exported_with_the_card_scopes(tmp_path):
     pat = "ghp_" + "d" * 36
     card = _skill_requirement(CARD_1_0, "oauth", ["https://www.googleapis.com/auth/drive", pat])
