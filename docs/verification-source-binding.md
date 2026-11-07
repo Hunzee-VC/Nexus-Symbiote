@@ -79,8 +79,8 @@ Every A2A server record carries `static_card_hash` (profile
 RFC 8785 digests cover field names, security scheme names with their mapped types,
 the exported scopes of each requirement (or, for other scheme types, the number of
 role names), the number of non-empty legacy scheme names, and the shape of each URL:
-the number
-of path separators, whether a query, fragment or user information is present, and
+the number of path separators, whether a query, fragment or user information is
+present, and
 the path itself only when it is a public root path (`/` or, for clients,
 `/.well-known/agent.json` or `/.well-known/agent-card.json`). They hold no other
 path, query or role value, so a path change on the same origin leaves them
