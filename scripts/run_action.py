@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import functools
 import hashlib
+import importlib
 import json
 import math
 import os
@@ -17,6 +19,13 @@ SCANNERS = frozenset(
     {"shadowscan", "mcp", "model", "prompt", "rag", "registry", "a2a", "ide_agents"}
 )
 FORMATS = frozenset({"json", "cyclonedx", "spdx", "sarif"})
+SIGSTORE_MODULES = (
+    "sigstore.hashes",
+    "sigstore.models",
+    "sigstore.verify",
+    "sigstore.verify.policy",
+    "sigstore_models.common.v1",
+)
 
 
 def _boolean(value: str) -> bool:
@@ -57,6 +66,7 @@ def _caller_owned(workspace: Path, value: str) -> bytes:
         # that a lexical check misses: case-insensitive names and bind mounts.
         with open_regular_file(path) as stream:
             content = stream.read(MAX_POLICY_BYTES + 1)
+            links = os.fstat(stream.fileno()).st_nlink
         ancestors = {(s.st_dev, s.st_ino) for s in map(os.stat, path.parents)}
     except OSError:
         raise ValueError(
@@ -65,9 +75,25 @@ def _caller_owned(workspace: Path, value: str) -> bytes:
     root = os.stat(workspace)
     if (root.st_dev, root.st_ino) in ancestors:
         raise ValueError(outside)
+    if links != 1:
+        raise ValueError(
+            "signature-policy must not be a hard link, which can alias a workspace file"
+        )
     if len(content) > MAX_POLICY_BYTES:
         raise ValueError("signature-policy exceeds the byte limit")
     return content
+
+
+def _require_sigstore() -> None:
+    # Without sigstore every signature would fail verification after a full
+    # scan, so a supplied policy would silently change nothing.
+    try:
+        for module in SIGSTORE_MODULES:
+            importlib.import_module(module)
+    except ImportError:
+        raise ValueError(
+            "signature-policy needs sigstore, which this Action runtime cannot import"
+        ) from None
 
 
 @dataclass(frozen=True)
@@ -105,6 +131,9 @@ class Config:
         if not math.isfinite(threshold) or not 0 <= threshold <= 100:
             raise ValueError("risk-threshold must be finite and between 0 and 100")
         policy = env.get("SYMBIOTE_SIGNATURE_POLICY", "")
+        signers = _caller_owned(workspace, policy) if policy else None
+        if signers is not None:
+            _require_sigstore()
         return cls(
             workspace,
             project,
@@ -115,14 +144,24 @@ class Config:
             _boolean(env.get("SYMBIOTE_RISK_CHECK", "true")),
             threshold,
             _boolean(env.get("SYMBIOTE_SARIF", "false")),
-            _caller_owned(workspace, policy) if policy else None,
+            signers,
         )
 
 
-def _run(args: list[str]) -> subprocess.CompletedProcess[str]:
+def _run(args: list[str], *, private: Path) -> subprocess.CompletedProcess[str]:
+    # Offline Sigstore verification trusts any trusted_root.json in the per-user
+    # cache without checking it, and an earlier job or step can plant one there.
+    # An empty private home makes sigstore seed it from its hash-locked package.
+    env = {
+        **os.environ,
+        "HOME": str(private),
+        "XDG_CACHE_HOME": str(private / "cache"),
+        "XDG_DATA_HOME": str(private / "data"),
+    }
     # The executable is this interpreter; arguments never pass through a shell.
     return subprocess.run(  # noqa: S603
         [sys.executable, "-I", "-m", "nexus_symbiote", *args],
+        env=env,
         text=True,
         capture_output=True,
         check=False,
@@ -151,7 +190,7 @@ def _export(native: Path, output: Path, fmt: str, *, root: Path | None = None) -
 def run(
     config: Config,
     *,
-    command: Callable[[list[str]], subprocess.CompletedProcess[str]] = _run,
+    command: Callable[[list[str]], subprocess.CompletedProcess[str]] | None = None,
     export: Callable[[Path, Path, str], None] | None = None,
     outputs: Path | None = None,
 ) -> int:
@@ -170,12 +209,18 @@ def run(
             export(native, output, fmt)
 
     emit(risk_score="", passed="skipped")
-    with tempfile.TemporaryDirectory(prefix="nexus-symbiote-action-") as scratch:
-        native = Path(scratch) / "native.json"
+    with tempfile.TemporaryDirectory(prefix="nexus-symbiote-action-") as created:
+        # The CLI refuses symlinked directories, and macOS temp paths contain one.
+        scratch = Path(created).resolve(strict=True)
+        if command is None:
+            private = scratch / "home"
+            private.mkdir(mode=0o700)
+            command = functools.partial(_run, private=private)
+        native = scratch / "native.json"
         signers: list[str] = []
         if config.signature_policy is not None:
             # Collection and validation read one snapshot of the caller's trust root.
-            snapshot = Path(scratch) / "signature-policy.json"
+            snapshot = scratch / "signature-policy.json"
             snapshot.write_bytes(config.signature_policy)
             signers = ["--signature-policy", str(snapshot)]
             digest = hashlib.sha256(config.signature_policy).hexdigest()

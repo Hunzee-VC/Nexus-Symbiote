@@ -35,8 +35,10 @@ inputs:
       Absolute path to a caller-owned operator signer policy JSON outside GITHUB_WORKSPACE,
       such as a file the workflow writes under RUNNER_TEMP from a trusted source; never a file
       from the checked-out code. Its artifact and bundle paths are relative to scan-path. The
-      Action refuses relative paths, symlinks, non-regular and oversized files, and passes one
-      snapshot to collection and validation. Empty means no signer policy
+      Action refuses relative paths, symlinks, hard links, non-regular and oversized files, and
+      passes one snapshot to collection and validation. Signatures verify offline against the
+      Sigstore trust root shipped in the Action's hash-locked sigstore package, never a runner
+      cache. Empty means no signer policy
     default: ""
   python-version:
     description: Python version for the scanner

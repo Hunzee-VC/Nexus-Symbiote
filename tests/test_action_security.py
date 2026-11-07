@@ -49,7 +49,7 @@ def test_path_input_is_one_literal_argument_and_collection_runs_once(tmp_path, p
     assert not (tmp_path / "PWNED").exists()
 
 
-def test_command_runner_never_uses_shell(monkeypatch):
+def test_command_runner_never_uses_shell(monkeypatch, tmp_path):
     captured = {}
 
     def invoke(args, **kwargs):
@@ -57,7 +57,7 @@ def test_command_runner_never_uses_shell(monkeypatch):
         return subprocess.CompletedProcess(args, 0, "", "")
 
     monkeypatch.setattr(runner.subprocess, "run", invoke)
-    runner._run(["scan", "$(touch PWNED)"])
+    runner._run(["scan", "$(touch PWNED)"], private=tmp_path)
     assert captured["args"] == [
         sys.executable,
         "-I",

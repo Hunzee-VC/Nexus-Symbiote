@@ -133,6 +133,10 @@ def _case_alias_of_workspace(tmp_path: Path, workspace: Path) -> str:
     return str(alias / "signers.json")
 
 
+def _double_slash_alias_of_workspace(tmp_path: Path, workspace: Path) -> str:
+    return f"/{workspace}/signers.json"
+
+
 def _newline(tmp_path: Path, workspace: Path) -> str:
     return f"{tmp_path}/caller/signers.json\nSYMBIOTE_VALIDATE=false"
 
@@ -156,6 +160,12 @@ def _symlink_to_caller_file(tmp_path: Path, workspace: Path) -> str:
 def _parent_symlink_into_workspace(tmp_path: Path, workspace: Path) -> str:
     (tmp_path / "alias").symlink_to(workspace, target_is_directory=True)
     return str(tmp_path / "alias" / "signers.json")
+
+
+def _hard_link_to_workspace_file(tmp_path: Path, workspace: Path) -> str:
+    link = tmp_path / "caller" / "hardlink.json"
+    os.link(workspace / "signers.json", link)
+    return str(link)
 
 
 def _directory(tmp_path: Path, workspace: Path) -> str:
@@ -189,11 +199,13 @@ def _oversized(tmp_path: Path, workspace: Path) -> str:
         (_in_scan_path, OUTSIDE),
         (_dot_dot_into_workspace, OUTSIDE),
         (_case_alias_of_workspace, OUTSIDE),
+        (_double_slash_alias_of_workspace, OUTSIDE),
         (_newline, OUTSIDE),
         (_nul, OUTSIDE),
         (_symlink_into_workspace, NOT_REGULAR),
         (_symlink_to_caller_file, NOT_REGULAR),
         (_parent_symlink_into_workspace, NOT_REGULAR),
+        (_hard_link_to_workspace_file, "must not be a hard link"),
         (_directory, NOT_REGULAR),
         (_missing, NOT_REGULAR),
         (_fifo, NOT_REGULAR),
@@ -225,11 +237,7 @@ def test_signature_policy_must_be_a_caller_owned_regular_file(
         )
 
 
-@pytest.mark.parametrize("mode", ["none", "caller", "wrong-signer", "checkout"])
-def test_real_entry_point_verifies_signed_model_only_with_caller_policy(
-    tmp_path: Path, mode: str
-) -> None:
-    pytest.importorskip("sigstore")
+def _signed_workspace(tmp_path: Path) -> Path:
     subject = (FIXTURES / "rfc8785-0.1.2-py3-none-any.whl.subject").read_bytes()
     assert hashlib.sha256(subject).hexdigest() == SUBJECT_SHA256
     workspace = tmp_path / "workspace"
@@ -239,17 +247,24 @@ def test_real_entry_point_verifies_signed_model_only_with_caller_policy(
     shutil.copyfile(
         FIXTURES / "bundle_v3_github.whl.sigstore", models / "signed-model.onnx.sigstore"
     )
-    (tmp_path / "caller").mkdir()
-    policy = {
-        "none": None,
-        "caller": tmp_path / "caller" / "signers.json",
-        "wrong-signer": tmp_path / "caller" / "signers.json",
-        "checkout": workspace / "agent" / "signers.json",
-    }[mode]
-    if policy is not None:
-        identity = SIGNER if mode != "wrong-signer" else SIGNER.replace("v0.1.2", "v9.9.9")
-        policy.write_text(policy_document(identity))
-    outputs = tmp_path / "action-outputs"
+    return workspace
+
+
+def _caller_policy(tmp_path: Path, identity: str = SIGNER) -> Path:
+    policy = tmp_path / "caller" / "signers.json"
+    policy.parent.mkdir(exist_ok=True)
+    policy.write_text(policy_document(identity))
+    return policy
+
+
+def _entry_point(
+    tmp_path: Path,
+    workspace: Path,
+    policy: Path | None,
+    *,
+    launcher: tuple[str, ...] = (),
+    **overrides: str,
+) -> subprocess.CompletedProcess[str]:
     env = {
         **os.environ,
         "HOME": str(tmp_path / "home"),
@@ -263,16 +278,42 @@ def test_real_entry_point_verifies_signed_model_only_with_caller_policy(
         "SYMBIOTE_SARIF": "false",
         "SYMBIOTE_OUTPUT_FILE": "result.json",
         "SYMBIOTE_SIGNATURE_POLICY": "" if policy is None else str(policy),
-        "GITHUB_OUTPUT": str(outputs),
+        "GITHUB_OUTPUT": str(tmp_path / "action-outputs"),
+        **overrides,
     }
-    result = subprocess.run(  # noqa: S603
-        [sys.executable, "-I", str(ROOT / "scripts/run_action.py")],
+    return subprocess.run(  # noqa: S603
+        [sys.executable, "-I", *launcher, str(ROOT / "scripts/run_action.py")],
         cwd=tmp_path,
         env=env,
         capture_output=True,
         text=True,
         check=False,
     )
+
+
+def _model(native: Path) -> dict:
+    [model] = [
+        c for c in json.loads(native.read_text())["components"] if c["component_type"] == "model"
+    ]
+    return model
+
+
+@pytest.mark.parametrize("mode", ["none", "caller", "wrong-signer", "checkout"])
+def test_real_entry_point_verifies_signed_model_only_with_caller_policy(
+    tmp_path: Path, mode: str
+) -> None:
+    pytest.importorskip("sigstore")
+    workspace = _signed_workspace(tmp_path)
+    policy: Path | None = None
+    if mode == "caller":
+        policy = _caller_policy(tmp_path)
+    elif mode == "wrong-signer":
+        policy = _caller_policy(tmp_path, SIGNER.replace("v0.1.2", "v9.9.9"))
+    elif mode == "checkout":
+        policy = workspace / "agent" / "signers.json"
+        policy.write_text(policy_document())
+    outputs = tmp_path / "action-outputs"
+    result = _entry_point(tmp_path, workspace, policy)
     # The stand-in subject is a wheel, so its format stays unknown even when
     # its signature verifies; only a signed SafeTensors model can pass fully.
     assert result.returncode == 1
@@ -288,11 +329,7 @@ def test_real_entry_point_verifies_signed_model_only_with_caller_policy(
         for line in result.stderr.splitlines()
         if line.lstrip().startswith(("UNKNOWN [", "ERROR [", "CRITICAL ["))
     ]
-    [model] = [
-        c
-        for c in json.loads((workspace / "result.json").read_text())["components"]
-        if c["component_type"] == "model"
-    ]
+    model = _model(workspace / "result.json")
     recorded = outputs.read_text()
     if mode == "none":
         assert f"UNKNOWN [{model['bom_ref']}] {UNTRUSTED}" in findings
@@ -300,6 +337,7 @@ def test_real_entry_point_verifies_signed_model_only_with_caller_policy(
         assert "signing_identity" not in model
         assert "signature_policy_digest" not in recorded
     elif mode == "caller":
+        assert policy is not None
         assert findings == [f"UNKNOWN [{model['bom_ref']}] {STAND_IN_FORMAT}"]
         assert "Hashes verified: 1, failed: 0" in result.stderr
         assert model["signing_status"] == "sigstore-signed"
@@ -314,3 +352,127 @@ def test_real_entry_point_verifies_signed_model_only_with_caller_policy(
         )
         assert model["signing_status"] == "verification-failed"
         assert "signing_identity" not in model
+
+
+def test_policy_without_importable_sigstore_fails_before_collection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = _signed_workspace(tmp_path)
+    policy = _caller_policy(tmp_path)
+    with monkeypatch.context() as patched:
+        for module in runner.SIGSTORE_MODULES:
+            patched.setitem(sys.modules, module, None)
+        with pytest.raises(ValueError, match="signature-policy needs sigstore"):
+            runner.Config.from_env(
+                {"GITHUB_WORKSPACE": str(workspace), "SYMBIOTE_SIGNATURE_POLICY": str(policy)}
+            )
+        assert runner.Config.from_env({"GITHUB_WORKSPACE": str(workspace)}).signature_policy is None
+    blocked = "import runpy, sys; sys.modules.update(sigstore=None, sigstore_models=None); "
+    result = _entry_point(
+        tmp_path,
+        workspace,
+        policy,
+        launcher=("-c", blocked + "runpy.run_path(sys.argv[1], run_name='__main__')"),
+    )
+    assert result.returncode == 1
+    assert "signature-policy needs sigstore, which this Action runtime cannot import" in (
+        result.stderr
+    )
+    assert not (workspace / "result.json").exists()
+    assert not (tmp_path / "action-outputs").exists()
+
+
+def test_cli_runs_with_an_empty_private_sigstore_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    planted = {
+        "HOME": str(tmp_path / "runner-home"),
+        "XDG_CACHE_HOME": str(tmp_path / "runner-cache"),
+        "XDG_DATA_HOME": str(tmp_path / "runner-data"),
+    }
+    for name, value in {**planted, "SYMBIOTE_INHERITED_PROBE": "kept"}.items():
+        monkeypatch.setenv(name, value)
+    homes: list[dict[str, str]] = []
+
+    def invoke(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        env = kwargs["env"]
+        assert isinstance(env, dict) and env["SYMBIOTE_INHERITED_PROBE"] == "kept"
+        homes.append({name: env[name] for name in planted})
+        assert not any(Path(env["HOME"]).iterdir())
+        cli = args[args.index("nexus_symbiote") + 1 :]
+        if cli[0] == "scan":
+            Path(cli[cli.index("--output") + 1]).write_text("{}")
+        return subprocess.CompletedProcess(args, 0, '{"overall_score": 0}', "")
+
+    monkeypatch.setattr(runner.subprocess, "run", invoke)
+    config = runner.Config.from_env({"GITHUB_WORKSPACE": str(workspace)})
+    assert runner.run(config, export=lambda native, output, fmt: None) == 0
+    assert len(homes) == 3 and homes.count(homes[0]) == 3
+    private = Path(homes[0]["HOME"])
+    assert private.parent.name.startswith("nexus-symbiote-action-")
+    assert Path(homes[0]["XDG_CACHE_HOME"]).parent == private
+    assert Path(homes[0]["XDG_DATA_HOME"]).parent == private
+    assert not private.exists()
+
+
+HOSTILE_TRUSTED_ROOT = {
+    "mediaType": "application/vnd.dev.sigstore.trustedroot+json;version=0.1",
+    "tlogs": [],
+    "certificateAuthorities": [],
+    "ctlogs": [],
+    "timestampAuthorities": [],
+}
+TUF_TARGETS = "sigstore-python/tuf/https%3A%2F%2Ftuf-repo-cdn.sigstore.dev/trusted_root.json"
+
+
+def test_planted_sigstore_cache_cannot_choose_the_trust_root(tmp_path: Path) -> None:
+    pytest.importorskip("sigstore")
+    workspace = _signed_workspace(tmp_path)
+    policy = _caller_policy(tmp_path)
+    home = tmp_path / "planted-home"
+    planted = {
+        "HOME": str(home),
+        "XDG_CACHE_HOME": str(home / "xdg-cache"),
+        "XDG_DATA_HOME": str(home / "xdg-data"),
+    }
+    for cache in ("xdg-cache", ".cache", "Library/Caches"):
+        root = home / cache / TUF_TARGETS
+        root.parent.mkdir(parents=True)
+        root.write_text(json.dumps(HOSTILE_TRUSTED_ROOT))
+    direct = subprocess.run(  # noqa: S603
+        [
+            *(sys.executable, "-I", "-m", "nexus_symbiote", "scan", "--no-project-policy"),
+            *("--report-only", "--format", "json", "--output", str(tmp_path / "direct.json")),
+            *("--signature-policy", str(policy), "--", str(workspace / "agent")),
+        ],
+        cwd=tmp_path,
+        env={**os.environ, **planted},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    # Control: the CLI on its own takes its offline trust root from that cache.
+    assert direct.returncode == 0, direct.stderr
+    assert _model(tmp_path / "direct.json")["signing_status"] == "verification-failed"
+    result = _entry_point(tmp_path, workspace, policy, **planted)
+    assert "Sigstore artifact verification failed" not in result.stderr
+    assert "Hashes verified: 1, failed: 0" in result.stderr
+    model = _model(workspace / "result.json")
+    assert model["signing_status"] == "sigstore-signed"
+    assert model["signing_identity"] == SIGNER
+
+
+def test_entry_point_reaches_its_scratch_without_symlinks(tmp_path: Path) -> None:
+    pytest.importorskip("sigstore")
+    workspace = _signed_workspace(tmp_path)
+    policy = _caller_policy(tmp_path)
+    real = tmp_path / "real-tmp"
+    real.mkdir()
+    (tmp_path / "linked-tmp").symlink_to(real, target_is_directory=True)
+    result = _entry_point(tmp_path, workspace, policy, TMPDIR=str(tmp_path / "linked-tmp"))
+    assert "symbolic link" not in result.stderr
+    assert "Selected signature policy is unavailable" not in result.stderr
+    assert _model(workspace / "result.json")["signing_status"] == "sigstore-signed"
+    assert not any(real.iterdir())
