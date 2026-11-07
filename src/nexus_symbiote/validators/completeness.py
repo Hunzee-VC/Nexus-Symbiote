@@ -22,6 +22,7 @@ from nexus_symbiote.core.models import (
     ToolComponent,
 )
 from nexus_symbiote.scanner_catalog import BUILTIN_SCANNER_NAMES
+from nexus_symbiote.utils.confined import ConfinedCollection
 
 if TYPE_CHECKING:
     from nexus_symbiote.scanners.base import ScanResult
@@ -624,10 +625,29 @@ def discovery_signature_required(
     """An operator signature policy that names a discovery report also requires its signer."""
     from nexus_symbiote.scanners.shadowscan import REPORT_PATHS
 
-    reports = {(root / path).resolve() for path in REPORT_PATHS}
-    return required_by_policy or any(
-        p.artifact_path.resolve() in reports for p in signature_policies
-    )
+    return required_by_policy or _report_policy(root, signature_policies, REPORT_PATHS) is not None
+
+
+def _report_policy(
+    root: Path, signature_policies: Sequence[SigstoreArtifactPolicy], reports: Sequence[str]
+) -> SigstoreArtifactPolicy | None:
+    """Return the operator entry that names one of ``reports``, by path or else by file.
+
+    Matching by device and inode covers another name for the same file, such as a
+    different case on a case-insensitive filesystem; a path comparison alone would
+    leave that entry's signer unchecked. Identities are read beneath the pinned
+    root without following symlinks.
+    """
+    paths = {(root / path).resolve() for path in reports}
+    named = next((p for p in signature_policies if p.artifact_path.resolve() in paths), None)
+    if named is not None or not signature_policies:
+        return named
+    with ConfinedCollection(root, []) as files:
+        identities = {files.path_identity(path) for path in reports} - {None}
+        return next(
+            (p for p in signature_policies if files.path_identity(p.artifact_path) in identities),
+            None,
+        )
 
 
 def discovery_producer_problems(
@@ -662,8 +682,7 @@ def discovery_producer_problems(
     problems = []
     if CompletenessValidator._discovery_mismatches(bom, local):
         problems.append("ShadowScan evidence differs from the projection of the signed report.")
-    report_path = (root / local.source_report_path).resolve()
-    policy = next((p for p in signature_policies if p.artifact_path.resolve() == report_path), None)
+    policy = _report_policy(root, signature_policies, [local.source_report_path])
     if policy is None:
         problems.append(
             "No operator signature policy entry names the ShadowScan report "

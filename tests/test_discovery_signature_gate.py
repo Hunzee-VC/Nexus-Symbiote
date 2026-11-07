@@ -7,6 +7,7 @@ Sigstore bundle over those bytes.
 
 import hashlib
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -16,7 +17,7 @@ from click.testing import CliRunner
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.policy import Policy
-from nexus_symbiote.utils.crypto import VerificationResult
+from nexus_symbiote.utils.crypto import SIGSTORE_MISSING, VerificationResult
 from nexus_symbiote.validators.completeness import discovery_producer_problems
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -26,6 +27,11 @@ IDENTITY = "https://github.com/acme/discovery/.github/workflows/scan.yml@refs/he
 ISSUER = "https://token.actions.githubusercontent.com"
 GATED = "validate: {require_integrity: false, require_discovery_signature: true}\n"
 UNGATED = "validate: {require_integrity: false}\n"
+# Only the producer check guards the evidence when the gated project switches completeness off.
+UNCHECKED = (
+    "validate: {require_completeness: false, require_integrity: false,"
+    " require_discovery_signature: true}\n"
+)
 
 
 def _project(tmp_path: Path, policy: str) -> tuple[Path, Path]:
@@ -42,10 +48,12 @@ def _project(tmp_path: Path, policy: str) -> tuple[Path, Path]:
     return project, bom
 
 
-def _signers(tmp_path: Path, identity: str = IDENTITY) -> Path:
+def _signers(
+    tmp_path: Path, identity: str = IDENTITY, artifact: str = ".shadowscan/report.json"
+) -> Path:
     path = tmp_path / "signers.json"
     record = {
-        "artifact_path": ".shadowscan/report.json",
+        "artifact_path": artifact,
         "bundle_path": ".shadowscan/report.sigstore.json",
         "expected_identity": identity,
         "expected_issuer": ISSUER,
@@ -184,3 +192,83 @@ def test_the_policy_flag_is_strict_and_off_by_default():
     assert Policy.model_validate({"validate": {"require_discovery_signature": True}})
     with pytest.raises(ValueError):
         Policy.model_validate({"validate": {"require_discovery_signature": "true"}})
+
+
+def _discovered(doc: dict, component_type: str) -> dict:
+    return next(
+        c
+        for c in doc["components"]
+        if c["bom_ref"].startswith("shadowscan:") and c["component_type"] == component_type
+    )
+
+
+def _clear_server_risks(doc: dict) -> None:
+    _discovered(doc, "mcp-server")["risks"] = []
+
+
+def _drop_discovered_agent(doc: dict) -> None:
+    agent = _discovered(doc, "agent")["bom_ref"]
+    doc["components"] = [c for c in doc["components"] if c["bom_ref"] != agent]
+    doc["dependencies"] = [
+        e for e in doc["dependencies"] if agent not in (e["source_ref"], e["target_ref"])
+    ]
+
+
+@pytest.mark.parametrize("edit", [_clear_server_risks, _drop_discovered_agent])
+def test_the_signed_report_binds_the_evidence_when_completeness_is_off(tmp_path, monkeypatch, edit):
+    calls = _verifier(monkeypatch)
+    project, bom = _project(tmp_path, UNCHECKED)
+    signers = str(_signers(tmp_path))
+    assert _validate(bom, project, "--signature-policy", signers).exit_code == 0
+    doc = json.loads(bom.read_text())
+    edit(doc)
+    bom.write_text(json.dumps(doc))
+    result = _validate(bom, project, "--signature-policy", signers)
+    assert result.exit_code == 1 and len(calls) == 2
+    assert "ShadowScan evidence differs from the projection of the signed report." in result.output
+
+
+def test_a_report_removed_after_the_scan_cannot_be_authenticated(tmp_path, monkeypatch):
+    calls = _verifier(monkeypatch)
+    project, bom = _project(tmp_path, UNCHECKED)
+    (project / ".shadowscan/report.json").unlink()
+    result = _validate(bom, project)
+    assert result.exit_code == 1 and calls == []
+    assert "No readable ShadowScan report beneath the project root to authenticate." in (
+        result.output
+    )
+
+
+def test_a_missing_sigstore_extra_fails_with_its_install_hint(tmp_path, monkeypatch):
+    _verifier(monkeypatch, verified=False, error=SIGSTORE_MISSING, details=None)
+    project, bom = _project(tmp_path, GATED)
+    result = _validate(bom, project, "--signature-policy", str(_signers(tmp_path)))
+    assert result.exit_code == 1
+    assert SIGSTORE_MISSING in result.output
+    assert "signer policy verification failed" not in result.output
+
+
+def _another_name(project: Path, kind: str) -> str:
+    if kind == "hard link":
+        os.link(project / ".shadowscan/report.json", project / ".shadowscan/alias.json")
+        return ".shadowscan/alias.json"
+    if not (project / ".shadowscan/REPORT.json").is_file():
+        pytest.skip("the filesystem is case-sensitive")
+    return ".shadowscan/REPORT.json"
+
+
+@pytest.mark.parametrize("kind", ["hard link", "case variant"])
+def test_an_entry_naming_the_report_file_differently_still_requires_its_signer(
+    tmp_path, monkeypatch, kind
+):
+    project, bom = _project(tmp_path, GATED)
+    signers = str(_signers(tmp_path, artifact=_another_name(project, kind)))
+    calls = _verifier(monkeypatch)
+    result = _validate(bom, project, "--signature-policy", signers)
+    assert result.exit_code == 0, result.output
+    assert len(calls) == 1
+    (project / ".nexus-symbiote.yaml").write_text(UNGATED)
+    calls = _verifier(monkeypatch, verified=False, error="Sigstore artifact verification failed")
+    result = _validate(bom, project, "--signature-policy", signers)
+    assert result.exit_code == 1 and len(calls) == 1
+    assert "ShadowScan report signature or signer policy verification failed" in result.output
