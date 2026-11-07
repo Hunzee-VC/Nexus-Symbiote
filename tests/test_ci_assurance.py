@@ -81,29 +81,35 @@ def lock_entries(path):
 def test_action_lock_reuses_reviewed_hashes_and_closes_runtime_dependencies():
     action = lock_entries(ROOT / "requirements-action.lock")
     ci = lock_entries(ROOT / "requirements-ci.lock")
-    assert not {"pytest", "ruff", "mypy", "sigstore"} & action.keys()
+    assert not {"pytest", "ruff", "mypy"} & action.keys()
     for name, (_, block) in action.items():
         assert block == ci[name][1]
         assert "--hash=sha256:" in block
-    project = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
+    # The signature-policy input verifies Sigstore bundles inside the Action's
+    # own venv, so its lock must close the signing extra as well as the core.
+    roots = [*project["dependencies"], *project["optional-dependencies"]["sigstore"], "hatchling"]
+    assert {"sigstore", "tuf"} <= action.keys()
     for python in ("3.11", "3.12", "3.13", "3.14"):
         env = default_environment()
         env.update(python_version=python, python_full_version=python + ".0", extra="")
-        pending = [*project["project"]["dependencies"], "hatchling"]
+        pending = [(root, "") for root in roots]
         seen = set()
         while pending:
-            requirement = Requirement(pending.pop())
-            if requirement.marker and not requirement.marker.evaluate(env):
+            text, extra = pending.pop()
+            requirement = Requirement(text)
+            if requirement.marker and not requirement.marker.evaluate({**env, "extra": extra}):
                 continue
             name = canonicalize_name(requirement.name)
-            if name in seen:
-                continue
-            seen.add(name)
             locked, _ = action[name]
             version = next(iter(locked.specifier)).version
             assert requirement.specifier.contains(version)
             assert not locked.marker or locked.marker.evaluate(env)
-            pending.extend(importlib.metadata.distribution(name).requires or [])
+            for wanted in ("", *sorted(requirement.extras)):
+                if (name, wanted) not in seen:
+                    seen.add((name, wanted))
+                    requires = importlib.metadata.distribution(name).requires or []
+                    pending.extend((dependency, wanted) for dependency in requires)
 
 
 def test_consumer_action_installs_only_locked_dependencies_before_source():
