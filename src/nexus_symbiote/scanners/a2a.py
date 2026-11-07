@@ -198,8 +198,8 @@ def _value_binding(profile: str, declaration: dict[str, Any]) -> dict[str, str]:
         message = canonical_json({"profile": profile, "configuration": declaration})
     except ValueError as exc:
         raise _BindingError(
-            f"{SOURCE_BINDING_KEY_ENV} binding needs RFC 8785 JSON values; "
-            "quote YAML dates and timestamps"
+            f"{SOURCE_BINDING_KEY_ENV} binding needs RFC 8785 JSON values (quote YAML "
+            "dates; avoid lone surrogates and integers beyond 2**53)"
         ) from exc
     material = key.encode()
     key_id = hmac.new(material, b"nexus-symbiote/source-binding-key-id", "sha256").hexdigest()

@@ -471,13 +471,18 @@ def test_client_well_known_card_path_swap_changes_the_structure_digest(tmp_path)
     assert len(hashes) == 2
 
 
-def test_keyed_binding_names_yaml_values_that_are_not_json(tmp_path, monkeypatch):
-    (tmp_path / "a2a.yaml").write_text("clients:\n  - name: c\n    added: 2024-01-01\n")
-    assert not A2AScanner().scan(tmp_path).scan_failures
+def test_keyed_binding_names_values_that_are_not_json(tmp_path, monkeypatch):
+    client, card = tmp_path / "client", tmp_path / "card"
+    client.mkdir()
+    (client / "a2a.yaml").write_text("clients:\n  - name: c\n    added: 2024-01-01\n")
+    _write_card(card, {**CARD, "skills": [{"name": "s", "description": "\ud800"}]})
+    assert not A2AScanner().scan(client).scan_failures
+    assert not A2AScanner().scan(card).scan_failures
     monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
-    (failure,) = A2AScanner().scan(tmp_path).scan_failures
-    assert failure.startswith(f"a2a.yaml: {SOURCE_BINDING_KEY_ENV} binding needs RFC 8785 JSON")
-    assert "quote YAML dates" in failure
+    for root, relative in ((client, "a2a.yaml"), (card, ".well-known/agent.json")):
+        (failure,) = A2AScanner().scan(root).scan_failures
+        assert failure.startswith(f"{relative}: {SOURCE_BINDING_KEY_ENV} binding needs RFC 8785")
+        assert "quote YAML dates; avoid lone surrogates" in failure
 
 
 VECTOR_KEY = "nexus-symbiote-a2a-test-vector-key"
