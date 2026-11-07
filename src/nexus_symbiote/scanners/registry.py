@@ -499,6 +499,27 @@ class RegistryScanner(Scanner):
     # pip decodes a file without a byte order mark by the PEP 263 declaration in its
     # first two lines.
     _CODING = re.compile(r"coding[:=]\s*([-\w.]+)", re.ASCII)
+    # A URL scheme as urlsplit finds one, after it drops leading C0 controls and spaces
+    # and every tab, CR and LF. Any scheme, not only pip's: no PEP 508 name has one.
+    _URL_SCHEME = re.compile(r"[\x00-\x20]*[A-Za-z0-9+.-]+:")
+    _URL_DROPPED = dict.fromkeys(map(ord, "\t\r\n"))
+    # "name @ URL", which pip reads by its name.
+    _NAMED_URL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*[ \t]*(?:\[[^\]/\\]*\][ \t]*)?@")
+    # pip 26.3's archive extensions.
+    _ARCHIVES = (
+        ".zip",
+        ".whl",
+        ".tar.bz2",
+        ".tbz",
+        ".tar.gz",
+        ".tgz",
+        ".tar",
+        ".tar.xz",
+        ".txz",
+        ".tlz",
+        ".tar.lz",
+        ".tar.lzma",
+    )
 
     @staticmethod
     def _requirement_files(entries: list[str]) -> list[str]:
@@ -617,6 +638,30 @@ class RegistryScanner(Scanner):
             and not path.startswith("/")
             and all(part in ("", ".") for part in path.split("/"))
         )
+
+    @classmethod
+    def _unnamed(cls, reference: str, entries: set[str]) -> bool:
+        """Whether pip installs a requirement from a URL, an archive or a path other
+        than the project itself, where the collector reads no package name.
+
+        pip 26.3 takes a URL by its scheme, then a path with a separator or a leading
+        ".", then a name ending in an archive extension; only then a PEP 508
+        requirement. Whether such a directory or file exists is known only where pip
+        runs, so it is taken to exist.
+        """
+        if cls._NAMED_URL.match(reference):
+            return False
+        url = cls._URL_SCHEME.match(reference.translate(cls._URL_DROPPED)) is not None
+        # pip's marker separator, which a URL may contain without a space.
+        target = reference.split("; " if url else ";", 1)[0].strip()
+        if not (
+            url
+            or any(c in target for c in "/\\")
+            or target.startswith(".")
+            or re.sub(r"\[[^\]]+\]$", "", target).lower().endswith(cls._ARCHIVES)
+        ):
+            return False
+        return not cls._editable_covered(target, entries)
 
     # Python's names for UTF-8, lower case with "-" as "_".
     _UTF8_NAMES = frozenset({"utf_8", "utf8", "u8", "utf", "cp65001", "utf_8_sig"})
@@ -795,6 +840,10 @@ class RegistryScanner(Scanner):
                         ):
                             # pip installs the requirement itself as editable.
                             gaps = ["editable install not followed"]
+                        elif self._unnamed(reference, folded):
+                            # The gap never names the reference, which can carry a
+                            # credential.
+                            gaps = ["URL, VCS or path requirement not followed"]
                         component = self._pip_component(reference, path, result)
                         if component is not None:
                             declare(component, filename, reference)

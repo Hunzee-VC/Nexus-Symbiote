@@ -427,15 +427,11 @@ def test_differing_declarations_in_one_requirements_file_get_one_finding(tmp_pat
     [
         "-e .\n",
         "-e .[dev]\n",
-        "git+https://github.com/example/unknown\n",
-        "https://files.example/python-dateutil-2.8.2.tar.gz\n",
-        "./wheels/openai-1.3.0-py3-none-any.whl\n",
+        ".\n",
     ],
 )
 def test_lines_the_collector_does_not_follow_leave_the_default_gate_as_on_main(tmp_path, content):
-    # The project's own editable install is covered by its pyproject.toml, and URL,
-    # VCS or path references without an AI package name are skipped, as before; the
-    # README and security model state the limit.
+    # The project's own install is covered by its pyproject.toml.
     project = tmp_path / "project"
     project.mkdir()
     (project / "AGENTS.md").write_text("Keep receipts.")
@@ -464,6 +460,16 @@ def test_lines_the_collector_does_not_follow_leave_the_default_gate_as_on_main(t
             "editable install not followed",
         ),
         ("-r 'unbalanced\n", "option line not parsed"),
+        # pip installs these without a package name, so the collector names none.
+        ("git+https://github.com/example/unknown\n", "URL, VCS or path requirement not followed"),
+        (
+            "https://files.example/python-dateutil-2.8.2.tar.gz\n",
+            "URL, VCS or path requirement not followed",
+        ),
+        (
+            "./wheels/openai-1.3.0-py3-none-any.whl\n",
+            "URL, VCS or path requirement not followed",
+        ),
     ],
 )
 def test_lines_that_pull_in_unread_packages_are_a_coverage_gap(tmp_path, content, gap):

@@ -215,6 +215,104 @@ def test_editable_file_url_is_not_the_project_when_a_directory_shadows_it(tmp_pa
     ]
 
 
+WHEEL_URL = "https://files.pythonhosted.org/packages/x/openai-1.0.0-py3-none-any.whl"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "./vendor/openai",
+        "vendor/openai[extra]",
+        "git+https://github.com/openai/openai-python@v1.0.0#egg=openai",
+        "GIT+HTTPS://github.com/openai/openai-python@v1.0.0#egg=openai",
+        WHEEL_URL,
+        "file:vendor/openai",
+        "../openai",
+        # pip finds the scheme after it drops a tab, and reads a local archive.
+        "git+ht\ttps://github.com/openai/openai-python#egg=openai",
+        "dist/openai-1.0.0.tar.gz",
+        f"{WHEEL_URL} --hash=sha256:{'0' * 64} --hash sha256:{'1' * 64}",
+        "./vendor/openai ; python_version >= '3.8'",
+        f"{WHEEL_URL} ; sys_platform == 'linux'",
+    ],
+)
+def test_requirement_by_url_or_path_is_partial(tmp_path, line):
+    # pip installs these without a PEP 508 name, so no component can stand for them.
+    project = _project(
+        tmp_path / "proj",
+        {
+            "requirements.txt": f"{line}\n",
+            "vendor/openai/pyproject.toml": '[project]\nname = "openai"\nversion = "1.0.0"\n',
+        },
+    )
+    result = RegistryScanner().scan(project)
+    assert result.surfaces_excluded == [
+        "requirements.txt: URL, VCS or path requirement not followed"
+    ]
+    assert result.components == [] and result.scan_failures == []
+    assert NOTHING_FOUND not in result.surfaces_scanned
+    code, document = _scan(project, tmp_path / "a.json")
+    assert code == 1
+    assert document["metadata"]["completeness"]["scanner_status"]["registry"] == "partial"
+
+
+def test_requirement_by_archive_name_is_partial(tmp_path):
+    # pip reads a name ending in an archive extension as a file, not a PyPI name.
+    _project(tmp_path, {"requirements.txt": "openai-1.0.0-py3-none-any.whl\n"})
+    assert RegistryScanner().scan(tmp_path).surfaces_excluded == [
+        "requirements.txt: URL, VCS or path requirement not followed"
+    ]
+
+
+def test_url_requirement_gap_names_no_reference(tmp_path):
+    project = _project(
+        tmp_path / "proj",
+        {
+            "requirements.txt": "openai==1.0.0\n"
+            "git+https://alice:S3CR1@github.com/org/S3CR2.git#egg=openai\n"
+        },
+    )
+    for fmt in ("json", "cyclonedx", "spdx", "sarif"):
+        out = tmp_path / f"out.{fmt}"
+        result = CliRunner().invoke(
+            main,
+            ["scan", str(project), "--no-project-policy", "--report-only", "-f", fmt]
+            + ["-o", str(out)],
+        )
+        assert result.exit_code == 0, result.output
+        text = out.read_text(encoding="utf-8") + result.output
+        assert "S3CR" not in text and "alice" not in text, fmt
+    assert "URL, VCS or path requirement not followed" in (tmp_path / "out.json").read_text()
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        ".",
+        "./",
+        ".[dev]",
+        "file:.",
+        ". ; python_version >= '3.8'",
+        f". --hash=sha256:{'0' * 64}",
+        f"openai @ {WHEEL_URL}",
+        "openai[dev] @ git+https://github.com/openai/openai-python@v1.0.0",
+    ],
+)
+def test_requirement_naming_the_project_or_a_package_stays_complete(tmp_path, line):
+    # The project's own pyproject.toml is read, and "name @ URL" keeps its name.
+    _project(
+        tmp_path,
+        {
+            "requirements.txt": f"{line}\n",
+            "pyproject.toml": '[project]\nname = "proj"\nversion = "1.0.0"\n'
+            'dependencies = ["openai==1.0.0"]\n',
+        },
+    )
+    result = RegistryScanner().scan(tmp_path)
+    assert result.surfaces_excluded == [] and result.scan_failures == []
+    assert [c.name for c in result.components] == ["openai"]
+
+
 @pytest.mark.parametrize(
     ("dockerfile", "image", "risk"),
     [
