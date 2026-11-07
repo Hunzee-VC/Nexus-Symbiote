@@ -263,3 +263,176 @@ def test_dockerfile_parsing_is_linear(tmp_path):
     result = RegistryScanner().scan(tmp_path)
     assert time.monotonic() - started < 5
     assert result.surfaces_excluded == ["Dockerfile: FROM instruction not parsed"]
+
+
+POETRY = '[tool.poetry]\nname = "agent"\nversion = "0.1.0"\n[tool.poetry.dependencies]\npython = "^3.11"\n'
+
+
+def _poetry(root: Path, body: str) -> RegistryScanner:
+    _project(root, {"pyproject.toml": POETRY + body})
+    return RegistryScanner()
+
+
+@pytest.mark.parametrize(
+    ("constraint", "specifier"),
+    [
+        ("2.3.1", "==2.3.1"),
+        ("=2.3.1", "==2.3.1"),
+        ("2.3.*", "==2.3.*"),
+        ("*", ""),
+        ("", ""),
+        ("^1.2.3", ">=1.2.3,<2"),
+        ("^1.2", ">=1.2,<2"),
+        ("^1", ">=1,<2"),
+        ("^0.2.3", ">=0.2.3,<0.3"),
+        ("^0.0.3", ">=0.0.3,<0.0.4"),
+        ("^0.0", ">=0.0,<0.1"),
+        ("^0", ">=0,<1"),
+        ("~1.2.3", ">=1.2.3,<1.3"),
+        ("~1.2", ">=1.2,<1.3"),
+        ("~1", ">=1,<2"),
+        ("~=2.3", "~=2.3"),
+        (">= 2.3, < 3.0", ">= 2.3,< 3.0"),
+        ("^2.3,!=2.4.1", ">=2.3,<3,!=2.4.1"),
+        ("^2.3 || ^3.0", None),
+        (">=1.2 <1.5", None),
+        ("^1.0.0a1", None),
+        ("^" + "9" * 70, None),
+        ("https://h.example/t.whl", None),
+    ],
+)
+def test_poetry_constraints_translate_to_pep440(constraint, specifier):
+    from nexus_symbiote.scanners.registry import _poetry_specifier
+
+    assert _poetry_specifier(constraint) == specifier
+
+
+@pytest.mark.parametrize(
+    "line", ['torch = "2.3.1"', 'torch = {version = "2.3.1", optional = true}']
+)
+def test_poetry_bare_version_is_an_exact_pin(tmp_path, line):
+    result = _poetry(tmp_path, line + "\n").scan(tmp_path)
+    assert result.scan_failures == [] and result.surfaces_excluded == []
+    (component,) = result.components
+    assert component.bom_ref == "registry:pypi/torch"
+    assert component.package_url == "pkg:pypi/torch@2.3.1" and component.risks == []
+
+
+@pytest.mark.parametrize(
+    ("value", "version"),
+    [('"^2.3"', "<3,>=2.3"), ('"^0.2.3"', "<0.3,>=0.2.3"), ('"~2.3"', "<2.4,>=2.3"), ('"*"', None)],
+)
+def test_poetry_caret_tilde_and_wildcard_are_not_failures(tmp_path, value, version):
+    result = _poetry(tmp_path, f"torch = {value}\n").scan(tmp_path)
+    assert result.scan_failures == [] and result.surfaces_excluded == []
+    assert [(c.bom_ref, c.version) for c in result.components] == [("registry:pypi/torch", version)]
+    code, _ = _scan(tmp_path, tmp_path / "bom.json")
+    assert code == 0
+
+
+def test_poetry_sources_are_recorded_by_name_as_a_gap(tmp_path):
+    body = (
+        'torch = {git = "https://alice:S3CR1@github.com/pytorch/S3CR2.git", rev = "v2.3.1"}\n'
+        'openai = {url = "https://alice:S3CR1@h.example/S3CR2/openai.whl"}\n'
+        'langchain = {path = "../vendor/S3CR2", develop = true}\n'
+        'tokenizers = [{version = "0.19.1", platform = "linux"}, {version = "0.19.0", platform = "darwin"}]\n'
+    )
+    project = tmp_path / "proj"
+    result = _poetry(project, body).scan(project)
+    assert result.scan_failures == []
+    assert result.surfaces_excluded == [
+        "pyproject.toml: Poetry git, path or URL dependency not translated"
+    ]
+    by_ref = {c.bom_ref: c for c in result.components}
+    assert sorted(by_ref) == [
+        "registry:pypi/langchain",
+        "registry:pypi/openai",
+        "registry:pypi/tokenizers",
+        "registry:pypi/torch",
+    ]
+    assert by_ref["registry:pypi/torch"].package_url is None
+    tokenizers = by_ref["registry:pypi/tokenizers"]
+    assert tokenizers.version == '==0.19.1; sys_platform == "linux"'
+    assert tokenizers.package_url is None
+    for fmt in ("json", "cyclonedx", "spdx", "sarif"):
+        out = tmp_path / f"out.{fmt}"
+        scanned = CliRunner().invoke(
+            main,
+            ["scan", str(project), "--no-project-policy", "--report-only", "-f", fmt]
+            + ["-o", str(out)],
+        )
+        assert scanned.exit_code == 0, scanned.output
+        text = out.read_text(encoding="utf-8") + scanned.output
+        assert "S3CR" not in text and "alice" not in text, fmt
+
+
+def test_poetry_markers_do_not_become_an_unconditional_pin(tmp_path):
+    body = 'torch = {version = "==2.3.1", markers = "sys_platform == \'linux\'"}\n'
+    (component,) = _poetry(tmp_path, body).scan(tmp_path).components
+    assert component.package_url is None
+    assert "sys_platform" in component.version
+    assert "sys_platform" in component.properties["requested_requirement"]
+
+
+def test_poetry_groups_and_dev_dependencies_are_read(tmp_path):
+    body = (
+        'torch = "2.3.1"\n[tool.poetry.group.ml.dependencies]\ncohere = "5.5.0"\ntorch = "2.2.0"\n'
+        '[tool.poetry.dev-dependencies]\nopenai = "1.30.1"\n'
+    )
+    result = _poetry(tmp_path, body).scan(tmp_path)
+    assert result.scan_failures == [] and result.surfaces_excluded == []
+    by_name = {c.name: c for c in result.components}
+    assert by_name["cohere"].package_url == "pkg:pypi/cohere@5.5.0"
+    assert by_name["openai"].package_url == "pkg:pypi/openai@1.30.1"
+    assert by_name["torch"].risks == []
+
+
+@pytest.mark.parametrize(
+    "line",
+    ['torch = "^2.3 || ^3.0"', 'torch = {version = "2.3.1", python = "^3.11"}'],
+)
+def test_untranslatable_poetry_condition_is_partial(tmp_path, line):
+    result = _poetry(tmp_path, line + "\n").scan(tmp_path)
+    assert result.surfaces_excluded == [
+        "pyproject.toml: Poetry dependency condition not translated"
+    ]
+    assert result.scan_failures == []
+    assert [(c.bom_ref, c.package_url) for c in result.components] == [
+        ("registry:pypi/torch", None)
+    ]
+    code, document = _scan(tmp_path, tmp_path / "bom.json")
+    assert code == 1
+    assert document["metadata"]["completeness"]["scanner_status"]["registry"] == "partial"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        'torch = "https://h.example/t.whl"',
+        "torch = 5",
+        'torch = {version = "2.3.1", markers = "((("}',
+        '"torch==2" = "*"',
+    ],
+)
+def test_invalid_poetry_dependency_is_a_failure_without_a_mangled_name(tmp_path, line):
+    result = _poetry(tmp_path, line + "\n").scan(tmp_path)
+    assert result.scan_failures == ["pyproject.toml: invalid or unsupported Poetry dependency"]
+    assert {c.bom_ref for c in result.components} <= {"registry:pypi/torch"}
+
+
+def test_poetry_python_key_is_not_a_package(tmp_path):
+    result = _poetry(tmp_path, "").scan(tmp_path)
+    assert result.components == [] and result.scan_failures == []
+
+
+def test_poetry_pin_change_is_a_version_change(tmp_path):
+    project = _project(tmp_path / "proj", {})
+    runner = CliRunner()
+    for version, out in (("2.3.1", "a.json"), ("2.3.2", "b.json")):
+        (project / "pyproject.toml").write_text(POETRY + f'torch = "{version}"\n')
+        _scan(project, tmp_path / out, "--report-only")
+    diff = runner.invoke(
+        main, ["diff", str(tmp_path / "a.json"), str(tmp_path / "b.json"), "--fail-on-alert"]
+    )
+    assert diff.exit_code == 1, diff.output
+    assert "==2.3.1 → ==2.3.2" in diff.output and "torch2" not in diff.output

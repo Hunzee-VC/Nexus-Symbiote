@@ -17,8 +17,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+from packaging.markers import InvalidMarker, Marker
 from packaging.requirements import InvalidRequirement, Requirement
-from packaging.specifiers import Specifier
+from packaging.specifiers import InvalidSpecifier, Specifier
 from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
@@ -89,6 +90,57 @@ def _parsed(text: str) -> Version | None:
         return Version(text)
     except InvalidVersion:
         return None
+
+
+_POETRY_RANGE = re.compile(r"([\^~])[ \t]*([0-9]{1,64})(?:\.([0-9]{1,64}))?(?:\.([0-9]{1,64}))?")
+# The characters of Poetry's constraint grammar. A constraint made only of them
+# that is not translated is a condition left out; anything else is invalid.
+_POETRY_CONSTRAINT = re.compile(r"[0-9A-Za-z.*+!_^~=<>|, \t-]*")
+_PEP508_NAME = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?")
+_PLATFORM = re.compile(r"[A-Za-z0-9_.-]+")
+
+
+def _poetry_specifier(text: str) -> str | None:
+    """A Poetry version constraint as a PEP 440 specifier set, or None if not translated.
+
+    A bare version is exact; ^ allows changes that keep the first non-zero part
+    given, and ~ changes below the minor part, or below the major part if it is
+    the only one given.
+    """
+    text = text.strip()
+    if text in ("", "*"):
+        return ""
+    clauses: list[str] = []
+    for part in (p.strip() for p in text.split(",")):
+        ranged = _POETRY_RANGE.fullmatch(part)
+        if ranged is not None:
+            given = [g for g in ranged.groups()[1:] if g is not None]
+            numbers = [int(g) for g in given]
+            if ranged.group(1) == "~":
+                bump = min(1, len(numbers) - 1)
+            else:
+                bump = next((i for i, n in enumerate(numbers) if n), len(numbers) - 1)
+            upper = [*numbers[:bump], numbers[bump] + 1]
+            clauses += [f">={'.'.join(given)}", f"<{'.'.join(map(str, upper))}"]
+            continue
+        if "0" <= part[:1] <= "9":
+            part = "==" + part
+        elif part[:1] == "=" and part[1:2] != "=":
+            part = "=" + part
+        try:
+            Specifier(part)
+        except InvalidSpecifier:
+            return None
+        clauses.append(part)
+    return ",".join(clauses)
+
+
+def _valid_marker(text: str) -> bool:
+    try:
+        Marker(text)
+    except (InvalidMarker, RecursionError):
+        return False
+    return True
 
 
 def _admits(clause: Specifier, text: str, version: Version | None) -> bool:
@@ -691,14 +743,96 @@ class RegistryScanner(Scanner):
                     result.scan_failures.append("pyproject.toml: invalid optional dependencies")
         tool = data.get("tool", {})
         poetry: Any = tool.get("poetry", {}) if isinstance(tool, dict) else {}
-        poetry_deps = poetry.get("dependencies", {}) if isinstance(poetry, dict) else {}
-        if isinstance(poetry_deps, dict):
-            for name, value in poetry_deps.items():
-                if isinstance(value, str):
-                    declarations.append((f"{name}{value}", ""))
-                elif isinstance(value, dict) and isinstance(value.get("version"), str):
-                    declarations.append((f"{name}{value['version']}", ""))
+        if not isinstance(poetry, dict):
+            result.scan_failures.append(self._POETRY_PROBLEMS["table"])
+            return declarations
+        failures: dict[str, None] = {}
+        gaps: dict[str, None] = {}
+        # The legacy dev-dependencies table is Poetry's dev group. Group labels keep
+        # main and group declarations from being compared with each other.
+        tables: list[tuple[str, Any]] = [
+            ("", poetry.get("dependencies", {})),
+            ("poetry:group:dev", poetry.get("dev-dependencies", {})),
+        ]
+        groups = poetry.get("group", {})
+        if not isinstance(groups, dict):
+            failures[self._POETRY_PROBLEMS["table"]] = None
+            groups = {}
+        for group_name, group in groups.items():
+            dependencies = group.get("dependencies", {}) if isinstance(group, dict) else None
+            tables.append((f"poetry:group:{group_name}", dependencies))
+        for group_label, table in tables:
+            if not isinstance(table, dict):
+                failures[self._POETRY_PROBLEMS["table"]] = None
+                continue
+            for name, value in table.items():
+                if not self._is_ai_package(name):
+                    continue
+                if not _PEP508_NAME.fullmatch(name):
+                    failures[self._POETRY_PROBLEMS["invalid"]] = None
+                    continue
+                for entry in value if isinstance(value, list) and value else [value]:
+                    text, problem = self._poetry_requirement(name, entry)
+                    if problem is None:
+                        declarations.append((text, group_label))
+                        continue
+                    # The bare name, never compared: what it leaves out is unknown.
+                    declarations.append((name, "poetry:untranslated"))
+                    record = failures if problem == "invalid" else gaps
+                    record[self._POETRY_PROBLEMS[problem]] = None
+        result.scan_failures.extend(failures)
+        result.surfaces_excluded.extend(gaps)
         return declarations
+
+    _POETRY_PROBLEMS = {
+        "table": "pyproject.toml: invalid Poetry dependencies",
+        "invalid": "pyproject.toml: invalid or unsupported Poetry dependency",
+        "source": "pyproject.toml: Poetry git, path or URL dependency not translated",
+        "condition": "pyproject.toml: Poetry dependency condition not translated",
+    }
+
+    @staticmethod
+    def _poetry_requirement(name: str, entry: Any) -> tuple[str, str | None]:
+        """One Poetry declaration as PEP 508 text, or the bare name and why it is not.
+
+        A version, extras, markers and platform are translated. A git, path or URL
+        source and a python restriction are left out, and so is a constraint that
+        does not translate, such as a || union.
+        """
+        if isinstance(entry, str):
+            entry = {"version": entry}
+        if not isinstance(entry, dict):
+            return name, "invalid"
+        if any(key in entry for key in ("git", "path", "url", "file")):
+            return name, "source"
+        version = entry.get("version", "*")
+        extras = entry.get("extras", [])
+        markers = entry.get("markers")
+        platform = entry.get("platform")
+        if (
+            not isinstance(version, str)
+            or not isinstance(extras, list)
+            or not all(isinstance(e, str) and _PEP508_NAME.fullmatch(e) for e in extras)
+            or not (markers is None or (isinstance(markers, str) and _valid_marker(markers)))
+            or not (
+                platform is None or (isinstance(platform, str) and _PLATFORM.fullmatch(platform))
+            )
+        ):
+            return name, "invalid"
+        if "python" in entry:
+            return name, "condition"
+        specifier = _poetry_specifier(version)
+        if specifier is None:
+            return name, "condition" if _POETRY_CONSTRAINT.fullmatch(version) else "invalid"
+        conditions = [markers] if markers else []
+        if platform:
+            conditions.append(f'sys_platform == "{platform}"')
+        text = name + (f"[{','.join(extras)}]" if extras else "") + specifier
+        if len(conditions) == 1:
+            text += f" ; {conditions[0]}"
+        elif conditions:
+            text += " ; " + " and ".join(f"({c})" for c in conditions)
+        return text, None
 
     def _scan_docker(self, root: Path, result: ScanResult) -> list[RegistryEntryComponent]:
         components: list[RegistryEntryComponent] = []
