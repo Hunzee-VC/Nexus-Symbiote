@@ -488,6 +488,326 @@ def test_keyed_binding_names_values_that_are_not_json(tmp_path, monkeypatch):
         assert "quote YAML dates; avoid lone surrogates" in failure
 
 
+def _requirement(card: dict[str, Any], kind: str | None, values: list[str]) -> dict[str, Any]:
+    """Type the oauth scheme as `kind`, or drop every declaration when it is None."""
+    changed = copy.deepcopy(card)
+    if kind is None:
+        del changed["securitySchemes"]
+    else:
+        changed["securitySchemes"]["oauth"]["type"] = kind
+    changed["security"] = [{"oauth": values}]
+    return changed
+
+
+@pytest.mark.parametrize("kind", ["OAuth2", "OPENIDCONNECT", None, "apiKey", "x-custom"])
+def test_requirement_value_change_fails_the_drift_gate_without_a_key(tmp_path, kind):
+    before = _requirement(CARD, kind, ["read:only"])
+    run, boms = _drift(tmp_path / "changed", before, _requirement(CARD, kind, ["admin"]))
+    assert run.exit_code == 1, run.output
+    alerts = [alert["alert"] for alert in json.loads(run.stdout)["security_alerts"]]
+    scoped = kind in {"OAuth2", "OPENIDCONNECT"}
+    expected = "capabilities changed" if scoped else "properties changed"
+    assert any(expected in alert for alert in alerts), alerts
+    # Only scopes are exported; other requirement values enter the unkeyed digest only.
+    assert ('"read:only"' in boms) is scoped and ('"admin"' in boms) is scoped
+    unchanged, _ = _drift(tmp_path / "unchanged", before, copy.deepcopy(before))
+    assert unchanged.exit_code == 0, unchanged.output
+
+
+def test_scheme_types_match_the_known_types_case_insensitively(tmp_path):
+    card = _requirement(CARD, "OAuth2", ["read:only"])
+    card["securitySchemes"].update(
+        {
+            "oidc": {"type": "OpenIdConnect", "openIdConnectUrl": "https://id.example.com"},
+            "mtls": {"type": "MutualTLS"},
+        }
+    )
+    card["security"] = [{"oauth": ["read:only"], "oidc": ["openid"]}, {"mtls": []}]
+    server = _server(tmp_path, card)
+    assert server.properties["security_scheme_types"] == ["mutualTLS", "oauth2", "openIdConnect"]
+    assert server.capabilities is not None
+    assert server.capabilities.oauth_scopes == ["openid", "read:only"]
+    assert server.authentication_required is True
+
+
+def _with_url(kind: str, url: str) -> dict[str, Any]:
+    card = copy.deepcopy(CARD)
+    oauth = card["securitySchemes"]["oauth"]
+    if kind == "url":
+        card["url"] = url
+    elif kind == "supportedInterfaces":
+        del card["url"]
+        card[kind] = [{"url": url, "protocolBinding": "JSONRPC", "protocolVersion": "1.0"}]
+    elif kind == "additionalInterfaces":
+        card[kind] = [{"url": url, "transport": "GRPC"}]
+    elif kind == "openIdConnectUrl":
+        card["securitySchemes"]["oidc"] = {"type": "openIdConnect", kind: url}
+    elif kind == "oauth2MetadataUrl":
+        oauth[kind] = url
+    elif kind == "authorizationUrl":
+        oauth["flows"]["authorizationCode"] = {
+            kind: url,
+            "tokenUrl": "https://auth.example.com/token",
+            "scopes": {},
+        }
+    else:
+        oauth["flows"]["clientCredentials"][kind] = url
+    return card
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "url",
+        "supportedInterfaces",
+        "additionalInterfaces",
+        "tokenUrl",
+        "authorizationUrl",
+        "refreshUrl",
+        "openIdConnectUrl",
+        "oauth2MetadataUrl",
+    ],
+)
+def test_network_path_url_host_change_fails_the_drift_gate_without_a_key(tmp_path, kind):
+    before = _with_url(kind, "//auth.example.com")
+    run, boms = _drift(tmp_path / "moved", before, _with_url(kind, "//evil.example.net"))
+    assert run.exit_code == 1, run.output
+    assert '"//auth.example.com"' in boms and '"//evil.example.net"' in boms
+    assert "[redacted]" not in boms
+    unchanged, _ = _drift(tmp_path / "unchanged", before, copy.deepcopy(before))
+    assert unchanged.exit_code == 0, unchanged.output
+
+
+@pytest.mark.parametrize(
+    ("url", "origin", "unbound"),
+    [
+        ("//Auth.Example.com", "//auth.example.com", False),
+        ("//auth.example.com:8443/", "//auth.example.com:8443", False),
+        ("auth.example.com:443", "//auth.example.com:443", False),
+        ("[::1]:50051", "//[::1]:50051", False),
+        ("//auth.example.com/secret-path", "//auth.example.com", True),
+        ("//user:secret-word@auth.example.com", "//auth.example.com", True),
+        # Without an exported origin, nothing of the URL is bound without a key.
+        ("//", "[redacted]", True),
+        ("https://auth.example.com:99999", "[redacted]", True),
+        ("//auth.example.com\\secret-path", "[redacted]", True),
+    ],
+)
+def test_scheme_less_urls_export_their_host_and_unexported_origins_are_unbound(
+    tmp_path, url, origin, unbound
+):
+    server = _server(tmp_path, {**_with_url("tokenUrl", url), "url": "https://agents.example.com"})
+    assert server.properties["security_scheme_origins"] == [origin]
+    gaps = [r.detail for r in server.risks if r.category == "completeness"]
+    assert gaps == (
+        [
+            "A2A agent 'billing-agent' values not bound in this inventory: security scheme URLs "
+            "beyond their exported origins."
+        ]
+        if unbound
+        else []
+    )
+    assert "secret" not in server.model_dump_json()
+
+
+@pytest.mark.parametrize("url", ["//agents.example.com", "agents.example.com:443"])
+def test_scheme_less_endpoints_still_fail_the_transport_check(tmp_path, url):
+    server = _server(tmp_path / "card", {**CARD, "url": url})
+    assert server.endpoint_url == "//" + url.removeprefix("//")
+    assert [r.severity for r in server.risks if r.category == "transport_security"] == ["high"]
+    card_url = "//agents.example.com/.well-known/agent-card.json"
+    client = _client(tmp_path / "client", {"name": "c", "agentCardUrl": card_url})
+    assert client.agent_card_url == "//agents.example.com"
+    assert not any(r.category == "completeness" for r in client.risks)
+    assert [r.severity for r in client.risks if r.category == "transport_security"] == ["high"]
+
+
+CARD_1_0: dict[str, Any] = {
+    "name": "billing-agent",
+    "description": "Looks up invoices.",
+    "version": "1.0.0",
+    "supportedInterfaces": [
+        {
+            "url": "https://agents.example.com/a2a/v1",
+            "protocolBinding": "JSONRPC",
+            "protocolVersion": "1.0",
+        },
+        {"url": "grpc.example.com:443", "protocolBinding": "GRPC", "protocolVersion": "1.0"},
+    ],
+    "capabilities": {"streaming": True},
+    "securitySchemes": {
+        "oauth": {
+            "oauth2SecurityScheme": {
+                "flows": {
+                    "clientCredentials": {
+                        "tokenUrl": "https://auth.example.com",
+                        "scopes": {"read:only": "Read-only access", "admin": "Full access"},
+                    }
+                }
+            }
+        }
+    },
+    "securityRequirements": [{"schemes": {"oauth": {"list": ["read:only"]}}}],
+    "defaultInputModes": ["text/plain"],
+    "defaultOutputModes": ["text/plain"],
+    "skills": [{"id": "lookup", "name": "lookup-invoice", "description": "Finds", "tags": []}],
+}
+
+
+def _interface(card: dict[str, Any], index: int, **fields: Any) -> dict[str, Any]:
+    changed = copy.deepcopy(card)
+    changed["supportedInterfaces"][index].update(fields)
+    return changed
+
+
+def test_a2a_1_0_card_is_read_from_its_interfaces_and_security_requirements(tmp_path):
+    server = _server(tmp_path, CARD_1_0)
+    assert server.endpoint_url == "https://agents.example.com"
+    assert server.properties["supported_interface_origins"] == [
+        "https://agents.example.com",
+        "//grpc.example.com:443",
+    ]
+    assert server.authentication_required is True
+    assert server.capabilities is not None and server.capabilities.oauth_scopes == ["read:only"]
+    assert server.properties["security_scheme_types"] == ["oauth2"]
+    assert server.properties["security_scheme_origins"] == ["https://auth.example.com"]
+    assert not any(r.category in {"authentication", "transport_security"} for r in server.risks)
+    (gap,) = [r.detail for r in server.risks if r.category == "completeness"]
+    assert gap.endswith(
+        "not bound in this inventory: endpoint URL beyond its exported origin; "
+        "supported interface URLs beyond their exported origins."
+    )
+    assert "/v1" not in server.model_dump_json()
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        _interface(CARD_1_0, 0, url="https://evil.example.net/a2a/v1"),
+        _interface(CARD_1_0, 1, url="grpc.evil.example.net:443"),
+        {**CARD_1_0, "supportedInterfaces": CARD_1_0["supportedInterfaces"][::-1]},
+        {**CARD_1_0, "url": "https://agents.example.com"},
+    ],
+    ids=["preferred-host", "second-host", "preference-order", "legacy-url-added"],
+)
+def test_a2a_1_0_interface_change_fails_the_drift_gate_without_a_key(tmp_path, changed):
+    run, _ = _drift(tmp_path, CARD_1_0, changed)
+    assert run.exit_code == 1, run.output
+    alerts = json.loads(run.stdout)["security_alerts"]
+    assert any("billing-agent" in alert["alert"] for alert in alerts), alerts
+
+
+def test_a2a_1_0_scope_widening_fails_the_drift_gate_without_a_key(tmp_path):
+    widened = copy.deepcopy(CARD_1_0)
+    widened["securityRequirements"][0]["schemes"]["oauth"]["list"].append("admin")
+    run, _ = _drift(tmp_path / "widened", CARD_1_0, widened)
+    assert run.exit_code == 1, run.output
+    alerts = json.loads(run.stdout)["security_alerts"]
+    assert any(
+        alert["severity"] == "high" and "capabilities changed" in alert["alert"] for alert in alerts
+    ), alerts
+    unchanged, _ = _drift(tmp_path / "unchanged", CARD_1_0, copy.deepcopy(CARD_1_0))
+    assert unchanged.exit_code == 0, unchanged.output
+
+
+@pytest.mark.parametrize(
+    "requirements",
+    [
+        [{"schemes": {"oauth": {"list": ["read:only"]}}}, {}],
+        [{"schemes": {"oauth": {"list": ["read:only"]}}}, {"schemes": {}}],
+        [{"schemes": {"oauth": {"list": ["read:only"]}}}, {"schemes": None}],
+        [],
+        [{"schemes": {"undeclared": {"list": []}}}],
+        [{"schemes": {"oauth": {"list": ["read:only"]}, "undeclared": {}}}],
+    ],
+)
+def test_a2a_1_0_anonymous_alternative_keeps_the_authentication_finding(tmp_path, requirements):
+    changed = {**CARD_1_0, "securityRequirements": requirements}
+    server = _server(tmp_path / "card", changed)
+    assert server.authentication_required is False
+    assert [r.severity for r in server.risks if r.category == "authentication"] == ["medium"]
+    run, _ = _drift(tmp_path, CARD_1_0, changed)
+    assert run.exit_code == 1, run.output
+
+
+def test_a2a_1_0_proto_field_names_are_read_like_json_names(tmp_path):
+    renamed = copy.deepcopy(CARD_1_0)
+    renamed["supported_interfaces"] = renamed.pop("supportedInterfaces")
+    renamed["security_requirements"] = renamed.pop("securityRequirements")
+    schemes = renamed["security_schemes"] = renamed.pop("securitySchemes")
+    schemes["oauth"] = {"oauth2_security_scheme": schemes["oauth"]["oauth2SecurityScheme"]}
+    json_names, proto_names = _server(tmp_path / "a", CARD_1_0), _server(tmp_path / "b", renamed)
+    for field in ("endpoint_url", "authentication_required", "capabilities"):
+        assert getattr(proto_names, field) == getattr(json_names, field)
+    for key in ("supported_interface_origins", "security_scheme_types", "security_scheme_origins"):
+        assert proto_names.properties[key] == json_names.properties[key]
+
+
+@pytest.mark.parametrize(
+    ("url", "insecure"),
+    [
+        ("https://agents.example.com", False),
+        ("http://agents.example.com", True),
+        ("//agents.example.com", True),
+        ("agents.example.com:443", True),
+    ],
+)
+def test_a2a_1_0_preferred_interface_gets_the_transport_check(tmp_path, url, insecure):
+    card = _interface(CARD_1_0, 0, url=url)
+    server = _server(tmp_path / "a", card)
+    assert server.endpoint_url == server.properties["supported_interface_origins"][0]
+    assert any(r.category == "transport_security" for r in server.risks) is insecure
+    legacy = _server(tmp_path / "b", {**card, "url": "https://legacy.example.com"})
+    assert legacy.endpoint_url == "https://legacy.example.com"
+    assert any(r.category == "transport_security" for r in legacy.risks) is insecure
+
+
+def test_a2a_1_0_interface_tenant_is_bound_only_by_the_key(tmp_path, monkeypatch):
+    card = _interface(CARD_1_0, 0, url="https://agents.example.com", tenant="acme-tenant")
+    card["supportedInterfaces"].pop()
+    server = _server(tmp_path / "a", card)
+    (gap,) = [r.detail for r in server.risks if r.category == "completeness"]
+    assert gap.endswith("values not bound in this inventory: supported interface tenants.")
+    assert "acme-tenant" not in server.model_dump_json()
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    keyed = _server(tmp_path / "b", card)
+    moved = _server(tmp_path / "c", _interface(card, 0, tenant="evil-tenant"))
+    assert keyed.properties["static_value_binding"] != moved.properties["static_value_binding"]
+    assert not any(r.category == "completeness" for r in keyed.risks)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"supportedInterfaces": {"url": "https://agents.example.com"}},
+        {"supportedInterfaces": ["https://agents.example.com"]},
+        {"supportedInterfaces": [{"protocolBinding": "JSONRPC"}]},
+        {"supportedInterfaces": [{"url": " "}]},
+        {"supportedInterfaces": [{"url": 1}]},
+        {"supportedInterfaces": [{"url": "https://a.example", "tenant": 1}]},
+        {"supportedInterfaces": [{"url": "https://a.example"}] * 1001},
+        # A proto3 JSON parser reads both names, so a card must not give both.
+        {"supported_interfaces": []},
+        {"security_requirements": []},
+        {"security_schemes": {}},
+        {"securityRequirements": {"schemes": {}}},
+        {"securityRequirements": [{"oauth": {"list": ["read:only"]}}]},
+        {"securityRequirements": [{"schemes": []}]},
+        {"securityRequirements": [{"schemes": {"oauth": ["read:only"]}}]},
+        {"securityRequirements": [{"schemes": {"oauth": {"list": "read:only"}}}]},
+        {"securityRequirements": [{"schemes": {"oauth": {"list": [1]}}}]},
+        {"securityRequirements": [{"schemes": {"oauth": {"list": ["s"] * 1001}}}]},
+        {"securitySchemes": {"oauth": {"oauth2SecurityScheme": {}, "mtlsSecurityScheme": {}}}},
+        {"securitySchemes": {"oauth": {"oauth2SecurityScheme": "flows"}}},
+        {"securitySchemes": {"oauth": {"type": "apiKey", "oauth2SecurityScheme": {}}}},
+    ],
+)
+def test_malformed_a2a_1_0_declarations_are_scan_failures(tmp_path, change):
+    assert _failures(tmp_path, {**CARD_1_0, **change}) == [
+        ".well-known/agent.json: invalid A2A card field types"
+    ]
+
+
 VECTOR_KEY = "nexus-symbiote-a2a-test-vector-key"
 VECTOR_CARD = {
     "name": "v",

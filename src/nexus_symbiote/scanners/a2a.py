@@ -305,6 +305,23 @@ def _alternatives(requirements: Any, wrapped: bool) -> list[dict[str, list[str]]
     return alternatives
 
 
+def _supported_interfaces(data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Read A2A 1.0 AgentInterface entries, which list endpoints with the preferred first."""
+    entries = _member(data, "supportedInterfaces", "supported_interfaces")
+    entries = [] if entries is None else entries
+    if not isinstance(entries, list) or len(entries) > _MAX_ENTRIES:
+        raise ValueError("invalid supported interfaces")
+    for entry in entries:
+        if (
+            not isinstance(entry, dict)
+            or not isinstance(entry.get("url"), str)
+            or not entry["url"].strip()
+            or not isinstance(entry.get("tenant"), str | None)
+        ):
+            raise ValueError("invalid supported interface")
+    return entries
+
+
 def _security(data: dict[str, Any]) -> _Security:
     """Read declared requirements; a card cannot show that an endpoint enforces them."""
     schemes = _member(data, "securitySchemes", "security_schemes")
@@ -458,20 +475,7 @@ class A2AScanner(Scanner):
         security = _security(data)
         # Clients may send credentials to these alternative endpoints too.
         interface_urls = _declared_urls(data.get("additionalInterfaces"))
-        # A2A 1.0 cards list their endpoints here, preferred first, and may omit `url`.
-        supported = _member(data, "supportedInterfaces", "supported_interfaces")
-        supported = [] if supported is None else supported
-        if (
-            not isinstance(supported, list)
-            or len(supported) > _MAX_ENTRIES
-            or not all(
-                isinstance(entry, dict)
-                and isinstance(entry.get("url"), str)
-                and entry["url"].strip()
-                for entry in supported
-            )
-        ):
-            raise ValueError("invalid supported interfaces")
+        supported = _supported_interfaces(data)
         supported_urls: list[str] = [entry["url"] for entry in supported]
         endpoint = endpoint or (supported_urls[0] if supported_urls else None)
         structure_hash = hash_canonical(
@@ -504,11 +508,17 @@ class A2AScanner(Scanner):
                     "supported interface URLs beyond their exported origins",
                     any(_beyond_origin(url, _ORIGIN_PATHS) for url in supported_urls),
                 ),
+                # A tenant routes requests on the same origin, as a path does.
+                ("supported interface tenants", any(entry.get("tenant") for entry in supported)),
             )
             if gap
         ] + security.unbound
         risks: list[RiskAssessment] = []
-        if endpoint and not endpoint.lower().startswith("https://"):
+        # A2A 1.0 clients use the first supported interface even when `url` is present.
+        if any(
+            url and not url.lower().startswith("https://")
+            for url in (endpoint, *supported_urls[:1])
+        ):
             risks.append(
                 RiskAssessment(
                     severity=RiskSeverity.HIGH,
