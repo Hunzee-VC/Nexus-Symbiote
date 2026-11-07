@@ -26,6 +26,7 @@ from nexus_symbiote.core.models import (
 from nexus_symbiote.generators._common import (
     claim_properties,
     component_property,
+    coverage_aggregate,
     document_properties,
     json_text,
     normalize_hash,
@@ -80,10 +81,8 @@ class CycloneDXGenerator(Generator):
                 self._component(c) for c in sorted(aibom.components, key=lambda c: c.bom_ref)
             ],
             "dependencies": self._dependencies(aibom),
+            "compositions": [{"aggregate": coverage_aggregate(aibom.metadata.completeness)}],
         }
-        claim = aibom.metadata.completeness
-        if claim and claim.source_report_digest:
-            document["compositions"] = [{"aggregate": "incomplete"}]
         return document
 
     @staticmethod
@@ -110,6 +109,11 @@ class CycloneDXGenerator(Generator):
         view["dependencies"] = [
             edge for edge in view.get("dependencies", []) if set(edge) != {"ref"}
         ]
+        # Readers such as the upstream SDK drop compositions. Without one a consumer
+        # sees no completeness assertion, which equals "unknown"; dropping
+        # "incomplete" loses the public coverage warning and still conflicts.
+        if view.get("compositions") == [{"aggregate": "unknown"}]:
+            del view["compositions"]
         return view
 
     @classmethod

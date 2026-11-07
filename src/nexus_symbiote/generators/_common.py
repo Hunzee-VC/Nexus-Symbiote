@@ -10,9 +10,13 @@ from typing import Any
 
 from nexus_symbiote import __version__
 from nexus_symbiote.core.aibom import AIBOM
-from nexus_symbiote.core.models import AnyComponent
+from nexus_symbiote.core.models import AnyComponent, CompletenessClaim
+from nexus_symbiote.scanner_catalog import BUILTIN_SCANNER_NAMES
+from nexus_symbiote.utils.confined import DEFAULT_EXCLUDES
 
 NAMESPACE = uuid.UUID("ccaa2a43-8ba9-58e6-8f22-f8793a2039d5")
+# The confined collector never reads these trees, so excluding them again narrows nothing.
+BUILTIN_EXCLUSIONS = frozenset({*DEFAULT_EXCLUDES, *(f"**/{name}" for name in DEFAULT_EXCLUDES)})
 HASH_ALGORITHMS = {
     "md5": ("MD5", 32),
     "sha1": ("SHA-1", 40),
@@ -151,6 +155,26 @@ def loss_report(bom: AIBOM, target: str) -> dict[str, Any]:
         "itemCoverage": "selected-security-fields" if preserves_native else "summary-only",
         "items": [*items, *identifier_losses],
     }
+
+
+def coverage_aggregate(claim: CompletenessClaim | None) -> str:
+    """Public coverage for standard-only consumers, which never see the native claim.
+
+    Static collection never observes runtime, network or live tool surfaces, so
+    the best result is "unknown" and an export never claims "complete".
+    """
+    if claim is None:
+        return "unknown"
+    requested = set(claim.collectors_requested)
+    narrowed = (
+        claim.source_report_digest is not None
+        or bool(BUILTIN_SCANNER_NAMES - requested)
+        or bool(requested - set(claim.collectors_completed))
+        or any(state != "complete" for state in claim.scanner_status.values())
+        or bool(claim.scan_failures or claim.surfaces_excluded)
+        or not BUILTIN_EXCLUSIONS.issuperset(claim.exclusions)
+    )
+    return "incomplete" if narrowed else "unknown"
 
 
 def unordered_projection(value: Any) -> Any:
