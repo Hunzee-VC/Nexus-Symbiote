@@ -76,10 +76,12 @@ Several security declarations are recorded in clear:
   form `{"schemes": {"<scheme>": {"list": ["<scope>"]}}}`. Scopes are public
   identifiers (RFC 6749 section 3.3), so scope URIs such as
   `https://www.googleapis.com/auth/drive.readonly` or `api://<app>/access_as_user`
-  are kept in full. A scope with user information, a query, a fragment or a
-  credential assignment is reduced by the standard redaction, and one in a known
-  token format (a JWT or a `ghp_`, `AKIA`, `sk-`, `xox`, `glpat-` or `AIza`
-  prefix) is exported as `***`. A change to the set of scopes raises a high
+  are kept in full. A scope in `scheme://` URL form with user information, a query or a
+  fragment is reduced to its origin, a recognised credential assignment such as
+  `token=...` or `api_key=...` is reduced by the standard redaction, and one in a
+  known token format (a JWT or a `ghp_`, `AKIA`, `sk-`, `xox`, `glpat-` or `AIza`
+  prefix) is exported as `***`; a scheme-less scope that contains `?`, `#` or
+  `@`, such as `a?b=1`, is exported in full. A change to the set of scopes raises a high
   `capabilities changed` alert. A scope moved between the card and a skill, or
   between skills, changes only the structure digest below and raises a medium
   `properties changed` alert.

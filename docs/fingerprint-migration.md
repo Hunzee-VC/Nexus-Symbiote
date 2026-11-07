@@ -55,9 +55,9 @@ Legacy mode, which only CycloneDX recovery has, does not help with:
 - a CycloneDX export of a scan whose coverage is now `incomplete`, such as one
   narrowed with `--scanner`, written before every export had a `compositions`
   entry;
-- an SPDX export with an unconditional relationship exported as `other`,
-  written before such a relationship had a `comment` naming the native
-  relationship.
+- any SPDX export written before the document `comment` and relationship
+  `completeness` existed, with or without an unconditional relationship exported
+  as `other`.
 
 Regenerate such exports from the native AIBOM or by rescanning. Keep the
 original export when a downstream consumer discards fields such as the
