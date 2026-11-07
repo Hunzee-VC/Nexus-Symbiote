@@ -54,6 +54,21 @@ def _scan(project: Path, out: Path, *extra: str) -> tuple[int, dict]:
         "-e ./vendor/x",
         "-e file:./vendor/x",
         "-r 'unbalanced",
+        # optparse takes "--" as an option's value, so options continue after it.
+        "--trusted-host -- -r more.txt",
+        "-f -- -e ./vendor",
+        "--extra-index-url -- -c c.txt",
+        "-i -- -r more.txt",
+        "--hash -- -r more.txt",
+        "-C -- -r more.txt",
+        # An option of another pip, which may take a value.
+        "--global-option -- -r more.txt",
+        # pip fills in ${NAME} before it reads the line.
+        "${OPT} more.txt",
+        "--pre ${OPT}",
+        # pip installs the requirement itself as editable.
+        "./vendor/openai -e .",
+        "git+https://github.com/openai/openai-python@v1.0.0#egg=openai --editable=x",
     ],
 )
 def test_requirements_option_reaching_beyond_the_read_files_is_partial(tmp_path, line):
@@ -129,15 +144,62 @@ def test_one_gap_per_file_and_option(tmp_path):
         "--extra-index-url https://${TOKEN}@h.example/simple --pre",
         "--hash=sha256:" + "0" * 64,
         "-- -r more.txt",
+        "--pre -- -r more.txt",
+        "--index-url=https://${TOKEN}@h.example/simple",
+        "--trusted-host h.example --no-binary :all: --only-binary=:none:",
+        "-f ./wheels -i https://pypi.org/simple --config-settings k=v --use-feature truststore",
+        ". -e .",
     ],
 )
 def test_options_that_add_nothing_unread_stay_complete(tmp_path, line):
     project = _project(
         tmp_path,
-        {"requirements.txt": "openai==1.0.0\n", "requirements-dev.txt": f"﻿{line}\n"},
+        {"requirements.txt": "openai==1.0.0\n", "requirements-dev.txt": f"\ufeff{line}\n"},
     )
     result = RegistryScanner().scan(project)
     assert result.surfaces_excluded == [] and result.scan_failures == []
+    assert [c.name for c in result.components] == ["openai"]
+
+
+@pytest.mark.parametrize(
+    "line",
+    ["${OPT} more.txt", "open${SUFFIX}==1.0.0", "--pre ${OPT}", "--${OPT}=more.txt"],
+)
+def test_environment_variable_that_decides_a_line_is_a_gap(tmp_path, line):
+    project = _project(tmp_path, {"requirements.txt": f"{line}\n", "more.txt": "openai==1.0.0\n"})
+    result = RegistryScanner().scan(project)
+    assert result.surfaces_excluded == ["requirements.txt: environment variable not resolved"]
+    assert result.components == [] and result.scan_failures == []
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    ["# coding: utf-7", "# -*- coding: latin-1 -*-", "#!/bin/sh\n# vim: fileencoding=utf-16"],
+)
+def test_requirements_file_in_another_declared_encoding_is_not_read(tmp_path, declaration):
+    # pip decodes by the declaration, so "+AC0-r more.txt" is "-r more.txt" in UTF-7.
+    project = _project(
+        tmp_path / "proj",
+        {"requirements.txt": f"{declaration}\n+AC0-r more.txt\n", "more.txt": "openai==1.0.0\n"},
+    )
+    result = RegistryScanner().scan(project)
+    assert result.scan_failures == [
+        "requirements.txt: declared encoding other than UTF-8: not read"
+    ]
+    assert NOTHING_FOUND not in result.surfaces_scanned
+    code, document = _scan(project, tmp_path / "a.json")
+    assert code == 1
+    assert document["metadata"]["completeness"]["scanner_status"]["registry"] == "failed"
+
+
+@pytest.mark.parametrize(
+    "declaration", ["# -*- coding: utf-8 -*-", "# coding=UTF8", "\ufeff# coding: utf-7"]
+)
+def test_utf8_declaration_is_read(tmp_path, declaration):
+    # A byte order mark decides the encoding before any declaration.
+    _project(tmp_path, {"requirements.txt": f"{declaration}\nopenai==1.0.0\n"})
+    result = RegistryScanner().scan(tmp_path)
+    assert result.scan_failures == [] and result.surfaces_excluded == []
     assert [c.name for c in result.components] == ["openai"]
 
 
@@ -171,19 +233,103 @@ def test_editable_file_url_is_not_the_project_when_a_directory_shadows_it(tmp_pa
         ("FROM \\\n  ollama/ollama:latest\n", "ollama/ollama:latest", "version_pinning"),
         ("FROM ollama/\\\n# note\n\nollama:0.5.7\n", "ollama/ollama:0.5.7", "mutable_image_tag"),
         (
-            "﻿# syntax=docker/dockerfile:1\nFrom   ollama/ollama:0.5.7\n",
+            "\ufeff# syntax=docker/dockerfile:1\nFrom   ollama/ollama:0.5.7\n",
             "ollama/ollama:0.5.7",
             "mutable_image_tag",
+        ),
+        # BuildKit reads a heredoc's lines as its body, up to the terminator as written.
+        (
+            "FROM python:3.12-slim\nRUN <<'EOF\\'\necho hello\nEOF\\\nFROM ollama/ollama:latest\n",
+            "ollama/ollama:latest",
+            "version_pinning",
+        ),
+        (
+            "RUN <<'#EOF'\necho hello \\\n#EOF\nFROM ollama/ollama:latest\n",
+            "ollama/ollama:latest",
+            "version_pinning",
+        ),
+        (
+            "RUN <<-EOF\n\tFROM ollama/ollama:1\n\tEOF\nFROM ollama/ollama:0.5.7\n",
+            "ollama/ollama:0.5.7",
+            "mutable_image_tag",
+        ),
+        (
+            "RUN <<A <<B\nA\nFROM ollama/ollama:1\nB\nFROM ollama/ollama:0.5.7\n",
+            "ollama/ollama:0.5.7",
+            "mutable_image_tag",
+        ),
+        (
+            "RUN <<EOF\r\nFROM ollama/ollama:1\r\nEOF\r\r\nFROM ollama/ollama:0.5.7\r\n",
+            "ollama/ollama:0.5.7",
+            "mutable_image_tag",
+        ),
+        (
+            "LABEL a=<<EOF\nFROM ollama/ollama:0.5.7\nEOF\n",
+            "ollama/ollama:0.5.7",
+            "mutable_image_tag",
+        ),
+        (
+            'RUN ["<<EOF"]\nFROM ollama/ollama:0.5.7\nEOF\n',
+            "ollama/ollama:0.5.7",
+            "mutable_image_tag",
+        ),
+        (
+            "RUN echo a<<EOF\nFROM ollama/ollama:0.5.7\nEOF\n",
+            "ollama/ollama:0.5.7",
+            "mutable_image_tag",
+        ),
+        (
+            "ONBU\N{LATIN CAPITAL LETTER I WITH DOT ABOVE}LD RUN <<'EOF\\'\nx\nEOF\\\n"
+            "FROM ollama/ollama:0.5.7\n",
+            "ollama/ollama:0.5.7",
+            "mutable_image_tag",
+        ),
+        # An escaped backslash does not continue a line, and every CR before LF goes.
+        (
+            "RUN echo foo\\\\\nFROM ollama/ollama:latest\n",
+            "ollama/ollama:latest",
+            "version_pinning",
+        ),
+        ("FROM \\\r\r\nollama/ollama:latest\r\n", "ollama/ollama:latest", "version_pinning"),
+        # Go's unicode.IsSpace has no \x1c-\x1f.
+        (
+            "RUN echo \\\n\x1c\nFROM ollama/ollama:latest\n",
+            "ollama/ollama:latest",
+            "version_pinning",
+        ),
+        (
+            "RUN echo \\\n\x1c# x\nFROM ollama/ollama:latest\n",
+            "ollama/ollama:latest",
+            "version_pinning",
         ),
     ],
 )
 def test_dockerfile_from_forms_name_the_image(tmp_path, dockerfile, image, risk):
-    (tmp_path / "Dockerfile").write_text(dockerfile)
+    (tmp_path / "Dockerfile").write_bytes(dockerfile.encode())
     result = RegistryScanner().scan(tmp_path)
     assert result.surfaces_excluded == [] and result.scan_failures == []
     assert [(c.bom_ref, [r.category for r in c.risks]) for c in result.components] == [
         (f"registry:docker/{image}", [risk])
     ]
+
+
+@pytest.mark.parametrize(
+    "dockerfile",
+    [
+        "FROM python:3\nRUN <<EOF\nFROM ollama/ollama:1\nEOF\n",
+        "FROM python:3\nRUN cat << EOF\nFROM ollama/ollama:1\nEOF\n",
+        "FROM python:3\nCOPY <<EOF /etc/x\nFROM ollama/ollama:1\nEOF\n",
+        "FROM python:3\nONBUILD RUN <<EOF\nFROM ollama/ollama:1\nEOF\n",
+        "FROM python:3\nRUN 3<<EOF cat\nFROM ollama/ollama:1\nEOF\n",
+        "FROM python:3\nRUN <<E\\OF\nFROM ollama/ollama:1\nEOF\n",
+        'FROM python:3\nRUN <<"E O"\nFROM ollama/ollama:1\nE O\n',
+        "FROM python:3\nRUN <<EOF \\\n  && echo\nFROM ollama/ollama:1\nEOF\n",
+    ],
+)
+def test_heredoc_body_is_not_an_instruction(tmp_path, dockerfile):
+    (tmp_path / "Dockerfile").write_bytes(dockerfile.encode())
+    result = RegistryScanner().scan(tmp_path)
+    assert result.components == [] and result.surfaces_excluded == []
 
 
 def test_stage_reference_is_not_an_image(tmp_path):
@@ -221,10 +367,34 @@ def test_text_outside_a_from_instruction_is_not_an_image(tmp_path):
         ("FROM --platform=linux/amd64\n", "FROM instruction not parsed", []),
         ('FROM --platform="linux/amd64 x" ollama/ollama:1\n', "FROM instruction not parsed", []),
         ("# escape=`\nFROM ollama/ollama:latest\n", "escape parser directive not followed", []),
+        (
+            "#\x0cescape=`\nRUN echo \\\nFROM ollama/ollama:1\n",
+            "escape parser directive not followed",
+            [],
+        ),
+        ("RUN <<EOF\nFROM ollama/ollama:1\n", "heredoc not parsed", []),
+        (
+            "RUN echo ${X:-a} <<EOF\nFROM ollama/ollama:1\nEOF\n",
+            "heredoc not parsed",
+            ["ollama/ollama:1"],
+        ),
+        (
+            "RUN echo 'it <<EOF\nFROM ollama/ollama:1\nEOF\n",
+            "heredoc not parsed",
+            ["ollama/ollama:1"],
+        ),
+        # BuildKit's lexer removes quotes and escapes from the image it pulls.
+        ('FROM oll""ama/oll""ama:latest\n', "FROM image quoting not resolved", []),
+        ("FROM ol\\lama/ol\\lama:latest\n", "FROM image quoting not resolved", []),
+        (
+            "FROM 'ollama/ollama:latest'\n",
+            "FROM image quoting not resolved",
+            ["'ollama/ollama:latest'"],
+        ),
     ],
 )
 def test_unresolved_from_is_partial(tmp_path, dockerfile, gap, collected):
-    (tmp_path / "Dockerfile").write_text(dockerfile)
+    (tmp_path / "Dockerfile").write_bytes(dockerfile.encode())
     result = RegistryScanner().scan(tmp_path)
     assert result.surfaces_excluded == [f"Dockerfile: {gap}"]
     assert [c.name for c in result.components] == collected
@@ -420,6 +590,22 @@ def test_invalid_poetry_dependency_is_a_failure_without_a_mangled_name(tmp_path,
     assert {c.bom_ref for c in result.components} <= {"registry:pypi/torch"}
 
 
+def test_poetry_dependency_from_another_source_is_not_a_pypi_pin(tmp_path):
+    body = (
+        'torch = {version = "2.3.1", source = "cu121"}\n'
+        'openai = {version = "1.0.0", source = "PyPI"}\n'
+        '[[tool.poetry.source]]\nname = "cu121"\n'
+        'url = "https://download.pytorch.org/whl/cu121"\npriority = "explicit"\n'
+    )
+    result = _poetry(tmp_path, body).scan(tmp_path)
+    assert result.surfaces_excluded == [
+        "pyproject.toml: Poetry dependency from a source other than PyPI not translated"
+    ]
+    by_ref = {c.bom_ref: c for c in result.components}
+    assert by_ref["registry:pypi/torch"].package_url is None
+    assert by_ref["registry:pypi/openai"].package_url == "pkg:pypi/openai@1.0.0"
+
+
 def test_poetry_python_key_is_not_a_package(tmp_path):
     result = _poetry(tmp_path, "").scan(tmp_path)
     assert result.components == [] and result.scan_failures == []
@@ -435,4 +621,4 @@ def test_poetry_pin_change_is_a_version_change(tmp_path):
         main, ["diff", str(tmp_path / "a.json"), str(tmp_path / "b.json"), "--fail-on-alert"]
     )
     assert diff.exit_code == 1, diff.output
-    assert "==2.3.1 → ==2.3.2" in diff.output and "torch2" not in diff.output
+    assert "==2.3.1 \u2192 ==2.3.2" in diff.output and "torch2" not in diff.output

@@ -460,9 +460,45 @@ class RegistryScanner(Scanner):
         "--constraint": "constraints file not followed",
         "--editable": "editable install not followed",
     }
-    _SHORT_OPTIONS = {"r": "--requirement", "c": "--constraint", "e": "--editable"}
+    # Every option pip 26.3 accepts in a requirements file, and whether it takes a value.
+    _PIP_OPTIONS = {
+        "--index-url": True,
+        "--pypi-url": True,
+        "--extra-index-url": True,
+        "--no-index": False,
+        "--constraint": True,
+        "--requirement": True,
+        "--editable": True,
+        "--find-links": True,
+        "--no-binary": True,
+        "--only-binary": True,
+        "--prefer-binary": False,
+        "--require-hashes": False,
+        "--no-require-hashes": False,
+        "--pre": False,
+        "--all-releases": True,
+        "--only-final": True,
+        "--trusted-host": True,
+        "--use-feature": True,
+        "--hash": True,
+        "--config-settings": True,
+    }
+    _SHORT_OPTIONS = {
+        "i": "--index-url",
+        "c": "--constraint",
+        "r": "--requirement",
+        "e": "--editable",
+        "f": "--find-links",
+        "C": "--config-settings",
+    }
     # shlex's whitespace; str.split() would also split on a no-break space.
     _SHLEX_SPACE = re.compile(r"[ \t\r\n]+")
+    # pip replaces ${NAME} with the environment variable before it reads a line.
+    _ENV_VAR = re.compile(r"\$\{[A-Z0-9_]+\}")
+    _ENV_NAME = re.compile(r"[A-Za-z0-9_.-]*\$\{[A-Z0-9_]+\}")
+    # pip decodes a file without a byte order mark by the PEP 263 declaration in its
+    # first two lines.
+    _CODING = re.compile(r"coding[:=]\s*([-\w.]+)", re.ASCII)
 
     @staticmethod
     def _requirement_files(entries: list[str]) -> list[str]:
@@ -476,13 +512,15 @@ class RegistryScanner(Scanner):
         )
 
     @classmethod
-    def _option_gaps(cls, text: str, names: set[str], entries: set[str]) -> list[str]:
-        """What an option line adds or pins that the collector does not read.
+    def _options(cls, text: str) -> tuple[list[tuple[str, str]], list[str]]:
+        """The options pip reads from option words, with their values, and what it
+        may read that is not known.
 
-        pip splits the line with shlex and parses every word with optparse, so one
-        line can hold several options, and "-rX", "-r X", "--requirement=X" and an
-        unambiguous prefix of a long name all apply. The gap never names the
-        target, which can be a URL carrying a credential.
+        pip splits the words with shlex and parses them with optparse, so one line
+        can hold several options, and "-rX", "-r X", "--requirement=X" and an
+        unambiguous prefix of a long name all apply. An option that takes a value
+        takes the next word, even "--". An option pip 26.3 does not know may take
+        one in another pip.
         """
         try:
             words = (
@@ -491,8 +529,9 @@ class RegistryScanner(Scanner):
                 else [w for w in cls._SHLEX_SPACE.split(text) if w]
             )
         except ValueError:
-            return ["option line not parsed"]
-        gaps: list[str] = []
+            return [], ["option line not parsed"]
+        options: list[tuple[str, str]] = []
+        problems: list[str] = []
         index = 0
         while index < len(words):
             word = words[index]
@@ -500,31 +539,51 @@ class RegistryScanner(Scanner):
             if word == "--":
                 # optparse leaves the rest as arguments, which pip ignores.
                 break
+            if not word.startswith("-") or word == "-":
+                if cls._ENV_VAR.search(word):
+                    # An ignored argument, unless the variable holds an option.
+                    problems.append("environment variable not resolved")
+                continue
             if word.startswith("--"):
                 name, equals, value = word.partition("=")
-                option = next(
-                    (o for o in cls._PACKAGE_OPTIONS if len(name) > 2 and o.startswith(name)),
-                    None,
-                )
+                found = [o for o in cls._PIP_OPTIONS if o.startswith(name)]
+                if name in cls._PIP_OPTIONS:
+                    found = [name]
+                option = found[0] if len(found) == 1 else None
                 attached = bool(equals)
-            elif word.startswith("-") and len(word) > 1:
+            else:
                 option = cls._SHORT_OPTIONS.get(word[1])
                 value, attached = word[2:], len(word) > 2
-            else:
-                continue
             if option is None:
+                variable = cls._ENV_VAR.search(word.partition("=")[0])
+                problems.append(
+                    "environment variable not resolved" if variable else "option line not parsed"
+                )
                 continue
-            if not attached:
-                # optparse takes the next word as the value even if it starts with -.
+            if cls._PIP_OPTIONS[option] and not attached:
                 value = words[index] if index < len(words) else ""
                 index += 1
+            options.append((option, value))
+        return options, problems
+
+    @classmethod
+    def _option_gaps(cls, text: str, names: set[str], entries: set[str]) -> list[str]:
+        """What an option line adds or pins that the collector does not read.
+
+        The gap never names the target, which can be a URL carrying a credential.
+        """
+        options, gaps = cls._options(text)
+        for option, value in options:
+            gap = cls._PACKAGE_OPTIONS.get(option)
+            if gap is None:
+                continue
             covered = (
                 cls._editable_covered(value, entries)
                 if option == "--editable"
                 else cls._include_covered(value, names)
             )
             if not covered:
-                gaps.append(cls._PACKAGE_OPTIONS[option])
+                gaps.append(gap)
         return gaps
 
     @staticmethod
@@ -558,6 +617,20 @@ class RegistryScanner(Scanner):
             and not path.startswith("/")
             and all(part in ("", ".") for part in path.split("/"))
         )
+
+    # Python's names for UTF-8, lower case with "-" as "_".
+    _UTF8_NAMES = frozenset({"utf_8", "utf8", "u8", "utf", "cp65001", "utf_8_sig"})
+
+    @classmethod
+    def _declares_other_encoding(cls, content: str) -> bool:
+        """Whether pip decodes the file by a PEP 263 declaration of another encoding."""
+        if content.startswith("\ufeff"):
+            return False
+        for line in content.split("\n", 2)[:2]:
+            match = cls._CODING.search(line) if line.startswith("#") else None
+            if match is not None:
+                return match.group(1).lower().replace("-", "_") not in cls._UTF8_NAMES
+        return False
 
     @staticmethod
     def _requirement_lines(content: str) -> list[str]:
@@ -687,32 +760,49 @@ class RegistryScanner(Scanner):
                     "requirements files exceed the combined size limit: the rest were not read"
                 )
                 break
+            if self._declares_other_encoding(content):
+                # pip would decode other text than the UTF-8 read here.
+                result.scan_failures.append(
+                    f"{filename}: declared encoding other than UTF-8: not read"
+                )
+                continue
             for line in self._requirement_lines(content):
                 text = self._COMMENT.sub("", line).strip()
                 if not text:
                     continue
+                gaps: list[str] = []
                 if text.startswith("-"):
                     # Includes, constraints and editable installs are not followed. One
                     # that reaches beyond what is read here is a coverage gap; index
                     # options add no package.
-                    for gap in self._option_gaps(text, names, folded):
-                        message = f"{filename}: {gap}"
-                        if message not in noted:
-                            noted.add(message)
-                            result.surfaces_excluded.append(message)
-                    continue
-                # Per-requirement options such as --hash follow the requirement itself.
-                words: list[str] = []
-                # pip splits options on spaces only, so a tab or another space
-                # character stays inside the requirement.
-                for word in (w for w in text.split(" ") if w):
-                    if word.startswith("-"):
-                        break
-                    words.append(word)
-                reference = " ".join(words)
-                component = self._pip_component(reference, path, result)
-                if component is not None:
-                    declare(component, filename, reference)
+                    gaps = self._option_gaps(text, names, folded)
+                else:
+                    # Per-requirement options such as --hash follow the requirement
+                    # itself. pip splits them off on spaces only, so a tab or another
+                    # space character stays inside the requirement.
+                    tokens = text.split(" ")
+                    split = next(
+                        (i for i, t in enumerate(tokens) if t.startswith("-")), len(tokens)
+                    )
+                    reference = " ".join(t for t in tokens[:split] if t)
+                    options, _ = self._options(" ".join(tokens[split:]))
+                    if self._ENV_NAME.match(reference):
+                        # The variable can make the line any package, or an option.
+                        gaps = ["environment variable not resolved"]
+                    else:
+                        if any(o == "--editable" for o, _ in options) and not (
+                            self._editable_covered(reference, folded)
+                        ):
+                            # pip installs the requirement itself as editable.
+                            gaps = ["editable install not followed"]
+                        component = self._pip_component(reference, path, result)
+                        if component is not None:
+                            declare(component, filename, reference)
+                for gap in gaps:
+                    message = f"{filename}: {gap}"
+                    if message not in noted:
+                        noted.add(message)
+                        result.surfaces_excluded.append(message)
 
     def _pyproject_declarations(self, path: Path, result: ScanResult) -> list[tuple[str, str]]:
         """Each declaration with its optional-dependency group ("" for none)."""
@@ -788,6 +878,7 @@ class RegistryScanner(Scanner):
         "table": "pyproject.toml: invalid Poetry dependencies",
         "invalid": "pyproject.toml: invalid or unsupported Poetry dependency",
         "source": "pyproject.toml: Poetry git, path or URL dependency not translated",
+        "index": "pyproject.toml: Poetry dependency from a source other than PyPI not translated",
         "condition": "pyproject.toml: Poetry dependency condition not translated",
     }
 
@@ -796,8 +887,8 @@ class RegistryScanner(Scanner):
         """One Poetry declaration as PEP 508 text, or the bare name and why it is not.
 
         A version, extras, markers and platform are translated. A git, path or URL
-        source and a python restriction are left out, and so is a constraint that
-        does not translate, such as a || union.
+        source, a package source other than PyPI and a python restriction are left
+        out, and so is a constraint that does not translate, such as a || union.
         """
         if isinstance(entry, str):
             entry = {"version": entry}
@@ -805,6 +896,12 @@ class RegistryScanner(Scanner):
             return name, "invalid"
         if any(key in entry for key in ("git", "path", "url", "file")):
             return name, "source"
+        source = entry.get("source", "pypi")
+        if not isinstance(source, str):
+            return name, "invalid"
+        if source.lower() != "pypi":
+            # Not a PyPI package, though it may share a name with one.
+            return name, "index"
         version = entry.get("version", "*")
         extras = entry.get("extras", [])
         markers = entry.get("markers")
@@ -890,31 +987,56 @@ class RegistryScanner(Scanner):
 
     # BuildKit's word separators; a no-break space is part of a word.
     _DOCKER_WORD = re.compile(r"[^\t\v\f\r ]+")
-    _DOCKER_DIRECTIVE = re.compile(r"#[ \t]*([A-Za-z][A-Za-z0-9]*)[ \t]*=(.*)")
+    # Go's unicode.IsSpace, which BuildKit trims lines with and splits shell words on;
+    # str.strip() would also take \x1c-\x1f.
+    _GO_SPACE = (
+        "\t\n\v\f\r \x85\xa0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008"
+        "\u2009\u200a\u2028\u2029\u202f\u205f\u3000"
+    )
+    # Go's \s, which has no \v.
+    _DOCKER_DIRECTIVE = re.compile(
+        r"#[\t\n\f\r ]*([A-Za-z][A-Za-z0-9]*)[\t\n\f\r ]*=[\t\n\f\r ]*(.+?)[\t\n\f\r ]*"
+    )
+    # A heredoc word: an optional descriptor, <<, an optional - and the terminator.
+    _HEREDOC = re.compile(r"[0-9]*<<(-?)[\t\n\f\r ]*([^<]*)")
+    # The substitutions BuildKit's lexer keeps as written when no variable is set.
+    # The others can move word boundaries or fail the line.
+    _DOLLAR = r"\$(?:\{(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[-@*#?$!])\}|(?!\{))"
+    _SHELL_TOKEN = re.compile(
+        f"(?P<space>[{_GO_SPACE}]+)"
+        f"|(?P<plain>[^{_GO_SPACE}'\"$<\\\\]+|<(?!<))"
+        r"|(?P<heredoc><<[\t\r ]*)"
+        r"|(?P<single>'[^']*')"
+        rf'|(?P<double>"(?:[^"\\$]|\\[\s\S]|{_DOLLAR})*")'
+        rf"|(?P<dollar>{_DOLLAR})"
+        r"|(?P<escape>\\[\s\S]?)"
+    )
+    _QUOTED_ESCAPE = re.compile(r'\\([\\"$])')
 
     @classmethod
     def _dockerfile_images(cls, content: str) -> tuple[list[str], list[str]]:
         """Images named by FROM instructions, as written, and what was not collected.
 
         The file is read as BuildKit reads it: a trailing backslash continues an
-        instruction and comment lines are dropped, even inside one; the instruction
-        word is case-insensitive; --flag words come before the image; and a FROM
-        naming an earlier stage is not an image. Each line is handled once.
+        instruction and comment lines are dropped, even inside one; the lines of a
+        heredoc are its body, not instructions; the instruction word is
+        case-insensitive; --flag words come before the image; and a FROM naming an
+        earlier stage is not an image. Each line is handled once.
         """
-        lines = content.removeprefix("﻿").split("\n")
+        lines = content.removeprefix("\ufeff").split("\n")
         for line in lines:
-            directive = cls._DOCKER_DIRECTIVE.fullmatch(line.strip())
+            directive = cls._DOCKER_DIRECTIVE.fullmatch(line.rstrip("\r").lstrip(cls._GO_SPACE))
             if directive is None:
                 break
-            if directive.group(1).lower() == "escape" and directive.group(2).strip() != "\\":
+            if directive.group(1).lower() == "escape" and directive.group(2) != "\\":
                 # Another escape character changes where instructions end.
                 return [], ["escape parser directive not followed"]
         images: list[str] = []
         gaps: list[str] = []
         stages: set[str] = set()
-        for line in cls._dockerfile_instructions(lines):
+        for line in cls._dockerfile_instructions(lines, gaps):
             instruction = cls._DOCKER_WORD.match(line)
-            if instruction is None or instruction.group().lower() != "from":
+            if instruction is None or cls._command(instruction.group()) != "from":
                 continue
             words = cls._DOCKER_WORD.findall(line, instruction.end())
             start = 0
@@ -928,30 +1050,124 @@ class RegistryScanner(Scanner):
             if image.lower() not in stages:
                 if "$" in image:
                     gaps.append("FROM image substitution not resolved")
+                if any(c in image for c in "\"'\\"):
+                    # BuildKit's lexer removes them, so the image pulled is another word.
+                    gaps.append("FROM image quoting not resolved")
                 images.append(image)
             if len(rest) == 2 and rest[0].lower() == "as":
                 stages.add(rest[1].lower())
         return images, list(dict.fromkeys(gaps))
 
     @staticmethod
-    def _dockerfile_instructions(lines: list[str]) -> Iterator[str]:
-        """Instructions as BuildKit joins their lines, without comment or empty lines."""
-        parts: list[str] = []
-        for raw in lines:
-            line = raw.removesuffix("\r")
-            stripped = line.lstrip()
-            if not stripped or stripped.startswith("#"):
-                continue
-            body = line if parts else stripped
-            trimmed = body.rstrip(" \t")
-            if trimmed.endswith("\\"):
+    def _command(word: str) -> str:
+        # As Go's strings.ToLower does; str.lower() makes U+0130 two characters.
+        return word.replace("\u0130", "i").lower()
+
+    @classmethod
+    def _dockerfile_instructions(cls, lines: list[str], gaps: list[str]) -> Iterator[str]:
+        """Instructions as BuildKit joins their lines, without comment, empty or heredoc lines."""
+        index = 0
+        while index < len(lines):
+            parts: list[str] = []
+            while index < len(lines):
+                line = lines[index].rstrip("\r")
+                index += 1
+                stripped = line.lstrip(cls._GO_SPACE)
+                if not stripped or stripped.startswith("#"):
+                    continue
+                body = line if parts else stripped
+                trimmed = body.rstrip(" \t")
+                # One backslash continues the line; an escaped one does not.
+                if not trimmed.endswith("\\") or trimmed.endswith("\\\\"):
+                    parts.append(body)
+                    break
                 parts.append(trimmed[:-1])
+            if not parts:
+                return
+            instruction = "".join(parts)
+            yield instruction
+            heredocs = cls._heredocs(instruction)
+            if heredocs is None:
+                gaps.append("heredoc not parsed")
                 continue
-            parts.append(body)
-            yield "".join(parts)
-            parts = []
-        if parts:
-            yield "".join(parts)
+            for name, chomp in heredocs:
+                # The body runs to the terminator as written: no comment or
+                # continuation applies inside it.
+                while index < len(lines):
+                    line = lines[index].rstrip("\r")
+                    index += 1
+                    if (line.lstrip("\t") if chomp else line) == name:
+                        break
+                else:
+                    gaps.append("heredoc not parsed")
+                    return
+
+    @classmethod
+    def _heredocs(cls, instruction: str) -> list[tuple[str, bool]] | None:
+        """The terminator of each heredoc BuildKit reads after an instruction.
+
+        With whether leading tabs are removed before the comparison. Only RUN, COPY
+        and ADD, alone or after ONBUILD, take heredocs. None when the line uses
+        shell syntax that is not modelled, so where the instruction ends is unknown.
+        """
+        if "<<" not in instruction:
+            return []
+        words = cls._DOCKER_WORD.findall(instruction)
+        command = cls._command(words[0]) if words else ""
+        if command == "onbuild":
+            command = cls._command(next((w for w in words[1:] if not w.startswith("--")), ""))
+        if command not in ("run", "copy", "add"):
+            return []
+        raw = cls._shell_words(instruction, raw=True)
+        if raw is None:
+            return None
+        heredocs: list[tuple[str, bool]] = []
+        for word in raw:
+            match = cls._HEREDOC.fullmatch(word)
+            if match is None or not match.group(2):
+                continue
+            name = cls._shell_words(match.group(2), raw=False)
+            if name is None:
+                return None
+            if len(name) == 1:
+                heredocs.append((name[0], match.group(1) == "-"))
+        return heredocs
+
+    @classmethod
+    def _shell_words(cls, text: str, *, raw: bool) -> list[str] | None:
+        """Words as BuildKit's shell lexer splits text when no variable is set.
+
+        With raw, quotes and escapes stay in the words, as when BuildKit looks for
+        heredocs; without, they are resolved, as for a heredoc's terminator. None
+        for a substitution that is not modelled, for text the lexer rejects, and
+        for a byte order mark, which Go's scanner can drop.
+        """
+        if "\ufeff" in text:
+            return None
+        words: list[str] = []
+        word = ""
+        position = 0
+        while position < len(text):
+            token = cls._SHELL_TOKEN.match(text, position)
+            if token is None:
+                return None
+            position = token.end()
+            kind, value = token.lastgroup, token.group()
+            if kind == "space":
+                if word:
+                    words.append(word)
+                word = ""
+            elif raw or kind in ("plain", "heredoc", "dollar"):
+                word += value
+            elif kind == "single":
+                word += value[1:-1]
+            elif kind == "double":
+                word += cls._QUOTED_ESCAPE.sub(r"\1", value[1:-1])
+            else:
+                word += value[1:]
+        if word:
+            words.append(word)
+        return words
 
     @staticmethod
     def _conflict(one: str, other: str) -> bool:
