@@ -276,7 +276,7 @@ class A2AScanner(Scanner):
                 RiskAssessment(
                     severity=RiskSeverity.LOW,
                     category="completeness",
-                    detail=f"A2A agent '{name}' endpoint beyond its origin is not bound in this inventory.",
+                    detail=f"A2A agent '{name}' endpoint path, query or user information is not bound in this inventory.",
                     recommendation=f"Set {SOURCE_BINDING_KEY_ENV} during collection to detect same-origin endpoint changes.",
                 )
             )
@@ -346,7 +346,7 @@ class A2AScanner(Scanner):
                 RiskAssessment(
                     severity=RiskSeverity.LOW,
                     category="completeness",
-                    detail=f"A2A client '{name}' agent card URL beyond its origin is not bound in this inventory.",
+                    detail=f"A2A client '{name}' agent card URL path, query or user information is not bound in this inventory.",
                     recommendation=f"Set {SOURCE_BINDING_KEY_ENV} during collection to detect same-origin card changes.",
                 )
             )
