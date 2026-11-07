@@ -225,9 +225,12 @@ def test_spdx_recovery_rejects_a_changed_public_condition(change):
 
 
 def test_spdx_native_relationship_comment_survives_a_standard_reader():
-    view = standard_only(SPDXGenerator().generate(_one_edge("delegates-to", None)), "spdx")
+    bom = _one_edge("delegates-to", None)
+    document = SPDXGenerator().generate(bom)
+    view = standard_only(document, "spdx")
     (kept,) = [n for n in _spdx_round_trip(view)["@graph"] if n.get("relationshipType") == "other"]
     assert kept.get("comment") == "Native relationship 'delegates-to'."
+    assert SPDXGenerator.recover(_spdx_round_trip(document)).dependencies == bom.dependencies
 
 
 @pytest.mark.parametrize("change", ["remove", "alter", "pad", "retype"])
