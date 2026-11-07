@@ -287,6 +287,30 @@ def test_url_requirement_gap_names_no_reference(tmp_path):
     assert "URL, VCS or path requirement not followed" in (tmp_path / "out.json").read_text()
 
 
+def test_named_url_requirement_shadowed_by_a_directory_is_partial(tmp_path):
+    # pip reads the whole line as a relative path first and installs the directory
+    # it finds there, under the name in its pyproject.toml.
+    project = _project(tmp_path, {"requirements.txt": "openai @ https://h.example/openai\n"})
+    shadow = project / "openai @ https:" / "h.example" / "openai"
+    try:
+        shadow.mkdir(parents=True)
+    except OSError:
+        pytest.skip("file system rejects the name")
+    (shadow / "pyproject.toml").write_text('[project]\nname = "other"\nversion = "1"\n')
+    result = RegistryScanner().scan(project)
+    assert result.surfaces_excluded == [
+        "requirements.txt: URL, VCS or path requirement not followed"
+    ]
+
+
+def test_named_url_requirement_leaving_the_project_is_partial(tmp_path):
+    # Normalised as a path, this names ../evil, outside the project.
+    _project(tmp_path, {"requirements.txt": "openai @ x/../../evil\n"})
+    assert RegistryScanner().scan(tmp_path).surfaces_excluded == [
+        "requirements.txt: URL, VCS or path requirement not followed"
+    ]
+
+
 @pytest.mark.parametrize(
     "line",
     [

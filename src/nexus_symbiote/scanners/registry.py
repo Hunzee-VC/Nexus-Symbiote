@@ -649,11 +649,12 @@ class RegistryScanner(Scanner):
         requirement. Whether such a directory or file exists is known only where pip
         runs, so it is taken to exist.
         """
-        if cls._NAMED_URL.match(reference):
-            return False
-        url = cls._URL_SCHEME.match(reference.translate(cls._URL_DROPPED)) is not None
+        named = cls._NAMED_URL.match(reference) is not None
+        url = not named and cls._URL_SCHEME.match(reference.translate(cls._URL_DROPPED))
         # pip's marker separator, which a URL may contain without a space.
         target = reference.split("; " if url else ";", 1)[0].strip()
+        if named:
+            return cls._shadowed(target, entries)
         if not (
             url
             or any(c in target for c in "/\\")
@@ -663,7 +664,26 @@ class RegistryScanner(Scanner):
             return False
         # pip takes extras off a path but not off a URL: "file:.[dev]" is a directory
         # named ".[dev]".
-        return (url and "[" in target) or not cls._editable_covered(target, entries)
+        return bool(url and "[" in target) or not cls._editable_covered(target, entries)
+
+    @staticmethod
+    def _shadowed(target: str, entries: set[str]) -> bool:
+        """Whether pip may install "name @ URL" from a path instead.
+
+        pip first reads the whole text as a relative path, normalised without looking
+        at the file system, and installs a directory or archive found there. That
+        path can exist where pip runs only if it leaves the project root or starts
+        with an entry of it.
+        """
+        parts: list[str] = []
+        for part in re.split(r"[/\\]", re.sub(r"\[[^\]]+\]$", "", target)):
+            if part == "..":
+                if not parts:
+                    return True
+                parts.pop()
+            elif part not in ("", "."):
+                parts.append(part)
+        return bool(parts) and parts[0].casefold() in entries
 
     # Python's names for UTF-8, lower case with "-" as "_".
     _UTF8_NAMES = frozenset({"utf_8", "utf8", "u8", "utf", "cp65001", "utf_8_sig"})
