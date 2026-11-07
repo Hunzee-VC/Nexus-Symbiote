@@ -138,6 +138,8 @@ def test_content_digest_ignores_layout_and_run_times_but_not_content():
         lambda d: d["findings"][0].update(first_seen="2026-11-02T00:10:00+00:00"),
         lambda d: d["stats"][0].update(objects_examined=3),
         lambda d: d.update(future_field=True),
+        lambda d: d.update(started_at={"hidden": "content"}),
+        lambda d: d["findings"][1].update(last_seen="not a timestamp"),
     ):
         changed = json.loads(REPORT.read_text())
         edit(changed)

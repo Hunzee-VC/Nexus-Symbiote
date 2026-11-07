@@ -7,6 +7,7 @@ attestation occurs here. Report bytes remain a separate sensitive artifact.
 from __future__ import annotations
 
 import hashlib
+import re
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -34,7 +35,10 @@ MAX_DEPENDENCIES = 10_000
 PROJECTION_PROFILE = "nexus-symbiote/shadowscan-projection/v3"
 CONTENT_PROFILE = "nexus-symbiote/shadowscan-content/v1"
 # The fields that only record when a collection run happened. The list is closed:
-# any other field, including one a later ShadowScan release adds, stays content.
+# any other field, including one a later ShadowScan release adds, stays content,
+# and so does a listed field whose value is not the expected run-event shape.
+_TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})")
+_SERIAL_NUMBER = re.compile(r"urn:uuid:[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}")
 _RUN_EVENT_FIELDS = frozenset({"started_at", "finished_at"})
 _FINDING_RUN_EVENT_FIELDS = frozenset({"last_seen"})
 _CYCLONEDX_RUN_EVENT_FIELDS = frozenset({"serialNumber"})
@@ -93,8 +97,15 @@ def _short_hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def _without(record: dict[str, Any], fields: frozenset[str]) -> dict[str, Any]:
-    return {key: value for key, value in record.items() if key not in fields}
+def _without(
+    record: dict[str, Any], fields: frozenset[str], shape: re.Pattern[str] = _TIMESTAMP
+) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in record.items()
+        if key not in fields
+        or not (value is None or (isinstance(value, str) and shape.fullmatch(value)))
+    }
 
 
 def report_content_digest(data: dict[str, Any]) -> str:
@@ -102,10 +113,12 @@ def report_content_digest(data: dict[str, Any]) -> str:
 
     RFC 8785 canonical JSON of the report without its run-event fields: native
     top-level and per-connector ``started_at``/``finished_at`` and per-finding
-    ``last_seen``; CycloneDX ``serialNumber`` and ``metadata.timestamp``.
+    ``last_seen``; CycloneDX ``serialNumber`` and ``metadata.timestamp``. A field is
+    dropped only when null or shaped as an RFC 3339 timestamp (a URN UUID for the
+    serial number).
     """
     if data.get("bomFormat") == "CycloneDX":
-        content = _without(data, _CYCLONEDX_RUN_EVENT_FIELDS)
+        content = _without(data, _CYCLONEDX_RUN_EVENT_FIELDS, _SERIAL_NUMBER)
         content["metadata"] = _without(data["metadata"], _CYCLONEDX_METADATA_RUN_EVENT_FIELDS)
         return hash_canonical(content)
     content = _without(data, _RUN_EVENT_FIELDS)

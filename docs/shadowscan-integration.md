@@ -139,8 +139,10 @@ the inventory also records `source_report_content_digest` under the profile
 JSON of the strictly parsed report without its run-event fields. These are, for
 native JSON, the top-level and per-connector `started_at` and `finished_at` and
 each finding's `last_seen`; for CycloneDX, `serialNumber` and
-`metadata.timestamp`. The list is closed. Every other field, including one a
-later ShadowScan release adds, counts as content. `shadowscan:finding-sha256`
+`metadata.timestamp`. Each is dropped only when it is null or shaped as an RFC
+3339 timestamp, or for the serial number a URN UUID. The list is closed. Every
+other field or value, including a field a later ShadowScan release adds, counts
+as content. `shadowscan:finding-sha256`
 applies the same rule to one finding, or to one CycloneDX component or service.
 
 When both inventories carry content digests under the same profile, `diff`
