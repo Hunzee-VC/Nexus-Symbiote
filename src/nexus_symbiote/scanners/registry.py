@@ -1084,7 +1084,9 @@ class RegistryScanner(Scanner):
                 parts.append(trimmed[:-1])
             if not parts:
                 return
-            instruction = "".join(parts)
+            # BuildKit trims the joined line, which keeps a continuation line's
+            # indentation when the first line holds only the backslash.
+            instruction = "".join(parts).lstrip(cls._GO_SPACE)
             yield instruction
             heredocs = cls._heredocs(instruction)
             if heredocs is None:

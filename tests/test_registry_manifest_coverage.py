@@ -302,6 +302,33 @@ def test_editable_file_url_is_not_the_project_when_a_directory_shadows_it(tmp_pa
             "ollama/ollama:latest",
             "version_pinning",
         ),
+        # BuildKit trims the joined instruction, so a line holding only a backslash
+        # does not hide the indented FROM it continues onto.
+        (
+            "FROM python:3.12-slim\n\\\n    FROM ollama/ollama:latest\n",
+            "ollama/ollama:latest",
+            "version_pinning",
+        ),
+        (
+            "FROM python:3.12-slim\n\\\n\tFROM ollama/ollama:latest\n",
+            "ollama/ollama:latest",
+            "version_pinning",
+        ),
+        (
+            "FROM python:3.12-slim\n\\\n# note\n    FROM ollama/ollama:latest\n",
+            "ollama/ollama:latest",
+            "version_pinning",
+        ),
+        (
+            "FROM python:3.12-slim\n\\\n\n    FROM ollama/ollama:latest\n",
+            "ollama/ollama:latest",
+            "version_pinning",
+        ),
+        (
+            "FROM python:3.12-slim\n  \\ \n\xa0 FROM ollama/ollama:latest\n",
+            "ollama/ollama:latest",
+            "version_pinning",
+        ),
     ],
 )
 def test_dockerfile_from_forms_name_the_image(tmp_path, dockerfile, image, risk):
@@ -324,6 +351,8 @@ def test_dockerfile_from_forms_name_the_image(tmp_path, dockerfile, image, risk)
         "FROM python:3\nRUN <<E\\OF\nFROM ollama/ollama:1\nEOF\n",
         'FROM python:3\nRUN <<"E O"\nFROM ollama/ollama:1\nE O\n',
         "FROM python:3\nRUN <<EOF \\\n  && echo\nFROM ollama/ollama:1\nEOF\n",
+        # The instruction word is found after the space BuildKit trims.
+        "FROM python:3\n\\\n\xa0RUN <<EOF\nFROM ollama/ollama:1\nEOF\n",
     ],
 )
 def test_heredoc_body_is_not_an_instruction(tmp_path, dockerfile):
