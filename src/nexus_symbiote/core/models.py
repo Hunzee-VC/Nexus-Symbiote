@@ -463,6 +463,15 @@ class CompletenessClaim(InventoryModel):
         pattern=r"^sha256:[0-9a-f]{64}$",
         description="SHA-256 of exact imported report bytes, not producer authentication",
     )
+    source_report_content_digest: str | None = Field(
+        default=None,
+        pattern=r"^sha256:[0-9a-f]{64}$",
+        description=(
+            "SHA-256 of the RFC 8785 canonical report without run-event fields, for drift "
+            "comparison; neither authentication nor a substitute for source_report_digest"
+        ),
+    )
+    source_report_content_profile: Literal["nexus-symbiote/shadowscan-content/v1"] | None = None
     source_report_format: Literal["shadowscan-json", "shadowscan-cyclonedx"] | None = None
     source_report_status: Literal["complete", "incomplete", "unknown"] | None = None
     source_projection_limitations: list[str] | None = Field(

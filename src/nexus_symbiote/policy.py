@@ -65,6 +65,9 @@ class ValidatePolicy(PolicySection):
     require_completeness: StrictBool = True
     require_integrity: StrictBool = True
     minimum_assurance_level: Literal["declared", "observed", "verified"] = "declared"
+    # With --project, imported ShadowScan evidence must come from the exact report
+    # bytes recorded in the BOM, signed as the operator signature policy requires.
+    require_discovery_signature: StrictBool = False
 
 
 class OutputPolicy(PolicySection):
@@ -215,6 +218,7 @@ validate:
   require_completeness: true
   require_integrity: true
   minimum_assurance_level: "declared"
+  require_discovery_signature: false
 output:
   default_format: "json"
 """

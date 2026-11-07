@@ -7,6 +7,7 @@ attestation occurs here. Report bytes remain a separate sensitive artifact.
 from __future__ import annotations
 
 import hashlib
+import re
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -14,7 +15,7 @@ from typing import Any
 
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.enums import AssuranceLevel, RiskSeverity, TrustTier
-from nexus_symbiote.core.hashing import parse_json_strict
+from nexus_symbiote.core.hashing import hash_canonical, parse_json_strict
 from nexus_symbiote.core.models import (
     AgentComponent,
     AIBOMMetadata,
@@ -31,7 +32,20 @@ from nexus_symbiote.utils.confined import ConfinedCollection
 MAX_REPORT_BYTES = 16 * 1024 * 1024
 MAX_FINDINGS = 10_000
 MAX_DEPENDENCIES = 10_000
-PROJECTION_PROFILE = "nexus-symbiote/shadowscan-projection/v2"
+PROJECTION_PROFILE = "nexus-symbiote/shadowscan-projection/v3"
+CONTENT_PROFILE = "nexus-symbiote/shadowscan-content/v1"
+# The fields that only record when a collection run happened. The list is closed:
+# any other field, including one a later ShadowScan release adds, stays content,
+# and so does a listed field whose value is not the expected run-event shape.
+_TIMESTAMP = re.compile(
+    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})", re.ASCII
+)
+_SERIAL_NUMBER = re.compile(r"urn:uuid:[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}")
+_RUN_EVENT_FIELDS = frozenset({"started_at", "finished_at"})
+_FINDING_RUN_EVENT_FIELDS = frozenset({"last_seen"})
+_CYCLONEDX_RUN_EVENT_FIELDS = frozenset({"serialNumber"})
+_CYCLONEDX_METADATA_RUN_EVENT_FIELDS = frozenset({"timestamp"})
+REPORT_PATHS = (".shadowscan/report.json", "shadowscan-report.json", "shadowscan.json")
 _ALLOWED_SURFACES = frozenset(
     {"code", "identity", "gateway", "lowcode", "saas", "cloud", "endpoint", "network", "runtime"}
 )
@@ -42,6 +56,7 @@ class ImportedReport:
     components: list[AnyComponent] = field(default_factory=list)
     dependencies: list[DependencyEdge] = field(default_factory=list)
     digest: str = ""
+    content_digest: str = ""
     source_format: str = ""
     source_status: str = "unknown"
     unmapped_count: int = 0
@@ -66,6 +81,8 @@ class ImportedReport:
             ),
             scanner_status={"shadowscan": "partial"},
             source_report_digest=self.digest,
+            source_report_content_digest=self.content_digest or None,
+            source_report_content_profile=CONTENT_PROFILE if self.content_digest else None,
             source_report_format=self.source_format,
             source_report_status=self.source_status,
             source_unmapped_count=self.unmapped_count,
@@ -80,6 +97,40 @@ class ImportedReport:
 
 def _short_hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _without(
+    record: dict[str, Any], fields: frozenset[str], shape: re.Pattern[str] = _TIMESTAMP
+) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in record.items()
+        if key not in fields
+        or not (value is None or (isinstance(value, str) and shape.fullmatch(value)))
+    }
+
+
+def report_content_digest(data: dict[str, Any]) -> str:
+    """Digest a strictly parsed report under CONTENT_PROFILE, for drift and not authentication.
+
+    RFC 8785 canonical JSON of the report without its run-event fields: native
+    top-level and per-connector ``started_at``/``finished_at`` and per-finding
+    ``last_seen``; CycloneDX ``serialNumber`` and ``metadata.timestamp``. A field is
+    dropped only when null or shaped as an RFC 3339 timestamp (a URN UUID for the
+    serial number).
+    """
+    if data.get("bomFormat") == "CycloneDX":
+        content = _without(data, _CYCLONEDX_RUN_EVENT_FIELDS, _SERIAL_NUMBER)
+        content["metadata"] = _without(data["metadata"], _CYCLONEDX_METADATA_RUN_EVENT_FIELDS)
+        return hash_canonical(content)
+    content = _without(data, _RUN_EVENT_FIELDS)
+    content["stats"] = [_without(stat, _RUN_EVENT_FIELDS) for stat in data["stats"]]
+    content["findings"] = [finding_content(finding) for finding in data["findings"]]
+    return hash_canonical(content)
+
+
+def finding_content(finding: dict[str, Any]) -> dict[str, Any]:
+    return _without(finding, _FINDING_RUN_EVENT_FIELDS)
 
 
 def _risks(level: Any, shadow: Any) -> list[RiskAssessment]:
@@ -111,6 +162,7 @@ def _make_component(
     source_id: str,
     index: int,
     digest: str,
+    finding_digest: str,
     surface: str | None,
     level: Any,
     shadow: Any,
@@ -130,6 +182,7 @@ def _make_component(
     ref = "shadowscan:" + identity_hash
     props: dict[str, Any] = {
         "shadowscan:report-sha256": digest,
+        "shadowscan:finding-sha256": finding_digest,
         "shadowscan:finding-index": index,
         "shadowscan:source-id-sha256": identity_hash,
         "collection_mode": "imported-unverified-report",
@@ -182,11 +235,7 @@ class ShadowScanImporter(Scanner):
             max_file_bytes=MAX_REPORT_BYTES,
             max_total_bytes=MAX_REPORT_BYTES,
         ) as files:
-            for relative in (
-                ".shadowscan/report.json",
-                "shadowscan-report.json",
-                "shadowscan.json",
-            ):
+            for relative in REPORT_PATHS:
                 raw = files.read_bytes(relative, missing_ok=True)
                 if raw is None:
                     continue
@@ -198,6 +247,9 @@ class ShadowScanImporter(Scanner):
                 result.components.extend(imported.components)
                 result.dependencies.extend(imported.dependencies)
                 result.source_report_digest = imported.digest
+                result.source_report_content_digest = imported.content_digest
+                result.source_report_content_profile = CONTENT_PROFILE
+                result.source_report_path = relative
                 result.source_report_format = imported.source_format
                 result.source_report_status = imported.source_status
                 result.source_unmapped_count = imported.unmapped_count
@@ -253,6 +305,7 @@ class ShadowScanImporter(Scanner):
             result = self._from_cyclonedx(data, digest)
         else:
             result = self._from_native(data, digest)
+        result.content_digest = report_content_digest(data)
         # Discovery is not a verified, complete BOM even when source scan is complete.
         result.limitations.append(
             "ShadowScan discovery is a source claim; artifact integrity and full BOM coverage are unverified"
@@ -323,6 +376,7 @@ class ShadowScanImporter(Scanner):
                 source_id,
                 index,
                 result.digest,
+                hash_canonical(finding_content(finding)),
                 surface,
                 level,
                 finding.get("shadow"),
@@ -414,8 +468,8 @@ class ShadowScanImporter(Scanner):
                         relationship="depends-on",
                         assurance_level="declared",
                         conditions=(
-                            f"Source-reported CycloneDX dependency; report {result.digest}; "
-                            f"dependencies index {index}; not independently verified"
+                            f"Source-reported CycloneDX dependency; dependencies index {index}; "
+                            "not independently verified"
                         ),
                     )
                 )
@@ -483,6 +537,7 @@ class ShadowScanImporter(Scanner):
                 ref,
                 index,
                 digest,
+                hash_canonical(entry),
                 p.get("shadowscan:surface"),
                 p.get("shadowscan:heuristic-risk"),
                 shadow,

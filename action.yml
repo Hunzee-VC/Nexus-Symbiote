@@ -17,7 +17,9 @@ inputs:
     description: Comma-separated scanner names including shadowscan, a2a, ide_agents; empty means all
     default: ""
   validate:
-    description: Fail the action when completeness or integrity validation fails
+    description: >-
+      Fail the action when completeness or integrity validation fails. A model passes integrity
+      only as a SafeTensors file whose artifact-bound signature verifies under signature-policy
     default: "true"
   risk-check:
     description: Apply the risk policy gate
@@ -28,6 +30,17 @@ inputs:
   sarif-upload:
     description: Generate SARIF and upload it with security-events write permission
     default: "false"
+  signature-policy:
+    description: >-
+      Absolute path to a caller-owned operator signer policy JSON outside GITHUB_WORKSPACE,
+      such as a file the workflow writes under RUNNER_TEMP from a trusted source; never a file
+      from the checked-out code. Its artifact and bundle paths are relative to scan-path. The
+      Action refuses relative paths, any path that passes through a symlink (including a
+      symlinked RUNNER_TEMP or parent directory), hard links, non-regular and oversized files, and
+      passes one snapshot to collection and validation. Signatures verify offline against the
+      Sigstore trust root shipped in the Action's hash-locked sigstore package, never a runner
+      cache. Empty means no signer policy
+    default: ""
   python-version:
     description: Python version for the scanner
     default: "3.12"
@@ -41,6 +54,9 @@ outputs:
   risk-passed:
     description: Whether the risk gate passed; true, false, or skipped
     value: ${{ steps.scan.outputs.passed }}
+  signature-policy-digest:
+    description: SHA-256 of the signer policy bytes used for collection and validation, as sha256:<hex>; empty without a policy
+    value: ${{ steps.scan.outputs.signature_policy_digest }}
 runs:
   using: composite
   steps:
@@ -71,6 +87,7 @@ runs:
         SYMBIOTE_RISK_CHECK: ${{ inputs.risk-check }}
         SYMBIOTE_RISK_THRESHOLD: ${{ inputs.risk-threshold }}
         SYMBIOTE_SARIF: ${{ inputs.sarif-upload }}
+        SYMBIOTE_SIGNATURE_POLICY: ${{ inputs.signature-policy }}
       run: python -I "$SYMBIOTE_ACTION_PATH/scripts/run_action.py"
     - name: Upload SARIF
       if: inputs.sarif-upload == 'true' && always() && steps.scan.outputs.sarif_path != ''

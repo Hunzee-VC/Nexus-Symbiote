@@ -363,6 +363,8 @@ def scan(
     scan_failures: list[str] = []
     completed: list[str] = []
     source_report_digest = None
+    source_report_content_digest = None
+    source_report_content_profile = None
     source_report_format = None
     source_report_status = None
     source_projection_limitations = None
@@ -389,6 +391,8 @@ def scan(
             result = scanner.scan(root)
             if name == "shadowscan":
                 source_report_digest = result.source_report_digest
+                source_report_content_digest = result.source_report_content_digest
+                source_report_content_profile = result.source_report_content_profile
                 source_report_format = result.source_report_format
                 source_report_status = result.source_report_status
                 source_projection_limitations = result.source_projection_limitations
@@ -428,6 +432,8 @@ def scan(
     aibom.metadata.completeness = CompletenessClaim(
         scope="repository+shadowscan" if source_report_digest else "repository",
         source_report_digest=source_report_digest,
+        source_report_content_digest=source_report_content_digest,
+        source_report_content_profile=source_report_content_profile,
         source_report_format=source_report_format,
         source_report_status=source_report_status,
         source_projection_limitations=source_projection_limitations,
@@ -726,7 +732,11 @@ def validate(
     """Validate an AIBOM for completeness and integrity."""
     bom = _load_bom(aibom_path)
 
-    from nexus_symbiote.validators.completeness import CompletenessValidator
+    from nexus_symbiote.validators.completeness import (
+        CompletenessValidator,
+        discovery_producer_problems,
+        discovery_signature_required,
+    )
     from nexus_symbiote.validators.integrity import IntegrityValidator
 
     signature_policies = _signer_policies(signature_policy, Path(project) if project else None)
@@ -782,6 +792,20 @@ def validate(
         valid = valid and i_report.is_valid
     else:
         console.print("  SKIPPED by explicit policy")
+    if project and discovery_signature_required(
+        policy.validation.require_discovery_signature, Path(project).resolve(), signature_policies
+    ):
+        console.print("\n[bold]Discovery producer check[/]")
+        problems = discovery_producer_problems(
+            bom,
+            Path(project).resolve(),
+            signature_policies,
+            exclude_paths=policy.scan.exclude_paths,
+        )
+        console.print("  Status: " + ("[red]FAIL[/]" if problems else "[green]PASS[/]"))
+        for problem in problems:
+            console.print(f"  ERROR \\[shadowscan] {_safe(problem)}", soft_wrap=True)
+        valid = valid and not problems
     minimum = policy.validation.minimum_assurance_level
     if minimum == "verified":
         raise click.ClickException(
@@ -860,7 +884,11 @@ def risk(
         raise click.BadParameter("threshold must be positive and finite", param_hint="--threshold")
     basis = "supplied-bom"
     if root is not None:
-        from nexus_symbiote.validators.completeness import CompletenessValidator
+        from nexus_symbiote.validators.completeness import (
+            CompletenessValidator,
+            discovery_producer_problems,
+            discovery_signature_required,
+        )
 
         checked = CompletenessValidator().validate_against_project(
             bom,
@@ -868,10 +896,20 @@ def risk(
             exclude_paths=policy.scan.exclude_paths,
             signature_policies=signature_policies,
         )
-        if not checked.is_complete or not checked.local_subjects:
+        discovery = (
+            discovery_producer_problems(
+                bom, root, signature_policies, exclude_paths=policy.scan.exclude_paths
+            )
+            if discovery_signature_required(
+                policy.validation.require_discovery_signature, root, signature_policies
+            )
+            else []
+        )
+        if not checked.is_complete or not checked.local_subjects or discovery:
             reasons = [issue.description for issue in checked.issues if issue.severity == "error"]
             if not checked.local_subjects:
                 reasons.append("No local project subject was available to reconcile.")
+            reasons.extend(discovery)
             if json_output:
                 click.echo(
                     json.dumps(
@@ -995,6 +1033,12 @@ def diff(old_path: str, new_path: str, json_output: bool, fail_on_alert: bool = 
                     f"  \\[{_safe(alert['severity'].upper())}] {_safe(alert['alert'])}",
                     soft_wrap=True,
                 )
+
+        notes = [change for change in result.metadata_changes if change["severity"] == "info"]
+        if notes:
+            console.print("\n[bold]Notes:[/]")
+            for change in notes:
+                console.print(f"  \\[INFO] {_safe(change['detail'])}", soft_wrap=True)
 
         if result.components_added:
             console.print(f"\n[green]+{len(result.components_added)} added[/]")

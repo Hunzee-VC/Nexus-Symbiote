@@ -22,6 +22,7 @@ from nexus_symbiote.core.models import (
     ToolComponent,
 )
 from nexus_symbiote.scanner_catalog import BUILTIN_SCANNER_NAMES
+from nexus_symbiote.utils.confined import ConfinedCollection
 
 if TYPE_CHECKING:
     from nexus_symbiote.scanners.base import ScanResult
@@ -406,6 +407,11 @@ class CompletenessValidator:
         if claim is not None:
             if claim.source_report_digest != local.source_report_digest:
                 problems.append("Local discovery report differs from the recorded digest.")
+            elif (
+                claim.source_report_content_digest != local.source_report_content_digest
+                or claim.source_report_content_profile != local.source_report_content_profile
+            ):
+                problems.append("Recorded discovery content digest differs from the local report.")
             if (
                 claim.source_report_format != local.source_report_format
                 or claim.source_report_status != local.source_report_status
@@ -594,3 +600,106 @@ class CompletenessValidator:
                     orphans.append((ref, f"{c.bom_ref}.{ref_field}"))
 
         return orphans
+
+
+def _carries_discovery(bom: AIBOM) -> bool:
+    claim = bom.metadata.completeness
+    if claim is not None and (
+        claim.source_report_digest is not None
+        or claim.source_report_format is not None
+        or claim.scope in {"repository+shadowscan", "shadowscan-imported"}
+    ):
+        return True
+    return any(
+        component.bom_ref.startswith("shadowscan:")
+        or component.properties.get("collection_mode") == "imported-unverified-report"
+        or any(key.startswith("shadowscan:") for key in component.properties)
+        or "discovery_report_entry" in component.claims
+        for component in bom.components
+    )
+
+
+def discovery_signature_required(
+    required_by_policy: bool, root: Path, signature_policies: Sequence[SigstoreArtifactPolicy]
+) -> bool:
+    """An operator signature policy that names a discovery report also requires its signer."""
+    from nexus_symbiote.scanners.shadowscan import REPORT_PATHS
+
+    return required_by_policy or _report_policy(root, signature_policies, REPORT_PATHS) is not None
+
+
+def _report_policy(
+    root: Path, signature_policies: Sequence[SigstoreArtifactPolicy], reports: Sequence[str]
+) -> SigstoreArtifactPolicy | None:
+    """Return the operator entry that names one of ``reports``, by path or else by file.
+
+    Matching by device and inode covers another name for the same file, such as a
+    different case on a case-insensitive filesystem; a path comparison alone would
+    leave that entry's signer unchecked. Identities are read beneath the pinned
+    root without following symlinks.
+    """
+    paths = {(root / path).resolve() for path in reports}
+    named = next((p for p in signature_policies if p.artifact_path.resolve() in paths), None)
+    if named is not None or not signature_policies:
+        return named
+    with ConfinedCollection(root, []) as files:
+        identities = {files.path_identity(path) for path in reports} - {None}
+        return next(
+            (p for p in signature_policies if files.path_identity(p.artifact_path) in identities),
+            None,
+        )
+
+
+def discovery_producer_problems(
+    bom: AIBOM,
+    root: Path,
+    signature_policies: Sequence[SigstoreArtifactPolicy],
+    *,
+    exclude_paths: Sequence[str | Path] = (),
+) -> list[str]:
+    """Require an operator-selected Sigstore signer for the exact report the BOM records.
+
+    The BOM is never trusted for this: the report is re-read beneath ``root`` with
+    the importer's confined reader, its digest must equal the recorded one, and the
+    operator policy entry for that report path must verify over those bytes.
+    """
+    from nexus_symbiote.scanners.shadowscan import ShadowScanImporter
+    from nexus_symbiote.utils.crypto import SIGSTORE_MISSING, verify_sigstore_bundle
+
+    if not _carries_discovery(bom):
+        return []
+    claim = bom.metadata.completeness
+    recorded = claim.source_report_digest if claim is not None else None
+    if recorded is None:
+        return ["ShadowScan evidence has no recorded report digest to authenticate."]
+    importer = ShadowScanImporter()
+    importer.configure(exclude_paths=exclude_paths)
+    local = importer.scan(root)
+    if local.source_report_path is None or local.source_report_digest is None:
+        return ["No readable ShadowScan report beneath the project root to authenticate."]
+    if not hmac.compare_digest(local.source_report_digest, recorded):
+        return ["Local discovery report differs from the recorded digest."]
+    problems = []
+    if CompletenessValidator._discovery_mismatches(bom, local):
+        problems.append("ShadowScan evidence differs from the projection of the signed report.")
+    policy = _report_policy(root, signature_policies, [local.source_report_path])
+    if policy is None:
+        problems.append(
+            "No operator signature policy entry names the ShadowScan report "
+            f"{local.source_report_path}; its producer is unverified."
+        )
+        return problems
+    verified = verify_sigstore_bundle(
+        policy.artifact_path, policy.bundle_path, policy.expected_identity, policy.expected_issuer
+    )
+    if verified.error == SIGSTORE_MISSING:
+        problems.append(SIGSTORE_MISSING)
+    elif not (
+        verified.verified
+        and verified.identity == policy.expected_identity
+        and verified.issuer == policy.expected_issuer
+        and verified.details
+        and hmac.compare_digest(str(verified.details.get("artifact_digest", "")), recorded)
+    ):
+        problems.append("ShadowScan report signature or signer policy verification failed.")
+    return problems

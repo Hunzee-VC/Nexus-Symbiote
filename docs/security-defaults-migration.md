@@ -14,7 +14,13 @@ constructor default; recollect or review them before relying on that value.
 
 CycloneDX and SPDX preserve explicit false and unknown native values through the
 digest-bound native extension and report projection limitations. Standard-only
-consumers must account for those limitations. A lossless extension round trip
+consumers must account for those limitations. Conditional edges are never
+exported as typed SPDX relationships or in the CycloneDX dependency graph.
+Every CycloneDX and SPDX inventory export states its coverage in standard
+fields: CycloneDX `compositions` and SPDX relationship `completeness` say
+`incomplete` or `unknown` (`noAssertion` in SPDX), and the SPDX document
+`comment` states it in prose; VEX and SARIF output state no coverage. A
+lossless extension round trip
 does not authenticate the values or their producer.
 
 Snapshot comparison now covers component semantics, missing integrity evidence,
