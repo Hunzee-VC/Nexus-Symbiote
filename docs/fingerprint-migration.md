@@ -31,17 +31,41 @@ when the current checkout identifies the package. Recollect the baseline and
 review the identity before approving the new snapshot. An observed package
 name and version do not establish the identity of installed executable bytes.
 
-CycloneDX `dependsOn` now contains unconditional native `depends-on` edges.
-Capability, invocation and conditional relationships remain in the native
-extension. CycloneDX and SPDX recovery check the standard projection against
-the embedded document. For historical CycloneDX exports that flattened all
-relationships into `dependsOn`, the Python API accepts
+CycloneDX `dependsOn` now contains only unconditional native `depends-on`
+edges. Capability, invocation and conditional relationships remain in the
+native extension, and the `nexus-symbiote:dependency:relationship` property of
+a conditional edge carries `"conditional": true`. CycloneDX and SPDX recovery
+check the standard projection against the embedded document.
+
+For historical CycloneDX exports that flattened all relationships into
+`dependsOn` and wrote no `conditional` flag, the Python API accepts
 `CycloneDXGenerator.recover(document, allow_legacy_relationships=True)`.
-This accepts the exact historical edge projection and still checks the other
-public fields. Re-export the recovered inventory to give standard consumers
-the corrected graph. Keep the original export when a downstream consumer
-discards fields such as the CycloneDX incomplete-composition claim. Recovery
-requires that evidence to remain present.
+Legacy mode accepts that exact historical edge projection only as a whole. It
+rejects a mixture of the historical and current edge projections, and it still
+checks every other public field, including the coverage composition, against
+the current projection. Re-export the recovered inventory to give standard
+consumers the corrected graph and flags.
+
+Other exports written by pre-release builds can fail recovery, because their
+standard fields no longer match what the embedded document projects to.
+Legacy mode, which only CycloneDX recovery has, does not help with:
+
+- a CycloneDX export whose `dependsOn` already lists only unconditional
+  `depends-on` edges but whose conditional edges have no flag;
+- a CycloneDX export of a scan whose coverage is now `incomplete`, such as one
+  narrowed with `--scanner`, written before every export had a `compositions`
+  entry;
+- an SPDX export with an unconditional relationship exported as `other`,
+  written before such a relationship had a `comment` naming the native
+  relationship.
+
+Regenerate such exports from the native AIBOM or by rescanning. Keep the
+original export when a downstream consumer discards fields such as the
+CycloneDX incomplete-composition claim, because recovery requires that
+evidence to remain present. cyclonedx-python-lib 11.12.0, for example, drops
+`compositions` whenever it reserializes a BOM. A reserialized `incomplete`
+export then no longer recovers, while a reserialized `unknown` export still
+does.
 
 Current CycloneDX 1.7 and SPDX 3.0.1 exports are checked against pinned official
 schemas and exercised by independent consumer-library round trips. These checks
