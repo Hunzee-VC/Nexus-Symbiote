@@ -33,20 +33,38 @@ A2A_CONFIG_FILES = ["a2a.json", "a2a.yaml", "a2a.yml", "a2a_config.json"]
 
 # Exports keep only URL origins, and paths or queries may carry credentials, so no
 # unkeyed digest covers them: it would let anyone holding the BOM confirm guesses.
-# The structure digests cover names, counts, flags and values exported in clear.
-# Other values are bound only by an HMAC under the operator key, as for MCP.
-CARD_STRUCTURE_PROFILE = "nexus-symbiote/a2a-card-structure/v1"
+# The structure digests cover names, counts, flags, values exported in clear and the
+# requirement values of schemes other than OAuth 2.0 and OpenID Connect, which are
+# not exported. Other values are bound only by an HMAC under the operator key, as for MCP.
+CARD_STRUCTURE_PROFILE = "nexus-symbiote/a2a-card-structure/v2"
 CARD_VALUE_BINDING_PROFILE = "nexus-symbiote/a2a-card-values/v1"
 CLIENT_STRUCTURE_PROFILE = "nexus-symbiote/a2a-client-structure/v1"
 CLIENT_VALUE_BINDING_PROFILE = "nexus-symbiote/a2a-client-values/v1"
 SECURITY_SCHEME_TYPES = frozenset({"apiKey", "http", "oauth2", "openIdConnect", "mutualTLS"})
 # Requirements list scopes for these types and role names for the others, as in OpenAPI.
 SCOPED_SCHEME_TYPES = frozenset({"oauth2", "openIdConnect"})
+_SCHEME_TYPE_NAMES = {kind.lower(): kind for kind in SECURITY_SCHEME_TYPES}
+# A2A 1.0 (lf.a2a.v1) serializes SecurityScheme as a oneof, and proto3 JSON parsers
+# accept each field under its JSON name or its proto name.
+_WRAPPED_SCHEME_TYPES = {
+    "apiKeySecurityScheme": "apiKey",
+    "api_key_security_scheme": "apiKey",
+    "httpAuthSecurityScheme": "http",
+    "http_auth_security_scheme": "http",
+    "oauth2SecurityScheme": "oauth2",
+    "oauth2_security_scheme": "oauth2",
+    "openIdConnectSecurityScheme": "openIdConnect",
+    "open_id_connect_security_scheme": "openIdConnect",
+    "mtlsSecurityScheme": "mutualTLS",
+    "mtls_security_scheme": "mutualTLS",
+}
 _MAX_ENTRIES = 1000
 _MAX_DEPTH = 8
 _ORIGIN_PATHS = frozenset({"", "/"})
 _CARD_PATHS = _ORIGIN_PATHS | {"/.well-known/agent.json", "/.well-known/agent-card.json"}
 _HOSTNAME = re.compile(r"[\w.-]+|[0-9a-f:.]+")
+# A2A 1.0 gRPC interfaces give a "hostname:port" address without a scheme.
+_HOST_PORT = re.compile(r"(?:(?:[\w-]+\.)+[\w-]+|localhost|\[[0-9a-f:.]+\]):\d{1,5}", re.I)
 # Credential formats that redact_text leaves intact; no OAuth scope takes these forms.
 _TOKEN_SHAPE = re.compile(
     r"eyJ[\w-]{8,}\.[\w-]{8,}"
@@ -123,8 +141,26 @@ def _odd_host(url: str) -> bool:
     return hostname is not None and not _HOSTNAME.fullmatch(hostname)
 
 
+def _authority(url: str) -> str:
+    return f"//{url}" if _HOST_PORT.fullmatch(url) else url
+
+
 def _origin(url: str) -> str:
-    return "[redacted]" if _odd_host(url) else sanitized_origin(url)
+    """Export scheme, host and port; a URL without a scheme keeps "//host:port"."""
+    url = _authority(url)
+    if _odd_host(url):
+        return "[redacted]"
+    if not url.startswith("//"):
+        return sanitized_origin(url)
+    try:
+        parsed = urlsplit(url)
+        host, port = parsed.hostname, parsed.port
+    except ValueError:
+        return "[redacted]"
+    if not host:
+        return "[redacted]"
+    host = f"[{host}]" if ":" in host else host
+    return f"//{host}" + (f":{port}" if port is not None else "")
 
 
 def _url_shape(url: str | None, plain_paths: frozenset[str]) -> dict[str, Any] | None:
@@ -149,15 +185,14 @@ def _url_shapes(urls: list[str]) -> list[dict[str, Any] | None]:
 
 
 def _beyond_origin(url: str, plain_paths: frozenset[str]) -> bool:
-    try:
-        parsed = urlsplit(url)
-    except ValueError:
+    """Whether the export leaves part of a URL unbound, all of it when no origin was kept."""
+    if _origin(url) == "[redacted]":
         return True
+    parsed = urlsplit(_authority(url))
     return (
         parsed.path not in plain_paths
         or bool(parsed.query or parsed.fragment)
         or "@" in parsed.netloc
-        or _odd_host(url)
     )
 
 
@@ -211,57 +246,109 @@ def _value_binding(profile: str, declaration: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def _member(declaration: dict[str, Any], name: str, proto_name: str) -> Any:
+    if name in declaration and proto_name in declaration:
+        raise ValueError(f"duplicate {name} field")
+    return declaration.get(name, declaration.get(proto_name))
+
+
+def _unwrap(message: Any, field: str, default: Any) -> Any:
+    """Read the only field of an A2A 1.0 SecurityRequirement or StringList message."""
+    if not isinstance(message, dict) or set(message) - {field}:
+        raise ValueError(f"invalid {field} message")
+    value = message.get(field)
+    return default if value is None else value
+
+
+def _scheme_type(scheme: Any) -> tuple[str, bool]:
+    """Map a 0.3 type or a 1.0 oneof member onto SECURITY_SCHEME_TYPES, and say if one is stated."""
+    if not isinstance(scheme, dict):
+        raise ValueError("invalid security scheme")
+    declared = scheme.get("type")
+    declared = "" if declared is None else declared
+    if not isinstance(declared, str):
+        raise ValueError("invalid security scheme type")
+    kind = _SCHEME_TYPE_NAMES.get(declared.strip().lower(), "other")
+    members = [
+        (_WRAPPED_SCHEME_TYPES[key], body)
+        for key, body in scheme.items()
+        if key in _WRAPPED_SCHEME_TYPES and body is not None
+    ]
+    if len(members) > 1 or any(not isinstance(body, dict) for _, body in members):
+        raise ValueError("invalid security scheme")
+    if not members:
+        return kind, bool(declared.strip())
+    if declared.strip() and kind != members[0][0]:
+        raise ValueError("conflicting security scheme types")
+    return members[0][0], True
+
+
+def _alternatives(requirements: Any, wrapped: bool) -> list[dict[str, list[str]]]:
+    """Read 0.3 `security` or 1.0 `securityRequirements` alternatives as scheme-to-values maps."""
+    if not isinstance(requirements, list) or len(requirements) > _MAX_ENTRIES:
+        raise ValueError("invalid security requirements")
+    alternatives, entries = [], 0
+    for requirement in requirements:
+        if wrapped:
+            requirement = _unwrap(requirement, "schemes", {})
+        if not isinstance(requirement, dict):
+            raise ValueError("invalid security requirement")
+        alternative = {}
+        for scheme_name, required in requirement.items():
+            if wrapped:
+                required = _unwrap(required, "list", [])
+            entries += 1 + (len(required) if isinstance(required, list) else 0)
+            if not isinstance(required, list) or entries > _MAX_ENTRIES:
+                raise ValueError("invalid or oversized security requirement")
+            alternative[scheme_name] = _string_list(required)
+        alternatives.append(alternative)
+    return alternatives
+
+
 def _security(data: dict[str, Any]) -> _Security:
     """Read declared requirements; a card cannot show that an endpoint enforces them."""
-    schemes = data.get("securitySchemes")
+    schemes = _member(data, "securitySchemes", "security_schemes")
     schemes = {} if schemes is None else schemes
     if not isinstance(schemes, dict) or len(schemes) > _MAX_ENTRIES:
         raise ValueError("invalid security schemes")
     kinds: dict[str, str] = {}
     typed: set[str] = set()
     for scheme_name, scheme in schemes.items():
-        if not isinstance(scheme, dict):
-            raise ValueError("invalid security scheme")
-        declared = scheme.get("type")
-        declared = "" if declared is None else declared
-        if not isinstance(declared, str):
-            raise ValueError("invalid security scheme type")
-        kinds[scheme_name] = declared if declared in SECURITY_SCHEME_TYPES else "other"
-        if declared.strip():
+        kinds[scheme_name], stated = _scheme_type(scheme)
+        if stated:
             typed.add(scheme_name)
     scheme_urls = _declared_urls(schemes)
     decisions: list[bool] = []
     scopes: set[str] = set()
-    redacted_scopes = role_names = False
-    alternatives: list[dict[str, list[str] | int]] | None = None
-    requirements = data.get("security")
-    if requirements is not None:
-        if not isinstance(requirements, list) or len(requirements) > _MAX_ENTRIES:
-            raise ValueError("invalid security requirements")
-        alternatives, entries = [], 0
-        for requirement in requirements:
-            if not isinstance(requirement, dict):
-                raise ValueError("invalid security requirement")
-            alternative: dict[str, list[str] | int] = {}
-            for scheme_name, required in requirement.items():
-                entries += 1 + (len(required) if isinstance(required, list) else 0)
-                if not isinstance(required, list) or entries > _MAX_ENTRIES:
-                    raise ValueError("invalid or oversized security requirement")
-                named = _string_list(required)
+    redacted_scopes = False
+    forms: dict[str, list[dict[str, list[str]]] | None] = {}
+    for form, requirements in (
+        ("security", data.get("security")),
+        ("security_requirements", _member(data, "securityRequirements", "security_requirements")),
+    ):
+        if requirements is None:
+            forms[form] = None
+            continue
+        alternatives = _alternatives(requirements, wrapped=form == "security_requirements")
+        digested = []
+        for alternative in alternatives:
+            values: dict[str, list[str]] = {}
+            for scheme_name, named in alternative.items():
                 if kinds.get(scheme_name) in SCOPED_SCHEME_TYPES:
                     exported = {scope: _scope(scope) for scope in named}
                     redacted_scopes |= any(scope != kept for scope, kept in exported.items())
-                    alternative[redact_text(scheme_name)] = sorted(set(exported.values()))
+                    values[redact_text(scheme_name)] = sorted(set(exported.values()))
                     scopes.update(exported.values())
                 else:
-                    # Role names may be anything, so only the key binds them.
-                    role_names |= bool(named)
-                    alternative[redact_text(scheme_name)] = len(named)
-            alternatives.append(alternative)
+                    # Role names may be anything, even a pasted credential, so they stay
+                    # out of the export; only the digest covers them.
+                    values[redact_text(scheme_name)] = sorted(set(named))
+            digested.append(values)
+        forms[form] = sorted(digested, key=canonical_json)
         # An empty alternative ({}) permits anonymous access, as in OpenAPI.
         decisions.append(
-            bool(requirements)
-            and all(requirement and set(requirement) <= typed for requirement in requirements)
+            bool(alternatives)
+            and all(alternative and set(alternative) <= typed for alternative in alternatives)
         )
     legacy = data.get("authentication")
     legacy_count = None
@@ -277,18 +364,17 @@ def _security(data: dict[str, Any]) -> _Security:
     structure = {
         "security_schemes": sorted([redact_text(name), kind] for name, kind in kinds.items()),
         "security_scheme_urls": _url_shapes(scheme_urls),
-        "security": (None if alternatives is None else sorted(alternatives, key=canonical_json)),
+        **forms,
         "authentication_schemes": legacy_count,
     }
     unbound = [
         label
         for label, gap in (
             (
-                "security scheme URL paths or queries",
+                "security scheme URLs beyond their exported origins",
                 any(_beyond_origin(url, _ORIGIN_PATHS) for url in scheme_urls),
             ),
             ("redacted OAuth scopes", redacted_scopes),
-            ("role names in security requirements", role_names),
         )
         if gap
     ]
@@ -372,6 +458,22 @@ class A2AScanner(Scanner):
         security = _security(data)
         # Clients may send credentials to these alternative endpoints too.
         interface_urls = _declared_urls(data.get("additionalInterfaces"))
+        # A2A 1.0 cards list their endpoints here, preferred first, and may omit `url`.
+        supported = _member(data, "supportedInterfaces", "supported_interfaces")
+        supported = [] if supported is None else supported
+        if (
+            not isinstance(supported, list)
+            or len(supported) > _MAX_ENTRIES
+            or not all(
+                isinstance(entry, dict)
+                and isinstance(entry.get("url"), str)
+                and entry["url"].strip()
+                for entry in supported
+            )
+        ):
+            raise ValueError("invalid supported interfaces")
+        supported_urls: list[str] = [entry["url"] for entry in supported]
+        endpoint = endpoint or (supported_urls[0] if supported_urls else None)
         structure_hash = hash_canonical(
             {
                 "profile": CARD_STRUCTURE_PROFILE,
@@ -379,6 +481,9 @@ class A2AScanner(Scanner):
                     "fields": _fields(data),
                     "endpoint": _url_shape(endpoint, _ORIGIN_PATHS),
                     "additional_interfaces": _url_shapes(interface_urls),
+                    "supported_interfaces": [
+                        _url_shape(url, _ORIGIN_PATHS) for url in supported_urls
+                    ],
                     **security.structure,
                 },
             }
@@ -388,12 +493,16 @@ class A2AScanner(Scanner):
             label
             for label, gap in (
                 (
-                    "endpoint path, query or user information",
+                    "endpoint URL beyond its exported origin",
                     endpoint is not None and _beyond_origin(endpoint, _ORIGIN_PATHS),
                 ),
                 (
-                    "additional interface URL paths or queries",
+                    "additional interface URLs beyond their exported origins",
                     any(_beyond_origin(url, _ORIGIN_PATHS) for url in interface_urls),
+                ),
+                (
+                    "supported interface URLs beyond their exported origins",
+                    any(_beyond_origin(url, _ORIGIN_PATHS) for url in supported_urls),
                 ),
             )
             if gap
@@ -456,6 +565,9 @@ class A2AScanner(Scanner):
                 "security_scheme_types": security.scheme_types,
                 "security_scheme_origins": sorted({_origin(url) for url in security.scheme_urls}),
                 "additional_interface_origins": sorted({_origin(url) for url in interface_urls}),
+                "supported_interface_origins": list(
+                    dict.fromkeys(_origin(url) for url in supported_urls)
+                ),
                 "source_values_bound": bool(binding),
                 "static_card_hash": structure_hash,
                 "static_card_hash_profile": CARD_STRUCTURE_PROFILE,
@@ -508,7 +620,7 @@ class A2AScanner(Scanner):
                 RiskAssessment(
                     severity=RiskSeverity.LOW,
                     category="completeness",
-                    detail=f"A2A client '{name}' agent card URL path, query or user information is not bound in this inventory.",
+                    detail=f"A2A client '{name}' agent card URL beyond its exported origin is not bound in this inventory.",
                     recommendation=f"Set {SOURCE_BINDING_KEY_ENV} during collection to detect same-origin card changes.",
                 )
             )

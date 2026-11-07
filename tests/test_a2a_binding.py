@@ -177,12 +177,12 @@ def test_without_a_key_the_path_is_neither_exported_nor_digested_but_marked_unbo
     # An unkeyed digest that changed with the path would let anyone confirm guesses.
     assert first.properties["static_card_hash"] == moved.properties["static_card_hash"]
     (gap,) = [r for r in first.risks if r.category == "completeness"]
-    assert gap.severity == "low" and "endpoint path" in gap.detail
+    assert gap.severity == "low" and "endpoint URL beyond its exported origin" in gap.detail
     assert SOURCE_BINDING_KEY_ENV in gap.recommendation
     assert "trusted" not in first.model_dump_json()
     origin_only = _server(tmp_path / "c", {**CARD, "url": "https://agents.example.com/"})
     assert origin_only.properties["source_values_bound"] is False
-    assert not any("endpoint path" in r.detail for r in origin_only.risks)
+    assert not any("endpoint URL" in r.detail for r in origin_only.risks)
 
 
 def test_keyed_binding_ignores_key_order_and_whitespace(tmp_path, monkeypatch):
@@ -404,11 +404,13 @@ def test_only_oauth_scopes_are_exported_and_secret_shaped_values_are_withheld(
     exported = server.model_dump_json()
     assert pat not in exported and jwt not in exported and "api_key=v" not in exported
     (gap,) = [r for r in server.risks if r.category == "completeness"]
-    assert "redacted OAuth scopes" in gap.detail and "role names" in gap.detail
+    assert gap.detail.endswith("; redacted OAuth scopes.") and "role names" not in gap.detail
     role_changed = copy.deepcopy(card)
     role_changed["security"][0]["key"] = ["ghp_" + "c" * 36]
     unkeyed = _server(tmp_path / "b", role_changed)
-    assert unkeyed.properties["static_card_hash"] == server.properties["static_card_hash"]
+    # Without a key the structure digest still detects the changed requirement value.
+    assert unkeyed.properties["static_card_hash"] != server.properties["static_card_hash"]
+    assert "ghp_" not in unkeyed.model_dump_json()
     monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
     keyed, rekeyed = _server(tmp_path / "c", card), _server(tmp_path / "d", role_changed)
     assert keyed.properties["static_value_binding"] != rekeyed.properties["static_value_binding"]
@@ -424,7 +426,7 @@ def test_credential_endpoint_host_change_fails_the_drift_gate_without_a_key(tmp_
     (server,) = [c for c in baseline["components"] if c["component_type"] == "a2a-server"]
     assert server["properties"]["security_scheme_origins"] == ["https://auth.example.com"]
     (gap,) = [r for r in server["risks"] if r["category"] == "completeness"]
-    assert "security scheme URL paths" in gap["detail"]
+    assert "security scheme URLs beyond their exported origins" in gap["detail"]
 
 
 def test_additional_interface_urls_export_origins_and_mark_paths_unbound(tmp_path):
@@ -435,7 +437,8 @@ def test_additional_interface_urls_export_origins_and_mark_paths_unbound(tmp_pat
     assert server.properties["security_scheme_origins"] == ["https://auth.example.com"]
     (gap,) = [r for r in server.risks if r.category == "completeness"]
     assert gap.detail.endswith(
-        "values not bound in this inventory: additional interface URL paths or queries."
+        "values not bound in this inventory: additional interface URLs beyond their exported "
+        "origins."
     )
     assert "secret-path" not in server.model_dump_json()
     moved = _server(
@@ -503,15 +506,16 @@ VECTOR_CLIENT = {"name": "c", "agentCardUrl": "https://a.example/.well-known/age
 VECTORS = [
     (
         "static_card_hash",
-        '{"profile":"nexus-symbiote/a2a-card-structure/v1","structure":{'
+        '{"profile":"nexus-symbiote/a2a-card-structure/v2","structure":{'
         '"additional_interfaces":[{"fragment":false,"path_separators":0,"plain_path":"",'
         '"query":false,"userinfo":false}],"authentication_schemes":null,'
         '"endpoint":{"fragment":false,"path_separators":1,"plain_path":null,"query":false,'
         '"userinfo":false},"fields":["additionalInterfaces","name","security",'
-        '"securitySchemes","url"],"security":[{"k":1},{"o":["https://a.example/scope","s"]}],'
-        '"security_scheme_urls":[{"fragment":false,"path_separators":1,"plain_path":null,'
-        '"query":false,"userinfo":false}],"security_schemes":[["k","apiKey"],["o","oauth2"]]}}',
-        "sha256:078c59393036dd82e7b3846bfd0ce88e7124cf3287657bed8586e641b953eb67",
+        '"securitySchemes","url"],"security":[{"k":["role"]},{"o":["https://a.example/scope",'
+        '"s"]}],"security_requirements":null,"security_scheme_urls":[{"fragment":false,'
+        '"path_separators":1,"plain_path":null,"query":false,"userinfo":false}],'
+        '"security_schemes":[["k","apiKey"],["o","oauth2"]],"supported_interfaces":[]}}',
+        "sha256:fb9d1305becb67fbf5a4a7b6d0fe18cad28f224791d64aaee4d08ffbba94765d",
     ),
     (
         "static_value_binding",
@@ -559,3 +563,50 @@ def test_binding_profiles_match_their_published_vectors(tmp_path, monkeypatch):
     assert card.capabilities.oauth_scopes == ["https://a.example/scope", "s"]
     assert card.properties["security_scheme_origins"] == ["https://t.example"]
     assert card.properties["additional_interface_origins"] == ["https://g.example"]
+
+
+VECTOR_CARD_1_0 = {
+    "name": "w",
+    "supportedInterfaces": [
+        {"url": "https://a.example/rpc", "protocolBinding": "JSONRPC", "protocolVersion": "1.0"},
+        {"url": "g.example:443", "protocolBinding": "GRPC", "protocolVersion": "1.0"},
+    ],
+    "securitySchemes": {
+        "o": {
+            "oauth2SecurityScheme": {
+                "flows": {"clientCredentials": {"tokenUrl": "//t.example/token", "scopes": {}}}
+            }
+        },
+        "k": {"apiKeySecurityScheme": {"location": "header", "name": "X-Key"}},
+    },
+    "securityRequirements": [
+        {"schemes": {"o": {"list": ["s"]}}},
+        {"schemes": {"k": {"list": ["role"]}}},
+    ],
+}
+VECTOR_1_0 = (
+    '{"profile":"nexus-symbiote/a2a-card-structure/v2","structure":{"additional_interfaces":[],'
+    '"authentication_schemes":null,"endpoint":{"fragment":false,"path_separators":1,'
+    '"plain_path":null,"query":false,"userinfo":false},"fields":["name","securityRequirements",'
+    '"securitySchemes","supportedInterfaces"],"security":null,"security_requirements":[{"k":'
+    '["role"]},{"o":["s"]}],"security_scheme_urls":[{"fragment":false,"path_separators":1,'
+    '"plain_path":null,"query":false,"userinfo":false}],"security_schemes":[["k","apiKey"],'
+    '["o","oauth2"]],"supported_interfaces":[{"fragment":false,"path_separators":1,'
+    '"plain_path":null,"query":false,"userinfo":false},{"fragment":false,"path_separators":0,'
+    '"plain_path":null,"query":false,"userinfo":false}]}}'
+)
+
+
+def test_a2a_1_0_card_matches_its_published_structure_vector(tmp_path):
+    expected = "sha256:7795bcddf41ee40cef6c25b2399c2cd36e211b8a009d2a0c29bc97d05d3e2d09"
+    assert "sha256:" + hashlib.sha256(VECTOR_1_0.encode()).hexdigest() == expected
+    card = _server(tmp_path, VECTOR_CARD_1_0)
+    assert card.properties["static_card_hash"] == expected
+    assert card.endpoint_url == "https://a.example"
+    assert card.properties["supported_interface_origins"] == [
+        "https://a.example",
+        "//g.example:443",
+    ]
+    assert card.properties["security_scheme_origins"] == ["//t.example"]
+    assert card.properties["security_scheme_types"] == ["apiKey", "oauth2"]
+    assert card.capabilities is not None and card.capabilities.oauth_scopes == ["s"]
