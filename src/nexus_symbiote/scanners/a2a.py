@@ -80,6 +80,7 @@ class _BindingError(ValueError):
 
 class _Security(NamedTuple):
     required: bool
+    skills_required: bool
     scopes: list[str]
     scheme_types: list[str]
     scheme_urls: list[str]
@@ -306,6 +307,45 @@ def _alternatives(requirements: Any, wrapped: bool) -> list[dict[str, list[str]]
     return alternatives
 
 
+def _requirement_forms(declaration: dict[str, Any]) -> tuple[tuple[str, Any], ...]:
+    """Cards and skills both take 0.3 `security` and 1.0 `securityRequirements` lists."""
+    return (
+        ("security", declaration.get("security")),
+        (
+            "security_requirements",
+            _member(declaration, "securityRequirements", "security_requirements"),
+        ),
+    )
+
+
+def _requires_authentication(alternatives: list[dict[str, list[str]]], typed: set[str]) -> bool:
+    # An empty alternative ({}) permits anonymous access, as in OpenAPI.
+    return all(alternative and set(alternative) <= typed for alternative in alternatives)
+
+
+def _digested(
+    alternatives: list[dict[str, list[str]]], kinds: dict[str, str]
+) -> tuple[list[dict[str, list[str]]], set[str], bool]:
+    """Return the digested alternatives, the exported scopes and whether one was redacted."""
+    digested: list[dict[str, list[str]]] = []
+    scopes: set[str] = set()
+    redacted = False
+    for alternative in alternatives:
+        values: dict[str, list[str]] = {}
+        for scheme_name, named in alternative.items():
+            if kinds.get(scheme_name) in SCOPED_SCHEME_TYPES:
+                exported = {scope: _scope(scope) for scope in named}
+                redacted |= any(scope != kept for scope, kept in exported.items())
+                values[redact_text(scheme_name)] = sorted(set(exported.values()))
+                scopes.update(exported.values())
+            else:
+                # Role names may be anything, even a pasted credential, so they stay
+                # out of the export; only the digest covers them.
+                values[redact_text(scheme_name)] = sorted(set(named))
+        digested.append(values)
+    return sorted(digested, key=canonical_json), scopes, redacted
+
+
 def _supported_interfaces(data: dict[str, Any]) -> list[dict[str, Any]]:
     """Read A2A 1.0 AgentInterface entries, which list endpoints with the preferred first."""
     entries = _member(data, "supportedInterfaces", "supported_interfaces")
@@ -323,7 +363,7 @@ def _supported_interfaces(data: dict[str, Any]) -> list[dict[str, Any]]:
     return entries
 
 
-def _security(data: dict[str, Any]) -> _Security:
+def _security(data: dict[str, Any], skills: list[tuple[str, dict[str, Any]]]) -> _Security:
     """Read declared requirements; a card cannot show that an endpoint enforces them."""
     schemes = _member(data, "securitySchemes", "security_schemes")
     schemes = {} if schemes is None else schemes
@@ -340,34 +380,35 @@ def _security(data: dict[str, Any]) -> _Security:
     scopes: set[str] = set()
     redacted_scopes = False
     forms: dict[str, list[dict[str, list[str]]] | None] = {}
-    for form, requirements in (
-        ("security", data.get("security")),
-        ("security_requirements", _member(data, "securityRequirements", "security_requirements")),
-    ):
+    for form, requirements in _requirement_forms(data):
         if requirements is None:
             forms[form] = None
             continue
         alternatives = _alternatives(requirements, wrapped=form == "security_requirements")
-        digested = []
-        for alternative in alternatives:
-            values: dict[str, list[str]] = {}
-            for scheme_name, named in alternative.items():
-                if kinds.get(scheme_name) in SCOPED_SCHEME_TYPES:
-                    exported = {scope: _scope(scope) for scope in named}
-                    redacted_scopes |= any(scope != kept for scope, kept in exported.items())
-                    values[redact_text(scheme_name)] = sorted(set(exported.values()))
-                    scopes.update(exported.values())
-                else:
-                    # Role names may be anything, even a pasted credential, so they stay
-                    # out of the export; only the digest covers them.
-                    values[redact_text(scheme_name)] = sorted(set(named))
-            digested.append(values)
-        forms[form] = sorted(digested, key=canonical_json)
-        # An empty alternative ({}) permits anonymous access, as in OpenAPI.
-        decisions.append(
-            bool(alternatives)
-            and all(alternative and set(alternative) <= typed for alternative in alternatives)
-        )
+        forms[form], named_scopes, redacted = _digested(alternatives, kinds)
+        scopes |= named_scopes
+        redacted_scopes |= redacted
+        decisions.append(bool(alternatives) and _requires_authentication(alternatives, typed))
+    skill_security: list[list[Any]] = []
+    skills_required, entries = True, 0
+    for label, skill in skills:
+        declared: dict[str, list[dict[str, list[str]]]] = {}
+        for form, requirements in _requirement_forms(skill):
+            if requirements is None:
+                continue
+            alternatives = _alternatives(requirements, wrapped=form == "security_requirements")
+            entries += sum(1 + len(alt) + sum(map(len, alt.values())) for alt in alternatives)
+            if entries > _MAX_ENTRIES:
+                raise ValueError("oversized skill security requirements")
+            declared[form], named_scopes, redacted = _digested(alternatives, kinds)
+            scopes |= named_scopes
+            redacted_scopes |= redacted
+            # The specifications leave open how a skill's requirements combine with the
+            # card's, so they can lower authentication_required but never raise it. An
+            # empty list adds none: proto3 JSON does not tell it from an absent field.
+            skills_required &= _requires_authentication(alternatives, typed)
+        if declared:
+            skill_security.append([label, declared])
     legacy = data.get("authentication")
     legacy_count = None
     if legacy is not None:
@@ -383,6 +424,7 @@ def _security(data: dict[str, Any]) -> _Security:
         "security_schemes": sorted([redact_text(name), kind] for name, kind in kinds.items()),
         "security_scheme_urls": _url_shapes(scheme_urls),
         **forms,
+        "skill_security": sorted(skill_security, key=canonical_json),
         "authentication_schemes": legacy_count,
     }
     unbound = [
@@ -398,6 +440,7 @@ def _security(data: dict[str, Any]) -> _Security:
     ]
     return _Security(
         required=bool(decisions) and all(decisions),
+        skills_required=skills_required,
         scopes=sorted(scopes),
         scheme_types=sorted(set(kinds.values())),
         scheme_urls=scheme_urls,
@@ -464,16 +507,19 @@ class A2AScanner(Scanner):
         declared_skills = data.get("skills", [])
         if not isinstance(declared_skills, list) or len(declared_skills) > 1000:
             raise ValueError("invalid skills")
-        skills = []
+        skills, skill_declarations = [], []
         for skill in declared_skills:
-            if isinstance(skill, dict):
-                skill = skill.get("name", skill.get("id", "unknown"))
-            if not isinstance(skill, str):
+            label = (
+                skill.get("name", skill.get("id", "unknown")) if isinstance(skill, dict) else skill
+            )
+            if not isinstance(label, str):
                 raise ValueError("invalid skill name")
-            skills.append(redact_text(skill))
+            skills.append(redact_text(label))
+            if isinstance(skill, dict):
+                skill_declarations.append((skills[-1], skill))
         # This records declarations only; neither a card nor this collector proves
         # that an endpoint actually enforces authentication.
-        security = _security(data)
+        security = _security(data, skill_declarations)
         # Clients may send credentials to these alternative endpoints too.
         interface_urls = _declared_urls(data.get("additionalInterfaces"))
         supported = _supported_interfaces(data)
@@ -528,12 +574,17 @@ class A2AScanner(Scanner):
                     recommendation="Use authenticated HTTPS transport for agent endpoints.",
                 )
             )
+        gap = ""
         if not security.required:
+            gap = "has no nonempty authentication requirement declared"
+        elif not security.skills_required:
+            gap = "has a skill without a nonempty authentication requirement declared"
+        if gap:
             risks.append(
                 RiskAssessment(
                     severity=RiskSeverity.MEDIUM,
                     category="authentication",
-                    detail=f"A2A agent '{name}' has no nonempty authentication requirement declared.",
+                    detail=f"A2A agent '{name}' {gap}.",
                     recommendation="Declare and independently verify endpoint authentication requirements.",
                 )
             )
@@ -563,7 +614,7 @@ class A2AScanner(Scanner):
             endpoint_url=_origin(endpoint) if endpoint else None,
             supported_protocols=protocols,
             skills_declared=skills,
-            authentication_required=security.required,
+            authentication_required=security.required and security.skills_required,
             capabilities=(
                 CapabilityDeclaration(oauth_scopes=security.scopes) if security.scopes else None
             ),

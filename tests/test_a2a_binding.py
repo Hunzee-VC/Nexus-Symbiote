@@ -821,6 +821,118 @@ def test_malformed_a2a_1_0_declarations_are_scan_failures(tmp_path, change):
     ]
 
 
+def _skill_requirement(card: dict[str, Any], scheme: str, values: list[str]) -> dict[str, Any]:
+    """Require `values` of `scheme` for the first skill, in the card's A2A version form."""
+    changed = copy.deepcopy(card)
+    skill = changed["skills"][0]
+    if "supportedInterfaces" in changed:
+        changed["securitySchemes"]["key"] = {"apiKeySecurityScheme": {"name": "X-Key"}}
+        skill["securityRequirements"] = [{"schemes": {scheme: {"list": values}}}]
+    else:
+        changed["securitySchemes"]["key"] = {"type": "apiKey", "in": "header", "name": "X-Key"}
+        skill["security"] = [{scheme: values}]
+    return changed
+
+
+@pytest.mark.parametrize("card", [CARD, CARD_1_0], ids=["a2a-0.3", "a2a-1.0"])
+@pytest.mark.parametrize(
+    ("scheme", "before", "after", "alert"),
+    [
+        ("oauth", "read:only", "admin", "capabilities changed"),
+        ("key", "skill-reader", "skill-writer", "properties changed"),
+        ("undeclared", "skill-reader", "skill-writer", "properties changed"),
+    ],
+)
+def test_skill_requirement_change_fails_the_drift_gate_without_a_key(
+    tmp_path, card, scheme, before, after, alert
+):
+    baseline = _skill_requirement(card, scheme, [before])
+    changed = _skill_requirement(card, scheme, [after])
+    run, boms = _drift(tmp_path / "changed", baseline, changed)
+    assert run.exit_code == 1, run.output
+    alerts = [a["alert"] for a in json.loads(run.stdout)["security_alerts"]]
+    assert any(alert in a and "billing-agent" in a for a in alerts), alerts
+    # Only OAuth and OpenID Connect scopes are exported; other values stay digest-only.
+    assert ('"admin"' in boms) is (scheme == "oauth") and "skill-" not in boms
+    unchanged, _ = _drift(tmp_path / "unchanged", baseline, copy.deepcopy(baseline))
+    assert unchanged.exit_code == 0, unchanged.output
+
+
+def test_skill_scopes_are_exported_with_the_card_scopes(tmp_path):
+    pat = "ghp_" + "d" * 36
+    card = _skill_requirement(CARD_1_0, "oauth", ["https://www.googleapis.com/auth/drive", pat])
+    server = _server(tmp_path, card)
+    assert server.capabilities is not None
+    assert server.capabilities.oauth_scopes == [
+        "***",
+        "https://www.googleapis.com/auth/drive",
+        "read:only",
+    ]
+    assert server.authentication_required is True
+    assert pat not in server.model_dump_json()
+    (gap,) = [r.detail for r in server.risks if r.category == "completeness"]
+    assert gap.endswith("; redacted OAuth scopes.")
+
+
+@pytest.mark.parametrize(
+    ("card", "skill_security", "required"),
+    [
+        (CARD, {"security": [{}]}, False),
+        (CARD, {"security": [{"oauth": ["read:only"]}, {}]}, False),
+        (CARD, {"security": [{"undeclared": []}]}, False),
+        (CARD, {"security": []}, True),
+        (CARD, {"security": None}, True),
+        (CARD, {"security": [{"oauth": []}]}, True),
+        (CARD_1_0, {"securityRequirements": [{"schemes": {}}]}, False),
+        (CARD_1_0, {"security_requirements": [{}]}, False),
+        (CARD_1_0, {"securityRequirements": []}, True),
+    ],
+)
+def test_skill_anonymous_alternative_keeps_the_authentication_finding(
+    tmp_path, card, skill_security, required
+):
+    changed = copy.deepcopy(card)
+    changed["skills"][0].update(skill_security)
+    server = _server(tmp_path / "card", changed)
+    assert server.authentication_required is required
+    gap = "has a skill without a nonempty authentication requirement declared"
+    findings = [r.detail for r in server.risks if r.category == "authentication"]
+    assert findings == ([] if required else [f"A2A agent 'billing-agent' {gap}."])
+    if not required:
+        run, _ = _drift(tmp_path, card, changed)
+        assert run.exit_code == 1, run.output
+
+
+def test_skill_requirements_do_not_make_a_card_require_authentication(tmp_path):
+    card = _skill_requirement(CARD, "oauth", ["read:only"])
+    del card["security"]
+    server = _server(tmp_path, card)
+    assert server.authentication_required is False
+    assert server.capabilities is not None and server.capabilities.oauth_scopes == ["read:only"]
+    findings = [r.detail for r in server.risks if r.category == "authentication"]
+    assert findings == [
+        "A2A agent 'billing-agent' has no nonempty authentication requirement declared."
+    ]
+
+
+@pytest.mark.parametrize(
+    "skills",
+    [
+        [{"id": "s", "security": {"oauth": ["read:only"]}}],
+        [{"id": "s", "security": [["oauth"]]}],
+        [{"id": "s", "security": [{"oauth": "read:only"}]}],
+        [{"id": "s", "securityRequirements": [{"oauth": {"list": []}}]}],
+        [{"id": "s", "securityRequirements": [], "security_requirements": []}],
+        # Each skill is within the per-list limit; together they exceed it.
+        [{"id": f"s{i}", "security": [{"oauth": ["x"] * 600}]} for i in range(2)],
+    ],
+)
+def test_malformed_or_oversized_skill_security_is_a_scan_failure(tmp_path, skills):
+    assert _failures(tmp_path, {**CARD, "skills": skills}) == [
+        ".well-known/agent.json: invalid A2A card field types"
+    ]
+
+
 VECTOR_KEY = "nexus-symbiote-a2a-test-vector-key"
 VECTOR_CARD = {
     "name": "v",
@@ -834,30 +946,33 @@ VECTOR_CARD = {
     },
     "security": [{"o": ["s", "https://a.example/scope"]}, {"k": ["role"]}],
     "additionalInterfaces": [{"url": "https://g.example", "transport": "GRPC"}],
+    "skills": [{"id": "l", "name": "lookup", "security": [{"o": ["t"]}]}],
 }
 VECTOR_CLIENT = {"name": "c", "agentCardUrl": "https://a.example/.well-known/agent-card.json"}
 VECTORS = [
     (
         "static_card_hash",
-        '{"profile":"nexus-symbiote/a2a-card-structure/v2","structure":{'
-        '"additional_interfaces":[{"fragment":false,"path_separators":0,"plain_path":"",'
-        '"query":false,"userinfo":false}],"authentication_schemes":null,'
+        '{"profile":"nexus-symbiote/a2a-card-structure/v2",'
+        '"structure":{"additional_interfaces":[{"fragment":false,"path_separators":0,'
+        '"plain_path":"","query":false,"userinfo":false}],"authentication_schemes":null,'
         '"endpoint":{"fragment":false,"path_separators":1,"plain_path":null,"query":false,'
-        '"userinfo":false},"fields":["additionalInterfaces","name","security",'
-        '"securitySchemes","url"],"security":[{"k":["role"]},{"o":["https://a.example/scope",'
-        '"s"]}],"security_requirements":null,"security_scheme_urls":[{"fragment":false,'
+        '"userinfo":false},"fields":["additionalInterfaces","name","security","securitySchemes",'
+        '"skills","url"],"security":[{"k":["role"]},{"o":["https://a.example/scope","s"]}],'
+        '"security_requirements":null,"security_scheme_urls":[{"fragment":false,'
         '"path_separators":1,"plain_path":null,"query":false,"userinfo":false}],'
-        '"security_schemes":[["k","apiKey"],["o","oauth2"]],"supported_interfaces":[]}}',
-        "sha256:fb9d1305becb67fbf5a4a7b6d0fe18cad28f224791d64aaee4d08ffbba94765d",
+        '"security_schemes":[["k","apiKey"],["o","oauth2"]],"skill_security":[["lookup",'
+        '{"security":[{"o":["t"]}]}]],"supported_interfaces":[]}}',
+        "sha256:b29ca4fd11e1d7a5e326d37bf1a550bc209f14c57bc6ee05ec6efbfb664de594",
     ),
     (
         "static_value_binding",
         '{"configuration":{"additionalInterfaces":[{"transport":"GRPC","url":"https://g.example"}],'
         '"name":"v","security":[{"o":["s","https://a.example/scope"]},{"k":["role"]}],'
-        '"securitySchemes":{"k":{"type":"apiKey"},"o":{"flows":{"clientCredentials":{'
-        '"scopes":{},"tokenUrl":"https://t.example/token"}},"type":"oauth2"}},'
-        '"url":"https://a.example/p"},"profile":"nexus-symbiote/a2a-card-values/v1"}',
-        "hmac-sha256:6891a90bc0fe990cca5ba895975fd35bb9a3a319abb88ea27c080b5568e81ba4",
+        '"securitySchemes":{"k":{"type":"apiKey"},"o":{"flows":{"clientCredentials":{"scopes":{},'
+        '"tokenUrl":"https://t.example/token"}},"type":"oauth2"}},"skills":[{"id":"l",'
+        '"name":"lookup","security":[{"o":["t"]}]}],"url":"https://a.example/p"},'
+        '"profile":"nexus-symbiote/a2a-card-values/v1"}',
+        "hmac-sha256:b2bf14d445fff1ba138b8f81aba51d13e16ff125b26e3f1dabd5718417d802a8",
     ),
     (
         "static_config_hash",
@@ -893,7 +1008,7 @@ def test_binding_profiles_match_their_published_vectors(tmp_path, monkeypatch):
         assert record.properties[field] == expected
     assert card.properties["static_value_binding_key_id"] == "46c23d6a04382e01f726b1da3f2253b1"
     assert card.capabilities is not None
-    assert card.capabilities.oauth_scopes == ["https://a.example/scope", "s"]
+    assert card.capabilities.oauth_scopes == ["https://a.example/scope", "s", "t"]
     assert card.properties["security_scheme_origins"] == ["https://t.example"]
     assert card.properties["additional_interface_origins"] == ["https://g.example"]
 
@@ -916,22 +1031,33 @@ VECTOR_CARD_1_0 = {
         {"schemes": {"o": {"list": ["s"]}}},
         {"schemes": {"k": {"list": ["role"]}}},
     ],
+    "skills": [
+        {
+            "id": "l",
+            "name": "lookup",
+            "description": "d",
+            "tags": [],
+            "securityRequirements": [{"schemes": {"o": {"list": ["t"]}, "k": {"list": ["r2"]}}}],
+        }
+    ],
 }
 VECTOR_1_0 = (
     '{"profile":"nexus-symbiote/a2a-card-structure/v2","structure":{"additional_interfaces":[],'
     '"authentication_schemes":null,"endpoint":{"fragment":false,"path_separators":1,'
     '"plain_path":null,"query":false,"userinfo":false},"fields":["name","securityRequirements",'
-    '"securitySchemes","supportedInterfaces"],"security":null,"security_requirements":[{"k":'
-    '["role"]},{"o":["s"]}],"security_scheme_urls":[{"fragment":false,"path_separators":1,'
-    '"plain_path":null,"query":false,"userinfo":false}],"security_schemes":[["k","apiKey"],'
-    '["o","oauth2"]],"supported_interfaces":[{"fragment":false,"path_separators":1,'
-    '"plain_path":null,"query":false,"userinfo":false},{"fragment":false,"path_separators":0,'
-    '"plain_path":null,"query":false,"userinfo":false}]}}'
+    '"securitySchemes","skills","supportedInterfaces"],"security":null,'
+    '"security_requirements":[{"k":["role"]},{"o":["s"]}],'
+    '"security_scheme_urls":[{"fragment":false,"path_separators":1,"plain_path":null,"query":false,'
+    '"userinfo":false}],"security_schemes":[["k","apiKey"],["o","oauth2"]],'
+    '"skill_security":[["lookup",{"security_requirements":[{"k":["r2"],"o":["t"]}]}]],'
+    '"supported_interfaces":[{"fragment":false,"path_separators":1,"plain_path":null,"query":false,'
+    '"userinfo":false},{"fragment":false,"path_separators":0,"plain_path":null,"query":false,'
+    '"userinfo":false}]}}'
 )
 
 
 def test_a2a_1_0_card_matches_its_published_structure_vector(tmp_path):
-    expected = "sha256:7795bcddf41ee40cef6c25b2399c2cd36e211b8a009d2a0c29bc97d05d3e2d09"
+    expected = "sha256:4e15192e6d059a3454939bc7fc892cd470a254ac268091ec4fa038b7f428d923"
     assert "sha256:" + hashlib.sha256(VECTOR_1_0.encode()).hexdigest() == expected
     card = _server(tmp_path, VECTOR_CARD_1_0)
     assert card.properties["static_card_hash"] == expected
@@ -942,4 +1068,4 @@ def test_a2a_1_0_card_matches_its_published_structure_vector(tmp_path):
     ]
     assert card.properties["security_scheme_origins"] == ["//t.example"]
     assert card.properties["security_scheme_types"] == ["apiKey", "oauth2"]
-    assert card.capabilities is not None and card.capabilities.oauth_scopes == ["s"]
+    assert card.capabilities is not None and card.capabilities.oauth_scopes == ["s", "t"]
