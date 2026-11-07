@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -150,3 +151,115 @@ def test_editable_file_url_is_not_the_project_when_a_directory_shadows_it(tmp_pa
     assert RegistryScanner().scan(project).surfaces_excluded == [
         "requirements.txt: editable install not followed"
     ]
+
+
+@pytest.mark.parametrize(
+    ("dockerfile", "image", "risk"),
+    [
+        (
+            "FROM --platform=linux/amd64 ollama/ollama:latest\n",
+            "ollama/ollama:latest",
+            "version_pinning",
+        ),
+        (
+            "ARG BUILDPLATFORM\nFROM --platform=$BUILDPLATFORM ollama/ollama:0.1.0 AS builder\n"
+            "FROM builder\n",
+            "ollama/ollama:0.1.0",
+            "mutable_image_tag",
+        ),
+        ("from ollama/ollama:latest\n", "ollama/ollama:latest", "version_pinning"),
+        ("FROM \\\n  ollama/ollama:latest\n", "ollama/ollama:latest", "version_pinning"),
+        ("FROM ollama/\\\n# note\n\nollama:0.5.7\n", "ollama/ollama:0.5.7", "mutable_image_tag"),
+        (
+            "﻿# syntax=docker/dockerfile:1\nFrom   ollama/ollama:0.5.7\n",
+            "ollama/ollama:0.5.7",
+            "mutable_image_tag",
+        ),
+    ],
+)
+def test_dockerfile_from_forms_name_the_image(tmp_path, dockerfile, image, risk):
+    (tmp_path / "Dockerfile").write_text(dockerfile)
+    result = RegistryScanner().scan(tmp_path)
+    assert result.surfaces_excluded == [] and result.scan_failures == []
+    assert [(c.bom_ref, [r.category for r in c.risks]) for c in result.components] == [
+        (f"registry:docker/{image}", [risk])
+    ]
+
+
+def test_stage_reference_is_not_an_image(tmp_path):
+    (tmp_path / "Dockerfile.agent").write_text(
+        "FROM python:3.12-slim AS Model-Builder\nRUN pip install vllm\nFROM model-builder\n"
+        "FROM --platform=linux/arm64 vllm/vllm-openai:v0.4.0 AS serve\n"
+    )
+    assert [c.bom_ref for c in RegistryScanner().scan(tmp_path).components] == [
+        "registry:docker/vllm/vllm-openai:v0.4.0"
+    ]
+
+
+def test_text_outside_a_from_instruction_is_not_an_image(tmp_path):
+    (tmp_path / "Dockerfile").write_text(
+        "FROM python:3.12\n# FROM ollama/ollama:1\nRUN echo FROM ollama/ollama:2\n"
+        "LABEL image: ollama/ollama:3\n"
+    )
+    result = RegistryScanner().scan(tmp_path)
+    assert result.components == [] and result.surfaces_excluded == []
+
+
+@pytest.mark.parametrize(
+    ("dockerfile", "gap", "collected"),
+    [
+        (
+            "ARG BASE=ollama/ollama:0.1.0\nFROM $BASE\n",
+            "FROM image with an unresolved substitution not collected",
+            [],
+        ),
+        (
+            "ARG V=0.1.0\nFROM ollama/ollama:${V}\n",
+            "FROM image with an unresolved substitution not collected",
+            ["ollama/ollama:${V}"],
+        ),
+        ("FROM --platform=linux/amd64\n", "FROM instruction not parsed", []),
+        ('FROM --platform="linux/amd64 x" ollama/ollama:1\n', "FROM instruction not parsed", []),
+        ("# escape=`\nFROM ollama/ollama:latest\n", "escape parser directive not followed", []),
+    ],
+)
+def test_unresolved_from_is_partial(tmp_path, dockerfile, gap, collected):
+    (tmp_path / "Dockerfile").write_text(dockerfile)
+    result = RegistryScanner().scan(tmp_path)
+    assert result.surfaces_excluded == [f"Dockerfile: {gap}"]
+    assert [c.name for c in result.components] == collected
+    out = tmp_path / "bom.json"
+    scanned = CliRunner().invoke(
+        main, ["scan", str(tmp_path), "--no-project-policy", "-o", str(out)]
+    )
+    assert scanned.exit_code == 1, scanned.output
+    status = json.loads(out.read_text())["metadata"]["completeness"]["scanner_status"]
+    assert status["registry"] == "partial"
+
+
+def test_tag_change_behind_a_from_flag_is_drift(tmp_path):
+    project = _project(tmp_path / "proj", {})
+    dockerfile = project / "Dockerfile"
+    runner = CliRunner()
+    for tag, out in (("0.1.0", "a.json"), ("0.5.7", "b.json")):
+        dockerfile.write_text(f"FROM --platform=linux/amd64 ollama/ollama:{tag}\n")
+        scanned = runner.invoke(
+            main,
+            ["scan", str(project), "--no-project-policy", "--report-only"]
+            + ["-o", str(tmp_path / out)],
+        )
+        assert scanned.exit_code == 0, scanned.output
+    diff = runner.invoke(
+        main, ["diff", str(tmp_path / "a.json"), str(tmp_path / "b.json"), "--fail-on-alert"]
+    )
+    assert diff.exit_code == 1, diff.output
+    assert "ollama/ollama:0.5.7" in diff.output
+
+
+def test_dockerfile_parsing_is_linear(tmp_path):
+    (tmp_path / "Dockerfile").write_text("FROM" + " " * 4_000_000)
+    (tmp_path / "Dockerfile.agent").write_text("FROM a AS b \\\n" * 300_000 + "RUN x\n")
+    started = time.monotonic()
+    result = RegistryScanner().scan(tmp_path)
+    assert time.monotonic() - started < 5
+    assert result.surfaces_excluded == ["Dockerfile: FROM instruction not parsed"]

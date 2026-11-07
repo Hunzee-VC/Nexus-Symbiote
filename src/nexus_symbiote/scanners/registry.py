@@ -12,7 +12,7 @@ import fnmatch
 import re
 import shlex
 import tomllib
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -712,9 +712,14 @@ class RegistryScanner(Scanner):
             content = self._read(path, result)
             if content is None:
                 continue
-            # One whitespace quantifier only: two adjacent ones backtrack quadratically
-            # when a file ends in "image:" followed by a long run of whitespace.
-            for raw_image in re.findall(r"(?:FROM|image:)\s*([^\s]+)", content):
+            if filename.startswith("Dockerfile"):
+                images, gaps = self._dockerfile_images(content)
+                result.surfaces_excluded.extend(f"{filename}: {gap}" for gap in gaps)
+            else:
+                # One whitespace quantifier only: two adjacent ones backtrack quadratically
+                # when a file ends in "image:" followed by a long run of whitespace.
+                images = re.findall(r"(?:FROM|image:)\s*([^\s]+)", content)
+            for raw_image in images:
                 if not any(
                     word in raw_image.lower()
                     for word in ("vllm", "ollama", "triton", "tgi", "llama", "model")
@@ -748,6 +753,71 @@ class RegistryScanner(Scanner):
                     )
                 )
         return components
+
+    # BuildKit's word separators; a no-break space is part of a word.
+    _DOCKER_WORD = re.compile(r"[^\t\v\f\r ]+")
+    _DOCKER_DIRECTIVE = re.compile(r"#[ \t]*([A-Za-z][A-Za-z0-9]*)[ \t]*=(.*)")
+
+    @classmethod
+    def _dockerfile_images(cls, content: str) -> tuple[list[str], list[str]]:
+        """Images named by FROM instructions, as written, and what was not collected.
+
+        The file is read as BuildKit reads it: a trailing backslash continues an
+        instruction and comment lines are dropped, even inside one; the instruction
+        word is case-insensitive; --flag words come before the image; and a FROM
+        naming an earlier stage is not an image. Each line is handled once.
+        """
+        lines = content.removeprefix("﻿").split("\n")
+        for line in lines:
+            directive = cls._DOCKER_DIRECTIVE.fullmatch(line.strip())
+            if directive is None:
+                break
+            if directive.group(1).lower() == "escape" and directive.group(2).strip() != "\\":
+                # Another escape character changes where instructions end.
+                return [], ["escape parser directive not followed"]
+        images: list[str] = []
+        gaps: list[str] = []
+        stages: set[str] = set()
+        for line in cls._dockerfile_instructions(lines):
+            instruction = cls._DOCKER_WORD.match(line)
+            if instruction is None or instruction.group().lower() != "from":
+                continue
+            words = cls._DOCKER_WORD.findall(line, instruction.end())
+            start = 0
+            while start < len(words) and words[start].startswith("--"):
+                start += 1
+            if start == len(words) or any(c in w for w in words[:start] for c in "\"'\\"):
+                # No image, or a quoted or escaped flag whose end is not certain.
+                gaps.append("FROM instruction not parsed")
+                continue
+            image, rest = words[start], words[start + 1 :]
+            if image.lower() not in stages:
+                if "$" in image:
+                    gaps.append("FROM image with an unresolved substitution not collected")
+                images.append(image)
+            if len(rest) == 2 and rest[0].lower() == "as":
+                stages.add(rest[1].lower())
+        return images, list(dict.fromkeys(gaps))
+
+    @staticmethod
+    def _dockerfile_instructions(lines: list[str]) -> Iterator[str]:
+        """Instructions as BuildKit joins their lines, without comment or empty lines."""
+        parts: list[str] = []
+        for raw in lines:
+            line = raw.removesuffix("\r")
+            stripped = line.lstrip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            body = line if parts else stripped
+            trimmed = body.rstrip(" \t")
+            if trimmed.endswith("\\"):
+                parts.append(trimmed[:-1])
+                continue
+            parts.append(body)
+            yield "".join(parts)
+            parts = []
+        if parts:
+            yield "".join(parts)
 
     @staticmethod
     def _conflict(one: str, other: str) -> bool:
