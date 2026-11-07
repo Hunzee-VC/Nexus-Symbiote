@@ -20,7 +20,7 @@ from click.testing import CliRunner
 from nexus_symbiote import modes
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
-from nexus_symbiote.core.models import CompletenessClaim
+from nexus_symbiote.core.models import CompletenessClaim, ToolComponent
 from nexus_symbiote.generators._common import NAMESPACE, coverage_aggregate
 from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
 from nexus_symbiote.generators.spdx import SPDXGenerator
@@ -42,7 +42,6 @@ TYPED_MAPPING = {
     "merged-from": "descendantOf",
 }
 NATIVE_RELATIONSHIPS = get_args(DependencyEdge.model_fields["relationship"].annotation)
-UNTYPED = [name for name in NATIVE_RELATIONSHIPS if name not in TYPED_MAPPING]
 RELATIONSHIP_PROPERTY = "nexus-symbiote:dependency:relationship"
 # One non-default value per imported-report field of the completeness claim.
 IMPORTED_MARKERS: dict[str, Any] = {
@@ -57,6 +56,11 @@ IMPORTED_MARKERS: dict[str, Any] = {
 }
 SCAN_CONDITION = "runtime use and authority unobserved"
 APPROVAL = "only after a human approves the call"
+EDGE_CASES = [
+    (relationship, conditions)
+    for relationship in NATIVE_RELATIONSHIPS
+    for conditions in (None, "", APPROVAL)
+]
 DEFAULT_EXCLUDE_LINE = '  exclude_paths: ["node_modules", ".git", "__pycache__", ".venv"]'
 
 
@@ -110,6 +114,8 @@ def _between(view: dict[str, Any], source: str, target: str) -> list[dict[str, A
 
 def _one_edge(relationship: str, conditions: str | None = APPROVAL) -> AIBOM:
     bom = fixture_bom()
+    # Two components keep the SPDX schema validation in generate and recover cheap.
+    bom.components = [c for c in bom.components if c.bom_ref in {"agent:main", "tool:send"}]
     bom.dependencies = [
         DependencyEdge(
             source_ref="agent:main",
@@ -218,19 +224,6 @@ def test_spdx_recovery_rejects_a_changed_public_condition(change):
         SPDXGenerator.recover(document)
 
 
-@pytest.mark.parametrize("conditions", [None, ""])
-@pytest.mark.parametrize("relationship", UNTYPED)
-def test_spdx_other_relationship_names_its_native_relationship(relationship, conditions):
-    document = SPDXGenerator().generate(_one_edge(relationship, conditions))
-    (edge,) = _between(standard_only(document, "spdx"), "agent:main", "tool:send")
-    assert edge["relationshipType"] == "other"
-    assert edge.get("comment") == f"Native relationship '{relationship}'."
-    assert (
-        SPDXGenerator.recover(document).dependencies
-        == _one_edge(relationship, conditions).dependencies
-    )
-
-
 def test_spdx_native_relationship_comment_survives_a_standard_reader():
     view = standard_only(SPDXGenerator().generate(_one_edge("delegates-to", None)), "spdx")
     (kept,) = [n for n in _spdx_round_trip(view)["@graph"] if n.get("relationshipType") == "other"]
@@ -255,30 +248,63 @@ def test_spdx_recovery_rejects_a_changed_native_relationship_comment(change):
         SPDXGenerator.recover(document)
 
 
-@pytest.mark.parametrize("conditions", [None, "", APPROVAL])
-@pytest.mark.parametrize("relationship", NATIVE_RELATIONSHIPS)
-def test_every_public_spdx_relationship_agrees_with_the_cyclonedx_graph(relationship, conditions):
-    bom = _one_edge(relationship, conditions)
-    (edge,) = _between(
-        standard_only(SPDXGenerator().generate(bom), "spdx"), "agent:main", "tool:send"
-    )
-    cdx = CycloneDXGenerator().generate(bom)
-    unconditional = not conditions
-    typed = TYPED_MAPPING.get(relationship) if unconditional else None
+@pytest.fixture(scope="module")
+def every_edge() -> tuple[AIBOM, dict[str, Any], dict[str, Any]]:
+    """One export per format, with a separate target for each relationship and condition."""
+    bom = fixture_bom()
+    bom.components += [
+        ToolComponent(bom_ref=f"tool:case-{index}", name=f"case-{index}")
+        for index in range(len(EDGE_CASES))
+    ]
+    bom.dependencies = [
+        DependencyEdge(
+            source_ref="agent:main",
+            target_ref=f"tool:case-{index}",
+            relationship=relationship,
+            conditions=conditions,
+        )
+        for index, (relationship, conditions) in enumerate(EDGE_CASES)
+    ]
+    return bom, SPDXGenerator().generate(bom), CycloneDXGenerator().generate(bom)
+
+
+@pytest.mark.parametrize(("relationship", "conditions"), EDGE_CASES)
+def test_every_public_spdx_relationship_agrees_with_the_cyclonedx_graph(
+    every_edge, relationship, conditions
+):
+    _bom, spdx_document, cdx = every_edge
+    target = f"tool:case-{EDGE_CASES.index((relationship, conditions))}"
+    (edge,) = _between(standard_only(spdx_document, "spdx"), "agent:main", target)
+    typed = None if conditions else TYPED_MAPPING.get(relationship)
     # An empty condition stays typed, as `not edge.conditions` keeps it in the CycloneDX graph.
     assert edge["relationshipType"] == (typed or "other")
-    if typed is None:
-        assert f"native relationship '{relationship}'" in edge.get("comment", "").lower()
+    if conditions:
+        assert edge["comment"] == (
+            f"Conditional native relationship '{relationship}' (conditions: {conditions}). "
+            f"Not an unconditional {TYPED_MAPPING.get(relationship, 'relationship')} assertion."
+        )
+    elif typed is None:
+        assert edge["comment"] == f"Native relationship '{relationship}'."
     else:
         assert "comment" not in edge
-    in_graph = standard_only(cdx, "cyclonedx").get("dependencies", []) == [
-        {"ref": "agent:main", "dependsOn": ["tool:send"]}
-    ]
+    graph = standard_only(cdx, "cyclonedx").get("dependencies", [])
+    in_graph = any(
+        target in row.get("dependsOn", []) for row in graph if row["ref"] == "agent:main"
+    )
     assert in_graph == (typed == "dependsOn")
-    flag = {} if unconditional else {"conditional": True}
-    assert _relationship_properties(cdx) == [
-        {"from": "agent:main", "to": "tool:send", "type": relationship, **flag}
+    flag = {"conditional": True} if conditions else {}
+    assert [p for p in _relationship_properties(cdx) if p["to"] == target] == [
+        {"from": "agent:main", "to": target, "type": relationship, **flag}
     ]
+
+
+def test_every_relationship_and_condition_recovers_exactly(every_edge):
+    bom, spdx_document, cdx = every_edge
+    for recovered in (
+        SPDXGenerator.recover(deepcopy(spdx_document)),
+        CycloneDXGenerator.recover(deepcopy(cdx)),
+    ):
+        assert sorted(recovered.dependencies, key=str) == sorted(bom.dependencies, key=str)
 
 
 @pytest.mark.parametrize("legacy", [False, True])
@@ -331,7 +357,7 @@ def _claim(**changes: Any) -> CompletenessClaim:
     ],
 )
 def test_public_coverage_is_derived_from_the_native_claim(changes, aggregate):
-    bom = fixture_bom()
+    bom = _one_edge("invokes", None)
     bom.metadata.completeness = None if changes is None else _claim(**changes)
     cdx = standard_only(CycloneDXGenerator().generate(bom), "cyclonedx")
     assert cdx.get("compositions") == [{"aggregate": aggregate}]
@@ -354,16 +380,24 @@ def test_every_imported_report_field_has_a_public_coverage_case():
         assert value != default and getattr(_claim(**{name: value}), name) == value
 
 
-@pytest.mark.parametrize("name", sorted(IMPORTED_MARKERS))
-def test_recovery_rejects_unknown_coverage_for_a_marker_only_import(name):
-    bom = fixture_bom()
-    bom.metadata.completeness = _claim(**{name: IMPORTED_MARKERS[name]})
+@pytest.mark.parametrize(
+    "marker",
+    [
+        *({name: value} for name, value in IMPORTED_MARKERS.items()),
+        {"scope": "repository+shadowscan"},
+    ],
+    ids=lambda marker: ",".join(marker),
+)
+def test_recovery_rejects_unknown_coverage_for_a_marker_only_import(marker):
+    bom = _one_edge("invokes", None)
+    bom.metadata.completeness = _claim(**marker)
     cdx = CycloneDXGenerator().generate(bom)
     spdx_document = SPDXGenerator().generate(bom)
-    assert CycloneDXGenerator.recover(deepcopy(cdx)).metadata.completeness == _claim(
-        **{name: IMPORTED_MARKERS[name]}
-    )
-    assert SPDXGenerator.recover(deepcopy(spdx_document)).metadata.completeness is not None
+    for recovered in (
+        CycloneDXGenerator.recover(deepcopy(cdx)),
+        SPDXGenerator.recover(deepcopy(spdx_document)),
+    ):
+        assert recovered.metadata.completeness == bom.metadata.completeness
     for weakened in (None, [{"aggregate": "unknown"}]):
         document = {k: v for k, v in cdx.items() if k != "compositions"}
         if weakened is not None:
