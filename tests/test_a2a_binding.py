@@ -265,6 +265,19 @@ def test_keyed_baseline_fails_reconciliation_without_its_key(tmp_path, monkeypat
     assert not CompletenessValidator().validate_against_project(bom, project).is_complete
 
 
+def test_snapshot_with_the_superseded_card_profile_fails_reconciliation(tmp_path):
+    project = tmp_path / "project"
+    _write_card(project, {**CARD, "url": "https://agents.example.com"})
+    baseline = tmp_path / "baseline.json"
+    _scan(project, baseline)
+    bom = AIBOM.load(baseline)
+    assert CompletenessValidator().validate_against_project(bom, project).is_complete
+    (server,) = [c for c in bom.components if isinstance(c, A2AServerComponent)]
+    server.properties["static_card_hash_profile"] = "nexus-symbiote/a2a-card-structure/v1"
+    report = CompletenessValidator().validate_against_project(bom, project)
+    assert any("a2a-server:billing-agent" in issue.description for issue in report.issues)
+
+
 def test_client_card_url_path_change_is_bound_by_the_key(tmp_path, monkeypatch):
     before = {"name": "planner", "agentCardUrl": "https://agents.example.com/trusted/card.json"}
     after = {**before, "agentCardUrl": "https://agents.example.com/attacker/card.json"}

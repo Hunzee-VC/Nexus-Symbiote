@@ -33,9 +33,10 @@ A2A_CONFIG_FILES = ["a2a.json", "a2a.yaml", "a2a.yml", "a2a_config.json"]
 
 # Exports keep only URL origins, and paths or queries may carry credentials, so no
 # unkeyed digest covers them: it would let anyone holding the BOM confirm guesses.
-# The structure digests cover names, counts, flags, values exported in clear and the
-# requirement values of schemes other than OAuth 2.0 and OpenID Connect, which are
-# not exported. Other values are bound only by an HMAC under the operator key, as for MCP.
+# The structure digests cover names, counts, flags and values exported in clear. They
+# also cover the requirement values of schemes other than OAuth 2.0 and OpenID Connect,
+# which are not exported, so a BOM holder can confirm guesses of those values. Other
+# values are bound only by an HMAC under the operator key, as for MCP.
 CARD_STRUCTURE_PROFILE = "nexus-symbiote/a2a-card-structure/v2"
 CARD_VALUE_BINDING_PROFILE = "nexus-symbiote/a2a-card-values/v1"
 CLIENT_STRUCTURE_PROFILE = "nexus-symbiote/a2a-client-structure/v1"
@@ -575,9 +576,7 @@ class A2AScanner(Scanner):
                 "security_scheme_types": security.scheme_types,
                 "security_scheme_origins": sorted({_origin(url) for url in security.scheme_urls}),
                 "additional_interface_origins": sorted({_origin(url) for url in interface_urls}),
-                "supported_interface_origins": list(
-                    dict.fromkeys(_origin(url) for url in supported_urls)
-                ),
+                "supported_interface_origins": [_origin(url) for url in supported_urls],
                 "source_values_bound": bool(binding),
                 "static_card_hash": structure_hash,
                 "static_card_hash_profile": CARD_STRUCTURE_PROFILE,
