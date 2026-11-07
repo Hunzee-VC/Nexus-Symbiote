@@ -21,7 +21,7 @@ from nexus_symbiote import modes
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.models import CompletenessClaim, ToolComponent
-from nexus_symbiote.generators._common import NAMESPACE, coverage_aggregate
+from nexus_symbiote.generators._common import BUILTIN_EXCLUSIONS, NAMESPACE, coverage_aggregate
 from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
 from nexus_symbiote.generators.spdx import SPDXGenerator
 from nexus_symbiote.generators.validation import validate_cyclonedx, validate_spdx
@@ -427,6 +427,8 @@ def scans(tmp_path_factory) -> dict[str, dict[str, dict[str, Any]]]:
     shutil.copytree(DEMO, initialized)
     result = CliRunner().invoke(main, ["init", "--path", str(initialized)])
     assert result.exit_code == 0, result.output
+    policy = (initialized / ".nexus-symbiote.yaml").read_text(encoding="utf-8")
+    assert policy == DEFAULT_POLICY_YAML
     narrowed = base / "models-excluded-agent"
     shutil.copytree(DEMO, narrowed)
     (narrowed / ".nexus-symbiote.yaml").write_text(
@@ -478,7 +480,8 @@ def test_cli_runs_record_the_scope_each_case_needs(scans):
     assert DEFAULT_EXCLUDE_LINE in DEFAULT_POLICY_YAML
     for scan in ("full", "init-policy", "every-scanner"):
         assert set(claim(scan).collectors_requested) == BUILTIN_SCANNER_NAMES
-    assert {"node_modules", ".git", "__pycache__", ".venv"} <= set(claim("init-policy").exclusions)
+    # The init policy lists only built-in names, so it narrows nothing.
+    assert set(claim("init-policy").exclusions) <= BUILTIN_EXCLUSIONS
     assert "models" in claim("models-excluded").exclusions
     assert set(claim("models-excluded").collectors_requested) == BUILTIN_SCANNER_NAMES
     assert not claim("models-excluded").scan_failures
