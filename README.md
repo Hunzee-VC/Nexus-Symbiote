@@ -71,7 +71,7 @@ Eight built-in collectors read declared configuration and artifacts from the pro
 | `registry` | In the project root: `package.json` and `package-lock.json` (v2 or v3); `requirements*.txt` (includes and editable installs are not followed; URL and VCS references without a package name, and local paths that do not start with an AI package name, are skipped); `pyproject.toml` (`[project]` dependencies and optional dependencies, `[tool.poetry.dependencies]`); `Dockerfile`, `Dockerfile.agent` and `docker-compose.yml` or `.yaml` | AI package identities, pins, npm lockfile integrity; container images taken as written from the first word after an upper-case `FROM` or `image:` (FROM flags, quotes and ARG substitutions are not resolved) when it contains vllm, ollama, triton, tgi, llama or model, and whether that word ends in a digest |
 | `a2a` | `.well-known/agent.json`, `agent-card.json`, A2A client config | Agent cards, endpoints, declared authentication |
 | `ide_agents` | Settings for Claude Code, Cursor, Codex, Windsurf, Cline, Copilot and others | Which agents are configured, from marker files. For Claude Code, the permission mode and whether its allow list has a blanket grant; for Cursor, Windsurf, Cline and Codex, only an `agent.permissionMode` key in their JSON settings. Not hooks, deny or ask rules, helpers, Codex `config.toml` or other settings |
-| `shadowscan` | [Nexus-ShadowScan](https://github.com/Hunzee-VC/Nexus-ShadowScan) reports | Imported discovery claims, kept separate from local evidence |
+| `shadowscan` | [Nexus-ShadowScan](https://github.com/Hunzee-VC/Nexus-ShadowScan) reports | Imported discovery claims, kept separate from local evidence. Reruns are compared by normalized content, and CI can require a signed report |
 
 ### What it checks
 
@@ -223,7 +223,22 @@ jobs:
           sarif-upload: 'false'
 ```
 
-The Action installs its own hash-locked runtime, ignores policy in the scanned checkout, and fails on collection errors. Keep a job timeout like the one above: hostile input can keep a scan running until the job times out. Run the Action once per workflow run, because its artifact name and SARIF category are fixed ([known limitations](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/SECURITY.md#known-limitations-in-010)). Set `sarif-upload: 'true'` and add `security-events: write` for SARIF upload. Inputs and outputs are in [action.yml](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/action.yml). The repository also ships [pre-commit hooks](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/.pre-commit-hooks.yaml) (`nexus-symbiote-scan` and `nexus-symbiote-risk`).
+With `validate: 'true'`, a model passes integrity only as a SafeTensors file whose artifact-bound signature verifies under a signer policy you own, so a repository that contains a model fails validation unless you pass such a policy and every model meets it. Write the policy outside the workspace from a trusted source, such as a repository or organization variable, never from the checked-out code:
+
+```yaml
+      - name: Write the signer policy
+        env:
+          SIGNER_POLICY: ${{ vars.NEXUS_SYMBIOTE_SIGNER_POLICY }}
+        run: printf '%s' "$SIGNER_POLICY" > "$RUNNER_TEMP/signers.json"
+      - uses: Hunzee-VC/Nexus-Symbiote@<reviewed-40-character-commit-sha>
+        with:
+          scan-path: .
+          signature-policy: ${{ runner.temp }}/signers.json
+```
+
+The Action refuses a policy inside the workspace, a symlink or a hard link, passes one snapshot of it to collection and validation, and reports its SHA-256 as the `signature-policy-digest` output. It verifies signatures offline against the Sigstore trust root shipped in its hash-locked `sigstore` package, never a cache on the runner.
+
+The Action installs its own hash-locked runtime, including Sigstore verification, ignores policy in the scanned checkout, and fails on collection errors. Keep a job timeout like the one above: hostile input can keep a scan running until the job times out. Run the Action once per workflow run, because its artifact name and SARIF category are fixed ([known limitations](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/SECURITY.md#known-limitations-in-010)). Set `sarif-upload: 'true'` and add `security-events: write` for SARIF upload. Inputs and outputs are in [action.yml](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/action.yml). The repository also ships [pre-commit hooks](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/.pre-commit-hooks.yaml) (`nexus-symbiote-scan` and `nexus-symbiote-risk`).
 
 Every command is offline by default. Only `discover-mcp`, `advisories` and `verify-live` reach the network, and only in live mode (`--live` or `NEXUS_SYMBIOTE_MODE=live`). Use `nexus-symbiote init` to generate a `.nexus-symbiote.yaml` policy file for a trusted project (it is read only from the project you scan or name with `--project`, never from a parent directory or from where an inventory file is saved), or pass `--no-project-policy` when the checkout is not yours. Details are in [offline and live modes](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/offline-and-live-modes.md).
 

@@ -162,8 +162,8 @@ stable key, which the report records as `collection_scope.credential_identity_sc
 `keyed`. In the `run` scope, ShadowScan derives each redacted credential
 finding's id from a random per-run key, so those findings get new ids on every
 run and `diff` reports them as removed and added components. That fails safe,
-as alerts, but configure a stable credential identity key in ShadowScan before
-you compare reruns.
+as alerts, but configure a stable credential identity key in ShadowScan, by
+setting `SHADOWSCAN_IDENTITY_KEY` for every run, before you compare reruns.
 
 ### Require a signed report in CI
 

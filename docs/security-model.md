@@ -36,7 +36,10 @@ their security-relevant fields and findings with the supplied BOM. A mismatch
 makes the project-backed risk command exit unsuccessfully with an unknown risk
 level and a null score. Without a project, `risk` scores the supplied claims
 and labels the result `supplied-bom`. For an operator-configured signature
-check, supply the trusted signer policy when validating the project.
+check, supply the trusted signer policy when validating the project. In the
+GitHub Action, pass it with the `signature-policy` input as a caller-owned file
+outside the workspace; the Action verifies against the Sigstore trust root
+embedded in its hash-locked runtime, not a runner cache.
 
 A mediated action needs a trusted approver, snapshot binding, authenticated workload and endpoint, action/resource constraints, validity, current revocation state, rollback protection, and any action-specific approval. One-use approval must bind to the action and arguments it authorizes. Adapter checks cannot govern tools invoked through an unmediated route; deployments need their own network, identity, and sandbox controls to make mediation complete.
 
@@ -62,7 +65,7 @@ For trusted local projects, standalone `scan` loads project policy from the scan
 
 | Capability | Evidence and limitation |
 | --- | --- |
-| ShadowScan integration | Exact source-report digest, mapped components and supported declared edges, with unmapped indexes and projection limits; no automatic producer authentication or trust upgrade |
+| ShadowScan integration | Exact source-report digest for authentication and a normalized content digest for drift, mapped components and supported declared edges, with unmapped indexes and projection limits. The producer is authenticated only when `validate` or `risk` runs with `--project` and an operator signature policy names the report, or `validate.require_discovery_signature` is set; the check authenticates the producer, not the report's commit or time; no trust upgrade |
 | MCP and tools | Scoped client/server references and supported source declarations; runtime descriptors and backend behavior need separate evidence |
 | Model integrity | Whole-file hashes, bounded format inspection, SafeTensors metadata fingerprints and optional Sigstore checks; a format, header fingerprint or signature does not prove benignness |
 | Instructions and skills | Source-bound artifacts and suspicious-content findings; detection is limited to supported files and patterns |
@@ -70,7 +73,7 @@ For trusted local projects, standalone `scan` loads project policy from the scan
 | A2A and IDE declarations | Agent Cards, host settings and extension declarations; supplier labels are not proof of endpoint identity, execution or signature validity |
 | Runtime contracts | Ed25519-signed snapshots, approvals and trust status bound to authenticated context in a reference adapter; deployments must prevent bypass and protect state |
 | Impact analysis | Potential graph reachability through recorded relationships, not proof that an exploit executed |
-| GitHub Action | One collected inventory, caller-owned gates and optional SARIF upload; disabled or skipped gates are visible policy choices |
+| GitHub Action | One collected inventory, caller-owned gates and signer policy, and optional SARIF upload; disabled or skipped gates are visible policy choices |
 
 Project validation compares static MCP records and configured tool fingerprints with fresh local evidence. A structure binding detects added or removed arguments, environment variables and tools. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` set, a keyed binding also detects same-version package swaps and changed argument, environment and endpoint values, without exporting anything a secret could be guessed from. MCP references include the relative configuration path and declared name. Legacy snapshots without the binding, or with name-only identities, need recollection; see [source reconciliation and migration](verification-source-binding.md). Python source declaration collection has bounded application-file coverage and reports unresolved or dynamic registrations as gaps, but some import forms, such as `from mcp.server.lowlevel import Server` and `from mcp.server import FastMCP`, are skipped without one (see the [known limitations](../SECURITY.md#known-limitations-in-010)).
 
