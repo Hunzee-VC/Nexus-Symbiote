@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import itertools
 import json
+import re
 import time
 from pathlib import Path
 
@@ -230,6 +232,10 @@ WHEEL_URL = "https://files.pythonhosted.org/packages/x/openai-1.0.0-py3-none-any
         # pip keeps the extras in a file: URL, which names a directory ".[dev]".
         "file:.[dev]",
         "../openai",
+        # pip normalises the path before it takes the extras off, so these name a
+        # directory "..]".
+        ".[/../..]",
+        "./[x/../..]",
         # pip finds the scheme after it drops a tab, and reads a local archive.
         "git+ht\ttps://github.com/openai/openai-python#egg=openai",
         "dist/openai-1.0.0.tar.gz",
@@ -311,10 +317,100 @@ def test_named_url_requirement_shadowed_by_a_directory_is_partial(tmp_path, line
     ]
 
 
-def test_named_url_requirement_leaving_the_project_is_partial(tmp_path):
-    # Normalised as a path, this names ../evil, outside the project.
-    _project(tmp_path, {"requirements.txt": "openai @ x/../../evil\n"})
+@pytest.mark.parametrize(
+    "line",
+    [
+        "openai @ x/../../evil",
+        # The extras come off after normalisation, leaving "..".
+        "openai @ x/../.. [z]",
+    ],
+)
+def test_named_url_requirement_leaving_the_project_is_partial(tmp_path, line):
+    # Normalised as a path, this names a directory outside the project.
+    _project(tmp_path, {"requirements.txt": f"{line}\n"})
     assert RegistryScanner().scan(tmp_path).surfaces_excluded == [
+        "requirements.txt: URL, VCS or path requirement not followed"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("line", "entry"),
+    [
+        # pip takes the last bracketed group and the white space before it off.
+        ("foo @ x.tar.gz [y]", "foo @ x.tar.gz"),
+        ("foo @ x[a.tar.gz[b]", "foo @ x[a.tar.gz"),
+        # A backslash is a name character on POSIX and a separator on Windows.
+        ("foo @ x\\..\\y.tar.gz", "foo @ x\\..\\y.tar.gz"),
+        ("foo @ x\\..\\y/pkg", "foo @ x\\..\\y/pkg/"),
+        ("openai @ x\\..\\y.tar.gz", "y.tar.gz"),
+        # APFS finds a name in either Unicode normal form, HFS+ ignores a zero width
+        # joiner, and NTFS ignores case, a trailing dot and a stream name and finds a
+        # short name.
+        ("foo @ caf\u00e9/pkg", "foo @ cafe\u0301/pkg/"),
+        ("foo @ x\u200d/pkg", "foo @ x/pkg/"),
+        ("FOO @ X./pkg", "foo @ x/pkg/"),
+        ("foo @ x::$INDEX_ALLOCATION/pkg", "foo @ x/pkg/"),
+        ("FOO@XY~1/pkg", "foo @ xyz/pkg/"),
+    ],
+)
+def test_named_url_requirement_shadowed_by_a_local_path_is_partial(tmp_path, line, entry):
+    project = _project(tmp_path, {"requirements.txt": f"{line}\n"})
+    try:
+        if entry.endswith("/"):
+            (project / entry).mkdir(parents=True)
+            (project / entry / "pyproject.toml").write_text(
+                '[project]\nname = "other"\nversion = "1"\n'
+            )
+        else:
+            (project / entry).write_bytes(b"")
+    except OSError:
+        pytest.skip("file system rejects the name")
+    assert RegistryScanner().scan(project).surfaces_excluded == [
+        "requirements.txt: URL, VCS or path requirement not followed"
+    ]
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "vendor.tar.gz [x]",
+        "vendor.tar.gz\t[x]",
+        f"vendor.zip [x] --hash=sha256:{'0' * 64}",
+        "vendor.tar.gz\u00a0[x]; python_version > '3'",
+        "vendor[a.zip[b]",
+        "torch-2.3.1-py3-none-any.whl [x]",
+    ],
+)
+def test_archive_requirement_with_extras_is_partial(tmp_path, line):
+    # pip looks for the archive extension once the extras are off, as pip takes them.
+    project = _project(tmp_path / "proj", {"requirements.txt": f"{line}\n"})
+    result = RegistryScanner().scan(project)
+    assert result.surfaces_excluded == [
+        "requirements.txt: URL, VCS or path requirement not followed"
+    ]
+    code, document = _scan(project, tmp_path / "a.json")
+    assert code == 1
+    assert document["metadata"]["completeness"]["scanner_status"]["registry"] == "partial"
+
+
+def test_extras_come_off_as_pip_strips_them():
+    # pip 26.3's strip_extras, on a path below the directory pip runs in.
+    for length in range(8):
+        for letters in itertools.product("[]x \u00a0", repeat=length):
+            text = "".join(letters)
+            match = re.match(r"^(.+)(\[[^\]]+\])$", "/cwd/" + text)
+            expected = match.group(1).rstrip() if match else "/cwd/" + text
+            assert "/cwd/" + RegistryScanner._without_extras(text) == expected, repr(text)
+
+
+def test_requirement_path_parsing_is_linear(tmp_path):
+    (tmp_path / "requirements.txt").write_text(
+        "".join(f"{prefix}{'[' * 1_000_000}\n" for prefix in ("x", "openai @ ", "./", "x]"))
+    )
+    started = time.monotonic()
+    result = RegistryScanner().scan(tmp_path)
+    assert time.monotonic() - started < 5
+    assert result.surfaces_excluded == [
         "requirements.txt: URL, VCS or path requirement not followed"
     ]
 
@@ -325,6 +421,8 @@ def test_named_url_requirement_leaving_the_project_is_partial(tmp_path):
         ".",
         "./",
         ".[dev]",
+        # pip drops the space before the extras.
+        ". [dev]",
         "file:.",
         ". ; python_version >= '3.8'",
         f". --hash=sha256:{'0' * 64}",

@@ -12,6 +12,7 @@ import fnmatch
 import re
 import shlex
 import tomllib
+import unicodedata
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -620,8 +621,24 @@ class RegistryScanner(Scanner):
             and parts[0].casefold() in names
         )
 
-    @staticmethod
-    def _editable_covered(target: str, entries: set[str]) -> bool:
+    # The format characters HFS+ ignores when it compares names.
+    _IGNORED_IN_NAMES = dict.fromkeys(
+        [*range(0x200C, 0x2010), *range(0x202A, 0x202F), *range(0x206A, 0x2070), 0xFEFF]
+    )
+
+    @classmethod
+    def _fold(cls, name: str) -> str:
+        """A name as file systems may compare it.
+
+        Case and Unicode normalisation are folded, as on APFS, HFS+ and NTFS; so are
+        the format characters HFS+ ignores and the trailing dots and spaces Windows
+        drops.
+        """
+        folded = unicodedata.normalize("NFD", unicodedata.normalize("NFD", name).casefold())
+        return folded.translate(cls._IGNORED_IN_NAMES).rstrip(". ")
+
+    @classmethod
+    def _editable_covered(cls, target: str, entries: set[str]) -> bool:
         """Whether -e installs the project itself, whose pyproject.toml is read."""
         # One trailing extras group, as pip strips it from a local path.
         match = re.fullmatch(r"([^\[\]]+)(?:\[[^\[\]]+\])?", target)
@@ -630,7 +647,7 @@ class RegistryScanner(Scanner):
         path = match.group(1)
         if path[:5].lower() == "file:":
             # pip installs a directory with that name instead, if there is one.
-            if path.split("/", 1)[0].casefold() in entries:
+            if cls._fold(path.split("/", 1)[0]) in entries:
                 return False
             path = path[5:]
         return (
@@ -639,15 +656,54 @@ class RegistryScanner(Scanner):
             and all(part in ("", ".") for part in path.split("/"))
         )
 
+    @staticmethod
+    def _without_extras(path: str) -> str:
+        """pip's strip_extras in linear time: the text before a last bracketed group
+        that runs to the end and holds no "]", without the white space before it."""
+        end = len(path) - 1
+        if end < 0 or path[end] != "]":
+            return path
+        start = path.rfind("[", path.rfind("]", 0, end) + 1, end - 1)
+        return path[:start].rstrip() if start >= 0 else path
+
+    @staticmethod
+    def _normalised(parts: list[str]) -> list[str] | None:
+        """Path parts as normpath leaves them, or None if they leave the directory."""
+        kept: list[str] = []
+        for part in parts:
+            if part == "..":
+                if not kept:
+                    return None
+                kept.pop()
+            elif part not in ("", "."):
+                kept.append(part)
+        return kept
+
+    @classmethod
+    def _local_paths(cls, target: str) -> Iterator[list[str] | None]:
+        """The paths pip 26.3 may read a requirement as, relative to where it runs.
+
+        pip normalises the whole text as a path, with "/" as the only separator on
+        POSIX and with "\\" as well on Windows, and then takes the extras off; the
+        file system resolves a "." or ".." this leaves. None stands for a path that
+        leaves the directory.
+        """
+        for separators in ("/", r"[/\\]"):
+            parts = cls._normalised(re.split(separators, target))
+            if parts is not None:
+                rest = cls._without_extras("/".join(parts))
+                parts = cls._normalised(re.split(separators, rest))
+            yield parts
+
     @classmethod
     def _unnamed(cls, reference: str, entries: set[str]) -> bool:
         """Whether pip installs a requirement from a URL, an archive or a path other
         than the project itself, where the collector reads no package name.
 
         pip 26.3 takes a URL by its scheme, then a path with a separator or a leading
-        ".", then a name ending in an archive extension; only then a PEP 508
-        requirement. Whether such a directory or file exists is known only where pip
-        runs, so it is taken to exist.
+        ".", then a name ending in an archive extension once the extras are off;
+        only then a PEP 508 requirement. Whether such a directory or file exists is
+        known only where pip runs, so it is taken to exist.
         """
         named = cls._NAMED_URL.match(reference) is not None
         url = not named and cls._URL_SCHEME.match(reference.translate(cls._URL_DROPPED))
@@ -655,35 +711,35 @@ class RegistryScanner(Scanner):
         target = reference.split("; " if url else ";", 1)[0].strip()
         if named:
             return cls._shadowed(target, entries)
+        if url:
+            # pip takes extras off a path but not off a URL: "file:.[dev]" is a
+            # directory named ".[dev]".
+            return "[" in target or not cls._editable_covered(target, entries)
         if not (
-            url
-            or any(c in target for c in "/\\")
+            any(c in target for c in "/\\")
             or target.startswith(".")
-            or re.sub(r"\[[^\]]+\]$", "", target).lower().endswith(cls._ARCHIVES)
+            or cls._without_extras(target).lower().endswith(cls._ARCHIVES)
         ):
             return False
-        # pip takes extras off a path but not off a URL: "file:.[dev]" is a directory
-        # named ".[dev]".
-        return bool(url and "[" in target) or not cls._editable_covered(target, entries)
+        return any(path != [] for path in cls._local_paths(target))
 
-    @staticmethod
-    def _shadowed(target: str, entries: set[str]) -> bool:
-        """Whether pip may install "name @ URL" from a path instead.
+    @classmethod
+    def _shadowed(cls, target: str, entries: set[str]) -> bool:
+        """Whether pip may install "name @ URL" from a local path instead.
 
-        pip first reads the whole text as a relative path, normalised without looking
-        at the file system, and installs a directory or archive found there. That
-        path can exist where pip runs only if it leaves the project root or starts
-        with an entry of it.
+        pip first reads the whole text as a path and installs a directory or archive
+        it finds there. Such a path can exist where pip runs only if it leaves that
+        directory or starts with an entry of the project root. A "~" may make the
+        entry's Windows short name, and a ":" may start an NTFS stream name.
         """
-        parts: list[str] = []
-        for part in re.split(r"[/\\]", re.sub(r"\[[^\]]+\]$", "", target)):
-            if part == "..":
-                if not parts:
+        for path in cls._local_paths(target):
+            if path is None:
+                return True
+            if path:
+                first = cls._fold(path[0])
+                if "~" in first or {first, first.partition(":")[0].rstrip(". ")} & entries:
                     return True
-                parts.pop()
-            elif part not in ("", "."):
-                parts.append(part)
-        return bool(parts) and parts[0].casefold() in entries
+        return False
 
     # Python's names for UTF-8, lower case with "-" as "_".
     _UTF8_NAMES = frozenset({"utf_8", "utf8", "u8", "utf", "cp65001", "utf_8_sig"})
@@ -795,7 +851,7 @@ class RegistryScanner(Scanner):
         entries = self._files.root_entries()
         filenames = self._requirement_files(entries)
         names = {n.casefold() for n in filenames}
-        folded = {n.casefold() for n in entries}
+        folded = {self._fold(n) for n in entries}
         noted: set[str] = set()
         unprintable = False
         remaining = _REQUIREMENTS_BUDGET
