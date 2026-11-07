@@ -69,18 +69,18 @@ class CycloneDXGenerator(Generator):
         require_valid(document, "cyclonedx")
         return document
 
-    def _projection(self, aibom: AIBOM) -> dict[str, Any]:
+    def _projection(self, aibom: AIBOM, *, historical: bool = False) -> dict[str, Any]:
         prepare(aibom)
         document = {
             "bomFormat": "CycloneDX",
             "specVersion": "1.7",
             "version": aibom.metadata.version,
             "serialNumber": aibom.metadata.serial_number,
-            "metadata": self._metadata(aibom),
+            "metadata": self._metadata(aibom, historical=historical),
             "components": [
                 self._component(c) for c in sorted(aibom.components, key=lambda c: c.bom_ref)
             ],
-            "dependencies": self._dependencies(aibom),
+            "dependencies": self._dependencies(aibom, historical=historical),
             "compositions": [{"aggregate": coverage_aggregate(aibom.metadata.completeness)}],
         }
         return document
@@ -120,21 +120,27 @@ class CycloneDXGenerator(Generator):
     def recover(
         cls, document: dict[str, Any], *, allow_legacy_relationships: bool = False
     ) -> AIBOM:
-        """Require agreement with the embedded inventory; legacy mode checks the exact old graph."""
+        """Require agreement with the embedded inventory.
+
+        Legacy mode also accepts the exact edge projection of the historical exporter as a
+        whole: every edge in ``dependsOn`` and no conditional flag. A mixture is rejected.
+        """
         require_valid(document, "cyclonedx")
         recovered = recover_document(document.get("metadata", {}).get("properties", []))
         exporter = cls()
-        expected = exporter._projection(recovered)
-        actual = cls._public_view(document)
-        if allow_legacy_relationships and unordered_projection(
-            actual["dependencies"]
-        ) == unordered_projection(cls._dependencies(recovered, historical=True)):
-            expected["dependencies"] = actual["dependencies"]
-        if unordered_projection(actual) != unordered_projection(cls._public_view(expected)):
+        actual = unordered_projection(cls._public_view(document))
+        accepted = (False, True) if allow_legacy_relationships else (False,)
+        if not any(
+            actual
+            == unordered_projection(
+                cls._public_view(exporter._projection(recovered, historical=historical))
+            )
+            for historical in accepted
+        ):
             raise ValueError("CycloneDX projection conflicts with the embedded native document")
         return recovered
 
-    def _metadata(self, aibom: AIBOM) -> dict[str, Any]:
+    def _metadata(self, aibom: AIBOM, *, historical: bool = False) -> dict[str, Any]:
         meta: dict[str, Any] = {
             "timestamp": (
                 aibom.metadata.timestamp.isoformat() if aibom.metadata.timestamp else None
@@ -156,7 +162,7 @@ class CycloneDXGenerator(Generator):
             {
                 json_text(
                     {"from": edge.source_ref, "to": edge.target_ref, "type": edge.relationship}
-                    | ({"conditional": True} if edge.conditions else {})
+                    | ({"conditional": True} if edge.conditions and not historical else {})
                 )
                 for edge in aibom.dependencies
             }

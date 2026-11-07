@@ -2,6 +2,8 @@
 
 import json
 from copy import deepcopy
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -9,6 +11,8 @@ from nexus_symbiote.core.aibom import DependencyEdge
 from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
 from nexus_symbiote.generators.spdx import SPDXGenerator
 from tests.test_export_conformance import fixture_bom
+
+LEGACY_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "cyclonedx-legacy"
 
 
 def test_cyclonedx_projects_only_unconditional_dependencies():
@@ -106,6 +110,99 @@ def test_legacy_cyclonedx_recovery_accepts_only_the_unchanged_historical_project
     historical["components"][0]["name"] = "unexpected"
     with pytest.raises(ValueError, match="projection conflicts"):
         CycloneDXGenerator.recover(historical, allow_legacy_relationships=True)
+
+
+def _historical_export() -> dict[str, Any]:
+    """Written by the exporter at 6edf849, before the standard graph was typed.
+
+    Every native edge is in ``dependsOn`` and no relationship property has the
+    conditional flag. The edges to prompt, server and tool are conditional.
+    """
+    return json.loads((LEGACY_FIXTURES / "flattened-6edf849.json").read_text(encoding="utf-8"))
+
+
+def _relationship_values(document: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {
+        value["to"]: value
+        for value in (
+            json.loads(prop["value"])
+            for prop in document["metadata"]["properties"]
+            if prop["name"] == "nexus-symbiote:dependency:relationship"
+        )
+    }
+
+
+def _set_relationship_values(document: dict[str, Any], values: dict[str, dict[str, Any]]) -> None:
+    for prop in document["metadata"]["properties"]:
+        if prop["name"] == "nexus-symbiote:dependency:relationship":
+            value = values[json.loads(prop["value"])["to"]]
+            prop["value"] = json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def test_legacy_cyclonedx_recovery_accepts_a_real_historical_export():
+    document = _historical_export()
+    assert document["dependencies"] == [
+        {
+            "ref": "agent:main",
+            "dependsOn": ["memory:one", "model:one", "prompt:one", "server:one", "tool:send"],
+        }
+    ]
+    assert not any("conditional" in value for value in _relationship_values(document).values())
+    with pytest.raises(ValueError, match="projection conflicts"):
+        CycloneDXGenerator.recover(deepcopy(document))
+    recovered = CycloneDXGenerator.recover(document, allow_legacy_relationships=True)
+    assert sorted((e.target_ref, e.conditions is not None) for e in recovered.dependencies) == [
+        ("memory:one", False),
+        ("model:one", False),
+        ("prompt:one", True),
+        ("server:one", True),
+        ("tool:send", True),
+    ]
+    current = CycloneDXGenerator().generate(recovered)
+    assert current["dependencies"] == [{"ref": "agent:main", "dependsOn": ["model:one"]}]
+    assert {
+        to for to, value in _relationship_values(current).items() if value.get("conditional")
+    } == {
+        "prompt:one",
+        "server:one",
+        "tool:send",
+    }
+    assert sorted(CycloneDXGenerator.recover(current).dependencies, key=str) == sorted(
+        recovered.dependencies, key=str
+    )
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "flag-every-conditional",
+        "flag-one-conditional",
+        "flag-unconditional",
+        "typed-graph",
+        "drop-target",
+        "retype",
+    ],
+)
+def test_legacy_cyclonedx_recovery_rejects_a_mixed_or_changed_historical_projection(change):
+    document = _historical_export()
+    values = _relationship_values(document)
+    if change == "flag-every-conditional":
+        # The current flags with the flattened graph match no exporter's output.
+        for target in ("prompt:one", "server:one", "tool:send"):
+            values[target]["conditional"] = True
+    elif change == "flag-one-conditional":
+        values["tool:send"]["conditional"] = True
+    elif change == "flag-unconditional":
+        values["model:one"]["conditional"] = True
+    elif change == "typed-graph":
+        document["dependencies"] = [{"ref": "agent:main", "dependsOn": ["model:one"]}]
+    elif change == "drop-target":
+        document["dependencies"][0]["dependsOn"].remove("tool:send")
+    else:
+        values["tool:send"]["type"] = "depends-on"
+    _set_relationship_values(document, values)
+    with pytest.raises(ValueError, match="projection conflicts"):
+        CycloneDXGenerator.recover(document, allow_legacy_relationships=True)
 
 
 @pytest.mark.parametrize("composition", [None, [{"aggregate": "complete"}]])
