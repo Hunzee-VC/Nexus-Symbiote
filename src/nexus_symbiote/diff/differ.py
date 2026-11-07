@@ -100,6 +100,11 @@ _SET_LISTS = {
 }
 
 
+_FINDING_DIGEST = "shadowscan:finding-sha256"
+_REPORT_DIGEST = "shadowscan:report-sha256"
+_PROJECTION = "shadowscan:projection-profile"
+
+
 def _semantic_value(value: Any, path: tuple[str, ...]) -> Any:
     """Ignore set ordering and fresh claim observation times, never arbitrary JSON arrays."""
     if isinstance(value, dict):
@@ -124,6 +129,29 @@ def _semantic_value(value: Any, path: tuple[str, ...]) -> Any:
             )
         return items
     return value
+
+
+def _discovery_finding_drift(old_fields: dict[str, Any], new_fields: dict[str, Any]) -> bool | None:
+    """Compare an imported finding by its content digest instead of its report's exact bytes.
+
+    A rerun that only records new run times changes every component's exact report
+    digest. Returns None, leaving the fields untouched, when either side lacks a
+    comparable finding digest, so legacy inventories keep the stricter comparison.
+    """
+    old_props, new_props = old_fields.get("properties"), new_fields.get("properties")
+    if (
+        not isinstance(old_props, dict)
+        or not isinstance(new_props, dict)
+        or not isinstance(old_props.get(_FINDING_DIGEST), str)
+        or not isinstance(new_props.get(_FINDING_DIGEST), str)
+        or old_props.get(_PROJECTION) != new_props.get(_PROJECTION)
+    ):
+        return None
+    changed = bool(old_props[_FINDING_DIGEST] != new_props[_FINDING_DIGEST])
+    for props in (old_props, new_props):
+        props.pop(_FINDING_DIGEST)
+        props.pop(_REPORT_DIGEST, None)
+    return changed
 
 
 def _edge_key(edge: DependencyEdge) -> str:
@@ -465,6 +493,14 @@ class AIBOMDiffer:
             handled.add("definition_hash_version")
         old_fields = old.model_dump(mode="json")
         new_fields = new.model_dump(mode="json")
+        if _discovery_finding_drift(old_fields, new_fields):
+            modifications.append(
+                {
+                    "detail": "ShadowScan finding content changed, including fields this "
+                    "inventory does not project.",
+                    "severity": "medium",
+                }
+            )
         for key in sorted((old_fields.keys() | new_fields.keys()) - handled):
             old_value = old_fields.get(key)
             new_value = new_fields.get(key)
@@ -485,12 +521,39 @@ class AIBOMDiffer:
     def _diff_metadata(self, old: AIBOM, new: AIBOM, report: DiffReport) -> None:
         old_metadata = old.metadata.model_dump(mode="json")
         new_metadata = new.metadata.model_dump(mode="json")
+        old_claim, new_claim = old.metadata.completeness, new.metadata.completeness
+        # Exact report bytes authenticate a report; they also change with its run
+        # times. Drift uses the content digest only when both sides carry it.
+        content_comparable = (
+            old_claim is not None
+            and new_claim is not None
+            and old_claim.source_report_content_digest is not None
+            and new_claim.source_report_content_digest is not None
+            and old_claim.source_report_content_profile is not None
+            and old_claim.source_report_content_profile == new_claim.source_report_content_profile
+        )
         for metadata in (old_metadata, new_metadata):
             # These identify a collection event, rather than its composition.
             metadata.pop("serial_number", None)
             metadata.pop("timestamp", None)
             if metadata.get("completeness") is not None:
                 metadata["completeness"].pop("timestamp", None)
+                if content_comparable:
+                    metadata["completeness"].pop("source_report_digest", None)
+        if (
+            content_comparable
+            and old_claim is not None
+            and new_claim is not None
+            and old_claim.source_report_digest != new_claim.source_report_digest
+            and old_claim.source_report_content_digest == new_claim.source_report_content_digest
+        ):
+            report.metadata_changes.append(
+                {
+                    "field": "completeness.source_report_digest",
+                    "severity": "info",
+                    "detail": "ShadowScan report regenerated; normalized content unchanged.",
+                }
+            )
         for key in sorted(old_metadata.keys() | new_metadata.keys()):
             if _semantic_value(old_metadata.get(key), (key,)) == _semantic_value(
                 new_metadata.get(key), (key,)

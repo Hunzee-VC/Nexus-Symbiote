@@ -1179,6 +1179,33 @@
           "description": "SHA-256 of exact imported report bytes, not producer authentication",
           "title": "Source Report Digest"
         },
+        "source_report_content_digest": {
+          "anyOf": [
+            {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "SHA-256 of the RFC 8785 canonical report without run-event fields, for drift comparison; neither authentication nor a substitute for source_report_digest",
+          "title": "Source Report Content Digest"
+        },
+        "source_report_content_profile": {
+          "anyOf": [
+            {
+              "const": "nexus-symbiote/shadowscan-content/v1",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Report Content Profile"
+        },
         "source_report_format": {
           "anyOf": [
             {

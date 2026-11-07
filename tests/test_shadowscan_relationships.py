@@ -26,7 +26,9 @@ def test_actual_producer_projection_preserves_declared_edge_and_omits_raw_names(
     assert by_ref[edge.source_ref].component_type == ComponentType.AGENT
     assert by_ref[edge.target_ref].component_type == ComponentType.MODEL
     assert edge.relationship == "depends-on" and edge.assurance_level == "declared"
-    assert report.digest in edge.conditions
+    # Exact report bytes change with each run's timestamps; metadata binds the edge
+    # to the report, so its conditions stay comparable across reruns.
+    assert report.digest not in edge.conditions
     assert "dependencies index 0" in edge.conditions
     assert all(
         c.properties["shadowscan:projection-profile"] == PROJECTION_PROFILE

@@ -73,6 +73,9 @@ class ScanResult:
     surfaces_excluded: list[str] = field(default_factory=list)
     scan_failures: list[str] = field(default_factory=list)
     source_report_digest: str | None = None
+    source_report_content_digest: str | None = None
+    source_report_content_profile: str | None = None
+    source_report_path: str | None = None
     source_report_format: str | None = None
     source_report_status: str | None = None
     source_projection_limitations: list[str] | None = None
