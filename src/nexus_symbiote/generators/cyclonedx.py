@@ -156,6 +156,7 @@ class CycloneDXGenerator(Generator):
             {
                 json_text(
                     {"from": edge.source_ref, "to": edge.target_ref, "type": edge.relationship}
+                    | ({"conditional": True} if edge.conditions else {})
                 )
                 for edge in aibom.dependencies
             }

@@ -313,6 +313,8 @@ class SPDXGenerator(Generator):
                 f"Conditional native relationship '{edge.relationship}' (conditions: "
                 f"{conditions}). Not an unconditional {typed or 'relationship'} assertion."
             )
+        elif typed is None:
+            relationship["comment"] = f"Native relationship '{edge.relationship}'."
         return relationship
 
     @staticmethod

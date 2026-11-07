@@ -167,7 +167,7 @@ def coverage_aggregate(claim: CompletenessClaim | None) -> Literal["incomplete",
         return "unknown"
     requested = set(claim.collectors_requested)
     narrowed = (
-        claim.source_report_digest is not None
+        imports_discovery(claim)
         or bool(BUILTIN_SCANNER_NAMES - requested)
         or bool(requested - set(claim.collectors_completed))
         or any(state != "complete" for state in claim.scanner_status.values())
@@ -175,6 +175,19 @@ def coverage_aggregate(claim: CompletenessClaim | None) -> Literal["incomplete",
         or not BUILTIN_EXCLUSIONS.issuperset(claim.exclusions)
     )
     return "incomplete" if narrowed else "unknown"
+
+
+def imports_discovery(claim: CompletenessClaim) -> bool:
+    """Any imported-report marker counts, even without the digest the CLI always sets.
+
+    The model does not tie these fields together. Every ``source_*`` field is compared
+    with its default, so a field added later counts too.
+    """
+    return "shadowscan" in claim.scope.lower() or any(
+        getattr(claim, name) != field.get_default(call_default_factory=True)
+        for name, field in CompletenessClaim.model_fields.items()
+        if name.startswith("source_")
+    )
 
 
 def unordered_projection(value: Any) -> Any:

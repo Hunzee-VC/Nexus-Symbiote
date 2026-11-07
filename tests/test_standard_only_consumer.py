@@ -12,7 +12,7 @@ import shutil
 import uuid
 from copy import deepcopy
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 import pytest
 from click.testing import CliRunner
@@ -21,10 +21,11 @@ from nexus_symbiote import modes
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.models import CompletenessClaim
-from nexus_symbiote.generators._common import NAMESPACE
+from nexus_symbiote.generators._common import NAMESPACE, coverage_aggregate
 from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
 from nexus_symbiote.generators.spdx import SPDXGenerator
 from nexus_symbiote.generators.validation import validate_cyclonedx, validate_spdx
+from nexus_symbiote.policy import DEFAULT_POLICY_YAML
 from nexus_symbiote.scanner_catalog import BUILTIN_SCANNER_NAMES
 from tests.test_export_conformance import fixture_bom
 
@@ -32,8 +33,31 @@ DEMO = Path(__file__).resolve().parents[1] / "examples" / "demo-agent"
 EXTENSION_PREFIXES = ("nexus-symbiote:", "agentbom:")
 LICENSE_RELATIONSHIPS = {"hasDeclaredLicense", "hasConcludedLicense"}
 TYPED = {"usesTool", "dependsOn", "trainedOn", "descendantOf"}
+TYPED_MAPPING = {
+    "invokes": "usesTool",
+    "depends-on": "dependsOn",
+    "trained-on": "trainedOn",
+    "fine-tuned-from": "descendantOf",
+    "quantized-from": "descendantOf",
+    "merged-from": "descendantOf",
+}
+NATIVE_RELATIONSHIPS = get_args(DependencyEdge.model_fields["relationship"].annotation)
+UNTYPED = [name for name in NATIVE_RELATIONSHIPS if name not in TYPED_MAPPING]
+RELATIONSHIP_PROPERTY = "nexus-symbiote:dependency:relationship"
+# One non-default value per imported-report field of the completeness claim.
+IMPORTED_MARKERS: dict[str, Any] = {
+    "source_report_digest": "sha256:" + "0" * 64,
+    "source_report_content_digest": "sha256:" + "1" * 64,
+    "source_report_content_profile": "nexus-symbiote/shadowscan-content/v1",
+    "source_report_format": "shadowscan-json",
+    "source_report_status": "complete",
+    "source_projection_limitations": ["unmapped entries are not represented"],
+    "source_unmapped_count": 1,
+    "source_unmapped_indexes": [0],
+}
 SCAN_CONDITION = "runtime use and authority unobserved"
 APPROVAL = "only after a human approves the call"
+DEFAULT_EXCLUDE_LINE = '  exclude_paths: ["node_modules", ".git", "__pycache__", ".venv"]'
 
 
 def standard_only(document: dict[str, Any], fmt: str) -> dict[str, Any]:
@@ -84,17 +108,25 @@ def _between(view: dict[str, Any], source: str, target: str) -> list[dict[str, A
     return [e for e in _edges(view) if e["from"] == source_id and e["to"] == [target_id]]
 
 
-def _conditional(relationship: str) -> AIBOM:
+def _one_edge(relationship: str, conditions: str | None = APPROVAL) -> AIBOM:
     bom = fixture_bom()
     bom.dependencies = [
         DependencyEdge(
             source_ref="agent:main",
             target_ref="tool:send",
             relationship=relationship,
-            conditions=APPROVAL,
+            conditions=conditions,
         )
     ]
     return bom
+
+
+def _relationship_properties(document: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        json.loads(prop["value"])
+        for prop in document["metadata"]["properties"]
+        if prop["name"] == RELATIONSHIP_PROPERTY
+    ]
 
 
 def _spdx_round_trip(document: dict[str, Any]) -> dict[str, Any]:
@@ -120,17 +152,9 @@ def _cyclonedx_strict(document: dict[str, Any]) -> None:
     assert JsonStrictValidator(SchemaVersion.V1_7).validate_str(json.dumps(document)) is None
 
 
-@pytest.mark.parametrize(
-    ("relationship", "typed"),
-    [
-        ("invokes", "usesTool"),
-        ("depends-on", "dependsOn"),
-        ("trained-on", "trainedOn"),
-        ("fine-tuned-from", "descendantOf"),
-    ],
-)
+@pytest.mark.parametrize(("relationship", "typed"), sorted(TYPED_MAPPING.items()))
 def test_spdx_conditional_edge_is_never_a_public_typed_relationship(relationship, typed):
-    view = standard_only(SPDXGenerator().generate(_conditional(relationship)), "spdx")
+    view = standard_only(SPDXGenerator().generate(_one_edge(relationship)), "spdx")
     assert not any(e["relationshipType"] in TYPED for e in _edges(view))
     (edge,) = _between(view, "agent:main", "tool:send")
     assert edge["relationshipType"] == "other"
@@ -151,7 +175,7 @@ def test_spdx_unconditional_edges_keep_their_typed_mapping():
 
 
 def test_spdx_conditional_comment_is_bounded():
-    bom = _conditional("invokes")
+    bom = _one_edge("invokes")
     bom.dependencies[0].conditions = "x" * 5000
     view = standard_only(SPDXGenerator().generate(bom), "spdx")
     (edge,) = _between(view, "agent:main", "tool:send")
@@ -180,7 +204,7 @@ def test_imported_conditional_dependency_matches_the_cyclonedx_public_graph():
 
 @pytest.mark.parametrize("change", ["remove", "alter", "retype", "complete"])
 def test_spdx_recovery_rejects_a_changed_public_condition(change):
-    document = SPDXGenerator().generate(_conditional("invokes"))
+    document = SPDXGenerator().generate(_one_edge("invokes"))
     edge = next(n for n in document["@graph"] if APPROVAL in n.get("comment", ""))
     if change == "remove":
         del edge["comment"]
@@ -192,6 +216,85 @@ def test_spdx_recovery_rejects_a_changed_public_condition(change):
         edge["completeness"] = "complete"
     with pytest.raises(ValueError, match="projection conflicts"):
         SPDXGenerator.recover(document)
+
+
+@pytest.mark.parametrize("conditions", [None, ""])
+@pytest.mark.parametrize("relationship", UNTYPED)
+def test_spdx_other_relationship_names_its_native_relationship(relationship, conditions):
+    document = SPDXGenerator().generate(_one_edge(relationship, conditions))
+    (edge,) = _between(standard_only(document, "spdx"), "agent:main", "tool:send")
+    assert edge["relationshipType"] == "other"
+    assert edge.get("comment") == f"Native relationship '{relationship}'."
+    assert (
+        SPDXGenerator.recover(document).dependencies
+        == _one_edge(relationship, conditions).dependencies
+    )
+
+
+def test_spdx_native_relationship_comment_survives_a_standard_reader():
+    view = standard_only(SPDXGenerator().generate(_one_edge("delegates-to", None)), "spdx")
+    (kept,) = [n for n in _spdx_round_trip(view)["@graph"] if n.get("relationshipType") == "other"]
+    assert kept.get("comment") == "Native relationship 'delegates-to'."
+
+
+@pytest.mark.parametrize("change", ["remove", "alter", "pad", "retype"])
+def test_spdx_recovery_rejects_a_changed_native_relationship_comment(change):
+    document = SPDXGenerator().generate(_one_edge("delegates-to", None))
+    edge = next(
+        n for n in document["@graph"] if n.get("comment") == "Native relationship 'delegates-to'."
+    )
+    if change == "remove":
+        del edge["comment"]
+    elif change == "alter":
+        edge["comment"] = "Native relationship 'configured-with'."
+    elif change == "pad":
+        edge["comment"] += " "
+    else:
+        edge["relationshipType"] = "usesTool"
+    with pytest.raises(ValueError, match="projection conflicts"):
+        SPDXGenerator.recover(document)
+
+
+@pytest.mark.parametrize("conditions", [None, "", APPROVAL])
+@pytest.mark.parametrize("relationship", NATIVE_RELATIONSHIPS)
+def test_every_public_spdx_relationship_agrees_with_the_cyclonedx_graph(relationship, conditions):
+    bom = _one_edge(relationship, conditions)
+    (edge,) = _between(
+        standard_only(SPDXGenerator().generate(bom), "spdx"), "agent:main", "tool:send"
+    )
+    cdx = CycloneDXGenerator().generate(bom)
+    unconditional = not conditions
+    typed = TYPED_MAPPING.get(relationship) if unconditional else None
+    # An empty condition stays typed, as `not edge.conditions` keeps it in the CycloneDX graph.
+    assert edge["relationshipType"] == (typed or "other")
+    if typed is None:
+        assert f"native relationship '{relationship}'" in edge.get("comment", "").lower()
+    else:
+        assert "comment" not in edge
+    in_graph = standard_only(cdx, "cyclonedx").get("dependencies", []) == [
+        {"ref": "agent:main", "dependsOn": ["tool:send"]}
+    ]
+    assert in_graph == (typed == "dependsOn")
+    flag = {} if unconditional else {"conditional": True}
+    assert _relationship_properties(cdx) == [
+        {"from": "agent:main", "to": "tool:send", "type": relationship, **flag}
+    ]
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+@pytest.mark.parametrize("conditions", [None, APPROVAL])
+def test_cyclonedx_recovery_rejects_a_changed_conditional_flag(conditions, legacy):
+    document = CycloneDXGenerator().generate(_one_edge("invokes", conditions))
+    assert CycloneDXGenerator.recover(deepcopy(document)).dependencies[0].conditions == conditions
+    prop = next(p for p in document["metadata"]["properties"] if p["name"] == RELATIONSHIP_PROPERTY)
+    value = json.loads(prop["value"])
+    if conditions:
+        del value["conditional"]
+    else:
+        value["conditional"] = True
+    prop["value"] = json.dumps(value, sort_keys=True, separators=(",", ":"))
+    with pytest.raises(ValueError, match="projection conflicts"):
+        CycloneDXGenerator.recover(document, allow_legacy_relationships=legacy)
 
 
 def _claim(**changes: Any) -> CompletenessClaim:
@@ -220,7 +323,11 @@ def _claim(**changes: Any) -> CompletenessClaim:
         ({"scan_failures": [".mcp.json: invalid JSON or duplicate keys"]}, "incomplete"),
         ({"surfaces_excluded": ["tools.py: unresolved Python MCP tool name"]}, "incomplete"),
         ({"exclusions": ["**/.git", "src"]}, "incomplete"),
-        ({"source_report_digest": "sha256:" + "0" * 64}, "incomplete"),
+        *(({name: value}, "incomplete") for name, value in IMPORTED_MARKERS.items()),
+        ({"source_projection_limitations": []}, "incomplete"),
+        ({"scope": "repository+shadowscan"}, "incomplete"),
+        ({"scope": "shadowscan-imported"}, "incomplete"),
+        ({"scope": "Repository+ShadowScan"}, "incomplete"),
     ],
 )
 def test_public_coverage_is_derived_from_the_native_claim(changes, aggregate):
@@ -236,9 +343,37 @@ def test_public_coverage_is_derived_from_the_native_claim(changes, aggregate):
         .get("comment", "")
         .startswith(f"Collection coverage is {aggregate}")
     )
-    from nexus_symbiote.generators._common import coverage_aggregate
-
     assert coverage_aggregate(bom.metadata.completeness) == aggregate
+
+
+def test_every_imported_report_field_has_a_public_coverage_case():
+    fields = {name for name in CompletenessClaim.model_fields if name.startswith("source_")}
+    assert set(IMPORTED_MARKERS) == fields
+    for name, value in IMPORTED_MARKERS.items():
+        default = CompletenessClaim.model_fields[name].get_default(call_default_factory=True)
+        assert value != default and getattr(_claim(**{name: value}), name) == value
+
+
+@pytest.mark.parametrize("name", sorted(IMPORTED_MARKERS))
+def test_recovery_rejects_unknown_coverage_for_a_marker_only_import(name):
+    bom = fixture_bom()
+    bom.metadata.completeness = _claim(**{name: IMPORTED_MARKERS[name]})
+    cdx = CycloneDXGenerator().generate(bom)
+    spdx_document = SPDXGenerator().generate(bom)
+    assert CycloneDXGenerator.recover(deepcopy(cdx)).metadata.completeness == _claim(
+        **{name: IMPORTED_MARKERS[name]}
+    )
+    assert SPDXGenerator.recover(deepcopy(spdx_document)).metadata.completeness is not None
+    for weakened in (None, [{"aggregate": "unknown"}]):
+        document = {k: v for k, v in cdx.items() if k != "compositions"}
+        if weakened is not None:
+            document["compositions"] = weakened
+        with pytest.raises(ValueError, match="projection conflicts"):
+            CycloneDXGenerator.recover(document)
+    for edge in _edges(spdx_document):
+        edge["completeness"] = "noAssertion"
+    with pytest.raises(ValueError, match="projection conflicts"):
+        SPDXGenerator.recover(spdx_document)
 
 
 @pytest.fixture(scope="module")
@@ -251,7 +386,25 @@ def scans(tmp_path_factory) -> dict[str, dict[str, dict[str, Any]]]:
     gap = base / "gap-agent"
     shutil.copytree(DEMO, gap)
     (gap / ".mcp.json").write_text('{"mcpServers": {"x": ', encoding="utf-8")
-    runs = {"full": (full, []), "subset": (full, ["--scanner", "mcp"]), "failed": (gap, [])}
+    initialized = base / "init-agent"
+    shutil.copytree(DEMO, initialized)
+    result = CliRunner().invoke(main, ["init", "--path", str(initialized)])
+    assert result.exit_code == 0, result.output
+    narrowed = base / "models-excluded-agent"
+    shutil.copytree(DEMO, narrowed)
+    (narrowed / ".nexus-symbiote.yaml").write_text(
+        DEFAULT_POLICY_YAML.replace(DEFAULT_EXCLUDE_LINE, '  exclude_paths: ["models"]'),
+        encoding="utf-8",
+    )
+    every_scanner = [arg for name in sorted(BUILTIN_SCANNER_NAMES) for arg in ("--scanner", name)]
+    runs = {
+        "full": (full, []),
+        "subset": (full, ["--scanner", "mcp"]),
+        "failed": (gap, []),
+        "init-policy": (initialized, []),
+        "models-excluded": (narrowed, []),
+        "every-scanner": (full, every_scanner),
+    }
     documents: dict[str, dict[str, dict[str, Any]]] = {}
     for name, (root, extra) in runs.items():
         documents[name] = {}
@@ -275,24 +428,42 @@ def test_scan_edges_carry_their_public_condition_in_spdx(scans):
         assert edge["relationshipType"] == "other"
         assert SCAN_CONDITION in edge.get("comment", "")
         assert "Not an unconditional" in edge.get("comment", "")
+    properties = _relationship_properties(scans["full"]["cyclonedx"])
+    assert properties and all(prop.get("conditional") is True for prop in properties)
 
 
-def test_full_static_scan_is_public_unknown_and_never_complete(scans):
-    cdx = standard_only(scans["full"]["cyclonedx"], "cyclonedx")
-    spdx_view = standard_only(scans["full"]["spdx"], "spdx")
+def test_cli_runs_record_the_scope_each_case_needs(scans):
+    def claim(scan: str) -> CompletenessClaim:
+        recovered = CycloneDXGenerator.recover(scans[scan]["cyclonedx"]).metadata.completeness
+        assert recovered is not None
+        return recovered
+
+    assert DEFAULT_EXCLUDE_LINE in DEFAULT_POLICY_YAML
+    for scan in ("full", "init-policy", "every-scanner"):
+        assert set(claim(scan).collectors_requested) == BUILTIN_SCANNER_NAMES
+    assert {"node_modules", ".git", "__pycache__", ".venv"} <= set(claim("init-policy").exclusions)
+    assert "models" in claim("models-excluded").exclusions
+    assert set(claim("models-excluded").collectors_requested) == BUILTIN_SCANNER_NAMES
+    assert not claim("models-excluded").scan_failures
+
+
+@pytest.mark.parametrize("scan", ["full", "init-policy", "every-scanner"])
+def test_full_static_scan_is_public_unknown_and_never_complete(scans, scan):
+    cdx = standard_only(scans[scan]["cyclonedx"], "cyclonedx")
+    spdx_view = standard_only(scans[scan]["spdx"], "spdx")
     assert cdx.get("compositions") == [{"aggregate": "unknown"}]
     assert {e.get("completeness") for e in _edges(spdx_view)} == {"noAssertion"}
     assert _spdx_document(spdx_view).get("comment", "").startswith("Collection coverage is unknown")
     _cyclonedx_strict(cdx)
     _spdx_round_trip(spdx_view)
-    document = scans["full"]["cyclonedx"]
+    document = scans[scan]["cyclonedx"]
     # An SDK that drops the composition removes no assertion; a complete claim conflicts.
     assert CycloneDXGenerator.recover({k: v for k, v in document.items() if k != "compositions"})
     with pytest.raises(ValueError, match="projection conflicts"):
         CycloneDXGenerator.recover({**document, "compositions": [{"aggregate": "complete"}]})
 
 
-@pytest.mark.parametrize("scan", ["subset", "failed"])
+@pytest.mark.parametrize("scan", ["subset", "failed", "models-excluded"])
 def test_scoped_or_failed_scan_is_publicly_incomplete(scans, scan):
     cdx = standard_only(scans[scan]["cyclonedx"], "cyclonedx")
     spdx_view = standard_only(scans[scan]["spdx"], "spdx")
@@ -311,7 +482,7 @@ def test_scoped_or_failed_scan_is_publicly_incomplete(scans, scan):
     } == {"incomplete"}
 
 
-@pytest.mark.parametrize("scan", ["subset", "failed"])
+@pytest.mark.parametrize("scan", ["subset", "failed", "models-excluded"])
 @pytest.mark.parametrize("composition", [None, "unknown", "complete"])
 def test_cyclonedx_recovery_rejects_a_weakened_partial_composition(scans, scan, composition):
     document = deepcopy(scans[scan]["cyclonedx"])
