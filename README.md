@@ -98,7 +98,7 @@ The [CLI reference](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/c
 | SARIF 2.1.0 | `scan -f sarif` | GitHub code scanning and other SARIF viewers |
 | CycloneDX VEX | `vex` | Findings marked `in_triage`, with no exploitability claim |
 
-Standard exports embed the native inventory in a digest-bound extension. Keep that extension to recover full semantics. Without it, a consumer still sees that conditional edges are not unconditional relationships, which native relationship each SPDX `other` relationship stands for, and that coverage is `incomplete` or `unknown`, never `complete`.
+Standard exports embed the native inventory in a digest-bound extension. Keep that extension to recover full semantics. Without it, a consumer never sees a conditional edge as an unconditional relationship, can read which native relationship each SPDX `other` relationship stands for, and sees coverage as `incomplete` or `unknown`, never `complete`. Exports written by earlier builds may need to be regenerated; see [fingerprint migration](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/fingerprint-migration.md).
 
 ### See it on the demo agent
 
@@ -224,7 +224,7 @@ jobs:
           sarif-upload: 'false'
 ```
 
-With `validate: 'true'`, a model passes integrity only as a SafeTensors file whose artifact-bound signature verifies under a signer policy you own, so a repository that contains a model fails validation unless you pass such a policy and every model meets it. Write the policy outside the workspace from a trusted source, such as a repository or organization variable, never from the checked-out code:
+With `validate: 'true'`, integrity passes only when at least one artifact hash or signature verifies and no component's evidence is unknown, so a repository in which nothing verifies, such as an empty checkout or one with only an MCP configuration, fails validation. A model counts only as a SafeTensors file whose artifact-bound signature verifies under a signer policy you own, so a repository that contains a model fails validation unless you pass such a policy and every model meets it. Write the policy outside the workspace from a trusted source, such as a repository or organization variable, never from the checked-out code:
 
 ```yaml
       - name: Write the signer policy
@@ -237,7 +237,7 @@ With `validate: 'true'`, a model passes integrity only as a SafeTensors file who
           signature-policy: ${{ runner.temp }}/signers.json
 ```
 
-The Action refuses a policy inside the workspace, a symlink or a hard link, passes one snapshot of it to collection and validation, and reports its SHA-256 as the `signature-policy-digest` output. It verifies signatures offline against the Sigstore trust root shipped in its hash-locked `sigstore` package, never a cache on the runner.
+The Action refuses a policy inside the workspace, a path that passes through a symlink (including a symlinked `RUNNER_TEMP`), or a hard link, passes one snapshot of it to collection and validation, and reports its SHA-256, as `sha256:<hex>`, in the `signature-policy-digest` output. It verifies signatures offline against the Sigstore trust root shipped in its hash-locked `sigstore` package, never a cache on the runner.
 
 The Action installs its own hash-locked runtime, including Sigstore verification, ignores policy in the scanned checkout, and fails on collection errors. Keep a job timeout like the one above: hostile input can keep a scan running until the job times out. Run the Action once per workflow run, because its artifact name and SARIF category are fixed ([known limitations](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/SECURITY.md#known-limitations-in-010)). Set `sarif-upload: 'true'` and add `security-events: write` for SARIF upload. Inputs and outputs are in [action.yml](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/action.yml). The repository also ships [pre-commit hooks](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/.pre-commit-hooks.yaml) (`nexus-symbiote-scan` and `nexus-symbiote-risk`).
 

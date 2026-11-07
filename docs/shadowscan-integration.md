@@ -151,15 +151,19 @@ ignores a changed exact digest and records an informational metadata note,
 security alert. A changed finding raises a medium alert on its own component,
 including when only fields that the BOM does not project changed, and the
 changed report content raises the high completeness alert. An inventory
-without these digests, written by an earlier version, keeps the exact-digest
-comparison, so the first comparison after an upgrade alerts once. The content
+written by an earlier version has no content digests, so the first comparison
+after an upgrade raises the high completeness alert and a medium alert for
+every imported component, even when the report bytes are unchanged, because the
+new inventory adds the content digests, the v3 projection profile and the
+per-component finding digests. Later comparisons use the content digests. The content
 digests are not authentication; `validate --project` compares them with the
 local report as it does the exact digest. Text output prints the note under
 Notes; `--json-output` lists it in `metadata_changes`.
 
-Reruns compare cleanly only when ShadowScan keys credential identities with a
-stable key, which the report records as `collection_scope.credential_identity_scope`
-`keyed`. In the `run` scope, ShadowScan derives each redacted credential
+Reruns whose reports contain redacted credential findings compare cleanly only
+when ShadowScan keys credential identities with a stable key, which the report
+records as `collection_scope.credential_identity_scope` `keyed`; reports without
+such findings compare cleanly in either scope. In the `run` scope, ShadowScan derives each redacted credential
 finding's id from a random per-run key, so those findings get new ids on every
 run and `diff` reports them as removed and added components. That fails safe,
 as alerts, but configure a stable credential identity key in ShadowScan, by
