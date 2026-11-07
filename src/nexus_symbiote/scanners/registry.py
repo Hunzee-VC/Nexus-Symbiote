@@ -851,6 +851,9 @@ class RegistryScanner(Scanner):
                     split = next(
                         (i for i, t in enumerate(tokens) if t.startswith("-")), len(tokens)
                     )
+                    # pip reads the words before them as written, with the empty
+                    # words two spaces leave.
+                    args = " ".join(tokens[:split])
                     reference = " ".join(t for t in tokens[:split] if t)
                     options, _ = self._options(" ".join(tokens[split:]))
                     if self._ENV_NAME.match(reference):
@@ -862,7 +865,7 @@ class RegistryScanner(Scanner):
                         ):
                             # pip installs the requirement itself as editable.
                             gaps = ["editable install not followed"]
-                        elif self._unnamed(reference, folded):
+                        elif self._unnamed(args, folded):
                             # The gap never names the reference, which can carry a
                             # credential.
                             gaps = ["URL, VCS or path requirement not followed"]

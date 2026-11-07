@@ -287,11 +287,19 @@ def test_url_requirement_gap_names_no_reference(tmp_path):
     assert "URL, VCS or path requirement not followed" in (tmp_path / "out.json").read_text()
 
 
-def test_named_url_requirement_shadowed_by_a_directory_is_partial(tmp_path):
+@pytest.mark.parametrize(
+    ("line", "directory"),
+    [
+        ("openai @ https://h.example/openai", "openai @ https:/h.example/openai"),
+        # pip keeps both spaces in the path it looks for.
+        (f"openai @ h  x/o --hash=sha256:{'0' * 64}", "openai @ h  x/o"),
+    ],
+)
+def test_named_url_requirement_shadowed_by_a_directory_is_partial(tmp_path, line, directory):
     # pip reads the whole line as a relative path first and installs the directory
     # it finds there, under the name in its pyproject.toml.
-    project = _project(tmp_path, {"requirements.txt": "openai @ https://h.example/openai\n"})
-    shadow = project / "openai @ https:" / "h.example" / "openai"
+    project = _project(tmp_path, {"requirements.txt": f"{line}\n"})
+    shadow = project / directory
     try:
         shadow.mkdir(parents=True)
     except OSError:
