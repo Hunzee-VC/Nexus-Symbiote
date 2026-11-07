@@ -15,6 +15,7 @@ from nexus_symbiote.generators._common import (
     claim_properties,
     component_property,
     content_digest,
+    coverage_aggregate,
     document_properties,
     json_text,
     native_document,
@@ -41,6 +42,18 @@ SPDX_TYPE_MAP = {
 
 
 NO_ASSERTION_LICENSE = "https://spdx.org/rdf/3.0.1/terms/Licensing/NoAssertion"
+MAX_CONDITION_COMMENT = 1024
+COVERAGE_COMMENTS = {
+    "incomplete": (
+        "Collection coverage is incomplete: collectors were scoped or failed, surfaces "
+        "were excluded, or discovery was imported. This document does not assert "
+        "complete collection."
+    ),
+    "unknown": (
+        "Collection coverage is unknown: static collection does not observe runtime, "
+        "network or live tool surfaces. This document does not assert complete collection."
+    ),
+}
 
 
 def _extension(properties: list[dict[str, str]]) -> list[dict[str, Any]]:
@@ -132,7 +145,13 @@ class SPDXGenerator(Generator):
             json_text(edge.model_dump(mode="json", exclude_none=True)): edge
             for edge in aibom.dependencies
         }
-        relationships = [self._relationship(edge_values[key], ids) for key in sorted(edge_values)]
+        coverage = coverage_aggregate(aibom.metadata.completeness)
+        relationships = [
+            self._relationship(
+                edge_values[key], ids, "incomplete" if coverage == "incomplete" else "noAssertion"
+            )
+            for key in sorted(edge_values)
+        ]
         license_relationships = [
             {
                 "type": "Relationship",
@@ -167,6 +186,7 @@ class SPDXGenerator(Generator):
             ],
             # The inventory does not collect all AI/Dataset-profile conformance evidence.
             "profileConformance": ["core", "software", "extension"],
+            "comment": COVERAGE_COMMENTS[coverage],
             "extension": _extension(document_properties(aibom, self.format_name)),
         }
         return {
@@ -260,7 +280,7 @@ class SPDXGenerator(Generator):
         return element
 
     @staticmethod
-    def _relationship(edge: DependencyEdge, ids: _DocumentIds) -> dict[str, Any]:
+    def _relationship(edge: DependencyEdge, ids: _DocumentIds, completeness: str) -> dict[str, Any]:
         mapping = {
             "invokes": "usesTool",
             "trained-on": "trainedOn",
@@ -270,17 +290,30 @@ class SPDXGenerator(Generator):
             "merged-from": "descendantOf",
         }
         body = edge.model_dump(mode="json", exclude_none=True)
-        return {
+        typed = mapping.get(edge.relationship)
+        relationship = {
             "type": "Relationship",
             "spdxId": ids.element("relationship", content_digest(body)),
             "creationInfo": ids.creation,
-            "relationshipType": mapping.get(edge.relationship, "other"),
+            # A typed SPDX relationship is unconditional; standard-only consumers
+            # never see the native condition, so match the CycloneDX graph rule.
+            "relationshipType": "other" if edge.conditions or typed is None else typed,
             "from": ids.element("component", edge.source_ref),
             "to": [ids.element("component", edge.target_ref)],
+            "completeness": completeness,
             "extension": _extension(
                 [{"name": "nexus-symbiote:relationship", "value": json_text(body)}]
             ),
         }
+        if edge.conditions:
+            conditions = edge.conditions
+            if len(conditions) > MAX_CONDITION_COMMENT:
+                conditions = conditions[:MAX_CONDITION_COMMENT] + " [truncated]"
+            relationship["comment"] = (
+                f"Conditional native relationship '{edge.relationship}', only when: "
+                f"{conditions}. Not an unconditional {typed or 'relationship'} assertion."
+            )
+        return relationship
 
     @staticmethod
     def recover(document: dict[str, Any]) -> AIBOM:
