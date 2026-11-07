@@ -1034,6 +1034,12 @@ def diff(old_path: str, new_path: str, json_output: bool, fail_on_alert: bool = 
                     soft_wrap=True,
                 )
 
+        notes = [change for change in result.metadata_changes if change["severity"] == "info"]
+        if notes:
+            console.print("\n[bold]Notes:[/]")
+            for change in notes:
+                console.print(f"  \\[INFO] {_safe(change['detail'])}", soft_wrap=True)
+
         if result.components_added:
             console.print(f"\n[green]+{len(result.components_added)} added[/]")
             for c in result.components_added:

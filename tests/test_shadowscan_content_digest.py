@@ -28,6 +28,7 @@ CYCLONEDX = FIXTURES / "shadowscan-producer/cyclonedx-agent-model.json"
 SCHEMA = Path(__file__).parents[1] / "schemas/nexus-symbiote-aibom-1.0.schema.json"
 SERVER = "shadowscan:6a6016901367"
 AGENT = "shadowscan:bbc418bfbfea"
+FULLWIDTH = str.maketrans("0123456789", "".join(chr(0xFF10 + digit) for digit in range(10)))
 
 MINIMAL = {
     "version": "0.1.4",
@@ -140,6 +141,7 @@ def test_content_digest_ignores_layout_and_run_times_but_not_content():
         lambda d: d.update(future_field=True),
         lambda d: d.update(started_at={"hidden": "content"}),
         lambda d: d["findings"][1].update(last_seen="not a timestamp"),
+        lambda d: d.update(started_at="2026-11-02T00:10:00+00:00".translate(FULLWIDTH)),
     ):
         changed = json.loads(REPORT.read_text())
         edit(changed)
@@ -153,6 +155,7 @@ def test_rerun_with_only_new_run_times_raises_no_drift_alert(tmp_path):
     second = _scan(tmp_path, "s1", json.dumps(_rerun(json.loads(REPORT.read_text()))).encode())
     result = CliRunner().invoke(main, ["diff", "--fail-on-alert", str(first), str(second)])
     assert result.exit_code == 0, result.output
+    assert "[INFO] ShadowScan report regenerated; normalized content unchanged." in result.output
     report = AIBOMDiffer().diff(_load(first), _load(second))
     assert report.security_alerts == []
     assert report.metadata_changes == [
@@ -187,22 +190,52 @@ def test_changed_finding_alerts_on_that_component_only(tmp_path):
     ].items()
 
 
-def test_inventories_without_content_digests_keep_the_strict_comparison(tmp_path):
+def _strip_content_digests(doc: dict) -> None:
+    claim = doc["metadata"]["completeness"]
+    claim["source_report_content_digest"] = claim["source_report_content_profile"] = None
+    for component in doc["components"]:
+        component["properties"].pop("shadowscan:finding-sha256", None)
+
+
+def _without_content_profile(doc: dict) -> None:
+    doc["metadata"]["completeness"]["source_report_content_profile"] = None
+
+
+def _older_projection_profile(doc: dict) -> None:
+    for component in doc["components"]:
+        if "shadowscan:projection-profile" in component["properties"]:
+            component["properties"]["shadowscan:projection-profile"] = (
+                "nexus-symbiote/shadowscan-projection/v2"
+            )
+
+
+@pytest.mark.parametrize(
+    ("edit", "sides", "metadata_alert", "component_alerts"),
+    [
+        (_strip_content_digests, (0, 1), True, 2),
+        (_strip_content_digests, (0,), True, 2),
+        (_strip_content_digests, (1,), True, 2),
+        (_without_content_profile, (0,), True, 0),
+        (_without_content_profile, (1,), True, 0),
+        (_older_projection_profile, (0,), False, 2),
+        (_older_projection_profile, (1,), False, 2),
+    ],
+)
+def test_inventories_without_comparable_digests_keep_the_strict_comparison(
+    tmp_path, edit, sides, metadata_alert, component_alerts
+):
     first = _scan(tmp_path, "s0", REPORT.read_bytes())
     second = _scan(tmp_path, "s1", json.dumps(_rerun(json.loads(REPORT.read_text()))).encode())
-    legacy = []
-    for path in (first, second):
-        doc = json.loads(path.read_text())
-        claim = doc["metadata"]["completeness"]
-        claim["source_report_content_digest"] = claim["source_report_content_profile"] = None
-        for component in doc["components"]:
-            component["properties"].pop("shadowscan:finding-sha256", None)
-        legacy.append(AIBOM.model_validate(doc))
-    report = AIBOMDiffer().diff(*legacy)
-    assert {"severity": "high", "component": "metadata"}.items() <= report.security_alerts[
-        0
-    ].items()
-    assert len([a for a in report.security_alerts if a["component"] != "metadata"]) == 2
+    docs = [json.loads(path.read_text()) for path in (first, second)]
+    for side in sides:
+        edit(docs[side])
+    report = AIBOMDiffer().diff(*(AIBOM.model_validate(doc) for doc in docs))
+    alerts = report.security_alerts
+    high = {"severity": "high", "component": "metadata"}
+    assert any(high.items() <= alert.items() for alert in alerts) is metadata_alert
+    assert len([a for a in alerts if a["component"] != "metadata"]) == component_alerts
+    regenerated = [c for c in report.metadata_changes if c["severity"] == "info"]
+    assert bool(regenerated) is not metadata_alert
 
 
 def test_cyclonedx_rerun_keeps_projected_dependencies(tmp_path):

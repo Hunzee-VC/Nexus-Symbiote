@@ -37,7 +37,9 @@ CONTENT_PROFILE = "nexus-symbiote/shadowscan-content/v1"
 # The fields that only record when a collection run happened. The list is closed:
 # any other field, including one a later ShadowScan release adds, stays content,
 # and so does a listed field whose value is not the expected run-event shape.
-_TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})")
+_TIMESTAMP = re.compile(
+    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})", re.ASCII
+)
 _SERIAL_NUMBER = re.compile(r"urn:uuid:[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}")
 _RUN_EVENT_FIELDS = frozenset({"started_at", "finished_at"})
 _FINDING_RUN_EVENT_FIELDS = frozenset({"last_seen"})
