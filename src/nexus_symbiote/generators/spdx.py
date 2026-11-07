@@ -310,8 +310,8 @@ class SPDXGenerator(Generator):
             if len(conditions) > MAX_CONDITION_COMMENT:
                 conditions = conditions[:MAX_CONDITION_COMMENT] + " [truncated]"
             relationship["comment"] = (
-                f"Conditional native relationship '{edge.relationship}', only when: "
-                f"{conditions}. Not an unconditional {typed or 'relationship'} assertion."
+                f"Conditional native relationship '{edge.relationship}' (conditions: "
+                f"{conditions}). Not an unconditional {typed or 'relationship'} assertion."
             )
         return relationship
 

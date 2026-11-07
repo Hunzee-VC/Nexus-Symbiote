@@ -6,7 +6,7 @@ import hashlib
 import json
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from nexus_symbiote import __version__
 from nexus_symbiote.core.aibom import AIBOM
@@ -157,7 +157,7 @@ def loss_report(bom: AIBOM, target: str) -> dict[str, Any]:
     }
 
 
-def coverage_aggregate(claim: CompletenessClaim | None) -> str:
+def coverage_aggregate(claim: CompletenessClaim | None) -> Literal["incomplete", "unknown"]:
     """Public coverage for standard-only consumers, which never see the native claim.
 
     Static collection never observes runtime, network or live tool surfaces, so
