@@ -140,7 +140,7 @@ JSON of the strictly parsed report without its run-event fields. These are, for
 native JSON, the top-level and per-connector `started_at` and `finished_at` and
 each finding's `last_seen`; for CycloneDX, `serialNumber` and
 `metadata.timestamp`. Each is dropped only when it is null or shaped as an RFC
-3339 timestamp, or for the serial number a URN UUID. The list is closed. Every
+3339 timestamp written with ASCII digits, or for the serial number a URN UUID. The list is closed. Every
 other field or value, including a field a later ShadowScan release adds, counts
 as content. `shadowscan:finding-sha256`
 applies the same rule to one finding, or to one CycloneDX component or service.
@@ -154,7 +154,16 @@ changed report content raises the high completeness alert. An inventory
 without these digests, written by an earlier version, keeps the exact-digest
 comparison, so the first comparison after an upgrade alerts once. The content
 digests are not authentication; `validate --project` compares them with the
-local report as it does the exact digest.
+local report as it does the exact digest. Text output prints the note under
+Notes; `--json-output` lists it in `metadata_changes`.
+
+Reruns compare cleanly only when ShadowScan keys credential identities with a
+stable key, which the report records as `collection_scope.credential_identity_scope`
+`keyed`. In the `run` scope, ShadowScan derives each redacted credential
+finding's id from a random per-run key, so those findings get new ids on every
+run and `diff` reports them as removed and added components. That fails safe,
+as alerts, but configure a stable credential identity key in ShadowScan before
+you compare reruns.
 
 ### Require a signed report in CI
 
@@ -176,7 +185,9 @@ nexus-symbiote risk agentbom.json --project . --signature-policy /etc/ci/signers
 ```
 
 A signature policy entry that names one of the conventional report paths turns
-the check on. So does `validate.require_discovery_signature: true` in the
+the check on. An entry matches the report by path or by file, so another name
+for the same file, such as a different case on a case-insensitive filesystem,
+counts too. So does `validate.require_discovery_signature: true` in the
 project policy, which then fails when no entry names the report. Keep the
 signature policy outside the checkout, as the project policy can be changed by
 the code it gates. When the BOM carries ShadowScan evidence, the check reads
@@ -190,6 +201,13 @@ reports `project-reconciliation-failed` with the reason. Values recorded in the
 BOM are never trusted for this check. A passing check authenticates the
 report's producer, not the truth of its findings, and imported components keep
 declared assurance. Install the Sigstore extra for this mode.
+
+The check binds the report to its producer, not to this repository, commit or
+time. Anyone who can write to the checkout can substitute an older report, or
+another repository's report, signed by the same identity, for example one from
+before a shadow agent appeared, and regenerate the BOM from it. Give each
+repository's discovery workflow its own signer identity, and bind freshness or
+the commit separately where you need that.
 
 ### Verify the native import and its producer
 
