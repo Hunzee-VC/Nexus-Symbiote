@@ -325,9 +325,17 @@ def test_editable_file_url_is_not_the_project_when_a_directory_shadows_it(tmp_pa
             "version_pinning",
         ),
         (
-            "FROM python:3.12-slim\n  \\ \n\xa0 FROM ollama/ollama:latest\n",
+            "FROM python:3.12-slim\n  \\ \n\xa0\u2000FROM ollama/ollama:latest\n",
             "ollama/ollama:latest",
             "version_pinning",
+        ),
+        # BuildKit trims the end of the instruction too, so the tag is still latest.
+        ("FROM ollama/ollama:latest\xa0\n", "ollama/ollama:latest", "version_pinning"),
+        ("FROM ollama/ollama:latest\u3000\x85\r\n", "ollama/ollama:latest", "version_pinning"),
+        (
+            "FROM ollama/ollama:0.5.7 AS ollama\u2028\nFROM ollama\n",
+            "ollama/ollama:0.5.7",
+            "mutable_image_tag",
         ),
     ],
 )

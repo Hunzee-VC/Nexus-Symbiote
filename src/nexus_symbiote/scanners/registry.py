@@ -1034,7 +1034,10 @@ class RegistryScanner(Scanner):
         images: list[str] = []
         gaps: list[str] = []
         stages: set[str] = set()
-        for line in cls._dockerfile_instructions(lines, gaps):
+        for joined in cls._dockerfile_instructions(lines, gaps):
+            # BuildKit trims the arguments too: a trailing no-break space is not part
+            # of the image, and "latest\xa0" is still the latest tag.
+            line = joined.rstrip(cls._GO_SPACE)
             instruction = cls._DOCKER_WORD.match(line)
             if instruction is None or cls._command(instruction.group()) != "from":
                 continue
