@@ -115,14 +115,37 @@ def _moved(card: dict[str, Any]) -> dict[str, Any]:
     return {**card, "url": "https://agents.example.com/attacker"}
 
 
-def _widened(card: dict[str, Any]) -> dict[str, Any]:
-    widened = json.loads(json.dumps(card).replace('"read:only"', '"admin"'))
-    assert widened["security"] == [{"oauth": ["admin"]}]
-    return widened
+def _scoped(card: dict[str, Any], scope: str) -> dict[str, Any]:
+    scoped = copy.deepcopy(card)
+    scoped["securitySchemes"]["oauth"]["flows"]["clientCredentials"]["scopes"] = {scope: "Access"}
+    scoped["security"] = [{"oauth": [scope]}]
+    return scoped
 
 
-def test_required_scope_change_fails_the_drift_gate_without_a_key(tmp_path):
-    run, boms = _drift(tmp_path, CARD, _widened(CARD))
+def _token_url(card: dict[str, Any], url: str) -> dict[str, Any]:
+    changed = copy.deepcopy(card)
+    changed["securitySchemes"]["oauth"]["flows"]["clientCredentials"]["tokenUrl"] = url
+    return changed
+
+
+AZURE_APP = "api://11111111-2222-3333-4444-555555555555"
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        ("read:only", "admin"),
+        # Scope URIs name the permission in their path (RFC 6749 section 3.3 tokens).
+        (
+            "https://www.googleapis.com/auth/drive.readonly",
+            "https://www.googleapis.com/auth/cloud-platform",
+        ),
+        (f"{AZURE_APP}/access_as_user", f"{AZURE_APP}/admin"),
+        ("https://graph.microsoft.com/User.Read", "https://graph.microsoft.com/Mail.ReadWrite"),
+    ],
+)
+def test_required_scope_change_fails_the_drift_gate_without_a_key(tmp_path, before, after):
+    run, boms = _drift(tmp_path, _scoped(CARD, before), _scoped(CARD, after))
     assert run.exit_code == 1, run.output
     alerts = json.loads(run.stdout)["security_alerts"]
     assert any(
@@ -130,8 +153,9 @@ def test_required_scope_change_fails_the_drift_gate_without_a_key(tmp_path):
     ), alerts
     baseline = json.loads((tmp_path / "before.json").read_text())
     (server,) = [c for c in baseline["components"] if c["component_type"] == "a2a-server"]
-    assert server["capabilities"]["oauth_scopes"] == ["read:only"]
+    assert server["capabilities"]["oauth_scopes"] == [before]
     assert server["properties"]["security_scheme_types"] == ["oauth2"]
+    assert not any("OAuth scopes" in risk["detail"] for risk in server["risks"])
 
 
 def test_same_origin_path_change_fails_the_drift_gate_with_a_key(tmp_path, monkeypatch):
@@ -152,11 +176,13 @@ def test_without_a_key_the_path_is_neither_exported_nor_digested_but_marked_unbo
     assert "static_value_binding" not in first.properties
     # An unkeyed digest that changed with the path would let anyone confirm guesses.
     assert first.properties["static_card_hash"] == moved.properties["static_card_hash"]
-    assert any(r.severity == "low" and r.category == "completeness" for r in first.risks)
+    (gap,) = [r for r in first.risks if r.category == "completeness"]
+    assert gap.severity == "low" and "endpoint path" in gap.detail
+    assert SOURCE_BINDING_KEY_ENV in gap.recommendation
     assert "trusted" not in first.model_dump_json()
     origin_only = _server(tmp_path / "c", {**CARD, "url": "https://agents.example.com/"})
     assert origin_only.properties["source_values_bound"] is False
-    assert not any(r.category == "completeness" for r in origin_only.risks)
+    assert not any("endpoint path" in r.detail for r in origin_only.risks)
 
 
 def test_keyed_binding_ignores_key_order_and_whitespace(tmp_path, monkeypatch):
@@ -341,42 +367,168 @@ def test_scheme_types_map_onto_a_fixed_set_and_scopes_are_redacted(tmp_path):
     assert secret not in server.model_dump_json()
 
 
+@pytest.mark.parametrize(
+    "change",
+    [
+        # SDK serializers that keep None fields emit these shapes.
+        {"securitySchemes": None, "security": None},
+        {"securitySchemes": None},
+        {"authentication": {"schemes": None}, "security": None},
+        {"authentication": {"schemes": [""]}, "security": None},
+        {"authentication": {"schemes": [" "]}, "security": None},
+        # A referenced scheme must declare a type to count as authentication.
+        {"securitySchemes": {"oauth": {}}, "security": [{"oauth": []}]},
+        {"securitySchemes": {"oauth": {"type": None}}, "security": [{"oauth": []}]},
+        {"securitySchemes": {"oauth": {"type": ""}}, "security": [{"oauth": []}]},
+    ],
+)
+def test_null_empty_and_typeless_declarations_are_not_authentication(tmp_path, change):
+    server = _server(tmp_path, {**CARD, **change})
+    assert server.authentication_required is False
+    assert [r.severity for r in server.risks if r.category == "authentication"] == ["medium"]
+
+
+def test_only_oauth_scopes_are_exported_and_secret_shaped_values_are_withheld(
+    tmp_path, monkeypatch
+):
+    pat = "ghp_" + "b" * 36
+    jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJlc2lnbmF0dXJl"
+    card = copy.deepcopy(CARD)
+    card["securitySchemes"]["key"] = {"type": "apiKey", "in": "header", "name": "X-Key"}
+    card["security"] = [
+        {"oauth": ["read:only", jwt, "https://x.example/s?api_key=v"], "key": [pat]}
+    ]
+    server = _server(tmp_path / "a", card)
+    assert server.capabilities is not None
+    assert server.capabilities.oauth_scopes == ["***", "https://x.example", "read:only"]
+    exported = server.model_dump_json()
+    assert pat not in exported and jwt not in exported and "api_key=v" not in exported
+    (gap,) = [r for r in server.risks if r.category == "completeness"]
+    assert "redacted OAuth scopes" in gap.detail and "role names" in gap.detail
+    role_changed = copy.deepcopy(card)
+    role_changed["security"][0]["key"] = ["ghp_" + "c" * 36]
+    unkeyed = _server(tmp_path / "b", role_changed)
+    assert unkeyed.properties["static_card_hash"] == server.properties["static_card_hash"]
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    keyed, rekeyed = _server(tmp_path / "c", card), _server(tmp_path / "d", role_changed)
+    assert keyed.properties["static_value_binding"] != rekeyed.properties["static_value_binding"]
+    assert not any(r.category == "completeness" for r in keyed.risks)
+
+
+def test_credential_endpoint_host_change_fails_the_drift_gate_without_a_key(tmp_path):
+    run, boms = _drift(tmp_path, CARD, _token_url(CARD, "https://evil.example.net/steal"))
+    assert run.exit_code == 1, run.output
+    assert any("billing-agent" in a["alert"] for a in json.loads(run.stdout)["security_alerts"])
+    assert "auth.example.com/token" not in boms and "evil.example.net/steal" not in boms
+    baseline = json.loads((tmp_path / "before.json").read_text())
+    (server,) = [c for c in baseline["components"] if c["component_type"] == "a2a-server"]
+    assert server["properties"]["security_scheme_origins"] == ["https://auth.example.com"]
+    (gap,) = [r for r in server["risks"] if r["category"] == "completeness"]
+    assert "security scheme URL paths" in gap["detail"]
+
+
+def test_additional_interface_urls_export_origins_and_mark_paths_unbound(tmp_path):
+    interface = {"url": "https://grpc.example.com/secret-path", "transport": "GRPC"}
+    card = {**_token_url(CARD, "https://auth.example.com"), "url": "https://agents.example.com"}
+    server = _server(tmp_path / "a", {**card, "additionalInterfaces": [interface]})
+    assert server.properties["additional_interface_origins"] == ["https://grpc.example.com"]
+    assert server.properties["security_scheme_origins"] == ["https://auth.example.com"]
+    (gap,) = [r for r in server.risks if r.category == "completeness"]
+    assert gap.detail.endswith(
+        "values not bound in this inventory: additional interface URL paths or queries."
+    )
+    assert "secret-path" not in server.model_dump_json()
+    moved = _server(
+        tmp_path / "b",
+        {**card, "additionalInterfaces": [{**interface, "url": "https://evil.example.net"}]},
+    )
+    assert moved.properties["additional_interface_origins"] == ["https://evil.example.net"]
+    relative = _server(tmp_path / "c", {**card, "additionalInterfaces": [{"url": "/trusted"}]})
+    assert any("additional interface" in r.detail for r in relative.risks)
+    assert "trusted" not in relative.model_dump_json()
+    plain = _server(tmp_path / "d", card)
+    assert plain.properties["additional_interface_origins"] == []
+    assert not any(r.category == "completeness" for r in plain.risks)
+
+
+def test_backslash_authority_is_not_exported_as_an_origin(tmp_path):
+    hidden = "SecretPathToken123"
+    server = _server(tmp_path / "a", {**CARD, "url": f"https://agents.example.com\\{hidden}"})
+    client = _client(tmp_path / "b", {"name": "c", "agentCardUrl": f"https://h.example\\{hidden}"})
+    assert server.endpoint_url == "[redacted]" and client.agent_card_url == "[redacted]"
+    for record in (server, client):
+        assert hidden.lower() not in record.model_dump_json().lower()
+        assert any(r.category == "completeness" for r in record.risks)
+
+
+def test_client_well_known_card_path_swap_changes_the_structure_digest(tmp_path):
+    hashes = set()
+    for index, path in enumerate(("agent.json", "agent-card.json")):
+        url = f"https://agents.example.com/.well-known/{path}"
+        client = _client(tmp_path / str(index), {"name": "c", "agentCardUrl": url})
+        assert not any(r.category == "completeness" for r in client.risks)
+        hashes.add(client.properties["static_config_hash"])
+    assert len(hashes) == 2
+
+
+def test_keyed_binding_names_yaml_values_that_are_not_json(tmp_path, monkeypatch):
+    (tmp_path / "a2a.yaml").write_text("clients:\n  - name: c\n    added: 2024-01-01\n")
+    assert not A2AScanner().scan(tmp_path).scan_failures
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    (failure,) = A2AScanner().scan(tmp_path).scan_failures
+    assert failure.startswith(f"a2a.yaml: {SOURCE_BINDING_KEY_ENV} binding needs RFC 8785 JSON")
+    assert "quote YAML dates" in failure
+
+
 VECTOR_KEY = "nexus-symbiote-a2a-test-vector-key"
 VECTOR_CARD = {
     "name": "v",
     "url": "https://a.example/p",
-    "securitySchemes": {"o": {"type": "oauth2"}},
-    "security": [{"o": ["s"]}],
+    "securitySchemes": {
+        "o": {
+            "type": "oauth2",
+            "flows": {"clientCredentials": {"tokenUrl": "https://t.example/token", "scopes": {}}},
+        },
+        "k": {"type": "apiKey"},
+    },
+    "security": [{"o": ["s", "https://a.example/scope"]}, {"k": ["role"]}],
+    "additionalInterfaces": [{"url": "https://g.example", "transport": "GRPC"}],
 }
-VECTOR_CLIENT = {"name": "c", "agentCardUrl": "https://a.example/agents/c.json"}
+VECTOR_CLIENT = {"name": "c", "agentCardUrl": "https://a.example/.well-known/agent-card.json"}
 VECTORS = [
     (
         "static_card_hash",
         '{"profile":"nexus-symbiote/a2a-card-structure/v1","structure":{'
-        '"authentication_schemes":null,"endpoint":{"fragment":false,"path_separators":1,'
-        '"query":false,"userinfo":false},"fields":["name","security","securitySchemes","url"],'
-        '"security":[{"o":["s"]}],"security_schemes":[["o","oauth2"]]}}',
-        "sha256:9760c28136cfd49b315e6980dfa453ce68a5bcf1197a65b14ee65637e1946147",
+        '"additional_interfaces":[{"fragment":false,"path_separators":0,"plain_path":"",'
+        '"query":false,"userinfo":false}],"authentication_schemes":null,'
+        '"endpoint":{"fragment":false,"path_separators":1,"plain_path":null,"query":false,'
+        '"userinfo":false},"fields":["additionalInterfaces","name","security",'
+        '"securitySchemes","url"],"security":[{"k":1},{"o":["https://a.example/scope","s"]}],'
+        '"security_scheme_urls":[{"fragment":false,"path_separators":1,"plain_path":null,'
+        '"query":false,"userinfo":false}],"security_schemes":[["k","apiKey"],["o","oauth2"]]}}',
+        "sha256:078c59393036dd82e7b3846bfd0ce88e7124cf3287657bed8586e641b953eb67",
     ),
     (
         "static_value_binding",
-        '{"configuration":{"name":"v","security":[{"o":["s"]}],'
-        '"securitySchemes":{"o":{"type":"oauth2"}},"url":"https://a.example/p"},'
-        '"profile":"nexus-symbiote/a2a-card-values/v1"}',
-        "hmac-sha256:a60cda950b400e22b5cd80b467fab5a5b91ae12999216f978661b40ddc4d4275",
+        '{"configuration":{"additionalInterfaces":[{"transport":"GRPC","url":"https://g.example"}],'
+        '"name":"v","security":[{"o":["s","https://a.example/scope"]},{"k":["role"]}],'
+        '"securitySchemes":{"k":{"type":"apiKey"},"o":{"flows":{"clientCredentials":{'
+        '"scopes":{},"tokenUrl":"https://t.example/token"}},"type":"oauth2"}},'
+        '"url":"https://a.example/p"},"profile":"nexus-symbiote/a2a-card-values/v1"}',
+        "hmac-sha256:6891a90bc0fe990cca5ba895975fd35bb9a3a319abb88ea27c080b5568e81ba4",
     ),
     (
         "static_config_hash",
         '{"profile":"nexus-symbiote/a2a-client-structure/v1","structure":{"card_url":{'
-        '"fragment":false,"path_separators":2,"query":false,"userinfo":false},'
-        '"fields":["agentCardUrl","name"]}}',
-        "sha256:8fae69b03cb0ed74c3863cece0dbd1ff72c233906a44f2a8e31f7357c6e4f3e0",
+        '"fragment":false,"path_separators":2,"plain_path":"/.well-known/agent-card.json",'
+        '"query":false,"userinfo":false},"fields":["agentCardUrl","name"]}}',
+        "sha256:37abbd341b98747178d6d9393bb2343dc6d7f4a2168a0d4fd3dd9d9a56f14d3a",
     ),
     (
         "static_value_binding",
-        '{"configuration":{"agentCardUrl":"https://a.example/agents/c.json","name":"c"},'
-        '"profile":"nexus-symbiote/a2a-client-values/v1"}',
-        "hmac-sha256:8e53250b3309f2ece9bffc3d4a607fa993badf050bfa1032dd8287b604962cca",
+        '{"configuration":{"agentCardUrl":"https://a.example/.well-known/agent-card.json",'
+        '"name":"c"},"profile":"nexus-symbiote/a2a-client-values/v1"}',
+        "hmac-sha256:54acc1cb60bb70eaa929aa3bec0e4d5ce0ccc13728191fdc72412c76d0ff0462",
     ),
 ]
 
@@ -398,3 +550,7 @@ def test_binding_profiles_match_their_published_vectors(tmp_path, monkeypatch):
         assert computed == expected
         assert record.properties[field] == expected
     assert card.properties["static_value_binding_key_id"] == "46c23d6a04382e01f726b1da3f2253b1"
+    assert card.capabilities is not None
+    assert card.capabilities.oauth_scopes == ["https://a.example/scope", "s"]
+    assert card.properties["security_scheme_origins"] == ["https://t.example"]
+    assert card.properties["additional_interface_origins"] == ["https://g.example"]

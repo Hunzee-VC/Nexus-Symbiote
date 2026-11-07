@@ -5,8 +5,9 @@ from __future__ import annotations
 import ast
 import hmac
 import os
+import re
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 from urllib.parse import urlsplit
 
 from nexus_symbiote.core.enums import RiskSeverity, TrustTier
@@ -19,7 +20,7 @@ from nexus_symbiote.core.models import (
 )
 from nexus_symbiote.scanners.base import Scanner, ScanResult, parse_python, sanitized_origin
 from nexus_symbiote.scanners.mcp import _MIN_SOURCE_BINDING_KEY_LENGTH, SOURCE_BINDING_KEY_ENV
-from nexus_symbiote.utils.secrets import redact_text
+from nexus_symbiote.utils.secrets import REDACTED, redact_text
 
 AGENT_CARD_FILES = [
     ".well-known/agent.json",
@@ -39,16 +40,35 @@ CARD_VALUE_BINDING_PROFILE = "nexus-symbiote/a2a-card-values/v1"
 CLIENT_STRUCTURE_PROFILE = "nexus-symbiote/a2a-client-structure/v1"
 CLIENT_VALUE_BINDING_PROFILE = "nexus-symbiote/a2a-client-values/v1"
 SECURITY_SCHEME_TYPES = frozenset({"apiKey", "http", "oauth2", "openIdConnect", "mutualTLS"})
+# Requirements list scopes for these types and role names for the others, as in OpenAPI.
+SCOPED_SCHEME_TYPES = frozenset({"oauth2", "openIdConnect"})
 _MAX_ENTRIES = 1000
+_MAX_DEPTH = 8
 _ORIGIN_PATHS = frozenset({"", "/"})
 _CARD_PATHS = _ORIGIN_PATHS | {"/.well-known/agent.json", "/.well-known/agent-card.json"}
+_HOSTNAME = re.compile(r"[\w.-]+|[0-9a-f:.]+")
+# Credential formats that redact_text leaves intact; no OAuth scope takes these forms.
+_TOKEN_SHAPE = re.compile(
+    r"eyJ[\w-]{8,}\.[\w-]{8,}"
+    r"|(?<![\w-])(?:gh[oprsu]_|github_pat_|glpat-|xox[abeoprs]-|sk-|[rs]k_live_|AKIA|ASIA|AIza)"
+    r"[\w-]{12,}"
+)
 
 
-class _BindingKeyError(ValueError):
+class _BindingError(ValueError):
     pass
 
 
-def _strings(value: Any) -> list[str]:
+class _Security(NamedTuple):
+    required: bool
+    scopes: list[str]
+    scheme_types: list[str]
+    scheme_urls: list[str]
+    structure: dict[str, Any]
+    unbound: list[str]
+
+
+def _string_list(value: Any) -> list[str]:
     if isinstance(value, str):
         value = [value]
     if (
@@ -57,7 +77,11 @@ def _strings(value: Any) -> list[str]:
         or not all(isinstance(item, str) for item in value)
     ):
         raise ValueError("invalid string-list declaration")
-    return [redact_text(item) for item in value]
+    return value
+
+
+def _strings(value: Any) -> list[str]:
+    return [redact_text(item) for item in _string_list(value)]
 
 
 def _fields(declaration: dict[str, Any]) -> list[str]:
@@ -66,7 +90,44 @@ def _fields(declaration: dict[str, Any]) -> list[str]:
     return sorted(redact_text(key) for key in declaration)
 
 
-def _url_shape(url: str | None) -> dict[str, Any] | None:
+def _scope(value: str) -> str:
+    """Export a scope, a public identifier (RFC 6749 section 3.3), unless it may be a secret."""
+    if _TOKEN_SHAPE.search(value):
+        return REDACTED
+    redacted = redact_text(value)
+    if redacted == value:
+        return value
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return redacted
+    # Scope URIs such as https://www.googleapis.com/auth/drive.readonly name the
+    # permission in their path, which redact_text would cut down to the origin.
+    locator = parsed.netloc + parsed.path
+    if (
+        parsed.scheme
+        and parsed.netloc
+        and not any(char in "@?#" or char.isspace() for char in value)
+        and redact_text(locator) == locator
+    ):
+        return value
+    return redacted
+
+
+def _odd_host(url: str) -> bool:
+    """urlsplit keeps "host\\path" in the host, where WHATWG parsers read a path."""
+    try:
+        hostname = urlsplit(url).hostname
+    except ValueError:
+        return True
+    return hostname is not None and not _HOSTNAME.fullmatch(hostname)
+
+
+def _origin(url: str) -> str:
+    return "[redacted]" if _odd_host(url) else sanitized_origin(url)
+
+
+def _url_shape(url: str | None, plain_paths: frozenset[str]) -> dict[str, Any] | None:
     """Describe what an origin-only export omits from a URL, without the values."""
     if url is None:
         return None
@@ -76,10 +137,15 @@ def _url_shape(url: str | None) -> dict[str, Any] | None:
         return {"valid": False}
     return {
         "path_separators": parsed.path.count("/"),
+        "plain_path": parsed.path if parsed.path in plain_paths else None,
         "query": bool(parsed.query),
         "fragment": bool(parsed.fragment),
         "userinfo": "@" in parsed.netloc,
     }
+
+
+def _url_shapes(urls: list[str]) -> list[dict[str, Any] | None]:
+    return sorted((_url_shape(url, _ORIGIN_PATHS) for url in urls), key=canonical_json)
 
 
 def _beyond_origin(url: str, plain_paths: frozenset[str]) -> bool:
@@ -91,7 +157,32 @@ def _beyond_origin(url: str, plain_paths: frozenset[str]) -> bool:
         parsed.path not in plain_paths
         or bool(parsed.query or parsed.fragment)
         or "@" in parsed.netloc
+        or _odd_host(url)
     )
+
+
+def _declared_urls(value: Any, depth: int = 0) -> list[str]:
+    """Collect URL fields, such as tokenUrl, wherever a declaration nests them."""
+    if depth > _MAX_DEPTH:
+        raise ValueError("declaration nested too deeply")
+    if isinstance(value, list):
+        if len(value) > _MAX_ENTRIES:
+            raise ValueError("oversized declaration")
+        urls = [url for item in value for url in _declared_urls(item, depth + 1)]
+    elif isinstance(value, dict):
+        if len(value) > _MAX_ENTRIES:
+            raise ValueError("oversized declaration")
+        urls = []
+        for key, item in value.items():
+            if isinstance(item, str) and key.lower().endswith(("url", "uri")):
+                urls.append(item)
+            elif key != "scopes":
+                urls.extend(_declared_urls(item, depth + 1))
+    else:
+        return []
+    if len(urls) > _MAX_ENTRIES:
+        raise ValueError("oversized declaration")
+    return urls
 
 
 def _value_binding(profile: str, declaration: dict[str, Any]) -> dict[str, str]:
@@ -99,9 +190,18 @@ def _value_binding(profile: str, declaration: dict[str, Any]) -> dict[str, str]:
     if not key:
         return {}
     if len(key) < _MIN_SOURCE_BINDING_KEY_LENGTH:
-        raise _BindingKeyError(f"{SOURCE_BINDING_KEY_ENV} must contain at least 32 characters")
+        raise _BindingError(
+            f"{SOURCE_BINDING_KEY_ENV} must contain at least "
+            f"{_MIN_SOURCE_BINDING_KEY_LENGTH} characters"
+        )
+    try:
+        message = canonical_json({"profile": profile, "configuration": declaration})
+    except ValueError as exc:
+        raise _BindingError(
+            f"{SOURCE_BINDING_KEY_ENV} binding needs RFC 8785 JSON values; "
+            "quote YAML dates and timestamps"
+        ) from exc
     material = key.encode()
-    message = canonical_json({"profile": profile, "configuration": declaration})
     key_id = hmac.new(material, b"nexus-symbiote/source-binding-key-id", "sha256").hexdigest()
     return {
         "static_value_binding": "hmac-sha256:"
@@ -111,20 +211,29 @@ def _value_binding(profile: str, declaration: dict[str, Any]) -> dict[str, str]:
     }
 
 
-def _security(data: dict[str, Any]) -> tuple[bool, list[str], list[str], dict[str, Any]]:
+def _security(data: dict[str, Any]) -> _Security:
     """Read declared requirements; a card cannot show that an endpoint enforces them."""
-    schemes = data.get("securitySchemes", {})
+    schemes = data.get("securitySchemes")
+    schemes = {} if schemes is None else schemes
     if not isinstance(schemes, dict) or len(schemes) > _MAX_ENTRIES:
         raise ValueError("invalid security schemes")
     kinds: dict[str, str] = {}
+    typed: set[str] = set()
     for scheme_name, scheme in schemes.items():
-        declared = scheme.get("type", "") if isinstance(scheme, dict) else None
-        if not isinstance(declared, str):
+        if not isinstance(scheme, dict):
             raise ValueError("invalid security scheme")
+        declared = scheme.get("type")
+        declared = "" if declared is None else declared
+        if not isinstance(declared, str):
+            raise ValueError("invalid security scheme type")
         kinds[scheme_name] = declared if declared in SECURITY_SCHEME_TYPES else "other"
+        if declared.strip():
+            typed.add(scheme_name)
+    scheme_urls = _declared_urls(schemes)
     decisions: list[bool] = []
     scopes: set[str] = set()
-    alternatives: list[dict[str, list[str]]] | None = None
+    redacted_scopes = role_names = False
+    alternatives: list[dict[str, list[str] | int]] | None = None
     requirements = data.get("security")
     if requirements is not None:
         if not isinstance(requirements, list) or len(requirements) > _MAX_ENTRIES:
@@ -133,34 +242,64 @@ def _security(data: dict[str, Any]) -> tuple[bool, list[str], list[str], dict[st
         for requirement in requirements:
             if not isinstance(requirement, dict):
                 raise ValueError("invalid security requirement")
-            alternative: dict[str, list[str]] = {}
+            alternative: dict[str, list[str] | int] = {}
             for scheme_name, required in requirement.items():
                 entries += 1 + (len(required) if isinstance(required, list) else 0)
                 if not isinstance(required, list) or entries > _MAX_ENTRIES:
                     raise ValueError("invalid or oversized security requirement")
-                required_scopes = sorted(set(_strings(required)))
-                alternative[redact_text(scheme_name)] = required_scopes
-                scopes.update(required_scopes)
+                named = _string_list(required)
+                if kinds.get(scheme_name) in SCOPED_SCHEME_TYPES:
+                    exported = {scope: _scope(scope) for scope in named}
+                    redacted_scopes |= any(scope != kept for scope, kept in exported.items())
+                    alternative[redact_text(scheme_name)] = sorted(set(exported.values()))
+                    scopes.update(exported.values())
+                else:
+                    # Role names may be anything, so only the key binds them.
+                    role_names |= bool(named)
+                    alternative[redact_text(scheme_name)] = len(named)
             alternatives.append(alternative)
         # An empty alternative ({}) permits anonymous access, as in OpenAPI.
         decisions.append(
             bool(requirements)
-            and all(requirement and set(requirement) <= set(kinds) for requirement in requirements)
+            and all(requirement and set(requirement) <= typed for requirement in requirements)
         )
     legacy = data.get("authentication")
     legacy_count = None
     if legacy is not None:
-        if not isinstance(legacy, dict) or not isinstance(legacy.get("schemes", []), list):
+        if not isinstance(legacy, dict):
             raise ValueError("invalid authentication declaration")
-        legacy_count = len(_strings(legacy.get("schemes", [])))
+        named_schemes = legacy.get("schemes")
+        named_schemes = [] if named_schemes is None else named_schemes
+        if not isinstance(named_schemes, list):
+            raise ValueError("invalid authentication schemes")
+        legacy_count = sum(1 for scheme in _string_list(named_schemes) if scheme.strip())
         decisions.append(legacy_count > 0)
     structure = {
         "security_schemes": sorted([redact_text(name), kind] for name, kind in kinds.items()),
+        "security_scheme_urls": _url_shapes(scheme_urls),
         "security": (None if alternatives is None else sorted(alternatives, key=canonical_json)),
         "authentication_schemes": legacy_count,
     }
-    required = bool(decisions) and all(decisions)
-    return required, sorted(scopes), sorted(set(kinds.values())), structure
+    unbound = [
+        label
+        for label, gap in (
+            (
+                "security scheme URL paths or queries",
+                any(_beyond_origin(url, _ORIGIN_PATHS) for url in scheme_urls),
+            ),
+            ("redacted OAuth scopes", redacted_scopes),
+            ("role names in security requirements", role_names),
+        )
+        if gap
+    ]
+    return _Security(
+        required=bool(decisions) and all(decisions),
+        scopes=sorted(scopes),
+        scheme_types=sorted(set(kinds.values())),
+        scheme_urls=scheme_urls,
+        structure=structure,
+        unbound=unbound,
+    )
 
 
 class A2AScanner(Scanner):
@@ -177,7 +316,7 @@ class A2AScanner(Scanner):
                 result.surfaces_scanned.append(str(path))
                 try:
                     result.components.append(self._parse_agent_card(data, relative, path))
-                except _BindingKeyError as exc:
+                except _BindingError as exc:
                     result.scan_failures.append(f"{relative}: {exc}")
                 except (TypeError, ValueError, RecursionError):
                     result.scan_failures.append(f"{relative}: invalid A2A card field types")
@@ -196,7 +335,7 @@ class A2AScanner(Scanner):
                         if not isinstance(client, dict):
                             raise ValueError("invalid client")
                         result.components.append(self._parse_a2a_client(client, path))
-                    except _BindingKeyError as exc:
+                    except _BindingError as exc:
                         result.scan_failures.append(f"{relative}: {exc}")
                     except (TypeError, ValueError, RecursionError):
                         result.scan_failures.append(f"{relative}: invalid A2A client field types")
@@ -230,19 +369,35 @@ class A2AScanner(Scanner):
             skills.append(redact_text(skill))
         # This records declarations only; neither a card nor this collector proves
         # that an endpoint actually enforces authentication.
-        auth_required, scopes, scheme_types, security = _security(data)
+        security = _security(data)
+        # Clients may send credentials to these alternative endpoints too.
+        interface_urls = _declared_urls(data.get("additionalInterfaces"))
         structure_hash = hash_canonical(
             {
                 "profile": CARD_STRUCTURE_PROFILE,
                 "structure": {
                     "fields": _fields(data),
-                    "endpoint": _url_shape(endpoint),
-                    **security,
+                    "endpoint": _url_shape(endpoint, _ORIGIN_PATHS),
+                    "additional_interfaces": _url_shapes(interface_urls),
+                    **security.structure,
                 },
             }
         )
         binding = _value_binding(CARD_VALUE_BINDING_PROFILE, data)
-        path_bound = bool(binding) or not (endpoint and _beyond_origin(endpoint, _ORIGIN_PATHS))
+        unbound = [
+            label
+            for label, gap in (
+                (
+                    "endpoint path, query or user information",
+                    endpoint is not None and _beyond_origin(endpoint, _ORIGIN_PATHS),
+                ),
+                (
+                    "additional interface URL paths or queries",
+                    any(_beyond_origin(url, _ORIGIN_PATHS) for url in interface_urls),
+                ),
+            )
+            if gap
+        ] + security.unbound
         risks: list[RiskAssessment] = []
         if endpoint and not endpoint.lower().startswith("https://"):
             risks.append(
@@ -253,7 +408,7 @@ class A2AScanner(Scanner):
                     recommendation="Use authenticated HTTPS transport for agent endpoints.",
                 )
             )
-        if not auth_required:
+        if not security.required:
             risks.append(
                 RiskAssessment(
                     severity=RiskSeverity.MEDIUM,
@@ -271,13 +426,13 @@ class A2AScanner(Scanner):
                     recommendation="Document declared skills and separately verify effective capabilities.",
                 )
             )
-        if not path_bound:
+        if unbound and not binding:
             risks.append(
                 RiskAssessment(
                     severity=RiskSeverity.LOW,
                     category="completeness",
-                    detail=f"A2A agent '{name}' endpoint path, query or user information is not bound in this inventory.",
-                    recommendation=f"Set {SOURCE_BINDING_KEY_ENV} during collection to detect same-origin endpoint changes.",
+                    detail=f"A2A agent '{name}' values not bound in this inventory: {'; '.join(unbound)}.",
+                    recommendation=f"Set {SOURCE_BINDING_KEY_ENV} during collection to detect changes to these values.",
                 )
             )
         return A2AServerComponent(
@@ -285,18 +440,22 @@ class A2AScanner(Scanner):
             name=name,
             version=redact_text(version) if version else None,
             agent_card_path=rel_path,
-            endpoint_url=sanitized_origin(endpoint) if endpoint else None,
+            endpoint_url=_origin(endpoint) if endpoint else None,
             supported_protocols=protocols,
             skills_declared=skills,
-            authentication_required=auth_required,
-            capabilities=CapabilityDeclaration(oauth_scopes=scopes) if scopes else None,
+            authentication_required=security.required,
+            capabilities=(
+                CapabilityDeclaration(oauth_scopes=security.scopes) if security.scopes else None
+            ),
             source_path=str(card_path),
             trust_tier=TrustTier.INTERNAL_UNVERIFIED,
             risks=risks,
             properties={
                 "collection_mode": "static-agent-card",
                 "authentication_evidence": "declaration-only",
-                "security_scheme_types": scheme_types,
+                "security_scheme_types": security.scheme_types,
+                "security_scheme_origins": sorted({_origin(url) for url in security.scheme_urls}),
+                "additional_interface_origins": sorted({_origin(url) for url in interface_urls}),
                 "source_values_bound": bool(binding),
                 "static_card_hash": structure_hash,
                 "static_card_hash_profile": CARD_STRUCTURE_PROFILE,
@@ -317,7 +476,10 @@ class A2AScanner(Scanner):
         structure_hash = hash_canonical(
             {
                 "profile": CLIENT_STRUCTURE_PROFILE,
-                "structure": {"fields": _fields(config), "card_url": _url_shape(card_url)},
+                "structure": {
+                    "fields": _fields(config),
+                    "card_url": _url_shape(card_url, _CARD_PATHS),
+                },
             }
         )
         binding = _value_binding(CLIENT_VALUE_BINDING_PROFILE, config)
@@ -353,7 +515,7 @@ class A2AScanner(Scanner):
         return A2AClientComponent(
             bom_ref=f"a2a-client:{name}",
             name=name,
-            agent_card_url=sanitized_origin(card_url) if card_url else None,
+            agent_card_url=_origin(card_url) if card_url else None,
             authentication_methods=auth_methods,
             source_path=str(config_path),
             trust_tier=TrustTier.UNKNOWN,
