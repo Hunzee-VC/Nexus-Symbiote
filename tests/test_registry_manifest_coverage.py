@@ -227,6 +227,8 @@ WHEEL_URL = "https://files.pythonhosted.org/packages/x/openai-1.0.0-py3-none-any
         "GIT+HTTPS://github.com/openai/openai-python@v1.0.0#egg=openai",
         WHEEL_URL,
         "file:vendor/openai",
+        # pip keeps the extras in a file: URL, which names a directory ".[dev]".
+        "file:.[dev]",
         "../openai",
         # pip finds the scheme after it drops a tab, and reads a local archive.
         "git+ht\ttps://github.com/openai/openai-python#egg=openai",

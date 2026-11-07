@@ -661,7 +661,9 @@ class RegistryScanner(Scanner):
             or re.sub(r"\[[^\]]+\]$", "", target).lower().endswith(cls._ARCHIVES)
         ):
             return False
-        return not cls._editable_covered(target, entries)
+        # pip takes extras off a path but not off a URL: "file:.[dev]" is a directory
+        # named ".[dev]".
+        return (url and "[" in target) or not cls._editable_covered(target, entries)
 
     # Python's names for UTF-8, lower case with "-" as "_".
     _UTF8_NAMES = frozenset({"utf_8", "utf8", "u8", "utf", "cp65001", "utf_8_sig"})
