@@ -10,6 +10,7 @@ import base64
 import binascii
 import fnmatch
 import re
+import shlex
 import tomllib
 from collections.abc import Callable
 from pathlib import Path
@@ -401,21 +402,109 @@ class RegistryScanner(Scanner):
         )
 
     _COMMENT = re.compile(r"(?:^|\s)#.*$")
+    # The options pip accepts in a requirements file that add or constrain packages.
+    _PACKAGE_OPTIONS = {
+        "--requirement": "requirements include not followed",
+        "--constraint": "constraints file not followed",
+        "--editable": "editable install not followed",
+    }
+    _SHORT_OPTIONS = {"r": "--requirement", "c": "--constraint", "e": "--editable"}
+    # shlex's whitespace; str.split() would also split on a no-break space.
+    _SHLEX_SPACE = re.compile(r"[ \t\r\n]+")
 
-    def _requirement_files(self) -> list[str]:
-        if self._files is None:
-            raise RuntimeError("_requirement_files called outside a _collection context")
+    @staticmethod
+    def _requirement_files(entries: list[str]) -> list[str]:
         # Without regard to case, as a fixed-name open is on macOS and Windows file
         # systems. The exact name, which pip reads on a case-sensitive system, comes
         # first, then its case variants, then the other files.
-        names = [
-            n
-            for n in self._files.root_entries()
-            if fnmatch.fnmatchcase(n.casefold(), "requirements*.txt")
-        ]
+        names = [n for n in entries if fnmatch.fnmatchcase(n.casefold(), "requirements*.txt")]
         return sorted(
             names,
             key=lambda n: (n.casefold() != "requirements.txt", n != "requirements.txt", n),
+        )
+
+    @classmethod
+    def _option_gaps(cls, text: str, names: set[str], entries: set[str]) -> list[str]:
+        """What an option line adds or pins that the collector does not read.
+
+        pip splits the line with shlex and parses every word with optparse, so one
+        line can hold several options, and "-rX", "-r X", "--requirement=X" and an
+        unambiguous prefix of a long name all apply. The gap never names the
+        target, which can be a URL carrying a credential.
+        """
+        try:
+            words = (
+                shlex.split(text)
+                if any(c in text for c in "\"'\\")
+                else [w for w in cls._SHLEX_SPACE.split(text) if w]
+            )
+        except ValueError:
+            return ["option line not parsed"]
+        gaps: list[str] = []
+        index = 0
+        while index < len(words):
+            word = words[index]
+            index += 1
+            if word == "--":
+                # optparse leaves the rest as arguments, which pip ignores.
+                break
+            if word.startswith("--"):
+                name, equals, value = word.partition("=")
+                option = next(
+                    (o for o in cls._PACKAGE_OPTIONS if len(name) > 2 and o.startswith(name)),
+                    None,
+                )
+                attached = bool(equals)
+            elif word.startswith("-") and len(word) > 1:
+                option = cls._SHORT_OPTIONS.get(word[1])
+                value, attached = word[2:], len(word) > 2
+            else:
+                continue
+            if option is None:
+                continue
+            if not attached:
+                # optparse takes the next word as the value even if it starts with -.
+                value = words[index] if index < len(words) else ""
+                index += 1
+            covered = (
+                cls._editable_covered(value, entries)
+                if option == "--editable"
+                else cls._include_covered(value, names)
+            )
+            if not covered:
+                gaps.append(cls._PACKAGE_OPTIONS[option])
+        return gaps
+
+    @staticmethod
+    def _include_covered(target: str, names: set[str]) -> bool:
+        """Whether -r or -c names a root requirements file the collector reads."""
+        parts = [part for part in target.split("/") if part not in ("", ".")]
+        return (
+            len(parts) == 1
+            and not target.startswith("/")
+            # A separator on Windows and a name character elsewhere; pip expands
+            # ${VAR} from the environment.
+            and not any(c in target for c in "\\$")
+            and parts[0].casefold() in names
+        )
+
+    @staticmethod
+    def _editable_covered(target: str, entries: set[str]) -> bool:
+        """Whether -e installs the project itself, whose pyproject.toml is read."""
+        # One trailing extras group, as pip strips it from a local path.
+        match = re.fullmatch(r"([^\[\]]+)(?:\[[^\[\]]+\])?", target)
+        if match is None:
+            return False
+        path = match.group(1)
+        if path[:5].lower() == "file:":
+            # pip installs a directory with that name instead, if there is one.
+            if path.split("/", 1)[0].casefold() in entries:
+                return False
+            path = path[5:]
+        return (
+            bool(path)
+            and not path.startswith("/")
+            and all(part in ("", ".") for part in path.split("/"))
         )
 
     @staticmethod
@@ -509,7 +598,13 @@ class RegistryScanner(Scanner):
         result: ScanResult,
         declare: Callable[[RegistryEntryComponent, str, str], None],
     ) -> None:
-        filenames = self._requirement_files()
+        if self._files is None:
+            raise RuntimeError("_scan_requirements called outside a _collection context")
+        entries = self._files.root_entries()
+        filenames = self._requirement_files(entries)
+        names = {n.casefold() for n in filenames}
+        folded = {n.casefold() for n in entries}
+        noted: set[str] = set()
         unprintable = False
         remaining = _REQUIREMENTS_BUDGET
         for filename in filenames:
@@ -545,8 +640,14 @@ class RegistryScanner(Scanner):
                 if not text:
                     continue
                 if text.startswith("-"):
-                    # Option lines (includes, editable installs, index options) are not
-                    # followed; the README states this limit.
+                    # Includes, constraints and editable installs are not followed. One
+                    # that reaches beyond what is read here is a coverage gap; index
+                    # options add no package.
+                    for gap in self._option_gaps(text, names, folded):
+                        message = f"{filename}: {gap}"
+                        if message not in noted:
+                            noted.add(message)
+                            result.surfaces_excluded.append(message)
                     continue
                 # Per-requirement options such as --hash follow the requirement itself.
                 words: list[str] = []
