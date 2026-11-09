@@ -139,16 +139,25 @@ def _disable_unused_format_checkers() -> None:
         sys.modules[name] = None  # type: ignore[assignment]
 
 
+def _apply_worker_limits() -> None:
+    import resource
+
+    resource.setrlimit(resource.RLIMIT_CPU, (1, 1))
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    try:
+        resource.setrlimit(resource.RLIMIT_AS, (256 * 1024 * 1024, 256 * 1024 * 1024))
+    except (ValueError, OSError):
+        # macOS kernels reject RLIMIT_AS lowering; fail closed on Linux/other POSIX.
+        if sys.platform != "darwin":
+            raise
+
+
 def _worker() -> int:
     """Internal fixed-protocol worker; failure details never echo input values."""
     try:
         if os.name != "posix":
             return 1
-        import resource
-
-        resource.setrlimit(resource.RLIMIT_CPU, (1, 1))
-        resource.setrlimit(resource.RLIMIT_AS, (256 * 1024 * 1024, 256 * 1024 * 1024))
-        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+        _apply_worker_limits()
         _disable_unused_format_checkers()
         from jsonschema import Draft202012Validator
         from referencing import Registry

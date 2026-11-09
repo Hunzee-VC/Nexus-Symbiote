@@ -24,7 +24,7 @@ from nexus_symbiote.scanners.base import ScanResult
 from nexus_symbiote.utils.confined import ConfinedCollection
 
 _MODULES = {"@modelcontextprotocol/server", "@modelcontextprotocol/sdk/server/mcp.js"}
-_IGNORED = {"dist", "build", "__tests__", "tests", "test"}
+_IGNORED = {"dist", "build", "__tests__", "tests", "test", "docs", "benchmarks", "examples"}
 MAX_SOURCE_FILES = 50
 MAX_SOURCE_BYTES = 262_144
 MAX_AST_NODES = 20_000
@@ -155,23 +155,26 @@ def collect_typescript(
     files: ConfinedCollection, result: ScanResult, sources: Sequence[Path]
 ) -> None:
     """Use the scanner's existing pinned root, exclusions and shared I/O budgets."""
-    paths = [
+    candidates = [
         path
         for path in sources
         if path.suffix == ".ts"
         and not _IGNORED.intersection(path.parts)
         and not path.name.endswith((".d.ts", ".spec.ts", ".test.ts"))
     ]
-    if len(paths) > MAX_SOURCE_FILES:
-        result.scan_failures.append("TypeScript MCP source file collection limit exceeded")
-    for path in paths[:MAX_SOURCE_FILES]:
+    matched: list[tuple[Path, bytes]] = []
+    for path in candidates:
         content = files.read_bytes(path)
         if content is None:
             continue
+        if b"@modelcontextprotocol/" not in content or b"McpServer" not in content:
+            continue
+        matched.append((path, content))
+    if len(matched) > MAX_SOURCE_FILES:
+        result.scan_failures.append("TypeScript MCP source file collection limit exceeded")
+    for path, content in matched[:MAX_SOURCE_FILES]:
         if len(content) > MAX_SOURCE_BYTES:
             result.scan_failures.append(f"{path}: TypeScript syntax collection size limit exceeded")
-            continue
-        if b"@modelcontextprotocol/" not in content or b"McpServer" not in content:
             continue
         result.surfaces_scanned.append(path.as_posix())
         try:

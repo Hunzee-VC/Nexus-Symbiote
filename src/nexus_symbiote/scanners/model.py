@@ -311,14 +311,14 @@ class ModelScanner(Scanner):
 
     def _scan_model_directory(self, model_dir: Path) -> list[ModelComponent]:
         components: list[ModelComponent] = []
-        model_name = model_dir.name
+        if self._files is None:
+            raise RuntimeError("_scan_model_directory called outside a _collection context")
+        rel_dir = model_dir.relative_to(self._files.root).as_posix()
+        model_name = model_dir.name if rel_dir == "." else rel_dir
 
         config = self._read_model_config(model_dir)
         tokenizer_hash = self._hash_tokenizer(model_dir)
         chat_template_hash = self._hash_chat_template(model_dir, config)
-
-        if self._files is None:
-            raise RuntimeError("_scan_model_directory called outside a _collection context")
         for path in self._discovered_paths:
             if path.parent != model_dir:
                 continue

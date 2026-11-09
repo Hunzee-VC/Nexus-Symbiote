@@ -418,3 +418,28 @@ class TestMCPScannerAdvanced:
         assert (
             len([c for c in result.components if c.component_type == ComponentType.MCP_SERVER]) >= 1
         )
+
+    def test_tokenized_heuristics_avoid_substring_false_positives(self):
+        from nexus_symbiote.core.enums import CapabilityClass, SideEffectProfile
+
+        scanner = MCPScanner()
+        for benign_name in ("validate_input", "format_output", "compute_metrics"):
+            assert scanner._classify_side_effects({}, benign_name) == SideEffectProfile.UNKNOWN
+        assert scanner._classify_side_effects({}, "get_postal_code") == SideEffectProfile.READ_ONLY
+        assert scanner._classify_side_effects({}, "putObject") == SideEffectProfile.STATE_MODIFYING
+        assert scanner._classify_side_effects({}, "deleteItem") == SideEffectProfile.DESTRUCTIVE
+
+        benign_caps = scanner._infer_capabilities(
+            "validate_input",
+            "Format output, compute executive summary, monkey patch hotkey and byte offset.",
+            {},
+        )
+        assert CapabilityClass.WRITE not in benign_caps
+        assert CapabilityClass.EXECUTE not in benign_caps
+        assert CapabilityClass.CREDENTIALS not in benign_caps
+        assert CapabilityClass.FILESYSTEM not in benign_caps
+
+        camel_caps = scanner._infer_capabilities("readFile", "Read a file using an API key", {})
+        assert CapabilityClass.FILESYSTEM in camel_caps
+        assert CapabilityClass.CREDENTIALS in camel_caps
+        assert CapabilityClass.READ in camel_caps

@@ -2,6 +2,21 @@
 
 Notable changes to Nexus SymBiote, newest release first. Within a release, security changes come first, and changes that need action from users are marked **Breaking**.
 
+## [Unreleased]
+
+### Security
+
+- Resolve exact versions, artifact digests, and download origins for AI dependencies from Python (`uv.lock`, `poetry.lock`) and npm (`pnpm-lock.yaml`, `yarn.lock`) lockfiles in `RegistryScanner`, and refuse to bind lockfile evidence when competing npm lockfiles coexist in the project root.
+- Pre-filter source files by SDK hints before applying file-count caps in `MCPScanner`, `A2AScanner`, and TypeScript tool discovery so large repositories do not exhaust their scan budget on unrelated files before reaching tool and protocol definitions.
+- Scope `ModelScanner` directory component names and `bom-ref` identifiers by root-relative path instead of leaf directory name so nested model directories with identical leaf names do not collide.
+- Tokenize tool identifiers on word boundaries in `MCPScanner` capability and side-effect inference to avoid substring false positives.
+- Support macOS root firmlink/symlink aliases (`/var`, `/tmp`, `/etc` -> `/private/{var,tmp,etc}`), traverse-only (`0111`) ancestor directories in `open_directory_nofollow`, and Darwin's kernel `RLIMIT_AS` behavior in the runtime validation worker while keeping target path segments and Linux resource limits fail-closed.
+
+### Added
+
+- Discover standalone Python agent SDK tool decorators (`langchain`, `crewai`, `openai-agents`, `smolagents`, and `pydantic-ai`) via static AST analysis in `python_tools` and surface them in `MCPScanner`.
+- Expand `RegistryScanner` AI package patterns to cover `langgraph`, `fastmcp`, `pydantic-ai`, `google-adk`, `smolagents`, and `semantic-kernel`.
+
 ## [0.1.0] - 2026-11-07
 
 First alpha of the AgentBOM toolkit under the Hunzee-VC organization. Its known detection gaps, including Claude Code settings beyond the permission mode and blanket grants, skill scripts and subagents, are listed under [known limitations](SECURITY.md#known-limitations-in-010); `diff --fail-on-alert` cannot alert on them.

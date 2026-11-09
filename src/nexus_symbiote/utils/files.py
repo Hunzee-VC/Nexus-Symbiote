@@ -7,9 +7,12 @@ import errno
 import os
 import secrets
 import stat
+import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+
+from nexus_symbiote.core.hashing import open_directory_nofollow
 
 
 class OutputRefusedError(OSError):
@@ -31,9 +34,20 @@ def _relative(root: Path, path: Path, *, allow_parent: bool = False) -> Path:
 @contextmanager
 def _parent(root: Path, relative: Path, create_parents: bool) -> Iterator[int]:
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-    parent = os.open(root, flags)
+    parent = open_directory_nofollow(root)
     try:
-        for part in relative.parts[:-1]:
+        for index, part in enumerate(relative.parts[:-1]):
+            if (
+                index == 0
+                and root == Path(root.anchor)
+                and sys.platform == "darwin"
+                and part in {"var", "tmp", "etc"}
+                and os.path.islink(f"/{part}")
+                and os.readlink(f"/{part}") == f"private/{part}"
+            ):
+                priv = os.open("private", flags, dir_fd=parent)
+                os.close(parent)
+                parent = priv
             try:
                 # ".." of a directory opened without following links is its real
                 # parent, so this reaches exactly what the kernel resolves.

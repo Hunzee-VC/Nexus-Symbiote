@@ -705,18 +705,26 @@ class A2AScanner(Scanner):
     def _scan_code_patterns(self, root: Path, result: ScanResult) -> None:
         if self._files is None:
             raise RuntimeError("_scan_code_patterns called outside a _collection context")
-        sources = [
+        excluded_dirs = {"tests", "test", "dist", "build", "docs", "benchmarks", "examples"}
+        candidates = [
             path
             for path in self._files.iter_files()
-            if path.suffix == ".py"
-            and (len(path.parts) == 1 or (len(path.parts) == 2 and path.parts[0] == "src"))
+            if path.suffix == ".py" and not excluded_dirs.intersection(path.parts)
         ]
-        if len(sources) > 20:
-            result.scan_failures.append("a2a code references: 20-file collection limit exceeded")
-        for path in sources[:20]:
+        candidates.sort(key=lambda path: len(path.parts) > 1)
+        matched: list[tuple[Path, str]] = []
+        for path in candidates:
             content = self._files.read_text(path)
             if content is None:
                 continue
+            if len(path.parts) > 1 and not any(
+                hint in content for hint in ("a2a", "A2AClient", "AgentCard")
+            ):
+                continue
+            matched.append((path, content))
+        if len(matched) > 20:
+            result.scan_failures.append("a2a code references: 20-file collection limit exceeded")
+        for path, content in matched[:20]:
             result.surfaces_scanned.append(str(root / path))
             if len(content) > 262_144:
                 result.scan_failures.append(f"{path}: syntax collection size limit exceeded")

@@ -13,10 +13,27 @@ from nexus_symbiote.core.hashing import hash_bytes
 from nexus_symbiote.core.models import ClaimEvidence, MCPServerComponent, ToolComponent
 from nexus_symbiote.scanners.base import ScanResult
 
+PYTHON_TOOL_HINTS = ("mcp", "langchain", "crewai", "function_tool", "smolagents", "pydantic_ai")
+
 _FACTORIES = {
     ("mcp.server.fastmcp", "FastMCP"),
     ("mcp.server.mcpserver", "MCPServer"),
     ("fastmcp", "FastMCP"),
+}
+
+_DECORATOR_IMPORTS = {
+    ("langchain_core.tools", "tool"): "langchain",
+    ("langchain.tools", "tool"): "langchain",
+    ("crewai.tools", "tool"): "crewai",
+    ("agents", "function_tool"): "openai-agents",
+    ("agents.tool", "function_tool"): "openai-agents",
+    ("smolagents", "tool"): "smolagents",
+    ("smolagents.tools", "tool"): "smolagents",
+}
+
+_AGENT_FACTORIES = {
+    ("pydantic_ai", "Agent"): "pydantic-ai",
+    ("pydantic_ai.agent", "Agent"): "pydantic-ai",
 }
 
 
@@ -91,6 +108,246 @@ def _record_decorator(
     server.tool_count += 1
 
 
+def _record_sdk_decorator(
+    deco: ast.AST,
+    default_name: str,
+    framework: str,
+    path: Path,
+    source_digest: str,
+    seen_refs: set[str],
+    result: ScanResult,
+) -> None:
+    lineno = getattr(deco, "lineno", 1)
+    name: object = default_name
+    if isinstance(deco, ast.Call):
+        options = {kw.arg: kw.value for kw in deco.keywords}
+        name_keys = [k for k in ("name", "name_or_callable", "name_override") if k in options]
+        if (
+            len(deco.args) > 1
+            or any(isinstance(arg, ast.Starred) for arg in deco.args)
+            or len(options) != len(deco.keywords)
+            or None in options
+            or len(name_keys) > 1
+            or (deco.args and name_keys)
+        ):
+            result.surfaces_excluded.append(f"{path}:{lineno}: unresolved Python SDK tool name")
+            return
+        if len(deco.args) == 1:
+            arg = deco.args[0]
+            name = arg.value if isinstance(arg, ast.Constant) else None
+        elif name_keys:
+            val = options[name_keys[0]]
+            name = val.value if isinstance(val, ast.Constant) else None
+    if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", name):
+        result.surfaces_excluded.append(f"{path}:{lineno}: unresolved Python SDK tool name")
+        return
+    ref = f"tool:python:{quote(path.as_posix(), safe='')}/{name}"
+    if ref in seen_refs:
+        result.scan_failures.append(f"{path}:{lineno}: duplicate Python SDK tool declaration")
+        return
+    seen_refs.add(ref)
+    result.components.append(
+        ToolComponent(
+            bom_ref=ref,
+            name=name,
+            source_path=path.as_posix(),
+            claims={
+                "tool_definition": ClaimEvidence(
+                    method="not-collected",
+                    scope="source-declaration",
+                    unknown_reason="Effective descriptor requires runtime evidence",
+                )
+            },
+            properties={
+                "method": "python-ast",
+                "framework": framework,
+                "collection_mode": "static-source-declaration",
+                "declaration_line": lineno,
+                "source_sha256": source_digest,
+            },
+        )
+    )
+
+
+def _collect_sdk_decorators(
+    tree: ast.Module,
+    nodes: list[ast.AST],
+    decorators: dict[str, tuple[ast.ImportFrom, str]],
+    bindings: Counter[str],
+    path: Path,
+    source_digest: str,
+    seen_refs: set[str],
+    result: ScanResult,
+) -> None:
+    top_level = set(tree.body)
+    valid: dict[str, tuple[int, str]] = {}
+    unsupported = False
+    for alias, (imported, framework) in decorators.items():
+        if imported not in top_level or bindings[alias] != 1:
+            unsupported = True
+            continue
+        valid[alias] = (imported.lineno, framework)
+    if sum(isinstance(n, ast.Name) and n.id in decorators for n in nodes) > 1000:
+        result.scan_failures.append(f"{path}: Python SDK tool registration limit exceeded")
+        return
+    handled: set[ast.AST] = set()
+    for stmt in tree.body:
+        if not isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for deco in stmt.decorator_list:
+            if isinstance(deco, ast.Name) and deco.id in valid:
+                import_line, framework = valid[deco.id]
+                if import_line >= stmt.lineno:
+                    unsupported = True
+                    continue
+                handled.add(deco)
+                _record_sdk_decorator(
+                    deco, stmt.name, framework, path, source_digest, seen_refs, result
+                )
+            elif (
+                isinstance(deco, ast.Call)
+                and isinstance(deco.func, ast.Name)
+                and deco.func.id in valid
+            ):
+                import_line, framework = valid[deco.func.id]
+                if import_line >= stmt.lineno:
+                    unsupported = True
+                    continue
+                handled.add(deco.func)
+                _record_sdk_decorator(
+                    deco, stmt.name, framework, path, source_digest, seen_refs, result
+                )
+    load_uses = {
+        node
+        for node in nodes
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in decorators
+    }
+    if unsupported or (load_uses - handled):
+        result.surfaces_excluded.append(
+            f"{path}: unsupported Python SDK tool binding or dynamic registration"
+        )
+
+
+def _collect_agent_decorators(
+    tree: ast.Module,
+    nodes: list[ast.AST],
+    agent_factories: dict[str, tuple[ast.ImportFrom, str]],
+    bindings: Counter[str],
+    path: Path,
+    source_digest: str,
+    seen_refs: set[str],
+    result: ScanResult,
+) -> None:
+    top_level = set(tree.body)
+    calls = {
+        node
+        for node in nodes
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in agent_factories
+    }
+    changed_receivers = {
+        node.value.id
+        for node in nodes
+        if isinstance(node, ast.Attribute)
+        and node.attr in {"tool", "tool_plain"}
+        and isinstance(node.value, ast.Name)
+        and isinstance(node.ctx, (ast.Store, ast.Del))
+    }
+    if (
+        sum(
+            isinstance(node, ast.Attribute) and node.attr in {"tool", "tool_plain"}
+            for node in nodes
+        )
+        > 1000
+    ):
+        result.scan_failures.append(f"{path}: Python SDK tool registration limit exceeded")
+        return
+    unsupported_factory = any(
+        imported not in top_level or bindings[factory] != 1
+        for factory, (imported, _) in agent_factories.items()
+    )
+    agents: dict[str, tuple[int, str]] = {}
+    handled: set[ast.AST] = set()
+    for stmt in tree.body:
+        target: ast.AST | None = None
+        call: ast.AST | None = None
+        if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1:
+            target = stmt.targets[0]
+            call = stmt.value
+        elif isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
+            target = stmt.target
+            call = stmt.value
+        if target is not None and call is not None:
+            if not (
+                isinstance(target, ast.Name)
+                and isinstance(call, ast.Call)
+                and isinstance(call.func, ast.Name)
+                and call in calls
+            ):
+                continue
+            factory = call.func.id
+            imported, framework = agent_factories[factory]
+            if (
+                imported not in top_level
+                or imported.lineno >= stmt.lineno
+                or bindings[factory] != 1
+                or target.id in changed_receivers
+                or bindings[target.id] != 1
+            ):
+                continue
+            handled.add(call)
+            agents[target.id] = (stmt.lineno, framework)
+        elif isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for deco in stmt.decorator_list:
+                if (
+                    isinstance(deco, ast.Attribute)
+                    and deco.attr in {"tool", "tool_plain"}
+                    and isinstance(deco.value, ast.Name)
+                    and deco.value.id in agents
+                ):
+                    decl_line, framework = agents[deco.value.id]
+                    if decl_line >= stmt.lineno:
+                        continue
+                    handled.add(deco)
+                    _record_sdk_decorator(
+                        deco, stmt.name, framework, path, source_digest, seen_refs, result
+                    )
+                elif (
+                    isinstance(deco, ast.Call)
+                    and isinstance(deco.func, ast.Attribute)
+                    and deco.func.attr in {"tool", "tool_plain"}
+                    and isinstance(deco.func.value, ast.Name)
+                    and deco.func.value.id in agents
+                ):
+                    decl_line, framework = agents[deco.func.value.id]
+                    if decl_line >= stmt.lineno:
+                        continue
+                    handled.add(deco.func)
+                    _record_sdk_decorator(
+                        deco, stmt.name, framework, path, source_digest, seen_refs, result
+                    )
+    candidates: set[ast.AST] = set(calls)
+    candidates.update(
+        node
+        for node in nodes
+        if isinstance(node, ast.Attribute)
+        and node.attr in {"tool", "tool_plain"}
+        and isinstance(node.value, ast.Name)
+        and node.value.id in agents
+    )
+    aliases = any(
+        isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr))
+        and isinstance(node.value, ast.Name)
+        and node.value.id in agents
+        for node in nodes
+    )
+    if unsupported_factory or aliases or (candidates - handled):
+        result.surfaces_excluded.append(
+            f"{path}: unsupported Python SDK tool binding or dynamic registration"
+        )
+
+
 def _report_import_scope(
     imports: list[ast.ImportFrom], nodes: list[ast.AST], path: Path, result: ScanResult
 ) -> None:
@@ -108,6 +365,17 @@ def _report_import_scope(
         stmt.module in modules and any(a.name == "*" for a in stmt.names) for stmt in imports
     ):
         result.surfaces_excluded.append(f"{path}: unresolved Python MCP factory import")
+    sdk_modules = {module for module, _ in _DECORATOR_IMPORTS} | {
+        module for module, _ in _AGENT_FACTORIES
+    }
+    qualified_sdk_import = any(
+        isinstance(node, ast.Import) and any(a.name in sdk_modules for a in node.names)
+        for node in nodes
+    )
+    if qualified_sdk_import or any(
+        stmt.module in sdk_modules and any(a.name == "*" for a in stmt.names) for stmt in imports
+    ):
+        result.surfaces_excluded.append(f"{path}: unresolved Python SDK tool import")
 
 
 def _factory_calls_and_rebinds(
@@ -222,7 +490,7 @@ def _has_unsupported_registration(
 
 def collect_python_tools(tree: ast.Module, source: str, path: Path, result: ScanResult) -> None:
     """Support direct SDK imports, module constructors and top-level decorators."""
-    if "mcp" not in source:
+    if not any(hint in source for hint in PYTHON_TOOL_HINTS):
         return
     nodes = list(islice(ast.walk(tree), 20_001))
     if len(nodes) > 20_000:
@@ -235,8 +503,20 @@ def collect_python_tools(tree: ast.Module, source: str, path: Path, result: Scan
         for a in stmt.names
         if (stmt.module, a.name) in _FACTORIES
     }
+    decorators = {
+        a.asname or a.name: (stmt, _DECORATOR_IMPORTS[(stmt.module, a.name)])
+        for stmt in imports
+        for a in stmt.names
+        if stmt.module is not None and (stmt.module, a.name) in _DECORATOR_IMPORTS
+    }
+    agent_factories = {
+        a.asname or a.name: (stmt, _AGENT_FACTORIES[(stmt.module, a.name)])
+        for stmt in imports
+        for a in stmt.names
+        if stmt.module is not None and (stmt.module, a.name) in _AGENT_FACTORIES
+    }
     _report_import_scope(imports, nodes, path, result)
-    if not factories:
+    if not factories and not decorators and not agent_factories:
         return
     if any(a.name == "*" for stmt in imports for a in stmt.names):
         result.surfaces_excluded.append(f"{path}: Python MCP bindings exceed supported scope")
@@ -244,6 +524,17 @@ def collect_python_tools(tree: ast.Module, source: str, path: Path, result: Scan
 
     bindings = _bindings(nodes)
     source_digest = hash_bytes(source.encode("utf-8"))
+    seen_refs: set[str] = set()
+    if decorators:
+        _collect_sdk_decorators(
+            tree, nodes, decorators, bindings, path, source_digest, seen_refs, result
+        )
+    if agent_factories:
+        _collect_agent_decorators(
+            tree, nodes, agent_factories, bindings, path, source_digest, seen_refs, result
+        )
+    if not factories:
+        return
     top_level = set(tree.body)
     servers: dict[str, MCPServerComponent] = {}
     calls, changed_receivers = _factory_calls_and_rebinds(nodes, factories)

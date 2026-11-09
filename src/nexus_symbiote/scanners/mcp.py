@@ -583,35 +583,47 @@ class MCPScanner(Scanner):
         if self._files is None:
             raise RuntimeError("_scan_code_mcp_clients called outside a _collection context")
         sources = list(self._files.iter_files())
-        from nexus_symbiote.scanners.python_tools import collect_python_tools
+        from nexus_symbiote.scanners.python_tools import PYTHON_TOOL_HINTS, collect_python_tools
         from nexus_symbiote.scanners.ts_tools import collect_typescript
 
         collect_typescript(self._files, result, sources)
         detected: list[str] = []
+        excluded_dirs = {"tests", "test", "dist", "build", "docs", "benchmarks", "examples"}
         for suffix in (".py", ".ts", ".js"):
             paths = [
                 path
                 for path in sources
                 if path.suffix == suffix
-                and (
-                    len(path.parts) == 1
-                    or suffix == ".py"
-                    and not {"tests", "test", "dist", "build"}.intersection(path.parts)
+                and not excluded_dirs.intersection(path.parts)
+                and not path.name.endswith(
+                    (".d.ts", ".spec.ts", ".test.ts", ".spec.js", ".test.js")
                 )
             ]
-            if suffix == ".py":
-                paths.sort(key=lambda path: len(path.parts) > 1)
+            paths.sort(key=lambda path: len(path.parts) > 1)
             limit = 50 if suffix == ".py" else 10
-            if len(paths) > limit:
-                result.scan_failures.append(
-                    f"MCP {suffix} references: {limit}-file collection limit exceeded"
-                )
-            for path in paths[:limit]:
+            candidates: list[tuple[Path, str]] = []
+            for path in paths:
                 content = self._files.read_text(path)
                 if content is None:
                     continue
-                if suffix == ".py" and len(path.parts) > 1 and "mcp" not in content:
+                if (
+                    suffix == ".py"
+                    and len(path.parts) > 1
+                    and not any(hint in content for hint in PYTHON_TOOL_HINTS)
+                ):
                     continue
+                if (
+                    suffix in {".ts", ".js"}
+                    and len(path.parts) > 1
+                    and "@modelcontextprotocol/sdk" not in content
+                ):
+                    continue
+                candidates.append((path, content))
+            if len(candidates) > limit:
+                result.scan_failures.append(
+                    f"MCP {suffix} references: {limit}-file collection limit exceeded"
+                )
+            for path, content in candidates[:limit]:
                 result.surfaces_scanned.append(str(root / path))
                 if len(content.encode("utf-8")) > 262_144:
                     result.scan_failures.append(f"{path}: syntax collection size limit exceeded")
@@ -663,6 +675,12 @@ class MCPScanner(Scanner):
                 )
             )
 
+    @staticmethod
+    def _tokenize_identifier(text: str) -> set[str]:
+        expanded = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", text)
+        expanded = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", expanded)
+        return set(re.findall(r"[a-z0-9]+", expanded.lower()))
+
     def _classify_side_effects(
         self, annotations: dict[str, Any], tool_name: str
     ) -> SideEffectProfile:
@@ -670,12 +688,12 @@ class MCPScanner(Scanner):
             return SideEffectProfile.DESTRUCTIVE
         if annotations.get("readOnlyHint"):
             return SideEffectProfile.READ_ONLY
-        name_lower = tool_name.lower()
-        if any(w in name_lower for w in ("delete", "remove", "drop", "destroy", "purge")):
+        tokens = self._tokenize_identifier(tool_name)
+        if tokens & {"delete", "remove", "drop", "destroy", "purge"}:
             return SideEffectProfile.DESTRUCTIVE
-        if any(w in name_lower for w in ("create", "update", "write", "send", "post", "put")):
+        if tokens & {"create", "update", "write", "send", "post", "put"}:
             return SideEffectProfile.STATE_MODIFYING
-        if any(w in name_lower for w in ("get", "list", "read", "search", "query", "fetch")):
+        if tokens & {"get", "list", "read", "search", "query", "fetch"}:
             return SideEffectProfile.READ_ONLY
         return SideEffectProfile.UNKNOWN
 
@@ -683,19 +701,30 @@ class MCPScanner(Scanner):
         self, tool_name: str, description: str, annotations: dict[str, Any]
     ) -> list[CapabilityClass]:
         caps = []
-        combined = f"{tool_name} {description}".lower()
-        if any(w in combined for w in ("file", "directory", "path", "fs", "disk")):
+        tokens = self._tokenize_identifier(f"{tool_name} {description}")
+        if tokens & {"file", "files", "directory", "directories", "path", "paths", "fs", "disk"}:
             caps.append(CapabilityClass.FILESYSTEM)
-        if any(w in combined for w in ("http", "url", "fetch", "request", "api", "endpoint")):
+        if tokens & {"http", "https", "url", "urls", "fetch", "request", "api", "endpoint"}:
             caps.append(CapabilityClass.NETWORK)
-        if any(w in combined for w in ("exec", "run", "shell", "command", "bash", "terminal")):
+        if tokens & {"exec", "execute", "run", "shell", "command", "bash", "terminal"}:
             caps.append(CapabilityClass.EXECUTE)
-        if any(w in combined for w in ("pay", "transfer", "invoice", "charge", "billing")):
+        if tokens & {"pay", "payment", "transfer", "invoice", "charge", "billing"}:
             caps.append(CapabilityClass.PAYMENT)
-        if any(w in combined for w in ("credential", "secret", "token", "password", "key", "auth")):
+        if tokens & {
+            "credential",
+            "credentials",
+            "secret",
+            "secrets",
+            "token",
+            "tokens",
+            "password",
+            "key",
+            "keys",
+            "auth",
+        }:
             caps.append(CapabilityClass.CREDENTIALS)
-        if any(w in combined for w in ("write", "create", "update", "delete", "send", "post")):
+        if tokens & {"write", "create", "update", "delete", "send", "post", "put"}:
             caps.append(CapabilityClass.WRITE)
-        elif any(w in combined for w in ("read", "get", "list", "search", "query")):
+        elif tokens & {"read", "get", "list", "search", "query", "fetch"}:
             caps.append(CapabilityClass.READ)
         return caps
