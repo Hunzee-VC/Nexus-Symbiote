@@ -98,8 +98,14 @@ class AdvisoryReport:
         }
 
 
-def _purl_identity(purl: Any) -> tuple[str, str, str]:
-    if not isinstance(purl, str) or len(purl) > 2048 or "?" in purl or "#" in purl:
+def _purl_identity(purl: Any, registry_uri: str | None = None) -> tuple[str, str, str]:
+    if not isinstance(purl, str) or len(purl) > 2048 or "#" in purl:
+        raise ValueError("exact package_url is required, without qualifiers or subpath")
+    purl, qualified, qualifiers = purl.partition("?")
+    # The registry collector names the registry a lockfile resolved a package from
+    # when it is not the default one. That qualifier, naming the component's own
+    # registry, is the only one accepted; the origin decides whether it is sent.
+    if qualified and (registry_uri is None or qualifiers != f"repository_url={registry_uri}"):
         raise ValueError("exact package_url is required, without qualifiers or subpath")
     match = re.fullmatch(r"pkg:(pypi|npm)/(.+)@([^@/]+)", purl)
     if match is None:
@@ -129,7 +135,7 @@ def _normalize(kind: str, name: str) -> str:
 
 def package_identity(component: RegistryEntryComponent) -> tuple[str, str, str]:
     """Accept a narrow purl subset and reconcile it with the inventory declaration."""
-    kind, name, version = _purl_identity(component.package_url)
+    kind, name, version = _purl_identity(component.package_url, component.registry_uri)
     declared_version = component.version or ""
     if kind == "pypi":
         declared_version = (

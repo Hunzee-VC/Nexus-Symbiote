@@ -13,11 +13,13 @@ import re
 import shlex
 import tomllib
 import unicodedata
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
-from urllib.parse import quote
+from typing import Any, Final, NamedTuple
+from urllib.parse import quote, unquote, urlsplit
 
+from packageurl import PackageURL
 from packaging.markers import InvalidMarker, Marker
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.specifiers import InvalidSpecifier, Specifier
@@ -28,91 +30,276 @@ from nexus_symbiote.core.enums import AssuranceLevel, RiskSeverity, TrustTier
 from nexus_symbiote.core.hashing import extract_version_pin, hash_bytes, parse_json_strict
 from nexus_symbiote.core.models import ClaimEvidence, RegistryEntryComponent, RiskAssessment
 from nexus_symbiote.scanners.base import Scanner, ScanResult, sanitized_origin
+from nexus_symbiote.utils.confined import ConfinedCollection
 from nexus_symbiote.utils.secrets import redact_text, redact_url
 from nexus_symbiote.utils.terminal import UNSAFE_TEXT
 
-AI_PACKAGE_PATTERNS = [
-    re.compile(r"(?:^|/)@modelcontextprotocol/", re.I),
-    re.compile(r"(?:^|/)mcp[-_]", re.I),
-    re.compile(
-        r"(?:^|/)(?:langchain|langgraph|llama[-_]index|crewai|autogen|openai|anthropic|cohere|fastmcp|pydantic[-_]ai|google[-_]adk|smolagents|semantic[-_]kernel)",
-        re.I,
-    ),
-    re.compile(r"(?:^|/)(?:transformers|torch|tensorflow|safetensors|tokenizers)", re.I),
-    re.compile(r"(?:^|/)(?:chromadb|pinecone|qdrant|weaviate|pgvector|faiss)", re.I),
-    re.compile(r"(?:^|/)(?:guardrails|nemo[-_]guardrails|rebuff)", re.I),
-]
-# Names the prefixes above cannot express: packages whose whole name is the
-# product ("mcp", "ai"), and npm scopes that hold a vendor's agent packages.
-AI_PACKAGE_NAMES = frozenset(
+# The registry collector inventories only the packages these name, on PyPI and npm
+# alike; docs/registry-collector.md lists them. A name is compared in its normal
+# form, in which runs of "-", "_" and "." are one "-" and letters are lower case, as
+# PEP 503 normalises a PyPI name. A name matches when it is listed whole in
+# AI_PACKAGE_NAMES, when its npm scope is in AI_PACKAGE_SCOPES, or when the part
+# after any scope starts with one of AI_PACKAGE_PREFIXES or has one of
+# AI_PACKAGE_WORDS among its "-"-separated words. A prefix without a trailing "-"
+# also matches longer names, as the patterns of earlier releases did.
+AI_PACKAGE_NAMES: Final[frozenset[str]] = frozenset(
     {
-        "a2a-sdk",
+        "@aws-sdk/client-bedrock-agent-runtime",
+        "@aws-sdk/client-bedrock-runtime",
+        "@browserbasehq/stagehand",
+        "@google-cloud/aiplatform",
+        "@google-cloud/vertexai",
+        "@google/adk",
+        "@google/genai",
+        "@google/generative-ai",
+        "accelerate",
         "ag2",
         "agno",
         "ai",
-        "claude-agent-sdk",
-        "claude-code-sdk",
-        "diffusers",
+        "ai21",
+        "bitsandbytes",
+        "browser-use",
+        "camel-ai",
+        "ctransformers",
+        "deepspeed",
         "dspy",
-        "dspy-ai",
-        "fastmcp",
-        "google-adk",
-        "google-genai",
-        "google-generativeai",
+        "e2b",
+        "farm-haystack",
+        "fireworks-ai",
+        "flash-attn",
+        "flax",
+        "gguf",
+        "griptape",
         "groq",
+        "groq-sdk",
         "haystack-ai",
-        "huggingface-hub",
         "instructor",
+        "jax",
+        "jaxlib",
+        "js-tiktoken",
         "lancedb",
-        "langgraph",
-        "langsmith",
-        "litellm",
-        "llama-cpp-python",
-        "llamaindex",
+        "letta",
         "mastra",
         "mcp",
         "mem0ai",
-        "mistralai",
-        "nemoguardrails",
-        "ollama",
-        "onnxruntime",
+        "mlx",
+        "node-llama-cpp",
+        "onnx",
+        "optimum",
+        "paddlepaddle",
         "pyautogen",
-        "pydantic-ai",
         "pymilvus",
-        "semantic-kernel",
-        "sentence-transformers",
-        "smolagents",
-        "strands-agents",
+        "redisvl",
+        "replicate",
+        "sentencepiece",
+        "together",
+        "trl",
         "vertexai",
-        "vllm",
-        "@google/genai",
-        "@google/generative-ai",
+        "voyageai",
+        "xformers",
     }
 )
-AI_PACKAGE_SCOPES = frozenset(
+# npm scopes that hold a vendor's agent packages; every package in them matches.
+AI_PACKAGE_SCOPES: Final[frozenset[str]] = frozenset(
     {
         "@a2a-js",
         "@ai-sdk",
         "@anthropic-ai",
         "@huggingface",
+        "@lancedb",
         "@langchain",
         "@llamaindex",
         "@mastra",
         "@mistralai",
+        "@mlc-ai",
         "@modelcontextprotocol",
         "@openai",
         "@pinecone-database",
         "@qdrant",
+        "@smithery",
+        "@tensorflow",
+        "@tensorflow-models",
+        "@xenova",
+        "@zilliz",
     }
 )
-
-# A pnpm lockfile holds about 40 YAML tokens per package, so a lockfile at the 4 MiB
-# read limit is about 650,000. The bound refuses denser input before it is parsed.
-_MAX_PNPM_LOCK_TOKENS = 1_000_000
-
-_EXACT_SEMVER_RE = re.compile(
-    r"\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+AI_PACKAGE_PREFIXES: Final[tuple[str, ...]] = (
+    # The families earlier releases matched.
+    "anthropic",
+    "autogen",
+    "chromadb",
+    "cohere",
+    "crewai",
+    "faiss",
+    "guardrails",
+    "langchain",
+    "llama-index",
+    "mcp-",
+    "nemo-guardrails",
+    "openai",
+    "pgvector",
+    "pinecone",
+    "qdrant",
+    "rebuff",
+    "safetensors",
+    "tensorflow",
+    "tokenizers",
+    "torch",
+    "transformers",
+    "weaviate",
+    # Agent frameworks, model SDKs and runtimes added since.
+    "a2a-sdk",
+    "agno-",
+    "claude-agent-sdk",
+    "claude-code-sdk",
+    "diffusers",
+    "dspy-",
+    "e2b-",
+    "fastmcp",
+    "google-adk",
+    "google-cloud-aiplatform",
+    "google-genai",
+    "google-generativeai",
+    "huggingface",
+    "keras",
+    "langgraph",
+    "langsmith",
+    "letta-",
+    "litellm",
+    "llama-cpp",
+    "llamaindex",
+    "mistralai",
+    "mlx-",
+    "nemoguardrails",
+    "ollama",
+    "onnxruntime",
+    "peft",
+    "pydantic-ai",
+    "semantic-kernel",
+    "sentence-transformers",
+    "smolagents",
+    "strands-agents",
+    "tiktoken",
+    "vllm",
 )
+AI_PACKAGE_WORDS: Final[frozenset[str]] = frozenset({"llm", "mcp"})
+
+# A container image is inventoried when its reference, in lower case, contains one
+# of these strings or has one of the words among its parts.
+AI_IMAGE_KEYWORDS: Final[tuple[str, ...]] = (
+    # The keywords earlier releases matched.
+    "llama",
+    "model",
+    "ollama",
+    "tgi",
+    "triton",
+    "vllm",
+    # Inference servers, vector stores and frameworks added since.
+    "chroma",
+    "huggingface",
+    "litellm",
+    "lmdeploy",
+    "localai",
+    "milvus",
+    "onnxruntime",
+    "pgvector",
+    "pytorch",
+    "qdrant",
+    "sglang",
+    "tensorflow",
+    "text-embeddings-inference",
+    "text-generation-inference",
+    "weaviate",
+)
+AI_IMAGE_WORDS: Final[frozenset[str]] = frozenset({"mcp", "tei"})
+
+_SEPARATORS = re.compile(r"[-_.]+")
+_IMAGE_WORD = re.compile(r"[^a-z0-9]+")
+
+
+def is_ai_image(reference: str) -> bool:
+    """Whether a container image reference is one the collector inventories."""
+    lowered = reference.lower()
+    return any(keyword in lowered for keyword in AI_IMAGE_KEYWORDS) or not (
+        AI_IMAGE_WORDS.isdisjoint(_IMAGE_WORD.split(lowered))
+    )
+
+
+class ImageReference(NamedTuple):
+    """An image reference as the distribution reference grammar reads it."""
+
+    domain: str
+    path: str
+    tag: str | None
+    digest: str | None
+
+    @property
+    def repository(self) -> str:
+        return f"{self.domain}/{self.path}"
+
+    @property
+    def pinned(self) -> bool:
+        """Whether the digest is one Docker pulls and verifies: sha256, sha384 or
+        sha512 in lower-case hex of the algorithm's length. Docker refuses any other
+        digest the reference grammar admits."""
+        return self.digest is not None and _PULLED_DIGEST.fullmatch(self.digest) is not None
+
+
+_DOMAIN_COMPONENT = re.compile(r"[A-Za-z0-9]+(?:-+[A-Za-z0-9]+)*")
+_PATH_COMPONENT = re.compile(r"[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*")
+_TAG = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}")
+_DIGEST = re.compile(r"[A-Za-z][A-Za-z0-9]*(?:[-_+.][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,}")
+_IPV6 = re.compile(r"\[[0-9A-Fa-f:.]+\]")
+_PULLED_DIGEST = re.compile(r"sha256:[0-9a-f]{64}|sha384:[0-9a-f]{96}|sha512:[0-9a-f]{128}")
+# docker/distribution's limit on a repository name.
+_LONGEST_IMAGE = 255 + 1 + 128 + 1 + 135
+
+
+def parse_image_reference(text: str) -> ImageReference | None:
+    """Split an image reference as Docker does, or None if it is not one.
+
+    The first path component is a registry host when it contains "." or ":", is
+    "localhost" or has upper-case letters; otherwise the image is on Docker Hub,
+    where a single-component name is in the library namespace.
+    """
+    if not text or len(text) > _LONGEST_IMAGE or not text.isascii():
+        return None
+    name, at, digest = text.partition("@")
+    if at and _DIGEST.fullmatch(digest) is None:
+        return None
+    slash, colon = name.rfind("/"), name.rfind(":")
+    tag = None
+    if colon > slash:
+        name, tag = name[:colon], name[colon + 1 :]
+        if _TAG.fullmatch(tag) is None:
+            return None
+    parts = name.split("/")
+    first = parts[0]
+    if len(parts) > 1 and (
+        "." in first or ":" in first or first == "localhost" or first != first.lower()
+    ):
+        if first.startswith("["):
+            close = first.find("]") + 1
+            host, rest = first[:close], first[close:]
+            if not close or _IPV6.fullmatch(host) is None:
+                return None
+        else:
+            host, separator, port = first.partition(":")
+            rest = separator + port
+            if not all(_DOMAIN_COMPONENT.fullmatch(label) for label in host.split(".")):
+                return None
+        if rest and not (rest[0] == ":" and rest[1:].isdigit() and len(rest) <= 6):
+            return None
+        domain, path = first.lower(), parts[1:]
+    else:
+        domain, path = "docker.io", parts
+    if domain in ("index.docker.io", "registry-1.docker.io"):
+        domain = "docker.io"
+    if not path or not all(_PATH_COMPONENT.fullmatch(part) for part in path):
+        return None
+    if domain == "docker.io" and len(path) == 1:
+        path = ["library", *path]
+    return ImageReference(domain, "/".join(path), tag, digest if at else None)
 
 
 def _url_origin(url: str) -> str:
@@ -135,22 +322,21 @@ def _unparsed(text: str) -> str:
     return redact_text(text[:cut]) + "[redacted-url]"
 
 
-def _recorded(reference: str) -> str:
-    """A requirement as the inventory records it, with a direct URL reduced to its origin."""
-    if "//" not in reference:
-        return redact_text(reference)
-    try:
-        requirement = Requirement(reference)
-    except InvalidRequirement:
-        return _unparsed(reference)
-    if not requirement.url:
-        # A // in a marker literal or an arbitrary-equality version.
-        return _unparsed(reference)
+def _recorded_requirement(requirement: Requirement) -> str:
+    """A requirement as the inventory records it, with a direct URL reduced to its origin.
+
+    The name and extras are PEP 508 identifiers and are kept as written; free text
+    that could hold a credential is redacted, so a name that ends in a word such as
+    "token" does not lose the version that follows it.
+    """
     extras = f"[{','.join(sorted(requirement.extras))}]" if requirement.extras else ""
-    text = f"{requirement.name}{extras} @ {_url_origin(requirement.url)}"
+    if requirement.url:
+        text = f"{requirement.name}{extras} @ {_url_origin(requirement.url)}"
+    else:
+        text = requirement.name + extras + _unparsed(str(requirement.specifier))
     if requirement.marker:
         text += f" ; {_unparsed(str(requirement.marker))}"
-    return redact_text(text)
+    return text
 
 
 # Real versions are short. packaging re-parses a clause's version on every
@@ -158,6 +344,56 @@ def _recorded(reference: str) -> str:
 _LONGEST_VERSION = 128
 # All root requirements*.txt files together, in characters.
 _REQUIREMENTS_BUDGET = 4 * 1024 * 1024
+# shlex builds a token one character at a time, so its cost grows with the square
+# of a quoted word's length; option text this long is not read.
+_LONGEST_OPTIONS = 16 * 1024
+# tomllib keeps every prefix of a dotted key, so its cost grows with the square of
+# a key's parts and with the file's size. Real files are tens of kilobytes and
+# their keys have a handful of parts.
+_PYPROJECT_BUDGET = 256 * 1024
+_LONGEST_DOTTED_KEY = 16
+# A pnpm lockfile holds about 40 YAML tokens per package, so a lockfile at the 4 MiB
+# read limit is about 650,000. The bound refuses denser input before it is parsed.
+_MAX_PNPM_LOCK_TOKENS = 1_000_000
+
+
+_TOML_SPECIAL = re.compile(r"""[#"'.=,{}\[\]\n]""")
+_TOML_STOPS = {
+    ('"', False): re.compile(r'["\\\n]'),
+    ("'", False): re.compile(r"['\n]"),
+    ('"', True): re.compile(r'["\\]'),
+    ("'", True): re.compile(r"'"),
+}
+
+
+def _toml_string_end(text: str, position: int, quote_char: str) -> int:
+    """Where a TOML string that opened just before position ends.
+
+    A basic string skips the character after a backslash. A multi-line string ends
+    at the last three quotes of the first run of three or more, since up to two
+    may end its content; a single-line one also ends at a line break.
+    """
+    multiline = text.startswith(quote_char * 2, position)
+    if multiline:
+        position += 2
+    stops = _TOML_STOPS[quote_char, multiline]
+    while True:
+        found = stops.search(text, position)
+        if found is None:
+            return len(text)
+        if found.group() == "\\":
+            position = found.end() + 1
+            continue
+        if found.group() == "\n":
+            return found.start()
+        if not multiline:
+            return found.end()
+        run = found.end()
+        while run < len(text) and text[run] == quote_char:
+            run += 1
+        if run - found.start() >= 3:
+            return run
+        position = run
 
 
 def _parsed(text: str) -> Version | None:
@@ -165,6 +401,30 @@ def _parsed(text: str) -> Version | None:
         return Version(text)
     except InvalidVersion:
         return None
+
+
+def _exact_pin(requirement: Requirement) -> tuple[str, object] | None:
+    """A requirement's single exact version and the key pins are compared by.
+
+    The same rule as extract_version_pin, which advisories apply, without its
+    rejection of markers: a pin under a marker is still an exact version.
+    """
+    clauses = list(requirement.specifier)
+    if requirement.url or len(clauses) != 1:
+        return None
+    clause = clauses[0]
+    if (
+        clause.operator not in ("==", "===")
+        or "*" in clause.version
+        or len(clause.version) > _LONGEST_VERSION
+    ):
+        return None
+    version = _parsed(clause.version)
+    if version is None or not clause.contains(version, prereleases=True):
+        return None
+    if clause.operator == "===":
+        return clause.version, ("===", clause.version.lower())
+    return clause.version, version
 
 
 _POETRY_RANGE = re.compile(r"([\^~])[ \t]*([0-9]{1,64})(?:\.([0-9]{1,64}))?(?:\.([0-9]{1,64}))?")
@@ -228,6 +488,16 @@ def _admits(clause: Specifier, text: str, version: Version | None) -> bool:
     return version is not None and clause.contains(version, prereleases=True)
 
 
+def _satisfies(requirement: Requirement, text: str, version: Version | None) -> bool:
+    """Whether a pin meets every clause of a requirement; a clause too long to
+    compare is taken as not met."""
+    clauses = list(requirement.specifier)
+    return all(
+        len(clause.version) <= _LONGEST_VERSION and _admits(clause, text, version)
+        for clause in clauses
+    )
+
+
 class _Declared:
     """What a package's declarations under one set of markers require together.
 
@@ -281,207 +551,723 @@ class _Declared:
         return conflict
 
 
+@dataclass
+class _PipDeclaration:
+    """One declaration of an inventoried PyPI package, as read and as recorded."""
+
+    name: str
+    source: str
+    reference: str
+    recorded: str
+    spec: str | None
+    group: str = ""
+    requirement: Requirement | None = None
+    # Why the declaration does not state what is installed: a Poetry or uv source,
+    # another index, an untranslated condition, an override or invalid input.
+    untranslated: str | None = None
+    hashes: tuple[str, ...] = ()
+    marker: str = ""
+    pin: str | None = None
+    pin_key: object = None
+
+
+@dataclass
+class _Package:
+    """Every declaration of one PyPI package, and whether two of them conflict."""
+
+    declarations: list[_PipDeclaration] = field(default_factory=list)
+    sources: set[str] = field(default_factory=set)
+    seen: set[str] = field(default_factory=set)
+    states: dict[tuple[str, str], _Declared] = field(default_factory=dict)
+    conflict: bool = False
+
+    def add(self, declaration: _PipDeclaration) -> None:
+        # One component per package across manifests. Every declaration is kept
+        # on it, so a change to any of them changes the inventory and its diff.
+        self.sources.add(f"{declaration.source}: {declaration.recorded}")
+        first = not self.declarations
+        self.declarations.append(declaration)
+        requirement = declaration.requirement
+        if (
+            self.conflict
+            or requirement is None
+            or declaration.untranslated is not None
+            or declaration.reference in self.seen
+        ):
+            return
+        self.seen.add(declaration.reference)
+        # Declarations under different markers apply to different environments
+        # (uv writes platform splits that way), and so do different optional-
+        # dependency groups (uv's cpu and cu121 extras), so only equal ones are
+        # compared.
+        state = self.states.setdefault((declaration.marker, declaration.group), _Declared())
+        if state.add(requirement) and not first:
+            self.conflict = True
+
+
+def _risk(
+    severity: RiskSeverity, category: str, detail: str, recommendation: str
+) -> RiskAssessment:
+    return RiskAssessment(
+        severity=severity, category=category, detail=detail, recommendation=recommendation
+    )
+
+
+def _npm_exact(version: str) -> bool:
+    return extract_version_pin("package@" + version, ecosystem="npm") == version
+
+
+_FULL_COMMIT = re.compile(r"[0-9a-fA-F]{40}(?:[0-9a-fA-F]{24})?")
+_HASH_VALUE = re.compile(r"sha(?:256|384|512):[0-9a-fA-F]{64,128}")
+
+
+def _vcs_pinned(url: str) -> bool:
+    """Whether a VCS reference names a full commit; branch and tag names can move."""
+    reference = url.split("#", 1)[0]
+    revision = reference.rsplit("@", 1)[1] if "@" in reference.split("//", 1)[-1] else ""
+    return _FULL_COMMIT.fullmatch(revision) is not None
+
+
+class _Resolution(NamedTuple):
+    version: str
+    origin: str | None
+    integrity: str | None
+    locator: str
+    risks: list[RiskAssessment]
+    # The record binds an exact version to a strong integrity value and a tarball
+    # that names this package and version, so the declared range is resolved.
+    resolved: bool
+    consistent: bool
+
+
 class RegistryScanner(Scanner):
     name = "registry"
 
     def scan(self, project_root: Path) -> ScanResult:
         result = ScanResult(scanner_name=self.name)
         with self._collection(project_root, result) as files:
-            result.components.extend(self._scan_npm(files.root, result))
-            result.components.extend(self._scan_pip(files.root, result))
-            result.components.extend(self._scan_docker(files.root, result))
+            entries = files.root_entries()
+            npm = self._scan_npm(result, entries)
+            pypi = self._scan_pip(result, entries)
+            self._note_unread_lockfiles(entries, npm, pypi)
+            result.components.extend(npm)
+            result.components.extend(pypi)
+            result.components.extend(self._scan_docker(result))
         if not result.components and not result.scan_failures and not result.surfaces_excluded:
             result.surfaces_scanned.append("registry (no AI-related dependencies found)")
         return result
 
-    def _read(self, path: Path, result: ScanResult) -> str | None:
+    def _confined(self) -> ConfinedCollection:
         if self._files is None:
-            raise RuntimeError("_read called outside a _collection context")
-        content = self._files.read_text(path, missing_ok=True)
+            raise RuntimeError("registry files read outside a _collection context")
+        return self._files
+
+    def _read(self, name: str, result: ScanResult) -> str | None:
+        """A root file by its name, which is also how the inventory records it."""
+        content = self._confined().read_text(name, missing_ok=True)
         if content is not None:
-            result.surfaces_scanned.append(str(path))
+            result.surfaces_scanned.append(name)
         return content
 
-    def _scan_npm(self, root: Path, result: ScanResult) -> list[RegistryEntryComponent]:
-        if self._files is None:
-            raise RuntimeError("_scan_npm called outside a _collection context")
-        path = root / "package.json"
-        data = self._files.read_json(path, missing_ok=True)
+    # Lockfiles of other package managers, which the collector does not read; the
+    # npm, pnpm, Yarn, uv and Poetry lockfiles are read below.
+    _UNREAD_LOCKFILES = {
+        "npm": ("bun.lock", "bun.lockb"),
+        "pypi": ("Pipfile.lock", "pdm.lock"),
+    }
+
+    @classmethod
+    def _note_unread_lockfiles(
+        cls,
+        entries: list[str],
+        npm: list[RegistryEntryComponent],
+        pypi: list[RegistryEntryComponent],
+    ) -> None:
+        # A finding, not a coverage gap: the declarations are read, but what the
+        # package manager resolves them to is not, and that stays visible per package.
+        present = set(entries)
+        for ecosystem, components, label in (("npm", npm, "npm"), ("pypi", pypi, "PyPI")):
+            unread = [name for name in cls._UNREAD_LOCKFILES[ecosystem] if name in present]
+            if not unread:
+                continue
+            for component in components:
+                component.risks.append(
+                    _risk(
+                        RiskSeverity.LOW,
+                        "lockfile_unread",
+                        f"{label} package '{component.name}' may be resolved by "
+                        f"{', '.join(unread)}, which the collector does not read.",
+                        "Review that lockfile's record for this package; the inventory "
+                        "records only what the manifests declare.",
+                    )
+                )
+
+    # Read in npm's order of precedence: a later section's spec replaces an earlier one.
+    _NPM_SECTIONS = ("peerDependencies", "dependencies", "optionalDependencies", "devDependencies")
+    # npm uses npm-shrinkwrap.json instead of package-lock.json when both exist.
+    _NPM_LOCKFILES = ("npm-shrinkwrap.json", "package-lock.json")
+    # The lockfiles of npm, pnpm and Yarn. Each package manager installs from its own,
+    # so a root that holds more than one of them is resolved ambiguously.
+    _NODE_LOCKFILES = (_NPM_LOCKFILES, ("pnpm-lock.yaml",), ("yarn.lock",))
+    _NPM_DEFAULT_REGISTRIES = frozenset({"registry.npmjs.org", "registry.yarnpkg.com"})
+    _NPM_GAPS = {
+        "override": "package.json: dependency override not translated",
+        "unclassified": "package.json: git, URL or path dependency not classified",
+        "workspaces": "package.json: workspaces not followed",
+        # pnpm reads workspace packages, overrides and version catalogs from it.
+        "pnpm": "pnpm-workspace.yaml: workspace settings not read",
+    }
+
+    def _npm_lock(
+        self, result: ScanResult
+    ) -> tuple[tuple[str, dict[str, Any], str] | None, tuple[str, bytes] | None]:
+        """The lockfile package.json is installed from: npm's packages map with the
+        digest of its bytes, or the bytes of a pnpm or Yarn lockfile.
+
+        With the lockfiles of more than one package manager in the root, which one
+        installs is unknown, so none is bound and the ambiguity is a coverage gap.
+        """
+        files = self._confined()
+        found: list[tuple[str, bytes | None]] = []
+        for names in self._NODE_LOCKFILES:
+            for name in names:
+                before = len(result.scan_failures), len(result.surfaces_excluded)
+                # Parse and bind the same bounded bytes; a second open for hashing could
+                # associate a swapped lockfile with a previously parsed resolution.
+                raw = files.read_bytes(name, missing_ok=True)
+                if raw is not None:
+                    result.surfaces_scanned.append(name)
+                    found.append((name, raw))
+                    break
+                if (len(result.scan_failures), len(result.surfaces_excluded)) != before:
+                    # Present but refused or excluded: the package manager still
+                    # prefers it, so no other file stands in for it.
+                    found.append((name, None))
+                    break
+        if len(found) > 1:
+            listed = ", ".join(name for name, _ in found)
+            result.surfaces_excluded.append(
+                f"multiple npm lockfiles present ({listed}); resolution is ambiguous"
+            )
+            return None, None
+        if not found:
+            return None, None
+        name, raw = found[0]
+        if raw is None:
+            return None, None
+        if name not in self._NPM_LOCKFILES:
+            return None, (name, raw)
+        try:
+            lock = parse_json_strict(raw)
+            if (
+                not isinstance(lock, dict)
+                or not isinstance(lock.get("packages"), dict)
+                or (
+                    lock.get("lockfileVersion") is not None
+                    and (
+                        type(lock["lockfileVersion"]) is not int
+                        or lock["lockfileVersion"] not in (2, 3)
+                    )
+                )
+            ):
+                raise ValueError("unsupported npm lockfile structure")
+        except (ValueError, TypeError, UnicodeError, RecursionError):
+            result.scan_failures.append(f"{name}: invalid or unsupported lockfile")
+            return None, None
+        return (name, lock["packages"], hash_bytes(raw)), None
+
+    @staticmethod
+    def _npm_spec(spec: str) -> tuple[str, str | None, str]:
+        """How npm reads a dependency spec: its kind, an alias's package, and its range.
+
+        The kinds follow npm-package-arg: a file path, an "npm:" alias, a hosted git
+        shorthand or URL, another URL scheme, a path with a slash or an archive name,
+        and otherwise a registry range, version or tag.
+        """
+        text = spec.strip()
+        lowered = text.lower()
+        if lowered.startswith("file:") or re.match(r"(?:[.]|~/|[/\\]|[a-zA-Z]:)", text):
+            return "path", None, text
+        if lowered.startswith("npm:"):
+            target = text[4:]
+            at = target.find("@", 1)
+            return "alias", target if at < 0 else target[:at], "" if at < 0 else target[at + 1 :]
+        if (
+            lowered.startswith(("git+", "git:", "github:", "gitlab:", "bitbucket:", "gist:"))
+            or re.fullmatch(r"[^@/:\s]+/[^/:\s#]+(?:#\S*)?", text)
+            or re.match(r"[\w.-]+@[\w.-]+:", text)
+        ):
+            return "git", None, text
+        if lowered.startswith(("http://", "https://")):
+            return "url", None, text
+        if lowered.startswith("workspace:"):
+            # pnpm and yarn resolve it to the workspace package named by the key.
+            return "workspace", None, text
+        if lowered.startswith("catalog:"):
+            # pnpm reads the version from its workspace catalog; the key names the package.
+            return "registry", None, text
+        if re.match(r"[a-z]+:", lowered) or "/" in text or "\\" in text:
+            return "path", None, text
+        if re.search(r"[.](?:tgz|tar[.]gz|tar)$", lowered):
+            return "path", None, text
+        return "registry", None, text
+
+    def _scan_npm(self, result: ScanResult, entries: list[str]) -> list[RegistryEntryComponent]:
+        if "pnpm-workspace.yaml" in entries:
+            result.surfaces_excluded.append(self._NPM_GAPS["pnpm"])
+        data = self._confined().read_json("package.json", missing_ok=True)
         if data is None:
             return []
-        result.surfaces_scanned.append(str(path))
+        result.surfaces_scanned.append("package.json")
         if not isinstance(data, dict):
             result.scan_failures.append("package.json: expected an object")
             return []
-        all_deps: dict[str, str] = {}
-        for key in ("dependencies", "devDependencies", "optionalDependencies"):
-            deps = data.get(key, {})
+        declared: dict[str, list[tuple[str, str]]] = {}
+        for section in self._NPM_SECTIONS:
+            deps = data.get(section, {})
             if not isinstance(deps, dict) or not all(
                 isinstance(value, str) for value in deps.values()
             ):
-                result.scan_failures.append(f"package.json: invalid {key} map")
+                result.scan_failures.append(f"package.json: invalid {section} map")
                 continue
-            all_deps.update(deps)
-        # Parse and bind the same bounded bytes; a second open for hashing could
-        # associate a swapped lockfile with a previously parsed resolution.
-        found_locks: list[tuple[str, bytes]] = []
-        for lock_name in ("package-lock.json", "pnpm-lock.yaml", "yarn.lock"):
-            raw = self._files.read_bytes(root / lock_name, missing_ok=True)
-            if raw is not None:
-                result.surfaces_scanned.append(lock_name)
-                found_locks.append((lock_name, raw))
-        if len(found_locks) > 1:
-            names = ", ".join(name for name, _ in found_locks)
-            result.surfaces_excluded.append(
-                f"multiple npm lockfiles present ({names}); resolution is ambiguous"
-            )
-            found_locks = []
-        lock_bytes = (
-            found_locks[0][1] if found_locks and found_locks[0][0] == "package-lock.json" else None
-        )
-        resolutions: dict[str, Any] = {}
-        lock_digest = None
-        if lock_bytes is not None:
-            try:
-                lock = parse_json_strict(lock_bytes)
-                if (
-                    not isinstance(lock, dict)
-                    or not isinstance(lock.get("packages"), dict)
-                    or (
-                        lock.get("lockfileVersion") is not None
-                        and (
-                            type(lock["lockfileVersion"]) is not int
-                            or lock["lockfileVersion"] not in (2, 3)
-                        )
-                    )
-                ):
-                    raise ValueError("unsupported npm lockfile structure")
-                resolutions = lock["packages"]
-                lock_digest = hash_bytes(lock_bytes)
-            except (ValueError, TypeError, UnicodeError, RecursionError):
-                result.scan_failures.append("package-lock.json: invalid or unsupported lockfile")
+            for key, spec in deps.items():
+                declared.setdefault(key, []).append((section, spec))
+        workspaces = data.get("workspaces")
+        if (isinstance(workspaces, list) and workspaces) or (
+            isinstance(workspaces, dict) and workspaces.get("packages")
+        ):
+            # Each workspace's package.json declares dependencies npm installs.
+            result.surfaces_excluded.append(self._NPM_GAPS["workspaces"])
+        lock, other_lock = self._npm_lock(result)
+        resolutions: dict[str, Any] = lock[1] if lock else {}
+        overrides = self._npm_overrides(data)
         components: list[RegistryEntryComponent] = []
-        for raw_name, raw_spec in sorted(all_deps.items()):
-            if not self._is_ai_package(raw_name):
+        gaps: dict[str, None] = {}
+        for key, specs in sorted(declared.items()):
+            spec = specs[-1][1]
+            kind, target, version_range = self._npm_spec(spec)
+            record = resolutions.get("node_modules/" + key)
+            installed = self._installed_name(key, record, resolutions)
+            package = target if kind == "alias" and target else key
+            if not (
+                self._is_ai_package(key)
+                or self._is_ai_package(package)
+                or (installed is not None and self._is_ai_package(installed))
+            ):
+                if kind in ("git", "url", "path") and installed is None:
+                    # npm installs such a source under the key whatever package it
+                    # holds; without a lock record naming it, it is not classified.
+                    gaps[self._NPM_GAPS["unclassified"]] = None
                 continue
-            name, spec = redact_text(raw_name), redact_text(raw_spec)
-            properties: dict[str, Any] = {
-                "collection_mode": "manifest-reference",
-                "registry_origin_verified": False,
-                "requested_version": spec,
-            }
-            claims: dict[str, ClaimEvidence] = {}
-            version = spec
-            registry_origin = None
-            source = str(path)
-            key = "node_modules/" + raw_name
-            record = resolutions.get(key)
-            if record is not None:
-                if not isinstance(record, dict):
-                    result.scan_failures.append(
-                        "package-lock.json: invalid selected package record"
-                    )
-                elif record.get("name", raw_name) != raw_name:
-                    result.surfaces_excluded.append(
-                        "package-lock.json: aliased package identity is unresolved"
-                    )
-                elif record.get("link") is True:
-                    result.surfaces_excluded.append(
-                        "package-lock.json: local link resolution is unverified"
-                    )
-                else:
-                    resolved_version = record.get("version")
-                    if (
-                        isinstance(resolved_version, str)
-                        and len(resolved_version) <= 128
-                        and _EXACT_SEMVER_RE.fullmatch(resolved_version)
-                    ):
-                        version = resolved_version
-                    else:
-                        result.scan_failures.append(
-                            "package-lock.json: selected package lacks an exact version"
-                        )
-                    locator = "package-lock.json#/packages/" + key.replace("~", "~0").replace(
-                        "/", "~1"
-                    )
-                    # Keep only source origin; paths, credentials and signed URLs
-                    # are not needed to identify this declared registry reference.
-                    url = record.get("resolved")
-                    if isinstance(url, str) and url.startswith(("https://", "http://")):
-                        origin = sanitized_origin(url)
-                        registry_origin = origin if origin != "[redacted]" else None
-                    properties.update(
-                        {
-                            "collection_mode": "lockfile-resolution-claim",
-                            "lockfile_sha256": lock_digest,
-                            "lockfile_record": locator,
-                            "artifact_verified": False,
-                        }
-                    )
-                    claims["package_resolution"] = ClaimEvidence(
-                        assurance=AssuranceLevel.DECLARED,
-                        method="npm-lockfile",
-                        scope="dependency-resolution",
-                        collector="registry",
-                        locator=locator,
-                    )
-                    source = "package-lock.json"
-                    integrity = record.get("integrity")
-                    if integrity is not None:
-                        if self._validate_sri_integrity(integrity):
-                            properties["lockfile_integrity"] = integrity
-                        else:
-                            result.scan_failures.append(
-                                "package-lock.json: invalid selected package integrity"
-                            )
-            risks: list[RiskAssessment] = []
-            if not re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][a-zA-Z0-9.-]+)?", raw_spec):
-                risks.append(
-                    RiskAssessment(
-                        severity=RiskSeverity.MEDIUM,
-                        category="version_pinning",
-                        detail=f"npm package '{name}' has a nonexact declared reference: {spec}",
-                        recommendation="Resolve and verify an immutable artifact with lockfile integrity evidence.",
-                    )
-                )
+            overridden = overrides is None or bool({key.lower(), package.lower()} & overrides[0])
+            if overridden:
+                gaps[self._NPM_GAPS["override"]] = None
             components.append(
-                RegistryEntryComponent(
-                    bom_ref=f"registry:npm/{name}",
-                    name=name,
-                    version=version,
-                    package_url=(
-                        f"pkg:npm/{quote(name, safe='/')}@{quote(version, safe='')}"
-                        if re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][a-zA-Z0-9.-]+)?", version)
-                        else None
-                    ),
-                    registry_type="npm",
-                    registry_uri=registry_origin,
-                    source_path=source,
-                    trust_tier=TrustTier.UNKNOWN,
-                    assurance_level=AssuranceLevel.DECLARED,
-                    risks=risks,
-                    properties=properties,
-                    claims=claims,
+                self._npm_component(
+                    key, package, kind, version_range, specs, record, lock, overridden, result
                 )
             )
-        if components and found_locks:
-            lock_kind, raw_lock = found_locks[0]
-            if lock_kind == "pnpm-lock.yaml":
+        if overrides is None or any(self._is_ai_package(t) for t in overrides[1]):
+            # Too many overrides to read, or one that installs an AI package under
+            # another package's name.
+            gaps[self._NPM_GAPS["override"]] = None
+        for replaced in sorted(overrides[2]) if overrides is not None else ():
+            # As for a dependency: a git, URL or path source is installed under the
+            # name whatever package it holds, and only a lock record names that.
+            record = resolutions.get("node_modules/" + replaced)
+            if not self._is_ai_package(replaced) and (
+                self._installed_name(replaced, record, resolutions) is None
+            ):
+                gaps[self._NPM_GAPS["unclassified"]] = None
+        result.surfaces_excluded.extend(gaps)
+        if components and other_lock is not None:
+            lock_name, raw_lock = other_lock
+            if lock_name == "pnpm-lock.yaml":
                 self._resolve_pnpm_lockfile(raw_lock, components, result)
-            elif lock_kind == "yarn.lock":
+            else:
                 self._resolve_yarn_lockfile(raw_lock, components, result)
         return components
 
     @staticmethod
-    def _validate_sri_integrity(integrity: Any) -> bool:
+    def _installed_name(key: str, record: Any, resolutions: dict[str, Any]) -> str | None:
+        """The package a lock record says is installed under a key: its name, the key
+        when it has none, or for a link the name of the entry it links to."""
+        if not isinstance(record, dict):
+            return None
+        if record.get("link") is True:
+            resolved = record.get("resolved")
+            target = resolutions.get(resolved) if isinstance(resolved, str) else None
+            name = target.get("name") if isinstance(target, dict) else None
+            return name if isinstance(name, str) else None
+        name = record.get("name", key)
+        return name if isinstance(name, str) else None
+
+    def _npm_component(
+        self,
+        key: str,
+        package: str,
+        kind: str,
+        version_range: str,
+        specs: list[tuple[str, str]],
+        record: Any,
+        lock: tuple[str, dict[str, Any], str] | None,
+        overridden: bool,
+        result: ScanResult,
+    ) -> RegistryEntryComponent:
+        spec = specs[-1][1]
+        name = redact_text(package)
+        properties: dict[str, Any] = {
+            "collection_mode": "manifest-reference",
+            "registry_origin_verified": False,
+            "requested_version": redact_text(spec),
+        }
+        if kind == "alias":
+            # npm installs the package under the key, which the code imports.
+            properties["npm_alias"] = redact_text(key)
+        if len({value for _, value in specs}) > 1:
+            properties["declarations"] = sorted(
+                f"{section}: {redact_text(value)}" for section, value in specs
+            )
+        claims: dict[str, ClaimEvidence] = {}
+        registry = kind in ("registry", "alias")
+        version = redact_text(version_range if registry and version_range else spec)
+        source = "package.json"
+        resolution = None
+        if lock is not None and record is not None:
+            lock_name, _, lock_digest = lock
+            locator = f"{lock_name}#/packages/" + ("node_modules/" + key).replace(
+                "~", "~0"
+            ).replace("/", "~1")
+            if registry:
+                resolution = self._npm_resolution(
+                    lock_name, key, package, version_range, record, locator, result
+                )
+            properties["lockfile_sha256"] = lock_digest
+            properties["lockfile_record"] = locator
+            if resolution is not None:
+                version, source = resolution.version, lock_name
+                properties.update(
+                    {
+                        "collection_mode": "lockfile-resolution-claim",
+                        "artifact_verified": False,
+                    }
+                )
+                if resolution.integrity is not None:
+                    properties["lockfile_integrity"] = resolution.integrity
+                claims["package_resolution"] = ClaimEvidence(
+                    assurance=AssuranceLevel.DECLARED,
+                    method="npm-lockfile",
+                    scope="dependency-resolution",
+                    collector="registry",
+                    locator=locator,
+                )
+            elif registry:
+                # A record that was not taken binds nothing; the failure or gap says why.
+                del properties["lockfile_sha256"], properties["lockfile_record"]
+        risks = list(resolution.risks) if resolution else []
+        if kind == "alias":
+            risks.append(
+                _risk(
+                    RiskSeverity.LOW,
+                    "package_alias",
+                    f"npm dependency '{redact_text(key)}' installs '{name}' under another name.",
+                    "Check that the aliased package is the one the code expects to import.",
+                )
+            )
+        if registry and not _npm_exact(version_range) and not (resolution and resolution.resolved):
+            risks.append(
+                _risk(
+                    RiskSeverity.MEDIUM,
+                    "version_pinning",
+                    f"npm package '{name}' has a nonexact declared reference: {redact_text(spec)}",
+                    "Resolve and verify an immutable artifact with lockfile integrity evidence.",
+                )
+            )
+        elif not registry:
+            risks.append(self._npm_source_risk(name, kind, spec))
+        package_url = None
+        if resolution is not None and resolution.consistent:
+            package_url = self._npm_purl(package, resolution.version, resolution.origin)
+        elif registry and record is None and not overridden and _npm_exact(version_range):
+            # A lock record that was not taken leaves the identity in doubt.
+            package_url = self._npm_purl(package, version_range, None)
+        return RegistryEntryComponent(
+            bom_ref=f"registry:npm/{redact_text(key)}",
+            name=name,
+            version=version or None,
+            package_url=package_url,
+            registry_type="npm",
+            registry_uri=resolution.origin if resolution else None,
+            source_path=source,
+            trust_tier=TrustTier.UNKNOWN,
+            assurance_level=AssuranceLevel.DECLARED,
+            risks=risks,
+            properties=properties,
+            claims=claims,
+        )
+
+    @classmethod
+    def _npm_purl(cls, package: str, version: str, origin: str | None) -> str | None:
+        if re.fullmatch(r"(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*", package) is None:
+            return None
+        purl = f"pkg:npm/{quote(package, safe='/')}@{quote(version, safe='')}"
+        if origin is not None and not cls._default_registry(origin):
+            # The package URL names the registry it was resolved from, so it is not
+            # mistaken for the public package of the same name.
+            purl += f"?repository_url={origin}"
+        return purl
+
+    @classmethod
+    def _default_registry(cls, origin: str) -> bool:
+        return origin.removeprefix("https://") in cls._NPM_DEFAULT_REGISTRIES
+
+    @staticmethod
+    def _npm_source_risk(name: str, kind: str, spec: str) -> RiskAssessment:
+        lowered = spec.strip().lower()
+        mutable = (kind == "git" and not _FULL_COMMIT.fullmatch(lowered.rsplit("#", 1)[-1])) or (
+            lowered.startswith("http://")
+        )
+        label = {
+            "git": "git",
+            "url": "URL",
+            "path": "local path or other",
+            "workspace": "workspace",
+        }[kind]
+        return _risk(
+            RiskSeverity.HIGH if mutable else RiskSeverity.MEDIUM,
+            "nonregistry_source",
+            f"npm package '{name}' is declared from a {label} source, not a registry.",
+            "Install it from a registry with an exact version and lockfile integrity, "
+            "or review the source and pin it to a full commit.",
+        )
+
+    def _npm_resolution(
+        self,
+        lock_name: str,
+        key: str,
+        package: str,
+        version_range: str,
+        record: Any,
+        locator: str,
+        result: ScanResult,
+    ) -> _Resolution | None:
+        """A lock record's resolution of a registry dependency, checked for consistency.
+
+        None, with a failure or gap recorded, when the record is not taken.
+        """
+        if not isinstance(record, dict):
+            result.scan_failures.append(f"{lock_name}: invalid selected package record")
+            return None
+        if record.get("name", key) != package:
+            result.surfaces_excluded.append(f"{lock_name}: aliased package identity is unresolved")
+            return None
+        if record.get("link") is True:
+            result.surfaces_excluded.append(f"{lock_name}: local link resolution is unverified")
+            return None
+        version = record.get("version")
+        if not (
+            isinstance(version, str) and len(version) <= _LONGEST_VERSION and _npm_exact(version)
+        ):
+            result.scan_failures.append(f"{lock_name}: selected package lacks an exact version")
+            return None
+        if _npm_exact(version_range) and version_range != version:
+            # npm ci refuses a lockfile that does not satisfy package.json.
+            result.scan_failures.append(
+                f"{lock_name}: selected package version disagrees with package.json"
+            )
+            return None
+        origin = None
+        consistent = True
+        resolved = record.get("resolved")
+        if resolved is not None:
+            parsed = self._https_resolution(resolved)
+            if parsed is None:
+                result.scan_failures.append(
+                    f"{lock_name}: selected package has an unsupported resolved URL"
+                )
+                return None
+            origin, path = parsed
+            consistent = self._tarball_matches(origin, path, package, version)
+        integrity = record.get("integrity")
+        if integrity is not None and not self._validate_sri_integrity(integrity):
+            result.scan_failures.append(f"{lock_name}: invalid selected package integrity")
+            return None
+        name = redact_text(package)
+        risks: list[RiskAssessment] = []
+        if not consistent:
+            risks.append(
+                _risk(
+                    RiskSeverity.HIGH,
+                    "lockfile_resolution_mismatch",
+                    f"npm package '{name}' has a lockfile record whose tarball URL names "
+                    "another package or version.",
+                    "Regenerate the lockfile from the registry and review the change.",
+                )
+            )
+        if integrity is None:
+            risks.append(
+                _risk(
+                    RiskSeverity.MEDIUM,
+                    "missing_lockfile_integrity",
+                    f"npm package '{name}' has a lockfile record without an integrity value.",
+                    "Regenerate the lockfile so that it records a sha512 integrity value.",
+                )
+            )
+        if origin is not None and not self._default_registry(origin):
+            risks.append(
+                _risk(
+                    RiskSeverity.LOW,
+                    "registry_origin",
+                    f"npm package '{name}' is resolved from {origin}, not the default npm "
+                    "registry.",
+                    "Confirm that this registry is intended and trusted for this package.",
+                )
+            )
+        return _Resolution(
+            version=version,
+            origin=origin,
+            integrity=integrity,
+            locator=locator,
+            risks=risks,
+            resolved=integrity is not None and consistent,
+            consistent=consistent,
+        )
+
+    @staticmethod
+    def _https_resolution(resolved: Any) -> tuple[str, str] | None:
+        """The origin and path of a resolved https URL, or None if a WHATWG parser,
+        which npm uses, could read it differently.
+
+        Control characters, white space, backslashes and percent signs in the host
+        are such cases, and so is any character outside ASCII. User information is
+        dropped, never recorded.
+        """
+        if not isinstance(resolved, str) or len(resolved) > 4096 or not resolved.isascii():
+            return None
+        if any(c <= " " or c in "\\\x7f" for c in resolved):
+            return None
         try:
-            if not isinstance(integrity, str) or len(integrity) > 1024:
-                return False
-            algorithm, encoded = integrity.split("-", 1)
-            size = {"sha256": 32, "sha384": 48, "sha512": 64}.get(algorithm)
-            return size is not None and len(base64.b64decode(encoded, validate=True)) == size
-        except (ValueError, binascii.Error):
+            parts = urlsplit(resolved)
+            port = parts.port
+        except ValueError:
+            return None
+        host = parts.hostname
+        if parts.scheme.lower() != "https" or not host or "%" in parts.netloc.rpartition("@")[2]:
+            return None
+        host = f"[{host}]" if ":" in host else host
+        origin = f"https://{host}" + (f":{port}" if port is not None and port != 443 else "")
+        return origin, parts.path
+
+    @classmethod
+    def _tarball_matches(cls, origin: str, path: str, package: str, version: str) -> bool:
+        """Whether a registry tarball path names this package and version.
+
+        npm registries serve /<name>/-/<unscoped name>-<version>.tgz. Another layout,
+        such as GitHub Packages' download paths, is not checked.
+        """
+        try:
+            decoded = unquote(path, errors="strict")
+        except UnicodeDecodeError:
             return False
+        tail = f"/{package}/-/{package.rsplit('/', 1)[-1]}-{version}.tgz"
+        if cls._default_registry(origin):
+            return decoded == tail
+        return "/-/" not in decoded or decoded.endswith(tail)
+
+    @staticmethod
+    def _validate_sri_integrity(integrity: Any) -> bool:
+        """Whether an SRI value binds the artifact as npm, pnpm and Yarn check it.
+
+        Every hash in it must decode to its algorithm's length, and one must be
+        SHA-256, SHA-384 or SHA-512: the package managers check the strongest, so a
+        value with only SHA-1 is refused, as is anything else.
+        """
+        if not isinstance(integrity, str) or not integrity or len(integrity) > 1024:
+            return False
+        algorithms: set[str] = set()
+        for item in integrity.split():
+            algorithm, separator, encoded = item.partition("-")
+            size = {"sha1": 20, "sha256": 32, "sha384": 48, "sha512": 64}.get(algorithm)
+            if not separator or size is None:
+                return False
+            try:
+                if len(base64.b64decode(encoded, validate=True)) != size:
+                    return False
+            except (ValueError, binascii.Error):
+                return False
+            algorithms.add(algorithm)
+        return bool(algorithms - {"sha1"})
+
+    def _bind_npm_resolution(
+        self,
+        component: RegistryEntryComponent,
+        lock_name: str,
+        method: str,
+        version: str,
+        resolved: Any,
+        integrity: Any,
+        locator: str,
+        lock_digest: str,
+        result: ScanResult,
+    ) -> None:
+        """Bind a pnpm or Yarn record's exact version to a component, checked as an npm
+        record is: an exact spec must agree with it, a download URL is read as a
+        WHATWG parser reads it, and an integrity value must be strong. Nothing is
+        bound, and a failure says why, when a check fails."""
+        requested = str(component.properties.get("requested_version", "")).strip()
+        if _npm_exact(requested) and requested != version:
+            result.scan_failures.append(
+                f"{lock_name}: selected package version disagrees with package.json"
+            )
+            return
+        origin = None
+        consistent = True
+        if resolved is not None:
+            parsed = self._https_resolution(resolved)
+            if parsed is None:
+                result.scan_failures.append(
+                    f"{lock_name}: selected package has an unsupported resolved URL"
+                )
+                return
+            origin, path = parsed
+            consistent = self._tarball_matches(origin, path, component.name, version)
+        if integrity is not None and not self._validate_sri_integrity(integrity):
+            result.scan_failures.append(f"{lock_name}: invalid selected package integrity")
+            return
+        if not consistent:
+            component.risks.append(
+                _risk(
+                    RiskSeverity.HIGH,
+                    "lockfile_resolution_mismatch",
+                    f"npm package '{component.name}' has a lockfile record whose tarball URL "
+                    "names another package or version.",
+                    "Regenerate the lockfile from the registry and review the change.",
+                )
+            )
+        component.version = version
+        component.package_url = (
+            self._npm_purl(component.name, version, origin) if consistent else None
+        )
+        component.registry_uri = origin
+        component.source_path = lock_name
+        component.assurance_level = AssuranceLevel.DECLARED
+        component.properties.update(
+            {
+                "collection_mode": "lockfile-resolution-claim",
+                "lockfile_sha256": lock_digest,
+                "lockfile_record": locator,
+                "artifact_verified": False,
+            }
+        )
+        if integrity is not None:
+            component.properties["lockfile_integrity"] = integrity
+        component.claims["package_resolution"] = ClaimEvidence(
+            assurance=AssuranceLevel.DECLARED,
+            method=method,
+            scope="dependency-resolution",
+            collector="registry",
+            locator=locator,
+        )
 
     def _resolve_pnpm_lockfile(
         self,
@@ -533,6 +1319,15 @@ class RegistryScanner(Scanner):
                     elif isinstance(entry, str):
                         importer_specs[pkg_name] = entry
         for comp in components:
+            alias = comp.properties.get("npm_alias")
+            if alias is not None:
+                # Only npm's own lockfile record is resolved against an alias's package.
+                if alias in importer_specs:
+                    comp.package_url = None
+                    result.surfaces_excluded.append(
+                        "pnpm-lock.yaml: aliased package identity is unresolved"
+                    )
+                continue
             ver_ref = importer_specs.get(comp.name)
             matched_pkg_key: str | None = None
             if ver_ref is None:
@@ -549,6 +1344,7 @@ class RegistryScanner(Scanner):
                                 break
                 base_versions = {s.split("(", 1)[0] for _, s in prefix_matches}
                 if len(base_versions) > 1:
+                    comp.package_url = None
                     result.surfaces_excluded.append(
                         f"pnpm-lock.yaml: multiple package resolutions for {comp.name} are ambiguous"
                     )
@@ -557,6 +1353,9 @@ class RegistryScanner(Scanner):
                     matched_pkg_key, ver_ref = prefix_matches[0]
             if ver_ref is None:
                 continue
+            # A record the lockfile holds decides the identity, or nothing does: one
+            # that is not taken leaves the version an exact spec names in doubt.
+            comp.package_url = None
             if ver_ref.startswith("npm:"):
                 result.surfaces_excluded.append(
                     "pnpm-lock.yaml: aliased package identity is unresolved"
@@ -575,7 +1374,7 @@ class RegistryScanner(Scanner):
                         "pnpm-lock.yaml: aliased package identity is unresolved"
                     )
                     continue
-            if len(base_ver) > 128 or not _EXACT_SEMVER_RE.fullmatch(base_ver):
+            if len(base_ver) > _LONGEST_VERSION or not _npm_exact(base_ver):
                 result.scan_failures.append(
                     "pnpm-lock.yaml: selected package lacks an exact version"
                 )
@@ -592,8 +1391,8 @@ class RegistryScanner(Scanner):
                 )
             )
             pkg_key = next((c for c in candidates if c in packages), None)
-            registry_origin: str | None = None
-            valid_integrity: str | None = None
+            tarball: Any = None
+            integrity: Any = None
             if pkg_key is not None:
                 pkg_record = packages[pkg_key]
                 if not isinstance(pkg_record, dict):
@@ -612,17 +1411,7 @@ class RegistryScanner(Scanner):
                             "pnpm-lock.yaml: local or non-registry resolution is unverified"
                         )
                         continue
-                    if isinstance(tarball, str) and tarball.startswith(("https://", "http://")):
-                        origin = sanitized_origin(tarball)
-                        registry_origin = origin if origin != "[redacted]" else None
                     integrity = resolution.get("integrity")
-                    if integrity is not None:
-                        if self._validate_sri_integrity(integrity):
-                            valid_integrity = integrity
-                        else:
-                            result.scan_failures.append(
-                                "pnpm-lock.yaml: invalid selected package integrity"
-                            )
                 locator = "pnpm-lock.yaml#/packages/" + pkg_key.replace("~", "~0").replace(
                     "/", "~1"
                 )
@@ -630,27 +1419,16 @@ class RegistryScanner(Scanner):
                 locator = "pnpm-lock.yaml#/importers/./" + comp.name.replace("~", "~0").replace(
                     "/", "~1"
                 )
-            comp.version = base_ver
-            comp.package_url = f"pkg:npm/{quote(comp.name, safe='/')}@{quote(base_ver, safe='')}"
-            comp.registry_uri = registry_origin
-            comp.source_path = "pnpm-lock.yaml"
-            comp.assurance_level = AssuranceLevel.DECLARED
-            comp.properties.update(
-                {
-                    "collection_mode": "lockfile-resolution-claim",
-                    "lockfile_sha256": lock_digest,
-                    "lockfile_record": locator,
-                    "artifact_verified": False,
-                }
-            )
-            if valid_integrity is not None:
-                comp.properties["lockfile_integrity"] = valid_integrity
-            comp.claims["package_resolution"] = ClaimEvidence(
-                assurance=AssuranceLevel.DECLARED,
-                method="pnpm-lockfile",
-                scope="dependency-resolution",
-                collector="registry",
-                locator=locator,
+            self._bind_npm_resolution(
+                comp,
+                "pnpm-lock.yaml",
+                "pnpm-lockfile",
+                base_ver,
+                tarball,
+                integrity,
+                locator,
+                lock_digest,
+                result,
             )
 
     def _resolve_yarn_lockfile(
@@ -712,9 +1490,20 @@ class RegistryScanner(Scanner):
                 sel_name, sel_spec = sel[:at_idx], sel[at_idx + 1 :]
                 by_pkg.setdefault(sel_name, []).append((sel_spec, fields, first_sel))
         for comp in components:
+            alias = comp.properties.get("npm_alias")
+            if alias is not None:
+                # Only npm's own lockfile record is resolved against an alias's package.
+                if alias in by_pkg:
+                    comp.package_url = None
+                    result.surfaces_excluded.append(
+                        "yarn.lock: aliased package identity is unresolved"
+                    )
+                continue
             entries = by_pkg.get(comp.name)
             if not entries:
                 continue
+            # As for pnpm: the record decides the identity, or nothing does.
+            comp.package_url = None
             req = str(comp.properties.get("requested_version", ""))
             exact_matches = [e for e in entries if e[0] in (req, f"npm:{req}")]
             chosen = exact_matches or entries
@@ -759,104 +1548,301 @@ class RegistryScanner(Scanner):
             resolved_version = fields.get("version")
             if (
                 not isinstance(resolved_version, str)
-                or len(resolved_version) > 128
-                or not _EXACT_SEMVER_RE.fullmatch(resolved_version)
+                or len(resolved_version) > _LONGEST_VERSION
+                or not _npm_exact(resolved_version)
             ):
                 result.scan_failures.append("yarn.lock: selected package lacks an exact version")
                 continue
-            registry_origin: str | None = None
-            if resolved_val.startswith(("https://", "http://")):
-                origin = sanitized_origin(resolved_val)
-                registry_origin = origin if origin != "[redacted]" else None
-            integrity = fields.get("integrity")
-            if integrity is not None:
-                if self._validate_sri_integrity(integrity):
-                    comp.properties["lockfile_integrity"] = integrity
-                else:
-                    result.scan_failures.append("yarn.lock: invalid selected package integrity")
             locator = "yarn.lock#/" + locator_key.replace("~", "~0").replace("/", "~1")
-            comp.version = resolved_version
-            comp.package_url = (
-                f"pkg:npm/{quote(comp.name, safe='/')}@{quote(resolved_version, safe='')}"
-            )
-            comp.registry_uri = registry_origin
-            comp.source_path = "yarn.lock"
-            comp.assurance_level = AssuranceLevel.DECLARED
-            comp.properties.update(
-                {
-                    "collection_mode": "lockfile-resolution-claim",
-                    "lockfile_sha256": lock_digest,
-                    "lockfile_record": locator,
-                    "artifact_verified": False,
-                }
-            )
-            comp.claims["package_resolution"] = ClaimEvidence(
-                assurance=AssuranceLevel.DECLARED,
-                method="yarn-lockfile",
-                scope="dependency-resolution",
-                collector="registry",
-                locator=locator,
+            self._bind_npm_resolution(
+                comp,
+                "yarn.lock",
+                "yarn-lockfile",
+                resolved_version,
+                resolved_val or None,
+                fields.get("integrity"),
+                locator,
+                lock_digest,
+                result,
             )
 
-    def _pip_component(
-        self, line: str, path: Path, result: ScanResult | None = None
-    ) -> RegistryEntryComponent | None:
-        reference = line.strip().split(" #", 1)[0].strip()
-        match = re.match(r"^([a-zA-Z0-9_.-]+)", reference)
-        if not match or not self._is_ai_package(match.group(1)):
+    _OVERRIDE_FIELDS = (("overrides",), ("resolutions",), ("pnpm", "overrides"))
+    _OVERRIDE_ENTRIES = 10_000
+
+    @classmethod
+    def _npm_overrides(cls, data: dict[str, Any]) -> tuple[set[str], set[str], set[str]] | None:
+        """The package names npm, yarn and pnpm override fields name, the alias
+        targets they install, and the packages they replace with a git, URL or path
+        source; None when there are too many entries to read."""
+        names: set[str] = set()
+        targets: set[str] = set()
+        sources: set[str] = set()
+        stack: list[tuple[Any, int, list[str]]] = []
+        for path in cls._OVERRIDE_FIELDS:
+            node: Any = data
+            for part in path:
+                node = node.get(part) if isinstance(node, dict) else None
+            if node is not None:
+                stack.append((node, 0, []))
+        remaining = cls._OVERRIDE_ENTRIES
+        while stack:
+            node, depth, parent = stack.pop()
+            if not isinstance(node, dict):
+                continue
+            for selector, value in node.items():
+                remaining -= 1
+                if remaining < 0 or depth > 32:
+                    return None
+                selected = cls._override_names(str(selector))
+                names.update(name.lower() for name in selected)
+                if isinstance(value, dict):
+                    stack.append((value, depth + 1, selected or parent))
+                elif isinstance(value, str):
+                    kind, target, _ = cls._npm_spec(value)
+                    if kind == "alias" and target:
+                        targets.add(target)
+                    elif kind in ("git", "url", "path"):
+                        # The last name is the package replaced; "." replaces the
+                        # package of the enclosing selector.
+                        sources.update((selected or parent)[-1:])
+        return names, targets, sources
+
+    @staticmethod
+    def _override_names(selector: str) -> list[str]:
+        """Package names in an override selector: "name@range" (npm), "a/**/name"
+        (yarn resolutions) or "a>name" (pnpm), with scoped names kept whole."""
+        names: list[str] = []
+        for part in selector.split(">"):
+            segments = part.split("/")
+            index = 0
+            while index < len(segments):
+                segment = segments[index]
+                index += 1
+                if segment.startswith("@") and index < len(segments):
+                    segment += "/" + segments[index]
+                    index += 1
+                at = segment.find("@", 1)
+                segment = segment[:at] if at > 0 else segment
+                if segment not in ("", "**", "*", "."):
+                    names.append(segment)
+        return names
+
+    _PIP_NAME = re.compile(r"[a-zA-Z0-9_.-]+")
+
+    def _pip_declaration(
+        self,
+        reference: str,
+        source: str,
+        result: ScanResult | None = None,
+        group: str = "",
+        hashes: tuple[str, ...] = (),
+        untranslated: str | None = None,
+    ) -> _PipDeclaration | None:
+        """A declaration of an inventoried PyPI package, or None for any other name."""
+        match = self._PIP_NAME.match(reference)
+        if not match or not self._is_ai_package(match.group()):
             return None
-        name = str(canonicalize_name(match.group(1)))
-        invalid = False
+        name = str(canonicalize_name(match.group()))
+        if untranslated is not None:
+            # The bare name, never compared: what it leaves out is unknown.
+            return _PipDeclaration(
+                name, source, reference, match.group(), None, group, untranslated=untranslated
+            )
         try:
             requirement = Requirement(reference)
-        except InvalidRequirement:
-            invalid = True
-            spec = _unparsed(reference[len(match.group(1)) :].strip())
-            if result is not None:
-                result.scan_failures.append(f"{path.name}: invalid or unsupported PyPI requirement")
-        else:
             name = str(canonicalize_name(requirement.name))
             # Retain markers and URLs as declared, unresolved conditions; they
             # must not silently turn into an unconditional exact package URL.
+            marker = str(requirement.marker) if requirement.marker else ""
             if requirement.url:
                 spec = "@ " + _url_origin(requirement.url)
             else:
                 spec = _unparsed(str(requirement.specifier))
-            if requirement.marker:
-                spec += "; " + _unparsed(str(requirement.marker))
-            spec = redact_text(spec)
-        version = extract_version_pin(reference, ecosystem="python") if not invalid else None
-        risks = (
-            []
-            if version is not None
-            else [
-                RiskAssessment(
-                    severity=RiskSeverity.MEDIUM,
-                    category="version_pinning",
-                    detail=f"PyPI package '{name}' has an unresolved or nonexact declared reference.",
-                    recommendation="Resolve the declared conditions, pin the version and verify artifact hashes.",
-                )
-            ]
+            if marker:
+                spec += "; " + _unparsed(marker)
+            recorded = _recorded_requirement(requirement)
+            pin = _exact_pin(requirement)
+        except (InvalidRequirement, RecursionError):
+            # packaging parses markers by recursion; a deeply nested one is invalid
+            # input for this line, not the end of the collection.
+            if result is not None:
+                message = f"{source}: invalid or unsupported PyPI requirement"
+                if message not in result.scan_failures:
+                    result.scan_failures.append(message)
+            spec = _unparsed(reference[len(match.group()) :].strip())
+            return _PipDeclaration(
+                name=name,
+                source=source,
+                reference=reference,
+                recorded=_unparsed(reference),
+                spec=redact_text(spec) or None,
+                group=group,
+                untranslated="invalid",
+                hashes=hashes,
+            )
+        return _PipDeclaration(
+            name=name,
+            source=source,
+            reference=reference,
+            recorded=recorded,
+            spec=redact_text(spec) or None,
+            group=group,
+            requirement=requirement,
+            hashes=hashes,
+            marker=marker,
+            pin=pin[0] if pin else None,
+            pin_key=pin[1] if pin else None,
         )
+
+    def _pip_component(
+        self, line: str, path: Path, result: ScanResult | None = None
+    ) -> RegistryEntryComponent | None:
+        """The component one requirement line alone declares."""
+        reference = line.strip().split(" #", 1)[0].strip()
+        declaration = self._pip_declaration(reference, str(path), result)
+        if declaration is None:
+            return None
+        package = _Package()
+        package.add(declaration)
+        return self._pypi_component(package)
+
+    @staticmethod
+    def _pypi_component(package: _Package) -> RegistryEntryComponent:
+        """One component from every declaration of a package, in the order read.
+
+        The version, package URL and findings follow from all of them, whichever file
+        is read first. The first exact pin without a marker is the version reported,
+        and it resolves the ranges it satisfies in every file, as a compiled
+        requirements file resolves the ranges of pyproject.toml; a range it does not
+        satisfy, under any marker or group, is a version_pinning finding. A URL or VCS
+        declaration anywhere is a finding and no PyPI package URL. A package URL is
+        emitted only when every exact pin names the same version, every other
+        declaration admits it, and nothing conflicts or is left untranslated.
+        """
+        declarations = package.declarations
+        name = declarations[0].name
+        urls: list[_PipDeclaration] = []
+        others: list[_PipDeclaration] = []
+        for declaration in declarations:
+            requirement = declaration.requirement
+            (urls if requirement is not None and requirement.url else others).append(declaration)
+        exact = [d for d in others if d.pin is not None]
+        unconditional = [d for d in exact if not d.marker]
+        chosen = unconditional[0] if unconditional else declarations[0]
+        loose: list[_PipDeclaration] = []
+        if chosen.pin is not None and unconditional:
+            pinned = _parsed(chosen.pin)
+            loose = [
+                d
+                for d in others
+                if d.pin is None
+                and d.requirement is not None
+                and not _satisfies(d.requirement, chosen.pin, pinned)
+            ]
+        risks: list[RiskAssessment] = []
+        if urls:
+            files = ", ".join(dict.fromkeys(d.source for d in urls))
+            mutable = any(
+                d.requirement is not None
+                and d.requirement.url
+                and re.match(r"(?:git|hg|svn|bzr)\+", d.requirement.url, re.I)
+                and not _vcs_pinned(d.requirement.url)
+                for d in urls
+            )
+            risks.append(
+                _risk(
+                    RiskSeverity.HIGH if mutable else RiskSeverity.MEDIUM,
+                    "nonregistry_source",
+                    f"PyPI package '{name}' is declared from a URL, VCS or path source in {files}.",
+                    "Install it from the package index with an exact version and verified "
+                    "hashes, or review the source and pin it to a full commit.",
+                )
+            )
+        if others and not unconditional:
+            if all(d.pin is not None for d in others):
+                risks.append(
+                    _risk(
+                        RiskSeverity.LOW,
+                        "version_pinning",
+                        f"PyPI package '{name}' is pinned only under environment markers.",
+                        "Check that every environment the project supports has a pin, and "
+                        "verify artifact hashes.",
+                    )
+                )
+            else:
+                risks.append(
+                    _risk(
+                        RiskSeverity.MEDIUM,
+                        "version_pinning",
+                        f"PyPI package '{name}' has an unresolved or nonexact declared reference.",
+                        "Resolve the declared conditions, pin the version and verify artifact "
+                        "hashes.",
+                    )
+                )
+        elif loose and not package.conflict:
+            files = ", ".join(dict.fromkeys(d.source for d in loose))
+            risks.append(
+                _risk(
+                    RiskSeverity.MEDIUM,
+                    "version_pinning",
+                    f"PyPI package '{name}' has a nonexact declaration in {files} that its "
+                    "exact pin does not satisfy.",
+                    "Make every declaration admit the pinned version, pin it where it floats, "
+                    "and verify artifact hashes.",
+                )
+            )
+        if package.conflict:
+            risks.append(
+                _risk(
+                    RiskSeverity.MEDIUM,
+                    "version_pinning",
+                    f"PyPI package '{name}' is declared more than once with requirements that "
+                    "conflict.",
+                    "Check that each declaration is intended, make them agree where possible, "
+                    "and verify artifact hashes.",
+                )
+            )
+        package_url = None
+        if (
+            unconditional
+            and not urls
+            and not loose
+            and not package.conflict
+            and all(d.untranslated is None for d in declarations)
+            and len({d.pin_key for d in exact}) == 1
+            and chosen.pin is not None
+        ):
+            package_url = f"pkg:pypi/{quote(name, safe='')}@{quote(chosen.pin, safe='')}"
+        origins = {
+            _url_origin(d.requirement.url)
+            for d in urls
+            if d.requirement is not None and d.requirement.url
+        }
+        registry_uri: str | None = "https://pypi.org"
+        if urls or any(d.untranslated in ("source", "index", "override") for d in declarations):
+            registry_uri = origins.pop() if not others and len(origins) == 1 else None
+        properties: dict[str, Any] = {
+            "collection_mode": "manifest-reference",
+            "registry_origin_verified": False,
+            "requested_requirement": chosen.recorded,
+        }
+        if len(package.sources) > 1:
+            properties["declarations"] = sorted(package.sources)
+        hashes = sorted({f"{d.source}: {value}" for d in declarations for value in d.hashes})
+        if hashes:
+            # pip checks the artifact against these; a changed or removed hash is drift.
+            properties["requirement_hashes"] = hashes
         return RegistryEntryComponent(
             bom_ref=f"registry:pypi/{name}",
             name=name,
-            version=spec or None,
-            package_url=(
-                f"pkg:pypi/{quote(name, safe='')}@{quote(version, safe='')}"
-                if version is not None
-                else None
-            ),
+            version=chosen.spec,
+            package_url=package_url,
             registry_type="pypi",
-            registry_uri="https://pypi.org",
-            source_path=str(path),
+            registry_uri=registry_uri,
+            source_path=chosen.source,
             trust_tier=TrustTier.UNKNOWN,
             risks=risks,
-            properties={
-                "collection_mode": "manifest-reference",
-                "registry_origin_verified": False,
-                "requested_requirement": _recorded(reference),
-            },
+            properties=properties,
         )
 
     _COMMENT = re.compile(r"(?:^|\s)#.*$")
@@ -949,12 +1935,11 @@ class RegistryScanner(Scanner):
         takes the next word, even "--". An option pip 26.3 does not know may take
         one in another pip.
         """
+        if cls._unsplittable(text):
+            return [], ["option line not parsed"]
+        quoted = any(c in text for c in "\"'\\")
         try:
-            words = (
-                shlex.split(text)
-                if any(c in text for c in "\"'\\")
-                else [w for w in cls._SHLEX_SPACE.split(text) if w]
-            )
+            words = shlex.split(text) if quoted else [w for w in cls._SHLEX_SPACE.split(text) if w]
         except ValueError:
             return [], ["option line not parsed"]
         options: list[tuple[str, str]] = []
@@ -992,6 +1977,12 @@ class RegistryScanner(Scanner):
                 index += 1
             options.append((option, value))
         return options, problems
+
+    @staticmethod
+    def _unsplittable(text: str) -> bool:
+        """Whether option text is too long for shlex, whose cost grows with the square
+        of a quoted word's length."""
+        return len(text) > _LONGEST_OPTIONS and any(c in text for c in "\"'\\")
 
     @classmethod
     def _option_gaps(cls, text: str, names: set[str], entries: set[str]) -> list[str]:
@@ -1184,77 +2175,55 @@ class RegistryScanner(Scanner):
             lines.append("".join(pending))
         return lines
 
-    def _scan_pip(self, root: Path, result: ScanResult) -> list[RegistryEntryComponent]:
-        components: list[RegistryEntryComponent] = []
-        kept: dict[str, RegistryEntryComponent] = {}
-        sources: dict[str, set[str]] = {}
-        seen: dict[str, set[str]] = {}
-        declared: dict[str, dict[tuple[str, str], _Declared]] = {}
-        conflicted: set[str] = set()
+    def _scan_pip(self, result: ScanResult, entries: list[str]) -> list[RegistryEntryComponent]:
+        packages: dict[str, _Package] = {}
 
         def declare(
-            component: RegistryEntryComponent, source: str, reference: str, group: str = ""
+            source: str,
+            reference: str,
+            group: str = "",
+            hashes: tuple[str, ...] = (),
+            untranslated: str | None = None,
         ) -> None:
-            # One component per package across manifests. Every declaration is kept
-            # on it, so a change to any of them changes the inventory and its diff.
-            ref = component.bom_ref
-            sources.setdefault(ref, set()).add(f"{source}: {_recorded(reference)}")
-            first = kept.get(ref)
-            if first is None:
-                kept[ref] = component
-                components.append(component)
-            if ref in conflicted or reference in seen.setdefault(ref, set()):
-                return
-            seen[ref].add(reference)
-            try:
-                requirement = Requirement(reference)
-            except InvalidRequirement:
-                # Already a collection failure; there is nothing reliable to compare.
-                return
-            # Declarations under different markers apply to different environments
-            # (uv writes platform splits that way), and so do different optional-
-            # dependency groups (uv's cpu and cu121 extras), so only equal ones are
-            # compared.
-            marker = str(requirement.marker) if requirement.marker else ""
-            state = declared.setdefault(ref, {}).setdefault((marker, group), _Declared())
-            if state.add(requirement) and first is not None:
-                conflicted.add(ref)
-                detail = (
-                    f"PyPI package '{first.name}' is declared more than once with "
-                    "requirements that conflict."
-                )
-                first.risks.append(
-                    RiskAssessment(
-                        severity=RiskSeverity.MEDIUM,
-                        category="version_pinning",
-                        detail=detail,
-                        recommendation="Check that each declaration is intended, make them agree where possible, and verify artifact hashes.",
-                    )
-                )
+            declaration = self._pip_declaration(
+                reference, source, result, group, hashes, untranslated
+            )
+            if declaration is not None:
+                packages.setdefault(declaration.name, _Package()).add(declaration)
 
-        self._scan_requirements(root, result, declare)
-        path = root / "pyproject.toml"
-        for declaration, group in self._pyproject_declarations(path, result):
-            component = self._pip_component(declaration, path, result)
-            if component:
-                # Compare the text _pip_component parsed, without a trailing comment.
-                reference = declaration.strip().split(" #", 1)[0].strip()
-                declare(component, "pyproject.toml", reference, group)
-        for component in components:
-            if len(sources[component.bom_ref]) > 1:
-                component.properties["declarations"] = sorted(sources[component.bom_ref])
+        self._scan_requirements(result, entries, declare)
+        for text, group, untranslated in self._pyproject_declarations(result):
+            # Compare the text the requirement is parsed from, without a trailing comment.
+            declare(
+                "pyproject.toml", text.strip().split(" #", 1)[0].strip(), group, (), untranslated
+            )
+        if "Pipfile" in entries:
+            # pipenv installs what Pipfile declares; it is not read.
+            result.surfaces_excluded.append("Pipfile: dependencies not read")
+        components = [self._pypi_component(package) for package in packages.values()]
         if components:
-            self._resolve_python_lockfiles(root, components, result)
+            # A lockfile records a registry resolution, so it does not stand for a
+            # package that a URL, VCS or path declaration installs, in any file.
+            from_urls = {
+                name
+                for name, package in packages.items()
+                if any(
+                    d.requirement is not None and d.requirement.url for d in package.declarations
+                )
+            }
+            self._resolve_python_lockfiles(components, result, from_urls)
         return components
 
     def _resolve_python_lockfiles(
-        self, root: Path, components: list[RegistryEntryComponent], result: ScanResult
+        self,
+        components: list[RegistryEntryComponent],
+        result: ScanResult,
+        from_urls: set[str],
     ) -> None:
-        if self._files is None:
-            raise RuntimeError("_resolve_python_lockfiles called outside a _collection context")
+        files = self._confined()
         found_locks: list[tuple[str, str, bytes]] = []
         for lock_name, method in (("uv.lock", "uv-lockfile"), ("poetry.lock", "poetry-lockfile")):
-            raw = self._files.read_bytes(root / lock_name, missing_ok=True)
+            raw = files.read_bytes(lock_name, missing_ok=True)
             if raw is not None:
                 result.surfaces_scanned.append(lock_name)
                 found_locks.append((lock_name, method, raw))
@@ -1267,7 +2236,12 @@ class RegistryScanner(Scanner):
             return
         lock_name, method, lock_bytes = found_locks[0]
         try:
-            lock_doc = tomllib.loads(lock_bytes.decode("utf-8"))
+            text = lock_bytes.decode("utf-8")
+            if self._longest_dotted_key(text) > _LONGEST_DOTTED_KEY:
+                # As for pyproject.toml: tomllib's cost grows with the square of a
+                # dotted key's parts, and lockfile keys have one or two.
+                raise ValueError("dotted key exceeds the length limit")
+            lock_doc = tomllib.loads(text)
             packages = lock_doc.get("package", [])
             if (
                 not isinstance(lock_doc, dict)
@@ -1276,7 +2250,9 @@ class RegistryScanner(Scanner):
                 or not all(isinstance(item, dict) for item in packages)
             ):
                 raise ValueError("unsupported Python lockfile structure")
-        except (ValueError, UnicodeError, tomllib.TOMLDecodeError, RecursionError):
+        except (ValueError, UnicodeError, RecursionError, MemoryError):
+            # TOMLDecodeError is a ValueError, as is a decimal integer past CPython's
+            # limit on digits it converts.
             result.scan_failures.append(f"{lock_name}: invalid or unsupported lockfile")
             return
         lock_digest = hash_bytes(lock_bytes)
@@ -1291,7 +2267,7 @@ class RegistryScanner(Scanner):
             indexed.setdefault(str(canonicalize_name(raw_name)), []).append((index, entry))
         for comp in components:
             matches = indexed.get(comp.name)
-            if not matches:
+            if not matches or comp.name in from_urls:
                 continue
             if comp.version and (";" in comp.version or comp.version.startswith("@ ")):
                 continue
@@ -1318,7 +2294,7 @@ class RegistryScanner(Scanner):
             resolved_version = record.get("version")
             pinned = (
                 extract_version_pin(f"{comp.name}=={resolved_version}", ecosystem="python")
-                if isinstance(resolved_version, str) and len(resolved_version) <= 128
+                if isinstance(resolved_version, str) and len(resolved_version) <= _LONGEST_VERSION
                 else None
             )
             if pinned is None or pinned != resolved_version:
@@ -1356,13 +2332,10 @@ class RegistryScanner(Scanner):
 
     def _scan_requirements(
         self,
-        root: Path,
         result: ScanResult,
-        declare: Callable[[RegistryEntryComponent, str, str], None],
+        entries: list[str],
+        declare: Callable[[str, str, str, tuple[str, ...]], None],
     ) -> None:
-        if self._files is None:
-            raise RuntimeError("_scan_requirements called outside a _collection context")
-        entries = self._files.root_entries()
         filenames = self._requirement_files(entries)
         names = {n.casefold() for n in filenames}
         folded = {self._fold(n) for n in entries}
@@ -1385,8 +2358,7 @@ class RegistryScanner(Scanner):
                     )
                     unprintable = True
                 continue
-            path = root / filename
-            content = self._read(path, result)
+            content = self._read(filename, result)
             if content is None:
                 continue
             remaining -= len(content)
@@ -1425,7 +2397,17 @@ class RegistryScanner(Scanner):
                     # words two spaces leave.
                     args = " ".join(tokens[:split])
                     reference = " ".join(t for t in tokens[:split] if t)
-                    options, _ = self._options(" ".join(tokens[split:]))
+                    option_text = " ".join(tokens[split:])
+                    options, _ = self._options(option_text)
+                    if self._unsplittable(option_text):
+                        # Too long to split: an -e among them would go unseen.
+                        gaps = ["option line not parsed"]
+                    # pip accepts only these; other text after --hash is not recorded.
+                    hashes = tuple(
+                        sorted(
+                            {v for o, v in options if o == "--hash" and _HASH_VALUE.fullmatch(v)}
+                        )
+                    )
                     if self._ENV_NAME.match(reference):
                         # The variable can make the line any package, or an option.
                         gaps = ["environment variable not resolved"]
@@ -1439,49 +2421,208 @@ class RegistryScanner(Scanner):
                             # The gap never names the reference, which can carry a
                             # credential.
                             gaps = ["URL, VCS or path requirement not followed"]
-                        component = self._pip_component(reference, path, result)
-                        if component is not None:
-                            declare(component, filename, reference)
+                        declare(filename, reference, "", hashes)
                 for gap in gaps:
                     message = f"{filename}: {gap}"
                     if message not in noted:
                         noted.add(message)
                         result.surfaces_excluded.append(message)
 
-    def _pyproject_declarations(self, path: Path, result: ScanResult) -> list[tuple[str, str]]:
-        """Each declaration with its optional-dependency group ("" for none)."""
-        content = self._read(path, result)
+    @staticmethod
+    def _longest_dotted_key(text: str) -> int:
+        """The most dots between two TOML structure characters outside strings and
+        comments, in one linear pass: a dotted key or table name has that many.
+
+        A string is skipped without ending the count, since a quoted part such as
+        "" or 'a' is still one part of a dotted key.
+        """
+        longest = dots = 0
+        position = 0
+        while True:
+            found = _TOML_SPECIAL.search(text, position)
+            if found is None:
+                return max(longest, dots)
+            char, position = found.group(), found.end()
+            if char == ".":
+                dots += 1
+            elif char in "\"'":
+                position = _toml_string_end(text, position, char)
+            else:
+                longest, dots = max(longest, dots), 0
+                if char == "#":
+                    newline = text.find("\n", position)
+                    position = len(text) if newline < 0 else newline
+
+    def _pyproject_declarations(self, result: ScanResult) -> list[tuple[str, str, str | None]]:
+        """Each declaration with its group ("" for none) and, when it is not translated,
+        why."""
+        content = self._read("pyproject.toml", result)
         if content is None:
+            return []
+        if len(content) > _PYPROJECT_BUDGET:
+            result.scan_failures.append("pyproject.toml: exceeds the size limit: not read")
+            return []
+        if self._longest_dotted_key(content) > _LONGEST_DOTTED_KEY:
+            result.scan_failures.append(
+                "pyproject.toml: dotted key exceeds the length limit: not read"
+            )
             return []
         try:
             data = tomllib.loads(content)
-        except (tomllib.TOMLDecodeError, RecursionError):
+        except (ValueError, RecursionError, MemoryError):
+            # TOMLDecodeError is a ValueError; tomllib raises a plain one for a decimal
+            # integer past CPython's limit on digits it converts.
             result.scan_failures.append("pyproject.toml: invalid TOML")
             return []
-        declarations: list[tuple[str, str]] = []
+        declarations: list[tuple[str, str, str | None]] = []
         project = data.get("project", {})
         if not isinstance(project, dict):
             result.scan_failures.append("pyproject.toml: invalid project table")
             return []
-        deps = project.get("dependencies", [])
-        if isinstance(deps, list) and all(isinstance(value, str) for value in deps):
-            declarations.extend((value, "") for value in deps)
-        else:
-            result.scan_failures.append("pyproject.toml: invalid project dependencies")
+        failures: dict[str, None] = {}
+        gaps: dict[str, None] = {}
+
+        def strings(value: Any, group: str, failure: str) -> None:
+            if isinstance(value, list) and all(isinstance(item, str) for item in value):
+                declarations.extend((item, group, None) for item in value)
+            else:
+                failures[failure] = None
+
+        strings(project.get("dependencies", []), "", "pyproject.toml: invalid project dependencies")
         optional = project.get("optional-dependencies", {})
         if isinstance(optional, dict):
             for extra, values in optional.items():
-                if isinstance(values, list) and all(isinstance(value, str) for value in values):
-                    declarations.extend((value, str(extra)) for value in values)
-                else:
-                    result.scan_failures.append("pyproject.toml: invalid optional dependencies")
+                strings(values, str(extra), "pyproject.toml: invalid optional dependencies")
+        build = data.get("build-system", {})
+        strings(
+            build.get("requires", []) if isinstance(build, dict) else None,
+            "build-system",
+            "pyproject.toml: invalid build-system requires",
+        )
+        self._dependency_groups(data.get("dependency-groups", {}), declarations, failures)
         tool = data.get("tool", {})
-        poetry: Any = tool.get("poetry", {}) if isinstance(tool, dict) else {}
+        tool = tool if isinstance(tool, dict) else {}
+        self._uv_declarations(tool.get("uv", {}), declarations, failures, gaps, strings)
+        self._pdm_declarations(tool.get("pdm", {}), declarations, failures, gaps, strings)
+        self._poetry_declarations(tool.get("poetry", {}), declarations, failures, gaps)
+        result.scan_failures.extend(failures)
+        result.surfaces_excluded.extend(gaps)
+        return declarations
+
+    @staticmethod
+    def _dependency_groups(
+        groups: Any, declarations: list[tuple[str, str, str | None]], failures: dict[str, None]
+    ) -> None:
+        """PEP 735 groups. An included group is read as a group of its own; group
+        names are compared in their normal form, as PEP 735 requires."""
+        failure = "pyproject.toml: invalid dependency groups"
+        if not isinstance(groups, dict):
+            failures[failure] = None
+            return
+        names = {canonicalize_name(str(name)) for name in groups}
+        for name, values in groups.items():
+            if not isinstance(values, list):
+                failures[failure] = None
+                continue
+            for value in values:
+                if isinstance(value, str):
+                    declarations.append((value, f"group:{canonicalize_name(str(name))}", None))
+                elif not (
+                    isinstance(value, dict)
+                    and set(value) == {"include-group"}
+                    and isinstance(value["include-group"], str)
+                    and canonicalize_name(value["include-group"]) in names
+                ):
+                    failures[failure] = None
+
+    _UV_GAPS = {
+        "source": "pyproject.toml: uv source not translated",
+        "override": "pyproject.toml: uv override or constraint not followed",
+        "workspace": "pyproject.toml: uv workspace members not followed",
+    }
+
+    @classmethod
+    def _uv_declarations(
+        cls,
+        uv: Any,
+        declarations: list[tuple[str, str, str | None]],
+        failures: dict[str, None],
+        gaps: dict[str, None],
+        strings: Callable[[Any, str, str], None],
+    ) -> None:
+        """uv's development dependencies, and the sources, overrides and constraints
+        that change what an inventoried package resolves to."""
+        failure = "pyproject.toml: invalid uv table"
+        if not isinstance(uv, dict):
+            failures[failure] = None
+            return
+        strings(uv.get("dev-dependencies", []), "uv:dev", failure)
+        workspace = uv.get("workspace", {})
+        if not isinstance(workspace, dict):
+            failures[failure] = None
+        elif workspace.get("members"):
+            # uv sync installs what each member's pyproject.toml declares.
+            gaps[cls._UV_GAPS["workspace"]] = None
+        sources = uv.get("sources", {})
+        if not isinstance(sources, dict):
+            failures[failure] = None
+            sources = {}
+        for name in sources:
+            if cls._is_ai_package(str(name)):
+                # A git, URL, path, workspace or index source replaces the package.
+                declarations.append((str(name), "", "source"))
+                gaps[cls._UV_GAPS["source"]] = None
+        for key in ("override-dependencies", "constraint-dependencies"):
+            values = uv.get(key, [])
+            if not isinstance(values, list) or not all(isinstance(v, str) for v in values):
+                failures[failure] = None
+                continue
+            for value in values:
+                name = cls._PIP_NAME.match(value)
+                if name is not None and cls._is_ai_package(name.group()):
+                    gaps[cls._UV_GAPS["override"]] = None
+                    if key == "override-dependencies":
+                        declarations.append((name.group(), "", "override"))
+
+    @classmethod
+    def _pdm_declarations(
+        cls,
+        pdm: Any,
+        declarations: list[tuple[str, str, str | None]],
+        failures: dict[str, None],
+        gaps: dict[str, None],
+        strings: Callable[[Any, str, str], None],
+    ) -> None:
+        failure = "pyproject.toml: invalid PDM table"
+        if not isinstance(pdm, dict):
+            failures[failure] = None
+            return
+        groups = pdm.get("dev-dependencies", {})
+        if not isinstance(groups, dict):
+            failures[failure] = None
+            groups = {}
+        for group, values in groups.items():
+            strings(values, f"pdm:{group}", failure)
+        resolution = pdm.get("resolution", {})
+        overrides = resolution.get("overrides", {}) if isinstance(resolution, dict) else None
+        if not isinstance(overrides, dict):
+            failures[failure] = None
+            return
+        for name in overrides:
+            if cls._is_ai_package(str(name)):
+                declarations.append((str(name), "", "override"))
+                gaps["pyproject.toml: PDM override not followed"] = None
+
+    def _poetry_declarations(
+        self,
+        poetry: Any,
+        declarations: list[tuple[str, str, str | None]],
+        failures: dict[str, None],
+        gaps: dict[str, None],
+    ) -> None:
         if not isinstance(poetry, dict):
-            result.scan_failures.append(self._POETRY_PROBLEMS["table"])
-            return declarations
-        failures: dict[str, None] = {}
-        gaps: dict[str, None] = {}
+            failures[self._POETRY_PROBLEMS["table"]] = None
+            return
         # The legacy dev-dependencies table is Poetry's dev group. Group labels keep
         # main and group declarations from being compared with each other.
         tables: list[tuple[str, Any]] = [
@@ -1508,15 +2649,11 @@ class RegistryScanner(Scanner):
                 for entry in value if isinstance(value, list) and value else [value]:
                     text, problem = self._poetry_requirement(name, entry)
                     if problem is None:
-                        declarations.append((text, group_label))
+                        declarations.append((text, group_label, None))
                         continue
-                    # The bare name, never compared: what it leaves out is unknown.
-                    declarations.append((name, "poetry:untranslated"))
+                    declarations.append((name, group_label, problem))
                     record = failures if problem == "invalid" else gaps
                     record[self._POETRY_PROBLEMS[problem]] = None
-        result.scan_failures.extend(failures)
-        result.surfaces_excluded.extend(gaps)
-        return declarations
 
     _POETRY_PROBLEMS = {
         "table": "pyproject.toml: invalid Poetry dependencies",
@@ -1575,59 +2712,190 @@ class RegistryScanner(Scanner):
             text += " ; " + " and ".join(f"({c})" for c in conditions)
         return text, None
 
-    def _scan_docker(self, root: Path, result: ScanResult) -> list[RegistryEntryComponent]:
-        components: list[RegistryEntryComponent] = []
-        for filename in (
-            "Dockerfile",
-            "Dockerfile.agent",
-            "docker-compose.yml",
-            "docker-compose.yaml",
-        ):
-            path = root / filename
-            content = self._read(path, result)
+    # Containerfile is the name Podman and Buildah read by default.
+    _DOCKERFILES = ("Dockerfile", "Dockerfile.agent", "Containerfile")
+    # Compose reads the first of the four base names that exists and merges the
+    # first override file; every one of them is read, so none can hide an image.
+    _COMPOSE_FILES = (
+        "compose.yaml",
+        "compose.yml",
+        "docker-compose.yml",
+        "docker-compose.yaml",
+        "compose.override.yml",
+        "compose.override.yaml",
+        "docker-compose.override.yml",
+        "docker-compose.override.yaml",
+    )
+
+    def _scan_docker(self, result: ScanResult) -> list[RegistryEntryComponent]:
+        environment = self._confined().read_bytes(".env", missing_ok=True)
+        if environment is not None:
+            # Read as bytes, so that no encoding fails the collector; nothing in it
+            # is recorded.
+            result.surfaces_scanned.append(".env")
+            if self._names_compose_file(environment):
+                # Compose reads the files it names instead of the default ones.
+                result.surfaces_excluded.append(".env: COMPOSE_FILE not followed")
+        # One component per image, with every file that names it.
+        found: dict[str, list[str]] = {}
+        unresolved: set[str] = set()
+        models: set[str] = set()
+
+        def collect(image: str, filename: str, gaps: Iterable[str]) -> None:
+            files = found.setdefault(image, [])
+            if filename not in files:
+                files.append(filename)
+            if gaps:
+                unresolved.add(image)
+
+        for filename in self._DOCKERFILES:
+            content = self._read(filename, result)
             if content is None:
                 continue
-            if filename.startswith("Dockerfile"):
-                images, gaps = self._dockerfile_images(content)
-                result.surfaces_excluded.extend(f"{filename}: {gap}" for gap in gaps)
-            else:
-                # One whitespace quantifier only: two adjacent ones backtrack quadratically
-                # when a file ends in "image:" followed by a long run of whitespace.
-                images = re.findall(r"(?:FROM|image:)\s*([^\s]+)", content)
-            for raw_image in images:
-                if not any(
-                    word in raw_image.lower()
-                    for word in ("vllm", "ollama", "triton", "tgi", "llama", "model")
-                ):
-                    continue
-                image = redact_text(raw_image)
-                has_digest = bool(re.search(r"@sha256:[0-9a-fA-F]{64}$", raw_image))
-                has_tag = ":" in raw_image.rsplit("/", 1)[-1] and not raw_image.endswith(":latest")
-                risks: list[RiskAssessment] = []
-                if not has_digest:
-                    risks.append(
-                        RiskAssessment(
-                            severity=RiskSeverity.MEDIUM if has_tag else RiskSeverity.HIGH,
-                            category="mutable_image_tag" if has_tag else "version_pinning",
-                            detail=f"Docker image '{image}' lacks an immutable digest pin.",
-                            recommendation="Pin to a SHA256 artifact digest and verify its provenance.",
-                        )
-                    )
-                components.append(
-                    RegistryEntryComponent(
-                        bom_ref=f"registry:docker/{image}",
-                        name=image,
-                        registry_type="docker-hub",
-                        source_path=str(path),
-                        trust_tier=TrustTier.UNKNOWN,
-                        risks=risks,
-                        properties={
-                            "collection_mode": "manifest-reference",
-                            "registry_origin_verified": False,
-                        },
-                    )
-                )
+            images, gaps = self._dockerfile_images(content)
+            result.surfaces_excluded.extend(f"{filename}: {gap}" for gap in gaps)
+            for image in images:
+                collect(image, filename, self._image_gaps(image))
+        for filename in self._COMPOSE_FILES:
+            content = self._read(filename, result)
+            if content is None:
+                continue
+            read = self._compose_images(content)
+            if read is None:
+                result.scan_failures.append(f"{filename}: YAML mapping parse failed or unsupported")
+                continue
+            images, model_references, gaps = read
+            result.surfaces_excluded.extend(f"{filename}: {gap}" for gap in gaps)
+            for image in images:
+                collect(image, filename, self._image_gaps(image))
+            for reference in model_references:
+                # A model Docker Model Runner pulls is AI-related whatever its name.
+                models.add(reference)
+                collect(reference, filename, self._image_gaps(reference))
+        components: list[RegistryEntryComponent] = []
+        noted: set[str] = set()
+        for raw, files in found.items():
+            if not (is_ai_image(raw) or raw in models):
+                continue
+            component = self._image_component(raw, files, raw in unresolved, raw in models)
+            if component is None:
+                for filename in files:
+                    message = f"{filename}: image reference not parsed"
+                    if message not in noted:
+                        noted.add(message)
+                        result.surfaces_excluded.append(message)
+                continue
+            components.append(component)
         return components
+
+    @staticmethod
+    def _names_compose_file(environment: bytes) -> bool:
+        """Whether a .env mentions COMPOSE_FILE, in any letter case.
+
+        Compose's dotenv parser reads statements, not lines: it skips any Unicode
+        space before a name and before "=", and a statement can start right after a
+        closing quote. No line pattern finds every setting, so any mention counts; one
+        in a comment or a value costs only a false gap.
+        """
+        return "COMPOSE_FILE" in environment.decode("utf-8", "replace").upper()
+
+    @staticmethod
+    def _image_gaps(image: str) -> list[str]:
+        """Why an image as written is not the image pulled; the parsers record the gap."""
+        return ["unresolved"] if "$" in image or any(c in image for c in "\"'\\") else []
+
+    @staticmethod
+    def _image_component(
+        raw: str, files: list[str], unresolved: bool, model: bool = False
+    ) -> RegistryEntryComponent | None:
+        properties: dict[str, Any] = {
+            "collection_mode": "manifest-reference",
+            "registry_origin_verified": False,
+        }
+        if model:
+            properties["artifact_type"] = "model"
+        if len(files) > 1:
+            properties["source_paths"] = sorted(files)
+        registry_type: str | None = None
+        registry_uri = None
+        package_url = None
+        if unresolved:
+            # Kept as written, with the gap that says why it is not the image pulled.
+            name = redact_text(raw)
+            has_digest = "@" in raw and _PULLED_DIGEST.fullmatch(raw.rpartition("@")[2]) is not None
+            has_tag = ":" in raw.rsplit("/", 1)[-1] and not raw.endswith(":latest")
+        else:
+            reference = parse_image_reference(raw)
+            if reference is None:
+                return None
+            # A valid reference holds no credential, so it is recorded exactly: a
+            # redacted one could give two tags the same name.
+            name = raw
+            has_digest = reference.pinned
+            has_tag = reference.tag not in (None, "latest")
+            registry_type = "docker-hub" if reference.domain == "docker.io" else "oci"
+            registry_uri = f"https://{reference.domain}"
+            properties["image_repository"] = reference.repository
+            if reference.digest is not None and has_digest:
+                qualifiers = {"repository_url": reference.repository}
+                if reference.tag is not None:
+                    qualifiers["tag"] = reference.tag
+                package_url = PackageURL(
+                    type="oci",
+                    name=reference.path.rsplit("/", 1)[-1],
+                    version=reference.digest,
+                    qualifiers=qualifiers,
+                ).to_string()
+        risks: list[RiskAssessment] = []
+        if not has_digest:
+            risks.append(
+                _risk(
+                    RiskSeverity.MEDIUM if has_tag else RiskSeverity.HIGH,
+                    "mutable_image_tag" if has_tag else "version_pinning",
+                    f"Docker image '{name}' lacks an immutable digest pin.",
+                    "Pin to a SHA256 artifact digest and verify its provenance.",
+                )
+            )
+        return RegistryEntryComponent(
+            bom_ref=f"registry:docker/{name}",
+            name=name,
+            package_url=package_url,
+            registry_type=registry_type,
+            registry_uri=registry_uri,
+            source_path=files[0],
+            trust_tier=TrustTier.UNKNOWN,
+            risks=risks,
+            properties=properties,
+        )
+
+    # The pre-scan bounds YAML's work as Scanner._read_mapping does; the walk below
+    # bounds what merge keys add.
+    _COMPOSE_TOKENS = 20_000
+    _COMPOSE_STEPS = 100_000
+
+    @classmethod
+    def _compose_images(cls, text: str) -> tuple[list[str], list[str], list[str]] | None:
+        """Service images and top-level models in a Compose file, and what was not followed.
+
+        The YAML is composed into nodes, never constructed: an alias is the node it
+        names, not a copy, and values keep the text Compose reads. Merge keys are
+        followed as YAML defines them, once per mapping and within a step budget.
+        None when the file is not a YAML mapping read this way.
+        """
+        try:
+            import yaml
+        except ImportError:
+            return None
+        try:
+            for index, _ in enumerate(yaml.scan(text, Loader=yaml.SafeLoader)):
+                if index >= cls._COMPOSE_TOKENS:
+                    return None
+            root = yaml.compose(text, Loader=yaml.SafeLoader)
+            if root is None:
+                return [], [], []
+            return _ComposeWalk(cls._COMPOSE_STEPS).images(root)
+        except (yaml.YAMLError, RecursionError, ValueError):
+            return None
 
     # BuildKit's word separators; a no-break space is part of a word.
     _DOCKER_WORD = re.compile(r"[^\t\v\f\r ]+")
@@ -1638,11 +2906,8 @@ class RegistryScanner(Scanner):
         "\u2009\u200a\u2028\u2029\u202f\u205f\u3000"
     )
     # Go's \s, which has no \v.
-    _DOCKER_DIRECTIVE = re.compile(
-        r"#[\t\n\f\r ]*([A-Za-z][A-Za-z0-9]*)[\t\n\f\r ]*=[\t\n\f\r ]*(.+?)[\t\n\f\r ]*"
-    )
-    # A heredoc word: an optional descriptor, <<, an optional - and the terminator.
-    _HEREDOC = re.compile(r"[0-9]*<<(-?)[\t\n\f\r ]*([^<]*)")
+    _GO_REGEX_SPACE = "\t\n\f\r "
+    _DIRECTIVE_NAME = re.compile(r"[A-Za-z][A-Za-z0-9]*")
     # The substitutions BuildKit's lexer keeps as written when no variable is set.
     # The others can move word boundaries or fail the line.
     _DOLLAR = r"\$(?:\{(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[-@*#?$!])\}|(?!\{))"
@@ -1658,6 +2923,39 @@ class RegistryScanner(Scanner):
     _QUOTED_ESCAPE = re.compile(r'\\([\\"$])')
 
     @classmethod
+    def _directive(cls, line: str) -> tuple[str, str] | None:
+        """A parser directive as BuildKit's ^#\\s*([a-zA-Z][a-zA-Z0-9]*)\\s*=\\s*(.+?)\\s*$
+        matches it, in linear time.
+
+        The value is the rest of the line without the white space around it; when
+        the rest is only white space, the lazy group still takes its last character.
+        """
+        if not line.startswith("#"):
+            return None
+        rest = line[1:].lstrip(cls._GO_REGEX_SPACE)
+        name = cls._DIRECTIVE_NAME.match(rest)
+        if name is None:
+            return None
+        rest = rest[name.end() :].lstrip(cls._GO_REGEX_SPACE)
+        if not rest.startswith("="):
+            return None
+        rest = rest[1:]
+        value = rest.strip(cls._GO_REGEX_SPACE) or rest[-1:]
+        return (name.group(), value) if value else None
+
+    @staticmethod
+    def _heredoc_word(word: str) -> tuple[bool, str] | None:
+        """A raw word as [0-9]*<<(-?)[\\t\\n\\f\\r ]*([^<]*) matches it whole, in linear
+        time: whether leading tabs are removed, and the terminator as written."""
+        start = len(word) - len(word.lstrip("0123456789"))
+        if not word.startswith("<<", start):
+            return None
+        rest = word[start + 2 :]
+        chomp = rest.startswith("-")
+        rest = rest[chomp:].lstrip("\t\n\f\r ")
+        return None if "<" in rest else (chomp, rest)
+
+    @classmethod
     def _dockerfile_images(cls, content: str) -> tuple[list[str], list[str]]:
         """Images named by FROM instructions, as written, and what was not collected.
 
@@ -1669,10 +2967,10 @@ class RegistryScanner(Scanner):
         """
         lines = content.removeprefix("\ufeff").split("\n")
         for line in lines:
-            directive = cls._DOCKER_DIRECTIVE.fullmatch(line.rstrip("\r").lstrip(cls._GO_SPACE))
+            directive = cls._directive(line.rstrip("\r").lstrip(cls._GO_SPACE))
             if directive is None:
                 break
-            if directive.group(1).lower() == "escape" and directive.group(2) != "\\":
+            if directive[0].lower() == "escape" and directive[1] != "\\":
                 # Another escape character changes where instructions end.
                 return [], ["escape parser directive not followed"]
         images: list[str] = []
@@ -1708,7 +3006,7 @@ class RegistryScanner(Scanner):
     @staticmethod
     def _command(word: str) -> str:
         # As Go's strings.ToLower does; str.lower() makes U+0130 two characters.
-        return word.replace("\u0130", "i").lower()
+        return word.replace("İ", "i").lower()
 
     @classmethod
     def _dockerfile_instructions(cls, lines: list[str], gaps: list[str]) -> Iterator[str]:
@@ -1772,14 +3070,14 @@ class RegistryScanner(Scanner):
             return None
         heredocs: list[tuple[str, bool]] = []
         for word in raw:
-            match = cls._HEREDOC.fullmatch(word)
-            if match is None or not match.group(2):
+            match = cls._heredoc_word(word)
+            if match is None or not match[1]:
                 continue
-            name = cls._shell_words(match.group(2), raw=False)
+            name = cls._shell_words(match[1], raw=False)
             if name is None:
                 return None
             if len(name) == 1:
-                heredocs.append((name[0], match.group(1) == "-"))
+                heredocs.append((name[0], match[0]))
         return heredocs
 
     @classmethod
@@ -1829,7 +3127,7 @@ class RegistryScanner(Scanner):
         """
         try:
             first, second = Requirement(one), Requirement(other)
-        except InvalidRequirement:
+        except (InvalidRequirement, RecursionError):
             return False
         if str(first.marker or "") != str(second.marker or ""):
             return False
@@ -1837,10 +3135,280 @@ class RegistryScanner(Scanner):
         state.add(first)
         return state.add(second)
 
-    def _is_ai_package(self, name: str) -> bool:
-        normal = re.sub(r"[-_.]+", "-", name).lower() if len(name) <= 214 else ""
+    @staticmethod
+    def _is_ai_package(name: str) -> bool:
+        """Whether a PyPI or npm package name is in the catalog, after normalisation.
+
+        pip, uv and Poetry treat "Llama.Index", "llama_index" and "llama-index" as
+        one package, so every spelling matches as its normal form does.
+        """
+        normal = _SEPARATORS.sub("-", name).lower()
+        base = normal
+        scope, slash, rest = normal.partition("/")
+        if slash and scope.startswith("@"):
+            if scope in AI_PACKAGE_SCOPES:
+                return True
+            base = rest
         return (
             normal in AI_PACKAGE_NAMES
-            or normal.partition("/")[0] in AI_PACKAGE_SCOPES
-            or any(pattern.search(name) for pattern in AI_PACKAGE_PATTERNS)
+            or base.startswith(AI_PACKAGE_PREFIXES)
+            or not AI_PACKAGE_WORDS.isdisjoint(base.split("-"))
         )
+
+
+class _ComposeWalk:
+    """Service images found by walking a Compose file's YAML nodes.
+
+    A mapping's keys are its own keys, then those of the mappings its merge keys
+    name, earlier ones first, as YAML's merge key type defines. Each mapping's keys
+    are worked out once; a mapping that merges itself, directly or through
+    others, is a gap rather than a loop. An alias is the node it names, so each
+    image, model, build, inline Dockerfile and build path node is read once,
+    however many services share it, through aliases or merge keys.
+    """
+
+    _STR = "tag:yaml.org,2002:str"
+    _NULL = "tag:yaml.org,2002:null"
+    # The scalars YAML 1.1 and 1.2 both read as null.
+    _NULL_TEXT = frozenset({"", "~", "null", "Null", "NULL"})
+    # Linux's PATH_MAX. A longer build path is not followed, even one that names the
+    # project root, and is never split.
+    _LONGEST_PATH = 4_096
+
+    def __init__(self, budget: int) -> None:
+        self.budget = budget
+        self.gaps: dict[str, None] = {}
+        self._keys: dict[int, dict[str, Any]] = {}
+        self._open: set[int] = set()
+        self._read: set[tuple[str, int]] = set()
+        self._paths: dict[int, list[str] | None] = {}
+
+    def _spend(self, steps: int = 1) -> None:
+        self.budget -= steps
+        if self.budget < 0:
+            raise ValueError("compose walk budget exhausted")
+
+    def _first(self, role: str, node: Any) -> bool:
+        """Whether a node is read in this role for the first time."""
+        read = (role, id(node))
+        if read in self._read:
+            return False
+        self._read.add(read)
+        return True
+
+    def keys(self, node: Any) -> dict[str, Any]:
+        import yaml
+
+        known = self._keys.get(id(node))
+        if known is not None:
+            return known
+        if not isinstance(node, yaml.MappingNode):
+            raise ValueError("expected a mapping")
+        if id(node) in self._open:
+            self.gaps["YAML merge key cycle not followed"] = None
+            return {}
+        self._open.add(id(node))
+        own: dict[str, Any] = {}
+        merged: list[Any] = []
+        for key, value in node.value:
+            self._spend()
+            if key.tag == "tag:yaml.org,2002:merge":
+                merged.extend(value.value if isinstance(value, yaml.SequenceNode) else [value])
+            elif isinstance(key, yaml.ScalarNode):
+                if key.tag == "tag:yaml.org,2002:binary" or not key.tag.startswith(
+                    "tag:yaml.org,2002:"
+                ):
+                    # Compose would read another key than the text, such as the
+                    # base64-decoded name of a !!binary key.
+                    raise ValueError("tagged key")
+                if key.value in own:
+                    # Compose refuses a mapping with a repeated key.
+                    raise ValueError("duplicate key")
+                own[key.value] = value
+            else:
+                raise ValueError("complex key")
+        result = dict(own)
+        for source in merged:
+            inherited = self.keys(source)
+            self._spend(len(inherited))
+            for name, value in inherited.items():
+                result.setdefault(name, value)
+        self._open.discard(id(node))
+        self._keys[id(node)] = result
+        return result
+
+    def images(self, root: Any) -> tuple[list[str], list[str], list[str]]:
+        """Service images, the references of top-level models, and the gaps."""
+        import yaml
+
+        top = self.keys(root)
+        if "include" in top:
+            self.gaps["include not followed"] = None
+        images: list[str] = []
+        models: list[str] = []
+        declared = top.get("models")
+        if declared is not None and not self._empty(declared):
+            for model in self.keys(declared).values():
+                reference = (
+                    model if isinstance(model, yaml.ScalarNode) else self.keys(model).get("model")
+                )
+                if reference is not None and self._first("model", reference):
+                    models.extend(self._image(reference))
+        services = top.get("services")
+        if services is None or self._empty(services):
+            return images, models, list(self.gaps)
+        for service in self.keys(services).values():
+            fields = self.keys(service)
+            image = fields.get("image")
+            if image is not None and self._first("image", image):
+                images.extend(self._image(image))
+            build = fields.get("build")
+            if build is not None and self._first("build", build):
+                images.extend(self._build(build))
+            extends = fields.get("extends")
+            if isinstance(extends, yaml.MappingNode) and "file" in self.keys(extends):
+                self.gaps["extends not followed"] = None
+        return images, models, list(self.gaps)
+
+    def _empty(self, node: Any) -> bool:
+        import yaml
+
+        return isinstance(node, yaml.ScalarNode) and (
+            node.value in self._NULL_TEXT and node.tag in (self._NULL, self._STR, "!reset")
+        )
+
+    def _text(self, node: Any, gap: str) -> str | None:
+        """The text Compose reads from a scalar: "" when it holds none, None after
+        recording the gap.
+
+        An untagged or !!str scalar, or one with Compose's !override, is read as
+        written, and !reset or null hold no value. Any other tag can make Compose
+        read other text, such as base64-decoded !!binary, or nothing at all.
+        """
+        if node.tag == "!reset" or (node.tag == self._NULL and node.value in self._NULL_TEXT):
+            return ""
+        if node.tag not in (self._STR, "!override"):
+            self.gaps[gap] = None
+            return None
+        return str(node.value)
+
+    def _image(self, node: Any) -> list[str]:
+        import yaml
+
+        if not isinstance(node, yaml.ScalarNode):
+            self.gaps["image not parsed"] = None
+            return []
+        value = (self._text(node, "tagged image value not resolved") or "").strip()
+        if not value:
+            # No image, such as an override file's !reset, or a gap recorded.
+            return []
+        if "$" in value:
+            # Compose fills ${NAME} from the environment and .env.
+            self.gaps["image substitution not resolved"] = None
+        return [value]
+
+    def _build(self, node: Any) -> list[str]:
+        """A build's FROM images when its Dockerfile is inline or is a root Dockerfile
+        the collector reads; otherwise a gap."""
+        import yaml
+
+        unread = "build context not followed"
+        context: list[str] | None
+        dockerfile: list[str] | None
+        if isinstance(node, yaml.ScalarNode):
+            text = self._text(node, "build not followed")
+            if not text:
+                # No build, such as an override file's !reset, or a gap recorded.
+                return []
+            context, dockerfile = self._parts(node, text), ["Dockerfile"]
+        elif isinstance(node, yaml.MappingNode):
+            fields = self.keys(node)
+            if self._named_contexts(fields):
+                # BuildKit uses a named context in place of the image that a FROM
+                # line of that name pulls.
+                self.gaps[unread] = None
+            if "dockerfile_inline" in fields:
+                return self._inline(fields["dockerfile_inline"])
+            context = self._path(fields.get("context"), ".")
+            dockerfile = self._path(fields.get("dockerfile"), "Dockerfile")
+        else:
+            self.gaps["build not followed"] = None
+            return []
+        if not (
+            context == []
+            and dockerfile is not None
+            and len(dockerfile) == 1
+            and dockerfile[0] in RegistryScanner._DOCKERFILES
+        ):
+            # The Dockerfile it builds from is not one the collector reads.
+            self.gaps[unread] = None
+        return []
+
+    def _named_contexts(self, fields: dict[str, Any]) -> bool:
+        """Whether a build names contexts: Compose's additional_contexts, or the
+        contexts that docker buildx bake reads from x-bake in the same file."""
+        import yaml
+
+        bake = fields.get("x-bake")
+        if isinstance(bake, yaml.MappingNode):
+            bake = self.keys(bake).get("contexts")
+        return any(
+            node is not None and not self._unset(node)
+            for node in (fields.get("additional_contexts"), bake)
+        )
+
+    def _unset(self, node: Any) -> bool:
+        """Whether a node holds no entries: null, empty, or Compose's !reset."""
+        import yaml
+
+        if node.tag == "!reset":
+            return True
+        return self._empty(node) if isinstance(node, yaml.ScalarNode) else not node.value
+
+    def _path(self, node: Any, default: str) -> list[str] | None:
+        """A build path setting's parts, its default's when unset, or None when the
+        collector does not follow it."""
+        import yaml
+
+        if node is None:
+            return self._local(default)
+        if not isinstance(node, yaml.ScalarNode):
+            return None
+        text = self._text(node, "build context not followed")
+        if text is None:
+            return None
+        return self._parts(node, text) if text else self._local(default)
+
+    def _parts(self, node: Any, text: str) -> list[str] | None:
+        """A scalar's path parts, worked out once however many builds share it."""
+        if id(node) not in self._paths:
+            self._paths[id(node)] = self._local(text)
+        return self._paths[id(node)]
+
+    @classmethod
+    def _local(cls, path: str) -> list[str] | None:
+        """A relative path's parts as Compose resolves it, None for any other path.
+
+        An absolute path, such as "/" for the root of the host, is not the project
+        root; a backslash separates paths on Windows. A path too long to open is not
+        split at all.
+        """
+        if len(path) > cls._LONGEST_PATH or path.startswith("/") or "\\" in path:
+            return None
+        return RegistryScanner._normalised(path.split("/"))
+
+    def _inline(self, node: Any) -> list[str]:
+        """The FROM images of an inline Dockerfile, parsed once however many builds
+        share it."""
+        import yaml
+
+        text = self._text(node, "build not followed") if isinstance(node, yaml.ScalarNode) else None
+        if not text:
+            self.gaps["build not followed"] = None
+            return []
+        if not self._first("dockerfile_inline", node):
+            return []
+        images, gaps = RegistryScanner._dockerfile_images(text)
+        for gap in gaps:
+            self.gaps[f"dockerfile_inline {gap}"] = None
+        return images

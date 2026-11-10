@@ -31,6 +31,7 @@ Reference material: exact behavior, fields and limits.
 | [Standard exports](standard-exports.md) | What CycloneDX, SPDX, SARIF and VEX output carry, the extension property names, projection versions and the SARIF rule catalog |
 | [Source binding](verification-source-binding.md) | How static MCP records are bound to their configuration and reconciled with a project |
 | [TypeScript inventory](typescript-inventory.md) | Static collection of MCP tool registrations from TypeScript servers, and its limits |
+| [Registry collector](registry-collector.md) | Which packages and images the registry collector inventories, what it reads, its gaps, findings and limits |
 | [Lockfile evidence](npm-lockfile-evidence.md) | What the registry collector records from npm, pnpm, Yarn, uv and Poetry lockfiles |
 | [Deployment evidence](deployment-evidence.md) | The optional deployment profile and its scoped authority claims |
 | [Security regression corpus](../benchmarks/README.md) | The committed security fixtures CI enforces, and what passing them does not show |

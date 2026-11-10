@@ -198,6 +198,37 @@ def test_private_origin_exclusion_sends_only_lockfile_backed_public_packages(tmp
     assert quiet.calls == []
 
 
+def test_a_package_resolved_from_another_registry_is_sent_unless_excluded(tmp_path):
+    # The registry collector names the registry a lockfile resolved a package from in
+    # its package URL. That qualifier is accepted for the component's own registry, so
+    # the default (private registries are sent) and both exclusions apply to it.
+    (tmp_path / "package.json").write_text(json.dumps({"dependencies": {"mcp-billing": "1.0.0"}}))
+    resolved = "https://npm.acme.internal/mcp-billing/-/mcp-billing-1.0.0.tgz"
+    record = {"version": "1.0.0", "resolved": resolved}
+    lock = {"lockfileVersion": 3, "packages": {"node_modules/mcp-billing": record}}
+    (tmp_path / "package-lock.json").write_text(json.dumps(lock))
+    bom = AIBOM(components=RegistryScanner().scan(tmp_path).components)
+    (component,) = bom.components
+    assert component.package_url == (
+        "pkg:npm/mcp-billing@1.0.0?repository_url=https://npm.acme.internal"
+    )
+    sent = Scripted(clean)
+    assert fetch_advisories(bom, transport=sent).complete
+    assert sent_names(sent) == ["mcp-billing"]
+    named = Scripted(clean)
+    report = fetch_advisories(bom, transport=named, exclude=["mcp-billing"])
+    assert named.calls == [] and report.excluded[0]["reason"] == "excluded by the operator"
+    # A qualifier that names another registry than the component's is not its identity.
+    forged = component.model_copy(
+        update={
+            "package_url": "pkg:npm/mcp-billing@1.0.0?repository_url=https://registry.npmjs.org"
+        }
+    )
+    quiet = Scripted(clean)
+    report = fetch_advisories(AIBOM(components=[forged]), transport=quiet)
+    assert quiet.calls == [] and report.errors
+
+
 @pytest.mark.parametrize(
     "lock_name, public_source, private_source",
     [
