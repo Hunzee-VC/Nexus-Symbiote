@@ -15,6 +15,7 @@ from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, BinaryIO, cast
 
+from nexus_symbiote import limits
 from nexus_symbiote.core.enums import (
     RiskSeverity,
     SerializationSafety,
@@ -23,7 +24,7 @@ from nexus_symbiote.core.enums import (
 from nexus_symbiote.core.hashing import descriptor_binding, open_regular_file, parse_json_strict
 from nexus_symbiote.core.models import ModelComponent, RiskAssessment
 from nexus_symbiote.scanners.base import Scanner, ScanResult
-from nexus_symbiote.utils.confined import MAX_HASH_BYTES, ConfinedCollection
+from nexus_symbiote.utils.confined import ConfinedCollection
 from nexus_symbiote.utils.crypto import SigstoreArtifactPolicy, verify_sigstore_bundle
 from nexus_symbiote.utils.tensors import fingerprint_stream
 
@@ -63,8 +64,6 @@ SIGNING_FILES = [
     "signature.json",
     "model.intoto.jsonl",
 ]
-
-MAX_HASH_SIZE = 5 * 1024 * 1024 * 1024
 
 MAX_MODEL_HEADER_BYTES = 1024 * 1024
 MAX_PICKLE_INSPECTION_BYTES = 65536
@@ -220,16 +219,17 @@ class _HashingModelReader:
         self.digest = hashlib.sha256()
         self.bytes_read = 0
         self.prefix = bytearray()
+        self.limit = limits.current().model_bytes
 
     def fileno(self) -> int:
         return self.stream.fileno()
 
     def read(self, size: int) -> bytes:
-        if self.bytes_read > MAX_HASH_SIZE:
+        if self.bytes_read > self.limit:
             raise OSError("model artifact exceeds the hash byte limit")
-        content = self.stream.read(min(size, MAX_HASH_SIZE + 1 - self.bytes_read))
+        content = self.stream.read(min(size, self.limit + 1 - self.bytes_read))
         self.bytes_read += len(content)
-        if self.bytes_read > MAX_HASH_SIZE:
+        if self.bytes_read > self.limit:
             raise OSError("model artifact exceeds the hash byte limit")
         self.digest.update(content)
         self.prefix.extend(content[: max(0, MAX_MODEL_HEADER_BYTES + 8 - len(self.prefix))])
@@ -249,7 +249,7 @@ def inspect_model_artifact(
     never attributed to a pathname that now names other bytes.
     """
     before = os.fstat(stream.fileno())
-    if before.st_size > MAX_HASH_SIZE:
+    if before.st_size > limits.current().model_bytes:
         raise OSError("model artifact exceeds the hash byte limit")
     observed = _HashingModelReader(stream)
     safety, explanation = inspect_model_format(path, stream=cast(BinaryIO, observed))
@@ -270,9 +270,10 @@ def safetensors_fingerprint(
 ) -> dict[str, str]:
     """Bind metadata and complete-file hash to one confined artifact observation."""
     metadata: dict[str, str] = {}
+    model_bytes = limits.bound("model-bytes")
     with (
-        ConfinedCollection(root, [], max_total_bytes=MAX_HASH_BYTES) as files,
-        files.open_regular(path, max_bytes=MAX_HASH_BYTES) as stream,
+        ConfinedCollection(root, [], max_total_bytes=model_bytes) as files,
+        files.open_regular(path, max_bytes=model_bytes) as stream,
     ):
         safety, _, digest = inspect_model_artifact(path, stream=stream, metadata=metadata)
     if safety != SerializationSafety.SAFE or not metadata:
@@ -294,9 +295,9 @@ class ModelScanner(Scanner):
     def scan(self, project_root: Path) -> ScanResult:
         result = ScanResult(scanner_name=self.name)
         # One deterministic walk and one aggregate budget for all model/config
-        # reads. Large weights are streamed; metadata remains capped at four MiB.
+        # reads. Large weights are streamed; metadata stays under the file-bytes limit.
         with self._collection(
-            project_root, result, max_total_bytes=MAX_HASH_SIZE + 32 * 1024 * 1024
+            project_root, result, max_total_bytes=limits.bound("model-total-bytes")
         ) as files:
             self._discovered_paths = tuple(files.root / path for path in files.iter_files())
             model_dirs = sorted(
@@ -329,7 +330,9 @@ class ModelScanner(Scanner):
             fmt_key, fmt_name = detected
             fingerprint: dict[str, str] = {}
             try:
-                with self._files.open_regular(path, max_bytes=MAX_HASH_SIZE) as stream:
+                with self._files.open_regular(
+                    path, max_bytes=limits.bound("model-bytes")
+                ) as stream:
                     safety, format_evidence, weight_hash = inspect_model_artifact(
                         path, stream=stream, metadata=fingerprint
                     )
@@ -445,7 +448,9 @@ class ModelScanner(Scanner):
         for name in ("tokenizer.json", "tokenizer.model", "spiece.model"):
             path = model_dir / name
             if path in self._discovered_paths and self._files is not None:
-                return self._files.hash_file(path)
+                # Tokenizers are hashed as streamed artifacts, like weights; several
+                # current vocabularies exceed the in-memory file-bytes limit.
+                return self._files.hash_file(path, max_bytes=limits.bound("model-bytes"))
         return None
 
     def _hash_chat_template(self, model_dir: Path, config: dict[str, Any] | None) -> str | None:

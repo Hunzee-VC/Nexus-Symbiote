@@ -1,7 +1,9 @@
 """Bounded local collection with descriptor-relative, no-symlink reads.
 
 This is an offline collector boundary, not a process sandbox. It requires POSIX
-``dir_fd`` and ``O_NOFOLLOW`` support and fails closed where unavailable.
+``dir_fd`` and ``O_NOFOLLOW`` support and fails closed where unavailable. Its
+size, entry and depth bounds are the operator limits in ``nexus_symbiote.limits``
+unless a caller passes a fixed bound for a particular input.
 """
 
 from __future__ import annotations
@@ -9,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import math
 import os
 import stat
 from collections.abc import Iterable, Iterator
@@ -16,28 +19,97 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, BinaryIO, cast
 
+from nexus_symbiote import limits
 from nexus_symbiote.core.hashing import descriptor_binding
+from nexus_symbiote.limits import Bound
 
-MAX_FILE_BYTES = 4 * 1024 * 1024
-MAX_ENTRIES = 20_000
-MAX_DEPTH = 32
-MAX_TOTAL_BYTES = 32 * 1024 * 1024
-MAX_HASH_BYTES = 5 * 1024 * 1024 * 1024
+# Defaults only: a collection reads the operator's current limits when it is created.
+MAX_FILE_BYTES = limits.DEFAULTS.file_bytes
+MAX_ENTRIES = limits.DEFAULTS.entries
+MAX_DEPTH = limits.DEFAULTS.depth
+MAX_TOTAL_BYTES = limits.DEFAULTS.total_bytes
+MAX_HASH_BYTES = limits.DEFAULTS.model_bytes
 DEFAULT_EXCLUDES = frozenset({".git", "node_modules", "__pycache__", ".venv", "venv"})
+_MAX_CHUNK_BYTES = 4 * 1024 * 1024
 
 
 class CollectionError(ValueError):
     """A collection input exceeded the supported safe boundary."""
 
 
+class LimitExceededError(CollectionError):
+    """A read would pass one of the collection's bounds."""
+
+    def __init__(self, bound: Bound) -> None:
+        super().__init__(bound.exceeded())
+        self.bound = bound
+
+
+def _bound(value: int | Bound | None, name: str) -> Bound:
+    if value is None:
+        return limits.bound(name)
+    if isinstance(value, Bound):
+        return value
+    return Bound(value, name, configurable=False)
+
+
+class ByteBudget:
+    """Bytes read so far against one named total bound."""
+
+    def __init__(self, bound: Bound) -> None:
+        self.bound = bound
+        self.used = 0
+        self.exhausted = False
+
+    def remaining(self) -> int:
+        return self.bound.value - self.used
+
+    def refuse(self) -> LimitExceededError:
+        self.exhausted = True
+        return LimitExceededError(self.bound)
+
+    def charge(self, count: int) -> None:
+        self.used += count
+        if self.used > self.bound.value:
+            raise self.refuse()
+
+
+def _undecodable(name: str) -> bool:
+    return any("\ud800" <= character <= "\udfff" for character in name)
+
+
+def _escaped(name: str) -> str:
+    """Show the bytes a non-UTF-8 name was decoded from, without lone surrogates."""
+    return "".join(
+        f"\\x{ord(character) - 0xDC00:02x}"
+        if "\udc80" <= character <= "\udcff"
+        else f"\\u{ord(character):04x}"
+        if "\ud800" <= character <= "\udfff"
+        else character
+        for character in name
+    )
+
+
+def _refuse_constant(_: str) -> Any:
+    raise CollectionError("nonfinite JSON")
+
+
+def _finite_float(text: str) -> float:
+    value = float(text)
+    if not math.isfinite(value):
+        raise CollectionError("nonfinite JSON")
+    return value
+
+
 def hash_confined_file(root: Path, source_path: str | Path, algorithm: str = "sha256") -> str:
     """Compatibility hash API for a BOM-supplied path beneath a caller root."""
     if algorithm not in {"sha256", "sha384", "sha512"}:
         raise OSError("unsupported security hash algorithm")
+    model_bytes = limits.bound("model-bytes")
     try:
         with (
-            ConfinedCollection(root, [], max_total_bytes=MAX_HASH_BYTES) as files,
-            files.open_regular(source_path, max_bytes=MAX_HASH_BYTES) as stream,
+            ConfinedCollection(root, [], max_total_bytes=model_bytes) as files,
+            files.open_regular(source_path, max_bytes=model_bytes) as stream,
         ):
             digest = hashlib.new(algorithm)
             while chunk := stream.read(65536):
@@ -50,11 +122,14 @@ def hash_confined_file(root: Path, source_path: str | Path, algorithm: str = "sh
 class _BoundedReader(io.RawIOBase):
     """Explicit-size reads only; enforce both stream and collection budgets."""
 
-    def __init__(self, fd: int, owner: ConfinedCollection, path: Path, limit: int) -> None:
+    def __init__(
+        self, fd: int, owner: ConfinedCollection, path: Path, limit: Bound, budget: ByteBudget
+    ) -> None:
         self._fd = fd
         self._owner = owner
         self._path = path
         self._limit = limit
+        self._budget = budget
         self._read = 0
 
     def readable(self) -> bool:
@@ -66,14 +141,17 @@ class _BoundedReader(io.RawIOBase):
     def read(self, size: int = -1) -> bytes:
         if self.closed:
             raise ValueError("read of closed collection stream")
-        if not 0 <= size <= MAX_FILE_BYTES:
+        if not 0 <= size <= _MAX_CHUNK_BYTES:
             raise CollectionError("explicit bounded read size required")
-        raw = os.read(self._fd, min(size, self._limit + 1 - self._read))
+        raw = os.read(self._fd, min(size, self._limit.value + 1 - self._read))
         self._read += len(raw)
-        self._owner._bytes_read += len(raw)
-        if self._read > self._limit or self._owner._bytes_read > self._owner.max_total_bytes:
-            self._owner._fail(self._path, "stream byte limit exceeded")
-            raise CollectionError("stream byte limit exceeded")
+        try:
+            if self._read > self._limit.value:
+                raise LimitExceededError(self._limit)
+            self._budget.charge(len(raw))
+        except LimitExceededError as exc:
+            self._owner._fail(self._path, exc.bound.exceeded())
+            raise
         return raw
 
     def close(self) -> None:
@@ -94,9 +172,12 @@ def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 class ConfinedCollection:
     """Read regular files beneath a pinned root without following symlinks.
 
-    Limits cover individual file bytes, directory entries over the complete walk,
-    and directory depth. A directory exceeding the entry budget is not partially
-    returned. Within those bounds traversal is lexical and deterministic.
+    Limits cover individual file bytes, the bytes read in total, directory entries
+    over the complete walk, and directory depth. A limit left unset is the
+    operator's current one (``nexus_symbiote.limits``); an integer is a fixed bound
+    for this input. Reaching any limit records a failure that names it. A
+    directory exceeding the entry budget is not partially returned. Within those
+    bounds traversal is lexical and deterministic.
     """
 
     def __init__(
@@ -106,34 +187,43 @@ class ConfinedCollection:
         exclusions: list[str] | None = None,
         *,
         exclude_paths: Iterable[str | Path] = (),
-        max_file_bytes: int = MAX_FILE_BYTES,
-        max_entries: int = MAX_ENTRIES,
-        max_depth: int = MAX_DEPTH,
-        max_total_bytes: int = MAX_TOTAL_BYTES,
+        max_file_bytes: int | Bound | None = None,
+        max_entries: int | Bound | None = None,
+        max_depth: int | Bound | None = None,
+        max_total_bytes: int | Bound | None = None,
     ) -> None:
-        self.root = Path(os.path.abspath(root))
+        requested = Path(root)
+        # Kept unnormalized so ".." is walked through the real parent, as the kernel
+        # resolves it, instead of being collapsed textually past a symlink.
+        self._requested_root = requested if requested.is_absolute() else Path.cwd() / requested
+        self.root = Path(os.path.abspath(self._requested_root))
         self.failures = failures
         self.exclusions = exclusions if exclusions is not None else []
-        self.max_file_bytes = max_file_bytes
-        self.max_entries = max_entries
-        self.max_depth = max_depth
-        self.max_total_bytes = max_total_bytes
-        self._bytes_read = 0
-        self._entry_budget = [max_entries]
+        self._file_bound = _bound(max_file_bytes, "file-bytes")
+        self._entry_bound = _bound(max_entries, "entries")
+        self._depth_bound = _bound(max_depth, "depth")
+        self._budget = ByteBudget(_bound(max_total_bytes, "total-bytes"))
+        self.max_file_bytes = self._file_bound.value
+        self.max_entries = self._entry_bound.value
+        self.max_depth = self._depth_bound.value
+        self.max_total_bytes = self._budget.bound.value
+        self._entry_budget = [self.max_entries]
+        self._entries_exhausted = False
         self._root_fd: int | None = None
-        self._excluded: list[Path] = []
+        self._excluded: set[tuple[str, ...]] = set()
         self._invalid_policy = False
+        root_text = str(self.root)
+        prefix = root_text.rstrip(os.sep) + os.sep
         for value in exclude_paths:
-            path = Path(value)
-            candidate = path if path.is_absolute() else self.root / path
-            candidate = Path(os.path.abspath(candidate))
-            try:
-                candidate.relative_to(self.root)
-            except ValueError:
+            # String operations keep a long exclusion list linear and cheap to load.
+            candidate = os.path.abspath(os.path.join(root_text, os.fspath(value)))
+            if candidate == root_text:
+                self._excluded.add(())
+            elif candidate.startswith(prefix):
+                self._excluded.add(tuple(candidate[len(prefix) :].split(os.sep)))
+            else:
                 self._fail(".", "excluded path is outside collection root")
                 self._invalid_policy = True
-                continue
-            self._excluded.append(candidate)
 
     def __enter__(self) -> ConfinedCollection:
         if self._invalid_policy:
@@ -143,8 +233,8 @@ class ConfinedCollection:
             return self
         current: int | None = None
         try:
-            current = os.open(self.root.anchor, os.O_RDONLY | os.O_DIRECTORY)
-            for part in self.root.parts[1:]:
+            current = os.open(self._requested_root.anchor, os.O_RDONLY | os.O_DIRECTORY)
+            for part in self._requested_root.parts[1:]:
                 next_fd = os.open(
                     part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=current
                 )
@@ -180,13 +270,15 @@ class ConfinedCollection:
 
     def excluded(self, path: str | Path) -> bool:
         relative = self._relative(path)
-        absolute = self.root / relative
+        parts = relative.parts
         # Dependency caches, virtual environments and Git internals are outside
         # the documented static scope. The BOM records these patterns. Any
         # further omission within that scope is a blocking coverage gap.
-        if any(part in DEFAULT_EXCLUDES for part in relative.parts):
+        if any(part in DEFAULT_EXCLUDES for part in parts):
             return True
-        denied = any(absolute == value or value in absolute.parents for value in self._excluded)
+        denied = bool(self._excluded) and any(
+            parts[:index] in self._excluded for index in range(len(parts) + 1)
+        )
         if denied:
             message = f"{relative}: excluded by collection policy"
             if message not in self.exclusions:
@@ -228,23 +320,23 @@ class ConfinedCollection:
                 before = os.fstat(fd)
                 if not stat.S_ISREG(before.st_mode):
                     raise CollectionError("not a regular file")
-                if before.st_size > self.max_file_bytes:
-                    raise CollectionError("file byte limit exceeded")
-                if before.st_size > self.max_total_bytes - self._bytes_read:
-                    raise CollectionError("total byte limit exceeded")
+                limit = self._file_bound
+                budget = self._budget
+                if before.st_size > limit.value:
+                    raise LimitExceededError(limit)
+                if before.st_size > budget.remaining():
+                    raise budget.refuse()
                 chunks: list[bytes] = []
                 length = 0
-                while length <= self.max_file_bytes:
-                    chunk = os.read(fd, min(65536, self.max_file_bytes + 1 - length))
+                while length <= limit.value:
+                    chunk = os.read(fd, min(65536, limit.value + 1 - length))
                     if not chunk:
                         break
                     chunks.append(chunk)
                     length += len(chunk)
-                    self._bytes_read += len(chunk)
-                    if self._bytes_read > self.max_total_bytes:
-                        raise CollectionError("total byte limit exceeded")
-                if length > self.max_file_bytes:
-                    raise CollectionError("file byte limit exceeded")
+                    budget.charge(len(chunk))
+                if length > limit.value:
+                    raise LimitExceededError(limit)
                 after = os.fstat(fd)
                 if descriptor_binding(before) != descriptor_binding(after) or not self._resolves_to(
                     relative, after
@@ -256,9 +348,11 @@ class ConfinedCollection:
         except FileNotFoundError:
             if not missing_ok:
                 self._fail(relative, "file unavailable during collection")
+        except LimitExceededError as exc:
+            self._fail(relative, exc.bound.exceeded())
         except (OSError, CollectionError):
             # Do not echo exception payloads: malformed input may contain secrets.
-            self._fail(relative, "read refused (symlink, nonregular file, limit, or I/O error)")
+            self._fail(relative, "read refused (symlink, nonregular file or I/O error)")
         return None
 
     def read_text(self, path: str | Path, *, missing_ok: bool = False) -> str | None:
@@ -272,7 +366,19 @@ class ConfinedCollection:
             return None
 
     @contextmanager
-    def open_regular(self, path: str | Path, *, max_bytes: int | None = None) -> Iterator[BinaryIO]:
+    def separate_budget(self, bound: Bound) -> Iterator[ByteBudget]:
+        """Charge reads inside the block to their own named budget, not the collection's."""
+        previous = self._budget
+        self._budget = ByteBudget(bound)
+        try:
+            yield self._budget
+        finally:
+            self._budget = previous
+
+    @contextmanager
+    def open_regular(
+        self, path: str | Path, *, max_bytes: int | Bound | None = None
+    ) -> Iterator[BinaryIO]:
         """Yield a confined regular stream or raise OSError after recording failure.
 
         ``max_bytes`` bounds the artifact size and bytes read; reads require an
@@ -280,7 +386,7 @@ class ConfinedCollection:
         applies. The trusted consumer must not bypass read() with fileno().
         """
         relative = self._relative(path)
-        limit = self.max_file_bytes if max_bytes is None else max_bytes
+        limit = self._file_bound if max_bytes is None else _bound(max_bytes, "file-bytes")
         try:
             if self.excluded(relative) or not relative.parts:
                 raise CollectionError("file excluded by policy")
@@ -293,15 +399,20 @@ class ConfinedCollection:
                 os.close(parent)
             try:
                 before = os.fstat(fd)
-                if not stat.S_ISREG(before.st_mode) or before.st_size > limit:
-                    raise CollectionError("nonregular file or byte limit exceeded")
+                if not stat.S_ISREG(before.st_mode):
+                    raise CollectionError("nonregular file")
+                if before.st_size > limit.value:
+                    raise LimitExceededError(limit)
             except BaseException:
                 os.close(fd)
                 raise
-        except (OSError, CollectionError) as exc:
-            self._fail(relative, "stream refused (symlink, nonregular file, limit, or I/O error)")
+        except LimitExceededError as exc:
+            self._fail(relative, exc.bound.exceeded())
             raise OSError("confined stream unavailable") from exc
-        stream = _BoundedReader(fd, self, relative, limit)
+        except (OSError, CollectionError) as exc:
+            self._fail(relative, "stream refused (symlink, nonregular file or I/O error)")
+            raise OSError("confined stream unavailable") from exc
+        stream = _BoundedReader(fd, self, relative, limit, self._budget)
         try:
             yield cast(BinaryIO, stream)
             after = os.fstat(fd)
@@ -340,13 +451,14 @@ class ConfinedCollection:
         # unlinked (an overlayfs lower layer) or an A-B-A swap during the read.
         return self.path_identity(relative) == (info.st_dev, info.st_ino)
 
-    def hash_file(self, path: str | Path, *, max_bytes: int | None = None) -> str | None:
+    def hash_file(self, path: str | Path, *, max_bytes: int | Bound | None = None) -> str | None:
         """Stream SHA-256 beneath the root, with explicit individual/total bounds.
 
         Model collectors can choose a larger per-file limit while retaining the
         collection-wide byte budget. No artifact is deserialized or imported.
         """
         relative: Path | str = str(path)
+        limit = self._file_bound if max_bytes is None else _bound(max_bytes, "file-bytes")
         try:
             relative = self._relative(path)
             if self.excluded(relative):
@@ -360,21 +472,23 @@ class ConfinedCollection:
                 os.close(parent)
             try:
                 before = os.fstat(fd)
-                limit = self.max_file_bytes if max_bytes is None else max_bytes
-                if not stat.S_ISREG(before.st_mode) or before.st_size > limit:
-                    raise CollectionError("nonregular file or byte limit exceeded")
-                if before.st_size > self.max_total_bytes - self._bytes_read:
-                    raise CollectionError("total byte limit exceeded")
+                budget = self._budget
+                if not stat.S_ISREG(before.st_mode):
+                    raise CollectionError("nonregular file")
+                if before.st_size > limit.value:
+                    raise LimitExceededError(limit)
+                if before.st_size > budget.remaining():
+                    raise budget.refuse()
                 digest = hashlib.sha256()
                 length = 0
-                while length <= limit:
-                    chunk = os.read(fd, min(65536, limit + 1 - length))
+                while length <= limit.value:
+                    chunk = os.read(fd, min(65536, limit.value + 1 - length))
                     if not chunk:
                         break
                     length += len(chunk)
-                    self._bytes_read += len(chunk)
-                    if length > limit or self._bytes_read > self.max_total_bytes:
-                        raise CollectionError("byte limit exceeded")
+                    if length > limit.value:
+                        raise LimitExceededError(limit)
+                    budget.charge(len(chunk))
                     digest.update(chunk)
                 after = os.fstat(fd)
                 if descriptor_binding(before) != descriptor_binding(after) or not self._resolves_to(
@@ -384,8 +498,11 @@ class ConfinedCollection:
                 return "sha256:" + digest.hexdigest()
             finally:
                 os.close(fd)
+        except LimitExceededError as exc:
+            self._fail(relative, exc.bound.exceeded())
+            return None
         except (OSError, CollectionError):
-            self._fail(relative, "hash refused (symlink, nonregular file, limit, or I/O error)")
+            self._fail(relative, "hash refused (symlink, nonregular file or I/O error)")
             return None
 
     def read_json(self, path: str | Path, *, missing_ok: bool = False) -> Any:
@@ -396,7 +513,8 @@ class ConfinedCollection:
             value = json.loads(
                 content,
                 object_pairs_hook=_unique_object,
-                parse_constant=lambda _: (_ for _ in ()).throw(CollectionError("nonfinite JSON")),
+                parse_constant=_refuse_constant,
+                parse_float=_finite_float,
             )
             if value is None:
                 raise CollectionError("null configuration")
@@ -406,14 +524,33 @@ class ConfinedCollection:
             return None
 
     def root_entries(self) -> list[str]:
-        """Sorted names directly beneath the pinned root; nothing is opened or followed."""
+        """Sorted names directly beneath the pinned root; nothing is opened or followed.
+
+        The listing is charged to the same entry budget as a walk.
+        """
         if self._root_fd is None:
             return []
+        names: list[str] = []
+        if self._entries_exhausted:
+            return []
         try:
-            return sorted(os.listdir(self._root_fd))
+            with os.scandir(self._root_fd) as stream:
+                for entry in stream:
+                    if len(names) >= self._entry_budget[0]:
+                        self._entries_exceeded(Path("."))
+                        return []
+                    names.append(entry.name)
         except OSError:
             self._fail(".", "root directory cannot be listed")
             return []
+        self._entry_budget[0] -= len(names)
+        return sorted(names)
+
+    def _entries_exceeded(self, relative: Path) -> None:
+        # One failure names where the walk stopped; later listings stop silently.
+        self._fail(relative, self._entry_bound.exceeded())
+        self._entry_budget[0] = 0
+        self._entries_exhausted = True
 
     def iter_files(self, directory: str | Path = ".") -> Iterator[Path]:
         """Yield root-relative file paths, never following directory symlinks."""
@@ -442,19 +579,25 @@ class ConfinedCollection:
         self, directory_fd: int, relative: Path, depth: int, budget: list[int]
     ) -> Iterator[Path]:
         if depth > self.max_depth:
-            self._fail(relative, "directory depth limit exceeded")
+            self._fail(relative, self._depth_bound.exceeded())
+            return
+        if self._entries_exhausted:
             return
         entries: list[str] = []
         try:
             with os.scandir(directory_fd) as stream:
                 for entry in stream:
                     if len(entries) >= budget[0]:
-                        self._fail(relative, "directory entry limit exceeded")
-                        budget[0] = 0
+                        self._entries_exceeded(relative)
                         return
                     entries.append(entry.name)
             budget[0] -= len(entries)
             for name in sorted(entries):
+                if _undecodable(name):
+                    # A surrogate-escaped name cannot be written to, or read back from,
+                    # an inventory; the entry and anything beneath it are a gap.
+                    self._fail(relative / _escaped(name), "name is not valid UTF-8; not collected")
+                    continue
                 child = relative / name
                 if self.excluded(child):
                     continue

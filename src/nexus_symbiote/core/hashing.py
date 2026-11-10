@@ -95,6 +95,12 @@ def descriptor_binding(info: os.stat_result) -> tuple[int, int, int, int, int, i
     )
 
 
+def _unnormalized_absolute(path: Path) -> Path:
+    # os.path.abspath would collapse "link/.." textually and name a different file
+    # than the kernel opens; each ".." is walked instead, through the real parent.
+    return path if path.is_absolute() else Path.cwd() / path
+
+
 def _open_parent_no_follow(absolute: Path) -> int:
     if (
         not hasattr(os, "O_NOFOLLOW")
@@ -121,7 +127,7 @@ def pathname_identity(path: Path) -> tuple[int, int] | None:
     component. Compare the result with the open descriptor's identity after a
     read to prove the pathname still names the bytes that were read.
     """
-    absolute = Path(os.path.abspath(path))
+    absolute = _unnormalized_absolute(Path(path))
     try:
         parent_fd = _open_parent_no_follow(absolute)
         try:
@@ -140,7 +146,7 @@ def open_regular_file(path: Path) -> BinaryIO:
     replacement between a check and the final open. Fail closed on platforms
     without the required no-follow APIs.
     """
-    absolute = Path(os.path.abspath(path))
+    absolute = _unnormalized_absolute(Path(path))
     parent_fd = _open_parent_no_follow(absolute)
     try:
         flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0)

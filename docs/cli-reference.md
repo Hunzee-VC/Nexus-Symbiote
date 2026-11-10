@@ -6,7 +6,7 @@ authoritative where this page differs; `tests/test_cli_reference.py` fails when 
 command or option is missing here.
 
 ```text
-nexus-symbiote [--offline | --live] [--version] [--help] COMMAND [ARGS]...
+nexus-symbiote [--offline | --live] [--limit NAME=VALUE]... [--version] [--help] COMMAND [ARGS]...
 ```
 
 ## Global options
@@ -15,6 +15,7 @@ nexus-symbiote [--offline | --live] [--version] [--help] COMMAND [ARGS]...
 |---|---|
 | `--offline` | Refuse name resolution, network connections and process creation (the default). |
 | `--live` | Allow the network and process steps of `discover-mcp`, `advisories` and `verify-live`. Every other command stays offline. |
+| `--limit` `NAME=VALUE` | Set one [collection limit](collection-limits.md) for this command, such as `entries=200000` or `model-bytes=128GiB`. Repeatable; overrides `NEXUS_SYMBIOTE_LIMITS` for that name. |
 | `--version` | Print the version and exit. |
 | `--help` | Print help and exit. |
 
@@ -29,6 +30,11 @@ error, is reported by the operating system's message, without the path.
 Mode flags go before the command. Without a flag, `NEXUS_SYMBIOTE_MODE=offline|live`
 selects the mode; without either, the mode is offline. See
 [offline and live modes](offline-and-live-modes.md).
+
+`--limit` also goes before the command. `NEXUS_SYMBIOTE_LIMITS=NAME=VALUE,NAME=VALUE`
+sets limits from the environment, and `--limit` wins for the names it sets. Limits
+apply to every command that collects from a project; a project's own files never
+change them. See [collection limits](collection-limits.md).
 
 ## Commands
 
@@ -59,7 +65,7 @@ selects the mode; without either, the mode is offline. See
 |---|---|
 | `0` | The command completed and every requested gate passed. |
 | `1` | A gate or check failed (risk gate, integrity, digest or signature mismatch, `diff --fail-on-alert`, incomplete collection or observation), the input could not be read or parsed, or `import-shadowscan` ran without `--report-only`. |
-| `2` | Usage error: an unknown command or option, a missing argument or file, an invalid value, an invalid `NEXUS_SYMBIOTE_MODE`, or a live command run without live mode. |
+| `2` | Usage error: an unknown command or option, a missing argument or file, an invalid value, an invalid `NEXUS_SYMBIOTE_MODE` or collection limit, or a live command run without live mode. |
 
 `--report-only` on `scan` and `import-shadowscan` reports collection failures and
 findings without turning them into exit status 1. It is for exploration, not

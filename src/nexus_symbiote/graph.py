@@ -53,8 +53,9 @@ def _manifest_dependencies(
     bom: AIBOM, declared: AgentDeclaration, root: Path, agent_ref: str
 ) -> list[PromptComponent | ModelComponent]:
     """Collect instruction bytes and local path bindings before changing the BOM."""
+    from nexus_symbiote import limits
     from nexus_symbiote.policy import PolicyError
-    from nexus_symbiote.utils.confined import MAX_HASH_BYTES, ConfinedCollection
+    from nexus_symbiote.utils.confined import ConfinedCollection
 
     def relative(value: str) -> Path:
         path = Path(value)
@@ -114,7 +115,7 @@ def _manifest_dependencies(
                     assert comp.source_path is not None
                     path = relative(comp.source_path)
                     try:
-                        with files.open_regular(path, max_bytes=MAX_HASH_BYTES):
+                        with files.open_regular(path, max_bytes=limits.bound("model-bytes")):
                             pass
                     except OSError as exc:
                         raise PolicyError("agent.yaml local model path is unavailable") from exc

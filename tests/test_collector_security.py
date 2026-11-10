@@ -122,7 +122,7 @@ def test_explicit_read_and_traversal_limits_are_failures(tmp_path):
     failures = []
     with ConfinedCollection(tmp_path, failures, max_entries=3) as files:
         assert list(files.iter_files()) == []
-    assert any("entry limit" in message for message in failures)
+    assert any("entries limit of 3 exceeded" in message for message in failures)
 
 
 def test_cumulative_byte_budget_and_bounded_stream(tmp_path):

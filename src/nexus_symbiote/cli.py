@@ -15,7 +15,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
-from nexus_symbiote import __version__, modes
+from nexus_symbiote import __version__, limits, modes
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import AssuranceLevel
 from nexus_symbiote.core.models import AIBOMMetadata, CompletenessClaim
@@ -187,6 +187,12 @@ class _RootGroup(click.Group):
         try:
             return super().invoke(ctx)
         except click.NoSuchOption as exc:
+            if exc.option_name == limits.OPTION:
+                raise click.UsageError(
+                    f"No such option: {limits.OPTION}. Limits go before the command: "
+                    f"nexus-symbiote {limits.OPTION} NAME=VALUE <command> ...",
+                    ctx=exc.ctx,
+                ) from None
             if exc.option_name not in _MODE_FLAGS:
                 raise
             raise click.UsageError(
@@ -220,20 +226,43 @@ class _RootGroup(click.Group):
         "(discover-mcp, advisories, verify-live). Other commands stay offline."
     ),
 )
+@click.option(
+    limits.OPTION,
+    "limit_settings",
+    multiple=True,
+    metavar="NAME=VALUE",
+    help=(
+        "Set one collection limit for this command, for example entries=200000 or "
+        "model-bytes=128GiB. Repeatable; overrides NEXUS_SYMBIOTE_LIMITS for that name. "
+        "Limits: " + ", ".join(limits.SPECS) + "."
+    ),
+)
 @click.pass_context
-def main(ctx: click.Context, offline_flag: bool, live_flag: bool) -> None:
+def main(
+    ctx: click.Context,
+    offline_flag: bool,
+    live_flag: bool,
+    limit_settings: tuple[str, ...] = (),
+) -> None:
     """Nexus SymBiote — Agent Bill of Materials for AI supply chain security.
 
     Every command runs offline by default: no name resolution, network
     connections or subprocesses. Only discover-mcp, advisories and verify-live
     reach outside local files, and only in live mode: pass --live before the
     command or set NEXUS_SYMBIOTE_MODE=live.
+
+    Collection limits bound what one command reads from a project. Reaching one
+    fails the scan and names the limit; raise it with --limit before the command
+    or with NEXUS_SYMBIOTE_LIMITS=NAME=VALUE,NAME=VALUE. A project's own files
+    never change a limit.
     """
     try:
         requested = modes.resolve(offline=offline_flag, live=live_flag, environ=os.environ)
+        collection_limits = limits.resolve(limit_settings, os.environ)
     except ValueError as exc:
         raise click.UsageError(str(exc), ctx=ctx) from None
     ctx.meta["nexus_symbiote.mode"] = requested
+    ctx.with_resource(limits.applied(collection_limits))
     ctx.with_resource(modes.enforce(modes.command_mode(requested.mode, ctx.invoked_subcommand)))
 
 
@@ -588,7 +617,7 @@ def verify_artifact(
     ):
         raise click.ClickException("Bundle verification requires both signer identity and issuer")
     try:
-        digest = hash_confined_file(Path(project), artifact_path)
+        digest = hash_confined_file(Path(project).resolve(), artifact_path)
     except OSError as exc:
         raise click.ClickException(
             "Cannot safely hash the artifact within the project root"
@@ -739,7 +768,9 @@ def validate(
     )
     from nexus_symbiote.validators.integrity import IntegrityValidator
 
-    signature_policies = _signer_policies(signature_policy, Path(project) if project else None)
+    signature_policies = _signer_policies(
+        signature_policy, Path(project).resolve() if project else None
+    )
 
     policy, policy_source, _ = _inventory_policy(
         Path(project).resolve() if project else None,

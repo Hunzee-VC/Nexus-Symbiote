@@ -25,6 +25,7 @@ Reference material: exact behavior, fields and limits.
 | Page | Covers |
 | --- | --- |
 | [CLI reference](cli-reference.md) | Every command, option and exit code, kept in sync with the CLI by a test |
+| [Collection limits](collection-limits.md) | Every bound on what a command reads from a project, its default, what happens when it is reached and how to raise it |
 | [AgentBOM schemas](../schemas/README.md) | The native AgentBOM JSON Schema, the deployment-profile schema and a minimal example |
 | [Source binding](verification-source-binding.md) | How static MCP records are bound to their configuration and reconciled with a project |
 | [TypeScript inventory](typescript-inventory.md) | Static collection of MCP tool registrations from TypeScript servers, and its limits |
