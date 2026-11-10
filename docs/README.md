@@ -14,8 +14,9 @@ Read these before you use any result in an approval decision.
 | Page | Read it to understand |
 | --- | --- |
 | [Security model](security-model.md) | [Design principles](security-model.md#design-principles); declared, observed, approved and mediated evidence; [what results do and do not establish](security-model.md#what-results-do-and-do-not-establish); known false-positive and false-negative classes |
+| [Known limitations](known-limitations.md) | What each collector, gate, export and integration does not record or verify, by surface, and what to do about each limit |
 | [Offline and live modes](offline-and-live-modes.md#why) | Why every command is offline by default, and how that is enforced |
-| [Security policy](../SECURITY.md) | Security boundaries, supported versions and how to report a vulnerability |
+| [Security policy](../SECURITY.md) | Security boundaries, supported versions, how to report a vulnerability, and the limits that matter most |
 | [Governance](../GOVERNANCE.md) | Who decides, how changes are reviewed, and which controls are actually active |
 
 ## What: formats, collectors and contracts

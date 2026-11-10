@@ -33,7 +33,7 @@ nexus-symbiote risk agentbom.json --no-project-policy --threshold 50   # gate on
 nexus-symbiote diff reviewed.json agentbom.json --fail-on-alert        # gate on drift
 ```
 
-> **Alpha.** Interfaces, formats and policy semantics may change. Install the published release only after verifying its build attestation, or install a reviewed commit from source; both are shown under [How](#how). This release has [known detection gaps](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/SECURITY.md#known-limitations-in-010): what the collectors do not record, no gate or `diff` can alert on.
+> **Alpha.** Interfaces, formats and policy semantics may change. Install the published release only after verifying its build attestation, or install a reviewed commit from source; both are shown under [How](#how). This release has [known detection gaps](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/known-limitations.md): what the collectors do not record, no gate or `diff` can alert on.
 
 ## Why
 
@@ -50,7 +50,7 @@ An agent's behavior depends on its configuration as much as its code — MCP ser
 | Executable model files | Pickle checkpoint; `.safetensors` that isn't one | Format classification without loading; SafeTensors header validation |
 | Unsigned weights | Model file with no artifact-bound signature | `UNKNOWN` integrity verdict until signer policy verifies |
 | Hidden instructions | Bidi or zero-width characters in `CLAUDE.md`; text in an HTML comment | Findings for every format character, variation selector and blank filler in the instruction, rule, skill, command and imported files the `prompt` collector reads, ordinary emoji sequences excepted, and a low finding for comments that rendered Markdown hides |
-| Over-broad permissions | Claude Code granted `Bash(*)` or a permissive default mode; a hook command added | Findings for Claude Code's `bypassPermissions` and `acceptEdits` modes, blanket grants such as `Bash(**)` or `mcp__server`, hook commands, credential helpers, MCP auto-approval and plugin sources; a digest of each settings file, so any settings change raises a drift alert (with `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, environment values and text the redaction removes are bound by the key instead; [known limitations](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/SECURITY.md#known-limitations-in-010)) |
+| Over-broad permissions | Claude Code granted `Bash(*)` or a permissive default mode; a hook command added | Findings for Claude Code's `bypassPermissions` and `acceptEdits` modes, blanket grants such as `Bash(**)` or `mcp__server`, hook commands, credential helpers, MCP auto-approval and plugin sources; a digest of each settings file, so any settings change raises a drift alert (with `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, environment values and text the redaction removes are bound by the key instead; [known limitations](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/known-limitations.md#instructions-and-ide-settings)) |
 | Credential exposure | Tokens in MCP env blocks or connection strings | Env vars by name, never value; known secret patterns redacted |
 
 The full trust model, design principles and offline-by-default enforcement are in the [security model](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/security-model.md).
@@ -80,7 +80,7 @@ An optional [`agent.yaml` manifest](https://github.com/Hunzee-VC/Nexus-Symbiote/
 
 | Command | What it answers |
 | --- | --- |
-| `validate` | Did every collector finish without reporting a gap? Do hashes, signatures and source bindings still match? Surfaces the collectors do not support are not gaps ([known limitations](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/SECURITY.md#known-limitations-in-010)) |
+| `validate` | Did every collector finish without reporting a gap? Do hashes, signatures and source bindings still match? Surfaces the collectors do not support are not gaps ([known limitations](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/known-limitations.md)) |
 | `risk` | What are the findings, and does the score or worst severity cross your gate? |
 | `diff` | What changed in the recorded inventory since the reviewed snapshot? Is any change security-relevant? Settings and files the collectors do not record are not compared |
 | `verify-artifact`, `verify-discovery` | Do these bytes match a trusted digest, Sigstore identity or ShadowScan report? |
@@ -203,7 +203,7 @@ nexus-symbiote diff reviewed.json agentbom.json --fail-on-alert
 
 `--fail-on-alert` fails on any change to the recorded inventory rated medium or higher, including a removed component and a coverage regression; an added source file that changes no component does not alert. Without the key, the inventory records MCP launch arguments, environment values and endpoint paths only as redacted positions, so a served directory widened from `./notes` to `/`, a changed environment value or a same-host path change passes; each such server carries a low `completeness` finding that names the key. RAG source values beyond the exported origins, such as a repointed path on the same host, are bound the same way. See [source binding](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/verification-source-binding.md).
 
-Paths in an inventory are relative to the project, so a baseline recorded in one checkout compares cleanly with a scan of another. Inventories written by 0.1.0 hold absolute paths: record the baseline again after upgrading. The gate cannot alert on what the collectors do not record; the [known limitations](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/SECURITY.md#known-limitations-in-010) list what that is. A baseline is unsigned — review it before treating it as an approval, and read it from a place the pull request cannot change; [Gate drift in CI](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/drift-gate.md) shows how and explains each alert.
+Paths in an inventory are relative to the project, so a baseline recorded in one checkout compares cleanly with a scan of another. Inventories written by 0.1.0 hold absolute paths: record the baseline again after upgrading. The gate cannot alert on what the collectors do not record; the [known limitations](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/known-limitations.md) list what that is. A baseline is unsigned — review it before treating it as an approval, and read it from a place the pull request cannot change; [Gate drift in CI](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/drift-gate.md) shows how and explains each alert.
 
 ### GitHub Action
 
@@ -337,7 +337,7 @@ The [documentation hub](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/do
 
 ## Project status
 
-Nexus SymBiote is **alpha** with a single maintainer: APIs, formats and policy semantics may change, and there is no SLA. Known detection gaps in this release are listed in [SECURITY.md](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/SECURITY.md#known-limitations-in-010). CI, including CodeQL, runs on every push and pull request. A release is published only by the environment-gated [release workflow](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/releasing.md), after its preflight has confirmed branch protection and a successful `Verified CI` run for the exact commit. Planned work is tracked in the [roadmap](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/ROADMAP.md) and changes are in the [changelog](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/CHANGELOG.md).
+Nexus SymBiote is **alpha** with a single maintainer: APIs, formats and policy semantics may change, and there is no SLA. Known detection gaps are listed in the [known limitations](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/known-limitations.md). CI, including CodeQL, runs on every push and pull request. A release is published only by the environment-gated [release workflow](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/releasing.md), after its preflight has confirmed branch protection and a successful `Verified CI` run for the exact commit. Planned work is tracked in the [roadmap](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/ROADMAP.md) and changes are in the [changelog](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/CHANGELOG.md).
 
 [Nexus-ShadowScan](https://github.com/Hunzee-VC/Nexus-ShadowScan) is the companion discovery engine — it finds agents across many surfaces, and Nexus SymBiote turns its reports into AgentBOMs with local artifact and supply-chain verification.
 

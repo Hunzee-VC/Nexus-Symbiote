@@ -146,6 +146,11 @@ Legacy mode, which only CycloneDX recovery has, does not help with:
   `completeness` existed, with or without an unconditional relationship exported
   as `other`.
 
+A 0.1.0 export of an inventory built through the Python API does not recover
+either when one of its package URLs is of a kind this release no longer projects,
+such as a `pkg:docker` or `pkg:generic` URL: recovery reports that the projection
+conflicts with the embedded native document.
+
 Regenerate such exports from the native AIBOM or by rescanning. Keep the
 original export when a downstream consumer discards fields such as the
 CycloneDX incomplete-composition claim, because recovery requires that

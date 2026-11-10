@@ -37,7 +37,7 @@ Closes detection gaps listed under 0.1.0's known limitations and makes inventori
 
 ## [0.1.0] - 2026-11-07
 
-First alpha of the AgentBOM toolkit under the Hunzee-VC organization. Its known detection gaps, including Claude Code settings beyond the permission mode and blanket grants, skill scripts and subagents, are listed under [known limitations](SECURITY.md#known-limitations-in-010); `diff --fail-on-alert` cannot alert on them.
+First alpha of the AgentBOM toolkit under the Hunzee-VC organization. Its known detection gaps, including Claude Code settings beyond the permission mode and blanket grants, skill scripts and subagents, are listed under [known limitations](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/v0.1.0/SECURITY.md#known-limitations-in-010); `diff --fail-on-alert` cannot alert on them.
 
 ### Security
 

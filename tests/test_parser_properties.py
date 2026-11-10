@@ -5,10 +5,10 @@ what a requirement means and pip's own requirements-file reader, wherever pip is
 (always in CI), for how a line is read, so the collector must reach the same name and pin
 however the line is decorated. Unparseable or deeply nested input must leave a gap or a
 failed collector, never silence. No collected file may crash a scan in any export format
-beyond the one failure SECURITY.md documents. Redaction must never let a planted secret
-through, and hostile inputs must not make parsing super-linear. The repository's Hypothesis
-profile (tests/conftest.py) keeps every run deterministic; the weekly ``fuzz`` profile
-explores further.
+beyond the one failure docs/known-limitations.md documents. Redaction must never let a
+planted secret through, and hostile inputs must not make parsing super-linear. The
+repository's Hypothesis profile (tests/conftest.py) keeps every run deterministic; the
+weekly ``fuzz`` profile explores further.
 """
 
 from __future__ import annotations
@@ -466,7 +466,7 @@ EXPORT_REFUSED = "cannot be exported as"
 
 
 def documented_export_failure(fmt: str, content: bytes) -> bool:
-    """SECURITY.md, "Malformed input stops some exports": only this export is refused."""
+    """Only this export is refused ("Malformed input" in docs/known-limitations.md)."""
     return fmt != "json" and LONE_SURROGATE_ESCAPE.search(content) is not None
 
 

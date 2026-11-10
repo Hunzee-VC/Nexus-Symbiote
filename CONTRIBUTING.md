@@ -4,7 +4,7 @@ Nexus SymBiote's compatibility baseline is the `nexus_symbiote` Python package a
 
 ## First contribution
 
-Read [SUPPORT.md](SUPPORT.md) for how the tool behaves and what to include when you ask for help; it is the place for usage questions. Well-bounded starter tasks are in the known-limitations list of [SECURITY.md](SECURITY.md#known-limitations-in-010): each names a file type, collector or check that is not covered yet. Open an issue with the feature form saying which one you will take before you start, so that two people do not do the same work.
+Read [SUPPORT.md](SUPPORT.md) for how the tool behaves and what to include when you ask for help; it is the place for usage questions. Well-bounded starter tasks are in the [known limitations](docs/known-limitations.md): each names a file type, collector or check that is not covered yet. Open an issue with the feature form saying which one you will take before you start, so that two people do not do the same work.
 
 Contributions are accepted under the project's [MIT licence](LICENSE): by opening a pull request you agree that your contribution is licensed under the same terms (inbound equals outbound), and that you have the right to submit it.
 

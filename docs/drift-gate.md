@@ -13,7 +13,7 @@ argument other than the launcher package, a changed environment or header value,
 endpoint or package index path changed on the same host, a changed value of a project
 resolver setting such as an `.npmrc` entry, or a RAG source repointed within its origin;
 see [source binding](verification-source-binding.md). The
-[known limitations](../SECURITY.md#known-limitations-in-010) list those surfaces.
+[known limitations](known-limitations.md) list those surfaces.
 
 ## The trust anchor is the baseline
 
