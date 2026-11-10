@@ -94,6 +94,11 @@ _SDK_IMPORT = re.compile(
     r"\brequire\s*\(\s*[\"']@modelcontextprotocol/sdk(?:/[^\"']*)?[\"'])"
 )
 _SPACE = re.compile(r"\s*")
+_CAMEL_BOUNDARY = re.compile(r"([a-z0-9])([A-Z])")
+# Fixed width on purpose: "HTTPServer" splits before the capital that starts "Server".
+_ACRONYM_BOUNDARY = re.compile(r"([A-Z])([A-Z][a-z])")
+_WORD = re.compile(r"[a-z0-9]+")
+_WORD_ENDINGS = ("s", "es", "ed", "d", "ing")
 
 
 def without_js_comments(text: str) -> str:
@@ -809,9 +814,28 @@ class MCPScanner(Scanner):
 
     @staticmethod
     def _tokenize_identifier(text: str) -> set[str]:
-        expanded = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", text)
-        expanded = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", expanded)
-        return set(re.findall(r"[a-z0-9]+", expanded.lower()))
+        """Words of a tool name or description, each also without a plural or verb ending.
+
+        Descriptions come from the checkout and may be megabytes long, so every
+        pattern here is linear: a repeated capital class before the acronym
+        boundary rescanned each run of capitals from every position in it.
+        """
+        expanded = _ACRONYM_BOUNDARY.sub(r"\1 \2", _CAMEL_BOUNDARY.sub(r"\1 \2", text))
+        words = set(_WORD.findall(expanded.lower()))
+        forms = set(words)
+        for word in words:
+            for ending in _WORD_ENDINGS:
+                if len(word) <= len(ending) + 1 or not word.endswith(ending):
+                    continue
+                stem = word[: -len(ending)]
+                forms.add(stem)
+                if ending in {"ed", "ing"}:
+                    forms.add(stem + "e")
+                    if stem[-1] == stem[-2]:
+                        forms.add(stem[:-1])
+                elif ending == "es" and stem.endswith("i"):
+                    forms.add(stem[:-1] + "y")
+        return forms
 
     def _classify_side_effects(
         self, annotations: dict[str, Any], tool_name: str
@@ -834,25 +858,47 @@ class MCPScanner(Scanner):
     ) -> list[CapabilityClass]:
         caps = []
         tokens = self._tokenize_identifier(f"{tool_name} {description}")
-        if tokens & {"file", "files", "directory", "directories", "path", "paths", "fs", "disk"}:
+        if tokens & {
+            "file",
+            "filename",
+            "filepath",
+            "filesystem",
+            "directory",
+            "path",
+            "fs",
+            "disk",
+        }:
             caps.append(CapabilityClass.FILESYSTEM)
-        if tokens & {"http", "https", "url", "urls", "fetch", "request", "api", "endpoint"}:
+        if tokens & {"http", "https", "url", "fetch", "request", "api", "endpoint"}:
             caps.append(CapabilityClass.NETWORK)
-        if tokens & {"exec", "execute", "run", "shell", "command", "bash", "terminal"}:
+        if tokens & {
+            "exec",
+            "execute",
+            "executable",
+            "run",
+            "shell",
+            "command",
+            "bash",
+            "terminal",
+        }:
             caps.append(CapabilityClass.EXECUTE)
         if tokens & {"pay", "payment", "transfer", "invoice", "charge", "billing"}:
             caps.append(CapabilityClass.PAYMENT)
         if tokens & {
             "credential",
-            "credentials",
             "secret",
-            "secrets",
             "token",
-            "tokens",
             "password",
+            "passwd",
+            "passphrase",
             "key",
-            "keys",
+            "apikey",
             "auth",
+            "oauth",
+            "authenticate",
+            "authentication",
+            "authorize",
+            "authorization",
         }:
             caps.append(CapabilityClass.CREDENTIALS)
         if tokens & {"write", "create", "update", "delete", "send", "post", "put"}:

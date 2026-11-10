@@ -443,3 +443,48 @@ class TestMCPScannerAdvanced:
         assert CapabilityClass.FILESYSTEM in camel_caps
         assert CapabilityClass.CREDENTIALS in camel_caps
         assert CapabilityClass.READ in camel_caps
+
+    def test_tokenized_heuristics_recognise_inflected_words(self):
+        from nexus_symbiote.core.enums import CapabilityClass, SideEffectProfile
+
+        scanner = MCPScanner()
+        expected = {
+            "Writes files to disk": {CapabilityClass.FILESYSTEM, CapabilityClass.WRITE},
+            "Deletes records": {CapabilityClass.WRITE},
+            "Executes shell commands": {CapabilityClass.EXECUTE},
+            "Authenticates with OAuth": {CapabilityClass.CREDENTIALS},
+            "Fetches URLs": {CapabilityClass.NETWORK, CapabilityClass.READ},
+            "Reads directories and queries": {CapabilityClass.FILESYSTEM, CapabilityClass.READ},
+            "Running the uploaded executable": {CapabilityClass.EXECUTE},
+        }
+        for description, capabilities in expected.items():
+            assert set(scanner._infer_capabilities("manage", description, {})) == capabilities
+        assert scanner._classify_side_effects({}, "droppedTables") == SideEffectProfile.DESTRUCTIVE
+        assert scanner._classify_side_effects({}, "authored_by") == SideEffectProfile.UNKNOWN
+
+    def test_tokenizer_acronym_split_matches_the_pattern_it_replaced(self):
+        import itertools
+        import re
+
+        from nexus_symbiote.scanners.mcp import _ACRONYM_BOUNDARY
+
+        old = re.compile(r"([A-Z]+)([A-Z][a-z])")
+        for length in range(8):
+            for letters in itertools.product("ABa0_", repeat=length):
+                text = "".join(letters)
+                assert _ACRONYM_BOUNDARY.sub(r"\1 \2", text) == old.sub(r"\1 \2", text)
+        assert MCPScanner._tokenize_identifier("HTTPServerGetURLs") >= {"http", "server", "get"}
+
+    def test_long_capital_run_in_a_tool_description_is_linear(self, tmp_path):
+        # The repeated capital class took about 2.5 seconds for 16,000 capitals and
+        # grew with the square of the run; a configuration may hold megabytes.
+        import time
+
+        tool = {"name": "lookup", "description": "A" * 100_000}
+        config = {"mcpServers": {"s": {"command": "npx", "args": ["-y", "pkg@1.0.0"]}}}
+        config["mcpServers"]["s"]["tools"] = [tool]
+        (tmp_path / ".mcp.json").write_text(json.dumps(config))
+        started = time.monotonic()
+        result = MCPScanner().scan(tmp_path)
+        assert time.monotonic() - started < 5
+        assert any(c.component_type == ComponentType.TOOL for c in result.components)

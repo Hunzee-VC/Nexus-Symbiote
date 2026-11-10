@@ -326,14 +326,12 @@ def test_open_directory_nofollow_traverse_only_ancestor_and_symlink_rejection(
 
     real_open = os.open
 
-    def restricted_open(path, flags, mode=0o777, *, dir_fd=None):
+    def restricted_open(path, flags, *args, dir_fd=None):
         if dir_fd is None and Path(path) == traverse_only:
             raise PermissionError(13, "Permission denied", str(path))
         if dir_fd is not None and path == "traverse_only":
             raise PermissionError(13, "Permission denied", str(path))
-        if dir_fd is None:
-            return real_open(path, flags, mode)
-        return real_open(path, flags, mode, dir_fd=dir_fd)
+        return real_open(path, flags, *args, dir_fd=dir_fd)
 
     monkeypatch.setattr(os, "open", restricted_open)
     monkeypatch.setattr(os, "supports_dir_fd", os.supports_dir_fd | {restricted_open})
@@ -346,4 +344,4 @@ def test_open_directory_nofollow_traverse_only_ancestor_and_symlink_rejection(
     linked_parent = tmp_path / "linked_parent"
     linked_parent.symlink_to(traverse_only, target_is_directory=True)
     with pytest.raises(OSError):
-        open_directory_nofollow(linked_parent / "workspace")
+        os.close(open_directory_nofollow(linked_parent / "workspace"))
