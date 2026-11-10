@@ -78,6 +78,7 @@ def lock_entries(path):
     return entries
 
 
+@pytest.mark.locked_only
 def test_action_lock_reuses_reviewed_hashes_and_closes_runtime_dependencies():
     action = lock_entries(ROOT / "requirements-action.lock")
     ci = lock_entries(ROOT / "requirements-ci.lock")
