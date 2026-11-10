@@ -101,12 +101,9 @@ def _root_relative(source_path: str | None, root: Path) -> str | None:
     return path.as_posix()
 
 
-def _read_manifest(files: ConfinedCollection, problems: list[str]) -> AgentDeclaration | None:
+def _parse_manifest(text: str, problems: list[str]) -> AgentDeclaration | None:
     from nexus_symbiote.policy import parse_yaml_mapping
 
-    text = files.read_text(MANIFEST, missing_ok=True)
-    if text is None:
-        return None
     try:
         import yaml
     except ImportError:
@@ -277,6 +274,7 @@ def assemble_repository_agent(
     exclude_paths: Iterable[str | Path] = (),
     failures: list[str] | None = None,
     exclusions: list[str] | None = None,
+    surfaces: list[str] | None = None,
 ) -> AgentComponent:
     """Associate repository-discovered dependencies with a definition, not a running agent.
 
@@ -284,7 +282,8 @@ def assemble_repository_agent(
     ``exclude_paths``. Given a ``failures`` list, manifest problems are recorded there,
     and policy exclusions in ``exclusions``, and the inventory is still assembled from
     what could be collected. Without one, any problem raises ``PolicyError`` before the
-    BOM is changed.
+    BOM is changed. Given ``surfaces``, the manifest and each instruction file only it
+    declares are recorded there once read.
     """
     from nexus_symbiote.policy import PolicyError
     from nexus_symbiote.utils.confined import ConfinedCollection
@@ -298,7 +297,8 @@ def assemble_repository_agent(
     with ConfinedCollection(
         root, recorded, gaps, exclude_paths=exclude_paths, max_file_bytes=MAX_MANIFEST_BYTES
     ) as files:
-        declared = _read_manifest(files, problems)
+        text = files.read_text(MANIFEST, missing_ok=True)
+    declared = None if text is None else _parse_manifest(text, problems)
     identity = declared.id if declared and declared.id else None
     agent_ref = (
         "agent:repository:" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
@@ -307,7 +307,10 @@ def assemble_repository_agent(
     )
     additions: list[AnyComponent] = []
     if declared is not None:
-        with ConfinedCollection(root, recorded, gaps, exclude_paths=exclude_paths) as files:
+        # Entries are checkout text, not paths found on disk: a read problem is recorded
+        # under the entry's locator and never echoes the entry itself.
+        unread: list[str] = []
+        with ConfinedCollection(root, unread, gaps, exclude_paths=exclude_paths) as files:
             additions = _manifest_dependencies(bom, declared, files, agent_ref, problems)
 
     index: dict[str, AnyComponent] = {c.bom_ref: c for c in bom.components}
@@ -323,6 +326,11 @@ def assemble_repository_agent(
         raise PolicyError("; ".join([*problems, *recorded]))
     if failures is not None:
         failures.extend(problems)
+    if surfaces is not None and text is not None:
+        surfaces.append(MANIFEST)
+        surfaces.extend(
+            c.source_path for c in accepted if isinstance(c, PromptComponent) and c.source_path
+        )
     if agent_ref in index:
         raise ValueError(f"{MANIFEST}: the repository agent reference is already in use")
 

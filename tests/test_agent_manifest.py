@@ -134,6 +134,50 @@ def test_bad_instruction_entries_are_recorded_and_the_rest_is_kept(tmp_path, ent
     assert _components(bom, "agent")[0]["properties"]["identity_source"] == "agent.yaml"
 
 
+def test_manifest_entries_are_never_echoed_into_failures(tmp_path):
+    # Entries are checkout text: terminal escapes, CI log commands or a pasted secret.
+    entries = ["\x1b]0;pwn\x07\x1b[31mred.md", "::error::x.md", "sk-live-0123456789abcdef.md"]
+    (tmp_path / "agent.yaml").write_text(json.dumps({"name": "x", "instructions": entries}))
+    failures: list[str] = []
+    assemble_repository_agent(AIBOM(), tmp_path, failures=failures)
+    assert failures == [
+        f"agent.yaml#/instructions/{index}: the declared instruction could not be collected safely"
+        for index in range(3)
+    ]
+
+
+def test_the_manifest_and_files_only_it_declares_are_scanned_surfaces(tmp_path):
+    project = tmp_path / "project"
+    (project / "docs/agents").mkdir(parents=True)
+    (project / "CLAUDE.md").write_text("Use read-only tools.\n")
+    (project / "docs/agents/rules.md").write_text("Refund only when asked.\n")
+    (project / "agent.yaml").write_text(
+        "name: demo\ninstructions: [CLAUDE.md, docs/agents/rules.md]\n"
+    )
+    _, bom = _scan(project, tmp_path / "bom.json", "--report-only")
+    surfaces = bom["metadata"]["completeness"]["surfaces_scanned"]
+    assert {"agent.yaml", "docs/agents/rules.md"} <= set(surfaces)
+
+
+def test_a_manifest_over_the_token_budget_is_a_recorded_failure(tmp_path, monkeypatch):
+    (tmp_path / "agent.yaml").write_text("name: x\ninstructions: [a.md, b.md, c.md]\n")
+    monkeypatch.setattr("nexus_symbiote.graph.MAX_MANIFEST_YAML_TOKENS", 8)
+    failures: list[str] = []
+    agent = assemble_repository_agent(AIBOM(), tmp_path, failures=failures)
+    assert failures == ["agent.yaml: does not conform to the agent manifest schema"]
+    assert agent.bom_ref == INFERRED_AGENT_REF
+
+
+def test_a_declared_instruction_that_is_not_utf8_is_a_recorded_failure(tmp_path):
+    (tmp_path / "notes.md").write_bytes(b"\xff\xfe not text")
+    (tmp_path / "agent.yaml").write_text("name: x\ninstructions: [notes.md]\n")
+    failures: list[str] = []
+    bom = AIBOM()
+    agent = assemble_repository_agent(bom, tmp_path, failures=failures)
+    assert failures == ["agent.yaml#/instructions/0: declared instruction is not UTF-8 text"]
+    assert bom.components == [agent] and agent.prompt_refs == []
+
+
 def test_operator_exclusions_bind_manifest_declared_files(tmp_path):
     project = tmp_path / "project"
     (project / "secrets").mkdir(parents=True)

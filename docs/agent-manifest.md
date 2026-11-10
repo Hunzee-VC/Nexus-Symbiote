@@ -56,7 +56,8 @@ are checked only when a scan reads the manifest.
   inventoried as `prompt:manifest:<digest of its path>` with its SHA-256 and the same
   hidden-character checks the collector applies to instruction files. This is how
   instruction files outside the fixed paths, such as nested or `docs/` files, enter
-  the inventory.
+  the inventory. `surfaces_scanned` lists `agent.yaml` once it is read, and each
+  file inventoried only because the manifest declares it.
 - **Local models.** A `path` must match a model artifact the `model` collector
   recorded: the file itself, or a file directly in that directory. The manifest adds
   no model of its own; it confirms the declared artifact was collected.
@@ -83,6 +84,9 @@ inventory, so the default gate fails and the evidence stays available for review
 | `agent.yaml#/instructions/N: declared instruction is not UTF-8 text` | It cannot be checked for hidden characters |
 | `agent.yaml#/models/KEY: the declared local model has no collected model artifact` | No collected model at that path |
 | `agent.yaml#/models/KEY: the declared local model is unavailable` | The artifact can no longer be opened safely |
+
+These failures name an entry by its position or its percent-encoded key, never by
+its text: that text comes from the checkout and need not name a file.
 
 `validate --project` and `risk --project` recollect the manifest and report any of
 these as "Local agent manifest could not be reconciled."

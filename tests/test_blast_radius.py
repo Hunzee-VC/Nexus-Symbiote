@@ -103,11 +103,18 @@ def test_dependents_are_reported_without_any_agent():
     assert result["dependent_components"] == ["s"]
 
 
-def test_an_unlinked_component_is_unknown_not_empty():
+def test_an_unlinked_component_is_unknown_not_empty(tmp_path):
     bom = AIBOM(components=[RegistryEntryComponent(bom_ref="r", name="r")])
     result = blast_radius(bom, "r")
     assert result["linked"] is False
     assert any("reachability is unknown" in item for item in result["limitations"])
+    bom.save(tmp_path / "bom.json")
+    printed = CliRunner().invoke(main, ["blast-radius", str(tmp_path / "bom.json"), "r"])
+    assert printed.exit_code == 0, printed.output
+    assert (
+        "Note: The component has no recorded relationships: reachability is unknown, not empty."
+        in printed.output
+    )
 
 
 def test_several_agents_and_a_cycle():

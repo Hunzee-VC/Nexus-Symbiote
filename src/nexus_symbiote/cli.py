@@ -432,6 +432,7 @@ def scan(
             exclude_paths=policy.scan.exclude_paths,
             failures=scan_failures,
             exclusions=surfaces_excluded,
+            surfaces=surfaces_scanned,
         )
     except (PolicyError, ValueError, OSError) as exc:
         raise _failure(exc) from exc
