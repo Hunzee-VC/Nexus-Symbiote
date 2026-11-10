@@ -33,11 +33,24 @@ baseline comes from.
 
 ## Take both snapshots the same way
 
+Approve a baseline on a checkout of the protected base branch, and commit it there
+through a reviewed pull request (or upload it to a store only maintainers can write):
+
 ```bash
-nexus-symbiote baseline /path/to/agent --no-project-policy -o "$RUNNER_TEMP/reviewed.json"
-nexus-symbiote scan /path/to/agent --no-project-policy -o "$RUNNER_TEMP/agentbom.json"
+nexus-symbiote baseline . --no-project-policy -o .nexus-symbiote/reviewed.json
+```
+
+The pull-request job then reads that baseline from the base commit, never from the
+pull request, and compares it with a scan of the pull-request checkout:
+
+```bash
+git show "$BASE_SHA:.nexus-symbiote/reviewed.json" > "$RUNNER_TEMP/reviewed.json"
+nexus-symbiote scan . --no-project-policy -o "$RUNNER_TEMP/agentbom.json"
 nexus-symbiote diff "$RUNNER_TEMP/reviewed.json" "$RUNNER_TEMP/agentbom.json" --fail-on-alert
 ```
+
+Taking both snapshots in the same job from the same checkout compares the pull
+request with itself, and that gate can never fail.
 
 - **Use the same policy for both.** `--no-project-policy` keeps a policy file in the
   checkout from narrowing either snapshot. `baseline` accepts it, and
@@ -74,11 +87,11 @@ then notes, then the added, removed and modified components and relationships.
 | Security field changed (for example capabilities, authorizations, claims, endpoints, A2A card URL, package URL, provider, source URI, signing identity or key reference, permission mode, version pin), a `*_ref` or `*_refs` field changed, declared autonomy level changed, trust tier or signing status downgraded, a digest removed or changed | high |
 | Trust tier or signing status raised | medium: a snapshot is unsigned, so a raised label is a claim to review |
 | Risk findings added | the highest added severity, at least medium |
-| Risk findings removed, any other field changed | medium |
+| Risk findings removed; any other field changed, including snapshot metadata such as the producer's `tool_name` or `tool_vendor` | medium |
 | Relationship added | medium; high for `invokes`, `delegates-to` and `acts-as-identity` |
 | Relationship removed | medium; high for `uses-guardrail` and `approved-under` |
 | Relationship kept but its assurance or conditions changed | high |
-| Coverage regressed: a new scan failure, coverage gap or exclusion; a collector's status got worse or is no longer recorded; fewer collectors requested or completed; a different scope; more unobserved surfaces; lower coverage assurance; no completeness claim in the new snapshot | high, naming the collector or entries |
+| Coverage regressed: a new scan failure, coverage gap or exclusion; a collector's status got worse or is no longer recorded; fewer collectors requested or completed; a different scope; more unobserved surfaces; lower coverage assurance; no completeness claim in the new snapshot; or a baseline without a completeness claim (such as a hand-made or supplied BOM) while the new snapshot records a scan failure, a coverage gap, a collector that did not complete or no collector at all, since nothing shows that gap predates the change | high, naming the collector or entries |
 | ShadowScan: report content changed; report bytes changed without comparable content digests; source status worse; more unmapped entries; new projection limitations; a lossy format | high |
 | The new snapshot has graph problems the baseline did not (dangling or mistyped references), or either snapshot uses a `spec_version` this release does not support | high |
 
@@ -87,9 +100,10 @@ through that component, unless its own rating is high.
 
 These are recorded but never alert: a changed list of scanned surfaces (the
 components found there are compared separately, so an added source file is not
-drift), a coverage improvement, a different Nexus SymBiote release, a ShadowScan
-report regenerated with unchanged content, and unmapped ShadowScan entries that
-moved within the report.
+drift), a coverage improvement, a baseline without a completeness claim compared
+with a snapshot whose coverage is complete, a different Nexus SymBiote release
+(`tool_version`), a ShadowScan report regenerated with unchanged content, and
+unmapped ShadowScan entries that moved within the report.
 
 Notes describe the comparison, not a change, and are printed even when nothing
 changed: gaps both snapshots share (the baseline was already incomplete, and changes

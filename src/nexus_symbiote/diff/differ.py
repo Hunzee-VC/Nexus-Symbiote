@@ -146,7 +146,7 @@ _DECLARED_AUTONOMY = "declared_autonomy_level"
 _STATUS_RANK = {"complete": 0, "partial": 1, "failed": 2, "unknown": 2}
 _ASSURANCE_RANK = {"verified": 0, "observed": 1, "declared": 2}
 _SOURCE_STATUS_RANK = {"complete": 0, "incomplete": 1, "unknown": 2}
-_INFO_METADATA = frozenset({"tool_version", "tool_name", "tool_vendor"})
+_INFO_METADATA = frozenset({"tool_version"})
 _LISTED = 5
 _SHOWN = 200
 
@@ -176,6 +176,31 @@ def _listing(values: Iterable[str]) -> str:
     items = sorted(values)
     shown = "; ".join(_clip(item) for item in items[:_LISTED])
     return shown + (f"; and {len(items) - _LISTED} more" if len(items) > _LISTED else "")
+
+
+def _incompleteness(claim: CompletenessClaim) -> list[str]:
+    """What keeps a claim short of complete coverage of its own scope, by name."""
+    found = []
+    if claim.scan_failures:
+        found.append(f"Scan failures: {_listing(claim.scan_failures)}.")
+    if claim.surfaces_excluded:
+        found.append(f"Coverage gaps: {_listing(claim.surfaces_excluded)}.")
+    collectors = {
+        name: state for name, state in claim.scanner_status.items() if state != "complete"
+    }
+    for name in claim.collectors_requested:
+        if name not in claim.collectors_completed:
+            collectors.setdefault(name, "not completed")
+    if collectors:
+        listed = _listing(f"{name} ({state})" for name, state in collectors.items())
+        found.append(f"Collectors not complete: {listed}.")
+    elif not claim.collectors_requested and not claim.scanner_status:
+        found.append("No collector is recorded.")
+    if claim.source_report_status not in (None, "complete"):
+        found.append(f"ShadowScan source status: {claim.source_report_status}.")
+    if claim.source_unmapped_count:
+        found.append(f"ShadowScan entries left unmapped: {claim.source_unmapped_count}.")
+    return found
 
 
 def _semantic_value(value: Any, path: tuple[str, ...]) -> Any:
@@ -745,11 +770,21 @@ class AIBOMDiffer:
             )
             return
         if old is None:
-            improvement(
-                "claim",
-                "The baseline carries no completeness claim, so coverage changes cannot be "
-                "assessed against it.",
-            )
+            # Nothing shows the baseline had the same gaps, so any gap the new snapshot
+            # records could have been introduced by the change under review.
+            gaps = _incompleteness(new)
+            if gaps:
+                regression(
+                    "claim",
+                    "The baseline carries no completeness claim, so gaps in the new snapshot "
+                    "cannot be shown to predate this change. " + " ".join(gaps),
+                )
+            else:
+                improvement(
+                    "claim",
+                    "The baseline carries no completeness claim, so coverage changes cannot be "
+                    "assessed against it; the new snapshot records complete coverage.",
+                )
             return
 
         old_fields = old.model_dump(mode="json")

@@ -168,6 +168,40 @@ def test_the_same_tree_in_another_directory_keeps_its_repository_agent(tmp_path)
     assert refs[0] == refs[1] == {("agent:repository:inferred", "repository")}
 
 
+def _baseline(project: Path, output: Path, *extra: str):
+    return CliRunner().invoke(main, ["baseline", str(project), "-o", str(output), *extra])
+
+
+def test_a_baseline_can_ignore_the_checkout_policy_like_the_candidate_scan(tmp_path):
+    project = tmp_path / "project"
+    _project(project)
+    (project / ".nexus-symbiote.yaml").write_text("scan: {exclude_paths: [vendor]}\n")
+    assert _baseline(project, tmp_path / "operator.json", "--no-project-policy").exit_code == 0
+    assert _baseline(project, tmp_path / "checkout.json").exit_code == 0
+    _scan(project, tmp_path / "candidate.json")
+    exclusions = {
+        name: json.loads((tmp_path / f"{name}.json").read_text())["metadata"]["completeness"][
+            "exclusions"
+        ]
+        for name in ("operator", "checkout", "candidate")
+    }
+    assert exclusions["operator"] == exclusions["candidate"]
+    assert "vendor" in exclusions["checkout"] and "vendor" not in exclusions["operator"]
+    assert _gate(tmp_path / "operator.json", tmp_path / "candidate.json")[0] == 0
+
+
+def test_a_baseline_applies_the_operator_signature_policy(tmp_path):
+    project = tmp_path / "project"
+    _project(project)
+    policy = tmp_path / "signers.json"
+    policy.write_text('{"version": 1, "artifacts": []}')
+    refused = _baseline(project, tmp_path / "reviewed.json", "--signature-policy", str(policy))
+    # The scan rejects the policy (exit 1); an unknown option would be a usage error (2).
+    assert refused.exit_code == 1, refused.output
+    assert not (tmp_path / "reviewed.json").exists()
+    assert _baseline(project, tmp_path / "reviewed.json").exit_code == 0
+
+
 def _claim(**fields) -> CompletenessClaim:
     base = {
         "scope": "repository",
@@ -265,6 +299,68 @@ def test_missing_completeness_claims_are_never_silently_equal():
     )
     dropped = _compare(_claim(), None)
     assert [a["severity"] for a in dropped.security_alerts] == ["high"]
+
+
+@pytest.mark.parametrize(
+    ("gap", "named"),
+    [
+        ({"scan_failures": ["mcp.json: invalid JSON"]}, "mcp.json: invalid JSON"),
+        ({"surfaces_excluded": ["models: excluded"]}, "models: excluded"),
+        ({"scanner_status": {"mcp": "partial", "model": "complete"}}, "mcp (partial)"),
+        ({"collectors_completed": ["mcp"]}, "model (not completed)"),
+        ({"source_report_status": "incomplete"}, "ShadowScan source status: incomplete"),
+        ({"source_unmapped_count": 3}, "ShadowScan entries left unmapped: 3"),
+        (
+            {"scanner_status": {}, "collectors_requested": [], "collectors_completed": []},
+            "No collector is recorded",
+        ),
+    ],
+)
+def test_a_baseline_without_a_claim_cannot_hide_gaps_in_the_new_snapshot(gap, named):
+    report = _compare(None, _claim(**gap))
+    assert [(a["severity"], a["component"]) for a in report.security_alerts] == [
+        ("high", "metadata")
+    ]
+    assert "cannot be shown to predate this change" in report.security_alerts[0]["alert"]
+    assert named in report.security_alerts[0]["alert"]
+    assert [c["field"] for c in report.metadata_changes] == ["completeness.claim"]
+
+
+def test_a_baseline_without_a_claim_against_complete_coverage_is_a_note():
+    report = _compare(None, _claim())
+    assert report.security_alerts == []
+    assert [(c["field"], c["severity"]) for c in report.metadata_changes] == [
+        ("completeness.claim", "info")
+    ]
+
+
+def test_a_supplied_baseline_without_a_claim_still_gates_a_failed_collector(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "CLAUDE.md").write_text("Use read-only tools.\n")
+    _scan(project, tmp_path / "clean.json")
+    supplied = json.loads((tmp_path / "clean.json").read_text())
+    supplied["metadata"].pop("completeness")
+    (tmp_path / "supplied.json").write_text(json.dumps(supplied))
+    assert _gate(tmp_path / "supplied.json", tmp_path / "clean.json")[0] == 0
+    # A malformed configuration hides whatever it declares without removing a component.
+    (project / ".mcp.json").write_text('{"mcpServers": {')
+    _scan(project, tmp_path / "broken.json")
+    status, report = _gate(tmp_path / "supplied.json", tmp_path / "broken.json")
+    assert status == 1
+    (alert,) = _alerts(report)
+    assert "no completeness claim" in alert and "invalid JSON" in alert
+
+
+def test_a_different_producer_is_not_a_release_note():
+    old, new = AIBOM(), AIBOM()
+    new.metadata.tool_name, new.metadata.tool_vendor = "other-generator", "someone-else"
+    report = AIBOMDiffer().diff(old, new)
+    assert sorted((a["severity"], a["alert"]) for a in report.security_alerts) == [
+        ("medium", "Snapshot metadata tool_name changed."),
+        ("medium", "Snapshot metadata tool_vendor changed."),
+    ]
+    assert all("releases" not in c["detail"] for c in report.metadata_changes)
 
 
 def test_shadowscan_content_change_and_coverage_regression_read_differently():
