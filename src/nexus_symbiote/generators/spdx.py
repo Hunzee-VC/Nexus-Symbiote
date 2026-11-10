@@ -1,27 +1,46 @@
-"""Validated SPDX 3.0.1 projection with a digest-bound native document extension."""
+"""Validated SPDX 3.0.1 projection with a digest-bound native document extension.
+
+Profile conformance lists core, software and extension, plus expandedLicensing when
+the document references SPDX's NoAssertionLicense individual. Models, agents and
+data use the AI and Dataset classes, but the AI and Dataset profiles also require
+properties an inventory does not collect (supplier, release time, version and
+download location), so those profiles are not claimed. Unknown optional fields are
+omitted rather than filled with placeholders.
+"""
 
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import UTC
 from typing import Any
+from urllib.parse import urlsplit
+
+from referencing.exceptions import Unresolvable
 
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.enums import ComponentType
-from nexus_symbiote.core.models import AnyComponent, ModelComponent
+from nexus_symbiote.core.models import AgentComponent, AnyComponent, ModelComponent
+from nexus_symbiote.generators import _legacy
 from nexus_symbiote.generators._common import (
     NAMESPACE,
+    PROJECTION_PROPERTY,
     claim_properties,
     component_property,
     content_digest,
     coverage_aggregate,
+    declared_projection,
     document_properties,
     json_text,
+    native_components,
     native_document,
-    normalize_hash,
     prepare,
-    recover_document,
+    recover_native,
+    repository_scan,
+    repository_subject,
+    standard_hashes,
+    standard_version,
     unordered_projection,
 )
 from nexus_symbiote.generators.base import Generator
@@ -29,8 +48,9 @@ from nexus_symbiote.generators.package_identifiers import (
     package_identifier,
     package_identifier_properties,
 )
-from nexus_symbiote.generators.validation import require_valid
+from nexus_symbiote.generators.validation import SPDX_COLLECTIONS, require_valid, spdx_errors
 
+PROJECTION = "spdx-3.0.1/2"
 SPDX_TYPE_MAP = {
     ComponentType.AGENT: "ai_AIPackage",
     ComponentType.MODEL: "ai_AIPackage",
@@ -41,7 +61,8 @@ SPDX_TYPE_MAP = {
 }
 
 
-NO_ASSERTION_LICENSE = "https://spdx.org/rdf/3.0.1/terms/Licensing/NoAssertion"
+# SPDX 3.0.1 defines this named individual for "no assertion" about a license.
+NO_ASSERTION_LICENSE = "expandedlicensing_NoAssertionLicense"
 MAX_CONDITION_COMMENT = 1024
 COVERAGE_COMMENTS = {
     "incomplete": (
@@ -54,6 +75,10 @@ COVERAGE_COMMENTS = {
         "network or live tool surfaces. This document does not assert complete collection."
     ),
 }
+_NAMESPACE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:[^\s#?<>\"{}|\\^`]+")
+_DEFAULT_DOCUMENT = re.compile(
+    r"urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+)
 
 
 def _extension(properties: list[dict[str, str]]) -> list[dict[str, Any]]:
@@ -72,6 +97,26 @@ def _extension(properties: list[dict[str, str]]) -> list[dict[str, Any]]:
     ]
 
 
+def _validated_namespace(namespace: str) -> str:
+    value = namespace.rstrip("/")
+    if len(value) > 2048 or _NAMESPACE.fullmatch(value) is None:
+        raise ValueError("SPDX namespace must be an absolute IRI without a query or fragment")
+    host = (urlsplit(value).hostname or "").lower()
+    if host == "spdx.org" or host.endswith(".spdx.org"):
+        raise ValueError("SPDX namespace must be one the document creator controls")
+    return value
+
+
+def _document_namespace(spdx_id: str) -> str | None:
+    """The namespace an export was written with, or None for the default identifier."""
+    namespace, separator, revision = spdx_id.rpartition("/document/")
+    if namespace and separator and revision:
+        return namespace
+    if _DEFAULT_DOCUMENT.fullmatch(spdx_id):
+        return None
+    raise ValueError("unrecognized SPDX export document identifier")
+
+
 @dataclass(frozen=True)
 class _DocumentIds:
     document: str
@@ -85,21 +130,35 @@ class _DocumentIds:
 
 
 class SPDXGenerator(Generator):
+    """SPDX 3.0.1 JSON-LD export.
+
+    Element identifiers are scoped to one inventory revision. Pass ``namespace``, an
+    absolute IRI the operator controls, to mint them under ``<namespace>/document/``;
+    by default the document identifier is a ``urn:uuid`` derived from the revision.
+    """
+
     format_name = "spdx-3.0.1"
 
-    def __init__(self, namespace: str = "https://spdx.org/spdxdocs/nexus_symbiote") -> None:
-        self._namespace = namespace.rstrip("/")
+    def __init__(self, namespace: str | None = None) -> None:
+        self._namespace = None if namespace is None else _validated_namespace(namespace)
 
     def generate(self, aibom: AIBOM) -> dict[str, Any]:
         document = self._projection(aibom)
         require_valid(document, "spdx")
         return document
 
-    def _projection(self, aibom: AIBOM) -> dict[str, Any]:
+    def _ids(self, revision: str) -> _DocumentIds:
+        if self._namespace is None:
+            return _DocumentIds(
+                "urn:uuid:" + str(uuid.uuid5(NAMESPACE, "spdx-document:" + revision))
+            )
+        return _DocumentIds(f"{self._namespace}/document/{revision}")
+
+    def _projection(self, aibom: AIBOM, native: dict[str, Any] | None = None) -> dict[str, Any]:
         prepare(aibom)
+        native = native_document(aibom) if native is None else native
         # Native refs are BOM-local, and producers can reuse serial numbers across revisions.
-        revision = content_digest(native_document(aibom)).removeprefix("sha256:")
-        ids = _DocumentIds(f"{self._namespace}/document/{revision}")
+        ids = self._ids(content_digest(native).removeprefix("sha256:"))
         ci = ids.creation
         producer_id = ids.element("producer", aibom.metadata.tool_name)
         tool_id = ids.element("generator", aibom.metadata.tool_name)
@@ -116,7 +175,8 @@ class SPDXGenerator(Generator):
             "name": aibom.metadata.tool_name,
             "summary": aibom.metadata.tool_version,
         }
-        assert aibom.metadata.timestamp is not None
+        if aibom.metadata.timestamp is None:
+            raise ValueError("export timestamps must be set")
         creation = {
             "type": "CreationInfo",
             "@id": ci,
@@ -138,9 +198,9 @@ class SPDXGenerator(Generator):
             }
             for name in sorted(suppliers)
         ]
-        components = [
-            self._element(comp, ids) for comp in sorted(aibom.components, key=lambda c: c.bom_ref)
-        ]
+        native_by_ref = native_components(native)
+        ordered = sorted(aibom.components, key=lambda c: c.bom_ref)
+        components = [self._element(comp, ids, native_by_ref[comp.bom_ref]) for comp in ordered]
         edge_values = {
             json_text(edge.model_dump(mode="json", exclude_none=True)): edge
             for edge in aibom.dependencies
@@ -165,29 +225,47 @@ class SPDXGenerator(Generator):
             if component["type"] in {"ai_AIPackage", "dataset_DatasetPackage"}
             for kind in ("hasDeclaredLicense", "hasConcludedLicense")
         ]
-        elements: list[dict[str, Any]] = [
-            creator,
-            generator,
+        subject = repository_subject(aibom)
+        members: list[dict[str, Any]] = [
             *parties,
             *components,
             *relationships,
             *license_relationships,
         ]
+        sbom: dict[str, Any] = {
+            "type": "software_Sbom",
+            "spdxId": ids.element("sbom", "inventory"),
+            "creationInfo": ci,
+            "element": [member["spdxId"] for member in members],
+            "rootElement": [
+                ids.element("component", comp.bom_ref)
+                for comp in ([subject] if subject is not None else ordered)
+                if comp.component_type == ComponentType.AGENT
+            ],
+        }
+        if repository_scan(aibom):
+            sbom["software_sbomType"] = ["source"]
+        elements: list[dict[str, Any]] = [creator, generator, *members, sbom]
         doc = {
             "type": "SpdxDocument",
             "spdxId": ids.document,
             "creationInfo": ci,
             "name": "Nexus SymBiote AgentBOM " + str(aibom.metadata.serial_number),
             "element": [element["spdxId"] for element in elements],
-            "rootElement": [
-                ids.element("component", comp.bom_ref)
-                for comp in sorted(aibom.components, key=lambda c: c.bom_ref)
-                if comp.component_type == ComponentType.AGENT
+            "rootElement": [sbom["spdxId"]],
+            "profileConformance": [
+                "core",
+                "software",
+                *(["expandedLicensing"] if license_relationships else []),
+                "extension",
             ],
-            # The inventory does not collect all AI/Dataset-profile conformance evidence.
-            "profileConformance": ["core", "software", "extension"],
             "comment": COVERAGE_COMMENTS[coverage],
-            "extension": _extension(document_properties(aibom, self.format_name)),
+            "extension": _extension(
+                [
+                    *document_properties(aibom, self.format_name, native),
+                    {"name": PROJECTION_PROPERTY, "value": PROJECTION},
+                ]
+            ),
         }
         return {
             "@context": "https://spdx.org/rdf/3.0.1/spdx-context.jsonld",
@@ -195,7 +273,7 @@ class SPDXGenerator(Generator):
         }
 
     @staticmethod
-    def _element(comp: AnyComponent, ids: _DocumentIds) -> dict[str, Any]:
+    def _element(comp: AnyComponent, ids: _DocumentIds, native: dict[str, Any]) -> dict[str, Any]:
         typ = SPDX_TYPE_MAP.get(comp.component_type, "software_Package")
         element: dict[str, Any] = {
             "type": typ,
@@ -204,7 +282,7 @@ class SPDXGenerator(Generator):
             "name": comp.name,
             "extension": _extension(
                 [
-                    component_property(comp),
+                    component_property(comp, native),
                     *claim_properties(comp),
                     *package_identifier_properties(comp),
                 ]
@@ -222,40 +300,25 @@ class SPDXGenerator(Generator):
             ]
             if typ != "software_File":
                 element["software_packageUrl"] = package.value
-        if typ != "software_File" and (package.version or comp.version):
-            element["software_packageVersion"] = package.version or comp.version
+        version = standard_version(comp)
+        if typ != "software_File" and version:
+            element["software_packageVersion"] = version
         if comp.supplier:
             element["suppliedBy"] = ids.element("supplier", comp.supplier)
         if comp.description:
             element["description"] = comp.description
-        if typ != "software_File":
-            element["software_downloadLocation"] = "NOASSERTION"
         if typ == "ai_AIPackage":
-            element.update(
-                {
-                    "software_primaryPurpose": "model"
-                    if isinstance(comp, ModelComponent)
-                    else "application",
-                    "ai_autonomyType": "noAssertion",
-                    "ai_informationAboutTraining": "Not supplied by the inventory producer.",
-                    "ai_informationAboutApplication": comp.description
-                    or "Not supplied by the inventory producer.",
-                    "ai_limitation": "Inventory assertions do not establish model safety or authorization.",
-                    "ai_useSensitivePersonalInformation": "noAssertion",
-                }
+            element["software_primaryPurpose"] = (
+                "model" if isinstance(comp, ModelComponent) else "application"
             )
             if isinstance(comp, ModelComponent) and comp.model_type:
                 element["ai_typeOfModel"] = [comp.model_type]
+            if isinstance(comp, AgentComponent) and comp.description:
+                element["ai_informationAboutApplication"] = comp.description
         elif typ == "dataset_DatasetPackage":
-            element.update(
-                {
-                    "software_primaryPurpose": "data",
-                    "dataset_datasetType": ["noAssertion"],
-                    "dataset_hasSensitivePersonalInformation": "noAssertion",
-                    "dataset_dataCollectionProcess": "Not supplied by the inventory producer.",
-                    "dataset_intendedUse": "Not supplied by the inventory producer.",
-                }
-            )
+            element["software_primaryPurpose"] = "data"
+            # The only property the Dataset class requires; the inventory has no type.
+            element["dataset_datasetType"] = ["noAssertion"]
         elif comp.component_type in {
             ComponentType.MCP_CLIENT,
             ComponentType.MCP_SERVER,
@@ -266,17 +329,12 @@ class SPDXGenerator(Generator):
             element["software_primaryPurpose"] = "application"
         elif comp.component_type == ComponentType.VERIFIED_EXTENSION:
             element["software_primaryPurpose"] = "library"
-        if comp.hashes:
-            hashes = []
-            for algorithm, value in sorted(comp.hashes.items()):
-                name, digest = normalize_hash(algorithm, value)
-                spdx_algorithm = (
-                    name.lower().replace("-", "_")
-                    if name.startswith("SHA3-")
-                    else name.lower().replace("-", "")
-                )
-                hashes.append({"type": "Hash", "algorithm": spdx_algorithm, "hashValue": digest})
-            element["verifiedUsing"] = hashes
+        hashes = standard_hashes(comp)
+        if hashes:
+            element["verifiedUsing"] = [
+                {"type": "Hash", "algorithm": _spdx_algorithm(name), "hashValue": digest}
+                for name, digest in hashes
+            ]
         return element
 
     @staticmethod
@@ -319,14 +377,27 @@ class SPDXGenerator(Generator):
 
     @staticmethod
     def recover(document: dict[str, Any]) -> AIBOM:
-        require_valid(document, "spdx")
-        docs = [node for node in document["@graph"] if node["type"] == "SpdxDocument"]
+        """Require agreement with the embedded inventory under the declared projection.
+
+        A document without a projection marker was written by 0.1.0 and must match that
+        projection. Malformed input raises ValueError.
+        """
+        try:
+            return SPDXGenerator._recover(document)
+        except (RecursionError, Unresolvable, KeyError, TypeError, AttributeError) as exc:
+            raise ValueError("SPDX document cannot be recovered") from exc
+
+    @staticmethod
+    def _recover(document: dict[str, Any]) -> AIBOM:
+        graph = document.get("@graph")
+        docs = [
+            node
+            for node in (graph if isinstance(graph, list) else [])
+            if isinstance(node, dict) and node.get("type") == "SpdxDocument"
+        ]
         if len(docs) != 1:
             raise ValueError("expected exactly one SPDX document")
         doc = docs[0]
-        namespace, separator, _revision = doc["spdxId"].rpartition("/document/")
-        if not namespace or not separator:
-            raise ValueError("unrecognized SPDX export document identifier")
         properties = [
             {"name": prop["extension_cdxPropName"], "value": prop.get("extension_cdxPropValue", "")}
             for extension in doc.get("extension", [])
@@ -335,16 +406,45 @@ class SPDXGenerator(Generator):
             for prop in extension.get("extension_cdxProperty", [])
             if isinstance(prop, dict) and "extension_cdxPropName" in prop
         ]
-        recovered = recover_document(properties)
-        expected = SPDXGenerator(namespace)._projection(recovered)
-        # A conforming JSON-LD consumer can omit an empty root element set.
-        actual = {
-            **document,
-            "@graph": [
-                {**node, "rootElement": node.get("rootElement", [])} if node is doc else node
-                for node in document["@graph"]
-            ],
-        }
-        if unordered_projection(actual) != unordered_projection(expected):
+        projection = declared_projection(properties)
+        errors = spdx_errors(
+            document,
+            legacy_license=_legacy.NO_ASSERTION_LICENSE if projection is None else None,
+        )
+        if errors:
+            raise ValueError("invalid spdx export: " + "; ".join(errors[:10]))
+        namespace = _document_namespace(doc["spdxId"])
+        recovered, native = recover_native(properties)
+        if projection == PROJECTION:
+            expected = SPDXGenerator(namespace)._projection(recovered, native)
+        elif projection is None and namespace is not None:
+            expected = _legacy.spdx_projection(recovered, namespace, native)
+        else:
+            raise ValueError("unsupported SPDX projection version")
+        if unordered_projection(_public_view(document)) != unordered_projection(
+            _public_view(expected)
+        ):
             raise ValueError("SPDX projection conflicts with the embedded native document")
         return recovered
+
+
+def _public_view(document: dict[str, Any]) -> dict[str, Any]:
+    # A conforming JSON-LD consumer can omit an empty root element set.
+    return {
+        **document,
+        "@graph": [
+            {**node, "rootElement": node.get("rootElement", [])}
+            if isinstance(node, dict) and node.get("type") in SPDX_COLLECTIONS
+            else node
+            for node in document["@graph"]
+        ],
+    }
+
+
+def _spdx_algorithm(name: str) -> str:
+    """SPDX spells SHA3 digests with an underscore and the others without separators."""
+    return (
+        name.lower().replace("-", "_")
+        if name.startswith("SHA3-")
+        else name.lower().replace("-", "")
+    )

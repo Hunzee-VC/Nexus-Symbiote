@@ -277,7 +277,7 @@ def _merge_scan_result(
             scan_failures.append(f"{name}: dependency endpoint was not imported")
 
 
-def _render_aibom(aibom: AIBOM, output_format: str) -> str:
+def _render_aibom(aibom: AIBOM, output_format: str, root: Path | None = None) -> str:
     if output_format == "cyclonedx":
         from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
 
@@ -289,7 +289,8 @@ def _render_aibom(aibom: AIBOM, output_format: str) -> str:
     if output_format == "sarif":
         from nexus_symbiote.generators.sarif import SARIFGenerator
 
-        return SARIFGenerator().generate_json(aibom)
+        # Inventory paths are relative to the scanned root; SARIF URIs to the working directory.
+        return SARIFGenerator(scan_root=root).generate_json(aibom)
     return aibom.to_json()
 
 
@@ -470,7 +471,7 @@ def scan(
         raise click.ClickException(
             "SARIF cannot preserve imported discovery coverage; use native JSON, CycloneDX or SPDX."
         )
-    out_data = _render_aibom(aibom, output_format)
+    out_data = _render_aibom(aibom, output_format, root)
 
     if output:
         write_cli_output(Path(output), out_data)

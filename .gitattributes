@@ -38,8 +38,11 @@ Dockerfile text eol=lf
 *.zip binary
 *.gz binary
 
-# Vendored schemas — track but don't normalize
-src/nexus_symbiote/generators/schemas/vendor/** -text -diff linguist-vendored
+# Vendored schemas — track but don't normalize. Only the large schema files skip
+# text diffs; the manifest, notice and license files must stay reviewable.
+src/nexus_symbiote/generators/schemas/vendor/** -text linguist-vendored
+src/nexus_symbiote/generators/schemas/vendor/*/*.json -diff
+src/nexus_symbiote/generators/schemas/vendor/*/*.jsonld -diff
 
 # Evidence and parser fixtures must retain their exact recorded bytes.
 benchmarks/fixtures/** -text

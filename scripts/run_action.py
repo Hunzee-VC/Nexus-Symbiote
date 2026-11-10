@@ -174,17 +174,30 @@ def _write(path: Path, content: str, *, root: Path | None = None) -> None:
     write_output_file(path, content, root=root, create_parents=True)
 
 
-def _export(native: Path, output: Path, fmt: str, *, root: Path | None = None) -> None:
+def _export(
+    native: Path,
+    output: Path,
+    fmt: str,
+    *,
+    root: Path | None = None,
+    scan_root: Path | None = None,
+) -> None:
     if fmt == "json":
         _write(output, native.read_text(encoding="utf-8"), root=root)
         return
     from nexus_symbiote.core.aibom import AIBOM
+    from nexus_symbiote.generators.base import Generator
     from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
     from nexus_symbiote.generators.sarif import SARIFGenerator
     from nexus_symbiote.generators.spdx import SPDXGenerator
 
-    generators = {"cyclonedx": CycloneDXGenerator, "sarif": SARIFGenerator, "spdx": SPDXGenerator}
-    _write(output, generators[fmt]().generate_json(AIBOM.load(native)), root=root)
+    # SARIF URIs are relative to the workspace; inventory paths to the scanned project.
+    generators: dict[str, Generator] = {
+        "cyclonedx": CycloneDXGenerator(),
+        "sarif": SARIFGenerator(root, scan_root=scan_root),
+        "spdx": SPDXGenerator(),
+    }
+    _write(output, generators[fmt].generate_json(AIBOM.load(native)), root=root)
 
 
 def run(
@@ -204,7 +217,7 @@ def run(
 
     def emit_export(native: Path, output: Path, fmt: str) -> None:
         if export is None:
-            _export(native, output, fmt, root=config.workspace)
+            _export(native, output, fmt, root=config.workspace, scan_root=config.project)
         else:
             export(native, output, fmt)
 
