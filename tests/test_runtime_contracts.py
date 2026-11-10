@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import inspect
+import ipaddress
 import json
 from datetime import timedelta
 
@@ -175,6 +176,9 @@ def test_contract_that_can_never_verify_is_not_signed(tmp_path, kind, index, lif
         "http://127.0.0.1:8080/mcp",
         "https://[::1]/mcp",
         "https://[fe80::1]/mcp",
+        "https://[2001:db8::1]/mcp",
+        "https://[1:0:1::1:0:0]/mcp",
+        "http://[::]:8080",
         "https://mcp.0xample/mcp",
         "spiffe://acme.example/ns/prod/sa/mail",
         "stdio+launcher:sha256:" + "0" * 64,
@@ -210,10 +214,17 @@ def test_canonical_endpoint_identities_are_accepted(identity):
         "stdio+launcher:SHA256:" + "0" * 64,
         "stdio+launcher:sha256:" + "A" * 64,
         "",
-        # An IP address has one accepted spelling, the one ipaddress prints.
+        # An IP address has one accepted spelling: RFC 5952 hexadecimal for IPv6.
         "https://[0:0:0:0:0:0:0:1]/mcp",
         "https://[::0001]/mcp",
+        "https://[1:0:1:0:0:1::]/mcp",
+        "https://[64:ff9b::1.2.3.4]/mcp",
+        # IPv4-mapped and IPv4-compatible addresses are another spelling of an IPv4
+        # address, and Python versions print mapped ones differently.
         "https://[::ffff:127.0.0.1]/mcp",
+        "https://[::ffff:7f00:1]/mcp",
+        "https://[::7f00:1]/mcp",
+        "https://[::127.0.0.1]/mcp",
         "https://[127.0.0.1]/mcp",
         "https://127.000.000.001/mcp",
         "https://2130706433/mcp",
@@ -235,6 +246,14 @@ def test_noncanonical_endpoint_identities_are_rejected_where_they_are_signed(ide
     window = {"not_before": NOW, "not_after": NOW + timedelta(minutes=5)}
     with pytest.raises(ValidationError, match="revoked_endpoints"):
         TrustStatus(tenant="acme", serial=1, revoked_endpoints=(identity,), **window)
+
+
+def test_ipv6_spelling_is_rfc_5952_text_without_relying_on_str():
+    # Every placement of zero groups exercises the choice of the run that "::" replaces.
+    for zeros in range(256):
+        groups = [0 if zeros >> index & 1 else 0xDB8 + index for index in range(8)]
+        value = sum(group << 16 * (7 - index) for index, group in enumerate(groups))
+        assert runtime._ipv6_text(value) == str(ipaddress.IPv6Address(value))
 
 
 EXTENDED = {

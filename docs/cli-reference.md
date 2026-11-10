@@ -269,14 +269,19 @@ nexus-symbiote runtime register [OPTIONS] SNAPSHOT_PATH
 | `--state` `PATH` | Initialized state database that the gateways share. (required) |
 | `--snapshot-key` `PATH` | Trusted snapshot-signing public key PEM; repeat to build the ring. (required, repeatable) |
 | `--trust-key` `PATH` | Trusted trust-status public key PEM; repeat to build the ring. (required, repeatable) |
+| `--approval-key` `PATH` | Approval public key PEM the gateways trust; repeat for each. Only checked, so the gateways' signer scope map can be passed unchanged. (repeatable) |
 | `--snapshot-threshold` `INTEGER RANGE` | Minimum number of distinct snapshot signers (default: 1). |
 | `--trust-threshold` `INTEGER RANGE` | Minimum number of distinct trust-status signers (default: 1). |
 | `--signer-scopes` `PATH` | JSON object mapping key IDs to the signer scopes the gateways use. |
+| `--allow-shared-keys` | Accept a key in more than one ring, as gateways built with `allow_shared_keys=True` do. |
 
 The snapshot and trust status are checked as the gateway checks them, except the
-workload context and the companion BOM, so pass the rings, quorums and signer scopes
-the gateways use. The output names the tenant, deployment, agent, serial and
-contract `digest` that became current.
+workload context and the companion BOM, so pass the rings, quorums, signer scopes
+and shared-key setting the gateways use. Pass the approval keys too when the scope
+map covers them. A scope entry for a key in no ring, or a key in two rings without
+`--allow-shared-keys`, fails with `configuration-invalid` and names the key ID. The
+output names the tenant, deployment, agent, serial and contract `digest` that
+became current.
 
 ### `scan`
 

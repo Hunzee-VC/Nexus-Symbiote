@@ -195,20 +195,28 @@ closed.
 
 Schemas are evaluated in the dialect their `$schema` declares: draft-04, draft-06,
 draft-07, 2019-09 or 2020-12. A schema without `$schema` is evaluated as 2020-12.
-Any other dialect is refused. A constraint that the declared dialect would ignore
-makes the schema invalid rather than approved but unenforced: a keyword of another
-dialect, such as draft-07 `dependencies` in a schema without `$schema` or `const`
-in a draft-04 schema, and an assertion next to `$ref` in draft-04 to draft-07,
-which ignore the siblings of `$ref`. `format` is an annotation and is never
-asserted. `pattern` and `patternProperties` have ECMA-262 meaning, read with the
-`u` flag that JSON Schema recommends: `$` does not match before a final newline,
-`\d` and `\w` are ASCII, `\s` and `.` use ECMA-262's whitespace and line
-terminators, and `[\s\S]` matches any character. Pattern syntax that ECMA-262
-rejects or reads differently and that has no translation makes the schema
-invalid: inline flags, possessive quantifiers such as `a*+`, `{,n}`, quantified
-assertions, and `\d`, `\w` or `\s` as a range bound, such as `[%-\w]`. A pattern
-that is valid only without the `u` flag, such as `^\-?\d+$`, keeps that meaning,
-but is refused if it also names characters outside the Basic Multilingual Plane.
+Any other dialect is refused. A constraint that evaluation would skip makes the
+schema invalid rather than approved but unenforced: a keyword that the declared
+dialect's specification does not define, such as draft-07 `dependencies` in a
+schema without `$schema`, `const` in a draft-04 schema or `maxContains` in a
+draft-07 schema; an assertion next to `$ref` in draft-04 to draft-07, which ignore
+the siblings of `$ref`; a subschema with its own `$schema` or base URI (`$id`, or
+`id` in draft-04); and a reference that is not a JSON Pointer within the schema,
+such as `https://tools.example.test/run#/x` or an anchor. `format` is an
+annotation and is never asserted. `pattern` and `patternProperties` have ECMA-262
+meaning, read with the `u` flag that JSON Schema recommends: `$` does not match
+before a final newline, `\d` and `\w` are ASCII, `\s` and `.` use ECMA-262's
+whitespace and line terminators, and `[\s\S]` matches any character. Pattern
+syntax that ECMA-262 rejects or reads differently and that has no translation
+makes the schema invalid: inline flags, possessive quantifiers such as `a*+`,
+`{,n}`, quantified assertions, `\d`, `\w` or `\s` as a range bound, such as
+`[%-\w]`, and a backreference to a group that may not take part, such as
+`^(['"])?rm\1\s`, which ECMA-262 reads as empty and Python as a failed match. A
+backreference to a group that always takes part first, as in `^(['"]).*\1$`,
+keeps its meaning. A pattern that is valid only without the `u` flag, such as
+`^\-?\d+$`, is accepted and read with code-point semantics, so `.` and negated
+classes match one character outside the Basic Multilingual Plane where Annex B
+would count two UTF-16 code units; it is refused if it names such characters.
 Every worker first checks that patterns have this meaning in each dialect; if a
 jsonschema upgrade changed that, the worker does not start and calls fail with
 `validation-unavailable`.

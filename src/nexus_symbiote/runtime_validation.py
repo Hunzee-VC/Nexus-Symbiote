@@ -17,7 +17,6 @@ import sys
 import threading
 import time
 from typing import Any
-from urllib.parse import unquote
 
 MAX_SCHEMA_BYTES = 256 * 1024
 MAX_ARGUMENT_BYTES = 1024 * 1024
@@ -283,6 +282,7 @@ _ESCAPES = {
 _ANY = r"[^\n\r  ]"
 _GROUPS = ("(?:", "(?=", "(?!", "(?<=", "(?<!")
 _LOOKAROUNDS = frozenset(_GROUPS[1:])
+_LOOKBEHINDS = frozenset(_GROUPS[3:])
 _COMPLEMENTS = {"D": "0-9", "W": "A-Za-z0-9_", "S": _ECMA_SPACE}
 _QUANTIFIER = re.compile(r"\{[0-9]+(?:,[0-9]*)?\}")
 # Python reads "{,n}" and "{,}" as quantifiers; ECMA-262 reads the braces literally
@@ -301,21 +301,27 @@ def ecma_pattern(pattern: str) -> str:
     that JSON Schema recommends. Python's ``$`` also matches before a final newline,
     and its ``\\d``, ``\\w`` and ``.`` differ for non-ASCII input, so a value the
     author excluded could pass. Syntax that ECMA-262 rejects or reads differently
-    and that has no translation, such as inline flags, possessive quantifiers or a
-    class escape as a range bound, raises ``re.error`` and makes the schema invalid.
+    and that has no translation, such as inline flags, possessive quantifiers, a
+    class escape as a range bound or a backreference to a group that may not take
+    part, raises ``re.error`` and makes the schema invalid. A pattern that is valid
+    only without the ``u`` flag (Annex B) is read with the ``u`` flag's code-point
+    semantics, so ``.`` and negated classes match one character outside the BMP
+    where Annex B would count two UTF-16 code units.
     """
     # Without the u flag, ECMA-262 Annex B accepts more syntax and counts UTF-16 code
     # units, which Python cannot. A pattern that names a character outside the BMP
     # or a surrogate must therefore be valid with the u flag.
     strict = _names_astral(pattern)
     out: list[str] = []
-    lookarounds: list[bool] = []
+    captures = _Captures()
     # The last token: "atom", "assertion", "quantifier", "lazy", or "" at the start
     # of the pattern, a group or an alternative. Only an atom can be repeated.
     previous = ""
     index = 0
     while index < len(pattern):
         char = pattern[index]
+        # A quantifier repeats the captures of a group that has just closed.
+        repeated, captures.repeated = captures.repeated, None
         quantifier = _QUANTIFIER.match(pattern, index) if char == "{" else None
         if char in "*+?" or quantifier is not None:
             if char == "?" and previous == "quantifier":
@@ -325,6 +331,8 @@ def ecma_pattern(pattern: str) -> str:
                 continue
             if previous != "atom":
                 raise re.error("quantifier does not follow a repeatable atom")
+            if repeated is not None:
+                captures.conditional.append(repeated)
             text = char if quantifier is None else quantifier.group()
             out.append(text)
             index += len(text)
@@ -338,27 +346,127 @@ def ecma_pattern(pattern: str) -> str:
             previous = "atom"
             continue
         if char == "\\":
-            text, index, previous = _escape_outside_class(pattern, index, strict)
+            text, index, previous = _escape_outside_class(pattern, index, strict, captures)
             out.append(text)
             continue
         if char == "(":
             prefix = _group_prefix(pattern, index)
-            out.append("(?P<" if prefix == "(?<" else prefix)
             index += len(prefix)
-            lookarounds.append(prefix in _LOOKAROUNDS)
+            name = None
+            if prefix == "(?<":
+                end = pattern.find(">", index)
+                if end < 0:
+                    raise re.error("unterminated group name")
+                name, index = pattern[index:end], end + 1
+            captures.open(prefix, name)
+            out.append(prefix if name is None else f"(?P<{name}>")
             previous = ""
             continue
         if strict and char in "]{}":
             raise re.error("a lone bracket or brace is not valid with the u flag")
         if char == ")":
-            previous = "assertion" if lookarounds and lookarounds.pop() else "atom"
+            previous = "assertion" if captures.close() else "atom"
         elif char in "^$":
             previous = "assertion"
+        elif char == "|":
+            captures.alternative()
+            previous = ""
         else:
-            previous = "" if char == "|" else "atom"
+            previous = "atom"
         out.append(_ANY if char == "." else r"\Z" if char == "$" else char)
         index += 1
+    captures.finish()
     return "".join(out)
+
+
+class _Group:
+    """An open group: its capture number (0 if none), prefix and first inner capture.
+
+    The captures inside a group are numbered contiguously, so a range describes them.
+    """
+
+    def __init__(self, number: int, prefix: str, first: int) -> None:
+        self.number = number
+        self.prefix = prefix
+        self.first = first
+        self.alternative = False
+
+
+class _Captures:
+    """The capture groups of one pattern, to keep only backreferences with one meaning.
+
+    In ECMA-262 a reference to a group that did not take part matches the empty
+    string, and a loop resets the captures inside it on each iteration; Python fails
+    such a reference and keeps the captures of earlier iterations. Both agree only
+    when the group always takes part, once, before the reference: when no quantifier,
+    alternative or lookaround encloses it. The bookkeeping is linear in the pattern.
+    """
+
+    def __init__(self) -> None:
+        self.count = 0
+        self.names: dict[str, int] = {}
+        self.closed: set[int] = set()
+        # Ranges of capture numbers that may not take part.
+        self.conditional: list[tuple[int, int]] = []
+        self.referenced: set[int] = set()
+        # The captures of the group that closed last, which a quantifier repeats.
+        self.repeated: tuple[int, int] | None = None
+        self.lookbehinds = 0
+        self.groups = [_Group(0, "", 1)]
+
+    def open(self, prefix: str, name: str | None) -> None:
+        number = 0
+        if prefix in ("(", "(?<"):
+            self.count += 1
+            number = self.count
+        if name is not None:
+            if name in self.names:
+                raise re.error("duplicate group name")
+            self.names[name] = number
+        self.lookbehinds += prefix in _LOOKBEHINDS
+        self.groups.append(_Group(number, prefix, self.count + 1))
+
+    def alternative(self) -> None:
+        self.groups[-1].alternative = True
+
+    def close(self) -> bool:
+        """Close the innermost group; return whether it was a lookaround."""
+        if len(self.groups) == 1:
+            raise re.error("unbalanced parenthesis")
+        group = self.groups.pop()
+        lookaround = group.prefix in _LOOKAROUNDS
+        self.lookbehinds -= group.prefix in _LOOKBEHINDS
+        if group.alternative or lookaround:
+            self.conditional.append((group.first, self.count))
+        if group.number:
+            self.closed.add(group.number)
+        self.repeated = (group.number or group.first, self.count)
+        return lookaround
+
+    def reference(self, number: int) -> None:
+        # Python reads \100 and above as octal escapes, not references.
+        if number not in self.closed or number > 99:
+            raise re.error("a backreference must follow the group it names")
+        if self.lookbehinds:
+            raise re.error("a backreference inside a lookbehind is not supported")
+        self.referenced.add(number)
+
+    def finish(self) -> None:
+        if len(self.groups) > 1:
+            raise re.error("missing ), unterminated subpattern")
+        if self.groups[0].alternative:
+            self.conditional.append((1, self.count))
+        # Count the conditional ranges that cover each capture number.
+        covered = [0] * (self.count + 2)
+        for low, high in self.conditional:
+            if low <= high:
+                covered[low] += 1
+                covered[high + 1] -= 1
+        depth = 0
+        for number in range(1, self.count + 1):
+            depth += covered[number]
+            if depth and number in self.referenced:
+                raise re.error("a backreference names a group that may not take part")
 
 
 def _group_prefix(pattern: str, index: int) -> str:
@@ -428,7 +536,9 @@ def _surrogate_pair(pattern: str, index: int, end: int) -> int | None:
     return 0x10000 + (high - 0xD800) * 0x400 + int(low[2:], 16) - 0xDC00
 
 
-def _escape_outside_class(pattern: str, index: int, strict: bool) -> tuple[str, int, str]:
+def _escape_outside_class(
+    pattern: str, index: int, strict: bool, captures: _Captures
+) -> tuple[str, int, str]:
     """Translate the escape at ``index``; return it, the index after it and its token."""
     escaped = pattern[index + 1 : index + 2]
     if escaped in _ESCAPES:
@@ -442,7 +552,19 @@ def _escape_outside_class(pattern: str, index: int, strict: bool) -> tuple[str, 
         end = pattern.find(">", index + 3)
         if not pattern.startswith("<", index + 2) or end < 0:
             raise re.error("invalid named backreference")
-        return f"(?P={pattern[index + 3 : end]})", end + 1, "atom"
+        name = pattern[index + 3 : end]
+        if name not in captures.names:
+            raise re.error("a backreference must follow the group it names")
+        captures.reference(captures.names[name])
+        return f"(?P={name})", end + 1, "atom"
+    if escaped and escaped in "123456789":
+        # ECMA-262 reads every following digit as part of the group number.
+        end = index + 2
+        while end < len(pattern) and pattern[end] in "0123456789":
+            end += 1
+        number = int(pattern[index + 1 : end])
+        captures.reference(number)
+        return f"(?:\\{number})", end, "atom"
     text, end = _escape(pattern, index, in_class=False, strict=strict)
     return text, end, "atom"
 
@@ -502,7 +624,10 @@ def _character_class(pattern: str, index: int, strict: bool) -> tuple[str, int]:
     if not negated:
         options = [f"[{positive}]"] if positive else []
         options.extend(f"[^{excluded}]" for excluded in complements)
-        return "(?:" + "|".join(options) + ")", index
+        # Every alternative matches the same one character, so an atomic group keeps
+        # the meaning and stops overlapping members ([\s\W]) from backtracking
+        # exponentially.
+        return "(?>" + "|".join(options) + ")", index
     guard = f"(?![{positive}])" if positive else ""
     guard += "".join(f"(?=[{excluded}])" for excluded in complements[:-1])
     return f"(?:{guard}[{complements[-1]}])", index
@@ -521,7 +646,11 @@ class _EcmaRegex:
             raise re.error("pattern flags are not supported")
         compiled = self._compiled.get(pattern)
         if compiled is None:
-            compiled = re.compile(ecma_pattern(pattern), re.ASCII)
+            translated = ecma_pattern(pattern)
+            try:
+                compiled = re.compile(translated, re.ASCII)
+            except RecursionError as exc:
+                raise re.error("pattern nests too deeply") from exc
             self._compiled[pattern] = compiled
         return compiled
 
@@ -625,15 +754,97 @@ _SUBSCHEMA_MAPS = frozenset(
 )
 
 
-def _ignores_a_keyword(
-    schema: dict[str, Any], known: frozenset[str], every: frozenset[str], legacy_ref: bool
-) -> bool:
-    """Whether the schema holds a constraint that its declared dialect does not apply.
+# The assertion and applicator keywords each supported dialect defines, from its
+# specification. jsonschema applies some inside another keyword (draft-04's boolean
+# exclusiveMinimum inside minimum, then inside if, minContains inside contains), so
+# its VALIDATORS tables alone are not the vocabulary.
+_DRAFT_04_KEYWORDS = frozenset(
+    {
+        "$ref",
+        "additionalItems",
+        "additionalProperties",
+        "allOf",
+        "anyOf",
+        "dependencies",
+        "enum",
+        "exclusiveMaximum",
+        "exclusiveMinimum",
+        "format",
+        "items",
+        "maxItems",
+        "maxLength",
+        "maxProperties",
+        "maximum",
+        "minItems",
+        "minLength",
+        "minProperties",
+        "minimum",
+        "multipleOf",
+        "not",
+        "oneOf",
+        "pattern",
+        "patternProperties",
+        "properties",
+        "required",
+        "type",
+        "uniqueItems",
+    }
+)
+_DRAFT_06_KEYWORDS = _DRAFT_04_KEYWORDS | {"const", "contains", "propertyNames"}
+_DRAFT_07_KEYWORDS = _DRAFT_06_KEYWORDS | {"if", "then", "else"}
+_DRAFT_2019_KEYWORDS = (_DRAFT_07_KEYWORDS - {"dependencies"}) | {
+    "$recursiveRef",
+    "dependentRequired",
+    "dependentSchemas",
+    "maxContains",
+    "minContains",
+    "unevaluatedItems",
+    "unevaluatedProperties",
+}
+_DRAFT_2020_KEYWORDS = (_DRAFT_2019_KEYWORDS - {"$recursiveRef", "additionalItems"}) | {
+    "$dynamicRef",
+    "prefixItems",
+}
+VOCABULARIES = dict(
+    zip(
+        DIALECTS,
+        (
+            _DRAFT_04_KEYWORDS,
+            _DRAFT_06_KEYWORDS,
+            _DRAFT_07_KEYWORDS,
+            _DRAFT_2019_KEYWORDS,
+            _DRAFT_2020_KEYWORDS,
+        ),
+        strict=True,
+    )
+)
+_EVERY_KEYWORD = frozenset().union(*VOCABULARIES.values())
+# Keywords that jsonschema evaluates inside another keyword rather than on their own.
+_APPLIED_INSIDE = frozenset(
+    {"else", "exclusiveMaximum", "exclusiveMinimum", "maxContains", "minContains", "then"}
+)
+_REFERENCES = ("$ref", "$dynamicRef", "$recursiveRef")
 
-    A keyword of another supported dialect, or one next to "$ref" in draft-04 to
-    draft-07, which ignore the siblings of "$ref", reads as a constraint to whoever
-    approves the schema but is not enforced. "format" is never asserted here.
+
+def _ignores_a_keyword(schema: dict[str, Any], dialect: str, validator: Any) -> bool:
+    """Whether evaluation would skip a constraint that whoever approves the schema reads.
+
+    That is a keyword the declared dialect does not define or jsonschema does not
+    apply, an assertion next to "$ref" in draft-04 to draft-07, which ignore the
+    siblings of "$ref", and a subschema that jsonschema would read in another dialect
+    (its own "$schema") or against another base URI (its own "$id", or "id" in
+    draft-04). References must be JSON Pointers within the schema ("#" or "#/...");
+    they are resolved with jsonschema's own resolver and their targets checked too.
+    "format" is never asserted here.
     """
+    from referencing import Registry
+    from referencing.jsonschema import specification_with
+
+    known = VOCABULARIES[dialect] & (frozenset(validator.VALIDATORS) | _APPLIED_INSIDE)
+    legacy = dialect in DIALECTS[:3]
+    identifier = "id" if dialect == DIALECTS[0] else "$id"
+    resource = specification_with(dialect).create_resource(schema)
+    resolver = Registry().resolver_with_root(resource)
     pending: list[Any] = [schema]
     seen: set[int] = set()
     while pending:
@@ -641,8 +852,10 @@ def _ignores_a_keyword(
         if not isinstance(node, dict) or id(node) in seen:
             continue
         seen.add(id(node))
-        used = every.intersection(node)
-        if used - known or (legacy_ref and "$ref" in node and used - {"$ref", "format"}):
+        used = _EVERY_KEYWORD.intersection(node)
+        if used - known or (legacy and "$ref" in node and used - {"$ref", "format"}):
+            return True
+        if node is not schema and _redeclares(node, dialect, identifier):
             return True
         for keyword, value in node.items():
             if keyword in _SUBSCHEMA_MAPS and isinstance(value, dict):
@@ -651,26 +864,42 @@ def _ignores_a_keyword(
                 pending.extend(value)
             elif keyword in _SUBSCHEMA:
                 pending.append(value)
-        reference = node.get("$ref")
-        if isinstance(reference, str) and reference.startswith("#/"):
-            pending.append(_pointer(schema, reference))
+        for keyword in _REFERENCES:
+            if keyword in node:
+                target = _reference_target(resolver, keyword, node[keyword])
+                if not isinstance(target, (dict, bool)):
+                    return True
+                pending.append(target)
     return False
 
 
-def _pointer(document: Any, reference: str) -> Any:
-    """Resolve a same-document JSON Pointer reference such as "#/$defs/a", else None."""
-    node = document
-    for token in unquote(reference[1:]).split("/")[1:]:
-        token = token.replace("~1", "/").replace("~0", "~")
-        if isinstance(node, dict) and token in node:
-            node = node[token]
-        elif isinstance(node, list) and token.isascii() and token.isdigit():
-            if int(token) >= len(node):
-                return None
-            node = node[int(token)]
-        else:
-            return None
-    return node
+def _redeclares(node: dict[str, Any], dialect: str, identifier: str) -> bool:
+    """Whether a subschema declares another dialect or a base URI of its own."""
+    if "$schema" in node:
+        declared = node["$schema"]
+        if not isinstance(declared, str) or declared.removesuffix("#") != dialect:
+            return True
+    if identifier not in node:
+        return False
+    value = node[identifier]
+    # Draft-04 to draft-07 read an identifier that starts with "#" as a plain-name
+    # anchor, which changes no base URI.
+    return not (dialect in DIALECTS[:3] and isinstance(value, str) and value.startswith("#"))
+
+
+def _reference_target(resolver: Any, keyword: str, reference: Any) -> Any:
+    """Resolve a JSON Pointer reference as jsonschema does; anything else gives None."""
+    from referencing.exceptions import Unresolvable
+
+    if keyword == "$recursiveRef":
+        # 2019-09 resolves "$recursiveRef" as "#" whatever it names.
+        reference = reference if reference == "#" else None
+    if not isinstance(reference, str) or not (reference == "#" or reference.startswith("#/")):
+        return None
+    try:
+        return resolver.lookup(reference).contents
+    except (Unresolvable, LookupError, TypeError, ValueError):
+        return None
 
 
 def _evaluate(dialects: dict[str, Any], schema: dict[str, Any], arguments: Any) -> bytes:
@@ -686,12 +915,9 @@ def _evaluate(dialects: dict[str, Any], schema: dict[str, Any], arguments: Any) 
     validator = dialects.get(dialect)
     if validator is None:
         return _SCHEMA
-    every = frozenset().union(*(other.VALIDATORS for other in dialects.values()))
     try:
         validator.check_schema(schema)
-        if _ignores_a_keyword(
-            schema, frozenset(validator.VALIDATORS), every, dialect in DIALECTS[:3]
-        ):
+        if _ignores_a_keyword(schema, dialect, validator):
             return _SCHEMA
         validator(schema, registry=Registry()).validate(arguments)
     except SchemaValidationError:

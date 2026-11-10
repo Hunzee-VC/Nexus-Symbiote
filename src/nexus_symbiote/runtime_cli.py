@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import stat
 from datetime import UTC, datetime
 from pathlib import Path
@@ -47,6 +48,7 @@ MAX_PASSPHRASE_FILE_BYTES = 4096
 # OpenSSL refuses longer PEM passphrases.
 MAX_PASSPHRASE_BYTES = 1023
 _CONTRACT_KINDS = ["snapshot", "approval", "trust", "model"]
+_KEY_ID = re.compile(r"[0-9a-f]{64}")
 _DIGEST_KINDS = [*_CONTRACT_KINDS, "context", "request", "tool", "bom"]
 
 
@@ -58,6 +60,10 @@ class _InputTooLargeError(Exception):
     """An input file exceeds its size limit."""
 
 
+class _RingError(Exception):
+    """Rings and scopes do not fit together; the message holds fixed text and key IDs only."""
+
+
 _HANDLED = (
     ValueError,
     TypeError,
@@ -66,6 +72,7 @@ _HANDLED = (
     UnsupportedAlgorithm,
     _KeyFileError,
     _InputTooLargeError,
+    _RingError,
 )
 
 
@@ -81,6 +88,8 @@ def _safe_error(exc: BaseException, operation: str) -> str:
         return f"runtime {operation} failed: {exc} (runtime-key-error)"
     if isinstance(exc, _InputTooLargeError):
         return f"runtime {operation} input exceeds its size limit (runtime-input-too-large)"
+    if isinstance(exc, _RingError):
+        return f"runtime {operation} failed: {exc} (configuration-invalid)"
     if isinstance(exc, OSError):
         return f"runtime {operation} files could not be accessed safely (runtime-io-error)"
     if isinstance(exc, RecursionError):
@@ -118,6 +127,28 @@ def _ring(paths: tuple[Path, ...]) -> dict[str, Ed25519PublicKey]:
         public = _load_public(path)
         ring[key_id(public)] = public
     return ring
+
+
+def _check_rings(
+    rings: dict[str, dict[str, Ed25519PublicKey]], scopes: dict[str, Any], allow_shared_keys: bool
+) -> None:
+    """Name the key behind a ring or scope error that the library reports without it."""
+    if not allow_shared_keys:
+        for name in sorted(set().union(*rings.values())):
+            purposes = [purpose for purpose, ring in rings.items() if name in ring]
+            if len(purposes) > 1:
+                raise _RingError(
+                    f"key {name} is in the {' and '.join(purposes)} rings; use one key per "
+                    "purpose or pass --allow-shared-keys as the gateways do"
+                )
+    for name in sorted(scopes):
+        if not any(name in ring for ring in rings.values()):
+            # Only a key ID is echoed; any other scope name is input and stays unprinted.
+            shown = f"key {name}" if _KEY_ID.fullmatch(name) else "an entry that is not a key ID"
+            raise _RingError(
+                f"--signer-scopes names {shown}, which is not a --snapshot-key, --trust-key "
+                "or --approval-key"
+            )
 
 
 def _write_new(path: Path, content: bytes, mode: int = 0o600) -> None:
@@ -429,6 +460,14 @@ def key_id_command(public_key: Path) -> None:
     help="Trusted trust-status public key PEM; repeat to build the ring.",
 )
 @click.option(
+    "--approval-key",
+    "approval_keys",
+    multiple=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Approval public key PEM the gateways trust; repeat for each. Only checked, so "
+    "the gateways' signer scope map can be passed unchanged.",
+)
+@click.option(
     "--snapshot-threshold",
     type=click.IntRange(min=1, max=32),
     default=1,
@@ -445,21 +484,29 @@ def key_id_command(public_key: Path) -> None:
     type=click.Path(exists=True, path_type=Path),
     help="JSON object mapping key IDs to the signer scopes the gateways use.",
 )
+@click.option(
+    "--allow-shared-keys",
+    is_flag=True,
+    help="Accept a key in more than one ring, as gateways built with allow_shared_keys=True do.",
+)
 def register(
     snapshot_path: Path,
     trust_path: Path,
     state: Path,
     snapshot_keys: tuple[Path, ...],
     trust_keys: tuple[Path, ...],
+    approval_keys: tuple[Path, ...],
     snapshot_threshold: int,
     trust_threshold: int,
     signer_scopes: Path | None,
+    allow_shared_keys: bool,
 ) -> None:
     """Make a newly issued snapshot current; gateways sharing the store deny older serials.
 
     The snapshot and trust status are checked as the gateway checks them, except the
-    workload context and the companion BOM. Pass the rings, quorums and signer scopes
-    the gateways use.
+    workload context and the companion BOM. Pass the rings, quorums, signer scopes
+    and shared-key setting the gateways use; approval keys are only checked against
+    the scope map.
     """
     try:
         scopes = (
@@ -470,13 +517,21 @@ def register(
                 for name, scope in _json_object(signer_scopes).items()
             }
         )
+        rings = {
+            "snapshot": _ring(snapshot_keys),
+            "trust": _ring(trust_keys),
+            "approval": _ring(approval_keys),
+        }
+        _check_rings(rings, scopes, allow_shared_keys)
         registrar = ReferenceGateway.registrar(
-            snapshot_keys=_ring(snapshot_keys),
-            trust_keys=_ring(trust_keys),
+            snapshot_keys=rings["snapshot"],
+            trust_keys=rings["trust"],
+            approval_keys=rings["approval"],
             state=StateStore(state),
             snapshot_threshold=snapshot_threshold,
             trust_threshold=trust_threshold,
             signer_scopes=scopes,
+            allow_shared_keys=allow_shared_keys,
         )
         snapshot = registrar.register_snapshot(
             Envelope.model_validate(_json_object(snapshot_path)),

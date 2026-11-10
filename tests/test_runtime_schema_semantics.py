@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -132,6 +133,115 @@ def test_pattern_syntax_without_an_ecma_262_meaning_makes_the_schema_invalid(pat
 
 
 @pytest.mark.parametrize(
+    "pattern",
+    [
+        # ECMA-262 matches a reference to a group that did not take part as the empty
+        # string and resets the captures of a loop on each iteration; Python fails the
+        # reference and keeps the captures of earlier iterations.
+        r"""^(['"])?rm\1\s""",
+        r"""^(?:(['"])?[\w.-]+\1(?:,|$))+$""",
+        r"""^(['"])?[a-z]+\1$""",
+        r"^(?:(a)|b)\1$",
+        r"^(?:(a)|b)+\1$",
+        r"^(a)*\1$",
+        r"^(a){2}\1$",
+        r"^(?=(a))\1",
+        r"^(?!(a))\1b$",
+        r"^(?<n>a)?\k<n>b$",
+        r"^(?:(?<n>a)|b)+\k<n>$",
+        # A group in any alternative is refused, even where both engines agree.
+        r"^(a)\1$|^b$",
+        # References before or inside their group, in a lookbehind, or to no group.
+        r"^\1(a)$",
+        r"^(a\1)$",
+        r"^(a)(?<=\1)b$",
+        r"^\k<n>(?<n>a)$",
+        r"^(a)\2$",
+        r"^(a)\k<m>$",
+        r"^(a)\10$",
+        # Python reads \100 as an octal escape, ECMA-262 as a reference to group 100.
+        "^" + "(a)" * 100 + r"\100$",
+    ],
+)
+def test_backreference_to_a_group_that_may_not_take_part_makes_the_schema_invalid(pattern):
+    with pytest.raises(re.error, match="backreference"):
+        validation.ecma_pattern(pattern)
+    assert outcome(string_schema(pattern), {"value": "a"}) == "schema-invalid"
+
+
+@pytest.mark.parametrize(
+    ("schema", "arguments"),
+    [
+        # Read with Python semantics, each schema admitted arguments that ECMA-262 rejects.
+        (
+            {"properties": {"cmd": {"type": "string", "not": {"pattern": r"""^(['"])?rm\1\s"""}}}},
+            {"cmd": "rm -rf /"},
+        ),
+        (
+            {"properties": {"cols": {"pattern": r"""^(?:(['"])?[\w.-]+\1(?:,|$))+$"""}}},
+            {"cols": "'a',b'"},
+        ),
+        (
+            {"patternProperties": {r"""^(['"])?[a-z]+\1$""": {"type": "integer"}}},
+            {"limit": "DROP TABLE"},
+        ),
+    ],
+)
+def test_schema_with_a_conditional_backreference_is_refused(schema, arguments):
+    assert outcome({"type": "object", **schema}, arguments) == "schema-invalid"
+
+
+@pytest.mark.parametrize(
+    ("pattern", "value", "expected"),
+    [
+        (r"""^(['"]).*\1$""", "'abc'", "valid"),
+        (r"""^(['"]).*\1$""", "'abc\"", "arguments-invalid"),
+        (r"""^(?<q>['"])\w+\k<q>$""", '"abc"', "valid"),
+        (r"""^(?<q>['"])\w+\k<q>$""", "\"abc'", "arguments-invalid"),
+        (r"^(a|b)\1$", "bb", "valid"),
+        (r"^(a|b)\1$", "ab", "arguments-invalid"),
+        (r"^(x)(?:\1|y)+$", "xxyx", "valid"),
+        (r"^(x)(?:\1|y)+$", "xz", "arguments-invalid"),
+        (r"^((a)b)\2\1$", "abaab", "valid"),
+    ],
+)
+def test_backreference_to_a_group_that_always_takes_part_keeps_its_meaning(
+    pattern, value, expected
+):
+    assert outcome(string_schema(pattern), {"value": value}) == expected
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    [
+        "(" * 20000 + "a" + ")" * 20000,
+        "(a)" + "(?<=" * 10000 + "b" + ")" * 10000 + "(?=" * 10000 + r"\1" * 10000 + ")" * 10000,
+    ],
+)
+def test_backreference_bookkeeping_stays_linear_on_deep_nesting(pattern):
+    # Bookkeeping that grew with the nesting depth squared spent the worker's budget
+    # before Python, which cannot compile such nesting, was reached.
+    start = time.monotonic()
+    validation.ecma_pattern(pattern)
+    assert time.monotonic() - start < 1
+    assert outcome(string_schema(pattern), {"value": "a"}) == "schema-invalid"
+
+
+@pytest.mark.parametrize(
+    ("pattern", "value"),
+    [
+        (r"^[\s\W]*$", " " * 64 + "a"),
+        (r"^[\D.]+$", "." * 400 + "1"),
+        (r"^[a\D]*$", "a" * 64 + "1"),
+    ],
+)
+def test_class_complements_do_not_backtrack_on_hostile_input(pattern, value):
+    # Overlapping members such as \s and \W became an ambiguous alternation that
+    # backtracked exponentially and held a validation slot until its deadline.
+    assert outcome(string_schema(pattern), {"value": value}) == "arguments-invalid"
+
+
+@pytest.mark.parametrize(
     ("pattern", "outside"),
     [
         (r"^[%-\w]+$", "<script>"),
@@ -211,6 +321,176 @@ def test_constraint_the_declared_dialect_ignores_makes_the_schema_invalid(schema
     # An approver reads these constraints, but the declared dialect would not enforce
     # them, so the call is denied instead of admitted without them.
     assert outcome({"type": "object", **schema}, {"v": "toolong"}) == "schema-invalid"
+
+
+DRAFT_03 = "http://json-schema.org/draft-03/schema#"
+DRAFT_06 = "http://json-schema.org/draft-06/schema#"
+DRAFT_2019 = "https://json-schema.org/draft/2019-09/schema"
+
+
+@pytest.mark.parametrize(
+    ("schema", "arguments"),
+    [
+        # minContains and maxContains are 2019-09 keywords; draft-06 and draft-07 ignore them.
+        (
+            {
+                "$schema": DRAFT_07,
+                "properties": {
+                    "to": {"type": "array", "contains": {"const": "all-staff"}, "maxContains": 0}
+                },
+            },
+            {"to": ["all-staff"]},
+        ),
+        (
+            {
+                "$schema": DRAFT_06,
+                "properties": {
+                    "by": {"type": "array", "contains": {"const": "lead"}, "minContains": 2}
+                },
+            },
+            {"by": ["lead"]},
+        ),
+        # A reference by URI resolves through an $id or id to targets the check missed.
+        (
+            {
+                "$schema": DRAFT_07,
+                "$id": "https://tools.example.test/run",
+                "definitions": {"s": {"type": "string"}},
+                "properties": {"path": {"$ref": "https://tools.example.test/run#/x-path"}},
+                "x-path": {"$ref": "#/definitions/s", "maxLength": 3},
+            },
+            {"path": "/etc/shadow"},
+        ),
+        (
+            {
+                "$schema": DRAFT_04,
+                "id": "https://tools.example.test/run",
+                "properties": {"op": {"$ref": "run#/x-op"}},
+                "x-op": {"const": "read"},
+            },
+            {"op": "delete"},
+        ),
+        # An id below the root changes the base that "#/x" resolves against.
+        (
+            {
+                "$schema": DRAFT_04,
+                "x": {},
+                "properties": {
+                    "op": {
+                        "id": "https://tools.example.test/op",
+                        "x": {"const": "read"},
+                        "allOf": [{"$ref": "#/x"}],
+                    }
+                },
+            },
+            {"op": "delete"},
+        ),
+        # jsonschema switches dialect at a subschema with its own $schema, draft-03 too.
+        ({"properties": {"op": {"$schema": DRAFT_04, "const": "read"}}}, {"op": "delete"}),
+        (
+            {
+                "properties": {
+                    "op": {
+                        "$schema": DRAFT_03,
+                        "type": "string",
+                        "not": {"enum": ["delete"]},
+                        "anyOf": [{"const": "read"}, {"const": "list"}],
+                    }
+                }
+            },
+            {"op": "delete"},
+        ),
+        (
+            {"properties": {"opts": {"$schema": DRAFT_03, "required": ["dry_run"]}}},
+            {"opts": {}},
+        ),
+        # 2019-09 resolves "$recursiveRef" as "#" whatever it names.
+        (
+            {
+                "$schema": DRAFT_2019,
+                "type": ["object", "integer"],
+                "$defs": {"small": {"maximum": 3}},
+                "properties": {"n": {"$recursiveRef": "#/$defs/small"}},
+            },
+            {"n": 10},
+        ),
+    ],
+)
+def test_constraint_that_evaluation_would_skip_makes_the_schema_invalid(schema, arguments):
+    assert outcome({"type": "object", **schema}, arguments) == "schema-invalid"
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {"$defs": {"s": {"$anchor": "s", "maxLength": 3}}, "properties": {"v": {"$ref": "#s"}}},
+        {"$defs": {"s": {"$dynamicAnchor": "s"}}, "properties": {"v": {"$dynamicRef": "#s"}}},
+        {"properties": {"v": {"$ref": ""}}},
+        {"properties": {"v": {"$ref": "#/$defs/missing"}}},
+        {"$defs": {"unused": {"$ref": "#/$defs/missing"}}},
+        {"x": ["a"], "properties": {"v": {"$ref": "#/x/0"}}},
+        {"x-s": {"$schema": 7}, "properties": {"v": {"$ref": "#/x-s"}}},
+        {"$defs": {"s": {"$id": "https://tools.example.test/s"}}},
+    ],
+)
+def test_references_the_check_cannot_follow_make_the_schema_invalid(schema):
+    # References are followed only as JSON Pointers within the schema document.
+    assert outcome({"type": "object", **schema}, {"v": "toolong"}) == "schema-invalid"
+
+
+def test_references_and_dialect_declarations_within_the_schema_stay_valid():
+    schema = {
+        "$schema": DRAFT_07,
+        "$id": "https://tools.example.test/run",
+        "definitions": {
+            "path": {"$schema": DRAFT_07.removesuffix("#"), "type": "string", "maxLength": 8},
+            "node": {
+                "$id": "#node",
+                "type": "object",
+                "properties": {"next": {"$ref": "#/definitions/node"}},
+                "additionalProperties": False,
+            },
+        },
+        "x-list": [{"type": "integer", "maximum": 3}],
+        "properties": {
+            "path": {"$ref": "#/definitions/path"},
+            "tree": {"$ref": "#/definitions/node"},
+            "n": {"$ref": "#/x-list/0"},
+        },
+    }
+    assert outcome(schema, {"path": "/srv/a", "tree": {"next": {}}, "n": 3}) == "valid"
+    assert outcome(schema, {"path": "/etc/shadow"}) == "arguments-invalid"
+    assert outcome(schema, {"tree": {"next": {"other": 1}}}) == "arguments-invalid"
+    assert outcome(schema, {"n": 4}) == "arguments-invalid"
+
+
+def test_contains_bounds_apply_from_2019_09():
+    schema = {
+        "$schema": DRAFT_2019,
+        "type": "object",
+        "properties": {
+            "to": {"type": "array", "contains": {"const": "all-staff"}, "maxContains": 1}
+        },
+    }
+    assert outcome(schema, {"to": ["all-staff", "team"]}) == "valid"
+    assert outcome(schema, {"to": ["all-staff", "all-staff"]}) == "arguments-invalid"
+
+
+@pytest.mark.parametrize(
+    ("bound", "keyword", "inside"),
+    [("minimum", "exclusiveMinimum", 1), ("maximum", "exclusiveMaximum", -1)],
+)
+def test_draft_04_boolean_exclusive_bounds_are_enforced(bound, keyword, inside):
+    # Draft-04's minimum and maximum consult the boolean form; draft-06 made it a number.
+    schema = {
+        "$schema": DRAFT_04,
+        "type": "object",
+        "properties": {"n": {"type": "integer", bound: 0, keyword: True}},
+    }
+    assert outcome(schema, {"n": inside}) == "valid"
+    assert outcome(schema, {"n": 0}) == "arguments-invalid"
+    schema["properties"]["n"][keyword] = 0
+    assert outcome(schema, {"n": inside}) == "schema-invalid"
 
 
 def test_annotations_next_to_ref_and_root_references_stay_valid():

@@ -234,11 +234,15 @@ one spelling per endpoint:
   `https` and `wss`, 80 for `http` and `ws`), no `.` or `..` path segments,
   uppercase percent-encoding only for characters that need it, and an empty
   path for the root: `https://mcp.example.test`, not `https://mcp.example.test/`.
-  An IP address has the one spelling Python's `ipaddress` prints: a dotted quad
+  An IP address has one spelling, whatever the Python version: a dotted quad
   without leading zeros (`127.0.0.1`, not `127.000.000.001`, `127.1` or
-  `2130706433`) and a compressed, lowercase IPv6 address (`[::1]`, not
-  `[0:0:0:0:0:0:0:1]` or `[::ffff:127.0.0.1]`). A host whose last label is a
-  number, which URL parsers read as an IPv4 address, must be such a dotted quad.
+  `2130706433`) and an IPv6 address in RFC 5952 form, lowercase hexadecimal with
+  the first longest run of zero groups written as `::` (`[::1]` and
+  `[2001:db8::1]`, not `[0:0:0:0:0:0:0:1]` or `[64:ff9b::1.2.3.4]`). IPv4-mapped
+  and IPv4-compatible IPv6 addresses, such as `[::ffff:7f00:1]`,
+  `[::ffff:127.0.0.1]` and `[::7f00:1]`, are refused: use the IPv4 address. A host
+  whose last label is a number, which URL parsers read as an IPv4 address, must be
+  such a dotted quad.
 
 A misspelled revocation entry is therefore rejected when the status is signed
 instead of silently matching nothing. The gateway compares the identity the
@@ -268,22 +272,46 @@ Step 10 below validates the arguments against the approved descriptor's
 `inputSchema` in a separate, bounded worker. The schema's `$schema` names its
 dialect: draft-04, draft-06, draft-07, 2019-09 or 2020-12, with or without a
 trailing `#`. Without `$schema` the dialect is 2020-12, and any other value makes
-the schema invalid (`schema-invalid`). So does a constraint that the dialect would
-ignore: an assertion keyword that only other supported dialects define, and in
-draft-04 to draft-07 an assertion next to `$ref`. `format` is never asserted, and
-references resolve only within the schema.
+the schema invalid (`schema-invalid`). So does a constraint that evaluation would
+skip:
+
+- an assertion or applicator keyword that the dialect's specification does not
+  define but another supported dialect does, such as `const` in draft-04, or
+  `minContains` and `maxContains` before 2019-09 (draft-04's boolean
+  `exclusiveMinimum` and `exclusiveMaximum` are draft-04 keywords and apply);
+- in draft-04 to draft-07, an assertion next to `$ref`;
+- a subschema whose `$schema` differs from the root's, where evaluation would
+  switch dialect, draft-03 included;
+- a subschema with its own base URI: `$id` below the root, or `id` in draft-04,
+  except the plain-name anchors of draft-04 to draft-07 such as `"$id": "#node"`;
+- a reference that is not a JSON Pointer within the schema (`#` or `#/...`), such
+  as a URI, a relative reference or an anchor; a `$recursiveRef` other than `#`;
+  and a pointer that resolves to nothing or to a value that is not a schema.
+
+Reference targets are checked by the same rules wherever they are in the
+document. `format` is never asserted.
 
 `pattern` and `patternProperties` are ECMA-262 regular expressions read with the
 `u` flag. Syntax that the `u` flag rejects and that would otherwise be read
 differently is `schema-invalid`: inline flags and other Python-only groups,
 possessive quantifiers (`a*+`), quantifiers without a minimum (`{,n}`), quantified
 assertions, and `\d`, `\w` or `\s` as a range bound (`[%-\w]`). The empty
-classes `[]` and `[^]` are refused too. An escaped surrogate pair such as
-`\uD83D\uDE00` is one code point. Annex B syntax that the `u` flag rejects, such
-as `\-` outside a class or an octal escape, keeps its Annex B meaning, except in a
-pattern that names a character outside the Basic Multilingual Plane or a
-surrogate: Annex B counts UTF-16 code units there, so such a pattern must be valid
-with the `u` flag.
+classes `[]` and `[^]` are refused too, as is a pattern nested too deeply for
+Python to compile. So is a backreference (`\1` or
+`\k<name>`) unless its group always takes part, once, before the reference:
+ECMA-262 reads a reference to a group that did not take part as the empty string
+and resets the captures of a loop on each iteration, while Python fails the
+reference and keeps earlier captures. A reference to a group inside a quantifier
+(`?` included), an alternative or a lookaround, a reference before or inside its
+group or inside a lookbehind, and a reference to group 100 or above are refused:
+`^(['"]).*\1$` is accepted, `^(['"])?\w+\1$` is not. An escaped surrogate pair
+such as `\uD83D\uDE00` is one code point. Annex B syntax that the `u` flag
+rejects, such as `\-` outside a class or an octal escape in a class, is accepted
+and read with the `u` flag's code-point semantics: `.`, negated classes and
+`\D`, `\S` and `\W` match one character outside the Basic Multilingual Plane,
+where Annex B would count two UTF-16 code units. A pattern that names a character
+outside the Basic Multilingual Plane or a surrogate must be valid with the `u`
+flag.
 
 ## Verification order
 

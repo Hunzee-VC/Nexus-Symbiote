@@ -644,7 +644,19 @@ def test_expiry_is_rechecked_after_slow_adapter(tmp_path):
 
 @pytest.mark.parametrize(
     "schema",
-    [{"type": "object", "required": ["amount"]}, {"$ref": "https://attacker.example.test/schema"}],
+    [
+        {"type": "object", "required": ["amount"]},
+        {"$ref": "https://attacker.example.test/schema"},
+        # Python semantics read this deny-list as not matching "team@example.test":
+        # its backreference names a group that did not take part.
+        {"properties": {"to": {"not": {"pattern": r"""^(['"])?team\1@"""}}}},
+        # A subschema's own $schema would switch evaluation to draft-04, which has no const.
+        {
+            "properties": {
+                "to": {"$schema": "http://json-schema.org/draft-04/schema#", "const": "ops"}
+            }
+        },
+    ],
 )
 def test_invalid_or_external_schema_cannot_execute(tmp_path, schema):
     values = list(fixture(tmp_path))

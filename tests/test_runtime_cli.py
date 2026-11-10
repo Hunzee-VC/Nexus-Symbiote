@@ -556,3 +556,83 @@ def test_register_makes_a_new_snapshot_current_without_a_gateway(tmp_path):
     absent = run("register", signed["newer"], *args[:2], "--state", missing, *args[4:])
     assert absent.exit_code == 1 and "(state-missing)" in absent.output
     assert not missing.exists()
+
+
+def registration(tmp_path, snapshot_key, trust_key):
+    now = datetime.now(UTC)
+    status = TrustStatus(
+        tenant="acme",
+        serial=1,
+        not_before=now - timedelta(seconds=1),
+        not_after=now + timedelta(minutes=30),
+    )
+    state = tmp_path / "state.sqlite"
+    StateStore.initialize(state)
+    snapshot = sign_contract(current_snapshot({}), "snapshot", (snapshot_key,))
+    return [
+        envelope_file(tmp_path, "snapshot.dsse.json", snapshot),
+        "--trust",
+        envelope_file(tmp_path, "trust.dsse.json", sign_contract(status, "trust", (trust_key,))),
+        "--state",
+        state,
+    ]
+
+
+def test_register_takes_the_full_scope_map_the_gateways_use(tmp_path):
+    snapshot_key, trust_key, approval_key = (Ed25519PrivateKey.generate() for _ in range(3))
+    keys = {"snapshot": snapshot_key, "trust": trust_key, "approval": approval_key}
+    scopes = write(
+        tmp_path,
+        "scopes.json",
+        json.dumps({key_id(key.public_key()): {"tenants": ["acme"]} for key in keys.values()}),
+    )
+    args = [
+        *registration(tmp_path, snapshot_key, trust_key),
+        "--snapshot-key",
+        public_file(tmp_path, "snapshot.pub", snapshot_key),
+        "--trust-key",
+        public_file(tmp_path, "trust.pub", trust_key),
+        "--signer-scopes",
+        scopes,
+    ]
+    # Without the approval ring the scope map names a key in no ring; say which one.
+    refused = run("register", *args)
+    assert refused.exit_code == 1 and "(configuration-invalid)" in refused.output
+    assert key_id(approval_key.public_key()) in refused.output
+    approval = public_file(tmp_path, "approval.pub", approval_key)
+    result = run("register", *args, "--approval-key", approval)
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["serial"] == 1
+
+
+def test_register_refuses_a_key_in_two_rings_unless_shared_keys_are_allowed(tmp_path):
+    shared = Ed25519PrivateKey.generate()
+    public = public_file(tmp_path, "shared.pub", shared)
+    args = [
+        *registration(tmp_path, shared, shared),
+        "--snapshot-key",
+        public,
+        "--trust-key",
+        public,
+    ]
+    refused = run("register", *args)
+    assert refused.exit_code == 1 and "(configuration-invalid)" in refused.output
+    assert key_id(shared.public_key()) in refused.output
+    assert run("register", *args, "--allow-shared-keys").exit_code == 0
+
+
+def test_register_does_not_echo_a_scope_name_that_is_not_a_key_id(tmp_path):
+    snapshot_key, trust_key = Ed25519PrivateKey.generate(), Ed25519PrivateKey.generate()
+    scopes = write(tmp_path, "scopes.json", json.dumps({"\x1b[2Jzqxname": {"tenants": ["acme"]}}))
+    refused = run(
+        "register",
+        *registration(tmp_path, snapshot_key, trust_key),
+        "--snapshot-key",
+        public_file(tmp_path, "snapshot.pub", snapshot_key),
+        "--trust-key",
+        public_file(tmp_path, "trust.pub", trust_key),
+        "--signer-scopes",
+        scopes,
+    )
+    assert refused.exit_code == 1 and "(configuration-invalid)" in refused.output
+    assert "\x1b" not in refused.output and "zqxname" not in refused.output

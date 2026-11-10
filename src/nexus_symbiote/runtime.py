@@ -238,13 +238,39 @@ _DEFAULT_PORTS = {"http": 80, "https": 443, "ws": 80, "wss": 443}
 _UNRESERVED = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
 
 
+def _ipv6_text(value: int) -> str:
+    """Write an IPv6 address as RFC 5952 hexadecimal text, the first longest zero run as ::.
+
+    ``str(IPv6Address)`` prints IPv4-mapped addresses differently across Python
+    patch releases, so a grant signed on one interpreter could fail on another.
+    """
+    groups = [value >> shift & 0xFFFF for shift in range(112, -1, -16)]
+    best = size = 0
+    start: int | None = None
+    for index, group in enumerate([*groups, 1]):
+        if group == 0 and start is None:
+            start = index
+        elif group != 0 and start is not None:
+            if index - start > size:
+                best, size = start, index - start
+            start = None
+    text = [f"{group:x}" for group in groups]
+    if size < 2:
+        return ":".join(text)
+    return ":".join(text[:best]) + "::" + ":".join(text[best + size :])
+
+
 def _canonical_host(host: str) -> bool:
-    """Accept an IP literal only in the form ``ipaddress`` prints, its one spelling."""
+    """Accept an IP literal only in its one spelling."""
     if host.startswith("["):
         try:
-            return f"[{ipaddress.IPv6Address(host[1:-1])}]" == host
+            address = int(ipaddress.IPv6Address(host[1:-1]))
         except ValueError:
             return False
+        # IPv4-mapped and IPv4-compatible addresses are other spellings of IPv4 ones.
+        if address >> 32 == 0xFFFF or 1 < address < 2**32:
+            return False
+        return f"[{_ipv6_text(address)}]" == host
     # URL parsers read a host whose last label is a number as an IPv4 address, in
     # forms such as 2130706433, 127.1 or 0x7f.0.0.1.
     if _NUMERIC_LABEL.fullmatch(host.rsplit(".", 1)[-1]):
