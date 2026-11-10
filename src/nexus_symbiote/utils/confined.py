@@ -74,6 +74,30 @@ class ByteBudget:
             raise self.refuse()
 
 
+class _MessageLog:
+    """Appends each message once to a caller's list, at constant cost per message.
+
+    A walk can record one message per entry, so a membership test on the list
+    itself would make a large tree quadratic. Entries the caller appends to the
+    list directly are taken into account before the next message.
+    """
+
+    def __init__(self, messages: list[str]) -> None:
+        self.messages = messages
+        self._seen = set(messages)
+        self._synced = len(messages)
+
+    def add(self, message: str) -> None:
+        if len(self.messages) < self._synced:
+            self._seen = set(self.messages)
+        else:
+            self._seen.update(self.messages[self._synced :])
+        if message not in self._seen:
+            self._seen.add(message)
+            self.messages.append(message)
+        self._synced = len(self.messages)
+
+
 def _undecodable(name: str) -> bool:
     return any("\ud800" <= character <= "\udfff" for character in name)
 
@@ -143,7 +167,11 @@ class _BoundedReader(io.RawIOBase):
             raise ValueError("read of closed collection stream")
         if not 0 <= size <= _MAX_CHUNK_BYTES:
             raise CollectionError("explicit bounded read size required")
-        raw = os.read(self._fd, min(size, self._limit.value + 1 - self._read))
+        try:
+            raw = os.read(self._fd, min(size, self._limit.value + 1 - self._read))
+        except OSError:
+            self._owner._fail(self._path, "stream read failed (I/O error)")
+            raise
         self._read += len(raw)
         try:
             if self._read > self._limit.value:
@@ -199,6 +227,8 @@ class ConfinedCollection:
         self.root = Path(os.path.abspath(self._requested_root))
         self.failures = failures
         self.exclusions = exclusions if exclusions is not None else []
+        self._failure_log = _MessageLog(self.failures)
+        self._exclusion_log = _MessageLog(self.exclusions)
         self._file_bound = _bound(max_file_bytes, "file-bytes")
         self._entry_bound = _bound(max_entries, "entries")
         self._depth_bound = _bound(max_depth, "depth")
@@ -253,9 +283,7 @@ class ConfinedCollection:
             self._root_fd = None
 
     def _fail(self, path: str | Path, reason: str) -> None:
-        message = f"{path!s}: {reason}"
-        if message not in self.failures:
-            self.failures.append(message)
+        self._failure_log.add(f"{path!s}: {reason}")
 
     def _relative(self, path: str | Path) -> Path:
         candidate = Path(path)
@@ -280,9 +308,7 @@ class ConfinedCollection:
             parts[:index] in self._excluded for index in range(len(parts) + 1)
         )
         if denied:
-            message = f"{relative}: excluded by collection policy"
-            if message not in self.exclusions:
-                self.exclusions.append(message)
+            self._exclusion_log.add(f"{relative}: excluded by collection policy")
         return denied
 
     def _open_parent(self, relative: Path) -> int:

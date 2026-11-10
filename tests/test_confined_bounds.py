@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import time
 from dataclasses import replace
@@ -176,6 +177,60 @@ def test_policy_exclusion_checks_do_not_grow_with_the_number_of_entries(tmp_path
     assert time.monotonic() - started < 5
     assert len(found) == 300
     assert surfaces == ["x000123: excluded by collection policy"]
+
+
+def test_a_walk_records_tens_of_thousands_of_messages_in_linear_time(tmp_path):
+    # Checking each new message against the list made 95,000 symlinks a 70 s walk.
+    count = 50_000
+    (tmp_path / "target").write_text("x")
+    names = [f"l{index:05d}" for index in range(count)]
+    for name in names:
+        os.symlink("target", tmp_path / name)
+    failures: list[str] = []
+    started = time.monotonic()
+    with ConfinedCollection(tmp_path, failures) as files:
+        assert list(files.iter_files()) == [Path("target")]
+    assert time.monotonic() - started < 8
+    assert len(failures) == count
+    exclusions: list[str] = []
+    started = time.monotonic()
+    with ConfinedCollection(tmp_path, [], exclusions, exclude_paths=names) as files:
+        assert list(files.iter_files()) == [Path("target")]
+    assert time.monotonic() - started < 8
+    assert len(exclusions) == count
+
+
+def test_messages_are_recorded_once_even_when_the_caller_appends_too(tmp_path):
+    failures = ["missing: file unavailable during collection"]
+    with ConfinedCollection(tmp_path, failures) as files:
+        failures.append("later: file unavailable during collection")
+        assert files.read_bytes("missing") is None
+        assert files.read_bytes("later") is None
+        assert files.read_bytes("other") is None
+        assert files.read_bytes("other") is None
+    assert failures == [
+        "missing: file unavailable during collection",
+        "later: file unavailable during collection",
+        "other: file unavailable during collection",
+    ]
+
+
+def test_a_failed_stream_read_is_recorded(tmp_path, monkeypatch):
+    (tmp_path / "a.bin").write_bytes(b"x" * 10)
+    failures: list[str] = []
+    read = os.read
+    with ConfinedCollection(tmp_path, failures) as files, files.open_regular("a.bin") as stream:
+        broken = stream.fileno()
+
+        def failing(fd: int, size: int) -> bytes:
+            if fd == broken:
+                raise OSError(errno.EIO, "I/O error")
+            return read(fd, size)
+
+        monkeypatch.setattr(os, "read", failing)
+        with pytest.raises(OSError):
+            stream.read(4)
+    assert failures == ["a.bin: stream read failed (I/O error)"]
 
 
 def test_an_undecodable_name_is_a_failure_and_the_inventory_still_loads(tmp_path):
