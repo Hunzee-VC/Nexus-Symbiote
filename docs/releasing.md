@@ -268,15 +268,17 @@ candidate evidence, including the checksums, in `release-evidence.tar.gz` and
 attests that archive as well as the distributions and the inventory benchmark.
 
 Every candidate runs the committed per-case security-regression gate and keeps its
-complete `security-regressions.json` report, including failures, and rechecks its
-installed locked dependencies against current OSV data, retaining that report even
-on failure. Passing those finite fixture contracts is a release prerequisite, not an
-estimate of production efficacy. The normal CI `Verified CI` check also requires
-measured statement and branch coverage floors (90% and 75%), complete dependency
-advisory lookups with no known advisories, a successful CodeQL analysis with no
-high/critical security results, and every verification job to succeed. Publication
-checks those security job results for the exact source. See the precise acceptance
-policy and its knowledge limits in [repository controls](repository-controls.md).
+complete `security-regressions.json` report, including failures, and rechecks every
+pin of `requirements-ci.lock` and `requirements-action.lock` against current OSV
+data, retaining that report even on failure. Passing those finite fixture contracts
+is a release prerequisite, not an estimate of production efficacy. The normal CI
+`Verified CI` check also requires the package and per-module coverage floors in
+`scripts/check_coverage.py`, the full suite at the declared dependency floors,
+complete dependency advisory lookups with no unwaived advisory, a successful CodeQL
+analysis with no high/critical security results, and every verification job to
+succeed. Publication checks those security job results for the exact source. See the
+precise acceptance policy and its knowledge limits in
+[repository controls](repository-controls.md).
 
 **Privilege separation.** The build job reads repository content and Actions run
 metadata only. A separate attest job holds OIDC and attestation-write permissions,
