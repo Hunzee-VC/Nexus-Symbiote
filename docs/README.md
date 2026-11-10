@@ -28,6 +28,7 @@ Reference material: exact behavior, fields and limits.
 | [AgentBOM schemas](../schemas/README.md) | The native AgentBOM JSON Schema, the deployment-profile schema and a minimal example |
 | [Source binding](verification-source-binding.md) | How static MCP records are bound to their configuration and reconciled with a project |
 | [TypeScript inventory](typescript-inventory.md) | Static collection of MCP tool registrations from TypeScript servers, and its limits |
+| [Model integrity](model-integrity.md) | What the model collector binds by digest, the operator signature policy (Sigstore entries and digest pins) and the signing evidence it records |
 | [npm lockfile evidence](npm-lockfile-evidence.md) | What the registry collector records from `package.json` and npm lockfiles |
 | [Deployment evidence](deployment-evidence.md) | The optional deployment profile and its scoped authority claims |
 | [Security regression corpus](../benchmarks/README.md) | The committed security fixtures CI enforces, and what passing them does not show |

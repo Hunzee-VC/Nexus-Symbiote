@@ -25,6 +25,17 @@ static MCP configuration, run `validate` with `--project` and
 checkout. A displayed schema with omitted literals is unsuitable for deciding
 which arguments a live tool accepts.
 
+Model components are now referenced by their path relative to the scanned
+root: `model:<relative path>`, with the same relative path as `name` and
+`source_path`. A model in a direct subdirectory of the root keeps its previous
+reference; a model at the root or deeper in the tree gets a new one, so `diff`
+against an older baseline reports it as removed and added. New model records
+also bind ONNX external data, SavedModel variables, shard indexes,
+configuration, tokenizer files, chat templates and declared custom code, and
+`tokenizer_hash` and `chat_template_hash` are now digests over every such file
+([model integrity](model-integrity.md)). Recollect and review the baseline once
+after upgrading instead of comparing old and new model records.
+
 For supported package launchers, new inventories retain `launcher_package`
 alongside the declared version. An older inventory can lack this field even
 when the current checkout identifies the package. Recollect the baseline and
