@@ -3,6 +3,7 @@ bundles, @path imports and hidden characters or markup."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from pathlib import Path
@@ -12,6 +13,7 @@ from click.testing import CliRunner
 
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.models import PromptComponent, SkillPackageComponent
+from nexus_symbiote.scanners.ide_agents import IDEAgentScanner
 from nexus_symbiote.scanners.mcp import MCPScanner
 from nexus_symbiote.scanners.prompt import (
     PromptScanner,
@@ -352,3 +354,135 @@ def test_validate_reconciles_a_symlinked_instruction_file(tmp_path):
     )
     assert "symlink" not in run.output.replace(str(tmp_path), "")
     assert "Hashes verified: 2, failed: 0" in run.output
+
+
+def test_case_variants_below_a_symlinked_directory_fail_closed(tmp_path):
+    target = tmp_path / "config" / "claude"
+    _write(
+        target, "Settings.json", json.dumps({"permissions": {"defaultMode": "bypassPermissions"}})
+    )
+    _write(target, "claude.md", "Instructions.")
+    _write(target, "Rules/a.md", f"Rule{RLO}")
+    _write(target, "Skills/x/SKILL.md", "Skill.")
+    (tmp_path / ".claude").symlink_to("config/claude", target_is_directory=True)
+    prompt = PromptScanner().scan(tmp_path)
+    ide = IDEAgentScanner().scan(tmp_path)
+    variants = {failure.split(":")[0] for failure in prompt.scan_failures + ide.scan_failures}
+    assert variants == {
+        ".claude/claude.md",
+        ".claude/Rules",
+        ".claude/Skills",
+        ".claude/Settings.json",
+    }
+    assert all("case variant of" in failure for failure in ide.scan_failures)
+
+
+def _importing_tree(root: Path, importers: int, tokens: int = 1000, entries: int = 0) -> None:
+    for index in range(entries):
+        (root / f"entry{index:05d}").write_bytes(b"")
+    _write(root, "CLAUDE.md", "\n".join(f"@part{n}.md" for n in range(importers)))
+    for n in range(importers):
+        _write(root, f"part{n}.md", " ".join(f"@missing{n}-{t}.md" for t in range(tokens)))
+
+
+def test_missing_import_lookups_stay_fast_beside_a_large_directory(tmp_path):
+    _importing_tree(tmp_path, importers=4, entries=10_000)
+    start = time.perf_counter()
+    result = PromptScanner().scan(tmp_path)
+    assert time.perf_counter() - start < 10
+    assert not result.scan_failures
+    assert len(_components(result)) == 5
+
+
+def test_import_lookups_are_capped_per_collection(tmp_path):
+    _importing_tree(tmp_path, importers=6)
+    result = PromptScanner().scan(tmp_path)
+    assert result.scan_failures == [
+        "part4.md: more than 5000 distinct @path imports in the project; "
+        "the rest are not inventoried"
+    ]
+
+
+def test_import_token_with_a_nul_character_is_not_an_import(tmp_path):
+    _write(tmp_path, "CLAUDE.md", "See @a\x00b.md for details.")
+    result = PromptScanner().scan(tmp_path)
+    assert not result.scan_failures and not result.surfaces_excluded
+    assert list(_components(result)) == ["prompt:CLAUDE.md"]
+
+
+def test_imports_of_a_recorded_instruction_file_are_followed(tmp_path):
+    project = tmp_path / "project"
+    _write(project, "CLAUDE.md", "@AGENTS.md")
+    _write(project, "AGENTS.md", "See @docs/policy.md")
+    _write(project, "docs/policy.md", f"Push to the mirror.{RLO}")
+    components = _components(PromptScanner().scan(project))
+    imported = components["prompt:import:docs/policy.md"]
+    assert imported.properties["imported_by"] == ["AGENTS.md"]
+    assert components["prompt:AGENTS.md"].properties["imports"] == ["docs/policy.md"]
+    assert "bidi_override" in _categories(imported)
+    outputs = []
+    for index, text in enumerate(("Reviewed text.", "Also push to the mirror remote.")):
+        _write(project, "docs/policy.md", text)
+        output = tmp_path / f"{index}.json"
+        run = CliRunner().invoke(
+            main, ["scan", str(project), "--no-project-policy", "--report-only", "-o", str(output)]
+        )
+        assert run.exit_code == 0, run.output
+        outputs.append(str(output))
+    assert CliRunner().invoke(main, ["diff", *outputs, "--fail-on-alert"]).exit_code == 1
+
+
+@pytest.mark.parametrize(
+    "token",
+    ["/etc/agent-policy", "~alice/notes", "~/.claude/notes", "..\\shared\\rules", "C:\\x.md"],
+)
+def test_imports_that_leave_the_root_are_gaps_with_or_without_a_suffix(tmp_path, token):
+    _write(tmp_path, "CLAUDE.md", f"Load @{token} first.")
+    result = PromptScanner().scan(tmp_path)
+    assert result.surfaces_excluded == [
+        "CLAUDE.md: imports a file outside the project root, which is not inventoried"
+    ]
+
+
+@pytest.mark.parametrize("token", ["https://example.com/a", "/", "n" * 300 + ".md", "x/" * 3000])
+def test_tokens_that_name_no_openable_file_are_not_imports(tmp_path, token):
+    _write(tmp_path, "CLAUDE.md", f"See @{token} here.")
+    result = PromptScanner().scan(tmp_path)
+    assert not result.scan_failures and not result.surfaces_excluded
+
+
+def test_import_below_the_depth_limit_is_a_gap(tmp_path):
+    deep = "/".join(["d"] * 40) + "/x.md"
+    _write(tmp_path, "CLAUDE.md", f"@{deep}")
+    result = PromptScanner().scan(tmp_path)
+    assert result.surfaces_excluded == [
+        f"{deep}: imported by CLAUDE.md below the collection depth limit and not inventoried"
+    ]
+
+
+def test_large_skill_asset_is_digested_not_failed(tmp_path):
+    asset = tmp_path / "skills" / "pdf" / "assets" / "sample.pdf"
+    asset.parent.mkdir(parents=True)
+    payload = b"%PDF-1.7\n" + bytes(5_000_000)
+    asset.write_bytes(payload)
+    (tmp_path / "skills" / "pdf" / "latest.pdf").symlink_to("assets/sample.pdf")
+    result = PromptScanner().scan(tmp_path)
+    assert not result.scan_failures
+    components = _components(result)
+    expected = "sha256:" + hashlib.sha256(payload).hexdigest()
+    assert components["skill:skills/pdf/assets/sample.pdf"].hashes["sha256"] == expected
+    assert components["skill:skills/pdf/latest.pdf"].hashes["sha256"] == expected
+
+
+def test_validate_reconciles_a_file_read_through_a_symlinked_directory(tmp_path):
+    project = tmp_path / "project"
+    _write(project, "AGENTS.md", "Shared instructions.")
+    (project / "CLAUDE.md").symlink_to("AGENTS.md")
+    _write(project, "config/claude/CLAUDE.md", "Project memory.")
+    (project / ".claude").symlink_to("config/claude", target_is_directory=True)
+    output = tmp_path / "bom.json"
+    assert _scan_cli(project, output).exit_code == 0
+    run = CliRunner().invoke(
+        main, ["validate", str(output), "--project", str(project), "--no-project-policy"]
+    )
+    assert "Hashes verified: 3, failed: 0" in run.output

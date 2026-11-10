@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections import deque
 from pathlib import Path, PurePosixPath
 
 from nexus_symbiote.core.enums import RiskSeverity, TrustTier
@@ -296,17 +297,53 @@ _MARKUP_SUFFIXES = frozenset({".md", ".mdc", ".markdown"})
 _IMPORTING_NAMES = frozenset({"CLAUDE.md", "CLAUDE.local.md", "GEMINI.md"})
 _MAX_IMPORT_DEPTH = 5
 _MAX_IMPORTS = 1000
+# Distinct import targets looked up in one collection. Each lookup of a missing file
+# lists the directories on its path for case variants, so file content must not be
+# able to ask for an unbounded number of them.
+_MAX_IMPORT_LOOKUPS = 5000
 _IMPORT = re.compile(r"(?<!\S)@(\S+)")
 _FENCE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})")
 _CODE_SPAN = re.compile(r"`[^`\n]*`")
-_FILE_SUFFIX = re.compile(r"\.[A-Za-z0-9]{1,10}$")
+_DRIVE = re.compile(r"[A-Za-z]:[\\/]")
 # Sentence punctuation after a reference; the file is inventoried without it.
 _TRAILING = ".,;:!?)]}\"'"
+# File systems in common use refuse longer names and paths, so no host opens them.
+_MAX_NAME_BYTES = 255
+_MAX_PATH_BYTES = 4096
 
 
 def _markup(path: str) -> bool:
     suffix = PurePosixPath(path).suffix.lower()
     return suffix in _MARKUP_SUFFIXES or not suffix
+
+
+def _resolve_import(importer: str, token: str) -> tuple[str | None, bool]:
+    """The in-root path an @path import names, and whether it names one outside the root.
+
+    Home-relative, absolute and drive paths, and paths that climb above the root, leave
+    it, also when a Windows host reads backslashes as separators. A token that no host
+    can open, such as one with a NUL character or an over-long name, is no import.
+    """
+    if "\x00" in token or len(token.encode()) > _MAX_PATH_BYTES or not token.strip("/\\"):
+        return None, False
+    forms = [token, token.replace("\\", "/")] if "\\" in token else [token]
+    resolved: list[list[str]] = []
+    for form in forms:
+        if form.startswith(("~", "/")) or _DRIVE.match(form):
+            return None, True
+        parts = list(PurePosixPath(importer).parent.parts)
+        for part in PurePosixPath(form).parts:
+            if part == "..":
+                if not parts:
+                    return None, True
+                parts.pop()
+            elif part != ".":
+                parts.append(part)
+        resolved.append(parts)
+    parts = resolved[0]
+    if not parts or any(len(part.encode()) > _MAX_NAME_BYTES for part in parts):
+        return None, False
+    return "/".join(parts), False
 
 
 def _import_tokens(text: str) -> list[str]:
@@ -336,7 +373,8 @@ class PromptScanner(Scanner):
 
         with self._collection(project_root, result) as files:
             recorded: dict[str, PromptComponent] = {}
-            importers: list[tuple[str, str]] = []
+            texts: dict[str, str] = {}
+            importers: list[str] = []
             for rel_path, prompt_type in INSTRUCTION_FILES.items():
                 if rel_path in INSTRUCTION_DIRECTORIES and files.is_directory(rel_path):
                     continue
@@ -347,8 +385,9 @@ class PromptScanner(Scanner):
                 component = self._record(rel_path, prompt_type, content, files, result)
                 if component is not None:
                     recorded[rel_path] = component
+                    texts[rel_path] = content.decode("utf-8")
                     if PurePosixPath(rel_path).name in _IMPORTING_NAMES:
-                        importers.append((rel_path, content.decode("utf-8")))
+                        importers.append(rel_path)
 
             for directory, prompt_type in INSTRUCTION_DIRECTORIES.items():
                 if directory in INSTRUCTION_FILES and not files.is_directory(directory):
@@ -363,8 +402,9 @@ class PromptScanner(Scanner):
                     component = self._record(relative, prompt_type, content, files, result)
                     if component is not None:
                         recorded[relative] = component
+                        texts[relative] = content.decode("utf-8")
 
-            self._follow_imports(importers, recorded, files, result)
+            self._follow_imports(importers, texts, recorded, files, result)
             self._scan_skills(files, result)
 
         if not result.components and not result.scan_failures and not result.surfaces_excluded:
@@ -397,42 +437,49 @@ class PromptScanner(Scanner):
 
     def _follow_imports(
         self,
-        importers: list[tuple[str, str]],
+        importers: list[str],
+        texts: dict[str, str],
         recorded: dict[str, PromptComponent],
         files: ConfinedCollection,
         result: ScanResult,
     ) -> None:
-        """Inventory in-root files that memory files import with @path, to five hops."""
-        pending = [(path, text, 0) for path, text in importers]
+        """Inventory in-root files that memory files import with @path, to five hops.
+
+        A host expands the imports of every file it loads this way, including a file
+        the collector records under its own name, such as an imported AGENTS.md.
+        """
+        pending = deque((path, 0) for path in importers)
+        followed = set(importers)
+        looked_up: set[str] = set()
         while pending:
-            importer, text, depth = pending.pop(0)
-            tokens = _import_tokens(text)
+            importer, depth = pending.popleft()
+            tokens = _import_tokens(texts[importer])
             if len(set(tokens)) > _MAX_IMPORTS:
                 result.scan_failures.append(f"{importer}: too many @path imports to inventory")
                 continue
             imports: set[str] = set()
             outside = False
             for token in dict.fromkeys(token.rstrip(_TRAILING) for token in tokens):
-                target = self._import_target(importer, token)
+                target, leaves = _resolve_import(importer, token)
+                outside |= leaves
                 if target is None:
-                    outside |= (
-                        token.startswith("~/")
-                        or (token.startswith("/") and bool(_FILE_SUFFIX.search(token)))
-                        or (".." in PurePosixPath(token).parts and bool(_FILE_SUFFIX.search(token)))
-                    )
                     continue
                 if target in recorded:
                     imports.add(target)
+                    if target not in followed and depth + 1 <= _MAX_IMPORT_DEPTH:
+                        followed.add(target)
+                        pending.append((target, depth + 1))
                     continue
-                if files.excluded(target):
-                    # A host still loads it, as it would a dependency's instructions.
-                    result.surfaces_excluded.append(
-                        f"{target}: imported by {importer} but excluded from collection"
+                if target in looked_up:
+                    continue
+                if len(looked_up) >= _MAX_IMPORT_LOOKUPS:
+                    result.scan_failures.append(
+                        f"{importer}: more than {_MAX_IMPORT_LOOKUPS} distinct @path imports "
+                        "in the project; the rest are not inventoried"
                     )
-                    continue
-                if files.is_directory(target):
-                    continue
-                content = files.read_bytes(target, missing_ok=True)
+                    return
+                looked_up.add(target)
+                content = self._read_import(importer, target, files, result)
                 if content is None:
                     continue
                 if depth + 1 > _MAX_IMPORT_DEPTH:
@@ -446,8 +493,10 @@ class PromptScanner(Scanner):
                     continue
                 component.bom_ref = f"prompt:import:{target}"
                 recorded[target] = component
+                texts[target] = content.decode("utf-8")
                 imports.add(target)
-                pending.append((target, content.decode("utf-8"), depth + 1))
+                followed.add(target)
+                pending.append((target, depth + 1))
             if outside:
                 result.surfaces_excluded.append(
                     f"{importer}: imports a file outside the project root, which is not inventoried"
@@ -461,19 +510,25 @@ class PromptScanner(Scanner):
                         importer_list.sort()
 
     @staticmethod
-    def _import_target(importer: str, token: str) -> str | None:
-        """The in-root path an import names, or None when it names none beneath the root."""
-        if token.startswith(("~", "/")):
+    def _read_import(
+        importer: str, target: str, files: ConfinedCollection, result: ScanResult
+    ) -> bytes | None:
+        """An imported file's bytes, or None when it is absent, a directory or a gap."""
+        if len(PurePosixPath(target).parts) > files.max_depth + 1:
+            result.surfaces_excluded.append(
+                f"{target}: imported by {importer} below the collection depth limit "
+                "and not inventoried"
+            )
             return None
-        parts = list(PurePosixPath(importer).parent.parts)
-        for part in PurePosixPath(token).parts:
-            if part == "..":
-                if not parts:
-                    return None
-                parts.pop()
-            elif part != ".":
-                parts.append(part)
-        return "/".join(parts) if parts else None
+        if files.excluded(target):
+            # A host still loads it, as it would a dependency's instructions.
+            result.surfaces_excluded.append(
+                f"{target}: imported by {importer} but excluded from collection"
+            )
+            return None
+        if files.is_directory(target):
+            return None
+        return files.read_bytes(target, missing_ok=True)
 
     def _scan_skills(self, files: ConfinedCollection, result: ScanResult) -> None:
         seen: set[str] = set()
@@ -483,21 +538,10 @@ class PromptScanner(Scanner):
                 if relative in seen:
                     continue
                 seen.add(relative)
-                content = files.read_bytes(path)
-                if content is None:
+                read = self._skill_file(path, files, result)
+                if read is None:
                     continue
-                risks: list[RiskAssessment] = []
-                try:
-                    text = content.decode("utf-8")
-                except UnicodeDecodeError:
-                    if path.suffix.lower() in _TEXT_SUFFIXES:
-                        result.scan_failures.append(f"{path}: invalid UTF-8 skill declaration")
-                        continue
-                    text = None
-                if text is not None:
-                    risks.extend(detect_invisible_characters(text, relative))
-                    if path.suffix.lower() in _MARKUP_SUFFIXES:
-                        risks.extend(detect_hidden_markup(text, relative))
+                digest, risks = read
                 result.surfaces_scanned.append(relative)
                 result.components.append(
                     SkillPackageComponent(
@@ -506,7 +550,7 @@ class PromptScanner(Scanner):
                         skill_type=(
                             "skill" if path.suffix.lower() in _TEXT_SUFFIXES else "skill-resource"
                         ),
-                        hashes={"sha256": hash_bytes(content)},
+                        hashes={"sha256": digest},
                         source_path=relative,
                         trust_tier=TrustTier.INTERNAL_UNVERIFIED,
                         risks=risks,
@@ -514,6 +558,34 @@ class PromptScanner(Scanner):
                 )
         if not seen and not result.scan_failures and not result.surfaces_excluded:
             result.surfaces_scanned.append("skills (no skill or command files found)")
+
+    @staticmethod
+    def _skill_file(
+        path: Path, files: ConfinedCollection, result: ScanResult
+    ) -> tuple[str, list[RiskAssessment]] | None:
+        """A bundle file's digest and the hidden-character findings of its text."""
+        relative = path.as_posix()
+        text_file = path.suffix.lower() in _TEXT_SUFFIXES
+        found = files.regular_file(path)
+        if found is not None and found[1] > files.max_file_bytes and not text_file:
+            # A large asset, such as a sample PDF, is streamed into a digest within the
+            # collection's byte budget instead of being read whole.
+            digest = files.hash_file(found[0], max_bytes=files.max_total_bytes)
+            return None if digest is None else (digest, [])
+        content = files.read_bytes(path)
+        if content is None:
+            return None
+        try:
+            text = content.decode("utf-8")
+        except UnicodeDecodeError:
+            if text_file:
+                result.scan_failures.append(f"{relative}: invalid UTF-8 skill declaration")
+                return None
+            return hash_bytes(content), []
+        risks = detect_invisible_characters(text, relative)
+        if path.suffix.lower() in _MARKUP_SUFFIXES:
+            risks.extend(detect_hidden_markup(text, relative))
+        return hash_bytes(content), risks
 
     def _scan_instruction_file(
         self, path: Path, rel_path: str, prompt_type: str, raw: bytes, text: str

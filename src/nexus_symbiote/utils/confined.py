@@ -44,6 +44,7 @@ class _LinkRefusedError(CollectionError):
 # parent opened with O_DIRECTORY as ENOTDIR.
 _LINK_ERRNOS = frozenset({errno.ELOOP, errno.EMLINK, errno.ENOTDIR})
 _MAX_CASE_VARIANTS = 16
+_DIRECTORY, _LINK, _OTHER = "directory", "link", "other"
 # The format characters HFS+ ignores when it compares names.
 _IGNORED_IN_NAMES = dict.fromkeys(
     [*range(0x200C, 0x2010), *range(0x202A, 0x202F), *range(0x206A, 0x2070), 0xFEFF]
@@ -176,7 +177,8 @@ class ConfinedCollection:
         self._entry_budget = [max_entries]
         self._root_fd: int | None = None
         self._links: dict[str, str] = {}
-        self._listings: dict[Path, list[str] | None] = {}
+        self._listings: dict[Path, dict[str, list[tuple[str, str]]] | None] = {}
+        self._variant_budget = max_entries
         self._excluded: list[Path] = []
         self._invalid_policy = False
         for value in exclude_paths:
@@ -224,6 +226,9 @@ class ConfinedCollection:
             self.failures.append(message)
 
     def _relative(self, path: str | Path) -> Path:
+        if "\x00" in str(path):
+            # os.open would raise ValueError, which no caller treats as a refused read.
+            raise CollectionError("path contains a NUL character")
         candidate = Path(path)
         if candidate.is_absolute():
             try:
@@ -573,6 +578,11 @@ class ConfinedCollection:
         when no symlink is involved, or ``None`` when no such regular file exists.
         Nothing is recorded.
         """
+        found = self.regular_file(path)
+        return None if found is None else found[0]
+
+    def regular_file(self, path: str | Path) -> tuple[Path, int] | None:
+        """``in_root_target`` with the file's size, so a caller can choose how to read it."""
         try:
             relative = self._relative(path)
             if self._root_fd is None or not relative.parts or self.excluded(relative):
@@ -581,7 +591,8 @@ class ConfinedCollection:
         except (OSError, CollectionError):
             return None
         try:
-            return opened if stat.S_ISREG(os.fstat(fd).st_mode) else None
+            info = os.fstat(fd)
+            return (opened, info.st_size) if stat.S_ISREG(info.st_mode) else None
         finally:
             os.close(fd)
 
@@ -707,6 +718,7 @@ class ConfinedCollection:
                     target = target.joinpath(*relative.parts[index + 1 :])
                     if not target.parts:
                         raise _LinkRefusedError("symlink target is the collection root")
+                    self._check_target_depth(target)
                     if self.excluded(target):
                         raise _LinkRefusedError("symlink target is excluded from collection")
                     return target, len(relative.parts) - index - 1
@@ -720,6 +732,11 @@ class ConfinedCollection:
             return None
         finally:
             os.close(fd)
+
+    def _check_target_depth(self, target: Path) -> None:
+        # Each component of a target is opened, for every read and walk that meets it.
+        if len(target.parts) > self.max_depth + 1:
+            raise _LinkRefusedError("symlink target is too deep")
 
     def _same_link(self, relative: Path, opened: Path) -> bool:
         """Whether a followed link still names the target that was read."""
@@ -735,10 +752,11 @@ class ConfinedCollection:
         regular file or directory reached without a further symlink.
         """
         target = _lexical_target(child.parent, os.readlink(child.name, dir_fd=directory_fd))
-        if target.parts and self.excluded(target):
-            raise _LinkRefusedError("symlink target is excluded from collection")
         if not target.parts:
             return False
+        self._check_target_depth(target)
+        if self.excluded(target):
+            raise _LinkRefusedError("symlink target is excluded from collection")
         try:
             parent = self._open_parent(target)
             try:
@@ -757,81 +775,122 @@ class ConfinedCollection:
             raise _LinkRefusedError("symlink target is another symlink")
         raise _LinkRefusedError("symlink target is not a regular file or directory")
 
-    def _names(self, fd: int, directory: Path) -> list[str] | None:
-        """Entry names of an open directory, listed once per collection and bounded."""
+    def _folded(self, directory: Path) -> dict[str, list[tuple[str, str]]] | None:
+        """A directory's entries and their kinds by folded name, listed once per collection.
+
+        Case-variant searches share one budget of ``max_entries`` per collection, which
+        each listing spends on the directory and its entries, as a walk would; the
+        directory that would exceed it is a failure. A directory that cannot be opened
+        without following a symlink has no listing: the read that missed records why.
+        """
         if directory in self._listings:
             return self._listings[directory]
-        names: list[str] | None = []
+        index: dict[str, list[tuple[str, str]]] | None = None
         try:
+            fd = self._open_directory_no_follow(directory)
+        except OSError:
+            self._listings[directory] = None
+            return None
+        try:
+            if self._variant_budget <= 0:
+                raise CollectionError("directory entry limit exceeded")
+            entries: list[tuple[str, str]] = []
             with os.scandir(fd) as stream:
                 for entry in stream:
-                    assert names is not None
-                    if len(names) >= self.max_entries:
-                        self._fail(directory, "directory entry limit exceeded")
-                        names = None
-                        break
-                    names.append(entry.name)
+                    if len(entries) + 1 >= self._variant_budget:
+                        self._variant_budget = 0
+                        raise CollectionError("directory entry limit exceeded")
+                    kind = (
+                        _LINK
+                        if entry.is_symlink()
+                        else _DIRECTORY
+                        if entry.is_dir(follow_symlinks=False)
+                        else _OTHER
+                    )
+                    entries.append((entry.name, kind))
+            self._variant_budget -= len(entries) + 1
+            index = {}
+            for name, kind in entries:
+                index.setdefault(fold_name(name), []).append((name, kind))
+        except CollectionError as exc:
+            self._fail(directory, str(exc))
         except OSError:
             self._fail(directory, "directory changed or could not be read")
-            names = None
-        self._listings[directory] = names
-        return names
+        finally:
+            os.close(fd)
+        self._listings[directory] = index
+        return index
 
     def case_variants(self, path: str | Path) -> list[Path]:
         """Existing paths that differ from ``path`` only by case or normalisation.
 
         Case-insensitive file systems, the default on macOS and Windows, open such a
         variant when ``path`` itself is absent. Listings are descriptor-relative and
-        no symlink is followed; a symlinked directory variant is reported as found.
+        indexed by folded name once per collection. An exact-named directory symlink
+        on the path is resolved as a read resolves it, lexically and once, and the
+        search goes on in its target; a symlinked variant is reported as found.
         """
+        return [logical for logical, _ in self._variants(path)]
+
+    def _variants(self, path: str | Path) -> list[tuple[Path, Path]]:
+        """Each case variant as the path a host opens and the path that holds it."""
         try:
             relative = self._relative(path)
         except CollectionError:
             return []
         if self._root_fd is None or not relative.parts:
             return []
-        found: list[Path] = []
+        found: list[tuple[Path, Path]] = []
         parts = relative.parts
 
-        def descend(fd: int, prefix: tuple[str, ...], exact: bool) -> None:
-            index = len(prefix)
-            names = self._names(fd, Path(*prefix))
-            wanted = fold_name(parts[index])
-            for name in names or ():
-                if len(found) >= _MAX_CASE_VARIANTS or fold_name(name) != wanted:
-                    continue
+        def descend(real: Path, logical: tuple[str, ...], exact: bool, followed: bool) -> None:
+            if not exact:
+                # Only another spelling branches the search, so only those visits are
+                # counted; a search along the requested spelling takes one per component.
+                if self._variant_budget <= 0:
+                    self._fail(Path(*logical), "directory entry limit exceeded")
+                    return
+                self._variant_budget -= 1
+            index = len(logical)
+            for name, kind in (self._folded(real) or {}).get(fold_name(parts[index]), ()):
+                if len(found) >= _MAX_CASE_VARIANTS:
+                    return
                 same = exact and name == parts[index]
+                here = (*logical, name)
                 if index + 1 == len(parts):
                     if not same:
-                        found.append(Path(*prefix, name))
-                    continue
-                try:
-                    child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
-                except OSError:
-                    try:
-                        linked = stat.S_ISLNK(
-                            os.stat(name, dir_fd=fd, follow_symlinks=False).st_mode
-                        )
-                    except OSError:
-                        linked = False
-                    if linked and not same:
-                        found.append(Path(*prefix, name, *parts[index + 1 :]))
-                    continue
-                try:
-                    descend(child, (*prefix, name), same)
-                finally:
-                    os.close(child)
+                        found.append((Path(*here), real / name))
+                elif kind == _DIRECTORY:
+                    descend(real / name, here, same, followed)
+                elif kind == _LINK and not same:
+                    rest = parts[index + 1 :]
+                    found.append((Path(*here, *rest), real.joinpath(name, *rest)))
+                elif kind == _LINK and not followed:
+                    target = self._directory_link(real, name)
+                    if target is not None:
+                        descend(target, here, True, True)
 
-        fd = os.dup(self._root_fd)
-        try:
-            descend(fd, (), True)
-        finally:
-            os.close(fd)
+        descend(Path(), (), True, False)
         return found
 
+    def _directory_link(self, directory: Path, name: str) -> Path | None:
+        """The lexical in-root target of the symlink ``name`` in ``directory``, or ``None``."""
+        try:
+            fd = self._open_directory_no_follow(directory)
+            try:
+                text = os.readlink(name, dir_fd=fd)
+            finally:
+                os.close(fd)
+            target = _lexical_target(directory, text)
+        except (OSError, CollectionError):
+            return None
+        if not target.parts or len(target.parts) > self.max_depth or self.excluded(target):
+            return None
+        return target
+
     def _report_case_variants(self, relative: Path, variants_read: Collection[str]) -> None:
-        for variant in self.case_variants(relative):
-            if variant.as_posix() in variants_read or self.excluded(variant):
+        for variant, real in self._variants(relative):
+            if variant.as_posix() in variants_read or self.excluded(variant) or self.excluded(real):
                 continue
             self._fail(
                 variant,

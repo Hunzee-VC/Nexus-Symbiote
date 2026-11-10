@@ -285,9 +285,10 @@ class IntegrityValidator:
         if not candidate.is_absolute():
             candidate = root / candidate
         try:
-            if candidate.is_symlink() and candidate.is_relative_to(root):
-                # Collectors read an in-root symlink, such as CLAUDE.md -> AGENTS.md,
-                # through its target, resolved lexically without following anything.
+            if candidate.is_relative_to(root):
+                # Collectors read through one in-root symlink at any component, such as
+                # CLAUDE.md -> AGENTS.md or .claude -> config/claude, resolved lexically
+                # without following anything; the hash is taken from that target.
                 from nexus_symbiote.utils.confined import ConfinedCollection
 
                 with ConfinedCollection(root, []) as files:

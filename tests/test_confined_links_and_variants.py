@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 
 import pytest
@@ -170,3 +171,86 @@ def test_missing_file_below_a_linked_directory_is_absent_not_a_failure(tmp_path)
         assert list(files.iter_files(".claude/commands")) == []
         assert files.read_json(".cursor/mcp.json", missing_ok=True) is None
     assert failures == [".cursor/mcp.json: symlink target is unavailable"]
+
+
+def _linked_claude(root: Path) -> Path:
+    """`.claude -> config/claude`, the layout where a host opens variants through the link."""
+    target = root / "config" / "claude"
+    target.mkdir(parents=True)
+    (root / ".claude").symlink_to("config/claude", target_is_directory=True)
+    return target
+
+
+def test_case_variant_below_an_in_root_directory_link_is_reported(tmp_path):
+    target = _linked_claude(tmp_path)
+    (target / "Settings.json").write_text("{}")
+    (target / "Rules").mkdir()
+    (target / "Rules" / "a.md").write_text("x")
+    failures: list[str] = []
+    with ConfinedCollection(tmp_path, failures) as files:
+        assert files.read_json(".claude/settings.json", missing_ok=True) is None
+        assert list(files.iter_files(".claude/rules")) == []
+        assert files.case_variants(".claude/settings.json") == [Path(".claude/Settings.json")]
+    assert failures == [
+        ".claude/Settings.json: case variant of .claude/settings.json is the active file on "
+        "case-insensitive file systems and is not inventoried",
+        ".claude/Rules: case variant of .claude/rules is the active file on "
+        "case-insensitive file systems and is not inventoried",
+    ]
+
+
+def test_case_variant_search_follows_one_link_only(tmp_path):
+    (tmp_path / "real").mkdir()
+    (tmp_path / "real" / "Settings.json").write_text("{}")
+    (tmp_path / "hop").symlink_to("real", target_is_directory=True)
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "claude").symlink_to("../hop", target_is_directory=True)
+    (tmp_path / ".claude").symlink_to("config/claude", target_is_directory=True)
+    failures: list[str] = []
+    with ConfinedCollection(tmp_path, failures) as files:
+        assert files.case_variants(".claude/settings.json") == []
+        assert files.read_json(".claude/settings.json", missing_ok=True) is None
+    assert failures == [
+        ".claude/settings.json: symlink target is or passes through another symlink"
+    ]
+
+
+def test_case_variant_search_spends_a_bounded_budget(tmp_path):
+    for top in range(10):
+        for below in range(10):
+            (tmp_path / ("A" + "." * top) / ("B" + "." * below)).mkdir(parents=True)
+    failures: list[str] = []
+    start = time.perf_counter()
+    with ConfinedCollection(tmp_path, failures, max_entries=300) as files:
+        for index in range(2000):
+            assert files.read_bytes(f"a/b/x{index}.md", missing_ok=True) is None
+    assert time.perf_counter() - start < 10
+    assert failures and all(f.endswith("directory entry limit exceeded") for f in failures)
+
+
+def test_path_with_a_nul_character_is_a_refused_read_not_an_error(tmp_path):
+    failures: list[str] = []
+    with ConfinedCollection(tmp_path, failures) as files:
+        assert files.read_bytes("a\x00b.md", missing_ok=True) is None
+        assert files.is_directory("a\x00b") is False
+        assert files.in_root_target("a\x00b.md") is None
+        assert list(files.iter_files("a\x00b")) == []
+    assert failures
+
+
+def test_symlink_to_a_target_beyond_the_depth_limit_is_refused(tmp_path):
+    deep = Path(*["d"] * 40)
+    (tmp_path / deep).mkdir(parents=True)
+    (tmp_path / deep / "f.md").write_text("x")
+    (tmp_path / "link.md").symlink_to(deep / "f.md")
+    (tmp_path / "linkdir").symlink_to(deep, target_is_directory=True)
+    with ConfinedCollection(tmp_path, [], max_depth=64) as files:
+        walked = [path.as_posix() for path in files.iter_files()]
+    assert "link.md" in walked
+    failures: list[str] = []
+    with ConfinedCollection(tmp_path, failures) as files:
+        assert files.read_bytes("link.md") is None
+        assert files.read_bytes("linkdir/f.md") is None
+        list(files.iter_files("."))
+    assert "link.md: symlink target is too deep" in failures
+    assert "linkdir/f.md: symlink target is too deep" in failures
