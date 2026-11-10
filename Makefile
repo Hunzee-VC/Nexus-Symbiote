@@ -1,4 +1,5 @@
 .DEFAULT_GOAL := help
+PYTHON_FLOOR ?= python3.11
 
 # ── Development ──────────────────────────────────────────────
 
@@ -7,8 +8,23 @@ install: install-locked ## Install the reviewed locked development environment
 
 .PHONY: install-locked
 install-locked: ## Install from the locked CI dependency set
-	python -m pip install --require-hashes -r requirements-ci.lock
+	python -m pip install --require-hashes --only-binary=:all: -r requirements-ci.lock
 	python -m pip install --no-deps --no-build-isolation -e .
+	python -m pip check
+
+# ── Dependency locks ─────────────────────────────────────────
+
+.PHONY: lock
+lock: ## Regenerate the CI, Action and floor locks from pyproject.toml (pinned uv, needs PyPI)
+	python scripts/check_locks.py --regenerate
+
+.PHONY: lock-upgrade
+lock-upgrade: ## Upgrade every locked package to the newest release at least a week old
+	python scripts/check_locks.py --regenerate --upgrade
+
+.PHONY: lock-check
+lock-check: ## Check the locks against pyproject.toml and each other, offline
+	python scripts/check_locks.py
 
 # ── Quality ──────────────────────────────────────────────────
 
@@ -25,7 +41,7 @@ typecheck: ## Run mypy strict type checking
 	mypy src/nexus_symbiote scripts
 
 .PHONY: quality
-quality: lint format-check typecheck workflow-check hygiene ## Run all quality checks
+quality: lint format-check typecheck workflow-check hygiene lock-check ## Run all quality checks
 
 .PHONY: workflow-check
 workflow-check: ## Validate pinned workflow references and shell inputs
@@ -38,16 +54,26 @@ hygiene: ## Check tracked source, links, versions and vendor digests
 # ── Testing ──────────────────────────────────────────────────
 
 .PHONY: test
-test: ## Run the test suite
-	python -m pytest
+test: ## Run the test suite; a skip other than a host file-system one fails it
+	python -m pytest --strict-skips
 
 .PHONY: test-verbose
 test-verbose: ## Run the test suite with verbose output
-	python -m pytest -vv --durations=20
+	python -m pytest -vv --durations=20 --strict-skips
+
+.PHONY: test-floor
+test-floor: ## Run the suite on Python 3.11 with every dependency at its declared floor
+	@set -eu; floor_dir="$$(mktemp -d)"; \
+	trap 'rm -rf "$$floor_dir"' EXIT; \
+	$(PYTHON_FLOOR) -m venv "$$floor_dir"; \
+	"$$floor_dir/bin/python" -m pip install --require-hashes --only-binary=:all: -r requirements-floor.lock; \
+	"$$floor_dir/bin/python" -m pip install --no-deps --no-build-isolation -e .; \
+	"$$floor_dir/bin/python" -m pip check; \
+	"$$floor_dir/bin/python" -m pytest --strict-skips
 
 .PHONY: coverage
 coverage: ## Run tests with coverage reporting
-	python -m pytest --cov=nexus_symbiote --cov-branch --cov-report=term-missing --cov-report=json:coverage.json
+	python -m pytest --strict-skips --cov=nexus_symbiote --cov-branch --cov-report=term-missing --cov-report=json:coverage.json
 	python scripts/check_coverage.py coverage.json
 
 .PHONY: security-regressions
@@ -65,14 +91,14 @@ build: ## Build sdist and wheel distributions
 
 .PHONY: check-dist
 check-dist: ## Validate built distributions with twine
-	python -m twine check dist/*
+	python -m twine check --strict dist/*
 
 .PHONY: wheel-smoke
 wheel-smoke: build ## Check the exact wheel in a temporary locked environment
 	@set -eu; smoke_dir="$$(mktemp -d)"; \
 	trap 'rm -rf "$$smoke_dir"' EXIT; \
 	python -m venv "$$smoke_dir"; \
-	"$$smoke_dir/bin/python" -m pip install --require-hashes -r requirements-ci.lock; \
+	"$$smoke_dir/bin/python" -m pip install --require-hashes --only-binary=:all: -r requirements-ci.lock; \
 	"$$smoke_dir/bin/python" -m pip install --no-index --no-deps dist/*.whl; \
 	"$$smoke_dir/bin/python" -I scripts/check_wheel_security.py dist/*.whl
 

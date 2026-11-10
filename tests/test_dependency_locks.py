@@ -1,0 +1,150 @@
+"""scripts/check_locks.py: the locks agree with pyproject.toml, with each other and with the floors."""
+
+from __future__ import annotations
+
+import re
+import shutil
+import tomllib
+
+import pytest
+from packaging.version import Version
+
+from tests.support import ROOT, load_script
+
+locks = load_script("check_locks")
+FILES = ("pyproject.toml", locks.CI_LOCK, locks.ACTION_LOCK, locks.FLOOR_LOCK)
+
+
+@pytest.fixture
+def checkout(tmp_path):
+    for name in FILES:
+        shutil.copyfile(ROOT / name, tmp_path / name)
+    return tmp_path
+
+
+def edit(path, old, new):
+    text = path.read_text()
+    assert old in text, old
+    path.write_text(text.replace(old, new, 1))
+
+
+def test_the_committed_locks_agree_with_pyproject_and_each_other():
+    assert locks.check(ROOT) == []
+
+
+def test_every_runtime_floor_is_the_version_the_floor_lock_tests():
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    floor = locks.read_lock(ROOT, locks.FLOOR_LOCK)
+    for requirement in [
+        *locks.runtime_requirements(pyproject),
+        *locks.build_requirements(pyproject),
+    ]:
+        name = locks.canonicalize_name(requirement.name)
+        assert floor.versions(name) == {locks._lower_bound(requirement)}, name
+    # The suite reads CliRunner's separate stderr, which needs click 8.2.
+    assert floor.versions("click") == {Version("8.2.1")}
+
+
+def test_a_range_change_without_regenerated_locks_fails(checkout):
+    edit(checkout / "pyproject.toml", '"rich>=13.0,<16"', '"rich>=13.0,<17"')
+    errors = locks.check(checkout)
+    assert any("dependency declarations changed" in error for error in errors)
+
+
+def test_a_raised_floor_without_a_regenerated_floor_lock_fails(checkout):
+    edit(checkout / "pyproject.toml", '"rich>=13.0,<16"', '"rich>=13.9,<16"')
+    errors = locks.check(checkout)
+    assert any("rich==13.0.0 is outside" in error for error in errors)
+
+
+def test_a_declared_floor_that_the_resolution_cannot_use_fails(checkout):
+    # pydantic 2.10 is what an earlier release declared; the sigstore extra needs 2.12.
+    edit(checkout / "pyproject.toml", '"pydantic>=2.12,<3"', '"pydantic>=2.10,<3"')
+    errors = locks.check(checkout)
+    assert any("pydantic declares 2.10 as its floor" in error for error in errors)
+
+
+def test_an_action_pin_that_differs_from_the_reviewed_ci_pin_fails(checkout):
+    action = checkout / locks.ACTION_LOCK
+    text = action.read_text()
+    first_hash = re.search(r"--hash=sha256:([0-9a-f]{64})", text)[1]
+    action.write_text(text.replace(first_hash, "0" * 64, 1))
+    assert any("differs from requirements-ci.lock" in e for e in locks.check(checkout))
+
+
+def test_a_test_tool_in_the_action_runtime_fails(checkout):
+    ci = locks.read_lock(checkout, locks.CI_LOCK)
+    pytest_pin = ci.pins["pytest"][0]
+    block = f"pytest=={pytest_pin.version} \\\n" + " \\\n".join(
+        f"    --hash=sha256:{value}" for value in sorted(pytest_pin.hashes)
+    )
+    with (checkout / locks.ACTION_LOCK).open("a") as stream:
+        stream.write(block + "\n")
+    assert any("test tool pytest" in e for e in locks.check(checkout))
+
+
+def test_a_floor_test_tool_must_match_its_ci_version(checkout):
+    floor = checkout / locks.FLOOR_LOCK
+    text = floor.read_text()
+    version = locks.read_lock(checkout, locks.FLOOR_LOCK).pins["hypothesis"][0].version
+    floor.write_text(text.replace(f"hypothesis=={version}", "hypothesis==6.0.0", 1))
+    assert any("test tool hypothesis differs" in e for e in locks.check(checkout))
+
+
+@pytest.mark.parametrize(
+    "lock,message",
+    [
+        ("annotated-types>=0.8.0 \\\n    --hash=sha256:" + "a" * 64 + "\n", "not one exact pin"),
+        ("annotated-types==0.8.0\n", "no sha256 hash"),
+        ("annotated-types==0.8.0 \\\n    --index-url https://example.invalid\n", "no sha256"),
+        (
+            "annotated-types @ https://example.invalid/a.whl \\\n    --hash=sha256:"
+            + "a" * 64
+            + "\n",
+            "not one exact pin",
+        ),
+        ("    --hash=sha256:" + "a" * 64 + "\n", "continuation line"),
+        ("", "no pinned requirement"),
+    ],
+)
+def test_a_lock_entry_that_is_not_an_exact_hashed_pin_is_rejected(lock, message):
+    with pytest.raises(locks.LockError, match=message):
+        locks.parse_lock(lock)
+
+
+def test_a_package_pinned_twice_under_one_marker_is_rejected():
+    entry = "attrs==26.1.0 \\\n    --hash=sha256:" + "a" * 64 + "\n"
+    with pytest.raises(locks.LockError, match="twice"):
+        locks.parse_lock(entry + entry)
+
+
+def test_locks_without_their_inputs_header_fail(checkout):
+    edit(checkout / locks.FLOOR_LOCK, "# lock-inputs:", "# lock inputs removed:")
+    assert any("no lock-inputs header" in e for e in locks.check(checkout))
+
+
+def test_locks_resolved_with_different_cutoffs_fail(checkout):
+    floor = checkout / locks.FLOOR_LOCK
+    text = floor.read_text()
+    floor.write_text(re.sub(r"exclude-newer=\S+", "exclude-newer=2026-01-01T00:00:00Z", text))
+    assert any("different upload cut-offs" in e for e in locks.check(checkout))
+
+
+def test_regeneration_refuses_an_unpinned_uv(monkeypatch):
+    monkeypatch.setattr(locks.shutil, "which", lambda name: None)
+    with pytest.raises(locks.LockError, match="uv"):
+        locks.regenerate(ROOT, None, False)
+
+
+def test_every_locked_pin_is_listed_for_the_advisory_audit_whatever_its_marker():
+    packages = locks.locked_packages(ROOT, [locks.CI_LOCK, locks.ACTION_LOCK])
+    names = {package["name"] for package in packages}
+    # Pins that the Python 3.12 Linux audit job never installs.
+    assert {
+        "backports-tarfile",
+        "importlib-metadata",
+        "zipp",
+        "colorama",
+        "pywin32-ctypes",
+    } <= names
+    assert len(packages) == len({(p["name"], p["version"]) for p in packages})
