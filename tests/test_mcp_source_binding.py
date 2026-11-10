@@ -225,9 +225,14 @@ def test_keyed_bom_fails_closed_when_validated_without_its_key(tmp_path, monkeyp
 
 def test_short_source_binding_key_is_rejected(tmp_path, monkeypatch):
     monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, "too-short")
-    (tmp_path / ".mcp.json").write_text(json.dumps({"mcpServers": {"db": _db("x")}}))
+    (tmp_path / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"db": _db("x"), "other": _db("y")}})
+    )
     result = MCPScanner().scan(tmp_path)
-    assert result.scan_failures
+    # One failure that names the operator setting, not a misleading tool-definition error.
+    assert result.scan_failures == [
+        f".mcp.json: {SOURCE_BINDING_KEY_ENV} must contain at least 32 characters"
+    ]
     assert not any(isinstance(c, MCPServerComponent) for c in result.components)
 
 
@@ -276,3 +281,255 @@ def test_binding_tags_compare_in_constant_time_and_tolerate_hostile_values():
     assert not _binding_equal("\ud800tag", "tag")
     assert _binding_equal("\ud800", "\ud800")
     assert not _binding_equal("\ud800", "\udc00")
+
+
+# Known-answer vectors. A change to either preimage needs a new profile version and
+# new vectors, because every stored baseline would otherwise mismatch.
+VECTOR_SERVER = {
+    "command": "npx",
+    "args": ["-y", "@acme/files-mcp@1.2.3", "--root", "/srv/data"],
+    "env": {"ACME_TOKEN": "vector-secret-value-0001", "LOG_LEVEL": "info"},
+    "tools": [
+        {"name": "read_file", "description": "Read a file", "inputSchema": {"type": "object"}}
+    ],
+}
+VECTOR_KEY = "nexus-symbiote-mcp-test-vector-key-0001"
+VECTOR_STRUCTURE = (
+    '{"profile":"nexus-symbiote/mcp-static-config/v3","structure":{"argument_count":4,'
+    '"client_settings":{},"command":"npx","endpoint":null,"environment_names":["ACME_TOKEN",'
+    '"LOG_LEVEL"],"fields":["args","command","env","tools"],"header_names":[],'
+    '"launch_context":{},"launcher":"npx","launcher_command":"npx","launcher_wrappers":[],'
+    '"package_sources":[],"packages":["npm:@acme/files-mcp"],"tool_names":["read_file"],'
+    '"transport":"stdio"}}'
+)
+VECTOR_HASH = "sha256:c007cfca2fef38a5fd61893eb766999d0f430b516840c1bf21eb029916c372ab"
+VECTOR_BINDING = "hmac-sha256:d287e6feea0dfe71fc5db61c8512f468936ab8eb856905214cd32675ca1ad664"
+VECTOR_KEY_ID = "12ff5c60eb4e7e21ba266464e71ccbcd"
+
+
+def test_static_config_hash_known_answer_vector(tmp_path, monkeypatch):
+    import hashlib
+
+    from nexus_symbiote.scanners.mcp import STATIC_CONFIG_HASH_PROFILE
+
+    monkeypatch.delenv(SOURCE_BINDING_KEY_ENV, raising=False)
+    server = _server(tmp_path, VECTOR_SERVER)
+    assert STATIC_CONFIG_HASH_PROFILE == "nexus-symbiote/mcp-static-config/v3"
+    assert "sha256:" + hashlib.sha256(VECTOR_STRUCTURE.encode()).hexdigest() == VECTOR_HASH
+    assert server.properties["static_config_hash"] == VECTOR_HASH
+    assert server.properties["source_values_bound"] is False
+
+
+def test_keyed_value_binding_known_answer_vector(tmp_path, monkeypatch):
+    import hashlib
+    import hmac
+
+    from nexus_symbiote.core.hashing import canonical_json
+    from nexus_symbiote.scanners.mcp import STATIC_VALUE_BINDING_PROFILE
+
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, VECTOR_KEY)
+    server = _server(tmp_path, VECTOR_SERVER)
+    message = canonical_json(
+        {"profile": STATIC_VALUE_BINDING_PROFILE, "configuration": VECTOR_SERVER, "resolver": []}
+    )
+    expected = hmac.new(VECTOR_KEY.encode(), message.encode(), hashlib.sha256).hexdigest()
+    assert STATIC_VALUE_BINDING_PROFILE == "nexus-symbiote/mcp-static-values/v2"
+    assert "hmac-sha256:" + expected == VECTOR_BINDING
+    assert server.properties["static_value_binding"] == VECTOR_BINDING
+    assert server.properties["static_value_binding_key_id"] == VECTOR_KEY_ID
+    assert server.properties["static_config_hash"] == VECTOR_HASH
+    assert server.properties["source_values_bound"] is True
+    assert not any(r.category == "completeness" for r in server.risks)
+
+
+def test_previous_static_profile_is_reported_as_recollect(tmp_path):
+    root, output, _ = _baseline(tmp_path)
+    bom = AIBOM.load(output)
+    server = next(c for c in bom.components if isinstance(c, MCPServerComponent))
+    server.properties["static_config_hash_profile"] = "nexus-symbiote/mcp-static-config/v2"
+    report = CompletenessValidator().validate_against_project(bom, root)
+    assert not report.is_complete
+    assert any(i.severity == "unknown" and "re-collect" in i.description for i in report.issues)
+
+
+def test_unbound_values_are_signalled_without_the_key(tmp_path, monkeypatch):
+    monkeypatch.delenv(SOURCE_BINDING_KEY_ENV, raising=False)
+    server = _server(tmp_path, _db("Summer2024!"))
+    finding = next(r for r in server.risks if r.category == "completeness")
+    assert finding.severity.value == "low"
+    assert "arguments, environment values, endpoint path" in finding.detail
+    assert SOURCE_BINDING_KEY_ENV in (finding.recommendation or "")
+    assert server.properties["source_values_bound"] is False
+
+
+def test_index_path_on_the_same_host_is_bound_only_with_the_key(tmp_path, monkeypatch):
+    def server(index: str) -> MCPServerComponent:
+        args = ["--from", "docs-server==1.2.3", "--index-url", index, "docs-server"]
+        return _server(tmp_path, {"command": "uvx", "args": args})
+
+    release = "https://artifacts.corp.test/api/pypi/release/simple"
+    sandbox = "https://artifacts.corp.test/api/pypi/sandbox-uploads/simple"
+    monkeypatch.delenv(SOURCE_BINDING_KEY_ENV, raising=False)
+    trusted, swapped = server(release), server(sandbox)
+    # Paths may carry tokens, so only the origin is exported and digested unkeyed.
+    assert trusted.properties["package_sources"] == ["--index-url=https://artifacts.corp.test"]
+    assert trusted.properties["static_config_hash"] == swapped.properties["static_config_hash"]
+    assert "release" not in trusted.model_dump_json()
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    assert (
+        server(release).properties["static_value_binding"]
+        != server(sandbox).properties["static_value_binding"]
+    )
+
+
+def test_container_interactive_flag_is_not_a_package_source(tmp_path):
+    server = _server(tmp_path, {"command": "docker", "args": ["run", "-i", "--rm", "image"]})
+    assert "package_sources" not in server.properties
+    assert not any(r.category == "package_source" for r in server.risks)
+
+
+@pytest.mark.parametrize(
+    "variable", ["NPM_CONFIG_REGISTRY", "npm_config_registry", "npm_config_@acme:registry"]
+)
+def test_registry_environment_redirect_withholds_identity(tmp_path, variable):
+    server = _server(
+        tmp_path,
+        {
+            "command": "npx",
+            "args": ["-y", "@acme/files@1.2.3"],
+            "env": {variable: "https://ci:hunter2@registry.attacker.test/npm/"},
+        },
+    )
+    assert server.launcher_package is None and server.package_url is None
+    assert server.version == "1.2.3" and server.version_pinned is True
+    assert server.properties["package_sources"] == [
+        f"env:{variable}=https://registry.attacker.test"
+    ]
+    finding = next(r for r in server.risks if r.category == "package_source")
+    assert finding.severity.value == "medium" and f"env:{variable}" in finding.detail
+    assert "hunter2" not in server.model_dump_json() and "/npm/" not in server.model_dump_json()
+
+
+@pytest.mark.parametrize(
+    "path,content",
+    [
+        (".npmrc", "@acme:registry=https://npm.attacker.test/\n"),
+        (".npmrc", "registry=https://npm.attacker.test/\n"),
+        ("bunfig.toml", '[install.scopes]\nacme = { url = "https://npm.attacker.test/" }\n'),
+    ],
+)
+def test_project_resolver_redirect_changes_the_binding_and_fails_validation(
+    tmp_path, path, content
+):
+    runner = "bunx" if path == "bunfig.toml" else "npx"
+    root, output, config = _baseline(tmp_path, command=runner)
+    config["mcpServers"]["local"]["args"] = ["@acme/files-mcp@1.0.0"]
+    (root / ".mcp.json").write_text(json.dumps(config))
+    baseline = tmp_path / "pinned.json"
+    run = CliRunner().invoke(
+        main, ["scan", "--no-project-policy", "--report-only", str(root), "-o", str(baseline)]
+    )
+    assert run.exit_code == 0, run.output
+    assert _validate(root, baseline).exit_code == 0
+    (root / path).write_text(content)
+    rejected = _validate(root, baseline)
+    assert rejected.exit_code == 1, rejected.output
+    assert "Missing or mismatched local component" in rejected.output
+    server = next(c for c in MCPScanner().scan(root).components if c.name == "local")
+    assert server.launcher_package is None
+    assert any(
+        source.endswith("=https://npm.attacker.test")
+        for source in server.properties["package_sources"]
+    )
+    assert path in MCPScanner().scan(root).surfaces_scanned
+
+
+def test_scoped_resolver_entry_applies_only_to_its_scope(tmp_path):
+    (tmp_path / ".npmrc").write_text(
+        "@acme:registry=https://npm.acme.test/\n//npm.acme.test/:_authToken=${NPM_TOKEN}\n"
+    )
+    server = _server(tmp_path, {"command": "npx", "args": ["-y", "@other/files@1.2.3"]})
+    assert server.launcher_package == "npm:@other/files"
+    assert server.package_url == "pkg:npm/%40other/files@1.2.3"
+    assert "package_sources" not in server.properties
+
+
+def test_credential_named_environment_value_in_the_endpoint_is_withheld(tmp_path):
+    result_dir = tmp_path / "masked"
+    result_dir.mkdir()
+    (result_dir / ".mcp.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "tickets": {
+                        "url": "https://mcp.vendor.test/mcp",
+                        "env": {"API_TOKEN": "mcp.vendor.test"},
+                    }
+                }
+            }
+        )
+    )
+    result = MCPScanner().scan(result_dir)
+    server = next(c for c in result.components if isinstance(c, MCPServerComponent))
+    assert server.endpoint_url == "[redacted]"
+    assert ".mcp.json: MCP server 'tickets' identity withheld by environment-value redaction" in (
+        result.surfaces_excluded
+    )
+    assert any(
+        r.category == "completeness" and "endpoint" in r.detail and r.severity.value == "medium"
+        for r in server.risks
+    )
+
+
+def test_ordinary_environment_value_cannot_mask_a_repointed_endpoint(tmp_path):
+    def endpoint(host: str) -> str | None:
+        root = tmp_path / host
+        root.mkdir()
+        (root / ".mcp.json").write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "tickets": {"url": f"https://{host}/mcp", "env": {"MCP_HOST": host}}
+                    }
+                }
+            )
+        )
+        result = MCPScanner().scan(root)
+        assert not result.surfaces_excluded
+        return next(c for c in result.components if isinstance(c, MCPServerComponent)).endpoint_url
+
+    assert endpoint("mcp.vendor.test") == "https://mcp.vendor.test"
+    assert endpoint("attacker.test") == "https://attacker.test"
+
+
+def test_short_environment_values_do_not_corrupt_names_or_endpoints(tmp_path, monkeypatch):
+    from nexus_symbiote.core.models import ToolComponent
+    from nexus_symbiote.live.verify import verify_mcp_servers
+
+    tool = {
+        "name": "send_message",
+        "description": "Send a message in en; basic arithmetic works",
+        "inputSchema": {"type": "object"},
+    }
+    config = {
+        "command": "npx",
+        "args": ["-y", "server1-mcp@1.2.3"],
+        "env": {"LANG": "en", "PORT": "8443", "DEBUG": "1", "LOG_LEVEL": "info"},
+        "url": "https://mcp.example.test:8443/mcp",
+        "tools": [tool],
+    }
+    (tmp_path / ".mcp.json").write_text(json.dumps({"mcpServers": {"server1": config}}))
+    result = MCPScanner().scan(tmp_path)
+    server = next(c for c in result.components if isinstance(c, MCPServerComponent))
+    recorded = next(c for c in result.components if isinstance(c, ToolComponent))
+    assert server.name == "server1" and recorded.name == "send_message"
+    assert server.endpoint_url == "https://mcp.example.test:8443"
+    assert server.launcher_package == "npm:server1-mcp"
+    assert recorded.description_text == tool["description"]
+    assert recorded.redacted_definition_hash is None
+    monkeypatch.setattr(
+        "nexus_symbiote.live.verify.fetch_tools_from_config", lambda *a, **kw: ("stdio", [tool])
+    )
+    server.transport = "stdio"
+    report = verify_mcp_servers(AIBOM(components=[server, recorded]))
+    assert [finding.status for finding in report.results[0].tool_findings] == ["match"]

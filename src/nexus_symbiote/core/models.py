@@ -157,6 +157,10 @@ class MCPServerComponent(ComponentBase):
         default=None,
         description="Declared ecosystem and package name or image repository, when safely identified",
     )
+    package_url: str | None = Field(
+        default=None,
+        description="Exact npm or PyPI package URL of the launched package, only for an exact pin from the default registry; not proof of installed artifact identity",
+    )
     args: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
     endpoint_url: str | None = None
@@ -165,7 +169,7 @@ class MCPServerComponent(ComponentBase):
     registry_source: str | None = None
     version_pinned: bool | None = Field(
         default=None,
-        description="Exact declared package reference; null when no package is declared",
+        description="True for an exact version, commit or digest; false for a floating or unclassified package runner reference; null when no package runner is declared",
     )
     schema_hash: str | None = Field(
         default=None,

