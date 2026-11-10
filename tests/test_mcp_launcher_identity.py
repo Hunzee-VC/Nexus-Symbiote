@@ -407,3 +407,25 @@ def test_effective_command_from_arguments_is_exported_only_when_recognised(
     server = scan_server(tmp_path, {"command": command, "args": args})
     assert server.properties.get("launcher_command") == shown
     assert "canary" not in server.model_dump_json()
+
+
+@pytest.mark.parametrize(
+    "command,args,pinned",
+    [
+        ("uvx", ["--with", "extra-dep==2.0.0", "tool-pkg==1.2.3"], True),
+        ("uvx", ["--with", "extra-dep", "tool-pkg==1.2.3"], False),
+        ("uv", ["tool", "run", "--from", "tool-pkg==1.2.3", "--with", "extra-dep", "tool"], False),
+    ],
+)
+def test_tool_package_stays_the_identity_when_dependencies_are_added(
+    tmp_path, command, args, pinned
+):
+    server = scan_server(tmp_path, {"command": command, "args": args})
+    assert server.launcher_package == "pypi:tool-pkg" and server.version == "1.2.3"
+    assert [p["identity"] for p in server.properties["packages"]] == [
+        "pypi:tool-pkg",
+        "pypi:extra-dep",
+    ]
+    assert server.version_pinned is pinned
+    assert server.package_url == "pkg:pypi/tool-pkg@1.2.3"
+    assert any(r.category == "version_pinning" for r in server.risks) is (not pinned)

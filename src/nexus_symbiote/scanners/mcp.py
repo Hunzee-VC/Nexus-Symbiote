@@ -699,15 +699,19 @@ class MCPScanner(Scanner):
             if isinstance(tool, dict)
         )
         packages = launch.packages
-        registry_only = bool(packages) and all(package.registry for package in packages)
+        # uv tool run and pipx name one tool package; --with adds dependencies to it.
+        primary = (
+            packages[0]
+            if len(packages) == 1 or (packages and launch.family in {"uv-tool", "pip"})
+            else None
+        )
         launcher_package = (
             identity.package_identities[0]
-            if len(packages) == 1 and registry_only and not identity.sources
+            if primary is not None and primary.registry and not identity.sources
             else None
         )
         if launcher_package == "[withheld]":
             launcher_package = None
-        primary = packages[0] if len(packages) == 1 else None
         version = (
             primary.version
             if primary is not None and identity.packages[0]["identity"] != "[withheld]"
@@ -719,9 +723,7 @@ class MCPScanner(Scanner):
         elif packages:
             version_pinned = all(package.pinned for package in packages)
         package_url = (
-            _purl(primary)
-            if primary is not None and launcher_package is not None and version_pinned
-            else None
+            _purl(primary) if primary is not None and launcher_package is not None else None
         )
         settings = self._client_settings(config)
         context = dict(launch.context)
