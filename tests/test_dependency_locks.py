@@ -148,3 +148,12 @@ def test_every_locked_pin_is_listed_for_the_advisory_audit_whatever_its_marker()
         "pywin32-ctypes",
     } <= names
     assert len(packages) == len({(p["name"], p["version"]) for p in packages})
+
+
+def test_a_failed_resolution_points_at_the_cutoff(monkeypatch, capsys):
+    def failing(*_args):
+        raise locks.subprocess.CalledProcessError(1, ["uv", "pip", "compile"])
+
+    monkeypatch.setattr(locks, "regenerate", failing)
+    assert locks.main(["--regenerate"]) == 1
+    assert "--exclude-newer" in capsys.readouterr().err

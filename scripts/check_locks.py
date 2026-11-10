@@ -459,6 +459,12 @@ def main(argv: list[str] | None = None) -> int:
             regenerate(ROOT, args.exclude_newer, args.upgrade)
         except (LockError, OSError, subprocess.SubprocessError, ValueError) as exc:
             print(f"Lock regeneration failed: {exc}", file=sys.stderr)
+            if isinstance(exc, subprocess.CalledProcessError):
+                print(
+                    "If a declaration needs a release newer than the recorded cut-off, pass"
+                    " --exclude-newer or run `make lock-upgrade`.",
+                    file=sys.stderr,
+                )
             return 1
     errors = check(ROOT)
     for error in errors:
