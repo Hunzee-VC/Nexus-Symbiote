@@ -158,3 +158,15 @@ def test_deeply_nested_source_does_not_discard_other_collector_results(tmp_path)
     mcp = MCPScanner().scan(tmp_path)
     assert any(component.name == "notes" for component in mcp.components)
     assert any("x.py" in failure for failure in mcp.scan_failures)
+
+
+def test_missing_file_below_a_linked_directory_is_absent_not_a_failure(tmp_path):
+    (tmp_path / "shared").mkdir()
+    (tmp_path / ".claude").symlink_to("shared", target_is_directory=True)
+    (tmp_path / ".cursor").symlink_to("gone", target_is_directory=True)
+    failures: list[str] = []
+    with ConfinedCollection(tmp_path, failures) as files:
+        assert files.read_json(".claude/settings.local.json", missing_ok=True) is None
+        assert list(files.iter_files(".claude/commands")) == []
+        assert files.read_json(".cursor/mcp.json", missing_ok=True) is None
+    assert failures == [".cursor/mcp.json: symlink target is unavailable"]

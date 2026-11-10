@@ -617,12 +617,15 @@ class ConfinedCollection:
         except OSError as exc:
             if exc.errno not in _LINK_ERRNOS:
                 raise
-            target = self._link_target(relative)
-            if target is None:
+            resolved = self._link_target(relative)
+            if resolved is None:
                 raise
+        target, below = resolved
         try:
             fd = self._open_no_follow(target)
         except FileNotFoundError as exc:
+            if below and self._linked_directory_exists(target, below):
+                raise
             raise _LinkRefusedError("symlink target is unavailable") from exc
         except OSError as exc:
             if exc.errno in _LINK_ERRNOS:
@@ -642,12 +645,15 @@ class ConfinedCollection:
         except OSError as exc:
             if exc.errno not in _LINK_ERRNOS:
                 raise
-            target = self._link_target(relative)
-            if target is None:
+            resolved = self._link_target(relative)
+            if resolved is None:
                 raise
+        target, below = resolved
         try:
             fd = self._open_directory_no_follow(target)
         except FileNotFoundError as exc:
+            if below and self._linked_directory_exists(target, below):
+                raise
             raise _LinkRefusedError("symlink target is unavailable") from exc
         except OSError as exc:
             if exc.errno in _LINK_ERRNOS:
@@ -671,12 +677,23 @@ class ConfinedCollection:
             os.close(fd)
             raise
 
-    def _link_target(self, relative: Path) -> Path | None:
+    def _linked_directory_exists(self, target: Path, below: int) -> bool:
+        """Whether the directory a symlink names exists, ``below`` components above ``target``."""
+        try:
+            fd = self._open_directory_no_follow(Path(*target.parts[: len(target.parts) - below]))
+        except OSError:
+            return False
+        os.close(fd)
+        return True
+
+    def _link_target(self, relative: Path) -> tuple[Path, int] | None:
         """Lexically resolve the first symlink on a confined path, or ``None`` if none.
 
-        Every component before the link is a directory opened without following
-        links, so the link's own directory holds no symlink. Raises ``_LinkRefusedError``
-        when the link cannot be covered through a target beneath the root.
+        Returns the resolved path and how many components of ``relative`` follow the
+        link. Every component before the link is a directory opened without following
+        links, so the link's own directory holds no symlink. Raises
+        ``_LinkRefusedError`` when the link cannot be covered through a target beneath
+        the root.
         """
         if self._root_fd is None:
             return None
@@ -692,7 +709,7 @@ class ConfinedCollection:
                         raise _LinkRefusedError("symlink target is the collection root")
                     if self.excluded(target):
                         raise _LinkRefusedError("symlink target is excluded from collection")
-                    return target
+                    return target, len(relative.parts) - index - 1
                 if index + 1 == len(relative.parts) or not stat.S_ISDIR(info.st_mode):
                     return None
                 next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
@@ -706,7 +723,10 @@ class ConfinedCollection:
 
     def _same_link(self, relative: Path, opened: Path) -> bool:
         """Whether a followed link still names the target that was read."""
-        return opened == relative or self._link_target(relative) == opened
+        if opened == relative:
+            return True
+        resolved = self._link_target(relative)
+        return resolved is not None and resolved[0] == opened
 
     def _walked_link(self, directory_fd: int, child: Path) -> bool:
         """Whether a walked symlink is yielded (a file) or skipped (a directory).
