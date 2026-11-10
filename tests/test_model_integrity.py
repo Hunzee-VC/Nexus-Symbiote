@@ -18,6 +18,7 @@ from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import RiskSeverity, SerializationSafety, TrustTier
 from nexus_symbiote.diff.differ import AIBOMDiffer
+from nexus_symbiote.scanners import model as model_collector
 from nexus_symbiote.scanners.model import ModelPackages, ModelScanner, inspect_model_format
 from nexus_symbiote.signature_policy import SignaturePolicyError, load_signature_policies
 from nexus_symbiote.utils.confined import ConfinedCollection
@@ -1316,3 +1317,158 @@ def test_tensors_and_values_named_location_are_not_external_data(project):
     result = ModelScanner().scan(project)
     assert not result.scan_failures
     assert "weight_files" not in result.components[0].properties
+
+
+@pytest.mark.parametrize(
+    "data_location",
+    [
+        # EXTERNAL with bit 32 set: protobuf reads an enum as int32.
+        _varint(14 << 3) + bytes([0x81, 0x80, 0x80, 0x80, 0x10]),
+        # EXTERNAL, then values ONNX's closed enum does not define, which protobuf
+        # keeps as unknown fields.
+        _field(14, 1) + _field(14, 2),
+        _field(14, 1) + _varint(14 << 3) + b"\xff" * 9 + b"\x01",
+    ],
+)
+def test_external_data_in_any_data_location_encoding_protobuf_reads_is_bound(
+    tmp_path, project, data_location
+):
+    tensor = _field(1, 4) + _field(2, 1) + _field(8, b"w")
+    tensor += _field(13, _entry("location", "model.onnx_data")) + data_location
+    (project / "model.onnx").write_bytes(_field(1, 8) + _field(7, _field(5, tensor)))
+    weights = project / "model.onnx_data"
+    weights.write_bytes(b"reviewed weights")
+    policy = write_policy(tmp_path, [pin(project, "model.onnx")])
+    result = ModelScanner(load_signature_policies(policy, project)).scan(project)
+    assert not result.scan_failures
+    (component,) = result.components
+    assert component.properties["weight_files"] == [
+        {"path": "model.onnx_data", "sha256": sha256(weights)}
+    ]
+    # The pin covers the graph only, so the model is not verified as a whole.
+    assert component.signing_status == "partially-verified"
+    weights.write_bytes(b"swapped weights!")
+    report = IntegrityValidator(require_model_signatures=False).validate(
+        AIBOM(components=[component]), project
+    )
+    assert any(issue.category == "weight_files_mismatch" for issue in report.issues)
+
+
+# Files bound to many models ------------------------------------------------------------
+
+
+def _shards_and_indexes(directory: Path, shards: int, indexes: int) -> list[str]:
+    """``shards`` model files and ``indexes`` identical shard indexes listing every one."""
+    directory.mkdir(parents=True)
+    names = [f"s{number:05d}.ggml" for number in range(shards)]
+    for name in names:
+        (directory / name).write_bytes(b"")
+    document = json.dumps({"weight_map": {f"t{i}": name for i, name in enumerate(names)}})
+    for number in range(indexes):
+        (directory / f"model.ggml.index.{number:02d}.json").write_text(document)
+    return names
+
+
+def test_a_directory_with_more_shard_indexes_than_the_limit_binds_none(project):
+    limit = model_collector.MAX_SHARD_INDEXES
+    model = project / "llm"
+    _shards_and_indexes(model, 3, limit + 1)
+    result = ModelScanner().scan(project)
+    assert result.scan_failures == [f"llm: {model_collector.TOO_MANY_INDEXES}"]
+    assert all("weight_files" not in c.properties for c in result.components)
+    assert not [surface for surface in result.surfaces_scanned if ".index." in surface]
+    report = IntegrityValidator(require_model_signatures=False).validate(
+        AIBOM(components=result.components), project
+    )
+    unverified = {i.component_ref for i in report.issues if i.category == "weight_files_unverified"}
+    assert unverified == {c.bom_ref for c in result.components}
+    (model / f"model.ggml.index.{limit:02d}.json").unlink()
+    bound = ModelScanner().scan(project)
+    assert not bound.scan_failures
+    assert {len(c.properties["weight_files"]) for c in bound.components} == {limit}
+
+
+def test_shards_listed_by_many_indexes_are_bound_within_one_budget(project):
+    # Identical indexes are one blob in a repository, so N shards and K indexes that
+    # each list every shard would cost N x K bindings in scan, validate and risk.
+    limit = model_collector.MAX_WEIGHT_FILE_BINDINGS
+    indexes = model_collector.MAX_SHARD_INDEXES
+    _shards_and_indexes(project / "llm", limit // (2 * indexes) + 100, indexes)
+    result = ModelScanner().scan(project)
+    pairs = sum(len(c.properties.get("weight_files", [])) for c in result.components)
+    assert 0 < pairs <= limit
+    (failure,) = result.scan_failures
+    assert failure.endswith(model_collector.BINDINGS_EXHAUSTED)
+    report = IntegrityValidator(require_model_signatures=False).validate(
+        AIBOM(components=result.components), project
+    )
+    assert report.status != "pass"
+    exhausted = {i.component_ref for i in report.issues if i.category.endswith("budget_exhausted")}
+    assert exhausted == {c.bom_ref for c in result.components if "weight_files" not in c.properties}
+
+
+def test_validation_charges_bindings_to_one_budget_and_binds_each_model_once(project, monkeypatch):
+    names = _shards_and_indexes(project / "llm", 3, 2)
+    components = ModelScanner().scan(project).components
+    # Two indexes of three entries, then two bindings for each of two shards.
+    monkeypatch.setattr(
+        "nexus_symbiote.validators.integrity.ModelPackages",
+        functools.partial(ModelPackages, binding_budget=2 * 3 + 2 * 2),
+    )
+    # A model listed twice is bound once.
+    again = components[0].model_copy(update={"bom_ref": "model:again"})
+    report = IntegrityValidator(require_model_signatures=False).validate(
+        AIBOM(components=[*components, again]), project
+    )
+    exhausted = {i.component_ref for i in report.issues if i.category.endswith("budget_exhausted")}
+    assert exhausted == {f"model:llm/{names[2]}"}
+    assert report.status != "pass"
+
+
+def test_weight_files_are_matched_to_policy_entries_without_resolving_each(project, monkeypatch):
+    write_safetensors(project / "m.safetensors")
+    (project / "m.data").write_bytes(b"weights")
+    weight_files = [(Path(name), sha256(project / name)) for name in ("m.safetensors", "m.data")]
+    policies = {
+        (project / name).resolve(): DigestPinPolicy(project / name, digest)
+        for name, digest in ((path.as_posix(), digest) for path, digest in weight_files)
+    }
+
+    def refuse(self, strict=False):
+        raise AssertionError("a weight file path was resolved again")
+
+    monkeypatch.setattr(Path, "resolve", refuse)
+    verification = model_collector.verify_weight_files(
+        weight_files, project, policies, verify=model_collector.verify_sigstore_bundle
+    )
+    assert verification.status is not None
+    assert verification.status.value == "digest-pinned"
+    assert verification.pins_verified == 2
+
+
+def test_directory_digests_recorded_on_every_model_are_bounded(project):
+    # Each model records its directory's digests, so one configuration with many
+    # chat templates beside N models would otherwise be recorded N times.
+    limit = model_collector.MAX_SHARED_DIGESTS
+    templates = [{"name": str(i), "template": ""} for i in range(limit // 2)]
+    (project / "tokenizer_config.json").write_text(json.dumps({"chat_template": templates}))
+    for name in ("a.ggml", "b.ggml", "c.ggml"):
+        (project / name).write_bytes(b"")
+    result = ModelScanner().scan(project)
+    assert result.scan_failures == [f"b.ggml: {model_collector.SHARED_DIGESTS_EXHAUSTED}"]
+    first, *rest = result.components
+    assert len(first.properties["chat_templates"]) == limit // 2
+    assert first.chat_template_hash is not None
+    for component in rest:
+        assert {"config_files", "chat_templates"}.isdisjoint(component.properties)
+        assert component.chat_template_hash is None
+
+
+def test_validation_keeps_no_chat_template_of_the_files_it_observes(project):
+    (project / "model.gguf").write_bytes(gguf("{{ messages }}"))
+    scanned = ModelScanner().scan(project).components[0]
+    assert scanned.properties["chat_templates"]
+    observation = ModelPackages(project).observe(Path("model.gguf")).observation
+    assert observation is not None
+    assert observation.chat_templates == ()
+    assert observation.digest == scanned.hashes["sha256"]

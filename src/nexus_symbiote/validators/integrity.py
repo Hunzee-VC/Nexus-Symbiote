@@ -400,8 +400,9 @@ class IntegrityValidator:
                 IntegrityIssue(
                     comp.bom_ref,
                     "validation_budget_exhausted",
-                    "Model files of this inventory exceed the bytes one validation reads "
-                    "(as much as one scan); this model was not read completely",
+                    "Model files of this inventory exceed the bytes or weight-file bindings "
+                    "one validation checks (as many as one scan); this model was not checked "
+                    "completely",
                     "unknown",
                 )
             )

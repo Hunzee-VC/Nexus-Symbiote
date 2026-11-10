@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import io
+import random
+import re
+import time
 
 import pytest
 
+from nexus_symbiote.utils import model_formats
 from nexus_symbiote.utils.model_formats import (
     GGUF_LIMIT,
     GGUF_UNREADABLE,
@@ -188,6 +192,75 @@ def test_location_without_a_value_fails_only_for_external_tensors():
     with pytest.raises(FormatError, match=ONNX_UNREADABLE):
         read(graph(message(5, keyless + number(14, 1))))
     assert read(graph(message(5, keyless))) == ()
+
+
+# protobuf reads data_location (an enum) as int32 and, for ONNX's proto2 closed
+# enum, keeps a value it does not define as an unknown field, so it never replaces
+# an earlier EXTERNAL; upb and pure-Python protobuf read these cases so.
+@pytest.mark.parametrize(
+    ("data_location", "is_external"),
+    [
+        (number(14, 1), True),
+        (tag(14, 0) + bytes([0x81, 0x80, 0x80, 0x80, 0x10]), True),
+        (number(14, 1) + number(14, 2), True),
+        (number(14, 1) + tag(14, 0) + b"\xff" * 9 + b"\x01", True),
+        (number(14, 1) + number(14, 0), False),
+        (number(14, 2), False),
+        (tag(14, 0) + bytes([0x80, 0x80, 0x80, 0x80, 0x10]), False),
+        (tag(14, 2) + varint(1) + b"\x01", False),
+    ],
+)
+def test_data_location_is_read_as_protobuf_reads_the_enum(data_location, is_external):
+    tensor = message(8, b"w") + message(13, entry(b"location", b"data.bin")) + data_location
+    assert read(graph(message(5, tensor))) == (("data.bin",) if is_external else ())
+
+
+# The forward form of the reader's marker pattern: a key tag, a length of 8, the key.
+FORWARD_MARKER = re.compile(
+    rb"(?:\x0a|\x8a(?:\x80{0,2}\x00|\x80{3}[\x00\x10\x20\x30\x40\x50\x60\x70]"
+    rb"|\x80{3}[\x80\x90\xa0\xb0\xc0\xd0\xe0\xf0][\x80-\xff]{0,4}[\x00-\x7f]))"
+    rb"(?:\x08|\x88(?:\x80{0,7}\x00|\x80{8}[\x00-\x7f]))location"
+)
+
+
+def test_markers_are_counted_exactly_across_reads():
+    pieces = [
+        b"location",
+        b"\x0a\x08location",
+        b"\x8a\x80\x80\x80\x10\x08location",
+        b"\x8a\x80\x80\x80\x90\x81\x00\x88\x80\x00location",
+        b"\x88\x80\x80location",
+        b"\x8a",
+        b"\x80",
+        b"\x00",
+        b"\x08",
+        b"\x88",
+    ]
+    generator = random.Random(7)  # noqa: S311 - a reproducible corpus, not a secret
+    for _ in range(300):
+        data = b"".join(generator.choice(pieces) for _ in range(generator.randint(1, 40)))
+        # Shift the data across the reader's 64 KiB read boundary.
+        data = b"\x01" * generator.randint(65536 - 40, 65536) + data
+        reader = model_formats._OnnxReader(io.BytesIO(data).read)
+        reader.drain()
+        assert reader.markers == len(FORWARD_MARKER.findall(data))
+        assert reader.occurrences == data.count(b"location")
+
+
+def test_marker_search_costs_the_same_whatever_the_filler():
+    # A search that may start at any byte of a set retries at each such byte, so
+    # filler of those bytes would cost far more than other bytes of the same size.
+    def cost(filler: bytes) -> float:
+        window = (filler * 65536)[: 65536 - 8] + b"location"
+        data = number(1, 8) + message(100, window * 64)
+        best = float("inf")
+        for _ in range(3):
+            started = time.perf_counter()
+            assert read(data) == ()
+            best = min(best, time.perf_counter() - started)
+        return best
+
+    assert cost(b"\x8a") < 3 * cost(b"\x00") + 0.05
 
 
 def test_an_exhausted_budget_fails_files_that_name_external_data():

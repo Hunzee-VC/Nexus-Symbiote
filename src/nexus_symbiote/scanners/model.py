@@ -18,7 +18,8 @@ import pickletools
 import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import nullcontext
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from functools import partial
 from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO, cast
 
@@ -37,7 +38,7 @@ from nexus_symbiote.core.hashing import (
 from nexus_symbiote.core.models import ClaimEvidence, ModelComponent, RiskAssessment
 from nexus_symbiote.scanners.base import Scanner, ScanResult
 from nexus_symbiote.scanners.shadowscan import REPORT_PATHS
-from nexus_symbiote.utils.confined import MAX_HASH_BYTES, ConfinedCollection
+from nexus_symbiote.utils.confined import MAX_ENTRIES, MAX_HASH_BYTES, ConfinedCollection
 from nexus_symbiote.utils.crypto import (
     POLICY_REF_PREFIX,
     SIGNING_EVIDENCE_CLAIM,
@@ -164,6 +165,23 @@ UNREAD_REPORT_ENTRY = (
 )
 OUTSIDE_ENTRY = "signature policy entry names an artifact outside the root"
 BUDGET_EXHAUSTED = "validation byte budget exhausted"
+# Real checkpoints keep one shard index per format and variant in a directory.
+MAX_SHARD_INDEXES = 16
+# Every file one walk may list, charged once as a shard-index entry and once more
+# when it is bound to a model.
+MAX_WEIGHT_FILE_BINDINGS = 2 * MAX_ENTRIES
+# Each model records the configuration, tokenizer, chat template and custom-code
+# digests of its directory, so those records are bounded across one scan as well.
+MAX_SHARED_DIGESTS = 2 * MAX_ENTRIES
+TOO_MANY_INDEXES = "model directory holds more shard indexes than one directory may bind"
+BINDINGS_EXHAUSTED = (
+    "weight files bound to models exceed what one collection records; "
+    "the bound files of this and later models are unknown"
+)
+SHARED_DIGESTS_EXHAUSTED = (
+    "configuration, tokenizer, chat template and custom code digests exceed what one "
+    "scan records; those of this and later models are not recorded"
+)
 
 Verify = Callable[[Path, Path, str | None, str | None], VerificationResult]
 
@@ -470,24 +488,58 @@ def _local_reference(directory: Path, reference: str) -> Path | None:
     return directory.joinpath(*parts)
 
 
+class BindingBudget:
+    """What files shared by many models add to each of them, bounded per scan or validation.
+
+    The weight-file budget charges each distinct entry of a shard index once when
+    the index is read and each candidate file once more for every model it is bound
+    to; the scan's shared-digest budget charges each directory digest once for every
+    model that records it. So files that many models share cannot multiply the work
+    or the inventory. Once a charge is refused, every later nonzero charge is too:
+    what is recorded never depends on the sizes of later models. Only the first
+    refusal records a failure (``reason``); later ones are kept in ``refused``.
+    """
+
+    def __init__(self, units: int | None = None, *, reason: str = BINDINGS_EXHAUSTED) -> None:
+        self.remaining = MAX_WEIGHT_FILE_BINDINGS if units is None else units
+        self.reason = reason
+        self.refused: set[Path] = set()
+
+    def charge(self, path: Path, units: int, fail: Callable[[str], None]) -> bool:
+        """Spend ``units`` for ``path``, or refuse it and spend nothing."""
+        if units and (self.refused or units > self.remaining):
+            if not self.refused:
+                fail(self.reason)
+            self.refused.add(path)
+            return False
+        self.remaining -= units
+        return True
+
+
 def index_references(
     files: ConfinedCollection,
     tree: ModelTree,
     directory: Path,
     digests: dict[Path, str | None],
+    budget: BindingBudget,
     read: Callable[[Path], bytes | None] | None = None,
-) -> dict[Path, list[Path]]:
+) -> tuple[dict[Path, list[Path]], list[Path]]:
     """Map each weight file to the shard indexes in ``directory`` that list it.
 
     A shard index decides which files a loader opens, so a reference to a missing
     file, a file outside the directory or a file that is not a collected model
-    file is a collection failure, not an omission. ``read`` replaces the
-    collection's own bounded read.
+    file is a collection failure, not an omission. A directory with more shard
+    indexes than ``MAX_SHARD_INDEXES`` binds none of them and fails, and the
+    entries of each index are charged to ``budget`` before they are examined.
+    ``read`` replaces the collection's own bounded read. Also returns the indexes
+    considered, which are the ones read.
     """
     references: dict[Path, list[Path]] = {}
-    for index in tree.children.get(directory, ()):
-        if _index_base(index) is None:
-            continue
+    indexes = [path for path in tree.children.get(directory, ()) if _index_base(path) is not None]
+    if len(indexes) > MAX_SHARD_INDEXES:
+        files._fail(directory, TOO_MANY_INDEXES)
+        return references, []
+    for index in indexes:
         raw = (read or files.read_bytes)(index)
         if raw is None:
             continue
@@ -503,7 +555,10 @@ def index_references(
         ):
             files._fail(index, "model index must map tensor names to weight files")
             continue
-        for name in sorted(set(weight_map.values())):
+        names = set(weight_map.values())
+        if not budget.charge(index, len(names), partial(files._fail, index)):
+            continue
+        for name in sorted(names):
             shard = _local_reference(directory, name)
             if (
                 shard is None
@@ -518,7 +573,7 @@ def index_references(
                 )
                 continue
             references.setdefault(shard, []).append(index)
-    return references
+    return references, indexes
 
 
 def bound_weight_files(
@@ -527,26 +582,37 @@ def bound_weight_files(
     observation: ModelArtifactObservation | None,
     index_refs: Mapping[Path, Sequence[Path]],
     fail: Callable[[str], None],
+    budget: BindingBudget,
 ) -> list[Path]:
-    """Return the other files a loader reads as this model's weights."""
+    """Return the other files a loader reads as this model's weights.
+
+    Every candidate is charged to ``budget`` before it is examined. When the budget
+    refuses them, nothing is bound: the model's weight files are unknown, and the
+    refusal is recorded in ``budget.refused``.
+    """
     directory = path.parent
     detected = model_format(path)
-    bound: set[Path] = set(index_refs.get(path, ()))
     if observation is not None and observation.onnx_error is not None:
         fail(observation.onnx_error)
-    locations = observation.external_data if observation is not None else None
-    for location in locations or ():
+    indexes = index_refs.get(path, ())
+    locations = (observation.external_data if observation is not None else None) or ()
+    savedmodel: list[Path] = []
+    if detected is not None and detected[1] == "tensorflow-savedmodel":
+        for name in SAVEDMODEL_DIRECTORIES:
+            savedmodel.extend(tree.below(directory / name))
+        savedmodel.extend(
+            directory / name for name in SAVEDMODEL_FILES if directory / name in tree.paths
+        )
+    if not budget.charge(path, len(indexes) + len(locations) + len(savedmodel), fail):
+        return []
+    bound: set[Path] = set(indexes)
+    for location in locations:
         target = _local_reference(directory, location)
         if target is None or target not in tree.paths:
             fail("ONNX external data reference is missing or outside the model directory")
             continue
         bound.add(target)
-    if detected is not None and detected[1] == "tensorflow-savedmodel":
-        for name in SAVEDMODEL_DIRECTORIES:
-            bound.update(tree.below(directory / name))
-        bound.update(
-            directory / name for name in SAVEDMODEL_FILES if directory / name in tree.paths
-        )
+    bound.update(savedmodel)
     bound.discard(path)
     return sorted(bound)
 
@@ -583,12 +649,16 @@ class ModelPackages:
     """Re-observe model files and their bound weight files beneath one root, as a scan does.
 
     One instance serves one validation. Each directory is walked once, each file
-    is inspected or hashed once, and every read is charged to one byte budget the
-    size of a scan's, so a BOM that lists many models, or many models that share
-    one weight file, cannot multiply the work of the scan that produced it.
+    is inspected or hashed once, each model is bound once, every read is charged
+    to one byte budget the size of a scan's and every binding to one binding
+    budget the size of a scan's, so a BOM that lists many models, or many models
+    that share one weight file, cannot multiply the work of the scan that
+    produced it.
     """
 
-    def __init__(self, root: Path, *, byte_budget: int | None = None) -> None:
+    def __init__(
+        self, root: Path, *, byte_budget: int | None = None, binding_budget: int | None = None
+    ) -> None:
         self.root = root
         self.covered: set[Path] = set()
         self.verified: dict[tuple[Any, ...], VerificationResult] = {}
@@ -596,13 +666,17 @@ class ModelPackages:
         self._remaining = MAX_HASH_SIZE + 32 * 1024 * 1024 if byte_budget is None else byte_budget
         self._refused: set[Path] = set()
         self._budget = InspectionBudget()
+        self._bindings = BindingBudget(binding_budget)
         self._trees: dict[Path, tuple[ModelTree, bool]] = {}
         self._indexes: dict[Path, tuple[dict[Path, list[Path]], list[Path], bool]] = {}
         self._observations: dict[Path, ModelArtifactObservation | None] = {}
         self._digests: dict[Path, str | None] = {}
+        self._packages: dict[Path, ModelPackage] = {}
 
     def observe(self, path: Path) -> ModelPackage:
         """Observe root-relative ``path`` and every weight file a loader reads with it."""
+        if path in self._packages:
+            return self._packages[path]
         failures: list[str] = []
         directory = path.parent
         with ConfinedCollection(
@@ -613,17 +687,29 @@ class ModelPackages:
             index_refs, indexes, indexed = self._index_references(files, tree, directory)
             weights = [(path, observation.digest if observation is not None else None)]
             for companion in bound_weight_files(
-                tree, path, observation, index_refs, lambda reason: files._fail(path, reason)
+                tree,
+                path,
+                observation,
+                index_refs,
+                lambda reason: files._fail(path, reason),
+                self._bindings,
             ):
                 weights.append((companion, self._hash(files, companion)))
         self.covered.update(weight for weight, _ in weights)
         read = {weight for weight, _ in weights}.union(indexes)
-        return ModelPackage(
+        exhausted = bool(read & self._refused or read & self._bindings.refused)
+        package = ModelPackage(
             observation,
             tuple(weights),
-            walked and indexed and not failures and all(digest for _, digest in weights),
-            bool(read & self._refused),
+            walked
+            and indexed
+            and not exhausted
+            and not failures
+            and all(digest for _, digest in weights),
+            exhausted,
         )
+        self._packages[path] = package
+        return package
 
     def observation(self, path: Path) -> ModelArtifactObservation | None:
         """The observation of root-relative ``path``, made now unless already made."""
@@ -662,8 +748,9 @@ class ModelPackages:
                     self._charge(files, path, stream)
                     observed = observe_model_artifact(path, stream=stream, budget=self._budget)
                 # Commit only after the confined stream confirmed the pathname still
-                # names the bytes that were read.
-                observation = observed
+                # names the bytes that were read. Validation reads no chat template,
+                # so none is kept for the rest of the run.
+                observation = replace(observed, chat_templates=())
                 self._digests[path] = observed.digest
             except (OSError, ValueError):
                 files._fail(path, "model inspection or hashing failed")
@@ -703,10 +790,14 @@ class ModelPackages:
         """The directory's shard references, its index files and whether all were read."""
         if directory not in self._indexes:
             before = len(files.failures)
-            references = index_references(
-                files, tree, directory, self._digests, read=lambda index: self._read(files, index)
+            references, indexes = index_references(
+                files,
+                tree,
+                directory,
+                self._digests,
+                self._bindings,
+                read=lambda index: self._read(files, index),
             )
-            indexes = [path for path in tree.children.get(directory, ()) if _index_base(path)]
             self._indexes[directory] = (references, indexes, len(files.failures) == before)
         return self._indexes[directory]
 
@@ -716,13 +807,14 @@ def unused_policy_entries(
 ) -> list[tuple[str, str]]:
     """Operator entries that no check verifies, as (root-relative path, reason) pairs.
 
-    The model checks verify the weight files in ``covered`` (root-relative). The
-    discovery producer check verifies the ShadowScan report the importer reads,
-    the first of its locations that exists, and only under a Sigstore entry.
+    The model checks verify the weight files in ``covered`` (root-relative, from a
+    walk that follows no symlink). The discovery producer check verifies the
+    ShadowScan report the importer reads, the first of its locations that exists,
+    and only under a Sigstore entry.
     """
     if not policies:
         return []
-    used = {(files.root / path).resolve() for path in covered}
+    used = {files.root / path for path in covered}
     locations = [files.path_identity(location) for location in REPORT_PATHS]
     found = [identity for identity in locations if identity is not None]
     report = found[0] if found else None
@@ -780,8 +872,12 @@ def verify_weight_files(
     the confined reader. A file verifies when its digest pin matches, or when its
     Sigstore bundle verifies over exactly that digest under the entry's identity
     and issuer (and its ``expected_sha256``, if set). The model counts as signed
-    only when every weight file verifies.
+    only when every weight file verifies. ``policies`` is keyed by resolved path
+    and ``root`` must be resolved: the paths come from a confined walk, which
+    follows no symlink, so none is resolved again.
     """
+    if not policies:
+        return WeightVerification(None, None, None, (), 0, 0, 0)
     methods: dict[Path, str] = {}
     refs: set[str] = set()
     failures: list[str] = []
@@ -792,7 +888,7 @@ def verify_weight_files(
     checked = signatures = pins = 0
     for path, digest in weight_files:
         label = path.as_posix()
-        policy = policies.get((root / path).resolve())
+        policy = policies.get(root / path)
         if policy is None:
             uncovered.append(label)
             continue
@@ -895,7 +991,7 @@ def verify_weight_files(
         evidence_refs=sorted(refs),
         unknown_reason=None if verified else "; ".join(sorted(reasons)),
     )
-    policy = policies.get((root / main).resolve())
+    policy = policies.get(root / main)
     identity = (
         policy.expected_identity
         if status == SigningStatus.SIGSTORE_SIGNED and isinstance(policy, SigstoreArtifactPolicy)
@@ -975,6 +1071,8 @@ class ModelScanner(Scanner):
         self._digests: dict[Path, str | None] = {}
         self._read: set[Path] = set()
         self._budget = InspectionBudget()
+        self._bindings = BindingBudget()
+        self._shared = BindingBudget(MAX_SHARED_DIGESTS, reason=SHARED_DIGESTS_EXHAUSTED)
         self._verified: dict[tuple[Any, ...], VerificationResult] = {}
 
     def scan(self, project_root: Path) -> ScanResult:
@@ -986,7 +1084,8 @@ class ModelScanner(Scanner):
         ) as files:
             self._tree = tree = ModelTree(files.iter_files())
             self._digests, self._read, self._budget = {}, set(), InspectionBudget()
-            self._verified = {}
+            self._bindings, self._verified = BindingBudget(), {}
+            self._shared = BindingBudget(MAX_SHARED_DIGESTS, reason=SHARED_DIGESTS_EXHAUSTED)
             model_dirs = sorted(
                 {
                     path.parent
@@ -1098,8 +1197,10 @@ class ModelScanner(Scanner):
                 "cross_repository": any("--" in reference for reference in references),
                 "python_files": python_files,
             }
-        self._read.update(path for path in tree.children.get(model_dir, ()) if _index_base(path))
-        index_refs = index_references(files, tree, model_dir, self._digests)
+        index_refs, indexes = index_references(
+            files, tree, model_dir, self._digests, self._bindings
+        )
+        self._read.update(indexes)
         return _DirectoryContext(
             config=merged,
             trust_remote_code=True if True in remote else False if remote else None,
@@ -1173,6 +1274,7 @@ class ModelScanner(Scanner):
             observation,
             context.index_refs,
             lambda reason: files._fail(path, reason),
+            self._bindings,
         )
         weight_files = [(path, weight_hash), *((c, self._digest(files, c)) for c in companions)]
         verification = verify_weight_files(
@@ -1189,7 +1291,23 @@ class ModelScanner(Scanner):
             SigningStatus.DIGEST_PINNED: TrustTier.INTERNAL_VERIFIED,
         }.get(status, TrustTier.UNKNOWN)
 
-        templates = [*context.chat_templates, *(observation.chat_templates if observation else ())]
+        gguf_templates = observation.chat_templates if observation is not None else ()
+        custom_code = context.custom_code
+        # Every model records its directory's digests, so they are charged per model.
+        recorded = self._shared.charge(
+            path,
+            len(context.config_files)
+            + len(context.tokenizer_files)
+            + len(context.chat_templates)
+            + len(gguf_templates)
+            + (
+                len(custom_code["references"]) + len(custom_code["python_files"])
+                if custom_code is not None
+                else 0
+            ),
+            lambda reason: files._fail(path, reason),
+        )
+        templates = [*context.chat_templates, *gguf_templates] if recorded else []
         properties: dict[str, Any] = {"format_inspection": format_evidence}
         if companions:
             properties["weight_files"] = [
@@ -1197,12 +1315,12 @@ class ModelScanner(Scanner):
                 for companion, digest in weight_files[1:]
                 if digest is not None
             ]
-        if context.config_files:
+        if recorded and context.config_files:
             properties["config_files"] = [
                 {"path": config.as_posix(), "sha256": digest}
                 for config, digest in context.config_files
             ]
-        if context.tokenizer_files:
+        if recorded and context.tokenizer_files:
             properties["tokenizer_files"] = [
                 {"path": tokenizer.as_posix(), "sha256": digest}
                 for tokenizer, digest in context.tokenizer_files
@@ -1211,8 +1329,8 @@ class ModelScanner(Scanner):
             properties["chat_templates"] = [
                 {"source": source, "sha256": digest} for source, digest in sorted(templates)
             ]
-        if context.custom_code is not None:
-            properties["custom_code"] = context.custom_code
+        if recorded and custom_code is not None:
+            properties["custom_code"] = custom_code
         if context.base_model is not None:
             properties["base_model"] = context.base_model
         if observation is not None and observation.gguf_architecture is not None:
@@ -1241,7 +1359,7 @@ class ModelScanner(Scanner):
             trust_remote_code=context.trust_remote_code,
             tokenizer_hash=(
                 manifest_digest((p.as_posix(), d) for p, d in context.tokenizer_files)
-                if context.tokenizer_files
+                if recorded and context.tokenizer_files
                 else None
             ),
             chat_template_hash=manifest_digest(templates) if templates else None,

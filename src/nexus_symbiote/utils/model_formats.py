@@ -115,7 +115,6 @@ ONNX_UNEXPLAINED = (
 MAX_ONNX_DEPTH = 64
 MAX_ONNX_FIELDS = 4_000_000
 MAX_ONNX_LOCATION_BYTES = 4096
-_EXTERNAL = 1
 
 (
     _MODEL,
@@ -160,13 +159,19 @@ _SCHEMA: dict[int, dict[int, int]] = {
 _KEY = b"location"
 # Field 1 length-delimited, then a length of 8, then the key, with each varint in any
 # encoding of up to ten bytes: protobuf's C++ parsers, which ONNX Runtime uses, keep
-# only the low 32 bits of a tag. A tenth length byte is not checked further.
-_KEY_MARKER = re.compile(
-    rb"(?:\x0a|\x8a(?:\x80{0,2}\x00|\x80{3}[\x00\x10\x20\x30\x40\x50\x60\x70]"
-    rb"|\x80{3}[\x80\x90\xa0\xb0\xc0\xd0\xe0\xf0][\x80-\xff]{0,4}[\x00-\x7f]))"
-    rb"(?:\x08|\x88(?:\x80{0,7}\x00|\x80{8}[\x00-\x7f]))location"
+# only the low 32 bits of a tag. A tenth length byte is not checked further. The
+# pattern matches the reversed bytes, so the engine starts a match only at the
+# literal key and hostile filler cannot make it try one at every byte.
+_REVERSED_KEY_MARKER = re.compile(
+    rb"noitacol(?:\x08|\x00\x80{0,7}\x88|[\x00-\x7f]\x80{8}\x88)"
+    rb"(?:\x0a|\x00\x80{0,2}\x8a|[\x00\x10\x20\x30\x40\x50\x60\x70]\x80{3}\x8a"
+    rb"|[\x00-\x7f][\x80-\xff]{0,4}[\x80\x90\xa0\xb0\xc0\xd0\xe0\xf0]\x80{3}\x8a)"
 )
 _MAX_MARKER_BYTES = 10 + 10 + len(_KEY)
+# An enum is read as int32, and a value a closed (proto2) enum does not define is
+# kept as an unknown field: it never replaces an earlier valid value.
+_DATA_LOCATIONS = (0, 1)
+_EXTERNAL = 1
 
 
 class _OnnxReader(_Reader):
@@ -174,8 +179,8 @@ class _OnnxReader(_Reader):
 
     ``occurrences`` counts every occurrence and ``markers`` those encoded as a
     field-1 string of exactly that value, as an external-data key is. Both are
-    counted by the regular expression engine, so hostile bytes cost no more than
-    a linear scan.
+    counted in C by searches anchored on the literal key, so hostile bytes cost
+    no more than a linear scan.
     """
 
     def __init__(self, read: Read) -> None:
@@ -191,7 +196,9 @@ class _OnnxReader(_Reader):
         if _KEY in window:
             # Markers are disjoint, so those ending in this chunk are the window's
             # minus the tail's, which the previous window counted.
-            self.markers += len(_KEY_MARKER.findall(window)) - len(_KEY_MARKER.findall(self._tail))
+            self.markers += len(_REVERSED_KEY_MARKER.findall(window[::-1])) - len(
+                _REVERSED_KEY_MARKER.findall(self._tail[::-1])
+            )
         self._tail = window[-(_MAX_MARKER_BYTES - 1) :]
         return chunk
 
@@ -278,7 +285,9 @@ def _message(
         if number == 0 or tag >= 2**32:
             raise FormatError(ONNX_UNREADABLE)
         if wire == 0 and kind == _TENSOR and number == 14:
-            location = reader.varint()
+            stored = reader.varint() & 0xFFFFFFFF
+            if stored in _DATA_LOCATIONS:
+                location = stored
             continue
         if wire != 2:
             _skip_value(reader, wire, number, state)

@@ -50,15 +50,27 @@ data the reader cannot attribute are collection failures. The reader counts a
 over-long tags whose low 32 bits protobuf's C++ parser keeps; in a file it can
 parse, each such key must be an external-data entry it read or a name, and a
 file it cannot parse, or one beyond its limits, fails whenever the bytes
-`location` occur in it at all.
+`location` occur in it at all. A tensor's `data_location` is read as protobuf
+reads the enum: as a 32-bit value, where a later value that the enum does not
+define never replaces an earlier `EXTERNAL`.
+
+A file that many models bind costs one binding per model, so the bindings are
+bounded. A directory with more than 16 shard indexes binds none of them and
+fails. One scan records at most 40,000 bindings, counting each distinct entry
+of a shard index once when the index is read and each file once for every
+model it is bound to; beyond that, the scan fails and binds nothing more to the
+remaining models.
 
 `validate --project` observes the files again and fails with
 `weight_files_mismatch` when they differ from the BOM's record, so replacing one
-shard or one external-data file fails integrity and changes the inventory. One
-validation walks each model directory once, reads a file that many models share
-once rather than once per model, verifies each policy entry once, and reads at
-most what one scan may read (5 GiB plus 32 MiB). A model it could not read
-within that budget gets the `unknown` issue `validation_budget_exhausted`.
+shard or one external-data file fails integrity and changes the inventory. For
+this model check, one validation walks each model directory once, reads a file
+that many models share once rather than once per model, verifies each policy
+entry once, and reads and binds at most what one scan may (5 GiB plus 32 MiB,
+and 40,000 bindings). A model beyond either budget gets the `unknown` issue
+`validation_budget_exhausted`. The separate file-hash check of `validate` reads
+each component's own file again, once for every digest the component declares,
+and that read is not part of this budget.
 
 ## Configuration, tokenizer, chat templates and custom code
 
@@ -75,6 +87,12 @@ files when present, and records the digests on each model in the directory:
 the RFC 8785 JSON `{"files": [{"path": ..., "sha256": ...}]}` built from the
 recorded list, sorted by path (for a chat template, the path is the source,
 such as `tokenizer_config.json#chat_template`).
+
+Every model records these digests for its directory, so one scan records at
+most 40,000 of them across its models, counting each configuration file,
+tokenizer file, chat template, custom-code reference and Python file once per
+model. Beyond that, the scan fails and the remaining models record none of
+these lists, `tokenizer_hash` or `chat_template_hash`.
 
 `trust_remote_code` is `true` when any configuration file says so, so an empty
 `config.json` cannot hide it in a later file. A configuration that declares
