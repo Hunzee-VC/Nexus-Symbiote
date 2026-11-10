@@ -49,7 +49,7 @@ jobs:
           python -m pip install --require-hashes --only-binary=:all: -r requirements-ci.lock
           python -m pip install --no-deps --no-build-isolation -e .
           python -m pip check
-      - name: Require branch protection, exact-source CI and the PyPI soak period
+      - name: Require branch protection, exact-source CI and the publication prerequisites
         if: inputs.publish != 'none'
         env:
           GH_TOKEN: ${{ github.token }}
