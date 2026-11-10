@@ -627,11 +627,16 @@ class A2AScanner(Scanner):
                     )
             parsed: list[tuple[str, dict[str, Any]]] = []
             for relative in sorted(cards, key=_card_preference):
-                data = self._read_mapping(Path(relative), result)
-                if data is None:
-                    continue
-                if relative in _GENERIC_CARD_PATHS and not _CARD_MARKERS & set(data):
-                    continue
+                if relative in _GENERIC_CARD_PATHS:
+                    # Another tool's file may use a generic name; without an object that
+                    # carries an A2A field it is not a card, and not a failure.
+                    data = files.read_json(relative)
+                    if not isinstance(data, dict) or not _CARD_MARKERS & set(data):
+                        continue
+                else:
+                    data = self._read_mapping(Path(relative), result)
+                    if data is None:
+                        continue
                 result.surfaces_scanned.append(relative)
                 parsed.append((relative, data))
             self._record_cards(parsed, result)
@@ -711,13 +716,17 @@ class A2AScanner(Scanner):
         self, data: dict[str, Any], rel_path: str, card_path: str
     ) -> A2AServerComponent:
         declared_name, version = data.get("name"), data.get("version")
-        endpoint = data.get("url") or data.get("endpoint")
+        declared = [data[key] for key in ("url", "endpoint") if data.get(key) is not None]
         if (
             (declared_name is not None and not isinstance(declared_name, str))
             or (version is not None and not isinstance(version, str))
-            or (endpoint is not None and not isinstance(endpoint, str))
+            or not all(isinstance(url, str) for url in declared)
         ):
             raise ValueError("invalid card identity")
+        # Both endpoint spellings are checked, so neither can hide behind the other.
+        named: list[str] = [url for url in declared if url]
+        endpoint: str | None = named[0] if named else None
+        aliases = named[1:]
         name = _bounded_name(declared_name) if declared_name is not None else "unnamed-agent"
         # An unnamed card is identified by its location, so two of them do not collide.
         bom_ref = f"a2a-server:{name}" if declared_name is not None else f"a2a-server:{rel_path}"
@@ -753,6 +762,11 @@ class A2AScanner(Scanner):
                 "structure": {
                     "fields": _fields(data),
                     "endpoint": _url_shape(endpoint, _ORIGIN_PATHS),
+                    **(
+                        {"endpoint_aliases": [_url_shape(url, _ORIGIN_PATHS) for url in aliases]}
+                        if aliases
+                        else {}
+                    ),
                     "additional_interfaces": _url_shapes(interface_urls),
                     "supported_interfaces": [
                         _url_shape(url, _ORIGIN_PATHS) for url in supported_urls
@@ -771,7 +785,11 @@ class A2AScanner(Scanner):
             for label, gap in (
                 (
                     "endpoint URL beyond its exported origin",
-                    endpoint is not None and _beyond_origin(endpoint, _ORIGIN_PATHS),
+                    any(
+                        _beyond_origin(url, _ORIGIN_PATHS)
+                        for url in (endpoint, *aliases)
+                        if url is not None
+                    ),
                 ),
                 (
                     "additional interface URLs beyond their exported origins",
@@ -794,7 +812,7 @@ class A2AScanner(Scanner):
         # A2A 1.0 clients use the first supported interface even when `url` is present.
         if any(
             url and not url.lower().startswith("https://")
-            for url in (endpoint, *supported_urls[:1])
+            for url in (endpoint, *aliases, *supported_urls[:1])
         ):
             risks.append(
                 RiskAssessment(
@@ -867,6 +885,7 @@ class A2AScanner(Scanner):
                     for record in extensions
                 ],
                 "provider_origin": _origin(provider_url) if provider_url else None,
+                **({"endpoint_origins": [_origin(url) for url in aliases]} if aliases else {}),
                 "source_values_bound": bool(binding),
                 "static_card_hash": structure_hash,
                 "static_card_hash_profile": CARD_STRUCTURE_PROFILE,

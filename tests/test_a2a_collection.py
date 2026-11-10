@@ -347,3 +347,28 @@ def test_card_read_through_an_in_root_link_names_its_target(tmp_path):
     (server,) = _servers(result)
     assert server.source_path == ".well-known/agent-card.json"
     assert server.properties["symlink_target"] == "public/card.json"
+
+
+@pytest.mark.parametrize("value", [[{"agent": "planner"}], '"agent"', 3])
+def test_generic_root_file_that_is_not_an_object_is_not_a_card(tmp_path, value):
+    _write(tmp_path, "agent.json", value)
+    _write(tmp_path, "a2a/agent.json", value)
+    result = A2AScanner().scan(tmp_path)
+    assert not result.scan_failures and not _servers(result)
+
+
+def test_both_card_endpoint_fields_are_checked_and_digested(tmp_path):
+    card = {**CARD, "endpoint": "http://agents.example.com/rpc"}
+    _write(tmp_path / "a", ".well-known/agent.json", card)
+    (server,) = _servers(A2AScanner().scan(tmp_path / "a"))
+    assert server.endpoint_url == "https://agents.example.com"
+    assert server.properties["endpoint_origins"] == ["http://agents.example.com"]
+    assert any(r.category == "transport_security" for r in server.risks)
+    run = _drift(tmp_path, card, {**card, "endpoint": "http://agents.example.com/a/b"})
+    assert run.exit_code == 1, run.output
+
+
+def test_yaml_number_overflow_in_a_client_configuration_is_a_failure(tmp_path):
+    _write(tmp_path, "a2a.yaml", "x: " + ":".join(["1"] * 200) + ".0\n")
+    result = A2AScanner().scan(tmp_path)
+    assert result.scan_failures == ["a2a.yaml: YAML mapping parse failed or unsupported"]

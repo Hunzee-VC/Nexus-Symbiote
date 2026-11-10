@@ -160,7 +160,7 @@ class Scanner(ABC):
                     ):
                         raise ValueError("unsupported YAML graph")
                 data = parse_yaml_mapping(text)
-            except (ValueError, RecursionError, yaml.YAMLError):
+            except (ValueError, RecursionError, OverflowError, IndexError, yaml.YAMLError):
                 result.scan_failures.append(
                     f"{path.name}: YAML mapping parse failed or unsupported"
                 )
