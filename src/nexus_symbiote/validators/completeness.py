@@ -30,6 +30,11 @@ from nexus_symbiote.core.models import (
 )
 from nexus_symbiote.scanner_catalog import BUILTIN_SCANNER_NAMES
 from nexus_symbiote.utils.confined import ConfinedCollection
+from nexus_symbiote.utils.crypto import (
+    SIGNING_EVIDENCE_CLAIM,
+    VERIFIED_SIGNING_STATUSES,
+    comparable_claim,
+)
 
 if TYPE_CHECKING:
     from nexus_symbiote.scanners.base import ScanResult
@@ -439,6 +444,12 @@ class CompletenessValidator:
         compared = CompletenessValidator._compared_fields(supplied, local)
         skip = compared | {"bom_ref", "component_type", "source_path", "risks", "claims"}
         skip |= {"properties"}
+        if CompletenessValidator._signing_corroborated(supplied, local):
+            # The operator policy verified what the supplier recorded as unverified; an
+            # identity the supplier asserts is still its own claim.
+            skip |= {"signing_status", "trust_tier"}
+            if getattr(supplied, "signing_identity", None) is None:
+                skip.add("signing_identity")
         local_data = local.model_dump(mode="json")
         supplied_data = supplied.model_dump(mode="json")
         claims = [
@@ -465,11 +476,21 @@ class CompletenessValidator:
             evidence = local.claims.get(name)
             if evidence is None or (
                 evidence.method == "not-collected"
-                and claim.model_dump(exclude={"observed_at"})
-                != evidence.model_dump(exclude={"observed_at"})
+                and comparable_claim(claim) != comparable_claim(evidence)
             ):
                 added.append(name)
         return added
+
+    @staticmethod
+    def _signing_corroborated(supplied: AnyComponent, local: AnyComponent) -> bool:
+        """A newly supplied operator policy verifies a model the supplier left unverified."""
+        return (
+            isinstance(local, ModelComponent)
+            and isinstance(supplied, ModelComponent)
+            and local.signing_status in VERIFIED_SIGNING_STATUSES
+            and supplied.signing_status not in VERIFIED_SIGNING_STATUSES
+            and supplied.trust_tier == TrustTier.UNKNOWN
+        )
 
     @staticmethod
     def _compared_fields(supplied: AnyComponent, local: AnyComponent) -> set[str]:
@@ -497,13 +518,7 @@ class CompletenessValidator:
             fields -= {"tool_refs", "tool_count"}
         if isinstance(local, AgentComponent):
             fields -= set(AGENT_REFERENCE_FIELDS)
-        if (
-            isinstance(local, ModelComponent)
-            and isinstance(supplied, ModelComponent)
-            and local.signing_status == "sigstore-signed"
-            and supplied.signing_status != "sigstore-signed"
-            and supplied.trust_tier == TrustTier.UNKNOWN
-        ):
+        if CompletenessValidator._signing_corroborated(supplied, local):
             # A newly supplied operator policy may corroborate an initially unsigned inventory.
             fields -= {"signing_status", "signing_identity", "trust_tier"}
         return fields
@@ -514,6 +529,7 @@ class CompletenessValidator:
         if is_imported(local):
             return True  # _discovery_mismatches checks the entire source projection.
         fields = CompletenessValidator._compared_fields(supplied, local)
+        corroborated = CompletenessValidator._signing_corroborated(supplied, local)
         if isinstance(local, MCPServerComponent) and isinstance(supplied, MCPServerComponent):
             if (
                 not set(local.tool_refs) <= set(supplied.tool_refs)
@@ -538,12 +554,12 @@ class CompletenessValidator:
         ):
             return False
         for name, evidence in local.claims.items():
-            if evidence.method == "not-collected":
+            if evidence.method == "not-collected" or (
+                corroborated and name == SIGNING_EVIDENCE_CLAIM
+            ):
                 continue  # A separate observation can fill a gap in the static inventory.
             claim = supplied.claims.get(name)
-            if claim is None or evidence.model_dump(exclude={"observed_at"}) != claim.model_dump(
-                exclude={"observed_at"}
-            ):
+            if claim is None or comparable_claim(evidence) != comparable_claim(claim):
                 return False
         # Preserve multiplicity. Independent findings and revised remediation text may be added.
         return Counter((r.severity, r.category, r.detail) for r in local.risks) <= Counter(
@@ -821,6 +837,10 @@ def discovery_producer_check(
             f"{local.source_report_path}; its producer is unverified."
         )
         return "failed", problems
+    if policy.expected_sha256 is not None and not hmac.compare_digest(
+        policy.expected_sha256, recorded
+    ):
+        problems.append("ShadowScan report differs from the operator's expected_sha256 pin.")
     verified = verify_sigstore_bundle(
         policy.artifact_path, policy.bundle_path, policy.expected_identity, policy.expected_issuer
     )

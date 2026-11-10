@@ -134,9 +134,11 @@ findings without turning them into exit status 1, as a project policy with
 
 ### Signer policy
 
-`--signature-policy` (`scan`, `validate`, `risk`) and the Action's
+`--signature-policy` (`scan`, `validate`, `risk`, `baseline`) and the Action's
 `signature-policy` input take a strict JSON file, at most 4 MiB and 1,000 artifacts,
-written by the operator, never by the checkout:
+written by the operator, never by the checkout. A policy inside the scanned project,
+also under another name for the project directory, or one with other hard links is
+refused:
 
 ```json
 {
@@ -152,8 +154,11 @@ written by the operator, never by the checkout:
 }
 ```
 
-Both paths are relative to the project. Every record needs exactly these four fields;
-unknown fields, duplicate keys or artifacts, symbolic links and missing files are
+Both paths are relative to the project. In version 1 every record needs exactly these
+four fields. Version 2 names a `kind` on every entry: `sigstore-message-signature`
+takes these four fields and an optional `expected_sha256`, and `digest-pin` takes only
+`artifact_path` and `expected_sha256`; see [model integrity](model-integrity.md#operator-signature-policy).
+Unknown fields, duplicate keys or artifacts, symbolic links and missing files are
 refused.
 
 ### Launch policy
@@ -257,7 +262,7 @@ nexus-symbiote baseline [OPTIONS] [PROJECT_PATH]
 |---|---|
 | `-o`, `--baseline-path` `PATH` | Where to write the unsigned baseline (default: .nexus-symbiote-baseline.json, in the working directory, not the project). |
 | `--no-project-policy` | Use built-in policy without reading configuration from the target, as scan does. |
-| `--signature-policy` `PATH` | Explicit operator signer policy JSON, as for scan. |
+| `--signature-policy` `FILE` | Explicit operator signer policy JSON, kept outside the project, as for scan. |
 
 The snapshot must also pass the built-in gate: a project policy cannot relax it.
 When it does not, `baseline` prints each reason and the findings that tripped the gate.

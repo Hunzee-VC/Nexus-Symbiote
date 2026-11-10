@@ -24,6 +24,7 @@ from nexus_symbiote.core.models import (
     MCPServerComponent,
     check_spec_version,
 )
+from nexus_symbiote.utils.crypto import VERIFIED_SIGNING_STATUSES, component_evidence_refs
 
 SEVERITIES = ("info", "low", "medium", "high", "critical")
 
@@ -225,6 +226,9 @@ def _semantic_value(value: Any, path: tuple[str, ...]) -> Any:
             if not (len(path) == 2 and path[0] == "claims" and key == "observed_at")
         }
     if isinstance(value, list):
+        if len(path) == 3 and path[0] == "claims" and path[2] == "evidence_refs":
+            # The operator policy file's digest says which run verified, not what.
+            value = component_evidence_refs(value)
         items = [_semantic_value(item, (*path, "[]")) for item in value]
         opaque = any(
             part in {"properties", "input_schema", "annotations", "variable_schema"}
@@ -629,7 +633,9 @@ class AIBOMDiffer:
         old_signing = getattr(old, "signing_status", None)
         new_signing = getattr(new, "signing_status", None)
         if old_signing != new_signing:
-            sev = "high" if old_signing in {"sigstore-signed", "pgp-signed"} else "medium"
+            # Losing operator-verified signing, a signature or a digest pin, is a downgrade.
+            verified = old_signing in VERIFIED_SIGNING_STATUSES or old_signing == "pgp-signed"
+            sev = "high" if verified else "medium"
             modifications.append(
                 {
                     "detail": f"Signing status changed: {old_signing} → {new_signing}",

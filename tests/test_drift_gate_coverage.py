@@ -471,6 +471,12 @@ def test_changed_edge_conditions_alert_once():
             "Signing status changed",
         ),
         (
+            ModelComponent(bom_ref="x", name="x", signing_status="digest-pinned"),
+            ModelComponent(bom_ref="x", name="x", signing_status="signature-not-found"),
+            "high",
+            "Signing status changed",
+        ),
+        (
             A2AClientComponent(bom_ref="x", name="x", agent_card_url="https://a.example"),
             A2AClientComponent(bom_ref="x", name="x", agent_card_url="https://b.example"),
             "high",

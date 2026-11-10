@@ -58,8 +58,9 @@ def test_model_replacement_cannot_bind_safe_structure_to_other_bytes(tmp_path, m
     write_safetensors(path)
     inspect = model.inspect_model_format
 
-    def replace_after_inspection(path, *, stream=None):
-        observation = inspect(path, stream=stream)
+    def replace_after_inspection(inspected, *, stream=None):
+        # The collector passes root-relative paths; replace the scanned file itself.
+        observation = inspect(inspected, stream=stream)
         replacement = tmp_path / "replacement"
         replacement.write_bytes(b"not a tensor container")
         replacement.replace(path)
@@ -527,19 +528,19 @@ def test_validation_byte_budget_fails_closed_with_a_reason(tmp_path):
 
 
 def test_repeated_models_are_inspected_once_and_fail_as_duplicates(tmp_path, monkeypatch):
-    from nexus_symbiote.validators import integrity
+    from nexus_symbiote.scanners import model
 
     path = tmp_path / "model.safetensors"
     write_safetensors(path, data=b"abcd" * 1024)
     size = path.stat().st_size
     inspected: list[Path] = []
-    real_inspect = integrity.inspect_model_artifact
+    real_inspect = model.observe_model_artifact
 
     def inspect(artifact, **kwargs):
         inspected.append(artifact)
         return real_inspect(artifact, **kwargs)
 
-    monkeypatch.setattr(integrity, "inspect_model_artifact", inspect)
+    monkeypatch.setattr(model, "observe_model_artifact", inspect)
     models = [
         ModelComponent(bom_ref=f"model:{i}", name="m", source_path="model.safetensors")
         for i in range(50)
@@ -595,13 +596,14 @@ def _signed_weights(tmp_path: Path, bundle_bytes: bytes) -> tuple[Path, Sigstore
 def test_one_signed_artifact_is_inspected_and_verified_once_however_it_is_named(
     tmp_path, monkeypatch
 ):
+    from nexus_symbiote.scanners import model
     from nexus_symbiote.validators import integrity
 
     path, policy = _signed_weights(tmp_path, b"{" + b" " * 65536 + b"}")
     (tmp_path / "alias").symlink_to(path.parent, target_is_directory=True)
     verified: list[Path] = []
     inspected: list[Path] = []
-    real_inspect = integrity.inspect_model_artifact
+    real_inspect = model.observe_model_artifact
 
     def verify(artifact, bundle, identity, issuer):
         verified.append(artifact)
@@ -614,7 +616,7 @@ def test_one_signed_artifact_is_inspected_and_verified_once_however_it_is_named(
         return real_inspect(artifact, **kwargs)
 
     monkeypatch.setattr(integrity, "verify_sigstore_bundle", verify)
-    monkeypatch.setattr(integrity, "inspect_model_artifact", inspect)
+    monkeypatch.setattr(model, "observe_model_artifact", inspect)
     spellings = [
         "weights/model.safetensors",
         "./weights/model.safetensors",
@@ -663,6 +665,25 @@ def test_signature_verification_work_draws_on_the_validation_budget(tmp_path, mo
     assert report.status == "unknown"
 
 
+def test_a_digest_pin_is_charged_for_the_reads_it_needs_and_no_verification(tmp_path):
+    from nexus_symbiote.utils.crypto import DigestPinPolicy, SignaturePolicySet
+
+    path, _ = _signed_weights(tmp_path, b"{}")
+    pin = DigestPinPolicy(path, hash_file(path))
+    model = ModelComponent(
+        bom_ref="model:m",
+        name="m",
+        source_path="weights/model.safetensors",
+        hashes={"sha256": hash_file(path)},
+    )
+    validator = IntegrityValidator(SignaturePolicySet(digest_pins=[pin]))
+    report = validator.validate(AIBOM(components=[model]), tmp_path)
+    assert report.status == "pass" and report.signatures_checked == 0
+    # The model check's observation and the digest check each read the weights once;
+    # a pin is compared with the observed digest, so no bundle or verification work.
+    assert report.bytes_charged == 2 * path.stat().st_size
+
+
 def test_paths_the_readers_refuse_are_never_charged_to_the_budget(tmp_path):
     project = tmp_path / "project"
     (project / "real").mkdir(parents=True)
@@ -686,6 +707,27 @@ def test_paths_the_readers_refuse_are_never_charged_to_the_budget(tmp_path):
 
 
 def test_bound_imports_report_only_unavailable_evidence_without_blocking(tmp_path):
+    # A format without a structural validator: its unknown verdict is not a gap in
+    # evidence the import could fill, so it still blocks.
+    (tmp_path / "weights.h5").write_bytes(b"\0" * 64)
+    imported = ModelComponent(
+        bom_ref="shadowscan:m",
+        name="m",
+        source_path="weights.h5",
+        properties={"collection_mode": "imported-unverified-report"},
+    )
+    report = IntegrityValidator().validate(
+        AIBOM(components=[imported]), tmp_path, bound_imports=frozenset({"shadowscan:m"})
+    )
+    severities = {issue.category: issue.severity for issue in report.issues}
+    assert severities["format_unverified"] == "unknown"
+    assert severities["unverified_signature"] == "info"
+    assert severities["missing_hash"] == "info"
+    assert report.status == "unknown"
+
+
+def test_bound_imports_keep_the_observed_unsafe_verdict_without_a_recorded_digest(tmp_path):
+    # The import records no digest; the verdict comes from the local bytes all the same.
     (tmp_path / "weights.bin").write_bytes(b"\0" * 64)
     imported = ModelComponent(
         bom_ref="shadowscan:m",
@@ -697,10 +739,10 @@ def test_bound_imports_report_only_unavailable_evidence_without_blocking(tmp_pat
         AIBOM(components=[imported]), tmp_path, bound_imports=frozenset({"shadowscan:m"})
     )
     severities = {issue.category: issue.severity for issue in report.issues}
+    assert severities["unsafe_format"] == "critical"
     assert severities["format_unverified"] == "unknown"
-    assert severities["unverified_signature"] == "info"
-    assert severities["missing_hash"] == "info"
-    assert report.status == "unknown"
+    assert "format_subject_mismatch" not in severities
+    assert report.status == "fail"
 
 
 def test_issue_lists_are_bounded_but_the_verdict_counts_every_issue():

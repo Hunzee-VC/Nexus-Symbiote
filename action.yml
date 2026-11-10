@@ -21,8 +21,9 @@ inputs:
   validate:
     description: >-
       Fail the action when completeness or integrity validation fails. A model passes integrity
-      only as a SafeTensors file whose artifact-bound signature verifies under signature-policy.
-      'false' skips both checks and prints a warning
+      only as a SafeTensors file each of whose weight files (the file and any shard index bound
+      to it) is Sigstore-signed or digest-pinned in signature-policy. 'false' skips both checks
+      and prints a warning
     default: "true"
   validate-integrity:
     description: >-

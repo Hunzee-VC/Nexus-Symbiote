@@ -286,7 +286,15 @@ time. Anyone who can write to the checkout can substitute an older report, or
 another repository's report, signed by the same identity, for example one from
 before a shadow agent appeared, and regenerate the BOM from it. Give each
 repository's discovery workflow its own signer identity, and bind freshness or
-the commit separately where you need that.
+the commit separately where you need that. To accept only one report, write a
+version 2 entry (`"kind": "sigstore-message-signature"`) with `expected_sha256`
+set to the report's SHA-256: the check then also fails for other report bytes,
+however they are signed. The report needs such a signature entry: a
+`digest-pin` entry for it, or an entry for a report location the collector does
+not read (it reads the first of `.shadowscan/report.json`,
+`shadowscan-report.json` and `shadowscan.json` that exists), is reported as an
+unused policy entry by `scan` and `validate --project`
+([model integrity](model-integrity.md#operator-signature-policy)).
 
 ### Verify the native import and its producer
 

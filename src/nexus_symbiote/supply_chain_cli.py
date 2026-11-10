@@ -259,8 +259,8 @@ def register_supply_chain_commands(main: click.Group) -> None:
     )
     @click.option(
         "--signature-policy",
-        type=click.Path(exists=True, path_type=Path),
-        help="Explicit operator signer policy JSON, as for scan.",
+        type=click.Path(exists=True, dir_okay=False, path_type=Path),
+        help="Explicit operator signer policy JSON, kept outside the project, as for scan.",
     )
     @click.pass_context
     def baseline(

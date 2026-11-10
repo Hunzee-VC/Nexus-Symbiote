@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import sys
 
 import pytest
 
 from nexus_symbiote.utils.crypto import (
+    DSSE_UNSUPPORTED,
+    SIGSTORE_MISSING,
     compute_file_hash,
     verify_file_hash,
-    verify_hash_consistency,
     verify_sigstore_bundle,
 )
 
@@ -94,37 +97,40 @@ class TestComputeFileHash:
         assert result is not None
 
 
-class TestVerifyHashConsistency:
-    def test_all_pass(self, tmp_path):
-        f = tmp_path / "test.bin"
-        f.write_bytes(b"data")
-        sha256 = hashlib.sha256(b"data").hexdigest()
-        sha512 = hashlib.sha512(b"data").hexdigest()
-        results = verify_hash_consistency({"sha256": sha256, "sha512": sha512}, f)
-        assert len(results) == 2
-        assert all(r.verified for r in results)
-
-    def test_partial_failure(self, tmp_path):
-        f = tmp_path / "test.bin"
-        f.write_bytes(b"data")
-        sha256 = hashlib.sha256(b"data").hexdigest()
-        results = verify_hash_consistency({"sha256": sha256, "sha512": "wrong"}, f)
-        assert len(results) == 2
-        passed = [r for r in results if r.verified]
-        failed = [r for r in results if not r.verified]
-        assert len(passed) == 1
-        assert len(failed) == 1
-
-
 class TestVerifySigstoreBundle:
-    def test_sigstore_not_installed_graceful(self, tmp_path):
+    def test_sigstore_not_installed_graceful(self, tmp_path, monkeypatch):
         artifact = tmp_path / "artifact.bin"
         bundle = tmp_path / "artifact.sigstore.json"
         artifact.write_bytes(b"data")
         bundle.write_text("{}")
-        result = verify_sigstore_bundle(artifact, bundle)
+        for module in ("sigstore", "sigstore.models", "sigstore.verify", "sigstore_models"):
+            monkeypatch.setitem(sys.modules, module, None)
+        result = verify_sigstore_bundle(
+            artifact, bundle, "publisher@example.test", "https://issuer.example.test"
+        )
         assert result.verified is False
-        assert "identity" in (result.error or "").lower()
+        assert result.error == SIGSTORE_MISSING
+
+    def test_dsse_bundle_is_refused_with_its_own_reason(self, tmp_path, monkeypatch):
+        artifact = tmp_path / "model.safetensors"
+        bundle = tmp_path / "model.sig"
+        artifact.write_bytes(b"data")
+        bundle.write_text(
+            json.dumps(
+                {
+                    "mediaType": "application/vnd.dev.sigstore.bundle.v0.3+json",
+                    "verificationMaterial": {},
+                    "dsseEnvelope": {"payload": "", "payloadType": "application/vnd.in-toto+json"},
+                }
+            )
+        )
+        for module in ("sigstore", "sigstore.models", "sigstore.verify", "sigstore_models"):
+            monkeypatch.setitem(sys.modules, module, None)
+        result = verify_sigstore_bundle(
+            artifact, bundle, "publisher@example.test", "https://issuer.example.test"
+        )
+        assert not result.verified
+        assert result.error == DSSE_UNSUPPORTED
 
 
 @pytest.mark.parametrize(

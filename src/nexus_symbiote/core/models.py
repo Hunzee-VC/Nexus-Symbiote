@@ -298,9 +298,11 @@ class ModelComponent(ComponentBase):
     signing_status: str | None = Field(
         default=None,
         description=(
-            "Collector-reported signature evidence, such as signature-not-found, "
-            "signature-present-unverified, verification-failed or sigstore-signed; never "
-            "trusted as verification. unsigned and pgp-signed appear only in older inventories"
+            "Collector-reported signature evidence under the operator signer policy: "
+            "sigstore-signed, digest-pinned, partially-verified, verification-failed, "
+            "verification-unavailable, signature-present-unverified or signature-not-found; "
+            "never trusted as verification. unsigned and pgp-signed appear only in older "
+            "inventories"
         ),
     )
     signing_identity: str | None = None

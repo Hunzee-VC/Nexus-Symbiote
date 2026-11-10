@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import os
+from collections.abc import Iterable
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from nexus_symbiote.core.hashing import (
     descriptor_binding,
@@ -16,10 +19,62 @@ from nexus_symbiote.core.hashing import (
     pathname_identity,
 )
 
+if TYPE_CHECKING:
+    from nexus_symbiote.core.models import ClaimEvidence
+
 MAX_BUNDLE_BYTES = 4 * 1024 * 1024
 MAX_SIGNED_ARTIFACT_BYTES = 5 * 1024 * 1024 * 1024
 # A fixed message, so callers can report it instead of a generic signature failure.
 SIGSTORE_MISSING = "sigstore package not installed; install nexus-symbiote[sigstore]"
+DSSE_UNSUPPORTED = (
+    "Bundle carries a DSSE envelope (an OpenSSF Model Signing signature or an attestation); "
+    "only Sigstore message-signature bundles are verified"
+)
+
+
+class SigningStatus(str, Enum):
+    """What the model collector established about a model's weight files."""
+
+    SIGSTORE_SIGNED = "sigstore-signed"
+    DIGEST_PINNED = "digest-pinned"
+    PARTIALLY_VERIFIED = "partially-verified"
+    VERIFICATION_FAILED = "verification-failed"
+    VERIFICATION_UNAVAILABLE = "verification-unavailable"
+    SIGNATURE_PRESENT_UNVERIFIED = "signature-present-unverified"
+    SIGNATURE_NOT_FOUND = "signature-not-found"
+
+
+VERIFIED_SIGNING_STATUSES = frozenset(
+    {SigningStatus.SIGSTORE_SIGNED.value, SigningStatus.DIGEST_PINNED.value}
+)
+# The claim on a model component that records how its signing status was established.
+SIGNING_EVIDENCE_CLAIM = "signing_status"
+# An evidence reference that names the digest of the operator policy file a run used.
+POLICY_REF_PREFIX = "policy:"
+
+
+def component_evidence_refs(refs: Iterable[Any]) -> list[Any]:
+    """``refs`` without policy-file digests, to compare one component across runs.
+
+    The digest identifies the run's policy file, not the component: equivalent
+    policies with other bytes, or one more entry for another artifact, must not
+    make the same verified component look changed or mismatched.
+    """
+    return [ref for ref in refs if not (isinstance(ref, str) and ref.startswith(POLICY_REF_PREFIX))]
+
+
+def comparable_claim(claim: ClaimEvidence) -> dict[str, Any]:
+    """A claim as two runs compare it: without its observation time or policy-file digest."""
+    dumped = claim.model_dump(exclude={"observed_at"})
+    dumped["evidence_refs"] = component_evidence_refs(dumped["evidence_refs"])
+    return dumped
+
+
+def _sha256(value: str | None) -> str | None:
+    if value is None:
+        return None
+    algorithm, digest = normalize_digest(value, "sha256")
+    return f"{algorithm}:{digest}"
 
 
 @dataclass(frozen=True)
@@ -27,17 +82,70 @@ class SigstoreArtifactPolicy:
     """Trusted caller input, never inferred from a BOM or adjacent signature file.
 
     This policy authorizes verification of one artifact with one exact identity
-    and OIDC issuer. It does not grant execution authority to the artifact.
+    and OIDC issuer, and with ``expected_sha256`` also pins its exact bytes, so
+    another artifact signed by the same identity cannot take its place. It does
+    not grant execution authority to the artifact.
     """
 
     artifact_path: Path
     bundle_path: Path
     expected_identity: str
     expected_issuer: str
+    expected_sha256: str | None = None
+    policy_digest: str | None = None
 
     def __post_init__(self) -> None:
         if not self.expected_identity.strip() or not self.expected_issuer.strip():
             raise ValueError("Both an expected signer identity and OIDC issuer are required")
+        object.__setattr__(self, "expected_sha256", _sha256(self.expected_sha256))
+
+
+@dataclass(frozen=True)
+class DigestPinPolicy:
+    """An operator-pinned SHA-256 for one artifact; the operator is the trust root."""
+
+    artifact_path: Path
+    expected_sha256: str
+    policy_digest: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "expected_sha256", _sha256(self.expected_sha256))
+
+
+ArtifactPolicy = SigstoreArtifactPolicy | DigestPinPolicy
+
+
+class SignaturePolicySet(list[SigstoreArtifactPolicy]):
+    """The Sigstore entries of one operator policy, plus its digest pins and digest.
+
+    It is a list of the Sigstore entries so every consumer that verifies
+    signatures keeps working; consumers that accept digest pins read
+    ``digest_pins`` as well.
+    """
+
+    def __init__(
+        self,
+        signatures: Iterable[SigstoreArtifactPolicy] = (),
+        digest_pins: Iterable[DigestPinPolicy] = (),
+        *,
+        digest: str | None = None,
+    ) -> None:
+        super().__init__(signatures)
+        self.digest_pins: tuple[DigestPinPolicy, ...] = tuple(digest_pins)
+        self.digest = digest
+
+
+def policy_entries(
+    signature_policies: Iterable[SigstoreArtifactPolicy],
+    digest_pins: Iterable[DigestPinPolicy] = (),
+) -> list[ArtifactPolicy]:
+    """Every entry of a policy set or plain sequence, rejecting duplicate artifacts."""
+    entries: list[ArtifactPolicy] = [*signature_policies, *digest_pins]
+    if isinstance(signature_policies, SignaturePolicySet):
+        entries.extend(signature_policies.digest_pins)
+    if len({entry.artifact_path.resolve() for entry in entries}) != len(entries):
+        raise ValueError("Duplicate artifact signature policies")
+    return entries
 
 
 @dataclass
@@ -77,6 +185,14 @@ def verify_file_hash(
     )
 
 
+def _carries_dsse_envelope(bundle_json: bytes) -> bool:
+    try:
+        document = json.loads(bundle_json)
+    except (ValueError, RecursionError):
+        return False
+    return isinstance(document, dict) and "dsseEnvelope" in document
+
+
 def verify_sigstore_digest(
     digest_hex: str,
     bundle_json: bytes,
@@ -86,7 +202,8 @@ def verify_sigstore_digest(
     """Verify a caller-inspected SHA-256 subject without a network refresh.
 
     The caller must bind this digest to the inspected artifact. This function
-    verifies a raw artifact signature, not an arbitrary DSSE predicate's subject.
+    verifies a message signature over the artifact digest. A DSSE envelope signs
+    an in-toto statement instead, so such a bundle is refused with a fixed reason.
     """
     if (
         not expected_identity
@@ -101,6 +218,8 @@ def verify_sigstore_digest(
         _, digest = normalize_digest(digest_hex, "sha256")
         if len(bundle_json) > MAX_BUNDLE_BYTES:
             raise ValueError("bundle byte limit exceeded")
+        if _carries_dsse_envelope(bundle_json):
+            return VerificationResult(False, error=DSSE_UNSUPPORTED)
         from sigstore.hashes import Hashed
         from sigstore.models import Bundle
         from sigstore.verify import Verifier
@@ -140,8 +259,8 @@ def verify_sigstore_bundle(
     """Verify an exact local artifact under an explicitly selected signer policy.
 
     Inputs are bounded, regular files with no symlink traversal. Streaming hash
-    verification uses the supported public Sigstore 3.x API and offline trust
-    material. Missing trust material fails; no network refresh is initiated.
+    verification uses the supported public sigstore-python 4.x API and offline
+    trust material. Missing trust material fails; no network refresh is initiated.
     """
     if (
         not expected_identity
@@ -193,8 +312,3 @@ def compute_file_hash(path: Path, algorithm: str = "sha256") -> str | None:
         return f"{algorithm}:{h.hexdigest()}"
     except (OSError, ValueError):
         return None
-
-
-def verify_hash_consistency(hashes: dict[str, str], path: Path) -> list[VerificationResult]:
-    """Verify each digest, rejecting conflicting key/prefix algorithms."""
-    return [verify_file_hash(path, expected, algo) for algo, expected in hashes.items()]
