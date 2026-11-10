@@ -13,6 +13,7 @@ import re
 import shlex
 import tomllib
 import unicodedata
+from collections import Counter
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -355,6 +356,7 @@ _LONGEST_DOTTED_KEY = 16
 # A pnpm lockfile holds about 40 YAML tokens per package, so a lockfile at the 4 MiB
 # read limit is about 650,000. The bound refuses denser input before it is parsed.
 _MAX_PNPM_LOCK_TOKENS = 1_000_000
+_PNPM_NAME_END = re.compile("[@/]")
 
 
 _TOML_SPECIAL = re.compile(r"""[#"'.=,{}\[\]\n]""")
@@ -1269,6 +1271,46 @@ class RegistryScanner(Scanner):
             locator=locator,
         )
 
+    @staticmethod
+    def _pnpm_selections(
+        packages: dict[Any, Any], names: set[str]
+    ) -> dict[str, tuple[str, str] | None]:
+        """The `packages` record each of these names selects: its key and version
+        reference, or None when records of more than one version make the choice
+        ambiguous. A name without a record, or with several records of one version,
+        selects none.
+
+        A key is the record of one name: its text up to the first "@" or "/" after the
+        first character, or after a scope's "/". So each key is read once and the cost
+        is linear in the lockfile: matching every name against every key cost their
+        product, and indexing a key under the text before each separator would cost
+        the square of its length.
+        """
+        if not names:
+            return {}
+        found: dict[str, list[tuple[str, str]]] = {}
+        for key in packages:
+            if not isinstance(key, str):
+                continue
+            clean = key.lstrip("/")
+            start = clean.find("/", 1) + 1 if clean.startswith("@") else 1
+            end = _PNPM_NAME_END.search(clean, start) if start else None
+            if end is None:
+                continue
+            name = clean[: end.start()]
+            if name not in names:
+                continue
+            suffix = clean[end.end() :]
+            if suffix and not suffix.startswith("/"):
+                found.setdefault(name, []).append((key, suffix))
+        selections: dict[str, tuple[str, str] | None] = {}
+        for name, records in found.items():
+            if len({suffix.split("(", 1)[0] for _, suffix in records}) > 1:
+                selections[name] = None
+            elif len(records) == 1:
+                selections[name] = records[0]
+        return selections
+
     def _resolve_pnpm_lockfile(
         self,
         lock_bytes: bytes,
@@ -1318,6 +1360,8 @@ class RegistryScanner(Scanner):
                         importer_specs[pkg_name] = entry["version"]
                     elif isinstance(entry, str):
                         importer_specs[pkg_name] = entry
+        counts = Counter(c.name for c in components if c.properties.get("npm_alias") is None)
+        selections = self._pnpm_selections(packages, set(counts).difference(importer_specs))
         for comp in components:
             alias = comp.properties.get("npm_alias")
             if alias is not None:
@@ -1330,32 +1374,28 @@ class RegistryScanner(Scanner):
                 continue
             ver_ref = importer_specs.get(comp.name)
             matched_pkg_key: str | None = None
-            if ver_ref is None:
-                prefix_matches: list[tuple[str, str]] = []
-                for k in packages:
-                    if not isinstance(k, str):
-                        continue
-                    clean_k = k.lstrip("/")
-                    for sep in ("@", "/"):
-                        if clean_k.startswith(comp.name + sep):
-                            suffix = clean_k[len(comp.name) + 1 :]
-                            if suffix and not suffix.startswith("/"):
-                                prefix_matches.append((k, suffix))
-                                break
-                base_versions = {s.split("(", 1)[0] for _, s in prefix_matches}
-                if len(base_versions) > 1:
+            if ver_ref is None and comp.name in selections:
+                selected = selections[comp.name]
+                if selected is None:
                     comp.package_url = None
                     result.surfaces_excluded.append(
                         f"pnpm-lock.yaml: multiple package resolutions for {comp.name} are ambiguous"
                     )
                     continue
-                if len(prefix_matches) == 1:
-                    matched_pkg_key, ver_ref = prefix_matches[0]
+                matched_pkg_key, ver_ref = selected
             if ver_ref is None:
                 continue
             # A record the lockfile holds decides the identity, or nothing does: one
             # that is not taken leaves the version an exact spec names in doubt.
             comp.package_url = None
+            if counts[comp.name] > 1:
+                # Redaction gave several dependencies this name, so which of them the
+                # record belongs to is unknown; binding it to each would also copy its
+                # key, however long, into every one.
+                result.surfaces_excluded.append(
+                    f"pnpm-lock.yaml: packages whose names redact to {comp.name} are unresolved"
+                )
+                continue
             if ver_ref.startswith("npm:"):
                 result.surfaces_excluded.append(
                     "pnpm-lock.yaml: aliased package identity is unresolved"
