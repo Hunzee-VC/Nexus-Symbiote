@@ -225,7 +225,9 @@ repository's `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` and
 an HMAC-SHA256 over the files as read (profile
 `nexus-symbiote/claude-settings-values/v1`). Without it, a record whose settings hold
 environment values or text the redaction shortened carries a low `completeness`
-risk naming the key. `properties.settings_declarations` counts hook commands,
+risk naming the key. The structure digest is unkeyed: anyone holding the BOM can
+confirm a guess of a settings value the redaction leaves in place, such as a
+password pasted into a hook command, so keep credentials out of settings files. `properties.settings_declarations` counts hook commands,
 allow, ask and deny rules, additional directories, plugins, marketplaces and MCP
 server approvals.
 
