@@ -17,13 +17,23 @@ audit. Malformed or non-finite numeric values now fail canonicalization rather
 than being converted to null.
 
 The source fingerprint covers the original declared name, description, input
-schema and annotations. Exported schemas omit literal defaults, examples,
-constants and enumeration values, which can contain credentials. When the
-displayed definition differs, `redacted_definition_hash` binds that view. For a
-static MCP configuration, run `validate` with `--project` and
+schema and annotations, and also `title`, `outputSchema` and `_meta` when the
+descriptor declares them. A definition without those members keeps the
+fingerprint it had before they were bound, so `rfc8785-jcs-v2` is unchanged;
+a tool whose descriptor declares one of them gets a new fingerprint once, and
+its baseline needs one re-approval. Exported schemas omit literal defaults,
+examples, constants and enumeration values, which can contain credentials. When
+the displayed definition differs, `redacted_definition_hash` binds that view.
+The inventory displays only the name, description, input schema and
+annotations, so a tool that declares `title`, `outputSchema` or `_meta` always
+has a `redacted_definition_hash`, and `validate` reports its fingerprint as
+`unknown` (`descriptor_source_unavailable`) until source evidence corroborates
+it. For a static MCP configuration, run `validate` with `--project` and
 `--no-project-policy` to corroborate the source fingerprint against the
-checkout. A displayed schema with omitted literals is unsuitable for deciding
-which arguments a live tool accepts.
+checkout. An inventory written by `discover-mcp --record` has no local source,
+so such tools stay `unknown` there; `diff` against an earlier observation is the
+check for them. A displayed schema with omitted literals is unsuitable for
+deciding which arguments a live tool accepts.
 
 For supported package launchers, new inventories retain `launcher_package`
 alongside the declared version. An older inventory can lack this field even
