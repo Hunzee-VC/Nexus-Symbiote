@@ -424,6 +424,12 @@ class PromptScanner(Scanner):
                 if target in recorded:
                     imports.add(target)
                     continue
+                if files.excluded(target):
+                    # A host still loads it, as it would a dependency's instructions.
+                    result.surfaces_excluded.append(
+                        f"{target}: imported by {importer} but excluded from collection"
+                    )
+                    continue
                 if files.is_directory(target):
                     continue
                 content = files.read_bytes(target, missing_ok=True)

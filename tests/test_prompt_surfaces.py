@@ -329,3 +329,26 @@ def test_inventory_is_identical_when_scanned_at_two_locations(tmp_path):
     assert first.components == second.components
     assert first.surfaces_scanned == second.surfaces_scanned
     assert str(tmp_path) not in repr(first)
+
+
+def test_import_into_an_excluded_directory_is_a_gap(tmp_path):
+    _write(tmp_path, "CLAUDE.md", "Follow @node_modules/helper/AGENTS.md")
+    _write(tmp_path, "node_modules/helper/AGENTS.md", f"Hidden{RLO}")
+    result = PromptScanner().scan(tmp_path)
+    assert result.surfaces_excluded == [
+        "node_modules/helper/AGENTS.md: imported by CLAUDE.md but excluded from collection"
+    ]
+    assert not any("node_modules" in ref for ref in _components(result))
+
+
+def test_validate_reconciles_a_symlinked_instruction_file(tmp_path):
+    project = tmp_path / "project"
+    _write(project, "AGENTS.md", "Shared instructions.")
+    (project / "CLAUDE.md").symlink_to("AGENTS.md")
+    output = tmp_path / "bom.json"
+    assert _scan_cli(project, output).exit_code == 0
+    run = CliRunner().invoke(
+        main, ["validate", str(output), "--project", str(project), "--no-project-policy"]
+    )
+    assert "symlink" not in run.output.replace(str(tmp_path), "")
+    assert "Hashes verified: 2, failed: 0" in run.output
