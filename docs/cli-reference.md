@@ -57,6 +57,9 @@ offline. See [offline and live modes](offline-and-live-modes.md).
 | [`runtime keygen`](#runtime-keygen) | offline | Create an Ed25519 key pair for runtime contracts |
 | [`runtime sign`](#runtime-sign) | offline | Sign a runtime contract |
 | [`runtime verify`](#runtime-verify) | offline | Verify a signed runtime contract's purpose, signers and validity window |
+| [`runtime digest`](#runtime-digest) | offline | Print the digest a runtime contract, approval or revocation list binds |
+| [`runtime key-id`](#runtime-key-id) | offline | Print the key ID of an Ed25519 public key |
+| [`runtime register`](#runtime-register) | offline | Make a newly issued runtime snapshot current in a gateway state store |
 | [`discover-mcp`](#discover-mcp) | **live** | List the tools an HTTPS MCP server serves, without calling them |
 | [`advisories`](#advisories) | **live** | Query OSV for advisories affecting exact PyPI and npm package versions |
 | [`verify-live`](#verify-live) | **live** | Compare an AgentBOM with the tools that operator-pinned stdio servers serve |
@@ -84,7 +87,9 @@ CI log:
 - nothing is read as markup or emoji codes, and lines are never wrapped.
 
 The JSON that `scan`, `vex`, `discover-mcp` and `advisories` print without `-o`, the
-candidate inventory that `verify-live --record` prints, and the `--json-output`
+JSON that every `runtime` command prints, such as the identities of the snapshot that
+`runtime register` made current, the candidate inventory that `verify-live --record`
+prints, and the `--json-output`
 documents of `validate`, `risk`, `diff`, `summary`, `blast-radius` and `verify-live`,
 write a `[` that follows such a `##` as `\u005b`; the document parses to exactly the
 same value. Files written with `-o` are not changed.
@@ -385,6 +390,11 @@ nexus-symbiote runtime keygen [OPTIONS]
 |---|---|
 | `--private-key` `PATH` | New PEM private key file, created with mode 0600; must not exist. (required) |
 | `--public-key` `PATH` | New PEM public key file, created with mode 0600; must not exist. (required) |
+| `--passphrase-file` `PATH` | Encrypt the private key with the passphrase on the first line of this file, which only its owner may read. |
+
+Use one key pair per purpose: snapshot, approval and trust rings must not share keys.
+A passphrase is at most 1,023 bytes, and a passphrase file that its group or others
+can read is refused. If either file cannot be written, neither key is kept.
 
 ### `runtime sign`
 
@@ -397,8 +407,13 @@ nexus-symbiote runtime sign [OPTIONS] CONTRACT_PATH
 | Option | Description |
 |---|---|
 | `--kind` `snapshot\|approval\|trust\|model` | Contract purpose; a signature is valid only for this purpose. (required) |
-| `--key` `PATH` | Ed25519 private key PEM; repeat for multiple signers. (required, repeatable) |
+| `--key` `PATH` | Ed25519 private key PEM with mode 0600; repeat for multiple signers. (required, repeatable) |
 | `--out` `PATH` | Signed envelope file to create; must not exist. (required) |
+| `--passphrase-file` `PATH` | Passphrase for encrypted private keys, on the first line of this file, which only its owner may read. |
+
+A contract that could never verify, because its validity window is longer than its
+purpose allows or has already ended, is refused. The output includes the contract
+`digest` that approvals and revocation lists use.
 
 ### `runtime verify`
 
@@ -414,6 +429,60 @@ nexus-symbiote runtime verify [OPTIONS] ENVELOPE_PATH
 | `--public-key` `PATH` | Trusted Ed25519 public key PEM; repeat to build the trusted key ring. (required, repeatable) |
 | `--threshold` `INTEGER RANGE` | Minimum number of distinct trusted signatures (default: 1). |
 | `--bom` `PATH` | The exact companion BOM; required for snapshot contracts. |
+
+Revocation, signer scopes, approver identities and an approval's bindings are
+checked only by the gateway. A failure names its reason code, listed in the
+[runtime contract reference](runtime-contract-reference.md#reason-codes).
+
+### `runtime digest`
+
+Print the canonical digest that contracts, approvals and revocations bind.
+
+```text
+nexus-symbiote runtime digest [OPTIONS] INPUT_PATH
+```
+
+| Option | Description |
+|---|---|
+| `--kind` `snapshot\|approval\|trust\|model\|context\|request\|tool\|bom` | What the file holds: an unsigned contract, an execution context, a tool call, a served tool descriptor or a companion BOM. (required) |
+
+It verifies nothing and works for contracts that are not yet valid or expired.
+
+### `runtime key-id`
+
+Print the key ID that envelopes, key rings and revocation lists use.
+
+```text
+nexus-symbiote runtime key-id [OPTIONS] PUBLIC_KEY
+```
+
+### `runtime register`
+
+Make a newly issued snapshot current; gateways sharing the store deny older serials.
+
+```text
+nexus-symbiote runtime register [OPTIONS] SNAPSHOT_PATH
+```
+
+| Option | Description |
+|---|---|
+| `--trust` `PATH` | Signed, currently valid trust status for the snapshot's tenant. (required) |
+| `--state` `PATH` | Initialized state database that the gateways share. (required) |
+| `--snapshot-key` `PATH` | Trusted snapshot-signing public key PEM; repeat to build the ring. (required, repeatable) |
+| `--trust-key` `PATH` | Trusted trust-status public key PEM; repeat to build the ring. (required, repeatable) |
+| `--approval-key` `PATH` | Approval public key PEM the gateways trust; repeat for each. Only checked, so the gateways' signer scope map can be passed unchanged. (repeatable) |
+| `--snapshot-threshold` `INTEGER RANGE` | Minimum number of distinct snapshot signers (default: 1). |
+| `--trust-threshold` `INTEGER RANGE` | Minimum number of distinct trust-status signers (default: 1). |
+| `--signer-scopes` `PATH` | JSON object mapping key IDs to the signer scopes the gateways use. |
+| `--allow-shared-keys` | Accept a key in more than one ring, as gateways built with `allow_shared_keys=True` do. |
+
+The snapshot and trust status are checked as the gateway checks them, except the
+workload context and the companion BOM, so pass the rings, quorums, signer scopes
+and shared-key setting the gateways use. Pass the approval keys too when the scope
+map covers them. A scope entry for a key in no ring, or a key in two rings without
+`--allow-shared-keys`, fails with `configuration-invalid` and names the key ID. The
+output names the tenant, deployment, agent, serial and contract `digest` that
+became current.
 
 ### `scan`
 

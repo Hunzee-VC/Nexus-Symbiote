@@ -85,7 +85,7 @@ An optional [`agent.yaml` manifest](https://github.com/Hunzee-VC/Nexus-Symbiote/
 | `diff` | What changed in the recorded inventory since the reviewed snapshot? Is any change security-relevant? Settings and files the collectors do not record are not compared |
 | `verify-artifact`, `verify-discovery` | Do these bytes match a trusted digest, Sigstore identity or ShadowScan report? |
 | `blast-radius` | Which agents and components are associated with a compromised component? |
-| `runtime keygen/sign/verify` | Are signed snapshots, approvals and trust statements valid for a gateway? |
+| `runtime keygen/sign/verify/digest/key-id/register` | Are signed snapshots, approvals and trust statements signed, current and in canonical form, and which digests do they bind? `register` retires older snapshots; revocation and approval bindings are checked only by the gateway |
 | `discover-mcp`, `verify-live`, `advisories` | What does a running server actually serve? Do exact versions have known advisories? *(live mode)* |
 
 The [CLI reference](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/cli-reference.md) documents every command and option.

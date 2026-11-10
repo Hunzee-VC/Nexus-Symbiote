@@ -4,78 +4,197 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import UTC, datetime, timedelta
+import re
+import stat
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 import click
+from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 from pydantic import ValidationError
 
 from nexus_symbiote.core.hashing import open_regular_file
 from nexus_symbiote.runtime import (
-    ActionApproval,
+    CONTRACTS,
+    MAX_LIFETIMES,
+    REASONS,
     ApprovedSnapshot,
+    AuthorizationError,
     Envelope,
-    HostedModelAttestation,
-    TrustStatus,
+    ExecutionContext,
+    Kind,
+    ReferenceGateway,
+    SignerScope,
+    StateStore,
+    ToolCall,
     _window,
-    digest,
+    bom_digest,
+    contract_digest,
     key_id,
+    request_digest,
     sign_contract,
     strict_json,
+    tool_definition_digest,
+    validation_fields,
     verify_contract,
 )
+from nexus_symbiote.utils.terminal import json_text
 
-Purpose = Literal["snapshot", "approval", "trust", "model"]
+MAX_KEY_BYTES = 65536
+MAX_INPUT_BYTES = 24 * 1024 * 1024
+MAX_PASSPHRASE_FILE_BYTES = 4096
+# OpenSSL refuses longer PEM passphrases.
+MAX_PASSPHRASE_BYTES = 1023
+_CONTRACT_KINDS = ["snapshot", "approval", "trust", "model"]
+_KEY_ID = re.compile(r"[0-9a-f]{64}")
+_DIGEST_KINDS = [*_CONTRACT_KINDS, "context", "request", "tool", "bom"]
 
 
-def _safe_error(exc: Exception, operation: Literal["signing", "verification"]) -> str:
+class _KeyFileError(Exception):
+    """A key or passphrase file was refused; the message is fixed text, never file content."""
+
+
+class _InputTooLargeError(Exception):
+    """An input file exceeds its size limit."""
+
+
+class _RingError(Exception):
+    """Rings and scopes do not fit together; the message holds fixed text and key IDs only."""
+
+
+_HANDLED = (
+    ValueError,
+    TypeError,
+    RecursionError,
+    OSError,
+    UnsupportedAlgorithm,
+    _KeyFileError,
+    _InputTooLargeError,
+    _RingError,
+)
+
+
+def _safe_error(exc: BaseException, operation: str) -> str:
     """Describe an operator error without echoing contract values or extra keys."""
     if isinstance(exc, ValidationError):
-        fields = {
-            field
-            for model in (
-                ApprovedSnapshot,
-                ActionApproval,
-                TrustStatus,
-                HostedModelAttestation,
-                Envelope,
-            )
-            for field in model.model_fields
-        }
-        fields.add("payloadType")
-        invalid = set()
-        for error in exc.errors(include_input=False, include_context=False, include_url=False):
-            location = error["loc"]
-            field = location[0] if location else None
-            invalid.add(
-                field if isinstance(field, str) and field in fields else "unsupported field"
-            )
-        locations = ", ".join(sorted(invalid))
-        return f"runtime input validation failed; review fields: {locations} (runtime-input-error)"
+        fields = validation_fields(exc)
+        return f"runtime input validation failed; review fields: {fields} (runtime-input-error)"
+    if isinstance(exc, AuthorizationError):
+        description = REASONS.get(exc.reason, REASONS["denied"])
+        return f"runtime {operation} failed: {description} ({exc.reason})"
+    if isinstance(exc, _KeyFileError):
+        return f"runtime {operation} failed: {exc} (runtime-key-error)"
+    if isinstance(exc, _InputTooLargeError):
+        return f"runtime {operation} input exceeds its size limit (runtime-input-too-large)"
+    if isinstance(exc, _RingError):
+        return f"runtime {operation} failed: {exc} (configuration-invalid)"
     if isinstance(exc, OSError):
         return f"runtime {operation} files could not be accessed safely (runtime-io-error)"
+    if isinstance(exc, RecursionError):
+        return f"runtime {operation} input is nested too deeply (runtime-input-error)"
     return (
         f"runtime {operation} failed; review the selected contract, Ed25519 keys, "
         "signer policy and validity (runtime-contract-error)"
     )
 
 
-def _read(path: Path, maximum: int = 24 * 1024 * 1024) -> bytes:
+def _read(path: Path, maximum: int = MAX_INPUT_BYTES, *, owner_only: str = "") -> bytes:
+    """Read a bounded regular file; with ``owner_only``, refuse one others can access."""
     with open_regular_file(path) as stream:
-        if os.fstat(stream.fileno()).st_size > maximum:
-            raise click.ClickException("input exceeds size limit")
+        info = os.fstat(stream.fileno())
+        if owner_only and os.name == "posix" and stat.S_IMODE(info.st_mode) & 0o077:
+            raise _KeyFileError(f"{owner_only} must not be accessible to group or others")
+        if info.st_size > maximum:
+            raise _InputTooLargeError
         raw = stream.read(maximum + 1)
     if len(raw) > maximum:
-        raise click.ClickException("input exceeds size limit")
+        raise _InputTooLargeError
     return raw
+
+
+def _json_object(path: Path) -> dict[str, Any]:
+    document = strict_json(_read(path))
+    if not isinstance(document, dict):
+        raise AuthorizationError("input must be a JSON object", reason="json-not-object")
+    return document
+
+
+def _ring(paths: tuple[Path, ...]) -> dict[str, Ed25519PublicKey]:
+    ring = {}
+    for path in paths:
+        public = _load_public(path)
+        ring[key_id(public)] = public
+    return ring
+
+
+def _check_rings(
+    rings: dict[str, dict[str, Ed25519PublicKey]], scopes: dict[str, Any], allow_shared_keys: bool
+) -> None:
+    """Name the key behind a ring or scope error that the library reports without it."""
+    if not allow_shared_keys:
+        for name in sorted(set().union(*rings.values())):
+            purposes = [purpose for purpose, ring in rings.items() if name in ring]
+            if len(purposes) > 1:
+                raise _RingError(
+                    f"key {name} is in the {' and '.join(purposes)} rings; use one key per "
+                    "purpose or pass --allow-shared-keys as the gateways do"
+                )
+    for name in sorted(scopes):
+        if not any(name in ring for ring in rings.values()):
+            # Only a key ID is echoed; any other scope name is input and stays unprinted.
+            shown = f"key {name}" if _KEY_ID.fullmatch(name) else "an entry that is not a key ID"
+            raise _RingError(
+                f"--signer-scopes names {shown}, which is not a --snapshot-key, --trust-key "
+                "or --approval-key"
+            )
 
 
 def _write_new(path: Path, content: bytes, mode: int = 0o600) -> None:
     with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode), "wb") as stream:
         stream.write(content)
+
+
+def _passphrase(path: Path | None) -> bytes | None:
+    if path is None:
+        return None
+    raw = _read(path, MAX_PASSPHRASE_FILE_BYTES, owner_only="passphrase file")
+    lines = raw.splitlines()
+    if not lines or not lines[0]:
+        raise _KeyFileError("passphrase file is empty")
+    if len(lines[0]) > MAX_PASSPHRASE_BYTES:
+        raise _KeyFileError(f"passphrase must be at most {MAX_PASSPHRASE_BYTES} bytes")
+    return lines[0]
+
+
+def _load_private(path: Path, passphrase: bytes | None) -> Ed25519PrivateKey:
+    pem = _read(path, MAX_KEY_BYTES, owner_only="private key file")
+    encrypted = pem.lstrip().startswith(b"-----BEGIN ENCRYPTED PRIVATE KEY-----")
+    if encrypted and passphrase is None:
+        raise _KeyFileError("private key is encrypted; pass --passphrase-file")
+    try:
+        private = serialization.load_pem_private_key(
+            pem, password=passphrase if encrypted else None
+        )
+    except (ValueError, TypeError, UnsupportedAlgorithm) as exc:
+        raise _KeyFileError(
+            "private key could not be loaded; check the file and passphrase"
+        ) from exc
+    if not isinstance(private, Ed25519PrivateKey):
+        raise _KeyFileError("only Ed25519 signing keys are supported")
+    return private
+
+
+def _load_public(path: Path) -> Ed25519PublicKey:
+    try:
+        public = serialization.load_pem_public_key(_read(path, MAX_KEY_BYTES))
+    except (ValueError, TypeError, UnsupportedAlgorithm) as exc:
+        raise _KeyFileError("public key could not be loaded") from exc
+    if not isinstance(public, Ed25519PublicKey):
+        raise _KeyFileError("only Ed25519 public keys are supported")
+    return public
 
 
 @click.group("runtime")
@@ -96,33 +215,51 @@ def runtime_group() -> None:
     required=True,
     help="New PEM public key file, created with mode 0600; must not exist.",
 )
-def keygen(private_key: Path, public_key: Path) -> None:
-    """Create an Ed25519 key pair without overwriting existing files."""
-    if private_key.exists() or public_key.exists() or private_key == public_key:
-        raise click.ClickException("choose distinct, nonexistent key paths")
-    key = Ed25519PrivateKey.generate()
-    _write_new(
-        private_key,
-        key.private_bytes(
-            serialization.Encoding.PEM,
-            serialization.PrivateFormat.PKCS8,
-            serialization.NoEncryption(),
-        ),
-    )
-    _write_new(
-        public_key,
-        key.public_key().public_bytes(
+@click.option(
+    "--passphrase-file",
+    type=click.Path(path_type=Path),
+    help="Encrypt the private key with the passphrase on the first line of this file, "
+    "which only its owner may read.",
+)
+def keygen(private_key: Path, public_key: Path, passphrase_file: Path | None) -> None:
+    """Create an Ed25519 key pair without overwriting existing files.
+
+    Use one key pair per purpose: snapshot, approval and trust rings must not share keys.
+    """
+    try:
+        if private_key.exists() or public_key.exists() or private_key == public_key:
+            raise _KeyFileError("choose distinct, nonexistent key paths")
+        passphrase = _passphrase(passphrase_file)
+        key = Ed25519PrivateKey.generate()
+        encryption: serialization.KeySerializationEncryption = (
+            serialization.NoEncryption()
+            if passphrase is None
+            else serialization.BestAvailableEncryption(passphrase)
+        )
+        # Serialize both keys first, so a refused passphrase writes neither file.
+        public_pem = key.public_key().public_bytes(
             serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
-        ),
-    )
-    click.echo(json.dumps({"key_id": key_id(key.public_key())}))
+        )
+        private_pem = key.private_bytes(
+            serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, encryption
+        )
+        _write_new(public_key, public_pem)
+        try:
+            _write_new(private_key, private_pem)
+        except BaseException:
+            public_key.unlink(missing_ok=True)
+            raise
+        result = {"key_id": key_id(key.public_key()), "encrypted": passphrase is not None}
+        click.echo(json_text(json.dumps(result)))
+    except _HANDLED as exc:
+        raise click.ClickException(_safe_error(exc, "key generation")) from None
 
 
 @runtime_group.command("sign")
 @click.argument("contract_path", type=click.Path(exists=True, path_type=Path))
 @click.option(
     "--kind",
-    type=click.Choice(["snapshot", "approval", "trust", "model"]),
+    type=click.Choice(_CONTRACT_KINDS),
     required=True,
     help="Contract purpose; a signature is valid only for this purpose.",
 )
@@ -132,7 +269,7 @@ def keygen(private_key: Path, public_key: Path) -> None:
     multiple=True,
     required=True,
     type=click.Path(exists=True, path_type=Path),
-    help="Ed25519 private key PEM; repeat for multiple signers.",
+    help="Ed25519 private key PEM with mode 0600; repeat for multiple signers.",
 )
 @click.option(
     "--out",
@@ -140,32 +277,51 @@ def keygen(private_key: Path, public_key: Path) -> None:
     required=True,
     help="Signed envelope file to create; must not exist.",
 )
-def sign(contract_path: Path, kind: str, keys: tuple[Path, ...], out: Path) -> None:
-    """Sign an explicit contract; signatures do not establish unmeasured facts."""
+@click.option(
+    "--passphrase-file",
+    type=click.Path(path_type=Path),
+    help="Passphrase for encrypted private keys, on the first line of this file, "
+    "which only its owner may read.",
+)
+def sign(
+    contract_path: Path,
+    kind: str,
+    keys: tuple[Path, ...],
+    out: Path,
+    passphrase_file: Path | None,
+) -> None:
+    """Sign an explicit contract; signatures do not establish unmeasured facts.
+
+    A contract that could never verify, because its validity window is longer than
+    its purpose allows or has already ended, is refused. Prints the contract digest
+    that approvals and revocation lists use.
+    """
+    purpose = cast(Kind, kind)
     try:
-        raw = strict_json(_read(contract_path))
-        contract: ApprovedSnapshot | ActionApproval | TrustStatus | HostedModelAttestation
-        if kind == "snapshot":
-            contract = ApprovedSnapshot.model_validate(raw)
-        elif kind == "approval":
-            contract = ActionApproval.model_validate(raw)
-        elif kind == "trust":
-            contract = TrustStatus.model_validate(raw)
-        else:
-            contract = HostedModelAttestation.model_validate(raw)
-        loaded = []
-        for path in keys:
-            private = serialization.load_pem_private_key(_read(path, 65536), password=None)
-            if not isinstance(private, Ed25519PrivateKey):
-                raise ValueError("only Ed25519 signing keys are supported")
-            loaded.append(private)
-        envelope = sign_contract(contract, cast(Purpose, kind), tuple(loaded))
+        contract = CONTRACTS[purpose].model_validate(_json_object(contract_path))
+        if contract.not_after - contract.not_before > MAX_LIFETIMES[purpose]:
+            raise AuthorizationError(
+                "contract validity exceeds its purpose's maximum lifetime",
+                reason=f"{purpose}-lifetime-exceeds-policy",
+            )
+        if contract.not_after <= datetime.now(UTC):
+            raise AuthorizationError("contract has expired", reason=f"{purpose}-expired")
+        passphrase = _passphrase(passphrase_file)
+        loaded = tuple(_load_private(path, passphrase) for path in keys)
+        envelope = sign_contract(contract, purpose, loaded)
         _write_new(
             out,
             (json.dumps(envelope.model_dump(mode="json", by_alias=True), indent=2) + "\n").encode(),
         )
-        click.echo(json.dumps({"out": str(out), "predicate": kind, "signed": True}))
-    except (ValueError, OSError) as exc:
+        result = {
+            "out": str(out),
+            "predicate": kind,
+            "digest": contract_digest(contract),
+            "signers": sorted({key_id(private.public_key()) for private in loaded}),
+            "signed": True,
+        }
+        click.echo(json_text(json.dumps(result)))
+    except _HANDLED as exc:
         raise click.ClickException(_safe_error(exc, "signing")) from None
 
 
@@ -173,7 +329,7 @@ def sign(contract_path: Path, kind: str, keys: tuple[Path, ...], out: Path) -> N
 @click.argument("envelope_path", type=click.Path(exists=True, path_type=Path))
 @click.option(
     "--kind",
-    type=click.Choice(["snapshot", "approval", "trust", "model"]),
+    type=click.Choice(_CONTRACT_KINDS),
     required=True,
     help="Expected contract purpose; a contract signed for another purpose is rejected.",
 )
@@ -187,7 +343,7 @@ def sign(contract_path: Path, kind: str, keys: tuple[Path, ...], out: Path) -> N
 )
 @click.option(
     "--threshold",
-    type=click.IntRange(min=1),
+    type=click.IntRange(min=1, max=32),
     default=1,
     help="Minimum number of distinct trusted signatures (default: 1).",
 )
@@ -199,37 +355,200 @@ def sign(contract_path: Path, kind: str, keys: tuple[Path, ...], out: Path) -> N
 def verify(
     envelope_path: Path, kind: str, keys: tuple[Path, ...], threshold: int, bom: Path | None
 ) -> None:
-    """Verify purpose, signer, subject and time; invocation uses ReferenceGateway."""
+    """Verify purpose, signer, subject and time; invocation uses ReferenceGateway.
+
+    Revocation, signer scopes, approver identities and an approval's bindings are
+    checked only by the gateway.
+    """
+    purpose = cast(Kind, kind)
     try:
-        ring = {}
-        for path in keys:
-            public = serialization.load_pem_public_key(_read(path, 65536))
-            if not isinstance(public, Ed25519PublicKey):
-                raise ValueError("expected Ed25519 public key")
-            ring[key_id(public)] = public
-        envelope = Envelope.model_validate(strict_json(_read(envelope_path)))
-        contract, accepted = verify_contract(
-            envelope, cast(Purpose, kind), ring, threshold=threshold
-        )
-        maximum = (
-            timedelta(minutes=5)
-            if kind == "approval"
-            else timedelta(hours=1 if kind == "trust" else 24)
-        )
-        _window(contract, datetime.now(UTC), maximum)
+        ring = _ring(keys)
+        envelope = Envelope.model_validate(_json_object(envelope_path))
+        contract, accepted = verify_contract(envelope, purpose, ring, threshold=threshold)
+        _window(contract, datetime.now(UTC), MAX_LIFETIMES[purpose], purpose)
         if isinstance(contract, ApprovedSnapshot):
-            if bom is None or digest(strict_json(_read(bom))) != contract.bom_digest:
-                raise ValueError("snapshot verification requires its exact companion BOM")
+            if bom is None:
+                raise AuthorizationError(
+                    "snapshot verification requires its exact companion BOM",
+                    reason="bom-required",
+                )
+            if bom_digest(_json_object(bom)) != contract.bom_digest:
+                raise AuthorizationError(
+                    "companion BOM does not match approved digest", reason="bom-mismatch"
+                )
         result: dict[str, Any] = {
             "contract_verified": True,
             "kind": kind,
-            "digest": digest(contract.model_dump(mode="json")),
+            "digest": contract_digest(contract),
             "accepted_signers": sorted(accepted),
             "invocation_authorized": False,
         }
-        click.echo(json.dumps(result, indent=2))
-    except (ValueError, OSError) as exc:
+        click.echo(json_text(json.dumps(result, indent=2)))
+    except _HANDLED as exc:
         raise click.ClickException(_safe_error(exc, "verification")) from None
+
+
+@runtime_group.command("digest")
+@click.argument("input_path", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "--kind",
+    type=click.Choice(_DIGEST_KINDS),
+    required=True,
+    help="What the file holds: an unsigned contract, an execution context, a tool call, "
+    "a served tool descriptor or a companion BOM.",
+)
+def digest_command(input_path: Path, kind: str) -> None:
+    """Print the canonical digest that contracts, approvals and revocations bind.
+
+    It verifies nothing and works for contracts that are not yet valid or expired.
+    """
+    try:
+        document = _json_object(input_path)
+        if kind in CONTRACTS:
+            value = contract_digest(CONTRACTS[kind].model_validate(document))
+        elif kind == "context":
+            value = contract_digest(ExecutionContext.model_validate(document))
+        elif kind == "request":
+            value = request_digest(ToolCall.model_validate(document))
+        elif kind == "tool":
+            value = tool_definition_digest(document)
+        else:
+            value = bom_digest(document)
+        click.echo(json_text(json.dumps({"kind": kind, "digest": value})))
+    except _HANDLED as exc:
+        raise click.ClickException(_safe_error(exc, "digest")) from None
+
+
+@runtime_group.command("key-id")
+@click.argument("public_key", type=click.Path(exists=True, path_type=Path))
+def key_id_command(public_key: Path) -> None:
+    """Print the key ID that envelopes, key rings and revocation lists use."""
+    try:
+        click.echo(json_text(json.dumps({"key_id": key_id(_load_public(public_key))})))
+    except _HANDLED as exc:
+        raise click.ClickException(_safe_error(exc, "key ID")) from None
+
+
+@runtime_group.command("register")
+@click.argument("snapshot_path", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "--trust",
+    "trust_path",
+    type=click.Path(exists=True, path_type=Path),
+    required=True,
+    help="Signed, currently valid trust status for the snapshot's tenant.",
+)
+@click.option(
+    "--state",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="Initialized state database that the gateways share.",
+)
+@click.option(
+    "--snapshot-key",
+    "snapshot_keys",
+    multiple=True,
+    required=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Trusted snapshot-signing public key PEM; repeat to build the ring.",
+)
+@click.option(
+    "--trust-key",
+    "trust_keys",
+    multiple=True,
+    required=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Trusted trust-status public key PEM; repeat to build the ring.",
+)
+@click.option(
+    "--approval-key",
+    "approval_keys",
+    multiple=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Approval public key PEM the gateways trust; repeat for each. Only checked, so "
+    "the gateways' signer scope map can be passed unchanged.",
+)
+@click.option(
+    "--snapshot-threshold",
+    type=click.IntRange(min=1, max=32),
+    default=1,
+    help="Minimum number of distinct snapshot signers (default: 1).",
+)
+@click.option(
+    "--trust-threshold",
+    type=click.IntRange(min=1, max=32),
+    default=1,
+    help="Minimum number of distinct trust-status signers (default: 1).",
+)
+@click.option(
+    "--signer-scopes",
+    type=click.Path(exists=True, path_type=Path),
+    help="JSON object mapping key IDs to the signer scopes the gateways use.",
+)
+@click.option(
+    "--allow-shared-keys",
+    is_flag=True,
+    help="Accept a key in more than one ring, as gateways built with allow_shared_keys=True do.",
+)
+def register(
+    snapshot_path: Path,
+    trust_path: Path,
+    state: Path,
+    snapshot_keys: tuple[Path, ...],
+    trust_keys: tuple[Path, ...],
+    approval_keys: tuple[Path, ...],
+    snapshot_threshold: int,
+    trust_threshold: int,
+    signer_scopes: Path | None,
+    allow_shared_keys: bool,
+) -> None:
+    """Make a newly issued snapshot current; gateways sharing the store deny older serials.
+
+    The snapshot and trust status are checked as the gateway checks them, except the
+    workload context and the companion BOM. Pass the rings, quorums, signer scopes
+    and shared-key setting the gateways use; approval keys are only checked against
+    the scope map.
+    """
+    try:
+        scopes = (
+            {}
+            if signer_scopes is None
+            else {
+                name: SignerScope.model_validate(scope)
+                for name, scope in _json_object(signer_scopes).items()
+            }
+        )
+        rings = {
+            "snapshot": _ring(snapshot_keys),
+            "trust": _ring(trust_keys),
+            "approval": _ring(approval_keys),
+        }
+        _check_rings(rings, scopes, allow_shared_keys)
+        registrar = ReferenceGateway.registrar(
+            snapshot_keys=rings["snapshot"],
+            trust_keys=rings["trust"],
+            approval_keys=rings["approval"],
+            state=StateStore(state),
+            snapshot_threshold=snapshot_threshold,
+            trust_threshold=trust_threshold,
+            signer_scopes=scopes,
+            allow_shared_keys=allow_shared_keys,
+        )
+        snapshot = registrar.register_snapshot(
+            Envelope.model_validate(_json_object(snapshot_path)),
+            trust=Envelope.model_validate(_json_object(trust_path)),
+        )
+        result = {
+            "registered": True,
+            "tenant": snapshot.tenant,
+            "deployment_id": snapshot.deployment_id,
+            "agent_id": snapshot.agent_id,
+            "serial": snapshot.serial,
+            "digest": contract_digest(snapshot),
+        }
+        click.echo(json_text(json.dumps(result)))
+    except _HANDLED as exc:
+        raise click.ClickException(_safe_error(exc, "registration")) from None
 
 
 def register_runtime_commands(main: click.Group) -> None:

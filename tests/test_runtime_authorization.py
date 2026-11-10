@@ -14,6 +14,9 @@ from pydantic import ValidationError
 
 from nexus_symbiote.core.hashing import hash_tool_definition
 from nexus_symbiote.runtime import (
+    PREDICATES,
+    REASONS,
+    STATEMENT_TYPE,
     ActionApproval,
     ApprovedSnapshot,
     AuthorizationError,
@@ -34,6 +37,7 @@ from nexus_symbiote.runtime import (
     strict_json,
     verify_contract,
 )
+from nexus_symbiote.runtime_validation import MAX_ARGUMENT_BYTES
 
 NOW = datetime(2026, 11, 1, tzinfo=UTC)
 POLICY = "sha256:" + "a" * 64
@@ -95,7 +99,7 @@ def fixture(tmp_path: Path, *, serial: int = 1):
         snapshot_keys={key_id(release.public_key()): release.public_key()},
         approval_keys={key_id(human.public_key()): human.public_key()},
         trust_keys={key_id(status.public_key()): status.public_key()},
-        state=StateStore(tmp_path / "state.sqlite"),
+        state=StateStore.initialize(tmp_path / "state.sqlite"),
         authenticate=lambda: context,
         describe=lambda *_: ServedTool(
             endpoint_identity=grant.endpoint_identity, definition=DEFINITION
@@ -129,8 +133,9 @@ def invoke(values, **changes):
 def test_gateway_executes_approved_call_and_consumes_approval(tmp_path):
     values = fixture(tmp_path)
     assert invoke(values) == "executed"
-    with pytest.raises(AuthorizationError, match="already been used"):
+    with pytest.raises(AuthorizationError, match="already been used") as replayed:
         invoke(values)
+    assert replayed.value.reason == "approval-replayed"
     assert len(values[-1]) == 1
 
 
@@ -143,8 +148,9 @@ def test_scope_resolver_cannot_modify_request_during_resolution(tmp_path):
         return "send", "mailbox:team"
 
     gateway.resolve_scope = mutate
-    with pytest.raises(AuthorizationError, match="resolver modified"):
+    with pytest.raises(AuthorizationError, match="resolver modified") as modified:
         invoke(values)
+    assert modified.value.reason == "resolver-modified-request"
     assert values[-1] == []
 
 
@@ -173,74 +179,242 @@ def test_scope_resolver_cannot_mutate_request_after_approval_check(tmp_path):
     assert original.arguments == {"to": "team@example.test"}
 
 
-@pytest.mark.parametrize(
-    "failure",
-    [
-        "missing-approval",
-        "changed-args",
-        "wrong-tenant",
-        "wrong-endpoint",
-        "changed-description",
-        "revoked-tool",
-        "revoked-signer",
-        "expired",
-        "future",
-        "bom-tampered",
-        "wrong-policy",
-        "wrong-resource",
-        "wrong-signer",
-        "unknown-descriptor-field",
-    ],
-)
-def test_gateway_denies_without_side_effects(tmp_path, failure):
-    values = list(fixture(tmp_path))
+def sign_unchecked(contract, kind, key):
+    """Sign without sign_contract's own refusals, as another DSSE signer could."""
+    body = contract.model_dump(mode="json")
+    statement = {
+        "_type": STATEMENT_TYPE,
+        "predicateType": PREDICATES[kind],
+        "subject": [{"name": kind, "digest": {"sha256": digest(body).split(":", 1)[1]}}],
+        "predicate": body,
+    }
+    payload = canonical_bytes(statement)
+    signature = EnvelopeSignature(
+        key_id=key_id(key.public_key()),
+        signature=base64.b64encode(key.sign(_pae(payload))).decode(),
+    )
+    return Envelope(payload=base64.b64encode(payload).decode(), signatures=(signature,))
+
+
+def autonomous(values):
+    grant = values[3].tools[0].model_copy(update={"require_approval": False})
+    values[3] = values[3].model_copy(update={"tools": (grant,)})
+
+
+def _denial_setup(values, failure):
     gateway, call, bom, snapshot, statuses, approval, release, human, status, executed = values
+    context = gateway.authenticate()
+    grant = snapshot.tools[0]
     changes = {}
     if failure == "missing-approval":
         changes["approval"] = None
-    elif failure == "changed-args":
+    elif failure == "changed-args-same-scope":
+        # The resolver still derives mailbox:team, so only the request binding stops it.
+        arguments = {"to": "team@example.test", "body": "wire the funds"}
+        values[1] = call.model_copy(update={"arguments": arguments})
+    elif failure == "changed-args-other-scope":
         values[1] = call.model_copy(update={"arguments": {"to": "attacker@example.test"}})
+    elif failure == "wrong-resource-label":
+        values[1] = call.model_copy(update={"resource": "mailbox:admin"})
+    elif failure == "out-of-grant-resource":
+        autonomous(values)
+        values[1] = call.model_copy(
+            update={"arguments": {"to": "admin@example.test"}, "resource": "mailbox:admin"}
+        )
+        changes["approval"] = None
+    elif failure == "ungranted-action":
+        values[1] = call.model_copy(update={"action": "delete"})
+        gateway.resolve_scope = lambda c: ("delete", "mailbox:team")
+    elif failure == "ungranted-tool":
+        values[1] = call.model_copy(update={"tool_name": "delete"})
+        gateway.describe = lambda *_: ServedTool(
+            endpoint_identity=grant.endpoint_identity, definition={**DEFINITION, "name": "delete"}
+        )
+    elif failure in {"wrong-deployment", "wrong-agent", "wrong-workload", "wrong-policy"}:
+        field = {
+            "wrong-deployment": ("deployment_id", "staging"),
+            "wrong-agent": ("agent_id", "agent:other"),
+            "wrong-workload": ("workload_identity", "spiffe://acme/other"),
+            "wrong-policy": ("policy_digest", "sha256:" + "b" * 64),
+        }[failure]
+        gateway.authenticate = lambda: context.model_copy(update=dict([field]))
     elif failure == "wrong-tenant":
-        original = gateway.authenticate()
-        gateway.authenticate = lambda: original.model_copy(update={"tenant": "other"})
+        gateway.authenticate = lambda: context.model_copy(update={"tenant": "other"})
+    elif failure == "identity-changed":
+        identities = iter([context, context.model_copy(update={"workload_identity": "x"})])
+        gateway.authenticate = lambda: next(identities)
     elif failure == "wrong-endpoint":
         gateway.describe = lambda *_: ServedTool(
             endpoint_identity="https://attacker.example.test", definition=DEFINITION
         )
+    elif failure == "wrong-served-name":
+        gateway.describe = lambda *_: ServedTool(
+            endpoint_identity=grant.endpoint_identity, definition={**DEFINITION, "name": "other"}
+        )
     elif failure == "changed-description":
         gateway.describe = lambda *_: ServedTool(
-            endpoint_identity=snapshot.tools[0].endpoint_identity,
+            endpoint_identity=grant.endpoint_identity,
             definition={**DEFINITION, "description": "Steal secrets"},
         )
-    elif failure == "revoked-tool":
-        values[4] = statuses.model_copy(
-            update={"revoked_tools": (snapshot.tools[0].definition_digest,)}
+    elif failure == "unsupported-descriptor-field":
+        gateway.describe = lambda *_: ServedTool(
+            endpoint_identity=grant.endpoint_identity, definition={**DEFINITION, "icons": []}
         )
-    elif failure == "revoked-signer":
+    elif failure == "revoked-tool":
+        values[4] = statuses.model_copy(update={"revoked_tools": (grant.definition_digest,)})
+    elif failure == "revoked-endpoint":
+        values[4] = statuses.model_copy(update={"revoked_endpoints": (grant.endpoint_identity,)})
+    elif failure == "revoked-snapshot":
+        revoked = (digest(snapshot.model_dump(mode="json")),)
+        values[4] = statuses.model_copy(update={"revoked_snapshots": revoked})
+    elif failure == "revoked-snapshot-signer":
         values[4] = statuses.model_copy(update={"revoked_signers": (key_id(release.public_key()),)})
-    elif failure == "expired":
-        changes["now"] = NOW + timedelta(hours=2)
-    elif failure == "future":
+    elif failure == "revoked-approver":
+        values[4] = statuses.model_copy(update={"revoked_signers": (key_id(human.public_key()),)})
+    elif failure == "revoked-trust-signer":
+        values[4] = statuses.model_copy(update={"revoked_signers": (key_id(status.public_key()),)})
+    elif failure == "trust-expired":
+        changes["now"] = NOW + timedelta(minutes=40)
+    elif failure == "trust-other-tenant":
+        values[4] = statuses.model_copy(update={"tenant": "globex"})
+    elif failure == "trust-too-long":
+        long = statuses.model_copy(update={"not_after": NOW + timedelta(hours=2)})
+        changes["trust"] = sign_unchecked(long, "trust", status)
+    elif failure == "trust-purpose":
+        changes["trust"] = sign_contract(snapshot, "snapshot", (status,))
+    elif failure == "snapshot-expired":
+        window = {"not_before": NOW - timedelta(hours=2), "not_after": NOW - timedelta(hours=1)}
+        values[3] = snapshot.model_copy(update=window)
+    elif failure == "snapshot-not-yet-valid":
         values[3] = snapshot.model_copy(update={"not_before": NOW + timedelta(minutes=1)})
+    elif failure == "snapshot-too-long":
+        long = snapshot.model_copy(update={"not_after": NOW + timedelta(hours=25)})
+        changes["snapshot"] = sign_unchecked(long, "snapshot", release)
+    elif failure == "wrong-snapshot-signer":
+        changes["snapshot"] = sign_contract(snapshot, "snapshot", (human,))
     elif failure == "bom-tampered":
         changes["bom"] = {**bom, "tools": ["send", "steal"]}
-    elif failure == "wrong-policy":
-        original = gateway.authenticate()
-        gateway.authenticate = lambda: original.model_copy(
-            update={"policy_digest": "sha256:" + "b" * 64}
+    elif failure == "approval-expired":
+        changes["now"] = NOW + timedelta(minutes=2)
+    elif failure == "approval-not-yet-valid":
+        window = {
+            "not_before": NOW + timedelta(seconds=30),
+            "not_after": NOW + timedelta(minutes=2),
+        }
+        values[5] = approval.model_copy(update=window)
+    elif failure == "approval-too-long":
+        long = approval.model_copy(update={"not_after": NOW + timedelta(hours=1)})
+        changes["approval"] = sign_unchecked(long, "approval", human)
+    elif failure == "approval-signed-by-snapshot-key":
+        changes["approval"] = sign_contract(approval, "approval", (release,))
+    elif failure == "approval-actor":
+        values[5] = approval.model_copy(update={"actor": "other-approver"})
+    elif failure == "approval-other-snapshot":
+        newer = snapshot.model_copy(update={"serial": 2})
+        values[5] = approval.model_copy(
+            update={"snapshot_digest": digest(newer.model_dump(mode="json"))}
         )
-    elif failure == "wrong-resource":
-        values[1] = call.model_copy(update={"resource": "mailbox:admin"})
-    elif failure == "wrong-signer":
-        changes["snapshot"] = sign_contract(snapshot, "snapshot", (human,))
-    elif failure == "unknown-descriptor-field":
+    elif failure == "approval-other-context":
+        other = context.model_copy(update={"workload_identity": "spiffe://acme/other"})
+        values[5] = approval.model_copy(
+            update={"context_digest": digest(other.model_dump(mode="json"))}
+        )
+    elif failure == "integer-out-of-range":
+        values[1] = call.model_copy(update={"arguments": {"to": "team@example.test", "id": 2**53}})
+    elif failure == "lone-surrogate-argument":
+        values[1] = call.model_copy(update={"arguments": {"to": "team@example.test\ud800"}})
+    elif failure == "oversized-arguments":
+        values[1] = call.model_copy(
+            update={"arguments": {"to": "team@example.test", "pad": "x" * MAX_ARGUMENT_BYTES}}
+        )
+    elif failure == "arguments-invalid":
+        values[1] = call.model_copy(update={"arguments": {"to": 7}})
+        gateway.resolve_scope = lambda c: ("send", "mailbox:team")
+        schema = {"type": "object", "properties": {"to": {"type": "string"}}}
+        definition = {**DEFINITION, "inputSchema": schema}
+        autonomous(values)
+        values[3] = values[3].model_copy(
+            update={
+                "tools": (
+                    values[3]
+                    .tools[0]
+                    .model_copy(
+                        update={
+                            "definition_digest": hash_tool_definition(
+                                "send", definition["description"], schema
+                            )
+                        }
+                    ),
+                )
+            }
+        )
         gateway.describe = lambda *_: ServedTool(
-            endpoint_identity=snapshot.tools[0].endpoint_identity,
-            definition={**DEFINITION, "outputSchema": {}},
+            endpoint_identity=grant.endpoint_identity, definition=definition
         )
-    with pytest.raises(AuthorizationError):
+        changes["approval"] = None
+    else:
+        raise AssertionError(failure)
+    return changes
+
+
+DENIALS = [
+    ("missing-approval", "approval-required", "operation-bound approval required"),
+    ("changed-args-same-scope", "approval-request-mismatch", "does not cover this operation"),
+    ("changed-args-other-scope", "scope-mismatch", "actual tool arguments"),
+    ("wrong-resource-label", "scope-mismatch", "actual tool arguments"),
+    ("out-of-grant-resource", "capability-denied", "outside approved capability"),
+    ("ungranted-action", "capability-denied", "outside approved capability"),
+    ("ungranted-tool", "tool-not-granted", "does not grant"),
+    ("wrong-deployment", "context-mismatch", "mismatch"),
+    ("wrong-agent", "context-mismatch", "mismatch"),
+    ("wrong-workload", "context-mismatch", "mismatch"),
+    ("wrong-policy", "context-mismatch", "mismatch"),
+    ("wrong-tenant", "trust-tenant-mismatch", "tenant mismatch"),
+    ("identity-changed", "identity-changed", "identity changed"),
+    ("wrong-endpoint", "endpoint-mismatch", "endpoint differs"),
+    ("wrong-served-name", "descriptor-name-mismatch", "tool name differs"),
+    ("changed-description", "descriptor-changed", "changed since approval"),
+    ("unsupported-descriptor-field", "descriptor-unsupported", "rfc8785-jcs-v2"),
+    ("revoked-tool", "tool-revoked", "tool is revoked"),
+    ("revoked-endpoint", "endpoint-revoked", "endpoint is revoked"),
+    ("revoked-snapshot", "snapshot-revoked", "snapshot is revoked"),
+    ("revoked-snapshot-signer", "signer-revoked", "signer is revoked"),
+    ("revoked-approver", "approver-revoked", "approver is revoked"),
+    ("revoked-trust-signer", "trust-signer-revoked", "unrevoked signers"),
+    ("trust-expired", "trust-expired", "expired"),
+    ("trust-other-tenant", "trust-tenant-mismatch", "tenant mismatch"),
+    ("trust-too-long", "trust-lifetime-exceeds-policy", "exceeds local policy"),
+    ("trust-purpose", "statement-purpose-mismatch", "purpose mismatch"),
+    ("snapshot-expired", "snapshot-expired", "expired"),
+    ("snapshot-not-yet-valid", "snapshot-not-yet-valid", "not yet valid"),
+    ("snapshot-too-long", "snapshot-lifetime-exceeds-policy", "exceeds local policy"),
+    ("wrong-snapshot-signer", "signers-insufficient", "insufficient distinct trusted signers"),
+    ("bom-tampered", "bom-mismatch", "companion BOM"),
+    ("approval-expired", "approval-expired", "expired"),
+    ("approval-not-yet-valid", "approval-not-yet-valid", "not yet valid"),
+    ("approval-too-long", "approval-lifetime-exceeds-policy", "exceeds local policy"),
+    ("approval-signed-by-snapshot-key", "signers-insufficient", "insufficient distinct"),
+    ("approval-actor", "approval-actor-unbound", "actor"),
+    ("approval-other-snapshot", "approval-snapshot-mismatch", "does not cover this operation"),
+    ("approval-other-context", "approval-context-mismatch", "does not cover this operation"),
+    ("integer-out-of-range", "arguments-number-out-of-range", "pass it as a string"),
+    ("lone-surrogate-argument", "arguments-not-json", "canonical JSON domain"),
+    ("oversized-arguments", "arguments-too-large", "JSON budget"),
+    ("arguments-invalid", "arguments-invalid", "offline input schema"),
+]
+
+
+@pytest.mark.parametrize(("failure", "reason", "message"), DENIALS, ids=[d[0] for d in DENIALS])
+def test_gateway_denies_with_a_specific_reason_and_no_side_effects(
+    tmp_path, failure, reason, message
+):
+    values = list(fixture(tmp_path))
+    changes = _denial_setup(values, failure)
+    with pytest.raises(AuthorizationError, match=message) as denied:
         invoke(values, **changes)
-    assert executed == []
+    assert denied.value.reason == reason
+    assert reason in REASONS
+    assert values[-1] == []
 
 
 def test_threshold_counts_distinct_authorized_keys(tmp_path):
@@ -281,13 +455,15 @@ def test_statement_type_and_payload_tampering_rejected(tmp_path):
 
 
 def test_verifier_records_high_water_mark_and_rejects_fork(tmp_path):
-    store = StateStore(tmp_path / "state.sqlite")
+    store = StateStore.initialize(tmp_path / "state.sqlite")
     store.record((("snapshot:acme/prod", 10, "digest10"),))
     reopened = StateStore(tmp_path / "state.sqlite")
-    with pytest.raises(AuthorizationError):
+    with pytest.raises(AuthorizationError) as older:
         reopened.record((("snapshot:acme/prod", 9, "digest9"),))
-    with pytest.raises(AuthorizationError):
+    assert older.value.reason == "snapshot-superseded"
+    with pytest.raises(AuthorizationError) as fork:
         reopened.record((("snapshot:acme/prod", 10, "other"),))
+    assert fork.value.reason == "snapshot-fork"
     reopened.record((("snapshot:acme/prod", 11, "digest11"),))
 
 
@@ -314,11 +490,13 @@ def test_new_revocation_is_remembered_even_when_call_is_denied(tmp_path):
     values[4] = old_status.model_copy(
         update={"serial": 2, "revoked_tools": (values[3].tools[0].definition_digest,)}
     )
-    with pytest.raises(AuthorizationError, match="revoked"):
+    with pytest.raises(AuthorizationError, match="revoked") as revoked:
         invoke(values)
+    assert revoked.value.reason == "tool-revoked"
     values[4] = old_status
-    with pytest.raises(AuthorizationError, match="rollback"):
+    with pytest.raises(AuthorizationError, match="rollback") as rollback:
         invoke(values)
+    assert rollback.value.reason == "trust-rollback"
     assert values[-1] == []
 
 
@@ -335,7 +513,7 @@ def test_revoked_trust_signer_cannot_reinstate_itself(tmp_path):
             "revoked_tools": (snapshot.tools[0].definition_digest,),
         }
     )
-    with pytest.raises(AuthorizationError, match="tool or endpoint is revoked"):
+    with pytest.raises(AuthorizationError, match="tool is revoked"):
         invoke(values, trust=sign_contract(revoked, "trust", (authority,)))
     gateway.state = StateStore(tmp_path / "state.sqlite")
     clear = status.model_copy(update={"serial": 3})
@@ -466,7 +644,19 @@ def test_expiry_is_rechecked_after_slow_adapter(tmp_path):
 
 @pytest.mark.parametrize(
     "schema",
-    [{"type": "object", "required": ["amount"]}, {"$ref": "https://attacker.example.test/schema"}],
+    [
+        {"type": "object", "required": ["amount"]},
+        {"$ref": "https://attacker.example.test/schema"},
+        # Python semantics read this deny-list as not matching "team@example.test":
+        # its backreference names a group that did not take part.
+        {"properties": {"to": {"not": {"pattern": r"""^(['"])?team\1@"""}}}},
+        # A subschema's own $schema would switch evaluation to draft-04, which has no const.
+        {
+            "properties": {
+                "to": {"$schema": "http://json-schema.org/draft-04/schema#", "const": "ops"}
+            }
+        },
+    ],
 )
 def test_invalid_or_external_schema_cannot_execute(tmp_path, schema):
     values = list(fixture(tmp_path))
@@ -507,7 +697,7 @@ def test_noncanonical_input_rejected(raw):
 
 
 def test_nonces_are_scoped_by_tenant_and_legacy_rows_stay_consumed(tmp_path):
-    store = StateStore(tmp_path / "state.sqlite")
+    store = StateStore.initialize(tmp_path / "state.sqlite")
     store.record((), "shared-nonce", tenant="acme")
     store.record((), "shared-nonce", tenant="globex")
     with pytest.raises(AuthorizationError, match="already been used"):

@@ -1,0 +1,265 @@
+{
+  "description": "Known-answer vectors for runtime contracts. The Ed25519 key is a published test key derived from seed_hex; never trust it. A change to any value here changes the wire format or a digest preimage and requires a new predicate or profile version.",
+  "key": {
+    "seed_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAA6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=\n-----END PUBLIC KEY-----\n",
+    "key_id": "a050837d85070582ccf7394b0988847cc312cb88259b894899f6f239cf1791a5"
+  },
+  "contracts": {
+    "snapshot": {
+      "predicate": {
+        "not_before": "2026-11-01T12:00:00Z",
+        "not_after": "2026-11-02T12:00:00Z",
+        "version": "1",
+        "kind": "approved",
+        "agent_id": "agent:triage",
+        "deployment_id": "prod",
+        "tenant": "acme",
+        "workload_identity": "spiffe://acme.example/ns/prod/sa/triage",
+        "serial": 7,
+        "bom_digest": "sha256:f1c3b69d8f0fba7fdb6c2e4497508d79a55da87b858480994cd45bd7ac361c08",
+        "policy_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "tools": [
+          {
+            "definition_profile": "rfc8785-jcs-v2",
+            "server_id": "server:mail",
+            "endpoint_identity": "https://mail.example.test/mcp",
+            "tool_name": "send",
+            "definition_digest": "sha256:2a7a3fb1d59ddde56cde86fe42e2fef2b8f2d2b5a9fd6dc0fb9cd0e20ef3d846",
+            "actions": [
+              "send"
+            ],
+            "resources": [
+              "mailbox:team"
+            ],
+            "require_approval": true
+          }
+        ]
+      },
+      "digest": "sha256:7996215e0392b26de2bb026b4f42b37e9465b710d285f4678b3cf559e741d376",
+      "envelope": {
+        "payloadType": "application/vnd.in-toto+json",
+        "payload": "eyJfdHlwZSI6Imh0dHBzOi8vaW4tdG90by5pby9TdGF0ZW1lbnQvdjEiLCJwcmVkaWNhdGUiOnsiYWdlbnRfaWQiOiJhZ2VudDp0cmlhZ2UiLCJib21fZGlnZXN0Ijoic2hhMjU2OmYxYzNiNjlkOGYwZmJhN2ZkYjZjMmU0NDk3NTA4ZDc5YTU1ZGE4N2I4NTg0ODA5OTRjZDQ1YmQ3YWMzNjFjMDgiLCJkZXBsb3ltZW50X2lkIjoicHJvZCIsImtpbmQiOiJhcHByb3ZlZCIsIm5vdF9hZnRlciI6IjIwMjYtMTEtMDJUMTI6MDA6MDBaIiwibm90X2JlZm9yZSI6IjIwMjYtMTEtMDFUMTI6MDA6MDBaIiwicG9saWN5X2RpZ2VzdCI6InNoYTI1NjphYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIiwic2VyaWFsIjo3LCJ0ZW5hbnQiOiJhY21lIiwidG9vbHMiOlt7ImFjdGlvbnMiOlsic2VuZCJdLCJkZWZpbml0aW9uX2RpZ2VzdCI6InNoYTI1NjoyYTdhM2ZiMWQ1OWRkZGU1NmNkZTg2ZmU0MmUyZmVmMmI4ZjJkMmI1YTlmZDZkYzBmYjljZDBlMjBlZjNkODQ2IiwiZGVmaW5pdGlvbl9wcm9maWxlIjoicmZjODc4NS1qY3MtdjIiLCJlbmRwb2ludF9pZGVudGl0eSI6Imh0dHBzOi8vbWFpbC5leGFtcGxlLnRlc3QvbWNwIiwicmVxdWlyZV9hcHByb3ZhbCI6dHJ1ZSwicmVzb3VyY2VzIjpbIm1haWxib3g6dGVhbSJdLCJzZXJ2ZXJfaWQiOiJzZXJ2ZXI6bWFpbCIsInRvb2xfbmFtZSI6InNlbmQifV0sInZlcnNpb24iOiIxIiwid29ya2xvYWRfaWRlbnRpdHkiOiJzcGlmZmU6Ly9hY21lLmV4YW1wbGUvbnMvcHJvZC9zYS90cmlhZ2UifSwicHJlZGljYXRlVHlwZSI6Imh0dHBzOi8vZ2l0aHViLmNvbS9haXNlY25vbWFkL25leHVzLXN5bWJpb3RlL2F0dGVzdGF0aW9uL2FwcHJvdmVkLXNuYXBzaG90L3YxIiwic3ViamVjdCI6W3siZGlnZXN0Ijp7InNoYTI1NiI6Ijc5OTYyMTVlMDM5MmIyNmRlMmJiMDI2YjRmNDJiMzdlOTQ2NWI3MTBkMjg1ZjQ2NzhiM2NmNTU5ZTc0MWQzNzYifSwibmFtZSI6InNuYXBzaG90In1dfQ==",
+        "signatures": [
+          {
+            "keyid": "a050837d85070582ccf7394b0988847cc312cb88259b894899f6f239cf1791a5",
+            "sig": "k2MF1hAotkzj5QDO+zxQKkLs0CFNl8bEMB9TZjNQucxNOukMI8lY5SG7GeYG6gMr6WCAFeRhUIwVajkTlsjABQ=="
+          }
+        ]
+      }
+    },
+    "approval": {
+      "predicate": {
+        "not_before": "2026-11-01T12:00:00Z",
+        "not_after": "2026-11-01T12:05:00Z",
+        "version": "1",
+        "snapshot_digest": "sha256:7996215e0392b26de2bb026b4f42b37e9465b710d285f4678b3cf559e741d376",
+        "context_digest": "sha256:9a64e9d85c4730a9a8abff0184ab65ba0f38ff84fc9cc8e0ca0d718ef1ea85db",
+        "request_digest": "sha256:d864a00310030eae90ddebe3d5e7c289f0e57ac8f9b5f660eba83e31501cb08d",
+        "nonce": "0123456789abcdef0123456789abcdef",
+        "actor": "alice"
+      },
+      "digest": "sha256:2703db2a8ea11b0530f119c3f2e4ed0a643af2fb8e4474a2c3e8108dad6fd59d",
+      "envelope": {
+        "payloadType": "application/vnd.in-toto+json",
+        "payload": "eyJfdHlwZSI6Imh0dHBzOi8vaW4tdG90by5pby9TdGF0ZW1lbnQvdjEiLCJwcmVkaWNhdGUiOnsiYWN0b3IiOiJhbGljZSIsImNvbnRleHRfZGlnZXN0Ijoic2hhMjU2OjlhNjRlOWQ4NWM0NzMwYTlhOGFiZmYwMTg0YWI2NWJhMGYzOGZmODRmYzljYzhlMGNhMGQ3MThlZjFlYTg1ZGIiLCJub25jZSI6IjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmIiwibm90X2FmdGVyIjoiMjAyNi0xMS0wMVQxMjowNTowMFoiLCJub3RfYmVmb3JlIjoiMjAyNi0xMS0wMVQxMjowMDowMFoiLCJyZXF1ZXN0X2RpZ2VzdCI6InNoYTI1NjpkODY0YTAwMzEwMDMwZWFlOTBkZGViZTNkNWU3YzI4OWYwZTU3YWM4ZjliNWY2NjBlYmE4M2UzMTUwMWNiMDhkIiwic25hcHNob3RfZGlnZXN0Ijoic2hhMjU2Ojc5OTYyMTVlMDM5MmIyNmRlMmJiMDI2YjRmNDJiMzdlOTQ2NWI3MTBkMjg1ZjQ2NzhiM2NmNTU5ZTc0MWQzNzYiLCJ2ZXJzaW9uIjoiMSJ9LCJwcmVkaWNhdGVUeXBlIjoiaHR0cHM6Ly9naXRodWIuY29tL2Fpc2Vjbm9tYWQvbmV4dXMtc3ltYmlvdGUvYXR0ZXN0YXRpb24vYWN0aW9uLWFwcHJvdmFsL3YxIiwic3ViamVjdCI6W3siZGlnZXN0Ijp7InNoYTI1NiI6IjI3MDNkYjJhOGVhMTFiMDUzMGYxMTljM2YyZTRlZDBhNjQzYWYyZmI4ZTQ0NzRhMmMzZTgxMDhkYWQ2ZmQ1OWQifSwibmFtZSI6ImFwcHJvdmFsIn1dfQ==",
+        "signatures": [
+          {
+            "keyid": "a050837d85070582ccf7394b0988847cc312cb88259b894899f6f239cf1791a5",
+            "sig": "utJ4cszWBQhD7NDHh8CHuKHmVA2OPzc7WsUR3gowV8BBF2DQ4STgeVcUVsczPXkFivQFt1fMo8UUbcorK5PJCg=="
+          }
+        ]
+      }
+    },
+    "trust": {
+      "predicate": {
+        "not_before": "2026-11-01T12:00:00Z",
+        "not_after": "2026-11-01T13:00:00Z",
+        "version": "1",
+        "tenant": "acme",
+        "serial": 3,
+        "revoked_snapshots": [
+          "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+        ],
+        "revoked_tools": [
+          "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+        ],
+        "revoked_endpoints": [
+          "stdio+launcher:sha256:3333333333333333333333333333333333333333333333333333333333333333"
+        ],
+        "revoked_signers": [
+          "4444444444444444444444444444444444444444444444444444444444444444"
+        ]
+      },
+      "digest": "sha256:954c2f69d3b06a997bcf9dd0b002cd861eac36ec216854928859c31813b31147",
+      "envelope": {
+        "payloadType": "application/vnd.in-toto+json",
+        "payload": "eyJfdHlwZSI6Imh0dHBzOi8vaW4tdG90by5pby9TdGF0ZW1lbnQvdjEiLCJwcmVkaWNhdGUiOnsibm90X2FmdGVyIjoiMjAyNi0xMS0wMVQxMzowMDowMFoiLCJub3RfYmVmb3JlIjoiMjAyNi0xMS0wMVQxMjowMDowMFoiLCJyZXZva2VkX2VuZHBvaW50cyI6WyJzdGRpbytsYXVuY2hlcjpzaGEyNTY6MzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMyJdLCJyZXZva2VkX3NpZ25lcnMiOlsiNDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NCJdLCJyZXZva2VkX3NuYXBzaG90cyI6WyJzaGEyNTY6MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMSJdLCJyZXZva2VkX3Rvb2xzIjpbInNoYTI1NjoyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyIl0sInNlcmlhbCI6MywidGVuYW50IjoiYWNtZSIsInZlcnNpb24iOiIxIn0sInByZWRpY2F0ZVR5cGUiOiJodHRwczovL2dpdGh1Yi5jb20vYWlzZWNub21hZC9uZXh1cy1zeW1iaW90ZS9hdHRlc3RhdGlvbi90cnVzdC1zdGF0dXMvdjEiLCJzdWJqZWN0IjpbeyJkaWdlc3QiOnsic2hhMjU2IjoiOTU0YzJmNjlkM2IwNmE5OTdiY2Y5ZGQwYjAwMmNkODYxZWFjMzZlYzIxNjg1NDkyODg1OWMzMTgxM2IzMTE0NyJ9LCJuYW1lIjoidHJ1c3QifV19",
+        "signatures": [
+          {
+            "keyid": "a050837d85070582ccf7394b0988847cc312cb88259b894899f6f239cf1791a5",
+            "sig": "6wMRqkGGEZ1I7sCJwI9N+0uMK6i/mTRVHmfByupsDH33oB1kkUYHWWQZr8aEkj/0KvHjOUu+zhPvu7AqLRJJDA=="
+          }
+        ]
+      }
+    },
+    "model": {
+      "predicate": {
+        "not_before": "2026-11-01T12:00:00Z",
+        "not_after": "2026-11-02T12:00:00Z",
+        "provider": "example-provider",
+        "endpoint": "https://models.example.test/v1",
+        "requested_alias": "example-large",
+        "resolved_revision": "2026-10-01"
+      },
+      "digest": "sha256:f48307a64b542227b9440f038856982c55a0db2abf681dfd104b94b072e1766b",
+      "envelope": {
+        "payloadType": "application/vnd.in-toto+json",
+        "payload": "eyJfdHlwZSI6Imh0dHBzOi8vaW4tdG90by5pby9TdGF0ZW1lbnQvdjEiLCJwcmVkaWNhdGUiOnsiZW5kcG9pbnQiOiJodHRwczovL21vZGVscy5leGFtcGxlLnRlc3QvdjEiLCJub3RfYWZ0ZXIiOiIyMDI2LTExLTAyVDEyOjAwOjAwWiIsIm5vdF9iZWZvcmUiOiIyMDI2LTExLTAxVDEyOjAwOjAwWiIsInByb3ZpZGVyIjoiZXhhbXBsZS1wcm92aWRlciIsInJlcXVlc3RlZF9hbGlhcyI6ImV4YW1wbGUtbGFyZ2UiLCJyZXNvbHZlZF9yZXZpc2lvbiI6IjIwMjYtMTAtMDEifSwicHJlZGljYXRlVHlwZSI6Imh0dHBzOi8vZ2l0aHViLmNvbS9haXNlY25vbWFkL25leHVzLXN5bWJpb3RlL2F0dGVzdGF0aW9uL2hvc3RlZC1tb2RlbC92MSIsInN1YmplY3QiOlt7ImRpZ2VzdCI6eyJzaGEyNTYiOiJmNDgzMDdhNjRiNTQyMjI3Yjk0NDBmMDM4ODU2OTgyYzU1YTBkYjJhYmY2ODFkZmQxMDRiOTRiMDcyZTE3NjZiIn0sIm5hbWUiOiJtb2RlbCJ9XX0=",
+        "signatures": [
+          {
+            "keyid": "a050837d85070582ccf7394b0988847cc312cb88259b894899f6f239cf1791a5",
+            "sig": "7ELtr+nMups4aM9/Sk0soe4nn1ePV3JmTPh5m2F5XK/rk22w2sn6jY4a6Jfm5wrxBezaMqv58AKWm30xpHl3Dg=="
+          }
+        ]
+      }
+    }
+  },
+  "context": {
+    "value": {
+      "agent_id": "agent:triage",
+      "deployment_id": "prod",
+      "tenant": "acme",
+      "workload_identity": "spiffe://acme.example/ns/prod/sa/triage",
+      "policy_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "digest": "sha256:9a64e9d85c4730a9a8abff0184ab65ba0f38ff84fc9cc8e0ca0d718ef1ea85db"
+  },
+  "request": {
+    "value": {
+      "server_id": "server:mail",
+      "tool_name": "send",
+      "action": "send",
+      "resource": "mailbox:team",
+      "arguments": {
+        "to": "team@example.test",
+        "priority": 1.0,
+        "tags": [
+          "a",
+          "é"
+        ]
+      }
+    },
+    "digest": "sha256:d864a00310030eae90ddebe3d5e7c289f0e57ac8f9b5f660eba83e31501cb08d"
+  },
+  "bom": {
+    "value": {
+      "metadata": {
+        "name": "triage"
+      },
+      "components": [
+        {
+          "name": "send",
+          "version": 1.5
+        }
+      ]
+    },
+    "digest": "sha256:f1c3b69d8f0fba7fdb6c2e4497508d79a55da87b858480994cd45bd7ac361c08"
+  },
+  "descriptors": [
+    {
+      "definition": {
+        "name": "send",
+        "description": "Send a message",
+        "inputSchema": {
+          "type": "object"
+        }
+      },
+      "digest": "sha256:762b12b80a23f272dfc2cbaec23d77ac1c7fe2d15d12fb1baf565947566e170a"
+    },
+    {
+      "definition": {
+        "name": "send",
+        "description": "Send a message",
+        "inputSchema": {
+          "type": "object"
+        },
+        "annotations": {}
+      },
+      "digest": "sha256:762b12b80a23f272dfc2cbaec23d77ac1c7fe2d15d12fb1baf565947566e170a"
+    },
+    {
+      "definition": {
+        "name": "send",
+        "description": "Send a message"
+      },
+      "digest": "sha256:93b31efd55e851592022ec4f2b47e4c2e48bb95201b38377ebdca9eb97ef0dc3"
+    },
+    {
+      "definition": {
+        "name": "send",
+        "description": "Send a message",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "to": {
+              "type": "string"
+            },
+            "priority": {
+              "type": "number",
+              "minimum": 0.5
+            }
+          },
+          "required": [
+            "to"
+          ]
+        },
+        "annotations": {
+          "destructiveHint": false,
+          "openWorldHint": true,
+          "title": "Send"
+        }
+      },
+      "digest": "sha256:2a7a3fb1d59ddde56cde86fe42e2fef2b8f2d2b5a9fd6dc0fb9cd0e20ef3d846"
+    },
+    {
+      "definition": {
+        "name": "lookup",
+        "description": "Look up 🔎 café entries",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "🔑": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "digest": "sha256:c7476f70a3bd8965090e6b86efc42eddc5aca0bfaae936269ee62916cdac9a43"
+    },
+    {
+      "definition": {
+        "name": "send",
+        "description": "Send a message",
+        "inputSchema": {
+          "type": "object"
+        },
+        "title": "Send mail",
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        },
+        "_meta": {
+          "vendor": {
+            "tier": 1
+          }
+        }
+      },
+      "digest": "sha256:0d4950f8ab00ab2fb773c94a5afbfacf7f14d28ea7ee20a41623e30e7d4a1cb5"
+    }
+  ]
+}
