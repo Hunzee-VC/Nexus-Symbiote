@@ -302,7 +302,14 @@ _JSON_STRING = re.compile(r'"(?:[^"\\]|\\.)*"', re.DOTALL)
 
 
 def _strip_jsonc(text: str) -> str:
-    """Remove comments and trailing commas outside strings in one linear pass."""
+    """Remove comments and trailing commas outside strings in one linear pass.
+
+    Readers disagree about where a line comment ends: VS Code also ends one at a
+    lone carriage return and at U+2028 or U+2029, other JSONC readers only at a
+    line feed. Text that depends on the difference is rejected, never guessed.
+    """
+    if "\u2028" in text or "\u2029" in text:
+        raise ValueError("line or paragraph separator")
     parts: list[str] = []
     position = 0
     comma = -1
@@ -321,6 +328,8 @@ def _strip_jsonc(text: str) -> str:
         elif mark == "//":
             newline = text.find("\n", start)
             position = len(text) if newline < 0 else newline
+            if "\r" in text[start:position].removesuffix("\r"):
+                raise ValueError("carriage return inside a line comment")
         elif mark == "/*":
             close = text.find("*/", start + 2)
             if close < 0:
