@@ -5,6 +5,7 @@ from __future__ import annotations
 import itertools
 import json
 import re
+import sys
 import time
 from pathlib import Path
 
@@ -1025,6 +1026,28 @@ def test_a_large_pyproject_is_not_parsed(tmp_path):
     (tmp_path / "pyproject.toml").write_text("x = 1\n" * 50_000)
     assert RegistryScanner().scan(tmp_path).scan_failures == [
         "pyproject.toml: exceeds the size limit: not read"
+    ]
+
+
+def test_an_integer_too_long_to_convert_fails_only_pyproject(tmp_path):
+    # tomllib raises a plain ValueError past CPython's limit on decimal digits; it
+    # used to fail the whole collector and drop the npm and image components.
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "a"\nversion = "1"\ndependencies = ["anthropic==0.40.0"]\n'
+        "[tool.x]\nn = " + "1" * 5_000 + "\n"
+    )
+    (tmp_path / "package.json").write_text('{"dependencies": {"openai": "4.52.0"}}')
+    (tmp_path / "Dockerfile").write_text("FROM ollama/ollama:0.5.7\n")
+    previous = sys.get_int_max_str_digits()
+    sys.set_int_max_str_digits(sys.int_info.default_max_str_digits)
+    try:
+        result = RegistryScanner().scan(tmp_path)
+    finally:
+        sys.set_int_max_str_digits(previous)
+    assert result.scan_failures == ["pyproject.toml: invalid TOML"]
+    assert sorted(c.bom_ref for c in result.components) == [
+        "registry:docker/ollama/ollama:0.5.7",
+        "registry:npm/openai",
     ]
 
 

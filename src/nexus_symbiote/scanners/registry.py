@@ -2026,7 +2026,9 @@ class RegistryScanner(Scanner):
             return []
         try:
             data = tomllib.loads(content)
-        except (tomllib.TOMLDecodeError, RecursionError, MemoryError):
+        except (ValueError, RecursionError, MemoryError):
+            # TOMLDecodeError is a ValueError; tomllib raises a plain one for a decimal
+            # integer past CPython's limit on digits it converts.
             result.scan_failures.append("pyproject.toml: invalid TOML")
             return []
         declarations: list[tuple[str, str, str | None]] = []
@@ -2269,12 +2271,6 @@ class RegistryScanner(Scanner):
 
     # Containerfile is the name Podman and Buildah read by default.
     _DOCKERFILES = ("Dockerfile", "Dockerfile.agent", "Containerfile")
-    # A COMPOSE_FILE assignment, or a bare name that takes it from the environment,
-    # as Compose's dotenv parser reads a line of .env.
-    _COMPOSE_FILE_SETTING = re.compile(
-        rb"^(?:\xef\xbb\xbf)?[ \t\r\f\v]*(?:export[ \t\r\f\v]+)?COMPOSE_FILE[ \t\r\f\v]*(?:[=:]|$)",
-        re.MULTILINE,
-    )
     # Compose reads the first of the four base names that exists and merges the
     # first override file; every one of them is read, so none can hide an image.
     _COMPOSE_FILES = (
@@ -2294,7 +2290,7 @@ class RegistryScanner(Scanner):
             # Read as bytes, so that no encoding fails the collector; nothing in it
             # is recorded.
             result.surfaces_scanned.append(".env")
-            if self._COMPOSE_FILE_SETTING.search(environment):
+            if self._names_compose_file(environment):
                 # Compose reads the files it names instead of the default ones.
                 result.surfaces_excluded.append(".env: COMPOSE_FILE not followed")
         # One component per image, with every file that names it.
@@ -2348,6 +2344,17 @@ class RegistryScanner(Scanner):
                 continue
             components.append(component)
         return components
+
+    @staticmethod
+    def _names_compose_file(environment: bytes) -> bool:
+        """Whether a .env mentions COMPOSE_FILE, in any letter case.
+
+        Compose's dotenv parser reads statements, not lines: it skips any Unicode
+        space before a name and before "=", and a statement can start right after a
+        closing quote. No line pattern finds every setting, so any mention counts; one
+        in a comment or a value costs only a false gap.
+        """
+        return "COMPOSE_FILE" in environment.decode("utf-8", "replace").upper()
 
     @staticmethod
     def _image_gaps(image: str) -> list[str]:
@@ -2690,14 +2697,17 @@ class _ComposeWalk:
     name, earlier ones first, as YAML's merge key type defines. Each mapping's keys
     are worked out once; a mapping that merges itself, directly or through
     others, is a gap rather than a loop. An alias is the node it names, so each
-    image, model, build and inline Dockerfile node is read once, however many
-    services share it.
+    image, model, build, inline Dockerfile and build path node is read once,
+    however many services share it, through aliases or merge keys.
     """
 
     _STR = "tag:yaml.org,2002:str"
     _NULL = "tag:yaml.org,2002:null"
     # The scalars YAML 1.1 and 1.2 both read as null.
     _NULL_TEXT = frozenset({"", "~", "null", "Null", "NULL"})
+    # Linux's PATH_MAX. A longer build path is not followed, even one that names the
+    # project root, and is never split.
+    _LONGEST_PATH = 4_096
 
     def __init__(self, budget: int) -> None:
         self.budget = budget
@@ -2705,6 +2715,7 @@ class _ComposeWalk:
         self._keys: dict[int, dict[str, Any]] = {}
         self._open: set[int] = set()
         self._read: set[tuple[str, int]] = set()
+        self._paths: dict[int, list[str] | None] = {}
 
     def _spend(self, steps: int = 1) -> None:
         self.budget -= steps
@@ -2836,54 +2847,87 @@ class _ComposeWalk:
         import yaml
 
         unread = "build context not followed"
+        context: list[str] | None
+        dockerfile: list[str] | None
         if isinstance(node, yaml.ScalarNode):
-            context = self._text(node, "build not followed")
-            dockerfile: str | None = "Dockerfile"
-            if not context:
+            text = self._text(node, "build not followed")
+            if not text:
                 # No build, such as an override file's !reset, or a gap recorded.
                 return []
+            context, dockerfile = self._parts(node, text), ["Dockerfile"]
         elif isinstance(node, yaml.MappingNode):
             fields = self.keys(node)
+            if self._named_contexts(fields):
+                # BuildKit uses a named context in place of the image that a FROM
+                # line of that name pulls.
+                self.gaps[unread] = None
             if "dockerfile_inline" in fields:
                 return self._inline(fields["dockerfile_inline"])
-            context = self._setting(fields.get("context"), ".", unread)
-            dockerfile = self._setting(fields.get("dockerfile"), "Dockerfile", unread)
+            context = self._path(fields.get("context"), ".")
+            dockerfile = self._path(fields.get("dockerfile"), "Dockerfile")
         else:
             self.gaps["build not followed"] = None
             return []
-        if context is None or dockerfile is None:
-            return []
-        local = self._local(dockerfile)
         if not (
-            self._local(context) == []
-            and local is not None
-            and len(local) == 1
-            and local[0] in RegistryScanner._DOCKERFILES
+            context == []
+            and dockerfile is not None
+            and len(dockerfile) == 1
+            and dockerfile[0] in RegistryScanner._DOCKERFILES
         ):
             # The Dockerfile it builds from is not one the collector reads.
             self.gaps[unread] = None
         return []
 
-    def _setting(self, node: Any, default: str, gap: str) -> str | None:
-        """A build path setting as text, its default when unset, or None after a gap."""
+    def _named_contexts(self, fields: dict[str, Any]) -> bool:
+        """Whether a build names contexts: Compose's additional_contexts, or the
+        contexts that docker buildx bake reads from x-bake in the same file."""
+        import yaml
+
+        bake = fields.get("x-bake")
+        if isinstance(bake, yaml.MappingNode):
+            bake = self.keys(bake).get("contexts")
+        return any(
+            node is not None and not self._unset(node)
+            for node in (fields.get("additional_contexts"), bake)
+        )
+
+    def _unset(self, node: Any) -> bool:
+        """Whether a node holds no entries: null, empty, or Compose's !reset."""
+        import yaml
+
+        if node.tag == "!reset":
+            return True
+        return self._empty(node) if isinstance(node, yaml.ScalarNode) else not node.value
+
+    def _path(self, node: Any, default: str) -> list[str] | None:
+        """A build path setting's parts, its default's when unset, or None when the
+        collector does not follow it."""
         import yaml
 
         if node is None:
-            return default
+            return self._local(default)
         if not isinstance(node, yaml.ScalarNode):
-            self.gaps[gap] = None
             return None
-        text = self._text(node, gap)
-        return default if text == "" else text
+        text = self._text(node, "build context not followed")
+        if text is None:
+            return None
+        return self._parts(node, text) if text else self._local(default)
 
-    @staticmethod
-    def _local(path: str) -> list[str] | None:
+    def _parts(self, node: Any, text: str) -> list[str] | None:
+        """A scalar's path parts, worked out once however many builds share it."""
+        if id(node) not in self._paths:
+            self._paths[id(node)] = self._local(text)
+        return self._paths[id(node)]
+
+    @classmethod
+    def _local(cls, path: str) -> list[str] | None:
         """A relative path's parts as Compose resolves it, None for any other path.
 
         An absolute path, such as "/" for the root of the host, is not the project
-        root; a backslash separates paths on Windows.
+        root; a backslash separates paths on Windows. A path too long to open is not
+        split at all.
         """
-        if path.startswith("/") or "\\" in path:
+        if len(path) > cls._LONGEST_PATH or path.startswith("/") or "\\" in path:
             return None
         return RegistryScanner._normalised(path.split("/"))
 

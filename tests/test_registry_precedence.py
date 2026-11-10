@@ -11,7 +11,7 @@ import pytest
 from click.testing import CliRunner
 
 from nexus_symbiote.cli import main
-from nexus_symbiote.scanners.registry import RegistryScanner
+from nexus_symbiote.scanners.registry import RegistryScanner, _ComposeWalk
 
 SHA512 = "sha512-" + base64.b64encode(b"x" * 64).decode()
 
@@ -258,8 +258,21 @@ def test_uv_workspace_members_are_a_coverage_gap(tmp_path, members, gaps):
         # A name without a value takes it from the environment Compose runs in.
         ("COMPOSE_FILE\n", True),
         ("COMPOSE_FILE: deploy/stack.yml\n", True),
-        ("# COMPOSE_FILE=deploy/stack.yml\nOPENAI_API_KEY=sk-test\n", False),
-        ("MY_COMPOSE_FILE=a\nCOMPOSE_FILES=b\n", False),
+        # Compose's dotenv parser reads statements, not lines: it skips any Unicode
+        # space before a name and before "=", and a statement can start right after
+        # a closing quote.
+        ("\u00a0COMPOSE_FILE=deploy/stack.yml\n", True),
+        ("\u0085COMPOSE_FILE=deploy/stack.yml\n", True),
+        ("\u3000COMPOSE_FILE=deploy/stack.yml\n", True),
+        ("COMPOSE_FILE\u00a0=deploy/stack.yml\n", True),
+        ('A="x" COMPOSE_FILE=deploy/stack.yml\n', True),
+        ("A='x'COMPOSE_FILE=deploy/stack.yml\n", True),
+        ('A="x\ny"COMPOSE_FILE=deploy/stack.yml\n', True),
+        # Any mention of the name, in any letter case, counts.
+        ("# COMPOSE_FILE=deploy/stack.yml\nOPENAI_API_KEY=sk-test\n", True),
+        ("MY_COMPOSE_FILE=a\nCOMPOSE_FILES=b\n", True),
+        ("compose_file=deploy/stack.yml\n", True),
+        ("COMPOSE_PROJECT_NAME=agent\nOPENAI_API_KEY=sk-test\n", False),
     ],
 )
 def test_a_compose_file_selected_in_dotenv_is_a_coverage_gap(tmp_path, environment, gap):
@@ -267,11 +280,11 @@ def test_a_compose_file_selected_in_dotenv_is_a_coverage_gap(tmp_path, environme
     project = _write(
         tmp_path,
         {
-            ".env": environment,
             "compose.yaml": "services:\n  llm:\n    image: ollama/ollama:0.5.7\n",
             "deploy/stack.yml": "services:\n  llm:\n    image: evil.example/ollama:1\n",
         },
     )
+    (project / ".env").write_bytes(environment.encode())
     result = RegistryScanner().scan(project)
     assert result.surfaces_excluded == ([".env: COMPOSE_FILE not followed"] if gap else [])
     assert ".env" in result.surfaces_scanned
@@ -810,6 +823,153 @@ def test_an_inline_dockerfile_shared_by_many_services_is_parsed_once(
     assert result.scan_failures == [] and result.surfaces_excluded == []
     assert [c.name for c in result.components] == ["ollama/ollama:0.5.7"]
     assert len(parsed) == 1 and parsed[0] > 400_000
+
+
+def _count_path_reads(monkeypatch) -> list[str]:
+    read: list[str] = []
+    original = _ComposeWalk._local
+
+    def counting(path: str) -> list[str] | None:
+        read.append(path)
+        return original(path)
+
+    monkeypatch.setattr(_ComposeWalk, "_local", staticmethod(counting))
+    return read
+
+
+LONG_PATH = "ab/" * 140_000 + "ab"
+
+
+@pytest.mark.parametrize(
+    "compose",
+    [
+        # Each service has a build of its own, and all alias one context, one
+        # dockerfile, both, or merge one mapping that holds the context.
+        "x-c: &c "
+        + LONG_PATH
+        + "\nservices:\n"
+        + "".join(f"  s{i}: {{build: {{context: *c}}}}\n" for i in range(1_000)),
+        "x-c: &c "
+        + LONG_PATH
+        + "\nservices:\n"
+        + "".join(f"  s{i}: {{build: {{dockerfile: *c}}}}\n" for i in range(1_000)),
+        "x-c: &c "
+        + LONG_PATH
+        + "\nservices:\n"
+        + "".join(f"  s{i}: {{build: {{context: *c, dockerfile: *c}}}}\n" for i in range(1_000)),
+        "x-b: &b {context: "
+        + LONG_PATH
+        + "}\nservices:\n"
+        + "".join(f"  s{i}: {{build: {{<<: *b}}}}\n" for i in range(1_000)),
+    ],
+)
+def test_a_build_path_shared_by_many_builds_is_read_once(tmp_path, monkeypatch, compose):
+    # Splitting it again for each build took minutes for one Compose file.
+    read = _count_path_reads(monkeypatch)
+    _write(tmp_path, {"compose.yaml": compose, "Dockerfile": "FROM ollama/ollama:0.5.7\n"})
+    started = time.monotonic()
+    result = RegistryScanner().scan(tmp_path)
+    assert time.monotonic() - started < 10
+    assert result.scan_failures == []
+    assert result.surfaces_excluded == ["compose.yaml: build context not followed"]
+    assert [c.name for c in result.components] == ["ollama/ollama:0.5.7"]
+    assert [path for path in read if len(path) > 100] == [LONG_PATH]
+
+
+def test_a_root_context_shared_by_many_builds_is_split_once(tmp_path, monkeypatch):
+    read = _count_path_reads(monkeypatch)
+    root = "./" * 2_000 + "."
+    _write(
+        tmp_path,
+        {
+            "compose.yaml": f"x-c: &c {root}\nservices:\n"
+            + "".join(f"  s{i}: {{build: {{context: *c}}}}\n" for i in range(1_000)),
+            "Dockerfile": "FROM ollama/ollama:0.5.7\n",
+        },
+    )
+    result = RegistryScanner().scan(tmp_path)
+    assert result.scan_failures == [] and result.surfaces_excluded == []
+    assert [c.name for c in result.components] == ["ollama/ollama:0.5.7"]
+    assert read.count(root) == 1
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        # Each one names the root Dockerfile, but is longer than any path Linux opens.
+        "build: " + "./" * 2_100,
+        "build:\n      context: " + "./" * 2_100,
+        "build:\n      dockerfile: " + "./" * 2_100 + "Dockerfile",
+    ],
+)
+def test_a_build_path_over_the_length_bound_is_a_gap(tmp_path, build):
+    _write(
+        tmp_path,
+        {
+            "compose.yaml": f"services:\n  a:\n    {build}\n",
+            "Dockerfile": "FROM ollama/ollama:0.5.7\n",
+        },
+    )
+    result = RegistryScanner().scan(tmp_path)
+    assert result.scan_failures == []
+    assert result.surfaces_excluded == ["compose.yaml: build context not followed"]
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        # BuildKit uses a named context in place of the image a FROM line names.
+        'context: .\n      additional_contexts:\n        "python:3.12-slim": '
+        "docker-image://ollama/ollama:0.5.7",
+        "context: .\n      additional_contexts:\n"
+        '        - "python:3.12-slim=docker-image://ollama/ollama:0.5.7"',
+        'context: .\n      additional_contexts:\n        "python:3.12-slim": '
+        "https://github.com/example/ollama-rootfs.git",
+        "context: .\n      additional_contexts:\n        python: ./rootfs",
+        "dockerfile_inline: |\n        FROM python:3.12-slim\n      additional_contexts:\n"
+        '        "python:3.12-slim": docker-image://vllm/vllm-openai:v0.6.0',
+        "dockerfile_inline: FROM python:3.12-slim\n"
+        "      additional_contexts: [python:3.12-slim=docker-image://vllm/vllm-openai:v0.6.0]",
+        # docker buildx bake reads named contexts from x-bake in the same file.
+        'context: .\n      x-bake:\n        contexts:\n          "python:3.12-slim": '
+        "docker-image://ollama/ollama:0.5.7",
+        "context: .\n      x-bake:\n        <<: {contexts: {python: docker-image://ollama/ollama}}",
+    ],
+)
+def test_named_build_contexts_are_a_gap(tmp_path, build):
+    _write(
+        tmp_path,
+        {
+            "compose.yaml": f"services:\n  agent:\n    build:\n      {build}\n",
+            "Dockerfile": "FROM python:3.12-slim\n",
+        },
+    )
+    result = RegistryScanner().scan(tmp_path)
+    assert result.scan_failures == [] and result.components == []
+    assert result.surfaces_excluded == ["compose.yaml: build context not followed"]
+
+
+@pytest.mark.parametrize(
+    "contexts",
+    [
+        "additional_contexts: {}",
+        "additional_contexts: []",
+        "additional_contexts:",
+        "additional_contexts: !reset null",
+        "x-bake: {tags: [agent:1], contexts: {}}",
+    ],
+)
+def test_a_build_without_named_contexts_stays_covered(tmp_path, contexts):
+    _write(
+        tmp_path,
+        {
+            "compose.yaml": f"services:\n  agent:\n    build:\n      context: .\n      {contexts}\n",
+            "Dockerfile": "FROM ollama/ollama:0.5.7\n",
+        },
+    )
+    result = RegistryScanner().scan(tmp_path)
+    assert result.scan_failures == [] and result.surfaces_excluded == []
+    assert [c.name for c in result.components] == ["ollama/ollama:0.5.7"]
 
 
 def test_compose_include_is_a_gap_and_root_builds_are_covered(tmp_path):
