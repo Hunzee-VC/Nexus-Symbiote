@@ -821,6 +821,20 @@ _DRAFT_2020_KEYWORDS = (_DRAFT_2019_KEYWORDS - {"$recursiveRef", "additionalItem
     "$dynamicRef",
     "prefixItems",
 }
+# Assertion and applicator keywords that only drafts before draft-04 define: draft-03's
+# divisibleBy, disallow and extends, and draft-01 and draft-02's requires, maxDecimal,
+# minimumCanEqual and maximumCanEqual. No supported dialect applies them.
+_RETIRED_KEYWORDS = frozenset(
+    {
+        "disallow",
+        "divisibleBy",
+        "extends",
+        "maxDecimal",
+        "maximumCanEqual",
+        "minimumCanEqual",
+        "requires",
+    }
+)
 VOCABULARIES = dict(
     zip(
         DIALECTS,
@@ -834,7 +848,7 @@ VOCABULARIES = dict(
         strict=True,
     )
 )
-_EVERY_KEYWORD = frozenset().union(*VOCABULARIES.values())
+_EVERY_KEYWORD = frozenset().union(*VOCABULARIES.values(), _RETIRED_KEYWORDS)
 # Keywords that jsonschema evaluates inside another keyword rather than on their own.
 _APPLIED_INSIDE = frozenset(
     {"else", "exclusiveMaximum", "exclusiveMinimum", "maxContains", "minContains", "then"}
@@ -846,12 +860,13 @@ def _ignores_a_keyword(schema: dict[str, Any], dialect: str, validator: Any) -> 
     """Whether evaluation would skip a constraint that whoever approves the schema reads.
 
     That is a keyword the declared dialect does not define or jsonschema does not
-    apply, an assertion next to "$ref" in draft-04 to draft-07, which ignore the
-    siblings of "$ref", and a subschema that jsonschema would read in another dialect
-    (its own "$schema") or against another base URI (its own "$id", or "id" in
-    draft-04). References must be JSON Pointers within the schema ("#" or "#/...");
-    they are resolved with jsonschema's own resolver and their targets checked too.
-    "format" is never asserted here.
+    apply, including those of drafts before draft-04; an assertion next to "$ref" in
+    draft-04 to draft-07, which ignore the siblings of "$ref"; a 2019-09
+    "unevaluatedItems" that would pass the items "contains" matched; and a subschema
+    that jsonschema would read in another dialect (its own "$schema") or against
+    another base URI (its own "$id", or "id" in draft-04). References must be JSON
+    Pointers within the schema ("#" or "#/..."); they are resolved with jsonschema's
+    own resolver and their targets checked too. "format" is never asserted here.
     """
     from referencing import Registry
     from referencing.jsonschema import specification_with
@@ -863,13 +878,21 @@ def _ignores_a_keyword(schema: dict[str, Any], dialect: str, validator: Any) -> 
     resolver = Registry().resolver_with_root(resource)
     pending: list[Any] = [schema]
     seen: set[int] = set()
+    nodes: list[dict[str, Any]] = []
     while pending:
         node = pending.pop()
         if not isinstance(node, dict) or id(node) in seen:
             continue
         seen.add(id(node))
+        nodes.append(node)
         used = _EVERY_KEYWORD.intersection(node)
-        if used - known or (legacy and "$ref" in node and used - {"$ref", "format"}):
+        # Draft-01 and draft-02 require every property whose schema does not say
+        # "optional": true. That value asks for what every supported dialect does.
+        if (
+            used - known
+            or node.get("optional", True) is not True
+            or (legacy and "$ref" in node and used - {"$ref", "format"})
+        ):
             return True
         if node is not schema and _redeclares(node, dialect, identifier):
             return True
@@ -886,7 +909,51 @@ def _ignores_a_keyword(schema: dict[str, Any], dialect: str, validator: Any) -> 
                 if not isinstance(target, (dict, bool)):
                     return True
                 pending.append(target)
+    return dialect == DIALECTS[3] and _contains_meets_unevaluated_items(nodes, resolver)
+
+
+def _contains_meets_unevaluated_items(nodes: list[dict[str, Any]], resolver: Any) -> bool:
+    """Whether "contains" applies where a 2019-09 "unevaluatedItems" does.
+
+    jsonschema's 2019-09 "unevaluatedItems" then treats the items "contains" matched
+    as evaluated, as 2020-12 specifies. In 2019-09 "contains" makes no annotation,
+    so the declared dialect still applies "unevaluatedItems" to them. The subschemas
+    of allOf, anyOf, oneOf, not, if, then, else and dependentSchemas, and the targets
+    of "$ref" and "$recursiveRef", apply where the schema holding them applies. The
+    search follows those links back from each "contains", in time linear in the schema.
+    """
+    callers: dict[int, list[dict[str, Any]]] = {}
+    for node in nodes:
+        for child in _applied_in_place(node, resolver):
+            if isinstance(child, dict):
+                callers.setdefault(id(child), []).append(node)
+    pending = [node for node in nodes if "contains" in node]
+    reached = {id(node) for node in pending}
+    while pending:
+        node = pending.pop()
+        if "unevaluatedItems" in node:
+            return True
+        for caller in callers.get(id(node), ()):
+            if id(caller) not in reached:
+                reached.add(id(caller))
+                pending.append(caller)
     return False
+
+
+def _applied_in_place(node: dict[str, Any], resolver: Any) -> list[Any]:
+    """The subschemas that 2019-09 applies to the instance location of ``node``."""
+    children = [node[keyword] for keyword in ("not", "if", "then", "else") if keyword in node]
+    for keyword in ("allOf", "anyOf", "oneOf"):
+        if isinstance(node.get(keyword), list):
+            children.extend(node[keyword])
+    if isinstance(node.get("dependentSchemas"), dict):
+        children.extend(node["dependentSchemas"].values())
+    children.extend(
+        _reference_target(resolver, keyword, node[keyword])
+        for keyword in ("$ref", "$recursiveRef")
+        if keyword in node
+    )
+    return children
 
 
 def _redeclares(node: dict[str, Any], dialect: str, identifier: str) -> bool:

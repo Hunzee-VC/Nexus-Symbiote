@@ -892,14 +892,9 @@ def _json_copy(value: Any) -> Any:
     return json.loads(json.dumps(value, allow_nan=False))
 
 
-def _isolated_call(call: ToolCall) -> tuple[ToolCall, bytes]:
-    """Copy the call so no caller or adapter reference can change it, and canonicalize it.
-
-    The executor receives the arguments as sent (key order, 1.0 versus 1). The
-    request digest is computed over the RFC 8785 form, in which those are equal.
-    """
+def _check_arguments(arguments: dict[str, Any]) -> None:
     try:
-        check_json_budget(call.arguments, maximum=MAX_ARGUMENT_BYTES)
+        check_json_budget(arguments, maximum=MAX_ARGUMENT_BYTES)
     except ValidationBudgetError as exc:
         if exc.reason == "json-number-out-of-range":
             raise AuthorizationError(
@@ -914,6 +909,15 @@ def _isolated_call(call: ToolCall) -> tuple[ToolCall, bytes]:
         raise AuthorizationError(
             "tool arguments exceed the supported JSON budget", reason="arguments-too-large"
         ) from exc
+
+
+def _isolated_call(call: ToolCall) -> tuple[ToolCall, bytes]:
+    """Copy the call so no caller or adapter reference can change it, and canonicalize it.
+
+    The copy keeps the arguments as sent (key order, 1.0 versus 1). The request
+    digest is computed over the RFC 8785 form, in which those are equal.
+    """
+    _check_arguments(call.arguments)
     try:
         isolated = ToolCall.model_validate(_json_copy(call.model_dump(mode="json")))
         return isolated, canonical_bytes(isolated.model_dump(mode="json"))
@@ -921,6 +925,18 @@ def _isolated_call(call: ToolCall) -> tuple[ToolCall, bytes]:
         raise AuthorizationError(
             "tool call is outside the canonical JSON domain", reason="arguments-not-json"
         ) from exc
+
+
+def _canonical_call(request_bytes: bytes) -> ToolCall:
+    """Parse the RFC 8785 form of a call, which a canonical gateway checks and executes.
+
+    RFC 8785 writes integral numbers below 1e21 as integers, so a float of 2**53 or
+    more becomes an integer outside I-JSON whose value can differ from the float's:
+    2.0**60 is written 1152921504606847000. Such arguments are refused.
+    """
+    call = ToolCall.model_validate(json.loads(request_bytes))
+    _check_arguments(call.arguments)
+    return call
 
 
 def contract_digest(contract: AnyContract | ExecutionContext) -> str:
@@ -1547,6 +1563,10 @@ class ReferenceGateway(Generic[T]):
         call, request_bytes = _isolated_call(call)
         request_digest = "sha256:" + hashlib.sha256(request_bytes).hexdigest()
         facts["request_digest"] = request_digest
+        if self.canonical_arguments:
+            # The scope resolver and the schema check then judge exactly the form the
+            # executor receives and the request digest binds.
+            call = _canonical_call(request_bytes)
         context = self.authenticate()
         facts.update(
             tenant=context.tenant,
@@ -1665,10 +1685,6 @@ class ReferenceGateway(Generic[T]):
             not_after=None if consent is None else consent.not_after,
             check_time=check_time,
         )
-        if self.canonical_arguments:
-            # Exactly the form the request digest binds: keys in RFC 8785 order and
-            # integral numbers below 1e21 as integers.
-            return ToolCall.model_validate(json.loads(request_bytes))
         return call
 
     def _check_approval(
