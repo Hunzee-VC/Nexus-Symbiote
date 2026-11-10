@@ -9,12 +9,14 @@ import os
 import pickle
 import shutil
 import zipfile
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import pytest
 from click.testing import CliRunner
 
+from nexus_symbiote import limits
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.collection import merge_collected
@@ -178,10 +180,10 @@ def test_same_named_models_in_same_named_directories_are_distinct(project):
     assert "conflicting duplicate component" not in bom.read_text()
 
 
-def test_failure_messages_name_root_relative_paths(project, monkeypatch):
-    monkeypatch.setattr("nexus_symbiote.scanners.model.MAX_HASH_SIZE", 8)
+def test_failure_messages_name_root_relative_paths(project):
     write_safetensors(project / "models" / "big.safetensors")
-    result = ModelScanner().scan(project)
+    with limits.applied(replace(limits.DEFAULTS, model_bytes=8)):
+        result = ModelScanner().scan(project)
     assert result.scan_failures
     assert all(str(project) not in failure for failure in result.scan_failures)
     assert any(failure.startswith("models/big.safetensors: ") for failure in result.scan_failures)
@@ -595,10 +597,10 @@ def test_keras_archive_is_not_mistaken_for_a_pickle(project):
     )
 
 
-def test_unreadable_pickle_keeps_its_code_executing_rating(project, monkeypatch):
-    monkeypatch.setattr("nexus_symbiote.scanners.model.MAX_HASH_SIZE", 8)
+def test_unreadable_pickle_keeps_its_code_executing_rating(project):
     (project / "model.pkl").write_bytes(pickle.dumps(list(range(100))))
-    result = ModelScanner().scan(project)
+    with limits.applied(replace(limits.DEFAULTS, model_bytes=8)):
+        result = ModelScanner().scan(project)
     assert result.scan_failures
     component = result.components[0]
     assert component.hashes == {}
@@ -1015,13 +1017,13 @@ def test_custom_pipelines_declare_custom_code(project):
     assert any(risk.category == "custom_code" for risk in component.risks)
 
 
-def test_a_pinned_file_that_cannot_be_hashed_fails_verification(tmp_path, project, monkeypatch):
+def test_a_pinned_file_that_cannot_be_hashed_fails_verification(tmp_path, project):
     write_safetensors(project / "m.safetensors")
     policies = load_signature_policies(
         write_policy(tmp_path, [pin(project, "m.safetensors")]), project
     )
-    monkeypatch.setattr("nexus_symbiote.scanners.model.MAX_HASH_SIZE", 8)
-    result = ModelScanner(policies).scan(project)
+    with limits.applied(replace(limits.DEFAULTS, model_bytes=8)):
+        result = ModelScanner(policies).scan(project)
     component = result.components[0]
     assert component.signing_status == "verification-failed"
     assert component.claims["signing_status"].unknown_reason == (
@@ -1409,10 +1411,14 @@ def test_a_directory_with_more_shard_indexes_than_the_limit_binds_none(project):
 def test_shards_listed_by_many_indexes_are_bound_within_one_budget(project, monkeypatch):
     # Identical indexes are one blob in a repository, so N shards and K indexes that
     # each list every shard would cost N x K bindings in scan, validate and risk.
-    limit = model_collector.MAX_WEIGHT_FILE_BINDINGS
+    # The budget is twice the operator's entries limit, lowered here to keep the tree small.
+    lowered = replace(limits.DEFAULTS, entries=20_000)
+    limit = 2 * lowered.entries
+    assert 2 * limits.DEFAULTS.entries == model_collector.MAX_WEIGHT_FILE_BINDINGS
     indexes = model_collector.MAX_SHARD_INDEXES
     _shards_and_indexes(project / "llm", limit // (2 * indexes) + 100, indexes)
-    result = ModelScanner().scan(project)
+    with limits.applied(lowered):
+        result = ModelScanner().scan(project)
     pairs = sum(len(c.properties.get("weight_files", [])) for c in result.components)
     assert 0 < pairs <= limit
     (failure,) = result.scan_failures
@@ -1420,9 +1426,10 @@ def test_shards_listed_by_many_indexes_are_bound_within_one_budget(project, monk
     # Every issue stays listed, so each refused model can be named; the verdict
     # counts all issues either way.
     monkeypatch.setattr("nexus_symbiote.validators.integrity.MAX_REPORTED_ISSUES", 10**6)
-    report = IntegrityValidator(require_model_signatures=False).validate(
-        AIBOM(components=result.components), project
-    )
+    with limits.applied(lowered):
+        report = IntegrityValidator(require_model_signatures=False).validate(
+            AIBOM(components=result.components), project
+        )
     assert report.status != "pass"
     exhausted = {i.component_ref for i in report.issues if i.category.endswith("budget_exhausted")}
     assert exhausted == {c.bom_ref for c in result.components if "weight_files" not in c.properties}
@@ -1469,13 +1476,17 @@ def test_weight_files_are_matched_to_policy_entries_without_resolving_each(proje
 
 def test_directory_digests_recorded_on_every_model_are_bounded(project):
     # Each model records its directory's digests, so one configuration with many
-    # chat templates beside N models would otherwise be recorded N times.
-    limit = model_collector.MAX_SHARED_DIGESTS
+    # chat templates beside N models would otherwise be recorded N times. The budget
+    # is twice the operator's entries limit, lowered here to keep the file small.
+    lowered = replace(limits.DEFAULTS, entries=20_000)
+    limit = 2 * lowered.entries
+    assert 2 * limits.DEFAULTS.entries == model_collector.MAX_SHARED_DIGESTS
     templates = [{"name": str(i), "template": ""} for i in range(limit // 2)]
     (project / "tokenizer_config.json").write_text(json.dumps({"chat_template": templates}))
     for name in ("a.ggml", "b.ggml", "c.ggml"):
         (project / name).write_bytes(b"")
-    result = ModelScanner().scan(project)
+    with limits.applied(lowered):
+        result = ModelScanner().scan(project)
     assert result.scan_failures == [f"b.ggml: {model_collector.SHARED_DIGESTS_EXHAUSTED}"]
     first, *rest = result.components
     assert len(first.properties["chat_templates"]) == limit // 2

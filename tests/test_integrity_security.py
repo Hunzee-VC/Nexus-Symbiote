@@ -5,10 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+from nexus_symbiote import limits
 from nexus_symbiote.core import AIBOM, ModelComponent, PromptComponent, ToolComponent
 from nexus_symbiote.core.enums import SerializationSafety, TrustTier
 from nexus_symbiote.core.hashing import (
@@ -379,10 +381,10 @@ def test_model_config_symlink_is_never_read(tmp_path):
     assert result.components[0].trust_remote_code is None
 
 
-def test_model_hash_limit_is_explicit_missing_evidence(tmp_path, monkeypatch):
-    monkeypatch.setattr("nexus_symbiote.scanners.model.MAX_HASH_SIZE", 8)
+def test_model_hash_limit_is_explicit_missing_evidence(tmp_path):
     write_safetensors(tmp_path / "model.safetensors")
-    result = ModelScanner().scan(tmp_path)
+    with limits.applied(replace(limits.DEFAULTS, model_bytes=8)):
+        result = ModelScanner().scan(tmp_path)
     assert result.scan_failures
     assert result.components[0].hashes == {}
     assert result.components[0].serialization_safety == SerializationSafety.UNKNOWN

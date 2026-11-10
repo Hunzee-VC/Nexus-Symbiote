@@ -47,6 +47,10 @@ nexus-symbiote risk candidate.json --no-project-policy --threshold 50
 
 A command can write an inventory while returning a failing status. `--report-only` explicitly permits inspection without a successful gate; do not turn it on to make a deployment approval appear green. The trusted GitHub Action ignores checkout-supplied policy, and disabled Action gates are reported as skipped rather than successful verification.
 
+## A collection limit was exceeded
+
+A scan failure such as `vendor: entries limit of 100000 exceeded; raise it with --limit entries=N` means a collector stopped at one of the [collection limits](docs/collection-limits.md), so its coverage is incomplete and the gates fail. Check first that the path belongs in the scan; otherwise raise the named limit with `--limit NAME=VALUE` before the command or with `NEXUS_SYMBIOTE_LIMITS`. Settings in the scanned project never change a limit.
+
 ## ShadowScan import returns a failing status
 
 Standalone import remains partial even for a completed source scan. It writes evidence and normally exits nonzero. Use `--report-only` explicitly for inspection, with a fresh output path. The command ignores project policy beside the report and in parent directories. Malformed input is rejected; unsupported entries and lossy projections remain limitations.

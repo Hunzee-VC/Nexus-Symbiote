@@ -97,13 +97,21 @@ def descriptor_binding(info: os.stat_result) -> tuple[int, int, int, int, int, i
     )
 
 
+def _unnormalized_absolute(path: Path) -> Path:
+    # os.path.abspath would collapse "link/.." textually and name a different file
+    # than the kernel opens; each ".." is walked instead, through the real parent.
+    return path if path.is_absolute() else Path.cwd() / path
+
+
 def open_directory_nofollow(directory: Path) -> int:
     """Open a directory without following symlinks in the target path.
 
     Walks from the filesystem anchor using ``O_NOFOLLOW`` descriptors, allowing
     traverse-only (execute-without-read) system ancestor directories after
     verifying via ``lstat`` that each ancestor is a real directory (or a
-    standard macOS root firmlink/symlink to ``/private/{var,tmp,etc}``).
+    standard macOS root firmlink/symlink to ``/private/{var,tmp,etc}``). A ``..``
+    component is opened through the real parent, as the kernel resolves it, so
+    ``link/..`` fails closed instead of naming the directory that holds the link.
     """
     if (
         not hasattr(os, "O_NOFOLLOW")
@@ -111,7 +119,7 @@ def open_directory_nofollow(directory: Path) -> int:
         or os.open not in os.supports_dir_fd
     ):
         raise OSError("Descriptor-relative no-follow file access is unavailable")
-    absolute = Path(os.path.abspath(directory))
+    absolute = _unnormalized_absolute(Path(directory))
     parts = list(absolute.parts)
     if (
         sys.platform == "darwin"
@@ -187,7 +195,7 @@ def pathname_identity(path: Path) -> tuple[int, int] | None:
     component. Compare the result with the open descriptor's identity after a
     read to prove the pathname still names the bytes that were read.
     """
-    absolute = Path(os.path.abspath(path))
+    absolute = _unnormalized_absolute(Path(path))
     try:
         parent_fd = _open_parent_no_follow(absolute)
         try:
@@ -206,7 +214,7 @@ def open_regular_file(path: Path) -> BinaryIO:
     replacement between a check and the final open. Fail closed on platforms
     without the required no-follow APIs.
     """
-    absolute = Path(os.path.abspath(path))
+    absolute = _unnormalized_absolute(Path(path))
     parent_fd = _open_parent_no_follow(absolute)
     try:
         flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0)

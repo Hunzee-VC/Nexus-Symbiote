@@ -13,7 +13,6 @@ and detects unpinned versions, missing transport security, and rug-pull risk.
 
 from __future__ import annotations
 
-import ast
 import hmac
 import ipaddress
 import os
@@ -48,14 +47,12 @@ from nexus_symbiote.core.models import (
     ToolComponent,
 )
 from nexus_symbiote.scanners.base import (
-    MAX_SOURCE_BYTES,
     Scanner,
     ScanResult,
     SourceBudget,
-    parse_python,
     sanitized_origin,
+    source_collection_bytes,
 )
-from nexus_symbiote.utils.confined import MAX_TOTAL_BYTES
 from nexus_symbiote.utils.secrets import REDACTED, redact_descriptor, redact_text
 
 MCP_CONFIG_FILES = [
@@ -262,8 +259,11 @@ class MCPScanner(Scanner):
         found_any = False
         clients: dict[str, MCPClientComponent] = {}
 
-        limits = {"max_total_bytes": MAX_TOTAL_BYTES + MAX_SOURCE_BYTES}
-        with self._collection(project_root, result, **limits) as files:
+        # Source text read while looking for SDK references is charged to this
+        # collection too, so its byte limit leaves room for the source budget.
+        with self._collection(
+            project_root, result, max_total_bytes=source_collection_bytes()
+        ) as files:
             sources = list(files.iter_files())
             nested = sorted(
                 {path.as_posix() for path in sources if path.name in MCP_CONFIG_NAMES}
@@ -740,84 +740,10 @@ class MCPScanner(Scanner):
     def _scan_code_mcp_clients(self, result: ScanResult, sources: list[Path]) -> None:
         if self._files is None:
             raise RuntimeError("_scan_code_mcp_clients called outside a _collection context")
-        from nexus_symbiote.scanners.python_tools import PYTHON_TOOL_HINTS, collect_python_tools
-        from nexus_symbiote.scanners.ts_tools import collect_typescript
+        from nexus_symbiote.scanners.mcp_sources import collect_source_references
 
         budget = SourceBudget("MCP source references", result)
-        collect_typescript(self._files, result, sources, budget)
-        detected: list[str] = []
-        excluded_dirs = {"tests", "test", "dist", "build", "docs", "benchmarks", "examples"}
-        python_hints = tuple(hint.encode("ascii") for hint in PYTHON_TOOL_HINTS)
-        for suffix in (".py", ".ts", ".js"):
-            paths = [
-                path
-                for path in sources
-                if path.suffix == suffix
-                and not excluded_dirs.intersection(path.parts)
-                and not path.name.endswith(
-                    (".d.ts", ".spec.ts", ".test.ts", ".spec.js", ".test.js")
-                )
-            ]
-            paths.sort(key=lambda path: len(path.parts) > 1)
-            hints = python_hints if suffix == ".py" else (b"@modelcontextprotocol/sdk",)
-            for path in paths:
-                if budget.exhausted:
-                    break
-                raw = self._files.read_bytes(path)
-                if raw is None or not budget.admit(len(raw)):
-                    continue
-                # Nested modules are decoded only when they can name a supported SDK, so
-                # an unrelated module is neither parsed nor a decoding failure.
-                if len(path.parts) > 1 and not any(hint in raw for hint in hints):
-                    continue
-                try:
-                    content = raw.decode("utf-8")
-                except UnicodeDecodeError:
-                    result.scan_failures.append(f"{path}: invalid UTF-8")
-                    continue
-                result.surfaces_scanned.append(str(self._files.root / path))
-                if len(raw) > 262_144:
-                    result.scan_failures.append(f"{path}: syntax collection size limit exceeded")
-                    continue
-                if suffix == ".py":
-                    try:
-                        tree = parse_python(content)
-                    except (SyntaxError, ValueError, RecursionError):
-                        result.scan_failures.append(f"{path}: invalid Python syntax")
-                        continue
-                    collect_python_tools(tree, content, path, result)
-                    found = any(
-                        isinstance(node, ast.ImportFrom)
-                        and node.module is not None
-                        and node.module.split(".")[0] == "mcp"
-                        and any("Client" in alias.name for alias in node.names)
-                        for node in ast.walk(tree)
-                    ) or any(
-                        isinstance(node, ast.Call)
-                        and isinstance(node.func, ast.Name)
-                        and node.func.id == "MCPClient"
-                        for node in ast.walk(tree)
-                    )
-                else:
-                    # A bounded syntax hint, never a claim that an SDK is installed
-                    # or deployed. Strip comments and require the SDK import path.
-                    found = bool(_SDK_IMPORT.search(without_js_comments(content)))
-                if found:
-                    detected.append(str(self._files.root / path))
-        if detected:
-            result.components.append(
-                MCPClientComponent(
-                    bom_ref="mcp-client:sdk",
-                    name="MCP SDK client (code-detected)",
-                    host_application="sdk",
-                    source_path=detected[0],
-                    trust_tier=TrustTier.INTERNAL_UNVERIFIED,
-                    properties={
-                        "collection_mode": "static-source-reference",
-                        "source_paths": detected,
-                    },
-                )
-            )
+        collect_source_references(self._files, result, sources, budget)
 
     @staticmethod
     def _tokenize_identifier(text: str) -> set[str]:

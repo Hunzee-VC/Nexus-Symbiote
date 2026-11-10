@@ -56,21 +56,24 @@ define never replaces an earlier `EXTERNAL`.
 
 A file that many models bind costs one binding per model, so the bindings are
 bounded. A directory with more than 16 shard indexes binds none of them and
-fails. One scan records at most 40,000 bindings, counting each distinct entry
-of a shard index once when the index is read and each file once for every
-model it is bound to; beyond that, the scan fails and binds nothing more to the
-remaining models.
+fails. One scan records at most twice the `entries`
+[collection limit](collection-limits.md) in bindings (200,000 by default),
+counting each distinct entry of a shard index once when the index is read and
+each file once for every model it is bound to; beyond that, the scan fails and
+binds nothing more to the remaining models.
 
 `validate --project` observes the files again and fails with
 `weight_files_mismatch` when they differ from the BOM's record, so replacing one
 shard or one external-data file fails integrity and changes the inventory. For
 this model check, one validation walks each model directory once, reads a file
 that many models share once rather than once per model, verifies each policy
-entry once, and reads and binds at most what one scan may (5 GiB plus 32 MiB,
-and 40,000 bindings). A model beyond either budget gets the `unknown` issue
-`validation_budget_exhausted`. In addition, `validate` charges the model's own
-file, each Sigstore verification of it and the file-hash check's digests (each
-algorithm computed once per run) to the validation's 30 GiB artifact budget, and
+entry once, and reads and binds at most what one scan may (the
+`model-total-bytes` limit, and twice the `entries` limit in bindings). A model
+beyond either budget gets the `unknown` issue `validation_budget_exhausted`. In
+addition, `validate` charges the model's own file, each Sigstore verification of
+it and the file-hash check's digests (each algorithm computed once per run) to
+the validation's artifact budget, six times the `model-total-bytes` limit
+(1.5 TiB by default), and
 a second model component that names the same weights file, or the same artifact
 the signer policy names, fails as `duplicate_artifact`.
 
@@ -91,7 +94,8 @@ recorded list, sorted by path (for a chat template, the path is the source,
 such as `tokenizer_config.json#chat_template`).
 
 Every model records these digests for its directory, so one scan records at
-most 40,000 of them across its models, counting each configuration file,
+most twice the `entries` limit of them across its models (200,000 by default),
+counting each configuration file,
 tokenizer file, chat template, custom-code reference and Python file once per
 model. Beyond that, the scan fails and the remaining models record none of
 these lists, `tokenizer_hash` or `chat_template_hash`.

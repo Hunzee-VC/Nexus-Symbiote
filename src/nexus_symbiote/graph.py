@@ -159,9 +159,9 @@ def _manifest_dependencies(
     problems: list[str],
 ) -> list[AnyComponent]:
     """Bind declared instructions and local models to collected records before changing the BOM."""
+    from nexus_symbiote import limits
     from nexus_symbiote.scanners.base import project_relative
     from nexus_symbiote.scanners.prompt import detect_invisible_characters
-    from nexus_symbiote.utils.confined import MAX_HASH_BYTES
 
     in_root = project_relative(files.root)
     collected_text: dict[str, list[AnyComponent]] = {}
@@ -257,7 +257,7 @@ def _manifest_dependencies(
             relative = _root_relative(comp.source_path, in_root)
             assert relative is not None
             try:
-                with files.open_regular(relative, max_bytes=MAX_HASH_BYTES):
+                with files.open_regular(relative, max_bytes=limits.bound("model-bytes")):
                     pass
             except OSError:
                 problems.append(f"{locator}: the declared local model is unavailable")

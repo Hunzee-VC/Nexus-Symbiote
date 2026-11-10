@@ -16,11 +16,11 @@ from nexus_symbiote.core.enums import RiskSeverity, TrustTier
 from nexus_symbiote.core.hashing import hash_canonical
 from nexus_symbiote.core.models import RAGSourceComponent, RiskAssessment
 from nexus_symbiote.scanners.base import (
-    MAX_SOURCE_BYTES,
     Scanner,
     ScanResult,
     SourceBudget,
     parse_python,
+    source_collection_bytes,
 )
 from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
 from nexus_symbiote.scanners.source_binding import (
@@ -30,7 +30,7 @@ from nexus_symbiote.scanners.source_binding import (
     url_shape,
     value_binding,
 )
-from nexus_symbiote.utils.confined import MAX_TOTAL_BYTES, ConfinedCollection, fold_name
+from nexus_symbiote.utils.confined import ConfinedCollection, fold_name
 from nexus_symbiote.utils.secrets import redact_text, redact_url
 from nexus_symbiote.utils.terminal import neutralize
 
@@ -346,7 +346,7 @@ class RAGScanner(Scanner):
         detected: dict[str, str] = {}
         budget = SourceBudget("rag vector-store imports", result)
         # The collection's own byte limit stays above the budget, which binds first.
-        limit = MAX_TOTAL_BYTES + MAX_SOURCE_BYTES
+        limit = source_collection_bytes()
         with ConfinedCollection(
             root, [], exclude_paths=self._exclude_paths, max_total_bytes=limit
         ) as heuristic:
@@ -354,7 +354,7 @@ class RAGScanner(Scanner):
                 if budget.exhausted:
                     break
                 raw = heuristic.read_bytes(path)
-                if raw is None or not budget.admit(len(raw)):
+                if raw is None or not budget.admit(len(raw), path):
                     continue
                 if not any(marker in raw for marker in _IMPORT_MARKERS):
                     continue

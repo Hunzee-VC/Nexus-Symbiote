@@ -19,11 +19,11 @@ from nexus_symbiote.core.models import (
     RiskAssessment,
 )
 from nexus_symbiote.scanners.base import (
-    MAX_SOURCE_BYTES,
     Scanner,
     ScanResult,
     SourceBudget,
     parse_python,
+    source_collection_bytes,
 )
 from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
 from nexus_symbiote.scanners.source_binding import ORIGIN_PATHS as _ORIGIN_PATHS
@@ -33,7 +33,7 @@ from nexus_symbiote.scanners.source_binding import origin as _origin
 from nexus_symbiote.scanners.source_binding import url_shape as _url_shape
 from nexus_symbiote.scanners.source_binding import url_shapes as _url_shapes
 from nexus_symbiote.scanners.source_binding import value_binding as _value_binding
-from nexus_symbiote.utils.confined import MAX_TOTAL_BYTES, ConfinedCollection, fold_name
+from nexus_symbiote.utils.confined import ConfinedCollection, fold_name
 from nexus_symbiote.utils.secrets import REDACTED, redact_text
 from nexus_symbiote.utils.terminal import neutralize
 
@@ -1017,7 +1017,7 @@ class A2AScanner(Scanner):
         references = _CodeReferences([], [], [], [], [])
         budget = SourceBudget("a2a code references", result)
         # The collection's own byte limit stays above the budget, which binds first.
-        limit = MAX_TOTAL_BYTES + MAX_SOURCE_BYTES
+        limit = source_collection_bytes()
         with ConfinedCollection(
             root, [], exclude_paths=self._exclude_paths, max_total_bytes=limit
         ) as heuristic:
@@ -1025,7 +1025,7 @@ class A2AScanner(Scanner):
                 if budget.exhausted:
                     break
                 raw = heuristic.read_bytes(path)
-                if raw is None or not budget.admit(len(raw)):
+                if raw is None or not budget.admit(len(raw), path):
                     continue
                 if not any(hint in raw for hint in _A2A_SOURCE_HINTS):
                     continue

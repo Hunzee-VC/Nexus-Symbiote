@@ -6,7 +6,7 @@ authoritative where this page differs; `tests/test_cli_reference.py` fails when 
 command, option or environment variable is missing here.
 
 ```text
-nexus-symbiote [--offline | --live] [--debug] [--version] [--help] COMMAND [ARGS]...
+nexus-symbiote [--offline | --live] [--debug] [--limit NAME=VALUE]... [--version] [--help] COMMAND [ARGS]...
 ```
 
 ## Global options
@@ -16,6 +16,7 @@ nexus-symbiote [--offline | --live] [--debug] [--version] [--help] COMMAND [ARGS
 | `--offline` | Refuse name resolution, network connections and process creation (the default). |
 | `--live` | Allow the network and process steps of `discover-mcp`, `advisories` and `verify-live`. Every other command stays offline. |
 | `--debug` | Print where a collector or internal error was raised on standard error: its class and the files, lines and functions of its traceback, without its message, which can quote project or inventory text. Without it, an unexpected error ends the command with `Error: internal error (<error class>)` and exit status 1, and a collector error is recorded by its diagnostic code only. |
+| `--limit` `NAME=VALUE` | Set one [collection limit](collection-limits.md) for this command, such as `entries=200000` or `model-bytes=128GiB`. Repeatable; overrides `NEXUS_SYMBIOTE_LIMITS` for that name. |
 | `--version` | Print the version and exit. |
 | `--help` | Print help and exit. |
 
@@ -37,6 +38,11 @@ writing alike.
 Mode flags and `--debug` go before the command. Without a flag,
 `NEXUS_SYMBIOTE_MODE=offline|live` selects the mode; without either, the mode is
 offline. See [offline and live modes](offline-and-live-modes.md).
+
+`--limit` also goes before the command. `NEXUS_SYMBIOTE_LIMITS=NAME=VALUE,NAME=VALUE`
+sets limits from the environment, and `--limit` wins for the names it sets. Limits
+apply to every command that collects from a project; a project's own files never
+change them. See [collection limits](collection-limits.md).
 
 ## Commands
 
@@ -102,7 +108,7 @@ Colors are used only on a terminal, and `NO_COLOR` turns them off.
 |---|---|
 | `0` | The command completed and every requested gate passed. |
 | `1` | A gate or check failed (risk gate, integrity, digest or signature mismatch, `diff --fail-on-alert`, incomplete collection or observation), the input could not be read or parsed, `import-shadowscan` ran without `--report-only`, or an unexpected internal error occurred. |
-| `2` | Usage error: an unknown command or option, a missing argument or file, a `PROJECT_PATH` of `scan` or `baseline` or a `--project` of `validate`, `risk`, `verify-artifact` or `verify-live` that is a file, a `verify-live` launch policy kept where the [launch policy](#launch-policy) rules forbid, an invalid value (including a malformed `verify-artifact --sha256` and an incomplete `--bundle`, `--signer-identity` and `--issuer` set), a relative project path that a symbolic link leads outside the working directory, an invalid `NEXUS_SYMBIOTE_MODE`, a `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` shorter than 32 characters, or a live command run without live mode (`advisories --dry-run` contacts nothing and runs in either mode). |
+| `2` | Usage error: an unknown command or option, a missing argument or file, a `PROJECT_PATH` of `scan` or `baseline` or a `--project` of `validate`, `risk`, `verify-artifact` or `verify-live` that is a file, a `verify-live` launch policy kept where the [launch policy](#launch-policy) rules forbid, an invalid value (including a malformed `verify-artifact --sha256` and an incomplete `--bundle`, `--signer-identity` and `--issuer` set), a relative project path that a symbolic link leads outside the working directory, an invalid `NEXUS_SYMBIOTE_MODE` or collection limit, a `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` shorter than 32 characters, or a live command run without live mode (`advisories --dry-run` contacts nothing and runs in either mode). |
 
 What exit status 1 means for each gate:
 

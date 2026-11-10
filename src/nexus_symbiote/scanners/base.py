@@ -13,13 +13,16 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from nexus_symbiote import limits
 from nexus_symbiote.core.aibom import DependencyEdge
 from nexus_symbiote.core.models import AnyComponent, MCPClientComponent
+from nexus_symbiote.limits import Bound
 from nexus_symbiote.utils.confined import ConfinedCollection
 
 MAX_CONFIG_BYTES = 4 * 1024 * 1024
 MAX_MODEL_BYTES = 1024 * 1024 * 1024
-MAX_SOURCE_BYTES = 64 * 1024 * 1024
+# The default only: a source budget reads the operator's source-scan-bytes limit.
+MAX_SOURCE_BYTES = limits.DEFAULTS.source_scan_bytes
 
 
 def read_regular_text(path: Path, *, max_bytes: int = MAX_CONFIG_BYTES) -> str:
@@ -138,25 +141,42 @@ class SourceBudget:
     """Bound the source text a collector reads while it looks for references.
 
     A file count says nothing about cost and made ordinary projects fail, so the
-    bound is the text read. What does not fit is one named coverage gap.
+    bound is the text read: the operator's ``source-scan-bytes`` limit, for each
+    collector that searches source. What does not fit is one named coverage gap,
+    which names the first file not read in full, the limit and how to raise it.
     """
 
-    def __init__(self, label: str, result: ScanResult, limit: int = MAX_SOURCE_BYTES) -> None:
+    def __init__(self, label: str, result: ScanResult, limit: int | None = None) -> None:
         self._label = label
         self._result = result
-        self._remaining = limit
+        value = limits.current().source_scan_bytes if limit is None else limit
+        self.bound = Bound(value, "source-scan-bytes")
+        self._remaining = value
         self.exhausted = False
 
-    def admit(self, size: int) -> bool:
+    def admit(self, size: int, path: str | Path | None = None) -> bool:
+        """Charge ``size`` bytes read from ``path``; False once they do not fit."""
         if self.exhausted:
             return False
         self._remaining -= size
         if self._remaining < 0:
             self.exhausted = True
+            where = "" if path is None else f"{Path(path).as_posix()}: "
             self._result.scan_failures.append(
-                f"{self._label} exceed the combined size limit: the rest were not read"
+                f"{where}{self._label} exceed the combined size limit: the rest were not "
+                "read; " + self.bound.exceeded()
             )
         return not self.exhausted
+
+
+def source_collection_bytes() -> Bound:
+    """The byte limit of a collection that also searches source text.
+
+    Source text is charged to the collection as well, so its limit is the operator's
+    ``total-bytes`` plus ``source-scan-bytes``: the source budget binds first.
+    """
+    settings = limits.current()
+    return Bound(settings.total_bytes + settings.source_scan_bytes, "total-bytes")
 
 
 class Scanner(ABC):
@@ -172,14 +192,14 @@ class Scanner(ABC):
 
     @contextmanager
     def _collection(
-        self, root: Path, result: ScanResult, **limits: Any
+        self, root: Path, result: ScanResult, **bounds: Any
     ) -> Iterator[ConfinedCollection]:
         with ConfinedCollection(
             root,
             result.scan_failures,
             result.surfaces_excluded,
             exclude_paths=self._exclude_paths,
-            **limits,
+            **bounds,
         ) as files:
             self._files = files
             try:

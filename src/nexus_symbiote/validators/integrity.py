@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+from nexus_symbiote import limits
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.collection import is_imported
 from nexus_symbiote.core.enums import SerializationSafety
@@ -35,7 +36,7 @@ from nexus_symbiote.scanners.model import (
     unused_policy_entries,
     verify_weight_files,
 )
-from nexus_symbiote.utils.confined import MAX_HASH_BYTES, ConfinedCollection
+from nexus_symbiote.utils.confined import ConfinedCollection
 from nexus_symbiote.utils.crypto import (
     MAX_BUNDLE_BYTES,
     ArtifactPolicy,
@@ -44,12 +45,15 @@ from nexus_symbiote.utils.crypto import (
     verify_sigstore_bundle,
 )
 
-VALIDATION_BYTE_BUDGET = 6 * MAX_HASH_BYTES
-"""Bytes one validation may read from artifacts, so a supplied BOM cannot multiply work.
+VALIDATION_PASSES = 6
+"""How many times a scan's model reads one validation may read from artifacts.
 
-A maximal scan inventory (the model collector reads at most ``MAX_HASH_BYTES`` of
-weights) needs at most four passes over its models; the rest is headroom.
+A maximal scan inventory (the model collector reads at most the operator's
+``model-total-bytes`` of weights) needs at most four passes over its models; the rest
+is headroom. So a supplied BOM cannot multiply the work of the scan behind it.
 """
+VALIDATION_BYTE_BUDGET = VALIDATION_PASSES * limits.DEFAULTS.model_total_bytes
+"""The validation budget under the default limits; a validator uses the limits in force."""
 SIGNATURE_VERIFICATION_COST = MAX_BUNDLE_BYTES
 """Work charged for one offline signature verification beyond the bytes it reads.
 
@@ -171,7 +175,7 @@ class _ArtifactDigests:
                 key = (descriptor_binding(before), algorithm)
                 if key in self._digests:
                     return self._digests[key]
-                if before.st_size > MAX_HASH_BYTES:
+                if before.st_size > limits.current().model_bytes:
                     self._digests[key] = None
                     return None
                 self.charge(before.st_size)
@@ -247,7 +251,7 @@ class IntegrityValidator:
         signature_policies: Sequence[SigstoreArtifactPolicy] = (),
         *,
         require_model_signatures: bool = True,
-        byte_budget: int = VALIDATION_BYTE_BUDGET,
+        byte_budget: int | None = None,
     ) -> None:
         # Digest pins arrive with the Sigstore entries of a loaded policy set.
         self._signature_policies: dict[Path, ArtifactPolicy] = {
@@ -255,8 +259,12 @@ class IntegrityValidator:
         }
         self._packages: tuple[IntegrityReport, ModelPackages] | None = None
         self.require_model_signatures = require_model_signatures
-        self.byte_budget = byte_budget
-        self._digests = _ArtifactDigests(byte_budget)
+        self.byte_budget = (
+            VALIDATION_PASSES * limits.current().model_total_bytes
+            if byte_budget is None
+            else byte_budget
+        )
+        self._digests = _ArtifactDigests(self.byte_budget)
         self._inspected_models: set[Path] = set()
 
     def validate(

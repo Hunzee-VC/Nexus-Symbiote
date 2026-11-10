@@ -2,10 +2,12 @@
 
 import hashlib
 import os
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+from nexus_symbiote import limits
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.models import ModelComponent, PromptComponent
 from nexus_symbiote.utils import confined, crypto
@@ -77,12 +79,9 @@ def test_prompt_missing_file_fails_verification(tmp_path: Path) -> None:
     assert result.hashes_failed == 1
 
 
-def test_hash_limit_and_algorithm_are_enforced(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_hash_limit_and_algorithm_are_enforced(tmp_path: Path) -> None:
     (tmp_path / "model.bin").write_bytes(b"data")
-    monkeypatch.setattr("nexus_symbiote.utils.confined.MAX_HASH_BYTES", 3)
-    with pytest.raises(OSError):
+    with limits.applied(replace(limits.DEFAULTS, model_bytes=3)), pytest.raises(OSError):
         hash_confined_file(tmp_path, "model.bin")
     with pytest.raises(OSError):
         hash_confined_file(tmp_path, "model.bin", "md5")

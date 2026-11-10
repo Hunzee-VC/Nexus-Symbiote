@@ -226,7 +226,10 @@ def test_case_variant_search_spends_a_bounded_budget(tmp_path):
         for index in range(2000):
             assert files.read_bytes(f"a/b/x{index}.md", missing_ok=True) is None
     assert time.perf_counter() - start < 10
-    assert failures and all(f.endswith("directory entry limit exceeded") for f in failures)
+    assert failures and all(
+        f.endswith(": entries limit of 300 exceeded; this limit is fixed for this input")
+        for f in failures
+    )
 
 
 def test_path_with_a_nul_character_is_a_refused_read_not_an_error(tmp_path):
@@ -253,8 +256,11 @@ def test_symlink_to_a_target_beyond_the_depth_limit_is_refused(tmp_path):
         assert files.read_bytes("link.md") is None
         assert files.read_bytes("linkdir/f.md") is None
         list(files.iter_files("."))
-    assert "link.md: symlink target is too deep" in failures
-    assert "linkdir/f.md: symlink target is too deep" in failures
+    too_deep = (
+        "symlink target is too deep; depth limit of 32 exceeded; raise it with --limit depth=N"
+    )
+    assert f"link.md: {too_deep}" in failures
+    assert f"linkdir/f.md: {too_deep}" in failures
 
 
 @pytest.mark.parametrize("text", [".", "./"])
@@ -322,7 +328,9 @@ def test_a_spent_variant_budget_is_one_failure_and_ends_every_later_search(tmp_p
             assert files.read_bytes(f"a/b/x{index}.md", missing_ok=True) is None
         assert files.case_variants("a/b") == []
     assert time.perf_counter() - start < 10
-    assert len(failures) == 1 and failures[0].endswith(": directory entry limit exceeded")
+    assert len(failures) == 1 and failures[0].endswith(
+        ": entries limit of 1000 exceeded; this limit is fixed for this input"
+    )
 
 
 def test_failures_recorded_once_beside_those_the_caller_appends(tmp_path):

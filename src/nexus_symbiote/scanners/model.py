@@ -23,6 +23,7 @@ from functools import partial
 from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO, cast
 
+from nexus_symbiote import limits
 from nexus_symbiote.core.enums import (
     AssuranceLevel,
     RiskSeverity,
@@ -38,7 +39,7 @@ from nexus_symbiote.core.hashing import (
 from nexus_symbiote.core.models import ClaimEvidence, ModelComponent, RiskAssessment
 from nexus_symbiote.scanners.base import Scanner, ScanResult
 from nexus_symbiote.scanners.shadowscan import REPORT_PATHS
-from nexus_symbiote.utils.confined import MAX_ENTRIES, MAX_HASH_BYTES, ConfinedCollection
+from nexus_symbiote.utils.confined import MAX_ENTRIES, ConfinedCollection
 from nexus_symbiote.utils.crypto import (
     POLICY_REF_PREFIX,
     SIGNING_EVIDENCE_CLAIM,
@@ -126,8 +127,6 @@ SIGNING_FILES = [
 ]
 SIGNING_SUFFIXES = [".sig", ".sigstore", ".sigstore.json"]
 
-MAX_HASH_SIZE = 5 * 1024 * 1024 * 1024
-
 MAX_MODEL_HEADER_BYTES = 1024 * 1024
 MAX_PICKLE_INSPECTION_BYTES = 65536
 _UNSAFE_SUFFIXES = {
@@ -168,7 +167,8 @@ BUDGET_EXHAUSTED = "validation byte budget exhausted"
 # Real checkpoints keep one shard index per format and variant in a directory.
 MAX_SHARD_INDEXES = 16
 # Every file one walk may list, charged once as a shard-index entry and once more
-# when it is bound to a model.
+# when it is bound to a model: twice the entries limit. These two values are the
+# defaults; each scan and validation charges twice the operator's limit in force.
 MAX_WEIGHT_FILE_BINDINGS = 2 * MAX_ENTRIES
 # Each model records the configuration, tokenizer, chat template and custom-code
 # digests of its directory, so those records are bounded across one scan as well.
@@ -304,16 +304,17 @@ class _HashingModelReader:
         self.digest = hashlib.sha256()
         self.bytes_read = 0
         self.prefix = bytearray()
+        self.limit = limits.current().model_bytes
 
     def fileno(self) -> int:
         return self.stream.fileno()
 
     def read(self, size: int) -> bytes:
-        if self.bytes_read > MAX_HASH_SIZE:
+        if self.bytes_read > self.limit:
             raise OSError("model artifact exceeds the hash byte limit")
-        content = self.stream.read(min(size, MAX_HASH_SIZE + 1 - self.bytes_read))
+        content = self.stream.read(min(size, self.limit + 1 - self.bytes_read))
         self.bytes_read += len(content)
-        if self.bytes_read > MAX_HASH_SIZE:
+        if self.bytes_read > self.limit:
             raise OSError("model artifact exceeds the hash byte limit")
         self.digest.update(content)
         self.prefix.extend(content[: max(0, MAX_MODEL_HEADER_BYTES + 8 - len(self.prefix))])
@@ -364,7 +365,7 @@ def observe_model_artifact(
     never attributed to a pathname that now names other bytes.
     """
     before = os.fstat(stream.fileno())
-    if before.st_size > MAX_HASH_SIZE:
+    if before.st_size > limits.current().model_bytes:
         raise OSError("model artifact exceeds the hash byte limit")
     observed = _HashingModelReader(stream)
     safety, explanation = inspect_model_format(path, stream=cast(BinaryIO, observed))
@@ -424,9 +425,10 @@ def safetensors_fingerprint(
 ) -> dict[str, str]:
     """Bind metadata and complete-file hash to one confined artifact observation."""
     metadata: dict[str, str] = {}
+    model_bytes = limits.bound("model-bytes")
     with (
-        ConfinedCollection(root, [], max_total_bytes=MAX_HASH_BYTES) as files,
-        files.open_regular(path, max_bytes=MAX_HASH_BYTES) as stream,
+        ConfinedCollection(root, [], max_total_bytes=model_bytes) as files,
+        files.open_regular(path, max_bytes=model_bytes) as stream,
     ):
         safety, _, digest = inspect_model_artifact(path, stream=stream, metadata=metadata)
     if safety != SerializationSafety.SAFE or not metadata:
@@ -501,7 +503,7 @@ class BindingBudget:
     """
 
     def __init__(self, units: int | None = None, *, reason: str = BINDINGS_EXHAUSTED) -> None:
-        self.remaining = MAX_WEIGHT_FILE_BINDINGS if units is None else units
+        self.remaining = 2 * limits.current().entries if units is None else units
         self.reason = reason
         self.refused: set[Path] = set()
 
@@ -663,7 +665,7 @@ class ModelPackages:
         self.covered: set[Path] = set()
         self.verified: dict[tuple[Any, ...], VerificationResult] = {}
         # The scan's aggregate budget for the same files.
-        self._remaining = MAX_HASH_SIZE + 32 * 1024 * 1024 if byte_budget is None else byte_budget
+        self._remaining = limits.current().model_total_bytes if byte_budget is None else byte_budget
         self._refused: set[Path] = set()
         self._budget = InspectionBudget()
         self._bindings = BindingBudget(binding_budget)
@@ -680,7 +682,7 @@ class ModelPackages:
         failures: list[str] = []
         directory = path.parent
         with ConfinedCollection(
-            self.root, failures, max_total_bytes=MAX_HASH_SIZE + 32 * 1024 * 1024
+            self.root, failures, max_total_bytes=limits.bound("model-total-bytes")
         ) as files:
             tree, walked = self._tree(files, directory)
             observation = self._observe(files, path)
@@ -715,7 +717,7 @@ class ModelPackages:
         """The observation of root-relative ``path``, made now unless already made."""
         if path not in self._observations:
             with ConfinedCollection(
-                self.root, [], max_total_bytes=MAX_HASH_SIZE + 32 * 1024 * 1024
+                self.root, [], max_total_bytes=limits.bound("model-total-bytes")
             ) as files:
                 self._observe(files, path)
         return self._observations.get(path)
@@ -744,7 +746,7 @@ class ModelPackages:
         if path not in self._observations:
             observation: ModelArtifactObservation | None = None
             try:
-                with files.open_regular(path, max_bytes=MAX_HASH_SIZE) as stream:
+                with files.open_regular(path, max_bytes=limits.bound("model-bytes")) as stream:
                     self._charge(files, path, stream)
                     observed = observe_model_artifact(path, stream=stream, budget=self._budget)
                 # Commit only after the confined stream confirmed the pathname still
@@ -773,7 +775,7 @@ class ModelPackages:
         if path not in self._digests:
             digest: str | None = None
             try:
-                with files.open_regular(path, max_bytes=MAX_HASH_SIZE) as stream:
+                with files.open_regular(path, max_bytes=limits.bound("model-bytes")) as stream:
                     self._charge(files, path, stream)
                     hasher = hashlib.sha256()
                     while chunk := stream.read(65536):
@@ -1072,20 +1074,20 @@ class ModelScanner(Scanner):
         self._read: set[Path] = set()
         self._budget = InspectionBudget()
         self._bindings = BindingBudget()
-        self._shared = BindingBudget(MAX_SHARED_DIGESTS, reason=SHARED_DIGESTS_EXHAUSTED)
+        self._shared = BindingBudget(reason=SHARED_DIGESTS_EXHAUSTED)
         self._verified: dict[tuple[Any, ...], VerificationResult] = {}
 
     def scan(self, project_root: Path) -> ScanResult:
         result = ScanResult(scanner_name=self.name)
         # One deterministic walk and one aggregate budget for all model/config
-        # reads. Large weights are streamed; metadata remains capped at four MiB.
+        # reads. Large weights are streamed; metadata stays under the file-bytes limit.
         with self._collection(
-            project_root, result, max_total_bytes=MAX_HASH_SIZE + 32 * 1024 * 1024
+            project_root, result, max_total_bytes=limits.bound("model-total-bytes")
         ) as files:
             self._tree = tree = ModelTree(files.iter_files())
             self._digests, self._read, self._budget = {}, set(), InspectionBudget()
             self._bindings, self._verified = BindingBudget(), {}
-            self._shared = BindingBudget(MAX_SHARED_DIGESTS, reason=SHARED_DIGESTS_EXHAUSTED)
+            self._shared = BindingBudget(reason=SHARED_DIGESTS_EXHAUSTED)
             model_dirs = sorted(
                 {
                     path.parent
@@ -1115,7 +1117,7 @@ class ModelScanner(Scanner):
     def _digest(self, files: ConfinedCollection, path: Path) -> str | None:
         if path not in self._digests:
             self._read.add(path)
-            self._digests[path] = files.hash_file(path, max_bytes=MAX_HASH_SIZE)
+            self._digests[path] = files.hash_file(path, max_bytes=limits.bound("model-bytes"))
         return self._digests[path]
 
     def _directory_context(self, files: ConfinedCollection, model_dir: Path) -> _DirectoryContext:
@@ -1246,7 +1248,7 @@ class ModelScanner(Scanner):
         self._read.add(path)
         observation: ModelArtifactObservation | None = None
         try:
-            with files.open_regular(path, max_bytes=MAX_HASH_SIZE) as stream:
+            with files.open_regular(path, max_bytes=limits.bound("model-bytes")) as stream:
                 observed = observe_model_artifact(path, stream=stream, budget=self._budget)
             # Commit only after the confined stream confirmed the pathname still
             # names the bytes that were read.

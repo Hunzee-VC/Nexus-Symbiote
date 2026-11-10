@@ -6,10 +6,13 @@ import itertools
 import json
 import re
 import time
+from dataclasses import replace
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
+from nexus_symbiote import limits
 from nexus_symbiote.cli import main
 from nexus_symbiote.scanners import a2a, mcp, rag
 from nexus_symbiote.scanners.a2a import A2AScanner
@@ -18,6 +21,7 @@ from nexus_symbiote.scanners.mcp import MCPScanner, without_js_comments
 from nexus_symbiote.scanners.rag import RAGScanner
 
 _OLD_COMMENTS = re.compile(r"/\*.*?\*/|(?m:^\s*//[^\n]*$)", re.S)
+_SPENT = "source-scan-bytes limit of 1 KiB exceeded; raise it with --limit source-scan-bytes=N"
 
 
 def _write_many(directory: Path, suffix: str, count: int, body: str = "x = 1\n") -> None:
@@ -58,7 +62,7 @@ def test_sdk_reference_past_the_fiftieth_module_is_still_found(tmp_path):
     result = MCPScanner().scan(tmp_path)
     assert not result.scan_failures
     [client] = [c for c in result.components if c.bom_ref == "mcp-client:sdk"]
-    assert client.properties["source_paths"] == [str(tmp_path / "app" / "zz_last.py")]
+    assert client.properties["source_paths"] == ["app/zz_last.py"]
 
 
 def test_unrelated_binary_named_like_a_module_is_not_a_failure(tmp_path):
@@ -74,7 +78,8 @@ def test_exhausted_budget_is_one_named_gap(tmp_path, monkeypatch):
     )
     failures = MCPScanner().scan(tmp_path).scan_failures
     assert failures == [
-        "MCP source references exceed the combined size limit: the rest were not read"
+        "app/module_004.py: MCP source references exceed the combined size limit: the rest "
+        f"were not read; {_SPENT}"
     ]
 
 
@@ -85,7 +90,8 @@ def test_exhausted_a2a_budget_is_one_named_gap(tmp_path, monkeypatch):
     )
     failures = A2AScanner().scan(tmp_path).scan_failures
     assert failures == [
-        "a2a code references exceed the combined size limit: the rest were not read"
+        "module_005.py: a2a code references exceed the combined size limit: the rest "
+        f"were not read; {_SPENT}"
     ]
 
 
@@ -98,8 +104,53 @@ def test_exhausted_rag_budget_is_one_named_gap(tmp_path, monkeypatch):
     )
     failures = RAGScanner().scan(tmp_path).scan_failures
     assert failures == [
-        "rag vector-store imports exceed the combined size limit: the rest were not read"
+        "module_005.py: rag vector-store imports exceed the combined size limit: the rest "
+        f"were not read; {_SPENT}"
     ]
+
+
+@pytest.mark.parametrize(
+    ("scanner", "label"),
+    [
+        (MCPScanner, "MCP source references"),
+        (A2AScanner, "a2a code references"),
+        (RAGScanner, "rag vector-store imports"),
+    ],
+)
+def test_every_source_budget_is_the_operator_limit(tmp_path, scanner, label):
+    # One budget mechanism for every collector that searches source, set only by the
+    # operator's source-scan-bytes limit.
+    _write_many(tmp_path, ".py", 40, "import mcp\n" + "#" * 200 + "\n")
+    assert not scanner().scan(tmp_path).scan_failures
+    with limits.applied(replace(limits.DEFAULTS, source_scan_bytes=1024)):
+        failures = scanner().scan(tmp_path).scan_failures
+    assert len(failures) == 1
+    assert failures[0].endswith(
+        f"{label} exceed the combined size limit: the rest were not read; {_SPENT}"
+    )
+
+
+@pytest.mark.parametrize(
+    ("scanner", "reference", "found"),
+    [
+        (MCPScanner, "from mcp import ClientSession\n", "mcp-client:sdk"),
+        (A2AScanner, "from a2a.client import A2AClient\n", "a2a-client:code-detected"),
+        (RAGScanner, "import chromadb\n", "rag:import-chroma"),
+    ],
+)
+def test_the_source_budget_binds_before_the_collection_byte_limit(
+    tmp_path, scanner, reference, found
+):
+    # Source text is charged to the collection as well, whose limit leaves room for
+    # the whole source budget: total-bytes never cuts a source search short, even
+    # where a collector keeps none of its reader's failures.
+    _write_many(tmp_path, ".py", 8, "#" * 500 + "\n")
+    (tmp_path / "zz_reference.py").write_text(reference + "#" * 600 + "\n")
+    settings = replace(limits.DEFAULTS, total_bytes=1024, source_scan_bytes=8192)
+    with limits.applied(settings):
+        result = scanner().scan(tmp_path)
+    assert result.scan_failures == []
+    assert found in {component.bom_ref for component in result.components}
 
 
 def test_budget_refuses_everything_after_the_first_overrun():
@@ -137,4 +188,4 @@ def test_commented_sdk_import_is_still_not_a_client(tmp_path):
     )
     (tmp_path / "b.js").write_text("const sdk = require('@modelcontextprotocol/sdk/client')\n")
     [client] = [c for c in MCPScanner().scan(tmp_path).components if c.bom_ref == "mcp-client:sdk"]
-    assert client.properties["source_paths"] == [str(tmp_path / "b.js")]
+    assert client.properties["source_paths"] == ["b.js"]
