@@ -11,7 +11,7 @@ permissions:
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       actions: read
@@ -20,7 +20,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: ["python"]
+        # actions analyzes the workflows and action.yml themselves, as a second opinion
+        # beside scripts/check_workflows.py.
+        language: ["python", "actions"]
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -44,7 +46,7 @@ jobs:
 
       - name: Reject high and critical security findings
         env:
-          SARIF_PATH: ${{ runner.temp }}/codeql-sarif/python.sarif
+          SARIF_PATH: ${{ runner.temp }}/codeql-sarif/${{ matrix.language }}.sarif
           CODEQL_REPORT: ${{ runner.temp }}/codeql-policy.json
         run: python scripts/check_codeql_sarif.py "$SARIF_PATH" --out "$CODEQL_REPORT"
 
@@ -52,7 +54,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: scheduled-codeql-policy-evidence
+          name: scheduled-codeql-policy-evidence-${{ matrix.language }}
           path: |
             ${{ runner.temp }}/codeql-sarif/*.sarif
             ${{ runner.temp }}/codeql-policy.json

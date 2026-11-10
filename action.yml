@@ -91,7 +91,7 @@ runs:
       run: python -I "$SYMBIOTE_ACTION_PATH/scripts/run_action.py"
     - name: Upload SARIF
       if: inputs.sarif-upload == 'true' && always() && steps.scan.outputs.sarif_path != ''
-      uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
+      uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
       with:
         sarif_file: ${{ steps.scan.outputs.sarif_path }}
         category: nexus_symbiote
