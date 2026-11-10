@@ -25,6 +25,11 @@ _ASSIGNMENT = re.compile(
     r"(\"[^\"\n]{0,256}\"|'[^'\n]{0,256}'|[^\s,;]++)"
 )
 _AUTH = re.compile(r"(?i)\b(Bearer|Basic|Token|Bot|ApiKey|Api-Key)(\s++)([A-Za-z0-9_+/=.~-]{6,}+)")
+# After an Authorization or Proxy-Authorization header name the scheme's value is a
+# credential whatever its shape; the shape checks only tell prose from credentials.
+# Searched in a bounded window before each scheme, so the cost per match is constant.
+_AUTHORIZATION_HEADER = re.compile(r"(?i)authorization[\"']?\s{0,8}[:=]\s{0,8}[\"']?$")
+_AUTHORIZATION_LOOKBACK = 40
 # A prose word after a scheme ("Bearer authentication") is shorter than this; a value
 # this long after Bearer, Token, Bot or ApiKey is redacted whatever its shape.
 LONG_CREDENTIAL_LENGTH = 16
@@ -146,7 +151,11 @@ def _credential_like(token: str, scheme: str) -> bool:
 
 def _auth_replacement(match: re.Match[str]) -> str:
     scheme, space, token = match.groups()
-    if _credential_like(token, scheme):
+    start = match.start()
+    header = _AUTHORIZATION_HEADER.search(
+        match.string, max(0, start - _AUTHORIZATION_LOOKBACK), start
+    )
+    if header is not None or _credential_like(token, scheme):
         return scheme + space + REDACTED
     return match.group()
 

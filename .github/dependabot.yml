@@ -5,9 +5,13 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # A release gets a week of public scrutiny before it is proposed.
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: "ci"
-    # Workflows and action.yml pin the same actions by commit; move them together.
+    # Workflows and action.yml pin the same actions by commit; move them together, and
+    # raise ACTION_FLOORS in scripts/check_workflows.py with the pin.
     groups:
       github-actions:
         patterns: ["*"]
@@ -17,8 +21,13 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: "deps"
+    # Dependabot edits only pyproject.toml. `make lock-check` then fails until a maintainer
+    # runs `make lock` on the branch, and the "Dependency health" workflow tests the newest
+    # releases the widened range admits (CONTRIBUTING.md, "Dependency locks").
     ignore:
       # tree-sitter 0.26 removed Parser(timeout_micros=...), and its replacement,
       # parse(progress_callback=...), segfaults with tree-sitter-typescript 0.23.2.

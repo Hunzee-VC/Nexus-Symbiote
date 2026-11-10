@@ -255,6 +255,7 @@ SCHEMA = Path(__file__).parents[1] / "schemas/agent-manifest-1.0.schema.json"
 GUIDE = Path(__file__).parents[1] / "docs/agent-manifest.md"
 
 
+@pytest.mark.locked_only
 def test_published_schema_matches_the_manifest_model():
     from nexus_symbiote.graph import AgentDeclaration
 

@@ -290,6 +290,7 @@ def _entry_point(
         capture_output=True,
         text=True,
         check=False,
+        timeout=300,
     )
 
 
@@ -454,6 +455,7 @@ def test_planted_sigstore_cache_cannot_choose_the_trust_root(tmp_path: Path) -> 
         capture_output=True,
         text=True,
         check=False,
+        timeout=300,
     )
     # Control: the CLI on its own takes its offline trust root from that cache.
     assert direct.returncode == 0, direct.stderr

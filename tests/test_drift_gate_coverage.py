@@ -391,6 +391,116 @@ def test_shadowscan_content_change_and_coverage_regression_read_differently():
     assert "unmapped rose from 0 to 2" in unmapped.security_alerts[0]["alert"]
 
 
+REPORT_DIGEST = "sha256:" + "1" * 64
+COMPARABLE_CONTENT = {
+    "source_report_digest": REPORT_DIGEST,
+    "source_report_content_digest": "sha256:" + "2" * 64,
+    "source_report_content_profile": "nexus-symbiote/shadowscan-content/v1",
+}
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "field", "alert"),
+    [
+        (
+            {"assurance_level": "observed"},
+            {},
+            "assurance_level",
+            "Coverage assurance changed from observed to declared.",
+        ),
+        (
+            {"source_report_format": "shadowscan-json"},
+            {"source_report_format": "shadowscan-cyclonedx"},
+            "source_report_format",
+            "ShadowScan report format changed from shadowscan-json to shadowscan-cyclonedx.",
+        ),
+        (
+            {"source_report_status": "complete"},
+            {"source_report_status": "incomplete"},
+            "source_report_status",
+            "ShadowScan source status changed from complete to incomplete.",
+        ),
+        (
+            {"source_report_status": "incomplete"},
+            {"source_report_status": "unknown"},
+            "source_report_status",
+            "ShadowScan source status changed from incomplete to unknown.",
+        ),
+        (
+            {"source_projection_limitations": []},
+            {"source_projection_limitations": ["tool schemas not projected"]},
+            "source_projection_limitations",
+            "New ShadowScan projection limitations: tool schemas not projected.",
+        ),
+        (
+            COMPARABLE_CONTENT,
+            {**COMPARABLE_CONTENT, "source_unmapped_count": 2, "source_unmapped_indexes": [0, 4]},
+            "source_unmapped_count",
+            "ShadowScan entries left unmapped rose from 0 to 2.",
+        ),
+    ],
+)
+def test_each_imported_evidence_regression_alerts_and_its_reverse_is_a_note(
+    before, after, field, alert
+):
+    report = _compare(_claim(**before), _claim(**after))
+    assert [(a["severity"], a["alert"]) for a in report.security_alerts] == [("high", alert)]
+    assert [c["field"] for c in report.metadata_changes] == [f"completeness.{field}"]
+    reverse = _compare(_claim(**after), _claim(**before))
+    assert reverse.security_alerts == []
+    assert [(c["field"], c["severity"]) for c in reverse.metadata_changes] == [
+        (f"completeness.{field}", "info")
+    ]
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "alert"),
+    [
+        (
+            {"source_report_digest": REPORT_DIGEST},
+            {},
+            "The ShadowScan report is no longer imported.",
+        ),
+        ({}, {"source_report_digest": REPORT_DIGEST}, "A ShadowScan report is now imported."),
+        (
+            {"source_report_digest": REPORT_DIGEST},
+            {"source_report_digest": "sha256:" + "3" * 64},
+            "ShadowScan report bytes changed, and the snapshots carry no comparable content digest.",
+        ),
+    ],
+)
+def test_a_report_imported_dropped_or_changed_without_content_digests_alerts(before, after, alert):
+    report = _compare(_claim(**before), _claim(**after))
+    assert [(a["severity"], a["alert"]) for a in report.security_alerts] == [("high", alert)]
+
+
+def test_a_regenerated_report_and_moved_unmapped_entries_are_notes():
+    regenerated = _compare(
+        _claim(**COMPARABLE_CONTENT),
+        _claim(**{**COMPARABLE_CONTENT, "source_report_digest": "sha256:" + "3" * 64}),
+    )
+    moved = _compare(
+        _claim(**COMPARABLE_CONTENT, source_unmapped_count=1, source_unmapped_indexes=[0]),
+        _claim(**COMPARABLE_CONTENT, source_unmapped_count=1, source_unmapped_indexes=[3]),
+    )
+    for report, field, detail in (
+        (
+            regenerated,
+            "source_report_digest",
+            "ShadowScan report regenerated; normalized content unchanged.",
+        ),
+        (
+            moved,
+            "source_unmapped_indexes",
+            "Unmapped ShadowScan entries moved within the report; their number is unchanged.",
+        ),
+    ):
+        assert report.security_alerts == []
+        assert report.metadata_changes == [
+            {"field": f"completeness.{field}", "severity": "info", "detail": detail}
+        ]
+
+
 def test_relationship_between_existing_components_is_rated_and_printed(tmp_path):
     agent = AgentComponent(bom_ref="agent:a", name="a")
     tool = ToolComponent(bom_ref="tool:t", name="t")

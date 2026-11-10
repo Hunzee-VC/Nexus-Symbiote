@@ -432,6 +432,7 @@ def test_hostile_project_through_the_real_entry_point(tmp_path):
         capture_output=True,
         text=True,
         check=False,
+        timeout=300,
     )
     assert result.returncode == 1, result.stderr
     assert result.stdout == ""

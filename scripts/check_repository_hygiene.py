@@ -12,8 +12,11 @@ import subprocess
 import tomllib
 from collections import Counter
 from collections.abc import Iterator
+from datetime import date
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
+
+import yaml
 
 VENDOR = Path("src/nexus_symbiote/generators/schemas/vendor")
 MAX_FILE_BYTES = 2 * 1024 * 1024
@@ -267,6 +270,25 @@ def version_issues(root: Path) -> list[str]:
             return ["distribution and package versions disagree"]
     except (OSError, ValueError, KeyError, SyntaxError, UnicodeError):
         return ["distribution or package version could not be checked"]
+    return citation_issues(root, project)
+
+
+def citation_issues(root: Path, version: str) -> list[str]:
+    """CITATION.cff must cite the version being released, with a real release date."""
+    try:
+        citation = yaml.safe_load(read_file(root, Path("CITATION.cff")).decode("utf-8"))
+    except (OSError, ValueError, UnicodeError, yaml.YAMLError):
+        return ["CITATION.cff could not be read"]
+    if not isinstance(citation, dict) or str(citation.get("version")) != version:
+        return ["CITATION.cff cites another version than pyproject.toml"]
+    released = citation.get("date-released")
+    if isinstance(released, str):
+        try:
+            released = date.fromisoformat(released)
+        except ValueError:
+            released = None
+    if not isinstance(released, date):
+        return ["CITATION.cff needs the release date as date-released: YYYY-MM-DD"]
     return []
 
 

@@ -830,6 +830,8 @@ def test_npm_command_resolution_follows_npm_aliases_and_prefixes():
     assert npm_command("installTest") == "install-test"
 
 
+# Coverage tracing alone nearly reaches the bound, so the coverage job runs this untraced.
+@pytest.mark.no_cover
 def test_argument_scan_cost_is_bounded_by_characters_not_steps():
     import time
 

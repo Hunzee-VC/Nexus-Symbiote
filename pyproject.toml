@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27,<2"]
 build-backend = "hatchling.build"
 
 [project]
@@ -45,17 +45,22 @@ classifiers = [
     "Topic :: Software Development :: Quality Assurance",
     "Typing :: Typed",
 ]
+# Every lower bound is tested (requirements-floor.lock), with the extras and the build backend
+# installed beside the core. So three floors are what those need, not what the core was shown
+# to need: pydantic 2.12 (sigstore-models), jsonschema 4.25 (cyclonedx-python-lib's
+# json-validation) and packaging 24.2 (hatchling 1.27). Lower versions are untested, not known
+# to fail.
 dependencies = [
-    "click>=8.1,<9",
-    "packaging>=24,<27",
+    "click>=8.2.1,<9",
+    "packaging>=24.2,<27",
     "packageurl-python>=0.17.6,<1",
-    "pydantic>=2.10,<3",
+    "pydantic>=2.12,<3",
     "rich>=13.0,<16",
-    "rfc8785>=0.1.4,<1",
+    "rfc8785>=0.1.4,<0.2",
     "pyyaml>=6.0.1,<7",
-    "jsonschema>=4.23,<5",
+    "jsonschema>=4.25,<5",
     "referencing>=0.35,<1",
-    "cryptography>=50,<51",
+    "cryptography>=50,<53",
     "tree-sitter>=0.25,<0.26",
     "tree-sitter-typescript>=0.23,<0.24",
 ]
@@ -66,33 +71,12 @@ cyclonedx = [
 ]
 sigstore = [
     "sigstore>=4.4,<5",
+    # Imported directly by utils/crypto.py, not only through sigstore.
+    "sigstore-models>=0.0.6,<0.1",
     "tuf>=7,<8",
-]
-yaml = [
-    "pyyaml>=6.0.1,<7",
 ]
 all = [
-    "cyclonedx-python-lib[json-validation]>=11.12,<12",
-    "sigstore>=4.4,<5",
-    "tuf>=7,<8",
-    "pyyaml>=6.0.1,<7",
-]
-dev = [
-    "pytest>=9.0.3,<10",
-    "pytest-cov>=5.0,<8",
-    "ruff>=0.4,<1",
-    "mypy>=1.10,<3",
-    "types-PyYAML>=6.0,<7",
-    "types-jsonschema>=4.23,<5",
-    "sigstore>=4.4,<5",
-    "tuf>=7,<8",
-    "build>=1.2,<2",
-    "twine>=6.0,<8",
-    "hypothesis>=6.0,<7",
-    "spdx-python-model>=0.0.6,<1",
-    "cyclonedx-python-lib[json-validation]>=11.12,<12",
-    "hatchling>=1.25,<2",
-    "editables>=0.5,<1",
+    "nexus-symbiote[cyclonedx,sigstore]",
 ]
 
 [project.scripts]
@@ -105,6 +89,24 @@ Issues = "https://github.com/Hunzee-VC/Nexus-Symbiote/issues"
 Documentation = "https://github.com/Hunzee-VC/Nexus-Symbiote/tree/main/docs"
 Changelog = "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/CHANGELOG.md"
 Security = "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/SECURITY.md"
+
+[dependency-groups]
+# Development tools only; never published. `make lock` resolves them with the
+# `all` extra into requirements-ci.lock and pins them in requirements-floor.lock.
+dev = [
+    "pytest>=9.0.3,<10",
+    "pytest-cov>=5.0,<8",
+    "ruff>=0.4,<1",
+    "mypy>=1.10,<3",
+    "types-PyYAML>=6.0,<7",
+    "types-jsonschema>=4.23,<5",
+    "build>=1.2,<2",
+    "twine>=6.0,<8",
+    "hypothesis>=6.0,<7",
+    "spdx-python-model>=0.0.6,<1",
+    "hatchling>=1.27,<2",
+    "editables>=0.5,<1",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/nexus_symbiote"]
@@ -130,7 +132,13 @@ plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-v --tb=short"
+addopts = "-v --tb=short -p pytester"
+# A test that runs longer fails with its traceback (tests/conftest.py); the thread dump
+# comes first. CI sets a tighter limit. Mark a known slow test with
+# @pytest.mark.timeout(seconds).
+test_timeout = "300"
+faulthandler_timeout = 120
+xfail_strict = true
 
 [tool.coverage.run]
 branch = true

@@ -1,3 +1,14 @@
-# Default owner for all files — requires review from the lead maintainer.
-# See MAINTAINERS.md and GOVERNANCE.md for ownership and decision authority.
+# Code owners request the owner's review on pull requests that touch these paths. Review is
+# enforced only by the full protection profile (config/github-main-protection.json,
+# require_code_owner_reviews); the interim single-maintainer profile requires none.
+# See GOVERNANCE.md for the review policy and MAINTAINERS.md for ownership.
 * @aisecnomad
+
+# Gates and release controls: a change here changes what admits every other change.
+/.github/ @aisecnomad
+/action.yml @aisecnomad
+/scripts/ @aisecnomad
+/config/ @aisecnomad
+/pyproject.toml @aisecnomad
+/requirements-*.lock @aisecnomad
+/tests/conftest.py @aisecnomad

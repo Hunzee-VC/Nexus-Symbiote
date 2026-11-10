@@ -494,6 +494,9 @@ def test_padded_imports_that_leave_the_root_are_gaps(tmp_path, token):
     ]
 
 
+# The bound tells the linear bookkeeping from the quadratic one; coverage tracing alone
+# nearly reaches it, so the coverage job runs this test untraced.
+@pytest.mark.no_cover
 def test_imported_by_lists_every_importer_once_with_large_fan_in(tmp_path):
     names = [f"{index:03d}" for index in range(1000)]
     _write(tmp_path, "CLAUDE.md", " ".join(f"@d/{name}" for name in names))

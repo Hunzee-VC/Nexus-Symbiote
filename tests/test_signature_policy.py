@@ -149,3 +149,32 @@ def test_size_limit_and_missing_files_are_explicit_errors(policy_inputs, monkeyp
     (project / "model.bin").unlink()
     with pytest.raises(SignaturePolicyError):
         load_signature_policies(policy, project)
+
+
+@pytest.mark.parametrize(
+    ("version", "artifacts", "reason"),
+    [
+        (1, ["model.bin"], "Each signature policy artifact must be an object"),
+        (
+            2,
+            [{"kind": "digest-pin", "artifact_path": "model.bin", "expected_sha256": 7}],
+            "expected_sha256 must be a SHA-256 digest",
+        ),
+        (
+            2,
+            [{"kind": "digest-pin", "artifact_path": "model.bin", "expected_sha256": None}],
+            "A digest pin requires expected_sha256",
+        ),
+    ],
+)
+def test_malformed_entries_fail_closed_with_their_reason(policy_inputs, version, artifacts, reason):
+    project, policy, _ = policy_inputs
+    policy.write_text(json.dumps({"version": version, "artifacts": artifacts}))
+    with pytest.raises(SignaturePolicyError, match=reason):
+        load_signature_policies(policy, project)
+
+
+def test_a_missing_project_root_is_an_explicit_error(policy_inputs, tmp_path):
+    _, policy, _ = policy_inputs
+    with pytest.raises(SignaturePolicyError, match="Project root is unavailable"):
+        load_signature_policies(policy, tmp_path / "no-such-project")

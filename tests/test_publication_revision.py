@@ -167,23 +167,56 @@ def test_unknown_or_different_branch_revision_cannot_pass(sha):
 
 
 def test_workflow_query_cannot_fall_back_to_an_older_green_run(monkeypatch):
-    run, jobs = evidence()
-    run["conclusion"] = "failure"
+    green, jobs = evidence()
+    failed = {**green, "id": 124, "conclusion": "failure"}
     calls = []
 
     def api(repo, path, token):
         calls.append((repo, path))
         if len(calls) == 1:
-            return {"workflow_runs": [run], "total_count": 2}
+            return {"workflow_runs": [green, failed], "total_count": 2}
         return jobs
 
     monkeypatch.setattr(controls, "_fetch", api)
-    result = controls.fetch_verification("owner/repo", "a" * 40, "synthetic")
-    assert evaluate(*result)
+    run, _ = controls.fetch_verification("owner/repo", "a" * 40, "synthetic")
+    assert run["id"] == 124
+    assert evaluate(run, jobs)
     assert calls == [
-        ("owner/repo", "actions/workflows/ci.yml/runs?head_sha=" + "a" * 40 + "&per_page=1"),
-        ("owner/repo", "actions/runs/123/jobs?filter=latest&per_page=100"),
+        ("owner/repo", "actions/workflows/ci.yml/runs?head_sha=" + "a" * 40 + "&per_page=100"),
+        ("owner/repo", "actions/runs/124/jobs?filter=latest&per_page=100"),
     ]
+
+
+@pytest.mark.parametrize(
+    "intruder",
+    [
+        {"event": "pull_request", "head_branch": "main"},
+        {"event": "pull_request", "head_branch": "feature"},
+        {"head_repository": {"full_name": "fork/repo"}},
+        {"head_branch": "other", "event": "workflow_dispatch"},
+        {"path": ".github/workflows/other.yml"},
+    ],
+)
+def test_a_newer_untrusted_run_for_the_same_sha_cannot_displace_the_trusted_one(
+    monkeypatch, intruder
+):
+    trusted, jobs = evidence()
+    newer = {**trusted, "id": 999, "conclusion": None, "status": "queued", **intruder}
+
+    def api(repo, path, token):
+        if "/jobs" in path:
+            assert path.startswith("actions/runs/123/")
+            return jobs
+        return {"workflow_runs": [newer, trusted], "total_count": 2}
+
+    monkeypatch.setattr(controls, "_fetch", api)
+    assert evaluate(*controls.fetch_verification("owner/repo", "a" * 40, "synthetic")) == []
+
+
+@pytest.mark.parametrize("listing", [{"workflow_runs": [{}] * 3, "total_count": 101}, {}])
+def test_a_truncated_or_malformed_run_listing_fails_closed(monkeypatch, listing):
+    monkeypatch.setattr(controls, "_fetch", lambda *_: listing)
+    assert evaluate(*controls.fetch_verification("owner/repo", "a" * 40, "synthetic"))
 
 
 @pytest.mark.parametrize("runs", [[], None, [None], [{"id": True}], [{"id": -1}]])

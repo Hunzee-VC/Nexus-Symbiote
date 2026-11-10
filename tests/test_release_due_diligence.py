@@ -589,7 +589,14 @@ def test_a_changed_second_declaration_reaches_the_drift_gate(tmp_path):
         ["diff", "--fail-on-alert", str(tmp_path / "before.json"), str(tmp_path / "after.json")],
     )
     assert drift.exit_code != 0, drift.output
-    assert "registry:pypi/torch" in drift.output or "torch" in drift.output
+    report = json.loads(
+        runner.invoke(
+            main,
+            ["diff", "--json-output", str(tmp_path / "before.json"), str(tmp_path / "after.json")],
+        ).output
+    )
+    assert [c["bom_ref"] for c in report["components_modified"]] == ["registry:pypi/torch"]
+    assert any("torch" in json.dumps(alert) for alert in report["security_alerts"])
 
 
 def test_vex_refuses_a_second_name_for_its_input(tmp_path, monkeypatch):

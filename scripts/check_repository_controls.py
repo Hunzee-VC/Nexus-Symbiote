@@ -1,7 +1,14 @@
-"""Require enforced checks and successful workflow evidence for the published SHA.
+"""Require enforced checks, successful workflow evidence and release prerequisites.
 
-Only read repository branch metadata. Administrative configuration is a separate
-operator action; a checked-in policy file does not protect a GitHub branch.
+Read-only. For the published SHA it requires branch protection, the newest trusted CI run
+to have succeeded, and, with ``--publish``, the release-tag ruleset and the index
+environment's protection. Publishing to PyPI also requires the commit to have been on the
+branch for 24 hours (``SOAK_OVERRIDE`` with a stated reason waives that for an urgent fix)
+and the signed release tag to point at it. Only an administrator's token can see who may
+bypass the ruleset: the workflow reports that it could not, and ``--verify-bypass-actors``,
+for the administrator's own run, fails unless the list is readable and empty.
+Administrative configuration is a separate operator action; a checked-in policy file does
+not protect a GitHub branch.
 """
 
 from __future__ import annotations
@@ -11,6 +18,9 @@ import json
 import os
 import re
 import sys
+import tomllib
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
@@ -21,6 +31,13 @@ GITHUB_ACTIONS_APP_ID = 15368
 REQUIRED_CI_JOBS = frozenset({"Verified CI", "CodeQL policy", "Dependency advisories"})
 CI_WORKFLOW = ".github/workflows/ci.yml"
 MAX_RESPONSE_BYTES = 1024 * 1024
+ROOT = Path(__file__).resolve().parents[1]
+RUNS_PER_PAGE = 100
+SOAK = timedelta(hours=24)
+CLOCK_SKEW = timedelta(minutes=5)
+MIN_OVERRIDE_REASON = 20
+TAG_PATTERN = "refs/tags/v*"
+TRUSTED_EVENTS = frozenset({"push", "workflow_dispatch"})
 
 
 def evaluate(metadata: Any, required: frozenset[str] = REQUIRED_CHECKS) -> list[str]:
@@ -107,22 +124,118 @@ def evaluate_revision(metadata: Any, sha: str) -> list[str]:
     return []
 
 
-def fetch_verification(repo: str, sha: str, token: str) -> tuple[Any, Any]:
+def _trusted(run: Any, *, repo: str, branch: str, sha: str) -> bool:
+    if not isinstance(run, dict):
+        return False
+    source = run.get("head_repository")
+    return (
+        type(run.get("id")) is int
+        and run["id"] > 0
+        and run.get("head_sha") == sha
+        and run.get("head_branch") == branch
+        and run.get("path") == CI_WORKFLOW
+        and run.get("event") in TRUSTED_EVENTS
+        and isinstance(source, dict)
+        and isinstance(source.get("full_name"), str)
+        and source["full_name"].lower() == repo.lower()
+    )
+
+
+def fetch_runs(repo: str, sha: str, token: str) -> list[Any] | None:
+    """Every run of ci.yml for the SHA, or None when the list is malformed or truncated."""
     if not _valid_sha(sha):
         raise ValueError("an exact source commit SHA is required")
-    # The file-specific endpoint prevents an unrelated workflow from supplying
-    # an identically named check. Inspect the newest run, including queued runs;
-    # an older successful attempt must not hide a later failure or pending run.
-    response = _fetch(repo, f"actions/workflows/ci.yml/runs?head_sha={sha}&per_page=1", token)
+    response = _fetch(
+        repo, f"actions/workflows/ci.yml/runs?head_sha={sha}&per_page={RUNS_PER_PAGE}", token
+    )
     runs = response.get("workflow_runs") if isinstance(response, dict) else None
-    if not isinstance(runs, list) or len(runs) != 1 or not isinstance(runs[0], dict):
+    total = response.get("total_count") if isinstance(response, dict) else None
+    if not isinstance(runs, list) or type(total) is not int or total != len(runs):
+        return None
+    return runs
+
+
+def newest_trusted_run(runs: list[Any], *, repo: str, branch: str, sha: str) -> Any:
+    """The newest push or dispatch run of ci.yml on the branch in this repository.
+
+    Runs from pull requests, forks and other branches can share the SHA and be newer; they
+    are not evidence and must not displace the trusted run. A newer trusted run, pending or
+    failed, still wins over an older success.
+    """
+    trusted = [run for run in runs if _trusted(run, repo=repo, branch=branch, sha=sha)]
+    return max(trusted, key=lambda run: run["id"], default=None)
+
+
+def fetch_verification(repo: str, sha: str, token: str, branch: str = "main") -> tuple[Any, Any]:
+    # The file-specific endpoint prevents an unrelated workflow from supplying
+    # an identically named check.
+    runs = fetch_runs(repo, sha, token)
+    if runs is None:
         return None, None
-    run = runs[0]
-    run_id = run.get("id")
-    if type(run_id) is not int or run_id <= 0:
-        return run, None
-    jobs = _fetch(repo, f"actions/runs/{run_id}/jobs?filter=latest&per_page=100", token)
+    run = newest_trusted_run(runs, repo=repo, branch=branch, sha=sha)
+    if run is None:
+        return None, None
+    jobs = _fetch(repo, f"actions/runs/{run['id']}/jobs?filter=latest&per_page=100", token)
     return run, jobs
+
+
+def _timestamp(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.endswith("Z"):
+        return None
+    try:
+        moment = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return moment if moment.tzinfo is not None else None
+
+
+def landed_at(
+    metadata: Any, runs: list[Any], *, repo: str, branch: str, sha: str
+) -> datetime | None:
+    """When the SHA reached the branch: the later of its commit time and its first push run.
+
+    GitHub creates the push run when the commit lands; the commit time alone is whatever
+    the committer's clock said.
+    """
+    commit = metadata.get("commit") if isinstance(metadata, dict) else None
+    details = commit.get("commit") if isinstance(commit, dict) else None
+    committer = details.get("committer") if isinstance(details, dict) else None
+    committed = _timestamp(committer.get("date")) if isinstance(committer, dict) else None
+    if committed is None:
+        return None
+    pushes: list[datetime] = []
+    for run in runs:
+        if _trusted(run, repo=repo, branch=branch, sha=sha) and run.get("event") == "push":
+            created = _timestamp(run.get("created_at"))
+            if created is None:
+                return None
+            pushes.append(created)
+    return max(committed, min(pushes)) if pushes else committed
+
+
+def override_reason(override: str) -> str:
+    """The stated reason, reduced to plain prose so that it cannot steer the runner's log."""
+    return re.sub(r"[^A-Za-z0-9 .,;:()'/-]", "", override).strip()
+
+
+def evaluate_soak(landed: datetime | None, now: datetime, override: str) -> list[str]:
+    """Publishing to PyPI waits 24 hours after the release commit lands, unless explained."""
+    reason = override_reason(override)
+    if reason:
+        if len(reason) < MIN_OVERRIDE_REASON:
+            return ["a soak override must state its reason in at least 20 characters"]
+        return []
+    if landed is None:
+        return ["the time the release commit reached the branch is unavailable"]
+    if landed > now + CLOCK_SKEW:
+        return ["the release commit time is in the future"]
+    if now - landed < SOAK:
+        hours = (now - landed).total_seconds() / 3600
+        return [
+            f"the release commit reached the branch {hours:.1f} hours ago; PyPI publication"
+            " waits 24 hours (set soak_override with a reason for an urgent fix)"
+        ]
+    return []
 
 
 def evaluate_verification(
@@ -140,7 +253,7 @@ def evaluate_verification(
         or run.get("head_sha") != sha
         or run.get("head_branch") != branch
         or run.get("path") != CI_WORKFLOW
-        or run.get("event") not in {"push", "workflow_dispatch"}
+        or run.get("event") not in TRUSTED_EVENTS
         or not isinstance(source, dict)
         or not isinstance(source.get("full_name"), str)
         or source["full_name"].lower() != repo.lower()
@@ -174,12 +287,200 @@ def evaluate_verification(
     return errors
 
 
+def fetch_tag_rulesets(repo: str, token: str) -> list[Any]:
+    listing = _fetch(repo, "rulesets?targets=tag&per_page=100", token)
+    if not isinstance(listing, list):
+        raise ValueError("ruleset listing is malformed")
+    return [
+        _fetch(repo, f"rulesets/{entry['id']}", token)
+        for entry in listing
+        if isinstance(entry, dict)
+        and entry.get("target") == "tag"
+        and entry.get("enforcement") == "active"
+        and type(entry.get("id")) is int
+    ]
+
+
+def _guards_release_tags(ruleset: Any) -> bool:
+    """Active, covering every v* tag, blocking updates and deletions, binding the caller too."""
+    if (
+        not isinstance(ruleset, dict)
+        or ruleset.get("target") != "tag"
+        or ruleset.get("enforcement") != "active"
+        # Reported for the caller's own token: a workflow that may bypass could move a tag.
+        or ruleset.get("current_user_can_bypass", "never") != "never"
+    ):
+        return False
+    conditions = ruleset.get("conditions")
+    names = conditions.get("ref_name") if isinstance(conditions, dict) else None
+    include = names.get("include") if isinstance(names, dict) else None
+    exclude = names.get("exclude", []) if isinstance(names, dict) else None
+    if not isinstance(include, list) or exclude:
+        return False
+    if TAG_PATTERN not in include and "~ALL" not in include:
+        return False
+    rules = ruleset.get("rules")
+    types = (
+        {r.get("type") for r in rules if isinstance(r, dict)} if isinstance(rules, list) else set()
+    )
+    return {"update", "deletion"} <= types
+
+
+def evaluate_tag_rulesets(
+    rulesets: list[Any], *, verify_bypass_actors: bool = False
+) -> tuple[list[str], list[str]]:
+    """Errors and notices for the ruleset that must stop v* tags from moving or vanishing.
+
+    GitHub returns ``bypass_actors`` only to a caller that may edit the ruleset, which means an
+    administrator; the release workflow's token never sees it. A missing list is therefore
+    unknown, not empty: the workflow reports it, and the administrator's check
+    (``verify_bypass_actors``) fails on it.
+    """
+    unknown = False
+    for ruleset in rulesets:
+        if not _guards_release_tags(ruleset):
+            continue
+        actors = ruleset.get("bypass_actors")
+        if actors == []:
+            return [], []
+        unknown = unknown or actors is None
+    if unknown and verify_bypass_actors:
+        return [
+            "this token cannot read who may bypass the release-tag ruleset; run the check"
+            " with a repository administrator's token"
+        ], []
+    if unknown:
+        return [], [
+            "the release-tag ruleset's bypass actors are visible only to administrators, so"
+            " this token could not check them; the administrator check"
+            " (--verify-bypass-actors) does"
+        ]
+    return ["no active ruleset without bypass stops refs/tags/v* from being moved or deleted"], []
+
+
+def fetch_environment(repo: str, name: str, token: str) -> tuple[Any, Any]:
+    environment = _fetch(repo, f"environments/{quote(name, safe='')}", token)
+    policy = environment.get("deployment_branch_policy") if isinstance(environment, dict) else None
+    policies = None
+    if isinstance(policy, dict) and policy.get("custom_branch_policies") is True:
+        policies = _fetch(
+            repo,
+            f"environments/{quote(name, safe='')}/deployment-branch-policies?per_page=100",
+            token,
+        )
+    return environment, policies
+
+
+def evaluate_environment(environment: Any, policies: Any, *, name: str, branch: str) -> list[str]:
+    """The publishing environment must need a reviewer, admit no bypass and only the branch."""
+    if not isinstance(environment, dict) or environment.get("name") != name:
+        return [f"the {name} environment is unavailable"]
+    errors = []
+    if environment.get("can_admins_bypass") is not False:
+        errors.append(f"administrators can bypass the {name} environment's protection rules")
+    rules = environment.get("protection_rules")
+    if not isinstance(rules, list) or not any(
+        isinstance(rule, dict)
+        and rule.get("type") == "required_reviewers"
+        and isinstance(rule.get("reviewers"), list)
+        and rule["reviewers"]
+        for rule in rules
+    ):
+        errors.append(f"the {name} environment requires no reviewer")
+    policy = environment.get("deployment_branch_policy")
+    entries = policies.get("branch_policies") if isinstance(policies, dict) else None
+    total = policies.get("total_count") if isinstance(policies, dict) else None
+    if not isinstance(policy, dict):
+        errors.append(f"the {name} environment accepts deployments from any branch")
+    elif policy.get("custom_branch_policies") is True:
+        if (
+            not isinstance(entries, list)
+            or type(total) is not int
+            or total != len(entries)
+            or len(entries) != 1
+            or not isinstance(entries[0], dict)
+            or entries[0].get("name") != branch
+            or entries[0].get("type", "branch") != "branch"
+        ):
+            errors.append(
+                f"the {name} environment accepts deployments from refs other than {branch}"
+            )
+    elif policy.get("protected_branches") is not True:
+        errors.append(f"the {name} environment accepts deployments from any branch")
+    return errors
+
+
+def project_version(root: Path = ROOT) -> str:
+    version = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"][
+        "version"
+    ]
+    if not isinstance(version, str) or re.fullmatch(r"[0-9A-Za-z.+!-]{1,64}", version) is None:
+        raise ValueError("project version is malformed")
+    return version
+
+
+def fetch_release_tag(repo: str, version: str, token: str) -> tuple[Any, Any]:
+    try:
+        ref = _fetch(repo, f"git/ref/tags/{quote('v' + version, safe='')}", token)
+    except HTTPError as error:
+        if error.code == 404:
+            return None, None
+        raise
+    target = ref.get("object") if isinstance(ref, dict) else None
+    tag = None
+    if (
+        isinstance(target, dict)
+        and target.get("type") == "tag"
+        and _valid_sha(target.get("sha", ""))
+    ):
+        tag = _fetch(repo, f"git/tags/{target['sha']}", token)
+    return ref, tag
+
+
+def evaluate_release_tag(ref: Any, tag: Any, *, version: str, sha: str) -> list[str]:
+    """The signed, annotated v<version> tag must already point at the commit being published."""
+    name = f"v{version}"
+    target = ref.get("object") if isinstance(ref, dict) else None
+    if (
+        not isinstance(ref, dict)
+        or ref.get("ref") != f"refs/tags/{name}"
+        or not isinstance(target, dict)
+        or target.get("type") != "tag"
+    ):
+        return [f"push the signed, annotated tag {name} for the source commit before publishing"]
+    commit = tag.get("object") if isinstance(tag, dict) else None
+    if (
+        not isinstance(tag, dict)
+        or tag.get("tag") != name
+        or not isinstance(commit, dict)
+        or commit.get("type") != "commit"
+        or commit.get("sha") != sha
+    ):
+        return [f"the release tag {name} does not point at the source commit"]
+    verification = tag.get("verification")
+    if not isinstance(verification, dict) or verification.get("verified") is not True:
+        return [f"GitHub does not report a verified signature on the release tag {name}"]
+    return []
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     parser.add_argument("--branch", default="main")
     parser.add_argument("--sha", default=os.environ.get("GITHUB_SHA", ""))
+    parser.add_argument(
+        "--publish", choices=["testpypi", "pypi"], help="also check this index's prerequisites"
+    )
+    parser.add_argument(
+        "--verify-bypass-actors",
+        action="store_true",
+        help="fail unless the release-tag ruleset's bypass list is readable and empty;"
+        " needs a repository administrator's token",
+    )
     args = parser.parse_args()
+    if args.verify_bypass_actors and not args.publish:
+        parser.error("--verify-bypass-actors needs --publish")
+    notices: list[str] = []
     try:
         if not _valid_sha(args.sha):
             raise ValueError("an exact source commit SHA is required")
@@ -187,11 +488,39 @@ def main() -> int:
         metadata = fetch_branch(args.repo, args.branch, token)
         errors = [*evaluate(metadata), *evaluate_revision(metadata, args.sha)]
         if not errors:
-            run, jobs = fetch_verification(args.repo, args.sha, token)
+            run, jobs = fetch_verification(args.repo, args.sha, token, args.branch)
             errors.extend(
                 evaluate_verification(run, jobs, repo=args.repo, branch=args.branch, sha=args.sha)
             )
-    except (HTTPError, URLError, OSError, ValueError, RecursionError):
+        if not errors and args.publish:
+            ruleset_errors, notices = evaluate_tag_rulesets(
+                fetch_tag_rulesets(args.repo, token),
+                verify_bypass_actors=args.verify_bypass_actors,
+            )
+            errors.extend(ruleset_errors)
+            environment, policies = fetch_environment(args.repo, args.publish, token)
+            errors.extend(
+                evaluate_environment(environment, policies, name=args.publish, branch=args.branch)
+            )
+        if not errors and args.publish == "pypi":
+            # A truncated or malformed listing leaves the landing time unknown; the commit
+            # date alone is whatever the committer's clock said.
+            runs = fetch_runs(args.repo, args.sha, token)
+            landed = (
+                None
+                if runs is None
+                else landed_at(metadata, runs, repo=args.repo, branch=args.branch, sha=args.sha)
+            )
+            override = os.environ.get("SOAK_OVERRIDE", "")
+            errors.extend(evaluate_soak(landed, datetime.now(UTC), override))
+            if not errors and override_reason(override):
+                print(
+                    f"Soak period waived by the publishing maintainer: {override_reason(override)}"
+                )
+            version = project_version()
+            ref, tag = fetch_release_tag(args.repo, version, token)
+            errors.extend(evaluate_release_tag(ref, tag, version=version, sha=args.sha))
+    except (HTTPError, URLError, OSError, ValueError, KeyError, RecursionError):
         # Do not include response bodies, headers or credential-bearing error text.
         print(
             "Repository controls could not be verified from GitHub; publication is blocked.",
@@ -202,7 +531,22 @@ def main() -> int:
         print("Repository controls: " + error, file=sys.stderr)
     if errors:
         return 1
-    print("Repository controls verified: protected branch and successful CI for the exact source.")
+    for notice in notices:
+        print("Repository controls notice: " + notice)
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if notices and summary:
+        # The run page is what the maintainer sees at the environment approval.
+        try:
+            with open(summary, "a", encoding="utf-8") as stream:
+                stream.write("".join(f"- Repository controls notice: {n}\n" for n in notices))
+        except OSError:
+            print("The notices could not be added to the job summary.", file=sys.stderr)
+    checked = "protected branch and successful CI for the exact source"
+    if args.publish:
+        checked += f", the release-tag ruleset and the {args.publish} environment"
+    if args.publish == "pypi":
+        checked += ", the 24-hour soak and the signed release tag"
+    print(f"Repository controls verified: {checked}.")
     return 0
 
 

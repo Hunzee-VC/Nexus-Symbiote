@@ -1,0 +1,141 @@
+name: Dependency health
+# Not part of Verified CI: these runs resolve from PyPI and query OSV, so they report on
+# the outside world rather than on the change. A pull request that changes the declared
+# ranges or the locks must still have a green run here before it merges (CONTRIBUTING.md).
+on:
+  schedule:
+    - cron: "17 5 * * *"
+    - cron: "43 4 * * 2"
+  pull_request:
+    branches: [main]
+    paths:
+      - pyproject.toml
+      - requirements-*.lock
+      - config/dependency-advisory-waivers.json
+      - .github/workflows/dependencies.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  # One group per trigger: the daily run must not cancel a weekly run still in progress.
+  group: dependencies-${{ github.ref }}-${{ github.event.schedule || github.event_name }}
+  cancel-in-progress: true
+jobs:
+  locked-advisories:
+    name: Locked dependency advisories
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Install the reviewed dependency inventory
+        run: |
+          python -m pip install --require-hashes --only-binary=:all: -r requirements-ci.lock
+          python -m pip install --no-deps --no-build-isolation -e .
+          python -m pip check
+      - name: Query OSV for every pin of the CI and Action locks, whatever its marker
+        env:
+          ADVISORY_REPORT: ${{ runner.temp }}/locked-advisories.json
+        run: >-
+          python scripts/check_dependency_advisories.py
+          --lock requirements-ci.lock --lock requirements-action.lock
+          --out "$ADVISORY_REPORT"
+      - name: Retain the advisory report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: locked-advisory-evidence
+          path: ${{ runner.temp }}/locked-advisories.json
+          if-no-files-found: error
+          retention-days: 30
+  floor-advisories:
+    # A known advisory at a declared floor means users may be vulnerable while satisfying
+    # the published range: raise the floor.
+    name: Advisories at the declared floors
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Install the reviewed dependency inventory
+        run: |
+          python -m pip install --require-hashes --only-binary=:all: -r requirements-ci.lock
+          python -m pip install --no-deps --no-build-isolation -e .
+          python -m pip check
+      - name: Query OSV for every pin of the floor lock
+        env:
+          ADVISORY_REPORT: ${{ runner.temp }}/floor-advisories.json
+        run: >-
+          python scripts/check_dependency_advisories.py
+          --lock requirements-floor.lock --out "$ADVISORY_REPORT"
+      - name: Retain the advisory report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: floor-advisory-evidence
+          path: ${{ runner.temp }}/floor-advisories.json
+          if-no-files-found: error
+          retention-days: 30
+  newest:
+    name: Newest releases in the declared ranges
+    if: github.event_name != 'schedule' || github.event.schedule == '43 4 * * 2'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.14"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install the locked test tools, then let every runtime dependency float
+        env:
+          RESOLVED: ${{ runner.temp }}/newest-python-${{ matrix.python }}.txt
+        run: |
+          python -m pip install --require-hashes --only-binary=:all: -r requirements-ci.lock
+          python -m pip install --no-build-isolation --upgrade --upgrade-strategy eager -e '.[all]'
+          python -m pip check
+          python -m pip freeze --all | tee "$RESOLVED"
+      - name: Run the full suite on the newest allowed releases
+        run: python -m pytest -vv --strict-skips --durations=20
+      - name: Retain the resolved versions
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: newest-resolution-python-${{ matrix.python }}
+          path: ${{ runner.temp }}/newest-python-${{ matrix.python }}.txt
+          if-no-files-found: error
+          retention-days: 30
+  fuzz:
+    name: Randomized property tests
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '43 4 * * 2'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Install locked full test environment
+        run: |
+          python -m pip install --require-hashes --only-binary=:all: -r requirements-ci.lock
+          python -m pip install --no-deps --no-build-isolation -e .
+          python -m pip check
+      - name: Explore new inputs with the randomized Hypothesis profile
+        run: >-
+          python -m pytest -vv --hypothesis-profile=fuzz -o test_timeout=1800
+          --hypothesis-show-statistics tests/test_properties.py tests/test_parser_properties.py

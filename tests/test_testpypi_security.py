@@ -35,7 +35,7 @@ def test_testpypi_publication_requires_the_same_source_and_wheel_gates():
     assert preflight["env"]["GH_TOKEN"] == "${{ github.token }}"  # noqa: S105 - expression, not a credential
     assert build["permissions"] == {"contents": "read", "actions": "read"}
     source = commands(build)
-    assert "--require-hashes -r requirements-ci.lock" in source
+    assert "--require-hashes --only-binary=:all: -r requirements-ci.lock" in source
     assert "python scripts/check_security_regressions.py" in source
     assert "python -m build --no-isolation" in source
     assert "python -I scripts/check_wheel_security.py dist/*.whl" in source

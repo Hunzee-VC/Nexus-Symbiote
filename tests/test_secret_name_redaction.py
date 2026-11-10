@@ -81,6 +81,23 @@ def test_authorization_scheme_credentials_are_redacted(text, kept):
 
 
 @pytest.mark.parametrize(
+    "text,kept",
+    [
+        ("Authorization: Basic 00000000000A", "Authorization: Basic"),
+        ('{"Authorization": "Basic abcdefgh', '{"Authorization": "Basic'),
+        ("-H 'Proxy-Authorization: bearer abcdefgh", "-H 'Proxy-Authorization: bearer"),
+        ("authorization=Token abcdefgh", "authorization=Token"),
+    ],
+)
+def test_any_scheme_value_after_an_authorization_header_is_redacted(text, kept):
+    # A header value is a credential whatever its shape; the shape checks are for prose.
+    credential = text.split()[-1]
+    redacted = redact_text(text)
+    assert credential not in redacted
+    assert redacted == f"{kept} {REDACTED}"
+
+
+@pytest.mark.parametrize(
     "text",
     [
         "Provides basic arithmetic",

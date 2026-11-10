@@ -6,7 +6,9 @@ import argparse
 import hashlib
 import inspect
 import json
+import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -239,6 +241,15 @@ def _evaluate(case: dict[str, Any], directory: Path) -> dict[str, Any]:
         from nexus_symbiote.generators.sarif import SARIFGenerator
         from nexus_symbiote.generators.spdx import SPDXGenerator
 
+        servers = [c for c in result.components if c.component_type == ComponentType.MCP_SERVER]
+        if not servers:
+            # An empty inventory leaks nothing; it must not pass as redaction.
+            return {
+                "prediction": None,
+                "control_passed": False,
+                "unknown_reason": "required server was not collected",
+                "facts": facts,
+            }
         bom = AIBOM(components=result.components)
         exports = {
             "native": bom.to_json(),
@@ -255,10 +266,26 @@ def _evaluate(case: dict[str, Any], directory: Path) -> dict[str, Any]:
             for name, content in exports.items()
             if any(secret in content for secret in forbidden)
         ]
+        # The evidence that should survive, such as the variable's name, must still be
+        # there: dropping the whole server would also hide the secret. SARIF carries
+        # findings only.
+        required = case.get("parameters", {}).get("required_literals", [])
+        if not required or not all(isinstance(s, str) and s for s in required):
+            raise ValueError("credential control requires nonempty retained-evidence literals")
+        missing = [
+            name
+            for name, content in exports.items()
+            if name != "sarif" and not all(literal in content for literal in required)
+        ]
         facts["export_formats_checked"] = sorted(exports)
         facts["formats_with_literal_leaks"] = leaked
+        facts["formats_missing_evidence"] = missing
         predicted = bool(leaked)
-        return {"prediction": predicted, "control_passed": not predicted, "facts": facts}
+        return {
+            "prediction": predicted,
+            "control_passed": not predicted and not missing,
+            "facts": facts,
+        }
     else:
         raise ValueError(f"unsupported evaluator {kind}")
     return {"prediction": predicted, "facts": facts}
@@ -310,6 +337,12 @@ def metrics(results: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _source_identity() -> dict[str, Any]:
+    """Identify the evaluated package by content, and by revision only when that is certain.
+
+    In CI the revision is the workflow's GITHUB_SHA. Elsewhere Git is asked only when the
+    package directory holds files Git tracks: an installed copy inside a checkout (a
+    virtual environment in the work tree, say) is not that checkout's revision.
+    """
     package = Path(inspect.getfile(nexus_symbiote)).resolve().parent
     files = [
         {"path": p.relative_to(package).as_posix(), "sha256": _sha(p.read_bytes())}
@@ -322,27 +355,33 @@ def _source_identity() -> dict[str, Any]:
         "source_files": len(files),
         "git_sha": None,
         "git_dirty": None,
+        "revision_source": None,
     }
+    workflow_sha = os.environ.get("GITHUB_SHA", "")
+    if re.fullmatch(r"[0-9a-f]{40}", workflow_sha):
+        identity.update(git_sha=workflow_sha, revision_source="GITHUB_SHA")
+        return identity
     git = shutil.which("git")
     if git:
         try:
-            revision = subprocess.run(  # noqa: S603
-                [git, "-C", str(package), "rev-parse", "HEAD"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-                check=False,
-            )
-            dirty = subprocess.run(  # noqa: S603
-                [git, "-C", str(package), "status", "--porcelain"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-                check=False,
-            )
-            if revision.returncode == 0:
+
+            def ask(*arguments: str) -> subprocess.CompletedProcess[str]:
+                return subprocess.run(  # noqa: S603 - resolved git and fixed arguments
+                    [git, "-C", str(package), *arguments],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    check=False,
+                )
+
+            tracked = ask("ls-files", "--error-unmatch", "--", "__init__.py")
+            revision = ask("rev-parse", "HEAD")
+            dirty = ask("status", "--porcelain", "--", ".")
+            if tracked.returncode == 0 and revision.returncode == 0:
                 identity.update(
-                    git_sha=revision.stdout.strip(), git_dirty=bool(dirty.stdout.strip())
+                    git_sha=revision.stdout.strip(),
+                    git_dirty=bool(dirty.stdout.strip()),
+                    revision_source="git checkout of the evaluated package",
                 )
         except (OSError, subprocess.TimeoutExpired):
             # Revision identity is optional evidence; a checkout without git keeps the rest.
@@ -413,6 +452,12 @@ def run_benchmark(manifest_path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
             "python_traced_peak_bytes": peak,
             "memory_scope": "Python traced allocations, not RSS",
         },
+        # Every case must pass the CI gate, so on a passing run these ratios are 1.0 by
+        # construction: a regression record, not an accuracy estimate.
+        "metrics_scope": (
+            "finite regression corpus; the gate requires every case, so ratios on a"
+            " passing run are 1.0 by construction and estimate nothing"
+        ),
         "metrics": metrics(results),
         "metrics_by_kind": {
             kind: metrics([r for r in results if r["kind"] == kind])

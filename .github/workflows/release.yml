@@ -13,6 +13,14 @@ on:
           - none
           - testpypi
           - pypi
+      soak_override:
+        description: >-
+          Leave empty. Publishing to PyPI requires the release commit to have been on
+          main for 24 hours; to publish an urgent security fix sooner, state why here.
+          The reason is printed in the run log.
+        type: string
+        required: false
+        default: ""
 permissions:
   contents: read
 concurrency:
@@ -21,7 +29,7 @@ concurrency:
 jobs:
   build:
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -38,13 +46,18 @@ jobs:
           python-version: "3.12"
       - name: Install locked release checks
         run: |
-          python -m pip install --require-hashes -r requirements-ci.lock
+          python -m pip install --require-hashes --only-binary=:all: -r requirements-ci.lock
           python -m pip install --no-deps --no-build-isolation -e .
-      - name: Require enforced repository review controls before publication
+          python -m pip check
+      - name: Require branch protection, exact-source CI and the publication prerequisites
         if: inputs.publish != 'none'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python scripts/check_repository_controls.py --repo "$GITHUB_REPOSITORY" --branch main --sha "$GITHUB_SHA"
+          PUBLISH: ${{ inputs.publish }}
+          SOAK_OVERRIDE: ${{ inputs.soak_override }}
+        run: >-
+          python scripts/check_repository_controls.py --repo "$GITHUB_REPOSITORY"
+          --branch main --sha "$GITHUB_SHA" --publish "$PUBLISH"
       # Build first, from an export of the checked-out commit: no file that a
       # later test or evidence step writes into the workspace can reach the sdist.
       - name: Export the checked-out commit for a clean, reproducible build
@@ -74,9 +87,13 @@ jobs:
           name: release-distributions
           path: dist/*
           if-no-files-found: error
+          retention-days: 90
       - name: Recheck candidate dependencies against current OSV advisories
-        run: python scripts/check_dependency_advisories.py --out evidence/dependency-advisories.json
-      - run: python -m pytest
+        run: >-
+          python scripts/check_dependency_advisories.py
+          --lock requirements-ci.lock --lock requirements-action.lock
+          --out evidence/dependency-advisories.json
+      - run: python -m pytest --strict-skips
       - name: Enforce committed security regression contracts
         run: python scripts/check_security_regressions.py --out evidence/security-regressions.json
       - name: Retain candidate security reports on failure
@@ -88,6 +105,7 @@ jobs:
             evidence/security-regressions.json
             evidence/dependency-advisories.json
           if-no-files-found: warn
+          retention-days: 90
       - run: ruff check src tests scripts && ruff format --check src tests scripts
       - run: mypy src/nexus_symbiote scripts
       - run: python scripts/check_workflows.py
@@ -107,7 +125,9 @@ jobs:
           "$RUNNER_TEMP/release-smoke/bin/python" -m nexus_symbiote --version
           "$RUNNER_TEMP/release-smoke/bin/python" -m nexus_symbiote scan "$GITHUB_WORKSPACE" --report-only -f cyclonedx -o "$GITHUB_WORKSPACE/evidence/project.cdx.json"
       - name: Write the CycloneDX SBOM of the locked wheel runtime
-        run: python scripts/environment_sbom.py evidence/installed-distributions.json --out evidence/environment.cdx.json
+        run: >-
+          python scripts/environment_sbom.py evidence/installed-distributions.json
+          --lock requirements-action.lock --out evidence/environment.cdx.json
       - name: Package the installed wheel's inventory benchmark
         run: |
           # Evidence below is derived from dist/; fail closed unless it still holds
@@ -126,9 +146,10 @@ jobs:
           name: release-evidence
           path: evidence/*
           if-no-files-found: error
+          retention-days: 90
   compatibility:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions: {}
     steps:
@@ -142,17 +163,18 @@ jobs:
           digest-mismatch: error
       - name: Test the wheel against its public dependency ranges
         run: |
+          set -euo pipefail
           python -m venv "$RUNNER_TEMP/compatibility"
           python_bin="$RUNNER_TEMP/compatibility/bin/python"
           "$python_bin" -m pip install dist/*.whl
           "$python_bin" -m pip check
-          mkdir "$RUNNER_TEMP/sample"
-          printf 'Use read-only tools.\n' > "$RUNNER_TEMP/sample/AGENTS.md"
-          "$python_bin" -I -m nexus_symbiote --version
-          "$python_bin" -I -m nexus_symbiote scan "$RUNNER_TEMP/sample" --report-only -f cyclonedx -o "$RUNNER_TEMP/sample.cdx.json"
+          "$python_bin" -m pip freeze --all
+          mkdir "$RUNNER_TEMP/source"
+          tar --no-same-owner --strip-components=1 -xzf dist/nexus_symbiote-*.tar.gz -C "$RUNNER_TEMP/source"
+          "$python_bin" -I "$RUNNER_TEMP/source/scripts/check_installed_wheel.py" --source "$RUNNER_TEMP/source"
   attest:
     needs: [build, compatibility]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
       distribution_attestation_id: ${{ steps.distribution-attestation.outputs.artifact-id }}
@@ -178,6 +200,7 @@ jobs:
           name: distribution-attestation
           path: ${{ steps.distributions.outputs.bundle-path }}
           if-no-files-found: error
+          retention-days: 90
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           artifact-ids: ${{ needs.build.outputs.evidence_id || 'missing' }}
@@ -194,6 +217,7 @@ jobs:
           name: release-evidence-attestation
           path: ${{ steps.candidate-evidence.outputs.bundle-path }}
           if-no-files-found: error
+          retention-days: 90
       - name: Attest inventory benchmark results and wheel digest
         id: inventory
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
@@ -205,9 +229,10 @@ jobs:
           name: inventory-benchmark-attestation
           path: ${{ steps.inventory.outputs.bundle-path }}
           if-no-files-found: error
+          retention-days: 90
   verify:
     needs: [build, attest]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     # Verification runs shell and a token-bearing CLI, so it stays out of the
     # OIDC-holding jobs; publish depends on it and remains shell-free.
@@ -253,7 +278,7 @@ jobs:
   publish:
     if: inputs.publish != 'none' && github.ref == 'refs/heads/main'
     needs: [build, attest, verify]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     # The environment is named after the index: each index's trusted publisher
     # accepts only this workflow file and its own environment.
