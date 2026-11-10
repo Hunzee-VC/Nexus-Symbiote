@@ -390,6 +390,7 @@ def collect_source_references(files: ConfinedCollection, result: ScanResult) -> 
     for path, content in python.selected:
         location = path.as_posix()
         before = _outcome(result)
+        client = False
         try:
             text = _python_text(content)
         except _UnreadableError as exc:
@@ -401,7 +402,8 @@ def collect_source_references(files: ConfinedCollection, result: ScanResult) -> 
             fail(path, "invalid Python syntax")
         else:
             collect_python_tools(tree, text, path, result)
-            if _python_client(tree):
+            client = _python_client(tree)
+            if client:
                 detected.append(location)
             if "mcp" not in text and _server_import(tree):
                 # The tool collector looks for the literal name; an NFKC-only spelling
@@ -410,7 +412,7 @@ def collect_source_references(files: ConfinedCollection, result: ScanResult) -> 
                     f"{location}: Python MCP server import spelled with compatibility "
                     "characters; its servers and tools are not collected"
                 )
-        if _outcome(result) != before or location in detected:
+        if _outcome(result) != before or client:
             surfaces.append(location)
     for path, content in (*typescript.selected, *javascript.selected):
         try:
