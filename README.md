@@ -74,6 +74,8 @@ Eight built-in collectors read declared configuration and artifacts from the pro
 | `ide_agents` | Settings for Claude Code, Cursor, Codex, Windsurf, Cline, Copilot and others | Which agents are configured, from marker files. For Claude Code, the permission mode and whether its allow list has a blanket grant; for Cursor, Windsurf, Cline and Codex, only an `agent.permissionMode` key in their JSON settings. Not hooks, deny or ask rules, helpers, Codex `config.toml` or other settings |
 | `shadowscan` | [Nexus-ShadowScan](https://github.com/Hunzee-VC/Nexus-ShadowScan) reports | Imported discovery claims, kept separate from local evidence. Reruns are compared by normalized content, and CI can require a signed report |
 
+An optional [`agent.yaml` manifest](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/agent-manifest.md) at the project root names the agent and declares further instruction files and models.
+
 ### What it checks
 
 | Command | What it answers |
@@ -190,12 +192,12 @@ With `--project`, `risk` collects fresh evidence and refuses to score a BOM that
 Record a reviewed snapshot once, then compare every new collection:
 
 ```bash
-nexus-symbiote baseline /path/to/agent -o reviewed.json
+nexus-symbiote baseline /path/to/agent --no-project-policy -o reviewed.json
 nexus-symbiote scan /path/to/agent --no-project-policy -o agentbom.json
 nexus-symbiote diff reviewed.json agentbom.json --fail-on-alert
 ```
 
-`--fail-on-alert` fails on any change to the recorded inventory rated medium or higher. It cannot alert on what the collectors do not record: Claude Code hooks, deny and ask rules, skill scripts and subagents are among the [known limitations](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/SECURITY.md#known-limitations-in-010) of this release, so review changes to them separately. A baseline is unsigned — review it before treating it as an approval.
+`--fail-on-alert` fails on any change to the recorded inventory rated medium or higher, including a removed component and a coverage regression; an added source file that changes no component does not alert. It cannot alert on what the collectors do not record: Claude Code hooks, deny and ask rules, skill scripts and subagents are among the [known limitations](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/SECURITY.md#known-limitations-in-010) of this release, so review changes to them separately. A baseline is unsigned — review it before treating it as an approval, and read it from a place the pull request cannot change; [Gate drift in CI](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/drift-gate.md) shows how and explains each alert.
 
 ### GitHub Action
 
