@@ -147,9 +147,11 @@ Legacy mode, which only CycloneDX recovery has, does not help with:
   as `other`.
 
 A 0.1.0 export of an inventory built through the Python API does not recover
-either when one of its package URLs is of a kind this release no longer projects,
-such as a `pkg:docker` or `pkg:generic` URL: recovery reports that the projection
-conflicts with the embedded native document.
+either when one of its package URLs is of a kind this release no longer projects:
+a type other than PyPI, npm and OCI, such as a `pkg:docker` or `pkg:generic` URL,
+or a PyPI or npm URL with a qualifier other than a `repository_url` that names the
+component's own registry. Recovery reports that the projection conflicts with the
+embedded native document.
 
 Regenerate such exports from the native AIBOM or by rescanning. Keep the
 original export when a downstream consumer discards fields such as the

@@ -202,6 +202,9 @@ shortens a list of failures that are recorded anyway.
 | Sigstore bundle named in an operator signature policy | 4 MiB |
 | Model file header read to identify and inspect its format | 1 MiB |
 | Shard indexes in one model directory | 16 |
+| GGUF metadata the model collector inspects: keys, one string, one array, all metadata; a file beyond them is a gap | 65,536; 16 MiB; 2,097,152 items; 128 MiB |
+| ONNX structure the model collector reads for external data: nesting, fields in one file, one location; a file beyond them that may name external data is a failure | 64; 4,000,000; 4,096 bytes |
+| Structure units the ONNX and GGUF readers spend in one scan or one validation | 16,000,000 |
 | Python file the a2a and rag import heuristics parse; a larger file is skipped, and for a2a one that names `AgentCard` is a gap | 262,144 characters |
 | Root `requirements*.txt` files, together | 4 MiB |
 | MCP servers in one MCP client file | 1,000 |
@@ -216,7 +219,11 @@ shortens a list of failures that are recorded anyway.
 
 Some collectors apply further per-file bounds to the formats they parse, such as
 JSON nesting, YAML token counts and A2A card entries; each is reported as a
-failure or gap on the file that reached it. A signature policy entry over either
+failure or gap on the file that reached it. The registry collector's bounds on
+manifests, lockfiles, Compose files and image references are in its
+[limits table](registry-collector.md#limits), and
+[model integrity](model-integrity.md) describes what happens to a model file beyond
+the GGUF and ONNX bounds. A signature policy entry over either
 signature bound is refused with "Policy artifact or bundle is unavailable beneath
 the project root", which does not yet name the bound; a model artifact above
 5 GiB can be hashed under `model-bytes` but cannot be signer-verified.

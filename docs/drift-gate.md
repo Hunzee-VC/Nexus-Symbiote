@@ -43,6 +43,8 @@ Approve a baseline on a checkout of the protected base branch, and commit it the
 through a reviewed pull request (or upload it to a store only maintainers can write):
 
 ```bash
+# One secret of 32 or more characters, the same for the baseline and every later scan.
+export NEXUS_SYMBIOTE_SOURCE_BINDING_KEY="$AGENTBOM_BINDING_KEY"
 nexus-symbiote baseline . --no-project-policy -o .nexus-symbiote/reviewed.json
 ```
 
@@ -50,6 +52,7 @@ The pull-request job then reads that baseline from the base commit, never from t
 pull request, and compares it with a scan of the pull-request checkout:
 
 ```bash
+export NEXUS_SYMBIOTE_SOURCE_BINDING_KEY="$AGENTBOM_BINDING_KEY"
 git show "$BASE_SHA:.nexus-symbiote/reviewed.json" > "$RUNNER_TEMP/reviewed.json"
 nexus-symbiote scan . --no-project-policy -o "$RUNNER_TEMP/agentbom.json"
 nexus-symbiote diff "$RUNNER_TEMP/reviewed.json" "$RUNNER_TEMP/agentbom.json" --fail-on-alert

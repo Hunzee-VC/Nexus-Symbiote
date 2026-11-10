@@ -121,11 +121,13 @@ nexus-symbiote scan public-mcp-servers --no-project-policy -o current.aibom.json
 nexus-symbiote diff reviewed.aibom.json current.aibom.json --fail-on-alert
 ```
 
-`--fail-on-alert` fails on in-place changes rated medium or higher: an MCP
-server package bumped at the same version, a swapped lockfile integrity value,
-a replaced MCP tool implementation, an A2A card URL moved to plain HTTP, or
-newly broad IDE agent allowances. The alert set is the one documented in the
-[CHANGELOG](../../CHANGELOG.md) and exercised by the regression suite.
+`--fail-on-alert` fails on changes rated medium or higher: a changed MCP launcher
+package or version, a swapped integrity value in an npm lockfile
+(`npm-shrinkwrap.json` included), a replaced MCP tool implementation in the file
+that declares the tool, an A2A card URL moved to plain HTTP, newly broad IDE agent
+allowances, a removed component or a coverage regression. An added source file
+that changes no component does not alert. [Gate drift in CI](../drift-gate.md#what-the-alerts-mean)
+rates every change, and says where the reviewed baseline must come from.
 
 ## 7. Wire it into a reviewing repository's CI
 
@@ -140,8 +142,9 @@ permissions:
 jobs:
   inventory:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: Hunzee-VC/Nexus-Symbiote@<reviewed-40-character-commit-sha>

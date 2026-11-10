@@ -122,7 +122,7 @@ What exit status 1 means for each gate:
 | `verify-artifact`, `verify-discovery` | The digest, signature or projection does not match. |
 | `verify-live` | A stdio server could not be observed completely (a run with no stdio server observes nothing), or a server's served tools, declarations or identity differ from the inventory; with `--record`, such drift fails unless `--accept-drift` is given. |
 | `discover-mcp` | The observation is incomplete; with `--record`, nothing is written. |
-| `advisories` | An advisory was found (unless `--no-fail-on-advisory`), or not every package in scope was looked up (`coverage` is `partial` or `none`). |
+| `advisories` | An advisory was found (unless `--no-fail-on-advisory`), or not every package in scope was looked up (`coverage` is `partial` or `none`); with `--dry-run`, only when the report lists an error. |
 
 `--report-only` on `scan` and `import-shadowscan` reports collection failures and
 findings without turning them into exit status 1, as a project policy with
@@ -134,7 +134,7 @@ findings without turning them into exit status 1, as a project policy with
 | Variable | Effect |
 |---|---|
 | `NEXUS_SYMBIOTE_MODE` | `offline` or `live`; selects the mode when no mode flag is given. Any other value is a usage error. |
-| `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` | An operator secret of at least 32 characters. `scan`, `validate --project` and `risk --project` then bind MCP and A2A configuration values with an HMAC under it; the key never enters the inventory. A shorter key is a usage error before any collector runs. See [verification source binding](verification-source-binding.md). |
+| `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` | An operator secret of at least 32 characters. `scan`, `validate --project` and `risk --project` then bind MCP, A2A, RAG and IDE settings values with an HMAC under it; the key never enters the inventory. A shorter key is a usage error before any collector runs. See [verification source binding](verification-source-binding.md). |
 | `NEXUS_SYMBIOTE_LIMITS` | Raised collection limits for this invocation, as `NAME=VALUE` pairs separated by commas; the CLI validates the names and values. It is read from the environment of the operator, never from a scanned checkout. The GitHub Action sets it only from its `limits` input. |
 | `NO_COLOR` | Any value turns colors off. |
 | `XDG_CACHE_HOME`, `HOME` | Where sigstore-python caches the trusted root that offline Sigstore verification uses; see [known limitations](known-limitations.md#signatures). |
@@ -206,6 +206,15 @@ catch a misplaced policy; they do not authenticate it.
 | `diff --json-output` | `has_changes`, `total_changes`, `components_added`, `components_removed`, `components_modified`, `dependencies_added`, `dependencies_removed` (each with its `severity` and `conditions`), `security_alerts`, `metadata_changes` and `notes`. |
 | `summary --json-output` | `total_components`, `component_types`, `total_dependencies`, `total_risks`, `risk_breakdown` and the inventory's `completeness` claim. |
 | `blast-radius --json-output` | `subject`, `affected_agents`, `dependent_components`, `reachable_components`, `declared_principals`, `scope`, `effective_authority`, `linked` and `limitations`. |
+| `discover-mcp` | The observation: `endpoint`, `protocol_version` and `requested_protocol_version`, `collector_id`, `collection_id`, `observed_at`, `completed_at`, `client_info`, `user_agent`, `session_established`, `session_digest`, `server_info`, `server_capabilities`, `instructions` and `instructions_hash`, `declaration_hash` and `identity_hash` with their profiles, `tools` (each with its redacted `descriptor`, `definition_hash`, `fingerprint` and `lints`), `prompts`, `resource_templates`, `failures`, `complete`, `pages_observed`, `bytes_observed` and `coverage`, which names what was not observed. With `--record`, a native AgentBOM instead. |
+| `advisories` | `components_checked`, `components_skipped` and `components_excluded`, with the `skipped` and `excluded` entries and their reasons; `queries` (the ecosystem, name and version of each package in scope); `advisories`; `errors`; `coverage` (`complete`, `partial` or `none`) and `complete`; `dry_run`; `checked_at`, `tool_version` and `inventory_sha256`; `scope` and `sent_to_osv`. |
+| `verify-live --json-output` | `complete`, `servers_checked`, `servers_reachable`, `servers_skipped`, `has_drift`, `inputs` (the SHA-256 of the inventory and of the launch policy) and `results`: per MCP server, `server`, `server_ref`, `status` (`verified`, `failed` or `not-verifiable`), `reachable`, `reason`, `error`, `transport`, `protocol_version`, `launcher_sha256`, `rug_pull_detected`, `live_schema_hash`, `declaration_hash` and `declaration_status`, `identity_hash` and `identity_status`, and `tools` (each tool's `name`, `definition_hash` and `status`: `match`, `changed`, `new` or `unverifiable`). |
+| `runtime keygen` | `key_id` and `encrypted`. |
+| `runtime sign` | `out`, `predicate`, `digest`, `signers` and `signed`. |
+| `runtime verify` | `contract_verified`, `kind`, `digest`, `accepted_signers` and `invocation_authorized`, which is always `false`: only the gateway authorizes a call. |
+| `runtime digest` | `kind` and `digest`. |
+| `runtime key-id` | `key_id`. |
+| `runtime register` | `registered`, `tenant`, `deployment_id`, `agent_id`, `serial` and `digest`. |
 
 ## Pre-commit hooks
 
@@ -257,7 +266,9 @@ index, so the registry collector labels a Python package that no `uv.lock` or
 `--exclude` (previewed with `--dry-run`) keeps a private name local while public
 ones are still checked. It exits 1 when an advisory is found, or when
 not every package in scope was looked up (`coverage` is `partial` or `none`,
-including an inventory with no exact PyPI or npm package). A report keeps at most
+including an inventory with no exact PyPI or npm package). With `--dry-run` it looks
+nothing up, so `coverage` is `none`, and it exits 1 only when a package in scope has
+no exact identity or more than 500 packages would be sent. A report keeps at most
 10,000 advisories per package and 20,000 in total; beyond that, lookups end with an
 error and `coverage` is `partial`.
 
@@ -625,8 +636,9 @@ nexus-symbiote verify-live [OPTIONS] AIBOM_PATH
 Servers whose transport is `sse`, `streamable-http` or `http` are reported as not
 verifiable by `verify-live` (reason `remote-transport`) and do not make the run
 incomplete; observe them with `discover-mcp --record` and compare the inventories
-with `diff`. Any transport label other than these and `stdio` fails with reason
-`unsupported-transport`. The [launch policy](#launch-policy) section gives the
+with `diff`. Any transport label other than these and `stdio`, such as the
+`websocket` that the `mcp` collector records for a `ws://` or `wss://` endpoint, fails
+with reason `unsupported-transport`. The [launch policy](#launch-policy) section gives the
 policy's format and where it may be kept.
 
 ### `vex`
