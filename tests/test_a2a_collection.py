@@ -336,3 +336,14 @@ def test_inventory_is_identical_when_scanned_at_two_locations(tmp_path):
     assert first.components == second.components
     assert first.surfaces_scanned == second.surfaces_scanned
     assert str(tmp_path) not in repr(first)
+
+
+def test_card_read_through_an_in_root_link_names_its_target(tmp_path):
+    _write(tmp_path, "public/card.json", CARD)
+    (tmp_path / ".well-known").mkdir()
+    (tmp_path / ".well-known" / "agent-card.json").symlink_to("../public/card.json")
+    result = A2AScanner().scan(tmp_path)
+    assert not result.scan_failures
+    (server,) = _servers(result)
+    assert server.source_path == ".well-known/agent-card.json"
+    assert server.properties["symlink_target"] == "public/card.json"

@@ -331,3 +331,14 @@ def test_inventory_is_identical_when_scanned_at_two_locations(tmp_path):
     assert first.components == second.components
     assert first.surfaces_scanned == second.surfaces_scanned
     assert str(tmp_path) not in repr(first)
+
+
+def test_settings_read_through_an_in_root_link_name_their_target(tmp_path):
+    _write(tmp_path, "config/claude.json", BASE)
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "settings.json").symlink_to("../config/claude.json")
+    result = IDEAgentScanner().scan(tmp_path)
+    assert not result.scan_failures
+    agent = _agent(result)
+    assert agent.properties["settings_declarations"]["deny_rules"] == 1
+    assert agent.properties["symlink_targets"] == {".claude/settings.json": "config/claude.json"}

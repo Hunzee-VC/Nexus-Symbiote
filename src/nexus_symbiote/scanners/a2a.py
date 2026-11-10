@@ -641,6 +641,11 @@ class A2AScanner(Scanner):
                     continue
                 result.surfaces_scanned.append(relative)
                 self._record_clients(relative, data, result)
+            # A record read through an in-root symlink also names the file that held it.
+            for component in result.components:
+                target = files.link_target(component.source_path or "")
+                if target is not None:
+                    component.properties["symlink_target"] = target
             self._scan_code_patterns(files, sources, result)
         if not result.components and not result.scan_failures and not result.surfaces_excluded:
             result.surfaces_scanned.append("a2a (no A2A configurations found)")

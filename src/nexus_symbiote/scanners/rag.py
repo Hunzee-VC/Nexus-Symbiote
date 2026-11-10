@@ -338,12 +338,16 @@ class RAGScanner(Scanner):
             result.scan_failures.append(f"{relative}: invalid or oversized RAG source list")
             return []
         components: list[RAGSourceComponent] = []
+        target = files.link_target(path)
         for index, source in enumerate(sources):
             if not isinstance(source, dict):
                 result.scan_failures.append(f"{relative}: RAG source must be an object")
                 continue
             try:
-                components.append(self._source(relative, index, source))
+                component = self._source(relative, index, source)
+                if target is not None:
+                    component.properties["symlink_target"] = target
+                components.append(component)
             except BindingError as exc:
                 result.scan_failures.append(f"{relative}: {exc}")
             except _SourceError as exc:

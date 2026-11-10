@@ -408,6 +408,14 @@ class IDEAgentScanner(Scanner):
             data = self._read_mapping(Path(config_name), result)
             if data is not None:
                 mcp_configs.append(config_name)
+        # Markers and settings read through an in-root symlink, with the file that held them.
+        links = {
+            path: target
+            for path in (*found, *properties.get("settings_files", ()))
+            if (target := files.link_target(path)) is not None
+        }
+        if links:
+            properties["symlink_targets"] = dict(sorted(links.items()))
         # Configuration locators are not component references. The MCP
         # collector binds actual client/server components separately.
         return IDEAgentComponent(

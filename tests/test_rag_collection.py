@@ -325,3 +325,14 @@ def test_inventory_is_identical_when_scanned_at_two_locations(tmp_path):
     assert first.components == second.components
     assert first.surfaces_scanned == second.surfaces_scanned
     assert str(tmp_path) not in repr(first)
+
+
+def test_configuration_read_through_an_in_root_link_names_its_target(tmp_path):
+    (tmp_path / "configs").mkdir()
+    (tmp_path / "configs" / "rag.json").write_text(json.dumps(BASE))
+    (tmp_path / "rag_config.json").symlink_to("configs/rag.json")
+    result = RAGScanner().scan(tmp_path)
+    assert not result.scan_failures
+    (component,) = result.components
+    assert component.source_path == "rag_config.json"
+    assert component.properties["symlink_target"] == "configs/rag.json"
