@@ -98,7 +98,7 @@ The [CLI reference](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/c
 | SARIF 2.1.0 | `scan -f sarif` | GitHub code scanning and other SARIF viewers |
 | CycloneDX VEX | `vex` | Findings marked `in_triage`, with no exploitability claim |
 
-Standard exports embed the native inventory in a digest-bound extension. Keep that extension to recover full semantics. Without it, a consumer never sees a conditional edge as an unconditional relationship, can read which native relationship each SPDX `other` relationship stands for, and sees coverage as `incomplete` or `unknown`, never `complete`. Exports written by earlier builds may need to be regenerated; see [fingerprint migration](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/fingerprint-migration.md).
+Standard exports embed the native inventory in a digest-bound extension. Keep that extension to recover full semantics. Without it, a consumer never sees a conditional edge as an unconditional relationship, can read which native relationship each SPDX `other` relationship stands for, and sees coverage as `incomplete` or `unknown`, never `complete`. Exports written by builds before 0.1.0 may need to be regenerated; see [fingerprint migration](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/fingerprint-migration.md). [Standard exports](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/standard-exports.md) maps every field, including SARIF rules and what VEX can express.
 
 ### See it on the demo agent
 
