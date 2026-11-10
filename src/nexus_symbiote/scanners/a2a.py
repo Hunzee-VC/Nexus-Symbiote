@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import ast
 import base64
+import codecs
 import json
 import re
+import unicodedata
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, BinaryIO, NamedTuple
 from urllib.parse import urlsplit
 
 from nexus_symbiote.core.enums import RiskSeverity, TrustTier
@@ -26,6 +29,7 @@ from nexus_symbiote.scanners.base import (
     source_collection_bytes,
 )
 from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
+from nexus_symbiote.scanners.mcp_sources import _INVALID_UTF8, _source_encoding, _UnreadableError
 from nexus_symbiote.scanners.source_binding import ORIGIN_PATHS as _ORIGIN_PATHS
 from nexus_symbiote.scanners.source_binding import BindingError as _BindingError
 from nexus_symbiote.scanners.source_binding import beyond_origin as _beyond_origin
@@ -33,13 +37,13 @@ from nexus_symbiote.scanners.source_binding import origin as _origin
 from nexus_symbiote.scanners.source_binding import url_shape as _url_shape
 from nexus_symbiote.scanners.source_binding import url_shapes as _url_shapes
 from nexus_symbiote.scanners.source_binding import value_binding as _value_binding
-from nexus_symbiote.utils.confined import ConfinedCollection, fold_name
+from nexus_symbiote.utils.confined import CollectionError, ConfinedCollection, fold_name
 from nexus_symbiote.utils.secrets import REDACTED, redact_text
 from nexus_symbiote.utils.terminal import neutralize
 
-# Python source is decoded only when it can name the SDK, so an unrelated module is
-# neither parsed nor a decoding failure.
-_A2A_SOURCE_HINTS = (b"a2a", b"A2AClient", b"AgentCard")
+# Python source is parsed only when the text Python reads can name the SDK.
+_A2A_SOURCE_HINTS = ("a2a", "A2AClient", "AgentCard")
+_HINT_OVERLAP = max(len(hint) for hint in _A2A_SOURCE_HINTS) - 1
 # Source under these directories is not searched for SDK references.
 _SOURCE_EXCLUDED_DIRS = frozenset(
     {"tests", "test", "dist", "build", "docs", "benchmarks", "examples"}
@@ -131,6 +135,11 @@ _SERVER_CALLS = frozenset(
 )
 _CLIENT_CALLS = frozenset({"A2AClient", "A2ACardResolver", "ClientFactory"})
 _MAX_PYTHON_CHARACTERS = 262_144
+# No character of an encoding the search follows takes more than four bytes, so a longer
+# source holds more characters than are parsed.
+_HEAD_BYTES = 4 * _MAX_PYTHON_CHARACTERS
+_CHUNK_BYTES = 1024 * 1024
+_FOLD_SLICE = 4096
 
 
 class _CodeReferences(NamedTuple):
@@ -139,6 +148,114 @@ class _CodeReferences(NamedTuple):
     built_cards: list[str]
     loaded_cards: list[str]
     unparsed_cards: list[str]
+    unfollowed: list[str]
+
+
+class _BudgetSpentError(Exception):
+    """The source budget ran out during a read; the budget recorded the one gap."""
+
+
+class _Hints:
+    """The SDK hints one Python source names, in its bytes or in the text Python reads.
+
+    Python compares identifiers in NFKC form, so text not in that form is also searched
+    in NFKD form, which keeps every run of ASCII letters that NFKC gives. It is folded a
+    slice at a time, so one character's expansion (up to 18 characters) stays within its
+    slice. Each search keeps the end of the one before, so a hint split across reads is
+    found.
+    """
+
+    def __init__(self, encoding: str) -> None:
+        self.found: set[str] = set()
+        self._tail = b""
+        self._text_tail = ""
+        self._decoder = codecs.getincrementaldecoder(encoding)("replace")
+
+    def feed(self, chunk: bytes) -> None:
+        window = self._tail + chunk
+        self.found.update(hint for hint in _A2A_SOURCE_HINTS if hint.encode() in window)
+        self._tail = window[-_HINT_OVERLAP:]
+        text = self._decoder.decode(chunk)
+        if text.isascii() or unicodedata.is_normalized("NFKC", text):
+            self._search(text)
+            return
+        for start in range(0, len(text), _FOLD_SLICE):
+            self._search(unicodedata.normalize("NFKD", text[start : start + _FOLD_SLICE]))
+
+    def _search(self, text: str) -> None:
+        window = self._text_tail + text
+        self.found.update(hint for hint in _A2A_SOURCE_HINTS if hint in window)
+        self._text_tail = window[-_HINT_OVERLAP:]
+
+
+class _Source(NamedTuple):
+    """One searched Python source: the whole of it when it fits the parsed window."""
+
+    content: bytes | None
+    # None when the search cannot follow the source's encoding declaration.
+    encoding: str | None
+    hints: frozenset[str]
+
+
+def _encoding(head: bytes, *, complete: bool) -> str | None:
+    """The encoding Python decodes a source with, or None when the search cannot follow it.
+
+    Source that Python cannot decode is searched as the UTF-8 that Python expected.
+    """
+    try:
+        encoding, _ = _source_encoding(head, complete=complete, skipped=None)
+    except _UnreadableError as exc:
+        return "utf-8" if str(exc) == _INVALID_UTF8 else None
+    return encoding
+
+
+def _chunks(stream: BinaryIO, budget: SourceBudget, path: Path) -> Iterator[bytes]:
+    while chunk := stream.read(_CHUNK_BYTES):
+        if not budget.admit(len(chunk), path):
+            raise _BudgetSpentError
+        yield chunk
+
+
+def _search(files: ConfinedCollection, target: Path, path: Path, budget: SourceBudget) -> _Source:
+    """Read ``target``, the file ``path`` names, in chunks and note each hint it names.
+
+    Every chunk is charged to the source budget. A file larger than the whole budget is
+    refused alone before it is read, so it does not spend the budget. Its head is read
+    first, because its encoding declaration decides how all of it is searched.
+    """
+    with files.open_regular(target, max_bytes=budget.bound) as stream:
+        reads = _chunks(stream, budget, path)
+        kept: list[bytes] = []
+        size = 0
+        for chunk in reads:
+            kept.append(chunk)
+            size += len(chunk)
+            if size > _HEAD_BYTES:
+                break
+        head = b"".join(kept)
+        complete = size <= _HEAD_BYTES
+        encoding = _encoding(head, complete=complete)
+        if encoding is None:
+            return _Source(None, None, frozenset())
+        hints = _Hints(encoding)
+        for start in range(0, size, _CHUNK_BYTES):
+            hints.feed(head[start : start + _CHUNK_BYTES])
+        for chunk in reads:
+            hints.feed(chunk)
+    return _Source(head if complete else None, encoding, frozenset(hints.found))
+
+
+def _parsed(source: _Source) -> ast.Module | None:
+    """The syntax tree of a source within the parsed window, or None."""
+    if source.content is None or source.encoding is None:
+        return None
+    try:
+        text = source.content.decode(source.encoding)
+        if len(text) > _MAX_PYTHON_CHARACTERS:
+            return None
+        return parse_python(text)
+    except (SyntaxError, ValueError):
+        return None
 
 
 class _Security(NamedTuple):
@@ -1006,50 +1123,71 @@ class A2AScanner(Scanner):
     def _code_references(
         self, root: Path, sources: list[Path], result: ScanResult
     ) -> _CodeReferences:
-        """Find SDK use in Python source; a file that is merely unreadable is no gap.
+        """Find SDK use in Python source, searched in the text Python reads.
 
-        The text read is bounded by the source budget, and running out of it is one
-        named coverage gap. Files are read apart from the collection, whose failures are
-        not kept, so an ordinary repository's Python files never fail this collector.
-        Only a file that builds an agent card, or one that names AgentCard and cannot be
-        parsed, is a gap.
+        Each file is searched as a stream, root files first, and the source budget
+        bounds the text read: running out of it is one named coverage gap, and nothing
+        after it is read. A file the reader refuses, such as one larger than the whole
+        budget, is a failure that names it. Only a file that builds an agent card, one
+        that names AgentCard and cannot be parsed, or one whose encoding declaration
+        cannot be followed is a gap, so an ordinary repository's Python files never fail
+        this collector.
         """
-        references = _CodeReferences([], [], [], [], [])
+        references = _CodeReferences([], [], [], [], [], [])
         budget = SourceBudget("a2a code references", result)
-        # The collection's own byte limit stays above the budget, which binds first.
+        # Source is read apart from the collection, so it does not spend the bytes that
+        # cards are read with; this limit leaves room for the whole budget. Every file
+        # can fail, so failures past the listing bound are summarized by reason.
         limit = source_collection_bytes()
-        with ConfinedCollection(
-            root, [], exclude_paths=self._exclude_paths, max_total_bytes=limit
-        ) as heuristic:
+        with (
+            ConfinedCollection(
+                root,
+                result.scan_failures,
+                exclude_paths=self._exclude_paths,
+                max_total_bytes=limit,
+            ) as heuristic,
+            heuristic.bounded_failures(),
+        ):
             for path in sorted(sources, key=lambda path: len(path.parts) > 1):
-                if budget.exhausted:
-                    break
-                raw = heuristic.read_bytes(path)
-                if raw is None or not budget.admit(len(raw), path):
+                # None for a file gone since the walk, which recorded any refused link.
+                target = heuristic.in_root_target(path)
+                if target is None:
                     continue
-                if not any(hint in raw for hint in _A2A_SOURCE_HINTS):
-                    continue
-                relative = path.as_posix()
                 try:
-                    content = raw.decode("utf-8")
-                    if len(content) > _MAX_PYTHON_CHARACTERS:
-                        raise ValueError("oversized source")
-                    tree = parse_python(content)
-                except (SyntaxError, ValueError):
-                    if b"AgentCard" in raw:
-                        references.unparsed_cards.append(relative)
+                    source = _search(heuristic, target, path, budget)
+                except _BudgetSpentError:
+                    break
+                except (OSError, CollectionError):
+                    # The reader recorded why. Once its byte limit is spent, no later
+                    # file can be read either.
+                    if heuristic.bytes_exhausted:
+                        break
                     continue
-                imported, server, client = _module_roles(tree)
-                called, literal_card, mapping_card = _calls(tree)
-                if literal_card:
-                    references.built_cards.append(relative)
-                elif mapping_card:
-                    references.loaded_cards.append(relative)
-                if server or called & _SERVER_CALLS:
-                    references.server.append(relative)
-                elif client or called & _CLIENT_CALLS or imported:
-                    references.client.append(relative)
+                self._classify(path.as_posix(), source, references)
         return references
+
+    @staticmethod
+    def _classify(relative: str, source: _Source, references: _CodeReferences) -> None:
+        if source.encoding is None:
+            references.unfollowed.append(relative)
+            return
+        if not source.hints:
+            return
+        tree = _parsed(source)
+        if tree is None:
+            if "AgentCard" in source.hints:
+                references.unparsed_cards.append(relative)
+            return
+        imported, server, client = _module_roles(tree)
+        called, literal_card, mapping_card = _calls(tree)
+        if literal_card:
+            references.built_cards.append(relative)
+        elif mapping_card:
+            references.loaded_cards.append(relative)
+        if server or called & _SERVER_CALLS:
+            references.server.append(relative)
+        elif client or called & _CLIENT_CALLS or imported:
+            references.client.append(relative)
 
     def _scan_code_patterns(
         self, files: ConfinedCollection, sources: list[Path], result: ScanResult
@@ -1067,6 +1205,11 @@ class A2AScanner(Scanner):
             f"{path}: Python source that names AgentCard could not be parsed; "
             "an agent card it builds is not inventoried"
             for path in references.unparsed_cards
+        )
+        result.surfaces_excluded.extend(
+            f"{path}: Python source encoding declaration could not be followed; "
+            "an agent card it builds is not inventoried"
+            for path in references.unfollowed
         )
         if not static_cards:
             # With a static card present, a card built from loaded data is taken to be it.
