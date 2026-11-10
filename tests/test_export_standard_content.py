@@ -168,6 +168,25 @@ def test_the_repository_agent_is_the_subject_and_unconditional_edges_form_the_gr
     assert native_document(CycloneDXGenerator.recover(document)) == native_document(bom)
 
 
+def test_recovery_tolerates_only_a_dropped_unknown_composition():
+    from cyclonedx.model.bom import Bom
+    from cyclonedx.output.json import JsonV1Dot7
+
+    document = CycloneDXGenerator().generate(_inventory())
+    expected = CycloneDXGenerator.recover(json.loads(json.dumps(document)))
+    consumed = json.loads(JsonV1Dot7(Bom.from_json(document)).output_as_string())
+    assert "compositions" not in consumed
+    assert CycloneDXGenerator.recover(consumed) == expected
+    for edited in (
+        [{"aggregate": "unknown", "assemblies": ["server"], "dependencies": ["server"]}],
+        [{"aggregate": "unknown"}],
+        [{"aggregate": "unknown", "assemblies": [AGENT]}],
+        [],
+    ):
+        with pytest.raises(ValueError, match="projection conflicts"):
+            CycloneDXGenerator.recover({**document, "compositions": edited})
+
+
 def test_without_a_repository_agent_there_is_no_subject():
     bom = _inventory()
     bom.components = [c for c in bom.components if c.bom_ref != AGENT]
@@ -316,9 +335,19 @@ def test_spdx_identifiers_are_minted_in_the_operator_namespace_or_a_uuid_urn():
     assert custom["@graph"][0]["spdxId"].startswith("https://sbom.example.com/agents/document/")
     for document in (default, custom):
         assert native_document(SPDXGenerator.recover(document)) == native_document(bom)
-    for namespace in ("https://spdx.org/spdxdocs/x", "not an iri", "https://x.example/#frag", ""):
+    for namespace in (
+        "https://spdx.org/spdxdocs/x",
+        "https://spdx.org./spdxdocs/x",
+        "https://SPDX.ORG.../x",
+        "https://spdx%2Eorg/spdxdocs/x",
+        "https://www.spdx.org./x",
+        "not an iri",
+        "https://x.example/#frag",
+        "",
+    ):
         with pytest.raises(ValueError):
             SPDXGenerator(namespace)
+    assert SPDXGenerator("https://spdx.org.example.com/x").generate(bom)
 
 
 def test_spdx_validation_rejects_undefined_vocabulary_references():

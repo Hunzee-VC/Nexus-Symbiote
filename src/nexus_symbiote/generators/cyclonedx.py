@@ -169,16 +169,18 @@ class CycloneDXGenerator(Generator):
         view["dependencies"] = [
             edge for edge in view.get("dependencies", []) if set(edge) != {"ref"}
         ]
-        # Readers such as the upstream SDK drop compositions. Without one a consumer
-        # sees no completeness assertion, which equals "unknown"; dropping
-        # "incomplete" loses the public coverage warning and still conflicts.
-        compositions = view.get("compositions")
-        if (
-            isinstance(compositions, list)
-            and len(compositions) == 1
-            and isinstance(compositions[0], dict)
-            and compositions[0].get("aggregate") == "unknown"
-        ):
+        return view
+
+    @classmethod
+    def _expected_view(cls, candidate: dict[str, Any], document: dict[str, Any]) -> dict[str, Any]:
+        view = cls._public_view(candidate)
+        # Readers such as the upstream SDK drop the compositions array. Without one a
+        # consumer sees no completeness assertion, which equals "unknown". Dropping
+        # "incomplete" loses the public coverage warning, and any composition that
+        # is present must match exactly, so both still conflict.
+        if "compositions" not in document and [
+            composition.get("aggregate") for composition in view.get("compositions", [])
+        ] == ["unknown"]:
             del view["compositions"]
         return view
 
@@ -216,7 +218,8 @@ class CycloneDXGenerator(Generator):
             raise ValueError("unsupported CycloneDX projection version")
         actual = unordered_projection(cls._public_view(document))
         if not any(
-            actual == unordered_projection(cls._public_view(candidate)) for candidate in candidates
+            actual == unordered_projection(cls._expected_view(candidate, document))
+            for candidate in candidates
         ):
             raise ValueError("CycloneDX projection conflicts with the embedded native document")
         return recovered

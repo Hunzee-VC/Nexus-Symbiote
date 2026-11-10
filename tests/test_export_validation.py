@@ -114,6 +114,15 @@ def test_format_assertions_do_not_depend_on_optional_packages(monkeypatch):
     assert checker.conforms("2016-12-31T23:59:60+00:00", "date-time")
     for value in ("not-a-date", "2026-13-01T00:00:00Z", "2026-11-10 12:00:00Z", "2026-11-10"):
         assert not checker.conforms(value, "date-time"), value
+    # RFC 3339 digits are ASCII; fullwidth and Arabic-Indic digits are not.
+    for value in (
+        "２０２６-１１-１０T１２:００:００Z",
+        "2026-11-10T12:00:00.١٢Z",
+        "2026-11-10T12:00:00+٠١:00",
+    ):
+        assert not checker.conforms(value, "date-time"), value
+    assert checker.conforms("2026-11-10", "date")
+    assert not checker.conforms("٢٠٢٦-11-10", "date")
     assert checker.conforms("https://example.com/a?b#c", "iri-reference")
     assert checker.conforms("urn:cdx:x/1#ref", "iri-reference")
     for value in ("https://exa mple", "a\nb", "%zz", "a#b#c", "<x>"):

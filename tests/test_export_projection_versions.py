@@ -154,17 +154,30 @@ def _replace_document(document: dict[str, Any], text: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "case", ["duplicate-key", "non-finite", "deep", "oversized", "not-an-object", "digest"]
+    ("case", "message"),
+    [
+        ("duplicate-key", "Duplicate JSON object key"),
+        ("non-finite", "Nonfinite JSON number"),
+        ("deep", None),
+        ("oversized", None),
+        ("not-an-object", None),
+        ("digest", None),
+    ],
 )
-def test_malformed_embedded_documents_fail_with_value_errors(monkeypatch, case):
+def test_malformed_embedded_documents_fail_with_value_errors(monkeypatch, case, message):
     document = CycloneDXGenerator().generate(fixture_bom())
     prop = next(
         p for p in document["metadata"]["properties"] if p["name"] == "nexus-symbiote:document"
     )
+    native = json.loads(prop["value"])
+    # A last-key-wins parser reads both texts as the original document, digest included;
+    # the strict parser rejects them before the projection comparison.
     if case == "duplicate-key":
-        _replace_document(document, prop["value"][:-1] + ',"dependencies":[]}')
+        _replace_document(
+            document, prop["value"][:-1] + ',"metadata":' + json.dumps(native["metadata"]) + "}"
+        )
     elif case == "non-finite":
-        _replace_document(document, '{"metadata": NaN}')
+        _replace_document(document, '{"metadata":NaN,' + prop["value"][1:])
     elif case == "deep":
         _replace_document(document, "[" * 200_000 + "]" * 200_000)
     elif case == "oversized":
@@ -173,7 +186,7 @@ def test_malformed_embedded_documents_fail_with_value_errors(monkeypatch, case):
         _replace_document(document, "[]")
     else:
         _replace_document(document, prop["value"].replace('"main"', '"other"', 1))
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=message):
         CycloneDXGenerator.recover(document)
 
 

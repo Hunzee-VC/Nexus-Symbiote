@@ -39,6 +39,22 @@ conditional relationships remain in the native extension, and the
 `"conditional": true`. CycloneDX and SPDX recovery check the standard projection
 against the embedded document.
 
+## SARIF rule identifiers
+
+0.1.0 keyed SARIF rules by category (`nexus_symbiote/<category>`) and raised a
+rule's `security-severity` to the highest severity among that category's
+findings in the run. Rules are now keyed by category and severity
+(`nexus_symbiote/<category>/<severity>`), so a rule's severity no longer
+depends on the other findings. GitHub code scanning matches a result to an
+existing alert only under the same rule, so the first upload after upgrading
+closes every alert from 0.1.0 and opens new ones: dismissals and comments on
+the old alerts do not carry over, so review the new alerts and dismiss them
+again where that still applies. Later, a finding whose severity changes moves
+to the rule of its new severity, and code scanning again opens a new alert and
+closes the old one. The `nexus_symbiote/v1` fingerprint keeps its 0.1.0 value
+and, like `primaryLocationLineHash`, stays the same when the severity changes;
+consumers that match findings across runs should use it rather than the rule id.
+
 ## Standard projection versions
 
 Every CycloneDX and SPDX export declares the projection that produced its

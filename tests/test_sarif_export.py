@@ -140,6 +140,40 @@ def test_unlocatable_sources_are_anchored_and_never_disclosed(tmp_path, source):
     assert "secret" not in json.dumps(document) and "outside" not in json.dumps(document)
 
 
+@pytest.mark.parametrize(
+    "anchor", ["../outside.yaml", "/elsewhere/policy.yaml", "https://host/x", ".", ""]
+)
+def test_an_anchor_that_cannot_be_located_is_rejected(tmp_path, anchor):
+    with pytest.raises(ValueError, match="anchor"):
+        SARIFGenerator(tmp_path, anchor=anchor)
+
+
+def test_notifications_never_name_where_the_scan_root_lies(tmp_path):
+    project = tmp_path / "checkout"
+    project.mkdir()
+    bom = AIBOM()
+    bom.metadata.completeness = _claim(
+        scan_failures=[
+            f"{project / '.mcp.json'}: invalid JSON or duplicate keys",
+            f"{project}: unreadable",
+            f"{tmp_path / 'checkout-old' / 'x.json'}: sibling",
+        ],
+        surfaces_excluded=[f"{project / 'models' / 'big.bin'}: model size limit exceeded"],
+    )
+    document = SARIFGenerator(tmp_path, scan_root=project).generate(bom)
+    texts = {
+        n["message"]["text"]
+        for n in document["runs"][0]["invocations"][0]["toolExecutionNotifications"]
+    }
+    assert "Collection failure: .mcp.json: invalid JSON or duplicate keys" in texts
+    assert "Collection failure: .: unreadable" in texts
+    assert "Coverage gap: models/big.bin: model size limit exceeded" in texts
+    # Only the scan root is removed: another directory's path is left as written.
+    assert [text for text in texts if str(tmp_path) in text] == [
+        f"Collection failure: {tmp_path / 'checkout-old' / 'x.json'}: sibling"
+    ]
+
+
 def test_rules_are_keyed_by_category_and_severity_with_stable_metadata(tmp_path):
     server = MCPServerComponent(
         bom_ref="server",
@@ -245,6 +279,9 @@ def test_fingerprints_are_stable_distinct_and_match_0_1_0(tmp_path):
         "see //evil.example/path or www.evil.example",
         "\x1b[31mred\x1b[0m\u202eevil\u200b",
         "x" * 5000,
+        "_https://evil.example/x and _www.evil.example",
+        "\u00e9https://evil.example and WwW.evil.example",
+        "a" * 40 + "://evil.example",
     ],
 )
 def test_messages_are_plain_text_that_cannot_render_links(tmp_path, name):
@@ -274,6 +311,9 @@ def test_messages_are_plain_text_that_cannot_render_links(tmp_path, name):
         assert len(text) <= 2 * 1000
     assert plain_text("[a](b)") == "\\[a\\](b)"
     assert plain_text("C:\\path") == "C:\\\\path"
+    assert plain_text("_https://evil.example") == "_https\\[:\\]//evil.example"
+    # The cut cannot leave a "www." that defanging has not seen.
+    assert "www." not in plain_text("x" * 994 + "www" + "y" * 10)
 
 
 def test_collection_failures_and_gaps_reach_the_invocation(tmp_path):

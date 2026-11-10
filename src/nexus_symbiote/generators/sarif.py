@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Callable
 from datetime import UTC
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -61,24 +62,31 @@ HELP_URI = (
 GITHUB_MAX_RESULTS = 25_000
 MAX_MESSAGE = 1000
 MAX_NOTIFICATIONS = 100
-_URL_SCHEME = re.compile(r"(?i)\b([a-z][a-z0-9+.-]{0,31}):(?=//)")
-_WWW = re.compile(r"(?i)\bwww\.")
+# Every "://" and "www.", whatever precedes them: autolinkers also start a link
+# after "_" or another word character, and schemes have no length limit.
+_URL_SEPARATOR = re.compile(r":(?=//)")
+_WWW = re.compile(r"(?i)www\.")
 _SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:")
 _CATEGORY = re.compile(r"[a-z0-9][a-z0-9_.-]{0,63}")
+# The scan root where a path starts in a message, followed by separators or the
+# end of the path; never a root that only ends or begins a longer path name.
+_ROOT_START = r"(?<![\w./\\-])"
+_ROOT_END = r"(?:[\\/]+|(?![^\s:;,'\")\]]))"
 
 
 def plain_text(value: object, limit: int = MAX_MESSAGE) -> str:
     """One line of plain text that no SARIF viewer renders as a link or markup.
 
-    Control, bidirectional and invisible characters become U+FFFD; URL schemes and
-    ``www.`` are defanged (``https[:]//``, ``www[.]``); backslashes and brackets are
+    Control, bidirectional and invisible characters become U+FFFD; the text is cut
+    to ``limit`` characters; every ``://`` and ``www.`` is defanged (``https[:]//``,
+    ``www[.]``), including one that the cut produces; backslashes and brackets are
     escaped as SARIF requires for literal text, which also disables embedded links.
     """
     text = UNSAFE_TEXT.sub("\ufffd", str(value))
-    text = _URL_SCHEME.sub(r"\1[:]", text)
-    text = _WWW.sub(lambda match: match[0][:-1] + "[.]", text)
     if len(text) > limit:
         text = text[: limit - 3] + "..."
+    text = _URL_SEPARATOR.sub("[:]", text)
+    text = _WWW.sub(lambda match: match[0][:-1] + "[.]", text)
     return text.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
 
 
@@ -95,7 +103,8 @@ class SARIFGenerator(Generator):
     (default: the working directory). ``scan_root`` is the directory the inventory's
     relative paths are relative to (default: ``root``); when it lies outside ``root``
     it becomes the source root itself. ``anchor`` locates findings that no file
-    records, relative to ``scan_root`` (default: ``.nexus-symbiote.yaml``).
+    records, relative to ``scan_root`` (default: ``.nexus-symbiote.yaml``); an anchor
+    that is a URL or lies outside the source root raises ValueError.
     """
 
     format_name = "sarif"
@@ -112,9 +121,27 @@ class SARIFGenerator(Generator):
         if not self.scan_root.is_relative_to(self.root):
             self.root = self.scan_root
         self._prefix = PurePosixPath(self.scan_root.relative_to(self.root).as_posix())
-        self._anchor = self._uri(anchor if anchor is not None else DEFAULT_ANCHOR) or self._uri(
-            DEFAULT_ANCHOR
+        located = self._uri(anchor if anchor is not None else DEFAULT_ANCHOR)
+        if located is None:
+            raise ValueError("SARIF anchor must be a file path inside the source root")
+        self._anchor = located
+        roots = {str(self.scan_root), str((scan_root or self.root).absolute())}
+        bases = sorted((r for r in roots if Path(r).parent != Path(r)), key=len, reverse=True)
+        self._root_text = (
+            re.compile(_ROOT_START + "(?:" + "|".join(map(re.escape, bases)) + ")" + _ROOT_END)
+            if bases
+            else None
         )
+
+    def _relative_text(self, text: str) -> str:
+        """Message text with the scan root's location removed from the paths it names.
+
+        Inventory messages name files relative to the scan root; one that still names
+        an absolute path under it must not disclose where the checkout lies.
+        """
+        if self._root_text is None:
+            return text
+        return self._root_text.sub(lambda match: "" if match[0][-1] in "/\\" else ".", text)
 
     def _uri(self, source: str | Path | None) -> str | None:
         """A %SRCROOT%-relative URI for a file path; None for URLs and escaping paths."""
@@ -144,8 +171,6 @@ class SARIFGenerator(Generator):
         server = by_ref.get(getattr(component, "mcp_server_ref", None) or "")
         if server is not None and (uri := self._uri(server.source_path)):
             return uri, "server"
-        if self._anchor is None:
-            raise ValueError("SARIF anchor must lie inside the source root")
         return self._anchor, "anchor"
 
     def generate(self, bom: AIBOM) -> dict[str, Any]:
@@ -210,7 +235,7 @@ class SARIFGenerator(Generator):
         index = {rule["id"]: position for position, rule in enumerate(ordered_rules)}
         results = [{**result, "ruleIndex": index[result["ruleId"]]} for result in findings.values()]
         claim = bom.metadata.completeness
-        successful, notifications = _notifications(claim, len(results))
+        successful, notifications = _notifications(claim, len(results), self._relative_text)
         invocation: dict[str, Any] = {"executionSuccessful": successful}
         if notifications:
             invocation["toolExecutionNotifications"] = notifications
@@ -269,7 +294,7 @@ class SARIFGenerator(Generator):
 
 
 def _notifications(
-    claim: CompletenessClaim | None, result_count: int
+    claim: CompletenessClaim | None, result_count: int, relative: Callable[[str], str]
 ) -> tuple[bool, list[dict[str, Any]]]:
     """Collection failures make the run unsuccessful; gaps and scoping are warnings."""
     errors: list[str] = []
@@ -279,9 +304,13 @@ def _notifications(
         notes.append("The inventory carries no completeness claim; collection coverage is unknown.")
     else:
         failed = sorted(name for name, state in claim.scanner_status.items() if state == "failed")
-        errors.extend(f"Collection failure: {plain_text(item)}" for item in claim.scan_failures)
+        errors.extend(
+            f"Collection failure: {plain_text(relative(item))}" for item in claim.scan_failures
+        )
         errors.extend(f"Collector {plain_text(name)} failed." for name in failed)
-        warnings.extend(f"Coverage gap: {plain_text(item)}" for item in claim.surfaces_excluded)
+        warnings.extend(
+            f"Coverage gap: {plain_text(relative(item))}" for item in claim.surfaces_excluded
+        )
         not_run = (PROJECTION_SCANNERS | set(claim.scanner_status)) - set(
             claim.collectors_requested
         )

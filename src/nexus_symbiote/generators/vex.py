@@ -23,6 +23,7 @@ from nexus_symbiote.generators._common import (
     OMITTED_IMPORTED_FINDINGS,
     content_digest,
     imported_discovery_component,
+    prepare,
 )
 from nexus_symbiote.generators.base import Generator
 from nexus_symbiote.generators.cyclonedx import standard_component
@@ -46,10 +47,12 @@ class VEXGenerator(Generator):
     format_name = "vex-cyclonedx-1.7"
 
     def generate(self, bom: AIBOM) -> dict[str, Any]:
-        bom.finalize()
+        # The same content-derived serial as the inventory exports, so the BOM-Link
+        # names the CycloneDX export of this inventory.
+        prepare(bom)
         serial = str(bom.metadata.serial_number)
         stamp = bom.metadata.timestamp
-        timestamp = stamp.isoformat() if stamp is not None and stamp.tzinfo is not None else None
+        timestamp = stamp.isoformat() if stamp is not None else None
         vulnerabilities: list[dict[str, Any]] = []
         components: list[dict[str, Any]] = []
         seen: set[str] = set()

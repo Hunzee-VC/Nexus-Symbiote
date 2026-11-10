@@ -15,7 +15,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from referencing.exceptions import Unresolvable
 
@@ -101,7 +101,8 @@ def _validated_namespace(namespace: str) -> str:
     value = namespace.rstrip("/")
     if len(value) > 2048 or _NAMESPACE.fullmatch(value) is None:
         raise ValueError("SPDX namespace must be an absolute IRI without a query or fragment")
-    host = (urlsplit(value).hostname or "").lower()
+    # "spdx.org." and "spdx%2Eorg" name the same host as "spdx.org".
+    host = unquote(urlsplit(value).hostname or "").lower().rstrip(".")
     if host == "spdx.org" or host.endswith(".spdx.org"):
         raise ValueError("SPDX namespace must be one the document creator controls")
     return value

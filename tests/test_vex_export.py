@@ -6,7 +6,9 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-from nexus_symbiote.core.aibom import AIBOM
+import pytest
+
+from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.enums import RiskSeverity
 from nexus_symbiote.core.models import (
     MCPServerComponent,
@@ -139,6 +141,30 @@ def test_vex_text_cannot_render_links_or_controls():
     assert "](" not in vulnerability["description"].replace("\\]", "")
     assert "://" not in vulnerability["description"]
     assert "\\u001b" not in text
+
+
+def test_a_serial_less_inventory_links_the_serial_its_cyclonedx_export_has():
+    def serial_less() -> AIBOM:
+        bom = inventory()
+        bom.metadata.serial_number = None
+        return bom
+
+    vex = VEXGenerator().generate(serial_less())
+    assert vex == VEXGenerator().generate(serial_less())
+    serial = CycloneDXGenerator().generate(serial_less())["serialNumber"]
+    assert vex["externalReferences"][0]["url"] == f"urn:cdx:{serial.removeprefix('urn:uuid:')}/3"
+    naive = inventory()
+    naive.metadata.timestamp = datetime(2026, 11, 10, 12, 0)
+    with pytest.raises(ValueError, match="timezone"):
+        VEXGenerator().generate(naive)
+    dangling = inventory()
+    dangling.dependencies.append(
+        DependencyEdge(
+            source_ref="model:weights", target_ref="tool:gone", relationship="depends-on"
+        )
+    )
+    with pytest.raises(ValueError, match="unknown component"):
+        VEXGenerator().generate(dangling)
 
 
 def test_vex_without_a_uuid_serial_omits_the_bom_link():

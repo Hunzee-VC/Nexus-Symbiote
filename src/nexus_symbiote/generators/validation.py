@@ -97,10 +97,12 @@ _LinearDraft202012 = jsonschema_validators.extend(  # type: ignore[no-untyped-ca
     Draft202012Validator, {"uniqueItems": _unique_items}
 )
 
+# RFC 3339 digits are ASCII; without re.ASCII, \d also matches other scripts' digits.
 _RFC3339 = re.compile(
-    r"(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:[Zz]|[+-](\d{2}):(\d{2}))"
+    r"(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:[Zz]|[+-](\d{2}):(\d{2}))",
+    re.ASCII,
 )
-_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+_DATE = re.compile(r"\d{4}-\d{2}-\d{2}", re.ASCII)
 _IRI_EXCLUDED = re.compile(r'[\x00-\x20\x7f-\x9f<>"{}|\\^`]|%(?![0-9A-Fa-f]{2})')
 _SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:")
 
