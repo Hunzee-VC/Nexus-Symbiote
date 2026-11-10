@@ -30,6 +30,7 @@ Reference material: exact behavior, fields and limits.
 | [TypeScript inventory](typescript-inventory.md) | Static collection of MCP tool registrations from TypeScript servers, and its limits |
 | [npm lockfile evidence](npm-lockfile-evidence.md) | What the registry collector records from `package.json` and npm lockfiles |
 | [Deployment evidence](deployment-evidence.md) | The optional deployment profile and its scoped authority claims |
+| [Runtime contract reference](runtime-contract-reference.md) | Signed runtime contracts: envelope, fields, digests, order of checks, reason codes, state store, key lifecycle and what an integrator must build |
 | [Security regression corpus](../benchmarks/README.md) | The committed security fixtures CI enforces, and what passing them does not show |
 | [Inventory regression corpus](../benchmarks/inventory/README.md) | Labeled tool-inventory cases from public MCP servers, with explicit uncertainty bounds |
 
