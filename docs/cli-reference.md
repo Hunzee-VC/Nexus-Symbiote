@@ -90,6 +90,7 @@ nexus-symbiote baseline [OPTIONS] [PROJECT_PATH]
 | Option | Description |
 |---|---|
 | `-o`, `--baseline-path` `PATH` | Where to write the unsigned baseline (default: .nexus-symbiote-baseline.json). |
+| `--signature-policy` `FILE` | Explicit operator signer policy JSON, kept outside the project. |
 
 ### `blast-radius`
 

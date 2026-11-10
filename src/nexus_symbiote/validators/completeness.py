@@ -367,13 +367,16 @@ class CompletenessValidator:
                 or supplied.tool_count < local.tool_count
             ):
                 return False
-        if (
+        from nexus_symbiote.utils.crypto import SIGNING_EVIDENCE_CLAIM, VERIFIED_SIGNING_STATUSES
+
+        upgraded = (
             isinstance(local, ModelComponent)
             and isinstance(supplied, ModelComponent)
-            and local.signing_status == "sigstore-signed"
-            and supplied.signing_status != "sigstore-signed"
+            and local.signing_status in VERIFIED_SIGNING_STATUSES
+            and supplied.signing_status not in VERIFIED_SIGNING_STATUSES
             and supplied.trust_tier == TrustTier.UNKNOWN
-        ):
+        )
+        if upgraded:
             # A newly supplied operator policy may corroborate an initially unsigned inventory.
             fields -= {"signing_status", "signing_identity", "trust_tier"}
         if canonical_json(local.model_dump(mode="json", include=fields)) != canonical_json(
@@ -387,7 +390,7 @@ class CompletenessValidator:
         ):
             return False
         for name, evidence in local.claims.items():
-            if evidence.method == "not-collected":
+            if evidence.method == "not-collected" or (upgraded and name == SIGNING_EVIDENCE_CLAIM):
                 continue  # A separate observation can fill a gap in the static inventory.
             claim = supplied.claims.get(name)
             if claim is None or evidence.model_dump(exclude={"observed_at"}) != claim.model_dump(

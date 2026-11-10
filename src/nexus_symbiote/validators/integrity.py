@@ -13,7 +13,6 @@ from nexus_symbiote.core.hashing import (
     TOOL_DEFINITION_HASH_VERSION,
     hash_tool_definition,
     normalize_digest,
-    open_regular_file,
 )
 from nexus_symbiote.core.models import (
     AnyComponent,
@@ -23,12 +22,15 @@ from nexus_symbiote.core.models import (
     ToolComponent,
 )
 from nexus_symbiote.scanners.mcp import MCPScanner
-from nexus_symbiote.scanners.model import inspect_model_artifact
+from nexus_symbiote.scanners.model import observe_model_package, verify_weight_files
 from nexus_symbiote.utils.crypto import (
+    ArtifactPolicy,
     SigstoreArtifactPolicy,
+    policy_entries,
     verify_file_hash,
     verify_sigstore_bundle,
 )
+from nexus_symbiote.utils.model_formats import InspectionBudget
 
 
 @dataclass
@@ -98,9 +100,11 @@ class IntegrityValidator:
         *,
         require_model_signatures: bool = True,
     ) -> None:
-        self._signature_policies = {p.artifact_path.resolve(): p for p in signature_policies}
-        if len(self._signature_policies) != len(signature_policies):
-            raise ValueError("Duplicate artifact signature policies")
+        # Digest pins arrive with the Sigstore entries of a loaded policy set.
+        self._signature_policies: dict[Path, ArtifactPolicy] = {
+            p.artifact_path.resolve(): p for p in policy_entries(signature_policies)
+        }
+        self._inspection_budget = InspectionBudget()
         self.require_model_signatures = require_model_signatures
 
     def validate(
@@ -319,92 +323,122 @@ class IntegrityValidator:
                 )
             )
         path = self._artifact_path(comp, project_root, report)
-        if path is not None:
+        if path is None or project_root is None:
+            self._unsigned_model(comp, report)
+            return
+        root = project_root.resolve()
+        try:
+            relative = path.resolve().relative_to(root)
+            # The collector's own confined observation: the same verdict, digest and
+            # bound weight files for the same bytes, never the BOM's account of them.
+            package = observe_model_package(root, relative, self._inspection_budget)
+        except (OSError, ValueError):
+            package = None
+        observation = package.observation if package is not None else None
+        if observation is None:
+            actual, explanation = (
+                SerializationSafety.UNKNOWN,
+                "Model structure could not be bound to its SHA-256 subject",
+            )
+        else:
+            actual, explanation = observation.safety, observation.explanation
             try:
-                with open_regular_file(path) as stream:
-                    actual, explanation, inspected_digest = inspect_model_artifact(
-                        path, stream=stream
-                    )
                 _, expected_digest = normalize_digest(comp.hashes.get("sha256", ""), "sha256")
-                if inspected_digest != f"sha256:{expected_digest}":
-                    report.issues.append(
-                        IntegrityIssue(
-                            comp.bom_ref,
-                            "format_subject_mismatch",
-                            "Inspected model structure does not match the BOM's SHA-256 subject",
-                        )
-                    )
-            except (OSError, ValueError):
-                actual, explanation = (
-                    SerializationSafety.UNKNOWN,
-                    "Model structure could not be bound to its SHA-256 subject",
-                )
-            if actual in {
-                SerializationSafety.UNSAFE_CODE_EXECUTION,
-                SerializationSafety.UNSAFE_TEMPLATE_INJECTION,
-            }:
-                report.issues.append(
-                    IntegrityIssue(comp.bom_ref, "unsafe_format", explanation, "critical")
-                )
-            elif actual == SerializationSafety.UNKNOWN:
-                report.issues.append(
-                    IntegrityIssue(comp.bom_ref, "format_unverified", explanation, "unknown")
-                )
-            if (
-                comp.serialization_safety == SerializationSafety.SAFE
-                and actual != SerializationSafety.SAFE
-            ):
+                if observation.digest != f"sha256:{expected_digest}":
+                    raise ValueError("subject mismatch")
+            except ValueError:
                 report.issues.append(
                     IntegrityIssue(
                         comp.bom_ref,
-                        "format_claim_mismatch",
-                        "Declared safe format was not corroborated",
+                        "format_subject_mismatch",
+                        "Inspected model structure does not match the BOM's SHA-256 subject",
                     )
                 )
-
-        policy = self._signature_policies.get(path.resolve()) if path is not None else None
-        if policy is None or path is None:
-            category = (
-                "unsigned_model" if comp.signing_status == "unsigned" else "unverified_signature"
-            )
-            severity = "unknown" if self.require_model_signatures else "warning"
+        if actual in {
+            SerializationSafety.UNSAFE_CODE_EXECUTION,
+            SerializationSafety.UNSAFE_TEMPLATE_INJECTION,
+        }:
             report.issues.append(
-                IntegrityIssue(
-                    comp.bom_ref,
-                    category,
-                    "No trusted artifact-bound signer policy was supplied",
-                    severity,
-                )
+                IntegrityIssue(comp.bom_ref, "unsafe_format", explanation, "critical")
             )
-            return
-        report.signatures_checked += 1
-        result = verify_sigstore_bundle(
-            path, policy.bundle_path, policy.expected_identity, policy.expected_issuer
-        )
+        elif actual == SerializationSafety.UNKNOWN:
+            report.issues.append(
+                IntegrityIssue(comp.bom_ref, "format_unverified", explanation, "unknown")
+            )
         if (
-            not result.verified
-            or result.identity != policy.expected_identity
-            or result.issuer != policy.expected_issuer
+            comp.serialization_safety == SerializationSafety.SAFE
+            and actual != SerializationSafety.SAFE
         ):
             report.issues.append(
                 IntegrityIssue(
                     comp.bom_ref,
-                    "signature_verification_failed",
-                    result.error or "Signature verification failed",
+                    "format_claim_mismatch",
+                    "Declared safe format was not corroborated",
                 )
             )
+        if package is None:
+            self._unsigned_model(comp, report)
             return
-        # Bind the verification result to the same bytes represented by the BOM.
-        try:
-            _, digest = normalize_digest(comp.hashes.get("sha256", ""), "sha256")
-            if not result.details or result.details.get("artifact_digest") != f"sha256:{digest}":
-                raise ValueError("Signed artifact does not match the BOM's SHA-256 digest")
-        except ValueError as exc:
+        if not package.complete:
             report.issues.append(
-                IntegrityIssue(comp.bom_ref, "signature_subject_mismatch", str(exc))
+                IntegrityIssue(
+                    comp.bom_ref,
+                    "weight_files_unverified",
+                    "The weight files bound to this model could not all be read beneath the root",
+                    "unknown",
+                )
             )
+        local = sorted((weight.as_posix(), digest) for weight, digest in package.weight_files[1:])
+        if self._recorded_weight_files(comp) != local:
+            report.hashes_failed += 1
+            report.issues.append(
+                IntegrityIssue(
+                    comp.bom_ref,
+                    "weight_files_mismatch",
+                    "Weight files bound to this model differ from the BOM's record",
+                )
+            )
+        verification = verify_weight_files(
+            package.weight_files, root, self._signature_policies, verify=verify_sigstore_bundle
+        )
+        if verification.status is None:
+            self._unsigned_model(comp, report)
             return
-        report.signatures_verified += 1
+        report.signatures_checked += verification.signatures_checked
+        report.signatures_verified += verification.signatures_verified
+        report.hashes_verified += verification.pins_verified
+        for category, detail, severity in verification.issues:
+            if severity == "unknown" and not self.require_model_signatures:
+                severity = "warning"
+            report.issues.append(IntegrityIssue(comp.bom_ref, category, detail, severity))
+
+    @staticmethod
+    def _recorded_weight_files(comp: ModelComponent) -> list[tuple[str, str | None]] | None:
+        recorded = comp.properties.get("weight_files", [])
+        if not isinstance(recorded, list):
+            return None
+        entries: list[tuple[str, str | None]] = []
+        for item in recorded:
+            if not isinstance(item, dict) or not isinstance(item.get("path"), str):
+                return None
+            digest = item.get("sha256")
+            entries.append((item["path"], digest if isinstance(digest, str) else None))
+        return sorted(entries)
+
+    def _unsigned_model(self, comp: ModelComponent, report: IntegrityReport) -> None:
+        category = (
+            "unsigned_model"
+            if comp.signing_status in {"unsigned", "signature-not-found"}
+            else "unverified_signature"
+        )
+        report.issues.append(
+            IntegrityIssue(
+                comp.bom_ref,
+                category,
+                "No trusted artifact-bound signer policy was supplied",
+                "unknown" if self.require_model_signatures else "warning",
+            )
+        )
 
     def _check_prompt_hash(
         self, comp: PromptComponent, project_root: Path | None, report: IntegrityReport

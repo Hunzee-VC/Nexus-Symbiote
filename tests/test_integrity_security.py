@@ -58,8 +58,9 @@ def test_model_replacement_cannot_bind_safe_structure_to_other_bytes(tmp_path, m
     write_safetensors(path)
     inspect = model.inspect_model_format
 
-    def replace_after_inspection(path, *, stream=None):
-        observation = inspect(path, stream=stream)
+    def replace_after_inspection(inspected, *, stream=None):
+        # The collector passes root-relative paths; replace the scanned file itself.
+        observation = inspect(inspected, stream=stream)
         replacement = tmp_path / "replacement"
         replacement.write_bytes(b"not a tensor container")
         replacement.replace(path)
