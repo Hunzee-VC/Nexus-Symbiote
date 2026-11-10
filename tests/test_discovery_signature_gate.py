@@ -327,6 +327,10 @@ def test_operator_flag_requires_the_signature_when_the_project_policy_is_ignored
         ["risk", str(bom), "--project", str(project), "--no-project-policy", "--json-output"],
     )
     assert json.loads(risk.stdout)["discovery_producer"] == "not-verified"
+    text = CliRunner().invoke(
+        main, ["risk", str(bom), "--project", str(project), "--no-project-policy"]
+    )
+    assert "Discovery producer: not verified (unsigned evidence accepted)" in text.output
     gated = CliRunner().invoke(
         main,
         [

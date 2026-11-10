@@ -146,9 +146,12 @@ class AIBOM(BaseModel):
         Indented output is preferred; a document that only fits without indentation is
         written compactly rather than being written in a form ``load`` rejects.
         """
-        for text in (self.to_json(), json.dumps(self.to_dict(), separators=(",", ":"))):
-            if len(text.encode("utf-8")) <= MAX_NATIVE_BYTES:
-                return text
+        text = self.to_json()
+        if len(text.encode("utf-8")) <= MAX_NATIVE_BYTES:
+            return text
+        text = json.dumps(self.to_dict(), separators=(",", ":"))
+        if len(text.encode("utf-8")) <= MAX_NATIVE_BYTES:
+            return text
         raise NativeFormatError(
             f"The inventory exceeds the {MAX_NATIVE_BYTES // (1024 * 1024)} MiB limit "
             "that native readers accept."

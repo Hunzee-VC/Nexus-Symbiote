@@ -1043,6 +1043,8 @@ def risk(
     level = report.risk_level
     console.print(f"[bold]Risk Score:[/] [{color}]{score:.1f}[/] ({level})")
     console.print(f"  Assessment basis: {basis}")
+    if producer == "not-verified":
+        console.print("  Discovery producer: not verified (unsigned evidence accepted)")
     total = report.total_components
     risky = report.components_with_risks
     console.print(f"  Components: {total} total, {risky} with risks")
