@@ -149,12 +149,10 @@ def _spdx_round_trip(document: dict[str, Any]) -> dict[str, Any]:
 
 def _cyclonedx_strict(document: dict[str, Any]) -> None:
     assert validate_cyclonedx(document) == []
-    pytest.importorskip("cyclonedx.validation.json")
     from cyclonedx.schema import SchemaVersion
     from cyclonedx.validation.json import JsonStrictValidator
 
-    if not hasattr(SchemaVersion, "V1_7"):
-        pytest.skip("installed cyclonedx library does not support 1.7")
+    assert hasattr(SchemaVersion, "V1_7"), "installed cyclonedx library does not support 1.7"
     assert JsonStrictValidator(SchemaVersion.V1_7).validate_str(json.dumps(document)) is None
 
 

@@ -4,6 +4,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import jsonschema
 import pytest
 from pydantic import ValidationError
 
@@ -126,7 +127,6 @@ def test_timestamps_must_have_timezone():
 
 
 def test_native_schema_checks_deployment_profile_shape():
-    jsonschema = pytest.importorskip("jsonschema")
     schema = json.loads(
         (Path(__file__).parents[1] / "schemas" / "nexus-symbiote-aibom-1.0.schema.json").read_text()
     )

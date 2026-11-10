@@ -47,12 +47,12 @@ class TestLoadPolicy:
     def test_load_missing_returns_none(self, tmp_path: Path) -> None:
         assert load_policy(tmp_path) is None
 
-    def test_load_invalid_yaml_returns_none(self, tmp_path: Path) -> None:
+    def test_load_invalid_yaml_raises_policy_error(self, tmp_path: Path) -> None:
         (tmp_path / ".nexus-symbiote.yaml").write_text("{{invalid yaml:::")
         with pytest.raises(PolicyError):
             load_policy(tmp_path)
 
-    def test_load_empty_file_returns_none(self, tmp_path: Path) -> None:
+    def test_load_empty_file_raises_policy_error(self, tmp_path: Path) -> None:
         (tmp_path / ".nexus-symbiote.yaml").write_text("")
         with pytest.raises(PolicyError):
             load_policy(tmp_path)

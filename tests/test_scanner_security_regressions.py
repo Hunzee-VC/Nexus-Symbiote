@@ -51,7 +51,6 @@ def test_non_loopback_or_invalid_url_rejected(url: str) -> None:
 
 
 def test_rag_yaml_is_parsed_and_urls_are_minimized(tmp_path: Path) -> None:
-    pytest.importorskip("yaml")
     (tmp_path / "rag_config.yaml").write_text(
         "sources:\n  - name: docs\n    type: vector-store\n"
         "    source_uris: ['http://user:CANARY@example.com/private/CANARY?token=CANARY']\n",
@@ -71,7 +70,6 @@ def test_malformed_rag_config_reports_failure_not_absence(tmp_path: Path) -> Non
 
 
 def test_malformed_rag_yaml_reports_failure(tmp_path: Path) -> None:
-    pytest.importorskip("yaml")
     (tmp_path / "rag_config.yaml").write_text("sources: [", encoding="utf-8")
     result = RAGScanner().scan(tmp_path)
     assert result.scan_failures

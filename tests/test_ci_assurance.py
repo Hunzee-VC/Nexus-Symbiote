@@ -168,23 +168,51 @@ def test_verified_ci_executes_fail_closed_on_incomplete_or_unsuccessful_metadata
         check=False,
         capture_output=True,
         text=True,
+        timeout=60,
     )
     assert (process.returncode == 0) == (change == "none"), process.stdout + process.stderr
 
 
-@pytest.mark.parametrize("change", ["statement", "branch", "unmeasured", "missing", "boolean"])
-def test_coverage_gate_rejects_regressions_and_invalid_measurements(change):
-    check = runpy.run_path(str(ROOT / "scripts/check_coverage.py"))["coverage_failures"]
-    report = {
-        "meta": {"branch_coverage": True},
-        "totals": {
-            "covered_lines": 900,
+def coverage_report(coverage):
+    """A report exactly at every floor of scripts/check_coverage.py."""
+
+    def summary(statements, branches):
+        branches = 100 if branches is None else branches
+        return {
+            "covered_lines": statements * 10,
             "num_statements": 1000,
-            "covered_branches": 750,
+            "covered_branches": branches * 10,
             "num_branches": 1000,
-        },
+        }
+
+    files = {
+        f"src/{module}": {"summary": summary(*floors)}
+        for module, floors in coverage["MODULE_FLOORS"].items()
     }
+    totals = summary(coverage["MIN_STATEMENT_PERCENT"], coverage["MIN_BRANCH_PERCENT"])
+    return {"meta": {"branch_coverage": True}, "totals": totals, "files": files}
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "statement",
+        "branch",
+        "unmeasured",
+        "missing",
+        "boolean",
+        "module-statement",
+        "module-branch",
+        "module-missing",
+        "module-duplicated",
+    ],
+)
+def test_coverage_gate_rejects_regressions_and_invalid_measurements(change):
+    coverage = runpy.run_path(str(ROOT / "scripts/check_coverage.py"))
+    check = coverage["coverage_failures"]
+    report = coverage_report(coverage)
     assert check(report) == []
+    confined = report["files"]["src/nexus_symbiote/utils/confined.py"]["summary"]
     if change == "statement":
         report["totals"]["covered_lines"] -= 1
     elif change == "branch":
@@ -193,6 +221,34 @@ def test_coverage_gate_rejects_regressions_and_invalid_measurements(change):
         report["meta"]["branch_coverage"] = False
     elif change == "missing":
         del report["totals"]["covered_branches"]
-    else:
+    elif change == "boolean":
         report["totals"]["covered_lines"] = True
+    elif change == "module-statement":
+        # One untested security module fails even though the package total still passes.
+        report["totals"]["covered_lines"] += 100
+        confined["covered_lines"] -= 1
+    elif change == "module-branch":
+        confined["covered_branches"] -= 1
+    elif change == "module-missing":
+        del report["files"]["src/nexus_symbiote/utils/confined.py"]
+    else:
+        report["files"]["build/lib/nexus_symbiote/utils/confined.py"] = {"summary": confined}
     assert check(report)
+
+
+def test_coverage_floors_cover_the_security_critical_modules_and_exist():
+    floors = runpy.run_path(str(ROOT / "scripts/check_coverage.py"))["MODULE_FLOORS"]
+    for module in (
+        "nexus_symbiote/utils/confined.py",
+        "nexus_symbiote/core/hashing.py",
+        "nexus_symbiote/utils/crypto.py",
+        "nexus_symbiote/signature_policy.py",
+        "nexus_symbiote/validators/completeness.py",
+        "nexus_symbiote/validators/integrity.py",
+        "nexus_symbiote/validators/risk.py",
+        "nexus_symbiote/diff/differ.py",
+        "nexus_symbiote/modes.py",
+        "nexus_symbiote/runtime.py",
+    ):
+        assert module in floors
+    assert all((ROOT / "src" / module).is_file() for module in floors)

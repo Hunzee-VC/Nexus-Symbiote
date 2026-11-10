@@ -107,12 +107,14 @@ def _risky_bom() -> AIBOM:
 
 
 class TestCompletenessValidator:
-    def test_complete_bom_passes(self):
+    def test_a_bom_without_scanner_status_is_incomplete_however_full(self):
         bom = _full_bom()
         cv = CompletenessValidator()
         report = cv.validate(bom)
         assert report.total_components == 3
         assert len(report.surfaces_covered) > 0
+        assert not report.is_complete
+        assert any("Missing scanner coverage" in issue.description for issue in report.issues)
 
     def test_missing_completeness_claim(self):
         bom = AIBOM()
@@ -238,7 +240,7 @@ class TestRiskScorer:
         assert report.risk_level in ("high", "critical")
         assert report.severity_counts.get("critical", 0) >= 2
 
-    def test_passes_gate(self):
+    def test_unknown_coverage_cannot_pass_the_gate(self):
         bom = _full_bom()
         scorer = RiskScorer(fail_threshold=50.0)
         passed, report = scorer.passes_gate(bom)
