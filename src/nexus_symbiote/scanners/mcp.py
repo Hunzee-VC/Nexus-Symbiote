@@ -19,7 +19,7 @@ import json
 import os
 import re
 import tomllib
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -526,11 +526,47 @@ def _origin_label(value: str) -> list[str]:
     return ["[local]"] if value.strip() else []
 
 
-def _field_names(config: dict[str, Any]) -> list[str]:
-    return sorted(
-        redact_text(key, identifier=True) if _FIELD_NAME.fullmatch(key) else "[redacted]"
-        for key in config
+_TOKEN_RUN = re.compile(r"[A-Za-z0-9]{24,}")
+
+
+def _exportable_name(name: str) -> bool:
+    """Whether a configuration name may be exported: a plain field name, not token-shaped.
+
+    A secret pasted as a key ("ghp_..." as a field, header or environment name) must not
+    reach the inventory, so a name that matches a known token shape, or holds a run of 24
+    or more letters and digits that mixes both, is withheld.
+    """
+    if not _FIELD_NAME.fullmatch(name) or TOKEN_SHAPE.search(name):
+        return False
+    return not any(
+        any(c.isdigit() for c in run) and any(c.isalpha() for c in run)
+        for run in _TOKEN_RUN.findall(name)
     )
+
+
+def _exported_names(names: Iterable[str]) -> list[str]:
+    """Sorted names with every withheld one as "[redacted]", one marker per name."""
+    return sorted(
+        redact_text(name, identifier=True) if _exportable_name(name) else "[redacted]"
+        for name in names
+    )
+
+
+def _exported_environment(env: dict[str, Any]) -> dict[str, str]:
+    """The environment's names with masked values; withheld names get numbered markers."""
+    shown: dict[str, str] = {}
+    withheld = 0
+    for name in sorted(env):
+        if _exportable_name(name):
+            shown[name] = "***"
+        else:
+            withheld += 1
+            shown[f"[redacted-{withheld}]"] = "***"
+    return shown
+
+
+def _field_names(config: dict[str, Any]) -> list[str]:
+    return _exported_names(config)
 
 
 def _json_shape(value: Any, budget: int) -> tuple[int, int]:
@@ -1463,9 +1499,7 @@ class MCPScanner(Scanner):
         if context:
             launcher_properties["launch_context"] = context
         if header_names:
-            launcher_properties["header_names"] = [
-                header if _FIELD_NAME.fullmatch(header) else "[redacted]" for header in header_names
-            ]
+            launcher_properties["header_names"] = _exported_names(header_names)
         if settings:
             launcher_properties["client_settings"] = settings
         source_config_hash = hash_canonical(
@@ -1484,7 +1518,7 @@ class MCPScanner(Scanner):
                     "transport": transport,
                     "endpoint": identity.endpoint,
                     "argument_count": len(args),
-                    "environment_names": sorted(env),
+                    "environment_names": _exported_names(env),
                     "header_names": launcher_properties.get("header_names", []),
                     "client_settings": settings,
                     "tool_names": tool_names,
@@ -1502,7 +1536,7 @@ class MCPScanner(Scanner):
             package_url=package_url,
             command=identity.command,
             args=[REDACTED for _ in args],
-            env=dict.fromkeys(env, "***"),
+            env=_exported_environment(env),
             endpoint_url=identity.endpoint,
             version_pinned=version_pinned,
             source_path=config_scope,
