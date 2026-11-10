@@ -6,6 +6,7 @@ import _socket
 import asyncio
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -508,3 +509,165 @@ def test_offline_guard_covers_the_fork_exec_reference_subprocess_captured():
     with modes.enforce(modes.Mode.OFFLINE), pytest.raises(modes.OfflineViolation):
         subprocess._fork_exec()
     assert subprocess._fork_exec is original
+
+
+# The guard tables in modes.py drive these tests, so a new entry needs no new test
+# and a dropped one fails against the documented minimum below.
+DOCUMENTED_GUARDS = {
+    "_SOCKET_METHODS": {"connect", "connect_ex", "listen", "sendto", "sendmsg"},
+    "_RESOLVER_FUNCTIONS": {
+        "getaddrinfo",
+        "gethostbyname",
+        "gethostbyname_ex",
+        "gethostbyaddr",
+        "getnameinfo",
+    },
+    "_CONNECTION_FUNCTIONS": {"create_connection", "create_server"},
+    "_PROCESS_FUNCTIONS": {
+        "system",
+        "fork",
+        "forkpty",
+        "posix_spawn",
+        "posix_spawnp",
+        "execv",
+        "execve",
+    },
+}
+
+
+@pytest.mark.parametrize("table", sorted(DOCUMENTED_GUARDS))
+def test_guard_tables_keep_every_documented_entry_point(table):
+    assert DOCUMENTED_GUARDS[table] <= set(getattr(modes, table))
+    text = (REPOSITORY / "docs" / "offline-and-live-modes.md").read_text(encoding="utf-8")
+    for name in getattr(modes, table):
+        assert re.search(rf"`(?:[\w.]+\.)?{name}`", text), (table, name)
+
+
+@pytest.mark.parametrize("name", modes._SOCKET_METHODS)
+def test_every_socket_method_is_refused_even_on_unix_domain_sockets(name, tmp_path):
+    with (
+        modes.enforce(modes.Mode.OFFLINE),
+        socket.socket(socket.AF_UNIX) as local,
+        pytest.raises(modes.OfflineViolation, match=name),
+    ):
+        getattr(local, name)(str(tmp_path / "daemon.sock"))
+
+
+@pytest.mark.parametrize("name", modes._RESOLVER_FUNCTIONS)
+@pytest.mark.parametrize("owner", [socket, _socket], ids=["socket", "_socket"])
+def test_every_resolver_entry_point_is_refused(owner, name):
+    with modes.enforce(modes.Mode.OFFLINE), pytest.raises(modes.OfflineViolation):
+        getattr(owner, name)(_UNRESOLVABLE)
+
+
+@pytest.mark.parametrize("name", modes._CONNECTION_FUNCTIONS)
+def test_every_connection_helper_is_refused(name):
+    with modes.enforce(modes.Mode.OFFLINE), pytest.raises(modes.OfflineViolation):
+        getattr(socket, name)(_UNROUTABLE)
+
+
+@pytest.mark.parametrize("event", sorted(modes._AUDIT_EVENTS))
+def test_every_audit_event_is_refused_only_while_offline(event):
+    modes._audit(event, ())
+    with modes.enforce(modes.Mode.OFFLINE), pytest.raises(modes.OfflineViolation):
+        modes._audit(event, ())
+
+
+def test_socket_created_before_the_guard_cannot_send_or_connect():
+    with (
+        socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as early,
+        modes.enforce(modes.Mode.OFFLINE),
+    ):
+        with pytest.raises(modes.OfflineViolation):
+            early.sendto(b"x", _UNROUTABLE)
+        with pytest.raises(modes.OfflineViolation):
+            _socket.socket.sendto(early, b"x", _UNROUTABLE)
+        with pytest.raises(modes.OfflineViolation):
+            early.connect(_UNROUTABLE)
+
+
+def test_every_process_entry_point_is_refused_in_a_child_interpreter():
+    # A missing patch must not fork or replace the test runner, so the attempts run
+    # in a separate interpreter that reports which calls the guard refused.
+    code = (
+        "import json, os, sys\n"
+        "from nexus_symbiote import modes\n"
+        "refused = []\n"
+        "args = {'system': ('true',), 'execv': ('/bin/true', ['true']),\n"
+        "        'execve': ('/bin/true', ['true'], {}),\n"
+        "        'posix_spawn': ('/bin/true', ['true'], {}),\n"
+        "        'posix_spawnp': ('true', ['true'], {})}\n"
+        "with modes.enforce(modes.Mode.OFFLINE):\n"
+        "    for name in modes._PROCESS_FUNCTIONS:\n"
+        "        if not hasattr(os, name):\n"
+        "            refused.append(name)\n"
+        "            continue\n"
+        "        try:\n"
+        "            pid = getattr(os, name)(*args.get(name, ()))\n"
+        "        except modes.OfflineViolation:\n"
+        "            refused.append(name)\n"
+        "        else:\n"
+        "            pid = pid[0] if isinstance(pid, tuple) else pid\n"
+        "            if name in ('fork', 'forkpty') and pid == 0:\n"
+        "                os._exit(0)\n"
+        "print(json.dumps(sorted(refused)))\n"
+    )
+    result = subprocess.run(  # noqa: S603 - the installed interpreter running a fixed script
+        [sys.executable, "-I", "-c", code], capture_output=True, text=True, timeout=60, check=False
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == sorted(modes._PROCESS_FUNCTIONS)
+
+
+def test_subinterpreter_creation_is_refused_while_offline():
+    modules = [
+        module
+        for name in modes._SUBINTERPRETER_MODULES
+        if (module := sys.modules.get(name) or _import_optional(name)) is not None
+    ]
+    if not modules:
+        pytest.skip("this interpreter has no subinterpreter module")
+    originals = [module.create for module in modules]
+    with modes.enforce(modes.Mode.OFFLINE):
+        for module in modules:
+            with pytest.raises(modes.OfflineViolation, match="subinterpreter"):
+                module.create()
+    assert [module.create for module in modules] == originals
+
+
+def _import_optional(name: str):
+    import importlib
+
+    try:
+        return importlib.import_module(name)
+    except ImportError:
+        return None
+
+
+def test_collectors_called_directly_stay_offline_on_hostile_input(tmp_path):
+    # Library users call collectors without the CLI; the guard proves they make no
+    # network or process attempt on URLs, commands and imports in the checkout.
+    from nexus_symbiote.scanners import ALL_SCANNERS
+
+    marker = tmp_path / "executed"
+    (tmp_path / ".mcp.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "remote": {"url": "https://mcp.example.com/sse"},
+                    "local": {"command": "touch", "args": [str(marker)]},
+                }
+            }
+        )
+    )
+    (tmp_path / "agent.py").write_text(
+        "import socket\nsocket.getaddrinfo('example.com', 443)\nimport chromadb\n"
+    )
+    (tmp_path / "requirements.txt").write_text("openai @ https://example.com/openai.tar.gz\n")
+    (tmp_path / "rag_config.json").write_text(
+        json.dumps({"sources": [{"uri": "https://docs.example.com/index"}]})
+    )
+    with modes.enforce(modes.Mode.OFFLINE):
+        for collector in ALL_SCANNERS:
+            collector().scan(tmp_path)
+    assert not marker.exists()

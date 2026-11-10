@@ -58,6 +58,8 @@ _PROCESS_FUNCTIONS = (
     "execv",
     "execve",
 )
+# CPython 3.13 and later name the module _interpreters; 3.12 names it _xxsubinterpreters.
+_SUBINTERPRETER_MODULES = ("_interpreters", "_xxsubinterpreters")
 _MISSING = object()
 # CPython raises these audit events inside the C implementations, so they also
 # catch _socket.socket methods, references captured before the guard, and
@@ -238,6 +240,15 @@ def _install(patches: list[tuple[Any, str, Any]]) -> None:
         patch(_posixsubprocess, "fork_exec", "process creation (fork_exec)")
     # subprocess binds its own reference to fork_exec at import time.
     patch(subprocess, "_fork_exec", "process creation (fork_exec)")
+    # A subinterpreter has its own audit hooks and module patches, so code run in
+    # one would escape this guard. Raising from the cpython.PyInterpreterState_New
+    # audit event crashes CPython 3.12, so the creation functions are replaced.
+    for module_name in _SUBINTERPRETER_MODULES:
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError:
+            continue
+        patch(module, "create", "subinterpreter creation")
 
 
 def _restore(patches: list[tuple[Any, str, Any]]) -> None:

@@ -175,7 +175,10 @@ with functions that raise `OfflineViolation`:
 - process creation: `subprocess`, `os.system`, `os.fork`, `os.forkpty`,
   `os.posix_spawn`, `os.posix_spawnp`, `os.execv`, `os.execve`, and
   `_posixsubprocess.fork_exec` together with the reference that `subprocess`
-  keeps to it.
+  keeps to it;
+- subinterpreter creation (`_interpreters.create`, named `_xxsubinterpreters.create`
+  on Python 3.12), because a subinterpreter has its own audit hooks and modules and
+  would escape the guard.
 
 `OfflineViolation` derives from `BaseException`, so a collector's broad
 `except Exception` cannot turn it into a recorded, soft failure. The command stops
@@ -210,7 +213,9 @@ embedded trust root without network access.
 
 The guard is a tripwire for this package and its Python dependencies, **not a
 sandbox**. Native code that calls the operating system directly bypasses it, and
-a process started by `verify-live` is not covered at all. A socket created before
+a process started by `verify-live` is not covered at all. Live mode removes the
+whole guard for the three live commands, although `advisories` and `discover-mcp`
+never need a process and the `verify-live` parent never needs the network. A socket created before
 the command started is not affected by the creation check: code that holds one can
 still accept or use an existing connection, because `listen`, `accept`, `send` and
 `recv` raise no audit event, and its `bind`, `connect` or `sendto` on a host-name
