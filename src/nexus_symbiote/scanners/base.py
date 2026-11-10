@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import os
 import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Iterator
@@ -13,11 +14,12 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from nexus_symbiote.core.aibom import DependencyEdge
-from nexus_symbiote.core.models import AnyComponent
+from nexus_symbiote.core.models import AnyComponent, MCPClientComponent
 from nexus_symbiote.utils.confined import ConfinedCollection
 
 MAX_CONFIG_BYTES = 4 * 1024 * 1024
 MAX_MODEL_BYTES = 1024 * 1024 * 1024
+MAX_SOURCE_BYTES = 64 * 1024 * 1024
 
 
 def read_regular_text(path: Path, *, max_bytes: int = MAX_CONFIG_BYTES) -> str:
@@ -81,6 +83,61 @@ class ScanResult:
     source_projection_limitations: list[str] | None = None
     source_unmapped_count: int = 0
     source_unmapped_indexes: list[int] = field(default_factory=list)
+
+    def make_portable(self, root: Path) -> None:
+        """Record locations inside the project rather than where it was checked out.
+
+        A checkout path is not a property of the project: recorded, it made the
+        same tree collected in CI differ from its baseline on every component.
+        """
+        base = os.path.abspath(root)
+        prefix = base.rstrip(os.sep) + os.sep
+
+        def relative(value: str) -> str:
+            if value == base:
+                return "."
+            if not value.startswith(prefix):
+                return value
+            return value[len(prefix) :].replace(os.sep, "/")
+
+        for component in self.components:
+            if component.source_path is not None:
+                component.source_path = relative(component.source_path)
+            if isinstance(component, MCPClientComponent) and component.config_path is not None:
+                component.config_path = relative(component.config_path)
+            for key in ("config_paths", "source_paths"):
+                values = component.properties.get(key)
+                if isinstance(values, list):
+                    component.properties[key] = [
+                        relative(value) if isinstance(value, str) else value for value in values
+                    ]
+        for records in (self.surfaces_scanned, self.surfaces_excluded, self.scan_failures):
+            records[:] = [relative(record) for record in records]
+
+
+class SourceBudget:
+    """Bound the source text a collector reads while it looks for references.
+
+    A file count says nothing about cost and made ordinary projects fail, so the
+    bound is the text read. What does not fit is one named coverage gap.
+    """
+
+    def __init__(self, label: str, result: ScanResult, limit: int = MAX_SOURCE_BYTES) -> None:
+        self._label = label
+        self._result = result
+        self._remaining = limit
+        self.exhausted = False
+
+    def admit(self, size: int) -> bool:
+        if self.exhausted:
+            return False
+        self._remaining -= size
+        if self._remaining < 0:
+            self.exhausted = True
+            self._result.scan_failures.append(
+                f"{self._label} exceed the combined size limit: the rest were not read"
+            )
+        return not self.exhausted
 
 
 class Scanner(ABC):

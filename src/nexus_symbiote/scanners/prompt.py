@@ -118,6 +118,18 @@ INSTRUCTION_FILES: dict[str, str] = {
 
 SKILL_DIRECTORIES = [".claude/skills", ".claude/commands", "skills"]
 
+# Instruction files a host loads from below the root: per-directory memory files,
+# subagent definitions and rule or prompt directories.
+NESTED_INSTRUCTION_NAMES = {"CLAUDE.md": "system-prompt", "AGENTS.md": "system-prompt"}
+INSTRUCTION_DIRECTORIES: dict[str, str] = {
+    ".claude/agents": "subagent",
+    ".cursor/rules": "rules-file",
+    ".github/instructions": "instruction",
+    ".github/prompts": "instruction",
+}
+_INSTRUCTION_SUFFIXES = (".md", ".mdc", ".txt")
+_DECLARATION_SUFFIXES = (".md", ".txt", ".yaml", ".yml", ".json")
+
 
 class PromptScanner(Scanner):
     name = "prompt"
@@ -140,25 +152,60 @@ class PromptScanner(Scanner):
                 comp = self._scan_instruction_file(full_path, rel_path, prompt_type, content, text)
                 result.components.append(comp)
 
+            for path in sorted(files.iter_files()):
+                nested_path = path.as_posix()
+                if nested_path in INSTRUCTION_FILES:
+                    continue
+                nested_type: str | None = (
+                    NESTED_INSTRUCTION_NAMES.get(path.name) if len(path.parts) > 1 else None
+                )
+                if nested_type is None and path.suffix.lower() in _INSTRUCTION_SUFFIXES:
+                    nested_type = next(
+                        (
+                            kind
+                            for directory, kind in INSTRUCTION_DIRECTORIES.items()
+                            if nested_path.startswith(directory + "/")
+                        ),
+                        None,
+                    )
+                if nested_type is None:
+                    continue
+                content = files.read_bytes(path)
+                if content is None:
+                    continue
+                result.surfaces_scanned.append(nested_path)
+                try:
+                    text = content.decode("utf-8")
+                except UnicodeDecodeError:
+                    result.scan_failures.append(f"{nested_path}: invalid UTF-8 instruction")
+                    continue
+                result.components.append(
+                    self._scan_instruction_file(
+                        files.root / path, nested_path, nested_type, content, text
+                    )
+                )
+
             for skill_dir in SKILL_DIRECTORIES:
                 found = False
-                for path in files.iter_files(skill_dir):
-                    if path.name.startswith(".") or path.suffix.lower() not in (
-                        ".md",
-                        ".txt",
-                        ".yaml",
-                        ".yml",
-                        ".json",
+                paths = list(files.iter_files(skill_dir))
+                packages = {path.parent for path in paths if path.name == "SKILL.md"}
+                for path in paths:
+                    declaration = path.suffix.lower() in _DECLARATION_SUFFIXES
+                    # A skill package's scripts run with the agent's authority, so they
+                    # are bound by digest like its declarations.
+                    if path.name.startswith(".") or not (
+                        declaration or packages.intersection(path.parents)
                     ):
                         continue
                     content = files.read_bytes(path)
                     if content is None:
                         continue
-                    try:
-                        content.decode("utf-8")
-                    except UnicodeDecodeError:
-                        result.scan_failures.append(f"{path}: invalid UTF-8 skill declaration")
-                        continue
+                    if declaration:
+                        try:
+                            content.decode("utf-8")
+                        except UnicodeDecodeError:
+                            result.scan_failures.append(f"{path}: invalid UTF-8 skill declaration")
+                            continue
                     found = True
                     relative = path.as_posix()
                     result.surfaces_scanned.append(str(files.root / path))
@@ -166,7 +213,7 @@ class PromptScanner(Scanner):
                         SkillPackageComponent(
                             bom_ref=f"skill:{relative}",
                             name=relative,
-                            skill_type="skill",
+                            skill_type="skill" if declaration else "skill-resource",
                             hashes={"sha256": hash_bytes(content)},
                             source_path=str(files.root / path),
                             trust_tier=TrustTier.INTERNAL_UNVERIFIED,

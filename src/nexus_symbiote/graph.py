@@ -164,7 +164,8 @@ def assemble_repository_agent(bom: AIBOM, root: Path) -> AgentComponent:
             raise PolicyError(
                 "agent.yaml must conform to the declared agent identity schema"
             ) from exc
-    identity = declared.id if declared and declared.id else str(root.resolve())
+    # Without a declared id the agent is "this repository", wherever it is checked out.
+    identity = declared.id if declared and declared.id else "."
     agent_ref = "agent:repository:" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
     additions = _manifest_dependencies(bom, declared, root, agent_ref) if declared else []
     discovery = ClaimEvidence(
@@ -177,7 +178,7 @@ def assemble_repository_agent(bom: AIBOM, root: Path) -> AgentComponent:
     )
     agent = AgentComponent(
         bom_ref=agent_ref,
-        name=declared.name if declared else root.name,
+        name=declared.name if declared else "repository",
         version=declared.version if declared else None,
         framework=declared.framework if declared else None,
         supplier=declared.owner if declared else None,
