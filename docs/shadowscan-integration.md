@@ -86,8 +86,9 @@ Version 3 resolved a CycloneDX entry whose type or group contradicts its
 `shadowscan:kind`, such as kind `agent` on a `machine-learning-model`, by
 precedence; version 4 leaves it unmapped.
 Retain the original importer to reproduce or verify an older projection, then
-regenerate and review v3 inventories before comparison or approval. Producer schema and
-version changes require compatibility testing; the report remains untrusted.
+regenerate inventories with the current profile and review them before comparison or
+approval. Producer schema and version changes require compatibility testing; the
+report remains untrusted.
 
 At present the bridge does not resolve agents across tenants or reports, verify
 live MCP identities, or map every ShadowScan finding type, model association or
@@ -109,8 +110,9 @@ reports are rejected, because `verify-discovery` could not read them.
 
 A finding is still imported when it carries a risk level, a shadow flag or a
 surface the projection does not recognize, such as `Critical` instead of
-`critical` or the string `"true"` instead of `true`, but the value is not
-represented: the projection limitations count such entries and the collector
+`critical`, a `risk` object with a score but no level string, or the string
+`"true"` instead of `true`, but the value is not represented: the projection
+limitations count such entries and the collector
 records the coverage gap "ShadowScan report contains values the projection does
 not recognize", so the default gate does not pass on a finding whose rating was
 dropped.

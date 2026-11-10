@@ -417,7 +417,9 @@ class ShadowScanImporter(Scanner):
                     level,
                     finding.get("shadow"),
                     surface,
-                    malformed_risk=risk is not None and not isinstance(risk, dict),
+                    # A rating without a level string, such as a bare score, is not "unrated".
+                    malformed_risk=risk is not None
+                    and (not isinstance(risk, dict) or (bool(risk) and not isinstance(level, str))),
                 )
             )
             comp = _make_component(

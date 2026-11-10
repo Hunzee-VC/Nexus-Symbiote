@@ -79,6 +79,8 @@ def test_the_inventory_records_which_report_was_read(tmp_path, relative):
     [
         ({"risk": {"level": "Critical"}}, "a risk level"),
         ({"risk": "high"}, "a risk level"),
+        ({"risk": {"score": 90, "factors": []}}, "a risk level"),
+        ({"risk": {"level": None, "score": 90}}, "a risk level"),
         ({"shadow": "true"}, "a shadow flag"),
         ({"surface": "satellite"}, "a surface"),
     ],
@@ -99,6 +101,12 @@ def test_recognized_values_record_no_gap(tmp_path):
     _place(tmp_path, "shadowscan.json", REPORT.read_bytes())
     result = ShadowScanImporter().scan(tmp_path)
     assert UNRECOGNIZED_VALUES_GAP not in result.surfaces_excluded
+
+
+@pytest.mark.parametrize("fields", [{}, {"risk": None}, {"risk": {}}])
+def test_an_absent_rating_is_not_an_unrecognized_value(fields):
+    imported = ShadowScanImporter().parse_report(json.dumps(_report(**fields)))
+    assert not imported.unrecognized
 
 
 def _cyclonedx(entry_type: str, group: str | None, kind: str | None) -> dict:
