@@ -4,11 +4,15 @@ Nexus SymBiote is alpha security tooling. Inventory, signature verification, and
 
 ## Reporting a vulnerability
 
-Report security-sensitive defects through the repository's **Security > Report a vulnerability** feature ([open a private report](https://github.com/Hunzee-VC/Nexus-Symbiote/security/advisories/new)) when available. If private reporting is unavailable, contact the repository owner through their GitHub profile and request a private reporting channel. Do not put credentials, private BOMs, exploit details, or customer data in a public issue.
+Report security-sensitive defects through the repository's **Security > Report a vulnerability** feature: [open a private report](https://github.com/Hunzee-VC/Nexus-Symbiote/security/advisories/new). Private vulnerability reporting is enabled for this repository; the report reaches the repository's administrators and stays private until an advisory is published. Do not put credentials, private BOMs, exploit details, or customer data in a public issue.
 
 Include the affected commit or distribution version, platform and Python version, reproduction steps with synthetic inputs, expected and observed behavior, and the trust boundary crossed. Keep real credentials and sensitive agent context out of reproduction artifacts.
 
-The project does not promise response or remediation deadlines. Maintainers should acknowledge a report, agree on a disclosure plan with the reporter, and publish an advisory with affected and fixed versions when appropriate.
+**What to expect.** The project has one maintainer and offers best effort, not a service level: an acknowledgement within 7 days, and coordinated disclosure 90 days after the report by default, or earlier once a fixed version is published. The reporter and the maintainer can agree on another date. Fixes ship as a new version, and the advisory names the affected and fixed versions.
+
+**If nobody answers.** There is no second security contact yet ([continuity](GOVERNANCE.md#continuity)). If a private report has no acknowledgement after 7 days, open a public issue titled "Security report awaiting acknowledgement" that gives the report's date and nothing about its content. If the form itself is unavailable, open such an issue asking for a private channel instead; never put details in it.
+
+**Scope.** A way to make a documented guarantee fail is in scope: a gate that passes when it should fail, collection that reads, executes or reaches the network where the documentation says it does not, a secret that reaches an inventory, log or export, or terminal or CI output an input can steer. The items under [known limitations](#known-limitations-in-010) are tracked publicly; a new consequence of one, such as a bypass the entry does not describe, is still worth a private report.
 
 ## Supported versions
 

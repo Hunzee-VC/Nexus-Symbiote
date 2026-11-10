@@ -134,9 +134,32 @@ def test_declared_versions_match_without_importing_project_code(tmp_path):
         f'__version__ = "0.1.0"\nraise RuntimeError({str(marker)!r})\n'
     )
     (tmp_path / "pyproject.toml").write_text('[project]\nversion = "0.1.0"\n')
+    (tmp_path / "CITATION.cff").write_text('version: 0.1.0\ndate-released: "2026-11-08"\n')
     assert hygiene.version_issues(tmp_path) == [] and not marker.exists()
     (tmp_path / "pyproject.toml").write_text('[project]\nversion = "0.2.0"\n')
     assert hygiene.version_issues(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "citation",
+    [
+        'version: 0.0.9\ndate-released: "2026-11-08"\n',
+        "version: 0.1.0\n",
+        'version: 0.1.0\ndate-released: "soon"\n',
+        "- not a mapping\n",
+        None,
+    ],
+)
+def test_the_citation_must_name_the_released_version_and_its_date(tmp_path, citation):
+    package = tmp_path / "src/nexus_symbiote"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text('__version__ = "0.1.0"\n')
+    (tmp_path / "pyproject.toml").write_text('[project]\nversion = "0.1.0"\n')
+    if citation is not None:
+        (tmp_path / "CITATION.cff").write_text(citation)
+    assert any("CITATION.cff" in issue for issue in hygiene.version_issues(tmp_path))
+    (tmp_path / "CITATION.cff").write_text("version: 0.1.0\ndate-released: 2026-11-08\n")
+    assert hygiene.version_issues(tmp_path) == []
 
 
 @pytest.mark.parametrize("mutation", ["modified", "unlisted", "duplicate", "traversal"])
