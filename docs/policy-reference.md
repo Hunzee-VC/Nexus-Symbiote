@@ -75,7 +75,7 @@ output:
 
 `ignore_categories` and suppressions match category names exactly. Read them from the `category` field of `risk --json-output` findings. This version emits:
 
-`additional_directories`, `attestation`, `authentication`, `bidi_override`, `capability_scope`, `code_execution`, `completeness`, `credential_helper`, `data_integrity`, `detection_method`, `directional_marks`, `hidden_markup`, `hook_commands`, `instruction_layering`, `invalid_safetensors`, `invisible_characters`, `mcp_auto_approval`, `mutable_image_tag`, `permission_scope`, `plugin_sources`, `prompt_size`, `rag_discovery`, `serialization_format`, `serialization_format_unknown`, `shadowscan-heuristic`, `shadowscan-inventory-unmatched`, `signing_status`, `tag_characters`, `transport_security` and `version_pinning`.
+`additional_directories`, `attestation`, `authentication`, `auto_approval`, `bidi_override`, `capability_scope`, `code_execution`, `completeness`, `credential_helper`, `data_integrity`, `detection_method`, `directional_marks`, `endpoint_identity`, `hidden_markup`, `hook_commands`, `instruction_layering`, `invalid_safetensors`, `invisible_characters`, `launch_context`, `launcher_identity`, `local_process`, `mcp_auto_approval`, `mutable_image_tag`, `package_source`, `permission_scope`, `plugin_sources`, `prompt_size`, `rag_discovery`, `serialization_format`, `serialization_format_unknown`, `shadowscan-heuristic`, `shadowscan-inventory-unmatched`, `signing_status`, `tag_characters`, `transport_ambiguity`, `transport_security` and `version_pinning`. The note that an MCP server runs as a local process is `local_process`; `transport_security` is an insecure or credential-bearing endpoint.
 
 A name that matches no finding is accepted and has no effect.
 

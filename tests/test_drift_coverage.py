@@ -64,7 +64,7 @@ def test_mcp_configuration_below_the_root_is_collected(tmp_path, relative, host)
     result = MCPScanner().scan(tmp_path)
     assert not result.scan_failures
     [server] = [c for c in result.components if c.bom_ref.startswith("mcp-server:")]
-    assert server.source_path == str(tmp_path / relative)
+    assert server.source_path == relative
     [client] = [c for c in result.components if c.bom_ref.startswith("mcp-client:")]
     assert client.host_application == host
 

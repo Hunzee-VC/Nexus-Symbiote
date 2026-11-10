@@ -28,7 +28,11 @@ The inventory displays only the name, description, input schema and
 annotations, so a tool that declares `title`, `outputSchema` or `_meta` always
 has a `redacted_definition_hash`, and `validate` reports its fingerprint as
 `unknown` (`descriptor_source_unavailable`) until source evidence corroborates
-it. For a static MCP configuration, run `validate` with `--project` and
+it. The source fingerprint is an unkeyed digest of the original, so anyone
+holding the BOM who knows the rest of a descriptor can confirm a guess of an
+omitted low-entropy literal or of scrubbed text; keep credentials out of tool
+descriptors and treat exported BOMs as sensitive. For a static MCP
+configuration, run `validate` with `--project` and
 `--no-project-policy` to corroborate the source fingerprint against the
 checkout. An inventory written by `discover-mcp --record` has no local source,
 so such tools stay `unknown` there; `diff` against an earlier observation is the
@@ -46,11 +50,19 @@ configuration, tokenizer files, chat templates and declared custom code, and
 ([model integrity](model-integrity.md)). Recollect and review the baseline once
 after upgrading instead of comparing old and new model records.
 
-For supported package launchers, new inventories retain `launcher_package`
-alongside the declared version. An older inventory can lack this field even
-when the current checkout identifies the package. Recollect the baseline and
-review the identity before approving the new snapshot. An observed package
-name and version do not establish the identity of installed executable bytes.
+For classified package launchers, new inventories retain `launcher_package`
+alongside the declared version and, for an exact npm or PyPI version resolved
+from the default registry, `package_url`. Inventories written by 0.1.0
+identified only `npx`, `bunx`, `uvx`, `pipx` and `docker run` with a few
+options, recorded a version-tagged image as pinned (only a digest pins an image
+now) and carry static binding profile v2, which `validate --project` reports as
+unknown. Recollect the baseline and review the identity, the new findings and
+the `packages`, `package_sources` and `launch_context` properties before
+approving the new snapshot. Python server references no longer contain the
+declaration line, and the stdio note moved from `transport_security` to
+`local_process`, so `diff` against a 0.1.0 baseline reports those records as
+removed and added or changed once. An observed package name and version do not
+establish the identity of installed executable bytes.
 
 CycloneDX `dependsOn` contains only unconditional native `depends-on` edges
 and, since projection 2, the dependency of a tool on the MCP server whose

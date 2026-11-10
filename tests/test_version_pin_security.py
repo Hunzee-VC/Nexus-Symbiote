@@ -9,6 +9,7 @@ import pytest
 from nexus_symbiote.core.hashing import extract_version_pin
 from nexus_symbiote.core.models import MCPServerComponent
 from nexus_symbiote.scanners.mcp import MCPScanner
+from nexus_symbiote.scanners.mcp_launch import analyze
 
 
 @pytest.mark.parametrize(
@@ -102,10 +103,12 @@ def test_existing_npm_semver_and_oci_forms(reference, expected):
         ("uvx", ["mcp-server-git==1.2.*"], None),
         ("uvx", ["mcp-server-git==1.2.3,>=1"], None),
         ("pipx", ["run", "mcp-server-git>=1.2"], None),
-        ("docker", ["run", "--rm", "registry.test:5000/image:1.2.3"], "1.2.3"),
         ("docker", ["run", "image@sha256:" + "AB" * 32], "sha256:" + "ab" * 32),
+        ("docker", ["run", "image:1.4.2@sha256:" + "CD" * 32], "sha256:" + "cd" * 32),
         ("docker", ["run", "image/1.2.3/server:nightly"], None),
         ("docker", ["run", "image/1.2.3/server:latest"], None),
+        ("docker", ["run", "--rm", "python:3"], None),
+        ("docker", ["run", "--rm", "node:20"], None),
     ],
 )
 def test_real_mcp_launchers_preserve_only_exact_version_claims(tmp_path, command, args, expected):
@@ -121,6 +124,26 @@ def test_real_mcp_launchers_preserve_only_exact_version_claims(tmp_path, command
     assert all(arg == "***" for arg in server.args)
 
 
-@pytest.mark.parametrize("command", ["uvx", "pipx", "npx"])
+@pytest.mark.parametrize(
+    "image", ["registry.test:5000/image:1.2.3", "image:v2.0.1", "image:1.2.3-alpine"]
+)
+def test_release_tag_without_digest_is_a_mutable_reference_not_a_pin(tmp_path, image):
+    (tmp_path / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"test": {"command": "docker", "args": ["run", "--rm", image]}}})
+    )
+    server = next(
+        c for c in MCPScanner().scan(tmp_path).components if isinstance(c, MCPServerComponent)
+    )
+    assert server.version == image.rsplit(":", 1)[1]
+    assert server.version_pinned is False
+    assert [(r.severity.value, r.category) for r in server.risks if "image" in r.detail] == [
+        ("medium", "mutable_image_tag")
+    ]
+
+
+@pytest.mark.parametrize("command", ["uvx", "pipx run", "npx", "bunx", "docker run"])
 def test_unknown_flags_do_not_reinterpret_following_secrets(command):
-    assert MCPScanner()._extract_package_ref(command, ["--password", "secret@1.2.3"]) is None
+    words = command.split()
+    launch = analyze(words[0], [*words[1:], "--password", "secret@1.2.3"])
+    assert launch.unknown is not None
+    assert all("secret" not in package.spec for package in launch.packages)

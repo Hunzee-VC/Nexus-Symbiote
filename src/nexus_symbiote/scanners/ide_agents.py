@@ -30,6 +30,7 @@ from nexus_symbiote.scanners.base import Scanner, ScanResult
 from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
 from nexus_symbiote.scanners.source_binding import BindingError, value_binding
 from nexus_symbiote.utils.confined import ConfinedCollection, fold_name
+from nexus_symbiote.utils.jsonc import strip_jsonc
 from nexus_symbiote.utils.secrets import redact_text
 
 IDE_AGENT_CONFIGS: dict[str, dict[str, Any]] = {
@@ -294,63 +295,6 @@ def _starting_mode_risk(ide_type: str, mode: str | None) -> RiskAssessment | Non
             ),
         )
     return None
-
-
-def _strip_jsonc(text: str) -> str:
-    """Remove comments and trailing commas outside strings, as VS Code's parser accepts."""
-    out: list[str] = []
-    index, length = 0, len(text)
-    in_string = False
-    while index < length:
-        char = text[index]
-        if in_string:
-            out.append(char)
-            if char == "\\" and index + 1 < length:
-                out.append(text[index + 1])
-                index += 2
-                continue
-            in_string = char != '"'
-            index += 1
-            continue
-        if char == '"':
-            in_string = True
-        elif text.startswith("//", index):
-            end = text.find("\n", index)
-            index = length if end == -1 else end
-            continue
-        elif text.startswith("/*", index):
-            end = text.find("*/", index + 2)
-            if end == -1:
-                raise ValueError("unterminated comment")
-            out.append(" ")
-            index = end + 2
-            continue
-        out.append(char)
-        index += 1
-    stripped = "".join(out)
-    cleaned: list[str] = []
-    in_string = False
-    for position, char in enumerate(stripped):
-        if in_string:
-            if char == '"' and not _escaped(stripped, position):
-                in_string = False
-        elif char == '"':
-            in_string = True
-        elif char == ",":
-            following = position + 1
-            while following < len(stripped) and stripped[following] in " \t\r\n":
-                following += 1
-            if following < len(stripped) and stripped[following] in "}]":
-                continue
-        cleaned.append(char)
-    return "".join(cleaned)
-
-
-def _escaped(text: str, position: int) -> bool:
-    backslashes = 0
-    while position - backslashes - 1 >= 0 and text[position - backslashes - 1] == "\\":
-        backslashes += 1
-    return backslashes % 2 == 1
 
 
 class IDEAgentScanner(Scanner):
@@ -749,11 +693,6 @@ class IDEAgentScanner(Scanner):
                     recommendation="Keep the workspace-write sandbox and on-request approval.",
                 )
             )
-        servers = config.get("mcp_servers")
-        if isinstance(servers, dict) and servers:
-            result.surfaces_excluded.append(
-                f".codex/config.toml: {len(servers)} MCP server declaration(s) are not inventoried"
-            )
 
     def _gemini_settings(
         self,
@@ -761,16 +700,14 @@ class IDEAgentScanner(Scanner):
         result: ScanResult,
         documents: dict[str, dict[str, Any]],
     ) -> None:
-        """Report the MCP servers that Gemini CLI project settings declare as a gap."""
+        """Read Gemini CLI project settings for their digest.
+
+        The ``mcp`` collector inventories the MCP servers they declare.
+        """
         data = self._read_jsonc(files, GEMINI_SETTINGS, result)
         if data is None:
             return
         documents[GEMINI_SETTINGS] = data
-        servers = data.get("mcpServers")
-        if isinstance(servers, dict) and servers:
-            result.surfaces_excluded.append(
-                f"{GEMINI_SETTINGS}: {len(servers)} MCP server declaration(s) are not inventoried"
-            )
 
     def _cursor_hooks(
         self,
@@ -813,7 +750,7 @@ class IDEAgentScanner(Scanner):
         if text is None:
             return None
         try:
-            data = parse_json_strict(_strip_jsonc(text))
+            data = parse_json_strict(strip_jsonc(text))
         except (ValueError, RecursionError):
             result.scan_failures.append(f"{relative}: invalid JSON or duplicate keys")
             return None

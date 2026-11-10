@@ -101,6 +101,7 @@ Messages and recommendations are one line of plain text: control, bidirectional 
 | `version_pinning` | Unpinned version | CWE-829 | LLM03, ASI04 |
 | `mutable_image_tag` | Mutable image tag | CWE-829 | LLM03, ASI04 |
 | `transport_security` | Transport security | CWE-319 for high and critical findings | ASI07 |
+| `local_process` | Local MCP server process | none | ASI07 |
 | `authentication` | Missing authentication requirement | CWE-306 | ASI03, ASI07 |
 | `serialization_format` | Unsafe model serialization | CWE-502 for critical, CWE-1336 for high findings | LLM03, ASI04, ASI05 |
 | `serialization_format_unknown` | Unknown model serialization safety | CWE-502 | LLM03, ASI04 |

@@ -2348,6 +2348,19 @@
           "description": "Declared ecosystem and package name or image repository, when safely identified",
           "title": "Launcher Package"
         },
+        "package_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Exact npm or PyPI package URL of the launched package, only for an exact pin from the default registry; not proof of installed artifact identity",
+          "title": "Package Url"
+        },
         "args": {
           "items": {
             "type": "string"
@@ -2409,7 +2422,7 @@
             }
           ],
           "default": null,
-          "description": "Exact declared package reference; null when no package is declared",
+          "description": "True for an exact version, commit or digest; false for a floating or unclassified package runner reference; null when no package runner is declared",
           "title": "Version Pinned"
         },
         "schema_hash": {

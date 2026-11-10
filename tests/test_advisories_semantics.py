@@ -304,17 +304,13 @@ def test_mcp_launcher_package_identity_is_reconciled():
             mcp_package_identity(SimpleNamespace(**{**vars(server), **mismatch}))  # type: ignore[arg-type]
 
 
-@pytest.mark.skipif(
-    "package_url" not in MCPServerComponent.model_fields,
-    reason="MCP server package URLs are recorded by the MCP collector",
-)
 def test_mcp_servers_with_exact_package_urls_are_queried():
     server = MCPServerComponent(
         bom_ref="mcp:remote",
         name="remote",
         launcher_package="npm:mcp-remote",
         version="0.1.15",
-        package_url="pkg:npm/mcp-remote@0.1.15",  # type: ignore[call-arg]
+        package_url="pkg:npm/mcp-remote@0.1.15",
     )
     transport = Scripted(lambda q, c: {"results": [{"vulns": [{"id": "GHSA-6xpm-ggf7-wc3p"}]}]})
     report = fetch_advisories(AIBOM(components=[server]), transport=transport)

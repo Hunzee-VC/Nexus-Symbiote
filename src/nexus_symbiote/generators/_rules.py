@@ -53,10 +53,14 @@ RULES: dict[str, RuleInfo] = {
     ),
     "transport_security": RuleInfo(
         "Transport security",
-        "An endpoint is declared without TLS, or an MCP server runs as a local process "
-        "whose executable the inventory does not verify.",
+        "An endpoint is declared without TLS, or its URL embeds credentials.",
         owasp=("ASI07",),
         cwe_by_severity={RiskSeverity.HIGH: (319,), RiskSeverity.CRITICAL: (319,)},
+    ),
+    "local_process": RuleInfo(
+        "Local MCP server process",
+        "An MCP server runs as a local process whose executable the inventory does not verify.",
+        owasp=("ASI07",),
     ),
     "authentication": RuleInfo(
         "Missing authentication requirement",

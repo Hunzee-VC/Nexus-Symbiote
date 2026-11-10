@@ -3,40 +3,109 @@
 `validate --project` checks a supplied inventory against freshly collected local
 evidence. Static MCP server records carry two kinds of source binding.
 
-`static_config_hash` (profile `nexus-symbiote/mcp-static-config/v2`) is an RFC 8785
-digest of the server's structure: configuration field names, the displayed
-launcher, transport, endpoint origin, argument count, environment variable names
-and declared tool names. It covers only information the inventory already exports
-in clear, so it reveals nothing about secret values. It detects added or removed
-arguments, environment variables, fields and tools, and changed endpoint origins.
+`static_config_hash` (profile `nexus-symbiote/mcp-static-config/v3`) is an RFC 8785
+digest of the server's exported structure: configuration field names, the displayed
+command basename, the classified launcher with its wrappers and effective command,
+the identity, version and pin of every package it launches, package source origins,
+the names of the project resolver settings that apply to it, launch context flags and
+counts, transport, endpoint origin, argument count, environment variable and header
+names, client settings (auto-approval, disabled, tool filters) and declared tool names.
+It covers only information the record exports in clear, so it reveals nothing about
+secret values. It detects added or removed arguments, environment variables, headers,
+fields, resolver settings and tools, and changed launchers, package identities and
+versions (including dependencies added with `--with`), package source origins, launch
+context and endpoint origins.
+
+Package sources are the registry and index options of a launcher (`--registry`,
+`--@scope:registry`, `--index-url`, `--find-links` and similar), environment
+variables that redirect resolution (`npm_config_registry`, `UV_INDEX_URL`,
+`PIP_INDEX_URL`, `UV_PYTHON_INSTALL_MIRROR`, `JSR_URL`, `DOCKER_HOST`, `GOPROXY` and
+similar, and cache or tool directories a prepared copy could serve from:
+`UV_CACHE_DIR`, `UV_TOOL_DIR`, `PIPX_HOME`, `DENO_DIR`, `GOMODCACHE`), container engine options (`docker -H`, `--context`, `--config`; `podman
+--url`, `--root`), `pipx --pip-args` index and trust options (matched by unique
+prefix, as pip's parser does; an unknown option is a gap) and project-root resolver
+settings that apply to the launched package: `.npmrc` for npm, pnpm, bun and Deno
+`npm:` specifiers, `bunfig.toml` for bun, `.yarnrc.yml` for `yarn dlx`, and `uv.toml`
+and `pyproject.toml` `[tool.uv]` (indexes, mirrors, insecure hosts and `sources`
+entries for a launched package) for `uv run`. `.npmrc` is read as npm reads it: keys
+and values are trimmed, JSON-decoded when quoted and cut at an unescaped `;` or `#`
+otherwise, lines end at a carriage return or line feed, keys after the first
+`[section]` line are ignored, and a key containing `${...}` is `[unresolved]`. Its
+registry (and the `@scope:registry` of a configured `scope` for a package without a
+registry of its own, as npm selects it), cache, offline, proxy, `strict-ssl=false`,
+CA, user and global configuration, prefix, workspace and store settings are sources;
+auth settings (`//host/:...`, `_auth`, `username` and similar) are ignored. For npm and
+pnpm, every setting is classified, from `.npmrc` and from `npm_config_*` or
+`pnpm_config_*` variables alike: `call` and `package` decide what `npm exec` runs, so
+they make the launcher identity unknown (a high `launcher_identity` finding and a gap);
+`script-shell`, `node-options`, `shell`, `git`, `node-gyp`, `pnpmfile` and similar load
+local code (a medium `launch_context` risk); npm's own configuration keys and common
+pnpm keys that change neither are ignored; and any other setting is a source, because
+npm passes it to lifecycle scripts, whose installers read binary mirrors from it.
+Yarn's `yarnPath` and `plugins` (`.yarnrc.yml`, or `YARN_YARN_PATH` and
+`YARN_PLUGINS`) and `yarn-path` (`.yarnrc`) run local code in place of or inside Yarn
+and make the identity unknown; proxy, CA, strict-SSL,
+cache, checksum, offline, network and environment-file settings of `.yarnrc.yml` are
+sources, and a `.env.yarn` file, which Yarn 4 loads by default, is `[unresolved]`.
+Sources are exported as `package_sources` entries such as
+`.npmrc:@acme:registry=https://npm.acme.example`: the origin only, `[local]` for a
+path or other value and `[unresolved]` for a value with `${...}` expansion. A server
+that runs in another working directory (a `cwd` other than the root, `env -C`,
+`pwsh -WorkingDirectory`, `wsl --cd`, `uv --directory` or `--project`,
+`deno --config`) may read other resolver files, so it carries
+`working-directory=[unresolved]`, and so does a server declared in a configuration
+file below the root (such as `packages/api/.mcp.json`), which its client starts in
+that file's directory; one whose variables come from an `envFile` or from
+`dotenvx`, `doppler`, `infisical` or `op run --env-file` carries
+`environment-file=[unresolved]`. A variable that adds a trusted CA or disables TLS
+verification (`NODE_EXTRA_CA_CERTS`, `NODE_TLS_REJECT_UNAUTHORIZED=0`,
+`SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE` and similar) is a source, and so are the
+`HTTPS_PROXY`, `HTTP_PROXY` and `ALL_PROXY` variables beside it. A redirected package
+keeps its version but loses `launcher_package` and `package_url`, and carries a medium
+`package_source` risk. Setting names are exported as `resolver_settings` and digested
+only when they come from a fixed vocabulary (npm and pnpm configuration keys, the
+Yarn, bun and uv settings above, a scoped registry with a well-formed scope, or the
+`sources` entry of a launched package); any other name is `[other]`, once per setting,
+because a token pasted on its own `.npmrc` line is read as a setting name. Values
+enter only the keyed binding.
 
 Values are bound only when the operator sets `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` to
 a secret of at least 32 characters during collection and validation. Generate it
 from a secure random source, for example with
-`python -c "import secrets; print(secrets.token_hex(32))"`: every keyed record
-exports a key identifier derived from the key, so a guessable key lets anyone
-holding the BOM test guesses for it offline. Records then
-also carry `static_value_binding`, an HMAC-SHA256 under that key over the original
-server object (profile `nexus-symbiote/mcp-static-values/v1`), and a key
+`python -c "import secrets; print(secrets.token_hex(32))"` or `openssl rand -hex 32`:
+every keyed record exports a key identifier derived from the key, so a guessable key
+lets anyone holding the BOM test guesses for it offline. Records then also carry
+`static_value_binding`, an HMAC-SHA256 under that key over the original server object
+and the raw values of every project resolver setting that applies to it, auth
+settings excepted (profile `nexus-symbiote/mcp-static-values/v2`), and a key
 identifier. This detects a different package with the same version, changed
-arguments, environment values, endpoint paths and opaque launchers. The key never
-enters the BOM; without it, the binding cannot be used to test guesses for a
-secret. Keep the key in the CI secret store, use the same key for a baseline and
-its candidates, and rotate it by recollecting both. A keyed BOM validated without
-the key, or with a different key, fails reconciliation.
+arguments, environment and header values, endpoint and index paths, opaque launchers
+and the directory of a command. The key never enters the BOM; without it, the binding
+cannot be used to test guesses for a secret. Keep the key in the CI secret store, use
+the same key for a baseline and its candidates, and rotate it by recollecting both. A
+keyed BOM validated without the key, or with a different key, fails reconciliation. The
+CLI refuses a key shorter than 32 characters before any collector runs (exit 2);
+called as a library, the collector records one scan failure per configuration file
+that names the variable, and no server of that file is recorded. Every record states
+`source_values_bound`.
 
 Without the key, a server whose values go beyond what the inventory exports carries a
-low `completeness` risk that names the key and lists what is unbound: launch arguments
-other than the recorded launcher package, environment values, or an endpoint path or
-query. A server with only a pinned launcher package, or a bare endpoint origin, carries
-none.
+low `completeness` risk that names the key and lists what is unbound: a command path
+(a command with a directory, or one behind a wrapper), launch arguments other than the
+recorded launcher package and `-y`, environment values, header values, an endpoint path,
+query, fragment or user information, or project resolver settings. A server whose
+arguments are only its recorded launcher package, or with a bare endpoint origin,
+carries none.
 
 Profile v1 records (an unkeyed digest over raw configuration, including secret
 values) let anyone holding the BOM confirm guesses for low-entropy secrets. They
 fail reconciliation as unknown and require recollection; treat existing v1 exports
-as sensitive and replace them. Neither binding authenticates a publisher,
-identifies the installed executable or establishes that a tool backend is benign.
-JSON object-key ordering and whitespace do not change either binding.
+as sensitive and replace them. Profile v2 records (0.1.0) were digested before
+launchers, package sources and launch context were classified; `validate --project`
+reports them as unknown and asks for recollection, like v1. Neither binding
+authenticates a publisher, identifies the installed executable or establishes that a
+tool backend is benign. JSON object-key ordering and whitespace do not change either
+binding.
 
 Configured tool entries retain their configuration source path and static
 collection mode. Validation compares their descriptor digest, fingerprint
@@ -286,6 +355,7 @@ Live candidates whose served descriptors differ from the declaration need their
 own authenticated review; passing one scope does not establish the other.
 
 The regression cases in `tests/test_mcp_source_binding.py` cover changed source,
-edited supplied descriptors, missing legacy evidence, redaction and canonical
-object-key ordering. These cases test the stated contract, not detection efficacy
+edited supplied descriptors, missing legacy evidence, redaction, canonical
+object-key ordering and project resolver settings, and hold the known-answer vectors
+for the v3 structure digest and the v2 keyed binding. These cases test the stated contract, not detection efficacy
 across an independently sampled population of agent deployments.

@@ -6,11 +6,13 @@ page says where the reviewed snapshot must come from, how to take both snapshots
 they compare, and what each alert means.
 
 The gate compares what the inventory records. Content the collectors do not record,
-such as Codex `config.toml` settings or instruction files under names the `prompt`
-collector does not read, cannot alert. Without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`,
-neither can a changed MCP launch argument other than the launcher package, a changed
-environment value, an endpoint path changed on the same host, or a RAG source
-repointed within its origin; see [source binding](verification-source-binding.md). The
+such as Codex `config.toml` settings other than its approval, sandbox and MCP server
+settings, or instruction files under names the `prompt` collector does not read, cannot
+alert. Without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, neither can a changed MCP launch
+argument other than the launcher package, a changed environment or header value, an
+endpoint or package index path changed on the same host, a changed value of a project
+resolver setting such as an `.npmrc` entry, or a RAG source repointed within its origin;
+see [source binding](verification-source-binding.md). The
 [known limitations](../SECURITY.md#known-limitations-in-010) list those surfaces.
 
 ## The trust anchor is the baseline

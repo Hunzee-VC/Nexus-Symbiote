@@ -83,13 +83,14 @@ nexus-symbiote scan /tmp/demo-agent -o after.json
 nexus-symbiote diff before.json after.json --fail-on-alert
 ```
 
-`diff` reports exactly two changes, a critical alert for the changed `tickets`
-endpoint and a high alert for the removed version pin, and exits 1:
+`diff` reports exactly two changes, both critical, and exits 1: the changed
+`tickets` endpoint, and the floated `notes` package, whose static source binding
+records its version and pin and which also names the removed version pin:
 
 ```text
 Security Alerts:
   [CRITICAL] Critical change in 'tickets': MCP server endpoint changed. Review before execution.; MCP server static source binding changed: launcher, arguments, environment, endpoint or declared tools differ, or the binding key changed. Review before execution.; endpoint_url changed.; properties changed.
-  [HIGH] High change in 'notes': Version changed: 2025.8.21 → None; Version pin removed — now floating or unknown.; Risk findings added: 1 high (version_pinning).
+  [CRITICAL] Critical change in 'notes': MCP server static source binding changed: launcher, arguments, environment, endpoint or declared tools differ, or the binding key changed. Review before execution.; Version changed: 2025.8.21 → None; Version pin removed — now floating or unknown.; Risk findings added: 1 high (version_pinning).; package_url changed.; properties changed.
 ```
 
 An inventory records paths relative to the project, so a snapshot of one checkout
@@ -120,9 +121,11 @@ on purpose: imported claims never establish complete, verified coverage.
 nexus-symbiote --live advisories demo.aibom.json -o advisories.json
 ```
 
-The demo declares no exact PyPI or npm package URLs, so `advisories` checks none
-and reports that. Point it at your own inventory to query OSV. See
-[offline and live modes](../docs/offline-and-live-modes.md).
+The demo's `notes` server is launched from an exact npm package, so `advisories`
+sends one identity to OSV, `@modelcontextprotocol/server-filesystem@2025.8.21`;
+add `--dry-run` to list it without contacting OSV. The demo's other components
+declare no exact PyPI or npm package URL. Point it at your own inventory to query
+OSV. See [offline and live modes](../docs/offline-and-live-modes.md).
 
 ## Collector demo
 

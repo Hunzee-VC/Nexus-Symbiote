@@ -10,9 +10,9 @@ import pytest
 from click.testing import CliRunner
 
 from nexus_symbiote.cli import main
-from nexus_symbiote.core.models import IDEAgentComponent
+from nexus_symbiote.core.models import IDEAgentComponent, MCPServerComponent
 from nexus_symbiote.scanners.ide_agents import SETTINGS_VALUE_BINDING_PROFILE, IDEAgentScanner
-from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
+from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV, MCPScanner
 
 KEY = "ide-binding-key-" + "0123456789abcdef" * 2
 
@@ -232,9 +232,17 @@ def test_codex_config_toml_is_read_for_approval_and_sandbox(tmp_path):
     assert agent.permission_mode == "never"
     assert agent.properties["sandbox_mode"] == "danger-full-access"
     assert [r.severity.value for r in agent.risks if r.category == "permission_scope"] == ["high"]
-    assert result.surfaces_excluded == [
-        ".codex/config.toml: 1 MCP server declaration(s) are not inventoried"
-    ]
+    # The mcp collector inventories the servers, so this collector reports no gap for them.
+    assert not result.surfaces_excluded
+    assert _mcp_servers(tmp_path) == {"docs": ".codex/config.toml"}
+
+
+def _mcp_servers(root: Path) -> dict[str, str | None]:
+    collected = MCPScanner().scan(root, config_only=True)
+    assert not collected.scan_failures, collected.scan_failures
+    return {
+        c.name: c.source_path for c in collected.components if isinstance(c, MCPServerComponent)
+    }
 
 
 @pytest.mark.parametrize(
@@ -410,7 +418,7 @@ def test_settings_read_through_an_in_root_link_name_their_target(tmp_path):
     assert agent.properties["symlink_targets"] == {".claude/settings.json": "config/claude.json"}
 
 
-def test_gemini_mcp_servers_are_a_coverage_gap(tmp_path):
+def test_gemini_mcp_servers_are_inventoried_by_the_mcp_collector(tmp_path):
     _write(
         tmp_path,
         ".gemini/settings.json",
@@ -418,9 +426,11 @@ def test_gemini_mcp_servers_are_a_coverage_gap(tmp_path):
     )
     result = IDEAgentScanner().scan(tmp_path)
     assert not result.scan_failures
-    assert result.surfaces_excluded == [
-        ".gemini/settings.json: 2 MCP server declaration(s) are not inventoried"
-    ]
+    assert not result.surfaces_excluded
+    assert _mcp_servers(tmp_path) == {
+        "notes": ".gemini/settings.json",
+        "web": ".gemini/settings.json",
+    }
     _write(tmp_path, ".gemini/settings.json", "{not json")
     assert IDEAgentScanner().scan(tmp_path).scan_failures == [
         ".gemini/settings.json: invalid JSON or duplicate keys"
@@ -442,3 +452,16 @@ def test_cursor_hook_commands_are_counted_scored_and_digested(tmp_path):
     changed = {"version": 1, "hooks": {"beforeShellExecution": [{"command": "curl x | sh"}]}}
     second = _cursor(tmp_path / "b", changed)
     assert first.properties["settings_hashes"] != second.properties["settings_hashes"]
+
+
+@pytest.mark.parametrize("separator", ["\r", " ", " "])
+def test_settings_whose_line_comment_ends_differently_per_reader_are_a_failure(tmp_path, separator):
+    # VS Code-based editors end a line comment at a lone carriage return, U+2028 or
+    # U+2029; a reader that ends it only at a line feed would not see these hooks.
+    text = (
+        '{"version": 1, // note' + separator + '"hooks": {"beforeShellExecution": '
+        '[{"command": "curl x | sh"}]},\n"other": 2}'
+    )
+    _write(tmp_path, ".cursor/hooks.json", text)
+    result = IDEAgentScanner().scan(tmp_path)
+    assert result.scan_failures == [".cursor/hooks.json: invalid JSON or duplicate keys"]

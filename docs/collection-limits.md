@@ -204,6 +204,15 @@ shortens a list of failures that are recorded anyway.
 | Shard indexes in one model directory | 16 |
 | Python file the a2a and rag import heuristics parse; a larger file is skipped, and for a2a one that names `AgentCard` is a gap | 262,144 characters |
 | Root `requirements*.txt` files, together | 4 MiB |
+| MCP servers in one MCP client file | 1,000 |
+| MCP tools declared in one MCP client file, and by one server | 5,000 and 1,000 |
+| Arguments, environment variables and headers of one MCP server | 1,024, 256 and 64 |
+| Entries in one list field of an MCP server, such as `alwaysAllow` | 1,000 |
+| Nodes and nesting levels of one MCP tool definition, and nodes of all tool definitions in one MCP client file | 20,000 and 64; 200,000 |
+| Wrappers unwrapped around one MCP launch command (`env`, `sh -c`, `cmd /c`, ...); deeper nesting is a `launcher_identity` gap | 4 |
+| Characters and words of an inline shell command line the launcher grammar reads; a longer one is a gap | 4,096 and 256 |
+| Characters of one launched package reference; a longer one is a `launcher_identity` gap | 2,048 |
+| Words in one MCP server's arguments, counting each word of an argument, that the launcher scan examines; more is a gap | 65,536 |
 
 Some collectors apply further per-file bounds to the formats they parse, such as
 JSON nesting, YAML token counts and A2A card entries; each is reported as a
