@@ -1,7 +1,7 @@
-"""One typed evaluation of a native completeness claim, shared by every gate.
+"""One typed evaluation of a native completeness claim, shared by the gates.
 
-``validate`` (completeness), ``risk`` (coverage status) and drift comparison must agree
-on what "complete collection" means, so they all derive it from ``assess_coverage``.
+``validate`` (completeness) and ``risk`` (coverage status) both derive what "complete
+collection" means from ``assess_coverage``, so the two gates cannot disagree about it.
 A claim is complete only when every built-in collector is recorded complete, nothing
 failed or was excluded, every requested collector completed and some surface was
 recorded. A claim with no collector records is unknown rather than partial.

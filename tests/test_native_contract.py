@@ -143,6 +143,13 @@ def test_loader_refuses_links_and_special_files_without_blocking(tmp_path):
     (tmp_path / "link.json").symlink_to(real)
     with pytest.raises(NativeFormatError, match="symbolic link"):
         AIBOM.load(tmp_path / "link.json")
+    (tmp_path / "linked").symlink_to(tmp_path, target_is_directory=True)
+    with pytest.raises(NativeFormatError, match="symbolic link"):
+        AIBOM.load(tmp_path / "linked" / "real.json")
+    with pytest.raises(NativeFormatError, match="not a regular file"):
+        AIBOM.load(tmp_path)
+    with pytest.raises(NativeFormatError, match="does not exist"):
+        AIBOM.load(tmp_path / "missing.json")
     fifo = tmp_path / "pipe.json"
     os.mkfifo(fifo)
     outcome: list[BaseException] = []
@@ -152,6 +159,21 @@ def test_loader_refuses_links_and_special_files_without_blocking(tmp_path):
     reader.start()
     reader.join(timeout=10)
     assert not reader.is_alive() and outcome
+    assert "not a regular file" in str(outcome[0])
+
+
+def test_cli_names_why_an_inventory_could_not_be_opened(tmp_path):
+    from click.testing import CliRunner
+
+    from nexus_symbiote.cli import main
+
+    (tmp_path / "real").mkdir()
+    AIBOM().save(tmp_path / "real" / "bom.json")
+    (tmp_path / "linked").symlink_to(tmp_path / "real", target_is_directory=True)
+    result = CliRunner().invoke(main, ["summary", str(tmp_path / "linked" / "bom.json")])
+    assert result.exit_code == 1
+    assert "pass the real path" in result.output
+    assert "Not a directory" not in result.output and "Errno" not in result.output
 
 
 def test_save_replaces_a_link_instead_of_writing_through_it(tmp_path):

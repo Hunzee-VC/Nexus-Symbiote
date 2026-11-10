@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import uuid
 from datetime import UTC, datetime
@@ -53,6 +54,24 @@ Relationship = Literal[
 
 class NativeFormatError(ValueError):
     """A native AgentBOM document cannot be read; the message never quotes its content."""
+
+
+def _open_failure(exc: OSError) -> str:
+    """Why a native document could not be opened, without the operating system's text."""
+    if exc.errno in {errno.ELOOP, errno.ENOTDIR}:
+        return (
+            "It is reached through a symbolic link or a path component that is not a "
+            "directory; inventories are read without following links, so pass the real path."
+        )
+    if exc.errno is None:
+        return (
+            "It is not a regular file; FIFOs, devices, directories and standard input are refused."
+        )
+    if exc.errno == errno.ENOENT:
+        return "It does not exist."
+    if exc.errno in {errno.EACCES, errno.EPERM}:
+        return "It cannot be read: permission denied."
+    return "It cannot be opened for reading."
 
 
 class DependencyEdge(BaseModel):
@@ -176,9 +195,7 @@ class AIBOM(BaseModel):
             with open_regular_file(path) as stream:
                 raw = stream.read(MAX_NATIVE_BYTES + 1)
         except OSError as exc:
-            raise NativeFormatError(
-                "It cannot be opened as a regular file without following a symbolic link."
-            ) from exc
+            raise NativeFormatError(_open_failure(exc)) from exc
         if len(raw) > MAX_NATIVE_BYTES:
             raise NativeFormatError(
                 f"It exceeds the {MAX_NATIVE_BYTES // (1024 * 1024)} MiB native inventory limit."

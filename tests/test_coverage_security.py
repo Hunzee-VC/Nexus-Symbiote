@@ -136,19 +136,19 @@ def test_validate_and_risk_share_one_coverage_verdict(claim):
     assert risk.coverage_gaps == verdict.reasons()
 
 
-def test_every_collector_list_matches_the_catalogue():
-    import ast
+def test_every_collector_list_matches_the_catalogue(monkeypatch):
+    import importlib.util
+    import sys
     from pathlib import Path
 
     from nexus_symbiote.scanners import ALL_SCANNERS
 
     assert {scanner.name for scanner in ALL_SCANNERS} == BUILTIN_SCANNER_NAMES
-    script = Path(__file__).parents[1] / "scripts" / "run_action.py"
-    (declared,) = [
-        node.value
-        for node in ast.parse(script.read_text()).body
-        if isinstance(node, ast.Assign)
-        and any(isinstance(t, ast.Name) and t.id == "SCANNERS" for t in node.targets)
-    ]
-    assert isinstance(declared, ast.Call) and declared.args
-    assert ast.literal_eval(declared.args[0]) == BUILTIN_SCANNER_NAMES
+    spec = importlib.util.spec_from_file_location(
+        "action_runner_catalogue", Path(__file__).parents[1] / "scripts" / "run_action.py"
+    )
+    assert spec is not None and spec.loader is not None
+    runner = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, runner)
+    spec.loader.exec_module(runner)
+    assert set(runner.SCANNERS) == BUILTIN_SCANNER_NAMES

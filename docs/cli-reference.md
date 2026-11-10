@@ -26,6 +26,12 @@ real parent directory, as the operating system resolves it. A refused path ends 
 command with an error and writes nothing; any other failure, such as a permission
 error, is reported by the operating system's message, without the path.
 
+Every AgentBOM a command reads is opened the same way: neither the file nor any
+directory on its path may be a symbolic link (on macOS, use `/private/tmp` rather
+than `/tmp`), and FIFOs, devices, directories and `/dev/stdin` are refused. The
+error names the reason. Native inventories are limited to 16 MiB for reading and
+writing alike.
+
 Mode flags go before the command. Without a flag, `NEXUS_SYMBIOTE_MODE=offline|live`
 selects the mode; without either, the mode is offline. See
 [offline and live modes](offline-and-live-modes.md).
