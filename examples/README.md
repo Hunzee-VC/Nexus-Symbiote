@@ -32,8 +32,8 @@ nexus-symbiote summary demo.aibom.json
 ```
 
 All eight collectors complete and record 11 components across 9 types. The scan
-passes the default gate (exit 0) with a risk warning: score 33, below the default
-fail threshold of 50, from three high and three medium findings:
+passes the default gate (exit 0) with a risk warning: score 35, below the default
+fail threshold of 50, from three high, three medium and two low findings:
 
 | Severity | Component | Finding |
 |---|---|---|
@@ -42,6 +42,8 @@ fail threshold of 50, from three high and three medium findings:
 | high | `ollama/ollama:latest` container image | No immutable digest pin |
 | medium | `notes` and `memory` MCP servers | stdio transport: each runs as a local process |
 | medium | `product-notes` retrieval source | No declared content-filtering control |
+| low | `product-notes` retrieval source | Source URI path not bound without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` |
+| low | `support-research-assistant` agent card | Endpoint URL path not bound without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` |
 
 ### 2. Check it
 

@@ -11,7 +11,11 @@ in clear, so it reveals nothing about secret values. It detects added or removed
 arguments, environment variables, fields and tools, and changed endpoint origins.
 
 Values are bound only when the operator sets `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` to
-a secret of at least 32 characters during collection and validation. Records then
+a secret of at least 32 characters during collection and validation. Generate it
+from a secure random source, for example with
+`python -c "import secrets; print(secrets.token_hex(32))"`: every keyed record
+exports a key identifier derived from the key, so a guessable key lets anyone
+holding the BOM test guesses for it offline. Records then
 also carry `static_value_binding`, an HMAC-SHA256 under that key over the original
 server object (profile `nexus-symbiote/mcp-static-values/v1`), and a key
 identifier. This detects a different package with the same version, changed
@@ -113,8 +117,12 @@ in a skill's requirements as in the card's.
 `authentication_required` is true only when the card declares at least one of
 `security`, `securityRequirements` or a legacy `authentication` object, and each
 one it declares passes: every alternative in `security` and `securityRequirements`
-is non-empty and names only declared schemes that state a type, and a legacy
-`authentication` object lists at least one non-empty scheme name. An empty alternative (`{}` or `{"schemes": {}}`) permits
+is non-empty and names only declared schemes that state a type the collector
+recognises (a type such as `none` maps to `other` and does not count), and a legacy
+`authentication` object lists at least one scheme name other than `none`, `noauth`,
+`no-auth`, `anonymous`, `public` or `unauthenticated`, in any case. The legacy object counts only for a
+card without `securitySchemes`, `securityRequirements` or `supportedInterfaces`,
+because clients of the 0.3 and 1.0 declarations do not read it. An empty alternative (`{}` or `{"schemes": {}}`) permits
 anonymous access, and an empty list declares no requirement. The specifications do
 not say how a skill's requirements combine with the card's, so skill requirements
 can make `authentication_required` false but never true. A skill alternative that
@@ -128,14 +136,17 @@ absent, and so does a skill's `null` `security` or `securityRequirements`. These
 declarations: they do not show that an endpoint enforces authentication.
 
 Every A2A server record, and every client record read from an A2A configuration
-file, carries `static_card_hash` (profile `nexus-symbiote/a2a-card-structure/v2`)
+file, carries `static_card_hash` (profile `nexus-symbiote/a2a-card-structure/v3`)
 or `static_config_hash` (profile `nexus-symbiote/a2a-client-structure/v1`); the
-`a2a-client:code-detected` record created from an SDK import carries neither digest
-nor `source_values_bound`. These RFC 8785 digests cover the top-level field names
-of the card or client entry, security scheme names with their mapped types, each
+`a2a-server:code-detected` or `a2a-client:code-detected` record created from SDK
+use in Python source carries neither digest nor `source_values_bound`. These RFC
+8785 digests cover the top-level field names of the card or client entry, for a
+card its signatures (the `alg` and `kid` of each protected header), boolean
+capability flags, extensions (URL shape and `required` flag) and the shape of its
+provider URL, security scheme names with their mapped types, each
 requirement alternative of the card and of each skill (keyed by the skill's exported
 name) with its exported scopes and the values of other scheme types, the number of
-non-empty legacy scheme names, and the shape of each URL: the number of path
+legacy scheme names that declare authentication, and the shape of each URL: the number of path
 separators, whether a query, fragment or user information is present, and the path
 itself only when it is a public root path (`/` or, for clients,
 `/.well-known/agent.json` or `/.well-known/agent-card.json`). They hold no other
@@ -174,11 +185,56 @@ flow's `pkceRequired` and the scope descriptions of a flow; interface transports
 vectors for the four profiles, with a second card vector in the A2A 1.0 form. Both
 card vectors include a skill with its own requirements.
 
+Cards are read from any `.well-known` directory, such as
+`public/.well-known/agent-card.json`, and from `agent.json`, `agent-card.json` and
+`a2a/agent.json` in the project root when they carry an A2A field. The same card
+published under both well-known names is one record whose
+`properties.agent_card_paths` lists both; two different cards with one name are a
+scan failure, and a card without a name is identified by its path. Server records
+also carry `card_signatures` (count, `alg` and `kid`; `card_signature_verified` is
+`not-checked`), `capability_flags`, the origins and `required` flags of
+`extensions`, and `provider_origin`, so removing a signature, enabling push
+notifications or adding a required extension raises a medium `properties changed`
+alert without the key.
+
+## RAG sources
+
+Each RAG source record carries `static_config_hash` (profile
+`nexus-symbiote/rag-source-structure/v1`), an RFC 8785 digest of the source's field
+names, its exported name, type, store type, embedding model, chunking and index
+identities, the exported form and URL shape of each `source_uris` entry, the digest
+of its inline `documents`, and the state of its `sanitization` and `content_filter`
+controls (`enabled` only for `true` or an object whose `enabled` is `true`;
+`disabled`, `absent` or `unrecognized` otherwise). With
+`NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` set, `static_value_binding` is an HMAC-SHA256
+over the whole source object (profile `nexus-symbiote/rag-source-values/v1`).
+Without the key, a source whose URIs go beyond their exported origins, or that has
+fields the record does not export, carries a low `completeness` risk naming the
+key. URLs are exported as origins; connection strings, `user:secret@host` forms and
+token-shaped values as redaction markers; inline documents only as
+`document_count` and `properties.inline_documents_hash`.
+
+## Claude Code settings
+
+The `claude-code` record carries `static_config_hash` (profile
+`nexus-symbiote/claude-settings-structure/v1`), an RFC 8785 digest of every key and
+value of `.claude/settings.json` and `.claude/settings.local.json`, and of a plugin
+repository's `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` and
+`hooks/hooks.json`. Text values enter the digest after the standard redaction, and
+`env` values not at all, only their names. With the key, `static_value_binding` is
+an HMAC-SHA256 over the files as read (profile
+`nexus-symbiote/claude-settings-values/v1`). Without it, a record whose settings hold
+environment values or text the redaction shortened carries a low `completeness`
+risk naming the key. `properties.settings_declarations` counts hook commands,
+allow, ask and deny rules, additional directories, plugins, marketplaces and MCP
+server approvals.
+
 ## Upgrade existing snapshots
 
 Older static MCP snapshots lack the source binding and configured tool locators,
 and older A2A snapshots lack the structure digests or carry the superseded
-`nexus-symbiote/a2a-card-structure/v1` profile. They cannot establish this
+`nexus-symbiote/a2a-card-structure/v1` or `v2` profile; older RAG and Claude Code
+records carry no structure digest. They cannot establish this
 stronger reconciliation contract. Missing or unknown binding profiles fail
 validation and require recollection; copying a newly calculated digest into an
 old approved snapshot is not a migration.
