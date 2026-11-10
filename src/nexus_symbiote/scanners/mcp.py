@@ -25,6 +25,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit
 
+from packaging.utils import canonicalize_name
+
 from nexus_symbiote.core.enums import (
     CapabilityClass,
     RiskSeverity,
@@ -212,18 +214,35 @@ _CODE_LOADING_ENVIRONMENT = _names(
     "LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT DYLD_INSERT_LIBRARIES DYLD_LIBRARY_PATH "
     "DYLD_FRAMEWORK_PATH NODE_OPTIONS NODE_PATH PYTHONPATH PYTHONSTARTUP PYTHONHOME "
     "PERL5OPT PERL5LIB RUBYOPT RUBYLIB JAVA_TOOL_OPTIONS _JAVA_OPTIONS JDK_JAVA_OPTIONS "
-    "BASH_ENV ENV"
+    "BASH_ENV ENV NPM_CONFIG_NODE_OPTIONS NPM_CONFIG_SCRIPT_SHELL"
 )
-# Environment names that make a package runner resolve from another registry or index.
+# Environment names that make a package runner resolve from another registry, index,
+# cache, proxy, trust store or engine. npm reads npm_config_<key> for every .npmrc key.
+_NPM_REDIRECT = (
+    r"(?:npm|pnpm)_config_(?:(?:@[^:]+:)?registry|userconfig|globalconfig|prefix|cache"
+    r"|offline|prefer[-_]offline|proxy|https[-_]proxy|strict[-_]ssl|ca|cafile"
+    r"|replace[-_]registry[-_]host|store[-_]dir)"
+)
+_UV_REDIRECT = (
+    r"uv_(?:index|index_url|default_index|extra_index_url|find_links|config_file"
+    r"|insecure_host|python_install_mirror|pypy_install_mirror)"
+)
 _REDIRECT_ENVIRONMENT = {
-    "npm": r"(?:npm|pnpm)_config_(?:(?:@[^:]+:)?registry|userconfig|globalconfig|prefix|cache)",
-    "bun": r"bun_config_registry|npm_config_(?:(?:@[^:]+:)?registry|userconfig)",
-    "yarn": r"yarn_(?:npm_registry_server|registry|rc_filename)",
-    "deno": r"npm_config_(?:(?:@[^:]+:)?registry|userconfig)",
-    "uv-tool": r"uv_(?:index|index_url|default_index|extra_index_url|find_links|config_file)",
-    "uv-project": r"uv_(?:index|index_url|default_index|extra_index_url|find_links|config_file)",
-    "pip": r"pip_(?:index|index_url|extra_index_url|find_links|config_file)",
+    "npm": _NPM_REDIRECT,
+    "bun": rf"bun_config_registry|bun_install_cache_dir|{_NPM_REDIRECT}",
+    "yarn": (
+        r"yarn_(?:npm_registry_server|registry|rc_filename|cache_folder|enable_strict_ssl"
+        r"|https_proxy|http_proxy|ca_file_path|global_folder|npm_scopes)"
+    ),
+    "deno": rf"jsr_url|deno_cert|{_NPM_REDIRECT}",
+    "uv-tool": _UV_REDIRECT,
+    "uv-project": _UV_REDIRECT,
+    "pip": r"pip_(?:index|index_url|extra_index_url|find_links|config_file|trusted_host|proxy|cert)",
     "go": r"goproxy|goflags|gonosumdb|gonosumcheck|gosumdb|goprivate|gonoproxy|goinsecure",
+    "oci": (
+        r"docker_(?:host|context|config|cert_path|tls_verify)|container_(?:host|connection)"
+        r"|containers_(?:conf|registries_conf|storage_conf)|containerd_address"
+    ),
 }
 _LOCATOR = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s,;\"']+")
 _NPM_PURL_NAME = re.compile(r"(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*")
@@ -350,6 +369,152 @@ def _purl(package: Package) -> str | None:
     return None
 
 
+# String.prototype.trim whitespace: npm's ini reader trims keys and values with it.
+_JS_SPACE = (
+    "\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007"
+    "\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
+)
+_INI_COMMENT = re.compile(f"[{_JS_SPACE}]*[;#]")
+_INI_SECTION = re.compile(f"\\[[^\\]]*\\][{_JS_SPACE}]*")
+_NPMRC_AUTH = re.compile(
+    r"//.*|_auth|_authToken|_password|username|password|email|certfile|keyfile"
+    r"|always-auth|otp",
+    re.S,
+)
+# Keys that change where package bytes come from or how their transport is trusted.
+_NPMRC_SOURCES = frozenset(
+    {
+        "cache",
+        "proxy",
+        "https-proxy",
+        "http-proxy",
+        "ca",
+        "cafile",
+        "userconfig",
+        "globalconfig",
+        "replace-registry-host",
+        "prefix",
+        "store-dir",
+    }
+)
+_UV_SETTINGS = (
+    "index-url",
+    "extra-index-url",
+    "find-links",
+    "index",
+    "allow-insecure-host",
+    "python-install-mirror",
+    "pypy-install-mirror",
+)
+_SETTING_NAME = re.compile(r"[A-Za-z0-9_.@:/-]{1,128}")
+_RESOLVER_FILES = {
+    "npm": (".npmrc",),
+    "deno": (".npmrc",),
+    "bun": (".npmrc", "bunfig.toml"),
+    "yarn": (".yarnrc.yml",),
+    "uv-project": ("uv.toml", "pyproject.toml"),
+}
+# Working directories that are the scan root; any other one may hold other resolver files.
+_ROOT_DIRECTORIES = frozenset({"", ".", "./", "${workspaceFolder}", "${workspaceFolder}/"})
+
+
+def _ini_text(raw: str) -> str:
+    """npm's ini ``unsafe``: trim, decode quoted text as JSON, else cut at ``;`` or ``#``."""
+    text = raw.strip(_JS_SPACE)
+    if text[:1] in {'"', "'"} and text.endswith(text[0]):
+        inner = text[1:-1] if text[0] == "'" else text
+        try:
+            decoded = json.loads(inner)
+        except ValueError:
+            return inner if text[0] == "'" else text
+        return decoded if isinstance(decoded, str) else json.dumps(decoded)
+    kept: list[str] = []
+    escaped = False
+    for char in text:
+        if escaped:
+            kept.append(char if char in ";#\\" else "\\" + char)
+            escaped = False
+        elif char in ";#":
+            break
+        elif char == "\\":
+            escaped = True
+        else:
+            kept.append(char)
+    if escaped:
+        kept.append("\\")
+    return "".join(kept).strip(_JS_SPACE)
+
+
+@dataclass(frozen=True)
+class _ResolverFile:
+    """Effective settings of one project resolver file; auth settings are left out."""
+
+    settings: tuple[tuple[str, str], ...] = ()
+    unresolved: bool = False
+
+
+def _npmrc(text: str) -> _ResolverFile:
+    """Top-level .npmrc settings exactly as npm's ini reader and config loader see them.
+
+    Keys are trimmed, JSON-decoded when quoted and cut at ``;`` or ``#`` otherwise;
+    a key that holds ``${...}`` depends on the environment and is unresolved. Keys
+    after the first section header are not top-level settings and npm ignores them.
+    """
+    settings: dict[str, str] = {}
+    unresolved = False
+    for line in re.split(r"[\r\n]+", text):
+        if not line.strip(_JS_SPACE) or _INI_COMMENT.match(line):
+            continue
+        if _INI_SECTION.fullmatch(line):
+            break
+        raw_key, equals, raw_value = line.partition("=")
+        if not raw_key or (equals and ("\u2028" in raw_value or "\u2029" in raw_value)):
+            continue
+        key = _ini_text(raw_key)
+        if len(key) > 2 and key.endswith("[]"):
+            key = key[:-2]
+        if "${" in key:
+            unresolved = True
+        elif key != "__proto__" and not _NPMRC_AUTH.fullmatch(key):
+            settings[key] = _ini_text(raw_value) if equals else "true"
+    return _ResolverFile(tuple(settings.items()), unresolved)
+
+
+def _npmrc_source(key: str, value: str) -> bool:
+    """A setting other than a registry that changes where packages come from."""
+    if key in {"offline", "prefer-offline"}:
+        return value != "false"
+    if key == "strict-ssl":
+        return value != "true"
+    return key in _NPMRC_SOURCES
+
+
+def _uv_settings(settings: dict[str, Any]) -> _ResolverFile:
+    found: list[tuple[str, str]] = []
+    for key in _UV_SETTINGS:
+        values = settings.get(key)
+        for item in values if isinstance(values, list) else [values]:
+            url = item.get("url") if isinstance(item, dict) else item
+            if isinstance(url, str):
+                found.append((key, url))
+    sources = settings.get("sources")
+    if isinstance(sources, dict):
+        for name, source in sources.items():
+            locations = source if isinstance(source, list) else [source]
+            for location in locations:
+                if isinstance(location, dict):
+                    value = next(
+                        (
+                            str(location[field])
+                            for field in ("git", "url", "path", "index", "workspace")
+                            if field in location
+                        ),
+                        "",
+                    )
+                    found.append((f"sources.{canonicalize_name(str(name))}", value))
+    return _ResolverFile(tuple(found))
+
+
 class _Resolvers:
     """Project-root package resolver settings, read once per collection when needed."""
 
@@ -362,9 +527,9 @@ class _Resolvers:
         self._files = files
         self._result = result
         self._read_mapping = read_mapping
-        self._loaded: dict[str, list[tuple[str, str]]] = {}
+        self._loaded: dict[str, _ResolverFile] = {}
 
-    def entries(self, path: str) -> list[tuple[str, str]]:
+    def entries(self, path: str) -> _ResolverFile:
         if path not in self._loaded:
             self._loaded[path] = self._read(path)
         return self._loaded[path]
@@ -385,36 +550,39 @@ class _Resolvers:
             self._result.scan_failures.append(f"{path}: invalid TOML")
             return {}
 
-    def _read(self, path: str) -> list[tuple[str, str]]:
+    def _read(self, path: str) -> _ResolverFile:
         if path == ".npmrc":
-            found = []
-            for line in (self._text(path) or "").splitlines():
-                key, equals, value = line.strip().partition("=")
-                key = key.strip()
-                if equals and re.fullmatch(r"(?:@[a-z0-9][a-z0-9._-]*:)?registry", key):
-                    found.append((key, value.strip().strip("\"'")))
-            return found
+            return _npmrc(self._text(path) or "")
         if path == ".yarnrc.yml":
             settings = self._read_mapping(Path(path), self._result) or {}
             if settings:
                 self._result.surfaces_scanned.append(path)
-            return _registries(settings, "npmRegistryServer", "npmScopes")
+            return _ResolverFile(tuple(_registries(settings, "npmRegistryServer", "npmScopes")))
         settings = self._toml(path)
         if path == "bunfig.toml":
             install = settings.get("install")
-            return _registries(install if isinstance(install, dict) else {}, "registry", "scopes")
+            return _ResolverFile(
+                tuple(
+                    _registries(install if isinstance(install, dict) else {}, "registry", "scopes")
+                )
+            )
         if path == "pyproject.toml":
             tool = settings.get("tool")
             uv = tool.get("uv") if isinstance(tool, dict) else None
             settings = uv if isinstance(uv, dict) else {}
-        found = []
-        for key in ("index-url", "extra-index-url", "find-links", "index"):
-            values = settings.get(key)
-            for item in values if isinstance(values, list) else [values]:
-                url = item.get("url") if isinstance(item, dict) else item
-                if isinstance(url, str):
-                    found.append((key, url))
-        return found
+        return _uv_settings(settings)
+
+
+class _ResolverView:
+    """What project resolver files mean for one launcher."""
+
+    __slots__ = ("binding", "names", "sources", "unresolved")
+
+    def __init__(self) -> None:
+        self.sources: list[tuple[str, str]] = []
+        self.unresolved: list[str] = []
+        self.binding: list[list[str]] = []
+        self.names: list[str] = []
 
 
 def _registry_url(value: Any) -> str | None:
@@ -673,7 +841,12 @@ class MCPScanner(Scanner):
         scrubber = SecretScrubber(
             [*secret_values(env), *secret_values(headers), *secret_values(dict(launch.environment))]
         )
-        identity = self._identity(name, config, launch, endpoint_url, env, scrubber)
+        cwd = config.get("cwd")
+        relocated = launch.relocated or (
+            isinstance(cwd, str) and cwd.strip() not in _ROOT_DIRECTORIES
+        )
+        view = self._resolver_view(launch, relocated)
+        identity = self._identity(name, config, launch, endpoint_url, env, scrubber, view)
         gaps: list[str] = []
         for gap in (identity.endpoint_gap, transport_gap):
             if gap:
@@ -755,7 +928,7 @@ class MCPScanner(Scanner):
             withheld=identity.withheld,
             endpoints=endpoints,
         )
-        resolver = sorted([label, value] for label, value in self._resolver_entries(launch))
+        resolver = sorted(view.binding)
         unbound = self._unbound_values(args, env, headers, endpoint_url, command, launch)
         if resolver:
             unbound.append("project resolver settings")
@@ -786,6 +959,9 @@ class MCPScanner(Scanner):
             launcher_properties["packages"] = identity.packages
         if identity.sources:
             launcher_properties["package_sources"] = identity.sources
+        resolver_names = sorted(set(view.names))
+        if resolver_names:
+            launcher_properties["resolver_settings"] = resolver_names
         if context:
             launcher_properties["launch_context"] = context
         if header_names:
@@ -803,8 +979,9 @@ class MCPScanner(Scanner):
                     "launcher": launch.launcher,
                     "launcher_wrappers": launch.wrappers,
                     "launcher_command": identity.executable,
-                    "packages": identity.package_identities,
+                    "packages": identity.packages,
                     "package_sources": identity.sources,
+                    "resolver_settings": resolver_names,
                     "launch_context": context,
                     "transport": transport,
                     "endpoint": identity.endpoint,
@@ -864,6 +1041,7 @@ class MCPScanner(Scanner):
         endpoint_url: str | None,
         env: dict[str, str],
         scrubber: SecretScrubber,
+        view: _ResolverView,
     ) -> _Identity:
         """Compute identity fields from raw values; withhold one that holds a secret value."""
         withheld: list[str] = []
@@ -900,7 +1078,7 @@ class MCPScanner(Scanner):
                     "pin": package.pin,
                 }
             )
-        sources = self._package_sources(launch, env, scrubber, withheld)
+        sources = self._package_sources(launch, env, scrubber, withheld, view)
         return _Identity(
             name=shown_name,
             command=command,
@@ -927,6 +1105,7 @@ class MCPScanner(Scanner):
         env: dict[str, str],
         scrubber: SecretScrubber,
         withheld: list[str],
+        view: _ResolverView,
     ) -> list[str]:
         """Exported sources that redirect package resolution: label and origin only."""
         found: list[tuple[str, str]] = list(launch.sources)
@@ -935,37 +1114,49 @@ class MCPScanner(Scanner):
             for variable, value in (*env.items(), *launch.environment):
                 if re.fullmatch(pattern, variable, re.IGNORECASE):
                     found.append((f"env:{variable}", value))
-        found.extend((label, value) for label, value in self._resolver_entries(launch))
-        sources: set[str] = set()
+        found.extend(view.sources)
+        sources: set[str] = {f"{label}=[unresolved]" for label in view.unresolved}
         for label, value in found:
-            for location in _origin_label(value) or ["[empty]"]:
+            for location in _origin_label(value) or ["[set]"]:
                 if scrubber.contains(location):
                     location = "[redacted]"
                     withheld.append("package source")
                 sources.add(f"{label}={location}")
         return sorted(sources)
 
-    def _resolver_entries(self, launch: Launch) -> list[tuple[str, str]]:
+    def _resolver_view(self, launch: Launch, relocated: bool) -> _ResolverView:
         """Project resolver settings that apply to this launcher's registry packages."""
-        if self._resolvers is None:
-            return []
-        files = {
-            "npm": (".npmrc",),
-            "deno": (".npmrc",),
-            "bun": (".npmrc", "bunfig.toml"),
-            "yarn": (".yarnrc.yml",),
-            "uv-project": ("uv.toml", "pyproject.toml"),
-        }.get(launch.family or "", ())
+        view = _ResolverView()
+        files = _RESOLVER_FILES.get(launch.family or "", ())
         packages = [package for package in launch.packages if package.registry]
-        if not files or not packages:
-            return []
-        found: list[tuple[str, str]] = []
+        if self._resolvers is None or not files or not packages:
+            return view
+        if relocated:
+            # Another working directory may hold its own resolver files.
+            view.unresolved.append("working-directory")
+        names = {str(package.name) for package in packages}
         for path in files:
-            entries = self._resolvers.entries(path)
+            file = self._resolvers.entries(path)
+            if file.unresolved:
+                view.unresolved.append(f"{path}:key")
+            for key, value in file.settings:
+                view.binding.append([f"{path}:{key}", value])
+                shown = redact_text(key, identifier=True) if _SETTING_NAME.fullmatch(key) else ""
+                view.names.append(f"{path}:{shown or '[redacted]'}")
+            settings = dict(file.settings)
             if path in {"uv.toml", "pyproject.toml"}:
-                found.extend((f"{path}:{key}", value) for key, value in entries)
+                view.sources.extend(
+                    (f"{path}:{key}", value)
+                    for key, value in file.settings
+                    if not key.startswith("sources.") or key[8:] in names
+                )
                 continue
-            settings = dict(entries)
+            if path == ".npmrc":
+                view.sources.extend(
+                    (f"{path}:{key}", value)
+                    for key, value in file.settings
+                    if _npmrc_source(key, value)
+                )
             default = "npmRegistryServer" if path == ".yarnrc.yml" else "registry"
             for package in packages:
                 name = package.name or ""
@@ -973,8 +1164,8 @@ class MCPScanner(Scanner):
                 scoped = f"{scope}:{default}" if scope else None
                 selected = scoped if scoped in settings else default
                 if selected in settings:
-                    found.append((f"{path}:{selected}", settings[selected]))
-        return found
+                    view.sources.append((f"{path}:{selected}", settings[selected]))
+        return view
 
     @staticmethod
     def _identity_unknown(launch: Launch) -> str | None:

@@ -299,10 +299,11 @@ VECTOR_STRUCTURE = (
     '"client_settings":{},"command":"npx","endpoint":null,"environment_names":["ACME_TOKEN",'
     '"LOG_LEVEL"],"fields":["args","command","env","tools"],"header_names":[],'
     '"launch_context":{},"launcher":"npx","launcher_command":"npx","launcher_wrappers":[],'
-    '"package_sources":[],"packages":["npm:@acme/files-mcp"],"tool_names":["read_file"],'
+    '"package_sources":[],"packages":[{"identity":"npm:@acme/files-mcp","pin":"version",'
+    '"pinned":true,"version":"1.2.3"}],"resolver_settings":[],"tool_names":["read_file"],'
     '"transport":"stdio"}}'
 )
-VECTOR_HASH = "sha256:c007cfca2fef38a5fd61893eb766999d0f430b516840c1bf21eb029916c372ab"
+VECTOR_HASH = "sha256:8842529f58e69fae0d25b70d3b715a9e17c7ceb76acdf485fe6a5119f8ac760b"
 VECTOR_BINDING = "hmac-sha256:d287e6feea0dfe71fc5db61c8512f468936ab8eb856905214cd32675ca1ad664"
 VECTOR_KEY_ID = "12ff5c60eb4e7e21ba266464e71ccbcd"
 
@@ -533,3 +534,246 @@ def test_short_environment_values_do_not_corrupt_names_or_endpoints(tmp_path, mo
     server.transport = "stdio"
     report = verify_mcp_servers(AIBOM(components=[server, recorded]))
     assert [finding.status for finding in report.results[0].tool_findings] == ["match"]
+
+
+PINNED_NPX = {"command": "npx", "args": ["-y", "@acme/files-mcp@1.0.0"]}
+
+
+def _with_files(tmp_path: Path, config: dict, files: dict[str, str]) -> MCPServerComponent:
+    for name, content in files.items():
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content.encode())
+    return _server(tmp_path, config)
+
+
+@pytest.mark.parametrize(
+    "npmrc",
+    [
+        '"registry" = "https://npm.attacker.test/"\n',
+        "'registry'=https://npm.attacker.test/\n",
+        '"\\u0072egistry"=https://npm.attacker.test/\n',
+        '"@acme:registry"=https://npm.attacker.test/\n',
+        "registry#comment=https://npm.attacker.test/\n",
+        "registry;comment=https://npm.attacker.test/\n",
+        "\ufeffregistry=https://npm.attacker.test/\n",
+        "x=1\rregistry=https://npm.attacker.test/\r",
+        "\tregistry\t=\thttps://npm.attacker.test/ ; trailing comment\n",
+        "registry[]=https://npm.attacker.test/\n",
+    ],
+)
+def test_npmrc_keys_are_read_as_npm_reads_them(tmp_path, npmrc):
+    server = _with_files(tmp_path, PINNED_NPX, {".npmrc": npmrc})
+    assert server.launcher_package is None and server.package_url is None
+    assert any(
+        s.endswith("=https://npm.attacker.test") for s in server.properties["package_sources"]
+    )
+    assert any(r.category == "package_source" for r in server.risks)
+
+
+@pytest.mark.parametrize(
+    "npmrc",
+    [
+        "REGISTRY=https://npm.attacker.test/\n",
+        "[section]\nregistry=https://npm.attacker.test/\n",
+        "registry.x=https://npm.attacker.test/\n",
+        "; registry=https://npm.attacker.test/\n",
+        "registry=https://npm.attacker.test/\u2028\n",
+        "@other:registry=https://npm.attacker.test/\n",
+        "//npm.attacker.test/:_authToken=${NPM_TOKEN}\nsave-exact=true\n",
+    ],
+)
+def test_npmrc_lines_npm_ignores_keep_the_identity(tmp_path, npmrc):
+    server = _with_files(tmp_path, PINNED_NPX, {".npmrc": npmrc})
+    assert server.launcher_package == "npm:@acme/files-mcp"
+    assert server.package_url == "pkg:npm/%40acme/files-mcp@1.0.0"
+
+
+def test_npmrc_key_from_the_environment_is_unresolved(tmp_path):
+    server = _with_files(
+        tmp_path, PINNED_NPX, {".npmrc": "${REGISTRY_KEY}=https://npm.attacker.test/\n"}
+    )
+    assert server.launcher_package is None
+    assert ".npmrc:key=[unresolved]" in server.properties["package_sources"]
+
+
+@pytest.mark.parametrize(
+    "npmrc,label",
+    [
+        ("cache=./project-cache\nprefer-offline=true\n", ".npmrc:cache=[local]"),
+        ("offline=true\n", ".npmrc:offline=[local]"),
+        ("https-proxy=http://proxy.attacker.test:8080/\n", ".npmrc:https-proxy="),
+        ("strict-ssl=false\n", ".npmrc:strict-ssl=[local]"),
+        ("cafile=./ca.pem\n", ".npmrc:cafile=[local]"),
+        ("replace-registry-host=always\n", ".npmrc:replace-registry-host=[local]"),
+        ("userconfig=./other.npmrc\n", ".npmrc:userconfig=[local]"),
+    ],
+)
+def test_npmrc_cache_proxy_and_trust_settings_withhold_identity(tmp_path, npmrc, label):
+    server = _with_files(tmp_path, PINNED_NPX, {".npmrc": npmrc})
+    assert server.launcher_package is None
+    assert any(source.startswith(label) for source in server.properties["package_sources"])
+
+
+@pytest.mark.parametrize("npmrc", ["strict-ssl=true\n", "offline=false\nprefer-offline=false\n"])
+def test_npmrc_defaults_are_not_sources(tmp_path, npmrc):
+    server = _with_files(tmp_path, PINNED_NPX, {".npmrc": npmrc})
+    assert server.launcher_package == "npm:@acme/files-mcp"
+
+
+def test_every_npmrc_setting_is_bound_and_named_but_auth_is_not(tmp_path, monkeypatch):
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+
+    def scan(npmrc: str) -> MCPServerComponent:
+        return _with_files(tmp_path, PINNED_NPX, {".npmrc": npmrc})
+
+    base = scan("save-exact=true\n")
+    assert base.properties["resolver_settings"] == [".npmrc:save-exact"]
+    changed_value = scan("save-exact=false\n")
+    assert changed_value.properties["static_config_hash"] == base.properties["static_config_hash"]
+    assert (
+        changed_value.properties["static_value_binding"] != base.properties["static_value_binding"]
+    )
+    added_key = scan("save-exact=true\nengine-strict=true\n")
+    assert added_key.properties["static_config_hash"] != base.properties["static_config_hash"]
+    rotated = scan("save-exact=true\n//registry.npmjs.org/:_authToken=npm_rotated-token-1\n")
+    assert rotated.properties["static_value_binding"] == base.properties["static_value_binding"]
+    assert "npm_rotated" not in rotated.model_dump_json()
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        {**PINNED_NPX, "cwd": "sub"},
+        {"command": "env", "args": ["-C", "sub", "npx", "-y", "@acme/files-mcp@1.0.0"]},
+        {"command": "env", "args": ["--chdir=sub", "npx", "-y", "@acme/files-mcp@1.0.0"]},
+        {"command": "uv", "args": ["run", "--directory", "sub", "--with", "t==1.2.3", "s.py"]},
+        {"command": "uv", "args": ["--project", "sub", "run", "--with", "t==1.2.3", "s.py"]},
+        {"command": "deno", "args": ["run", "--config", "sub/deno.json", "npm:t@1.2.3"]},
+    ],
+)
+def test_another_working_directory_leaves_resolver_files_unresolved(tmp_path, config):
+    server = _with_files(tmp_path, config, {"sub/.npmrc": "registry=https://npm.attacker.test/\n"})
+    assert server.launcher_package is None and server.package_url is None
+    assert "working-directory=[unresolved]" in server.properties["package_sources"]
+
+
+@pytest.mark.parametrize("cwd", [".", "./", "${workspaceFolder}"])
+def test_root_working_directory_keeps_the_identity(tmp_path, cwd):
+    server = _server(tmp_path, {**PINNED_NPX, "cwd": cwd})
+    assert server.launcher_package == "npm:@acme/files-mcp"
+
+
+@pytest.mark.parametrize(
+    "config,label",
+    [
+        (
+            {
+                "command": "pipx",
+                "args": ["run", "--pip-args=--index https://pypi.attacker.test/simple", "t==1.2.3"],
+            },
+            "--pip-args --index-url=https://pypi.attacker.test",
+        ),
+        (
+            {"command": "pipx", "args": ["run", "--pip-args", "--extra-index x", "t==1.2.3"]},
+            "--pip-args --extra-index-url=[local]",
+        ),
+        (
+            {"command": "pipx", "args": ["run", "--pip-args=-qi https://x.test/s", "t==1.2.3"]},
+            "--pip-args --index-url=https://x.test",
+        ),
+        (
+            {
+                "command": "docker",
+                "args": ["-H", "tcp://engine.attacker.test:2375", "run", "i@sha256:" + "0" * 64],
+            },
+            "-H=tcp://engine.attacker.test:2375",
+        ),
+        (
+            {"command": "docker", "args": ["--context", "remote", "run", "i@sha256:" + "0" * 64]},
+            "--context=[local]",
+        ),
+        (
+            {
+                "command": "docker",
+                "args": ["run", "i@sha256:" + "0" * 64],
+                "env": {"DOCKER_HOST": "tcp://engine.attacker.test:2375"},
+            },
+            "env:DOCKER_HOST=tcp://engine.attacker.test:2375",
+        ),
+        (
+            {
+                "command": "uvx",
+                "args": ["t==1.2.3"],
+                "env": {"UV_PYTHON_INSTALL_MIRROR": "https://python.attacker.test/"},
+            },
+            "env:UV_PYTHON_INSTALL_MIRROR=https://python.attacker.test",
+        ),
+        (
+            {"command": "uvx", "args": ["t==1.2.3"], "env": {"UV_INSECURE_HOST": "pypi.org"}},
+            "env:UV_INSECURE_HOST=[local]",
+        ),
+        (
+            {
+                "command": "deno",
+                "args": ["run", "jsr:@std/http@1.0.0"],
+                "env": {"JSR_URL": "https://jsr.attacker.test/"},
+            },
+            "env:JSR_URL=https://jsr.attacker.test",
+        ),
+        (
+            {
+                "command": "uv",
+                "args": ["--index-url", "https://pypi.attacker.test/simple", "tool", "run", "t==1"],
+            },
+            "--index-url=https://pypi.attacker.test",
+        ),
+    ],
+)
+def test_runner_redirect_sources_withhold_identity(tmp_path, config, label):
+    server = _server(tmp_path, config)
+    assert server.launcher_package is None and server.package_url is None
+    assert label in server.properties["package_sources"]
+    assert any(r.category == "package_source" for r in server.risks)
+
+
+@pytest.mark.parametrize("pip_args", ["--no-such-option x", "evil-extra==6.6.6", "-Z"])
+def test_unrecognised_pip_arguments_are_unknown(tmp_path, pip_args):
+    (tmp_path / ".mcp.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "db": {"command": "pipx", "args": ["run", "--pip-args", pip_args, "t==1.2.3"]}
+                }
+            }
+        )
+    )
+    result = MCPScanner().scan(tmp_path)
+    server = next(c for c in result.components if isinstance(c, MCPServerComponent))
+    assert server.version_pinned is False
+    assert any(r.category == "launcher_identity" for r in server.risks)
+    assert result.surfaces_excluded
+
+
+def test_project_uv_sources_for_a_launched_package_withhold_identity(tmp_path):
+    config = {"command": "uv", "args": ["run", "--with", "trusted==1.2.3", "server.py"]}
+    pyproject = '[tool.uv.sources]\ntrusted = { git = "https://git.attacker.test/x" }\n'
+    server = _with_files(tmp_path, config, {"pyproject.toml": pyproject})
+    assert server.launcher_package is None
+    assert (
+        "pyproject.toml:sources.trusted=https://git.attacker.test"
+        in server.properties["package_sources"]
+    )
+
+
+def test_every_package_version_is_part_of_the_unkeyed_digest(tmp_path, monkeypatch):
+    monkeypatch.delenv(SOURCE_BINDING_KEY_ENV, raising=False)
+
+    def server(version: str) -> MCPServerComponent:
+        args = ["run", "--with", "a==1.0.0", "--with", f"b=={version}", "server.py"]
+        return _server(tmp_path, {"command": "uv", "args": args})
+
+    reviewed, changed = server("2.0.0"), server("2.6.6")
+    assert reviewed.version is None and reviewed.version_pinned is True
+    assert reviewed.properties["static_config_hash"] != changed.properties["static_config_hash"]
+    assert [p["version"] for p in changed.properties["packages"]] == ["1.0.0", "2.6.6"]
