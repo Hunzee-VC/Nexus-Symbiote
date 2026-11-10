@@ -55,7 +55,6 @@ dependencies = [
     "packaging>=24.2,<27",
     "packageurl-python>=0.17.6,<1",
     "pydantic>=2.12,<3",
-    "rich>=13.0,<16",
     "rfc8785>=0.1.4,<0.2",
     "pyyaml>=6.0.1,<7",
     "jsonschema>=4.25,<5",

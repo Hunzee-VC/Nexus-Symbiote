@@ -47,15 +47,15 @@ def test_every_runtime_floor_is_the_version_the_floor_lock_tests():
 
 
 def test_a_range_change_without_regenerated_locks_fails(checkout):
-    edit(checkout / "pyproject.toml", '"rich>=13.0,<16"', '"rich>=13.0,<17"')
+    edit(checkout / "pyproject.toml", '"click>=8.2.1,<9"', '"click>=8.2.1,<10"')
     errors = locks.check(checkout)
     assert any("dependency declarations changed" in error for error in errors)
 
 
 def test_a_raised_floor_without_a_regenerated_floor_lock_fails(checkout):
-    edit(checkout / "pyproject.toml", '"rich>=13.0,<16"', '"rich>=13.9,<16"')
+    edit(checkout / "pyproject.toml", '"click>=8.2.1,<9"', '"click>=8.3,<9"')
     errors = locks.check(checkout)
-    assert any("rich==13.0.0 is outside" in error for error in errors)
+    assert any("click==8.2.1 is outside" in error for error in errors)
 
 
 def test_a_declared_floor_that_the_resolution_cannot_use_fails(checkout):
