@@ -15,7 +15,7 @@ BASH = shutil.which("bash")
 COMMIT = "0" * 40
 
 STUBS = {
-    "python": """#!/bin/sh
+    "python3": """#!/bin/sh
 mkdir -p .venv/bin
 cp "$STUB_DIR/venv-python" .venv/bin/python
 echo 'PATH="$PWD/.venv/bin:$PATH"' > .venv/bin/activate
