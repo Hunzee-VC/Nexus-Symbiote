@@ -125,6 +125,10 @@ _AGENT_MODE_SETTINGS = {
 }
 SETTINGS_STRUCTURE_PROFILE = "nexus-symbiote/claude-settings-structure/v1"
 SETTINGS_VALUE_BINDING_PROFILE = "nexus-symbiote/claude-settings-values/v1"
+CURSOR_HOOKS = ".cursor/hooks.json"
+CURSOR_HOOKS_STRUCTURE_PROFILE = "nexus-symbiote/cursor-hooks-structure/v1"
+CURSOR_HOOKS_VALUE_BINDING_PROFILE = "nexus-symbiote/cursor-hooks-values/v1"
+GEMINI_SETTINGS = ".gemini/settings.json"
 _PERMISSION_MODES = frozenset(
     {
         "default",
@@ -352,8 +356,13 @@ class IDEAgentScanner(Scanner):
             settings = self._claude_settings(files, result, risks, properties, base=base)
         elif ide_type == "codex":
             settings = self._codex_settings(files, result, risks, properties)
+        elif ide_type == "gemini":
+            self._gemini_settings(files, result)
+            settings = None
         else:
             settings = self._agent_mode_settings(ide_type, result)
+        if ide_type == "cursor":
+            self._cursor_hooks(files, result, risks, properties)
         mode = self._extract_permission_mode(settings or {}, ide_type, result)
         if ide_type == "codex" and mode is None:
             mode = properties.get("approval_policy")
@@ -690,6 +699,95 @@ class IDEAgentScanner(Scanner):
             )
         return settings
 
+    def _gemini_settings(self, files: ConfinedCollection, result: ScanResult) -> None:
+        """Report the MCP servers that Gemini CLI project settings declare as a gap."""
+        data = self._read_jsonc(files, GEMINI_SETTINGS, result)
+        servers = None if data is None else data.get("mcpServers")
+        if isinstance(servers, dict) and servers:
+            result.surfaces_excluded.append(
+                f"{GEMINI_SETTINGS}: {len(servers)} MCP server declaration(s) are not inventoried"
+            )
+
+    def _cursor_hooks(
+        self,
+        files: ConfinedCollection,
+        result: ScanResult,
+        risks: list[RiskAssessment],
+        properties: dict[str, Any],
+    ) -> None:
+        """Count and bind the commands that Cursor project hooks run on agent events."""
+        data = self._read_jsonc(files, CURSOR_HOOKS, result)
+        if data is None:
+            return
+        try:
+            hooks = _hook_commands(data.get("hooks"))
+            structure = hash_canonical(
+                {"profile": CURSOR_HOOKS_STRUCTURE_PROFILE, "hooks": _projection(data)}
+            )
+            binding = value_binding(CURSOR_HOOKS_VALUE_BINDING_PROFILE, data)
+        except BindingError as exc:
+            result.scan_failures.append(f"{CURSOR_HOOKS}: {exc}")
+            return
+        except (TypeError, ValueError, RecursionError):
+            result.scan_failures.append(
+                f"{CURSOR_HOOKS}: hooks cannot be digested (values must be JSON)"
+            )
+            return
+        properties.update(
+            {
+                "hook_commands": hooks,
+                "source_values_bound": bool(binding),
+                "static_config_hash": structure,
+                "static_config_hash_profile": CURSOR_HOOKS_STRUCTURE_PROFILE,
+                **binding,
+            }
+        )
+        if hooks:
+            risks.append(
+                RiskAssessment(
+                    severity=RiskSeverity.MEDIUM,
+                    category="hook_commands",
+                    detail=(
+                        f"IDE agent 'cursor' declares {hooks} hook command(s) that run "
+                        "automatically on agent events."
+                    ),
+                    recommendation="Review this setting and approve its exact value.",
+                )
+            )
+        if _redacts(data) and not binding:
+            risks.append(
+                RiskAssessment(
+                    severity=RiskSeverity.LOW,
+                    category="completeness",
+                    detail=(
+                        "IDE agent 'cursor' hooks values not bound in this inventory: "
+                        "values reduced by redaction."
+                    ),
+                    recommendation=(
+                        f"Set {SOURCE_BINDING_KEY_ENV} during collection to detect changes "
+                        "to these values."
+                    ),
+                )
+            )
+
+    @staticmethod
+    def _read_jsonc(
+        files: ConfinedCollection, relative: str, result: ScanResult
+    ) -> dict[str, Any] | None:
+        """A JSON object that may hold comments and trailing commas, as editors accept."""
+        text = files.read_text(relative, missing_ok=True)
+        if text is None:
+            return None
+        try:
+            data = parse_json_strict(_strip_jsonc(text))
+        except (ValueError, RecursionError):
+            result.scan_failures.append(f"{relative}: invalid JSON or duplicate keys")
+            return None
+        if not isinstance(data, dict):
+            result.scan_failures.append(f"{relative}: expected a mapping")
+            return None
+        return data
+
     def _agent_mode_settings(self, ide_type: str, result: ScanResult) -> dict[str, Any] | None:
         merged: dict[str, Any] = {}
         for relative in _AGENT_MODE_SETTINGS.get(ide_type, []):
@@ -734,17 +832,8 @@ class IDEAgentScanner(Scanner):
 
     def _scan_extensions(self, files: ConfinedCollection, result: ScanResult) -> None:
         relative = ".vscode/extensions.json"
-        text = files.read_text(relative, missing_ok=True)
-        if text is None:
-            return
-        try:
-            # VS Code reads this file as JSON with comments and trailing commas.
-            data = parse_json_strict(_strip_jsonc(text))
-        except (ValueError, RecursionError):
-            result.scan_failures.append(f"{relative}: invalid JSON or duplicate keys")
-            return
-        if not isinstance(data, dict):
-            result.scan_failures.append(f"{relative}: expected a mapping")
+        data = self._read_jsonc(files, relative, result)
+        if data is None:
             return
         result.surfaces_scanned.append(relative)
         recommendations = data.get("recommendations", [])
