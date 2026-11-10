@@ -562,3 +562,51 @@ class TestNewCollectorBoundaries:
         link.symlink_to(target)
         with pytest.raises(ValueError, match="unavailable"):
             ShadowScanImporter().import_report(link)
+
+    def test_a2a_nested_code_pattern_and_unrelated_files_do_not_hit_limit(self, tmp_path):
+        src = tmp_path / "src"
+        src.mkdir()
+        for idx in range(25):
+            (src / f"helper_{idx:02d}.py").write_text(f"X = {idx}\n")
+        (src / "z_agent.py").write_text("from a2a import A2AClient\nclient = A2AClient()\n")
+
+        result = A2AScanner().scan(tmp_path)
+        assert not result.scan_failures and not result.surfaces_excluded
+        clients = [c for c in result.components if c.component_type == ComponentType.A2A_CLIENT]
+        assert len(clients) == 1
+        assert clients[0].source_path.endswith("src/z_agent.py")
+
+    def test_mcp_nested_ts_client_and_unrelated_ts_files_do_not_hit_limits(self, tmp_path):
+        src = tmp_path / "src"
+        src.mkdir()
+        for idx in range(55):
+            (src / f"util_{idx:02d}.ts").write_text(f"export const v{idx} = {idx};\n")
+        (src / "z_client.ts").write_text(
+            'import { Client } from "@modelcontextprotocol/sdk/client/index.js";\n'
+        )
+
+        result = MCPScanner().scan(tmp_path)
+        assert not result.scan_failures and not result.surfaces_excluded
+        clients = [c for c in result.components if c.component_type == ComponentType.MCP_CLIENT]
+        assert len(clients) == 1
+        assert clients[0].source_path.endswith("src/z_client.ts")
+
+    def test_model_scanner_nested_directories_sharing_leaf_name_have_distinct_bom_refs(
+        self, tmp_path
+    ):
+        from nexus_symbiote.core.aibom import AIBOM
+        from nexus_symbiote.scanners.model import ModelScanner
+
+        for variant in ("alpha", "beta"):
+            leaf = tmp_path / "fixtures" / variant / "project"
+            leaf.mkdir(parents=True)
+            (leaf / "model.safetensors").write_bytes(b"\x08\x00\x00\x00\x00\x00\x00\x00{}")
+
+        result = ModelScanner().scan(tmp_path)
+        assert not result.scan_failures
+        bom = AIBOM()
+        for comp in result.components:
+            bom.add_component(comp)
+        refs = {comp.bom_ref for comp in result.components}
+        assert "model:fixtures/alpha/project/model.safetensors" in refs
+        assert "model:fixtures/beta/project/model.safetensors" in refs

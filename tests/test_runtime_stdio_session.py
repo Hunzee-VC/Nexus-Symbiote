@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -21,7 +22,7 @@ def launcher(
     definition = dict(DEFINITION)
     if altered:
         definition["description"] = "changed after approval"
-    script = f"""#!/usr/bin/python3
+    script = f"""#!{sys.executable}
 import json, os, sys, time
 definition = {definition!r}
 log = {str(log)!r}
@@ -181,7 +182,7 @@ def test_symlink_launcher_is_rejected(tmp_path):
 def test_protocol_failure_kills_and_reaps_process(tmp_path, monkeypatch, mode):
     values = fixture(tmp_path)
     path, pin, log = launcher(tmp_path, mode=mode)
-    monkeypatch.setattr("nexus_symbiote.live.session.DEADLINE_SECONDS", 0.5)
+    monkeypatch.setattr("nexus_symbiote.live.session.DEADLINE_SECONDS", 1.5)
     with pytest.raises((AuthorizationError, OSError, ValueError)):
         invoke_pinned_stdio(
             values[0], values[1], command=str(path), sha256=pin, **signed_inputs(values, pin)

@@ -312,3 +312,36 @@ def test_localhost_prefix_does_not_hide_remote_cleartext_endpoint(tmp_path):
         r.severity.value == "high" and r.category == "transport_security"
         for r in result.components[0].risks
     )
+
+
+def test_open_directory_nofollow_traverse_only_ancestor_and_symlink_rejection(
+    tmp_path, monkeypatch
+):
+    from nexus_symbiote.core.hashing import open_directory_nofollow
+
+    traverse_only = tmp_path / "traverse_only"
+    traverse_only.mkdir()
+    workspace = traverse_only / "workspace"
+    workspace.mkdir()
+
+    real_open = os.open
+
+    def restricted_open(path, flags, *args, dir_fd=None):
+        if dir_fd is None and Path(path) == traverse_only:
+            raise PermissionError(13, "Permission denied", str(path))
+        if dir_fd is not None and path == "traverse_only":
+            raise PermissionError(13, "Permission denied", str(path))
+        return real_open(path, flags, *args, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "open", restricted_open)
+    monkeypatch.setattr(os, "supports_dir_fd", os.supports_dir_fd | {restricted_open})
+    fd = open_directory_nofollow(workspace)
+    try:
+        assert os.fstat(fd).st_ino == workspace.stat().st_ino
+    finally:
+        os.close(fd)
+
+    linked_parent = tmp_path / "linked_parent"
+    linked_parent.symlink_to(traverse_only, target_is_directory=True)
+    with pytest.raises(OSError):
+        os.close(open_directory_nofollow(linked_parent / "workspace"))

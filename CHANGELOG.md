@@ -15,6 +15,13 @@ Closes detection gaps listed under 0.1.0's known limitations and makes inventori
 - Read MCP configuration below the project root and for more hosts: `.mcp.json`, `mcp.json`, `mcp-config.json`, `mcp_config.json`, `mcp-servers.json`, `claude_desktop_config.json` and `cline_mcp_settings.json` in any subdirectory, including `.vscode/mcp.json` and `.windsurf/mcp_config.json`. A server added there was not inventoried.
 - State which MCP values an inventory does not bind. A server whose launch arguments, environment values or endpoint path are compared only with `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` carries a low `completeness` finding naming the key, as A2A records do. Without the key a served directory widened from `./notes` to `/` passes the drift gate; that is unchanged, and now visible.
 - Strip JavaScript comments in linear time. The pattern used for the root-level SDK import hint rescanned blank runs and unterminated block comments, so one file within the 262,144-byte limit took about a minute.
+- Resolve AI dependencies from more lockfiles in the `registry` collector: exact versions, SRI integrity and download origins from `pnpm-lock.yaml` and `yarn.lock`, and exact versions and index origins from `uv.lock` and `poetry.lock`. Lockfile evidence is not bound when more than one npm lockfile, or both Python lockfiles, sit in the project root.
+- Support macOS root firmlink aliases (`/var`, `/tmp`, `/etc` to `/private/...`) and traverse-only (`0111`) ancestor directories in `open_directory_nofollow`, and Darwin's refusal of `RLIMIT_AS` in the runtime validation worker. Every segment inside the collection root is still opened without following links, and Linux keeps every worker limit fail-closed.
+
+### Added
+
+- Discover standalone Python agent SDK tools declared with decorators (`langchain`, `crewai`, `openai-agents`, `smolagents` and `pydantic-ai`) by static AST analysis in `python_tools`.
+- Look for MCP SDK references in nested `.ts` and `.js` files and A2A references in nested Python files, within the 64 MiB source budget. Nested files are decoded only when they name a supported SDK, and `docs`, `benchmarks` and `examples` directories are skipped.
 
 ### Fixed
 
@@ -24,6 +31,9 @@ Closes detection gaps listed under 0.1.0's known limitations and makes inventori
 - Recognise more agent packages in the `registry` collector: `mcp`, `fastmcp`, `langgraph`, `litellm`, `pydantic-ai`, `google-adk`, `a2a-sdk`, `claude-agent-sdk`, the Vercel `ai` package, and the `@langchain`, `@anthropic-ai`, `@openai` and `@ai-sdk` scopes, among others. A manifest of 52 common agent packages yielded 17 records.
 - Describe an MCP endpoint URL that embeds credentials as such. It was reported as "not HTTPS" even for an `https://` URL.
 - Correct the demo numbers in the README and the examples walkthrough, which described six findings and a score of 33; a test now compares them with a scan of the demo project.
+- Match `langgraph`, `fastmcp`, `pydantic-ai`, `google-adk`, `smolagents` and `semantic-kernel` as package-name prefixes as well, so packages such as `langgraph-checkpoint` and `pydantic-ai-slim` are recognised.
+- Name nested model directories by their root-relative path. Two directories with the same leaf name (`fixtures/alpha/project` and `fixtures/beta/project`) produced conflicting `bom-ref`s.
+- Infer MCP tool capabilities and side effects from whole words in the tool name and description, including inflected forms (`Writes`, `deleted`, `running`). Substring matching read `author` as `auth`, `compute` as `put` and `monkey` as `key`.
 
 ## [0.1.0] - 2026-11-07
 

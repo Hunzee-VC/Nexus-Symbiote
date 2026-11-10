@@ -94,6 +94,11 @@ _SDK_IMPORT = re.compile(
     r"\brequire\s*\(\s*[\"']@modelcontextprotocol/sdk(?:/[^\"']*)?[\"'])"
 )
 _SPACE = re.compile(r"\s*")
+_CAMEL_BOUNDARY = re.compile(r"([a-z0-9])([A-Z])")
+# Fixed width on purpose: "HTTPServer" splits before the capital that starts "Server".
+_ACRONYM_BOUNDARY = re.compile(r"([A-Z])([A-Z][a-z])")
+_WORD = re.compile(r"[a-z0-9]+")
+_WORD_ENDINGS = ("s", "es", "ed", "d", "ing")
 
 
 def without_js_comments(text: str) -> str:
@@ -728,34 +733,35 @@ class MCPScanner(Scanner):
     def _scan_code_mcp_clients(self, result: ScanResult, sources: list[Path]) -> None:
         if self._files is None:
             raise RuntimeError("_scan_code_mcp_clients called outside a _collection context")
-        from nexus_symbiote.scanners.python_tools import collect_python_tools
+        from nexus_symbiote.scanners.python_tools import PYTHON_TOOL_HINTS, collect_python_tools
         from nexus_symbiote.scanners.ts_tools import collect_typescript
 
         budget = SourceBudget("MCP source references", result)
         collect_typescript(self._files, result, sources, budget)
         detected: list[str] = []
+        excluded_dirs = {"tests", "test", "dist", "build", "docs", "benchmarks", "examples"}
+        python_hints = tuple(hint.encode("ascii") for hint in PYTHON_TOOL_HINTS)
         for suffix in (".py", ".ts", ".js"):
             paths = [
                 path
                 for path in sources
                 if path.suffix == suffix
-                and (
-                    len(path.parts) == 1
-                    or suffix == ".py"
-                    and not {"tests", "test", "dist", "build"}.intersection(path.parts)
+                and not excluded_dirs.intersection(path.parts)
+                and not path.name.endswith(
+                    (".d.ts", ".spec.ts", ".test.ts", ".spec.js", ".test.js")
                 )
             ]
-            if suffix == ".py":
-                paths.sort(key=lambda path: len(path.parts) > 1)
+            paths.sort(key=lambda path: len(path.parts) > 1)
+            hints = python_hints if suffix == ".py" else (b"@modelcontextprotocol/sdk",)
             for path in paths:
                 if budget.exhausted:
                     break
                 raw = self._files.read_bytes(path)
                 if raw is None or not budget.admit(len(raw)):
                     continue
-                # Nested Python modules are read only when they can name the SDK, so
+                # Nested modules are decoded only when they can name a supported SDK, so
                 # an unrelated module is neither parsed nor a decoding failure.
-                if suffix == ".py" and len(path.parts) > 1 and b"mcp" not in raw:
+                if len(path.parts) > 1 and not any(hint in raw for hint in hints):
                     continue
                 try:
                     content = raw.decode("utf-8")
@@ -806,6 +812,31 @@ class MCPScanner(Scanner):
                 )
             )
 
+    @staticmethod
+    def _tokenize_identifier(text: str) -> set[str]:
+        """Words of a tool name or description, each also without a plural or verb ending.
+
+        Descriptions come from the checkout and may be megabytes long, so every
+        pattern here is linear: a repeated capital class before the acronym
+        boundary rescanned each run of capitals from every position in it.
+        """
+        expanded = _ACRONYM_BOUNDARY.sub(r"\1 \2", _CAMEL_BOUNDARY.sub(r"\1 \2", text))
+        words = set(_WORD.findall(expanded.lower()))
+        forms = set(words)
+        for word in words:
+            for ending in _WORD_ENDINGS:
+                if len(word) <= len(ending) + 1 or not word.endswith(ending):
+                    continue
+                stem = word[: -len(ending)]
+                forms.add(stem)
+                if ending in {"ed", "ing"}:
+                    forms.add(stem + "e")
+                    if stem[-1] == stem[-2]:
+                        forms.add(stem[:-1])
+                elif ending == "es" and stem.endswith("i"):
+                    forms.add(stem[:-1] + "y")
+        return forms
+
     def _classify_side_effects(
         self, annotations: dict[str, Any], tool_name: str
     ) -> SideEffectProfile:
@@ -813,12 +844,12 @@ class MCPScanner(Scanner):
             return SideEffectProfile.DESTRUCTIVE
         if annotations.get("readOnlyHint"):
             return SideEffectProfile.READ_ONLY
-        name_lower = tool_name.lower()
-        if any(w in name_lower for w in ("delete", "remove", "drop", "destroy", "purge")):
+        tokens = self._tokenize_identifier(tool_name)
+        if tokens & {"delete", "remove", "drop", "destroy", "purge"}:
             return SideEffectProfile.DESTRUCTIVE
-        if any(w in name_lower for w in ("create", "update", "write", "send", "post", "put")):
+        if tokens & {"create", "update", "write", "send", "post", "put"}:
             return SideEffectProfile.STATE_MODIFYING
-        if any(w in name_lower for w in ("get", "list", "read", "search", "query", "fetch")):
+        if tokens & {"get", "list", "read", "search", "query", "fetch"}:
             return SideEffectProfile.READ_ONLY
         return SideEffectProfile.UNKNOWN
 
@@ -826,19 +857,52 @@ class MCPScanner(Scanner):
         self, tool_name: str, description: str, annotations: dict[str, Any]
     ) -> list[CapabilityClass]:
         caps = []
-        combined = f"{tool_name} {description}".lower()
-        if any(w in combined for w in ("file", "directory", "path", "fs", "disk")):
+        tokens = self._tokenize_identifier(f"{tool_name} {description}")
+        if tokens & {
+            "file",
+            "filename",
+            "filepath",
+            "filesystem",
+            "directory",
+            "path",
+            "fs",
+            "disk",
+        }:
             caps.append(CapabilityClass.FILESYSTEM)
-        if any(w in combined for w in ("http", "url", "fetch", "request", "api", "endpoint")):
+        if tokens & {"http", "https", "url", "fetch", "request", "api", "endpoint"}:
             caps.append(CapabilityClass.NETWORK)
-        if any(w in combined for w in ("exec", "run", "shell", "command", "bash", "terminal")):
+        if tokens & {
+            "exec",
+            "execute",
+            "executable",
+            "run",
+            "shell",
+            "command",
+            "bash",
+            "terminal",
+        }:
             caps.append(CapabilityClass.EXECUTE)
-        if any(w in combined for w in ("pay", "transfer", "invoice", "charge", "billing")):
+        if tokens & {"pay", "payment", "transfer", "invoice", "charge", "billing"}:
             caps.append(CapabilityClass.PAYMENT)
-        if any(w in combined for w in ("credential", "secret", "token", "password", "key", "auth")):
+        if tokens & {
+            "credential",
+            "secret",
+            "token",
+            "password",
+            "passwd",
+            "passphrase",
+            "key",
+            "apikey",
+            "auth",
+            "oauth",
+            "authenticate",
+            "authentication",
+            "authorize",
+            "authorization",
+        }:
             caps.append(CapabilityClass.CREDENTIALS)
-        if any(w in combined for w in ("write", "create", "update", "delete", "send", "post")):
+        if tokens & {"write", "create", "update", "delete", "send", "post", "put"}:
             caps.append(CapabilityClass.WRITE)
-        elif any(w in combined for w in ("read", "get", "list", "search", "query")):
+        elif tokens & {"read", "get", "list", "search", "query", "fetch"}:
             caps.append(CapabilityClass.READ)
         return caps

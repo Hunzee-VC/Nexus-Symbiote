@@ -30,6 +30,8 @@ from nexus_symbiote.scanners.mcp import _MIN_SOURCE_BINDING_KEY_LENGTH, SOURCE_B
 from nexus_symbiote.utils.confined import MAX_TOTAL_BYTES
 from nexus_symbiote.utils.secrets import REDACTED, redact_text
 
+_A2A_SOURCE_HINTS = (b"a2a", b"A2AClient", b"AgentCard")
+
 AGENT_CARD_FILES = [
     ".well-known/agent.json",
     ".well-known/agent-card.json",
@@ -714,18 +716,28 @@ class A2AScanner(Scanner):
     def _scan_code_patterns(self, root: Path, result: ScanResult) -> None:
         if self._files is None:
             raise RuntimeError("_scan_code_patterns called outside a _collection context")
-        sources = [
+        excluded_dirs = {"tests", "test", "dist", "build", "docs", "benchmarks", "examples"}
+        candidates = [
             path
             for path in self._files.iter_files()
-            if path.suffix == ".py"
-            and (len(path.parts) == 1 or (len(path.parts) == 2 and path.parts[0] == "src"))
+            if path.suffix == ".py" and not excluded_dirs.intersection(path.parts)
         ]
+        candidates.sort(key=lambda path: len(path.parts) > 1)
         budget = SourceBudget("a2a code references", result)
-        for path in sources:
+        for path in candidates:
             if budget.exhausted:
                 break
-            content = self._files.read_text(path)
-            if content is None or not budget.admit(len(content)):
+            raw = self._files.read_bytes(path)
+            if raw is None or not budget.admit(len(raw)):
+                continue
+            # Nested modules are decoded only when they can name A2A, so an unrelated
+            # module is neither parsed nor a decoding failure.
+            if len(path.parts) > 1 and not any(hint in raw for hint in _A2A_SOURCE_HINTS):
+                continue
+            try:
+                content = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                result.scan_failures.append(f"{path}: invalid UTF-8")
                 continue
             result.surfaces_scanned.append(str(root / path))
             if len(content) > 262_144:

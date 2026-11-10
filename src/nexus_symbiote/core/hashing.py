@@ -11,6 +11,7 @@ import json
 import os
 import re
 import stat
+import sys
 from pathlib import Path
 from typing import Any, BinaryIO, Literal
 
@@ -95,23 +96,87 @@ def descriptor_binding(info: os.stat_result) -> tuple[int, int, int, int, int, i
     )
 
 
-def _open_parent_no_follow(absolute: Path) -> int:
+def open_directory_nofollow(directory: Path) -> int:
+    """Open a directory without following symlinks in the target path.
+
+    Walks from the filesystem anchor using ``O_NOFOLLOW`` descriptors, allowing
+    traverse-only (execute-without-read) system ancestor directories after
+    verifying via ``lstat`` that each ancestor is a real directory (or a
+    standard macOS root firmlink/symlink to ``/private/{var,tmp,etc}``).
+    """
     if (
         not hasattr(os, "O_NOFOLLOW")
         or not hasattr(os, "O_DIRECTORY")
         or os.open not in os.supports_dir_fd
     ):
         raise OSError("Descriptor-relative no-follow file access is unavailable")
-    parent_fd = os.open(absolute.anchor, os.O_RDONLY | os.O_DIRECTORY)
+    absolute = Path(os.path.abspath(directory))
+    parts = list(absolute.parts)
+    if (
+        sys.platform == "darwin"
+        and len(parts) >= 2
+        and parts[0] == "/"
+        and parts[1] in {"var", "tmp", "etc"}
+    ):
+        link_path = f"/{parts[1]}"
+        if os.path.islink(link_path) and os.readlink(link_path) == f"private/{parts[1]}":
+            parts = ["/", "private", *parts[1:]]
+
+    dir_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+    current_fd: int | None = None
+    prefix = Path(parts[0])
     try:
-        for part in absolute.parts[1:-1]:
-            next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent_fd)
-            os.close(parent_fd)
-            parent_fd = next_fd
+        for index, part in enumerate(parts):
+            if index > 0:
+                prefix = prefix / part
+            if current_fd is not None:
+                try:
+                    next_fd = os.open(part, dir_flags, dir_fd=current_fd)
+                    os.close(current_fd)
+                    current_fd = next_fd
+                    continue
+                except PermissionError:
+                    if index == len(parts) - 1:
+                        raise
+                    os.close(current_fd)
+                    current_fd = None
+                    st = os.lstat(prefix)
+                    if not stat.S_ISDIR(st.st_mode):
+                        raise OSError(f"Not a directory: {prefix}") from None
+                    continue
+
+            st = os.lstat(prefix)
+            if not stat.S_ISDIR(st.st_mode):
+                raise OSError(f"Not a directory: {prefix}")
+            try:
+                fd = os.open(prefix, dir_flags)
+            except PermissionError:
+                if index < len(parts) - 1:
+                    continue
+                raise
+            try:
+                opened_st = os.fstat(fd)
+                if not stat.S_ISDIR(opened_st.st_mode) or (
+                    opened_st.st_dev,
+                    opened_st.st_ino,
+                ) != (st.st_dev, st.st_ino):
+                    raise OSError(f"Directory changed during open: {prefix}")
+            except BaseException:
+                os.close(fd)
+                raise
+            current_fd = fd
+
+        if current_fd is None:
+            raise OSError(f"Unable to open directory: {directory}")
+        return current_fd
     except BaseException:
-        os.close(parent_fd)
+        if current_fd is not None:
+            os.close(current_fd)
         raise
-    return parent_fd
+
+
+def _open_parent_no_follow(absolute: Path) -> int:
+    return open_directory_nofollow(absolute.parent)
 
 
 def pathname_identity(path: Path) -> tuple[int, int] | None:

@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, BinaryIO, cast
 
-from nexus_symbiote.core.hashing import descriptor_binding
+from nexus_symbiote.core.hashing import descriptor_binding, open_directory_nofollow
 
 MAX_FILE_BYTES = 4 * 1024 * 1024
 MAX_ENTRIES = 20_000
@@ -141,19 +141,9 @@ class ConfinedCollection:
         if not hasattr(os, "O_NOFOLLOW") or os.open not in os.supports_dir_fd:
             self._fail(".", "no-follow descriptor-relative collection unsupported")
             return self
-        current: int | None = None
         try:
-            current = os.open(self.root.anchor, os.O_RDONLY | os.O_DIRECTORY)
-            for part in self.root.parts[1:]:
-                next_fd = os.open(
-                    part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=current
-                )
-                os.close(current)
-                current = next_fd
-            self._root_fd = current
+            self._root_fd = open_directory_nofollow(self.root)
         except OSError:
-            if current is not None:
-                os.close(current)
             self._fail(".", "root unavailable or contains a symlink")
         return self
 

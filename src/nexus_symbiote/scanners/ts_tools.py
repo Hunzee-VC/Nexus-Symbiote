@@ -24,7 +24,7 @@ from nexus_symbiote.scanners.base import ScanResult, SourceBudget
 from nexus_symbiote.utils.confined import ConfinedCollection
 
 _MODULES = {"@modelcontextprotocol/server", "@modelcontextprotocol/sdk/server/mcp.js"}
-_IGNORED = {"dist", "build", "__tests__", "tests", "test"}
+_IGNORED = {"dist", "build", "__tests__", "tests", "test", "docs", "benchmarks", "examples"}
 MAX_SOURCE_BYTES = 262_144
 MAX_AST_NODES = 20_000
 MAX_REGISTRATIONS = 1_000
