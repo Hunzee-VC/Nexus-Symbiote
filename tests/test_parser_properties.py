@@ -1,16 +1,21 @@
 """Generated-input checks of the hand-written parsers against reference behaviour.
 
 The requirements collector emulates pip's line handling; ``packaging`` is the reference for
-what a requirement means, so the collector must reach the same name and pin however the
-line is decorated. Unparseable input must leave a gap, never silence. Redaction must never
-let a planted secret through, and hostile inputs must not make parsing super-linear. The
-repository's Hypothesis profile (tests/conftest.py) keeps every run deterministic; the
-weekly ``fuzz`` profile explores further.
+what a requirement means and pip's own requirements-file reader, wherever pip is installed
+(always in CI), for how a line is read, so the collector must reach the same name and pin
+however the line is decorated. Unparseable or deeply nested input must leave a gap or a
+failed collector, never silence. No collected file may crash a scan in any export format
+beyond the one failure SECURITY.md documents. Redaction must never let a planted secret
+through, and hostile inputs must not make parsing super-linear. The repository's Hypothesis
+profile (tests/conftest.py) keeps every run deterministic; the weekly ``fuzz`` profile
+explores further.
 """
 
 from __future__ import annotations
 
 import json
+import os
+import re
 import string
 import tempfile
 import time
@@ -26,6 +31,8 @@ from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
 from nexus_symbiote.cli import main
+from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote.diff.differ import AIBOMDiffer
 from nexus_symbiote.scanners.base import sanitized_origin
 from nexus_symbiote.scanners.registry import RegistryScanner
 from nexus_symbiote.utils.secrets import redact_descriptor, redact_text, redact_url
@@ -70,7 +77,12 @@ def requirements(draw: st.DrawFn) -> str:
 @st.composite
 def decorated(draw: st.DrawFn, requirement: str) -> str:
     """The requirement as pip would still read it: indentation, comments, options, CRLF."""
-    line = draw(st.sampled_from(["", " ", "\t", "   "])) + requirement
+    body = requirement
+    if draw(st.booleans()):
+        # pip joins a continued line with nothing in between, even inside a word.
+        cut = draw(st.integers(min_value=1, max_value=len(body) - 1))
+        body = f"{body[:cut]}\\\n{body[cut:]}"
+    line = draw(st.sampled_from(["", " ", "\t", "   "])) + body
     if draw(st.booleans()):
         line += " --hash=sha256:" + "ab" * 32
     if draw(st.booleans()):
@@ -87,7 +99,9 @@ def decorated(draw: st.DrawFn, requirement: str) -> str:
 
 def reference_pin(requirement: Requirement) -> str | None:
     """The exact version packaging says the requirement pins, if any."""
-    clauses = list(requirement.specifier)
+    # A repeated clause adds nothing. packaging 26 drops repeats only once something has
+    # compared the set, packaging 24 always: count each clause once either way.
+    clauses = list(dict.fromkeys(requirement.specifier))
     if requirement.url or requirement.marker or len(clauses) != 1:
         return None
     clause = clauses[0]
@@ -131,6 +145,46 @@ def test_requirements_lines_reach_the_name_and_pin_packaging_reads(data):
         name = canonicalize_name(requirement.name)
         assert component.package_url == f"pkg:pypi/{name}@{quote(pin, safe='')}"
         assert not any(risk.category == "version_pinning" for risk in component.risks)
+
+
+@pytest.fixture(scope="module")
+def pip_reader():
+    """pip's own requirements-file reader and its version. CI installs with pip."""
+    try:
+        from pip import __version__
+        from pip._internal.network.session import PipSession
+        from pip._internal.req.req_file import parse_requirements
+    except ImportError:
+        if os.environ.get("CI"):
+            raise
+        pytest.skip("pip is not importable here; CI, which installs with pip, runs this test")
+    session = PipSession()
+
+    def read(content: bytes) -> list[str]:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "requirements.txt"
+            path.write_bytes(content)
+            return [parsed.requirement for parsed in parse_requirements(str(path), session=session)]
+
+    return __version__, read
+
+
+@given(st.data())
+def test_pip_reads_each_decorated_line_as_the_requirement_the_collector_reports(pip_reader, data):
+    version, read = pip_reader
+    text = data.draw(requirements())
+    content = data.draw(decorated(text)).encode()
+    found = read(content)
+    assert len(found) == 1, (version, content, found)
+    requirement = Requirement(found[0])
+    assert requirement == Requirement(text), (version, content, found)
+    result = scan({"requirements.txt": content})
+    components = pypi_components(result, requirement.name)
+    assert len(components) == 1 and result.scan_failures == [], (version, content)
+    pin = reference_pin(requirement)
+    name = canonicalize_name(requirement.name)
+    purl = None if pin is None else f"pkg:pypi/{name}@{quote(pin, safe='')}"
+    assert components[0].package_url == purl, (version, content)
 
 
 @given(st.data())
@@ -358,12 +412,71 @@ JSON_DOCUMENTS = st.recursive(
     max_leaves=16,
 ).map(lambda value: json.dumps(value).encode())
 CONTENT = st.one_of(st.binary(max_size=256), st.text(max_size=256).map(str.encode), JSON_DOCUMENTS)
+# Letters and lone surrogates: JSON escapes the latter, so the file is valid ASCII JSON whose
+# strings cannot be encoded as UTF-8.
+SURROGATE_TEXT = st.text(
+    st.characters(min_codepoint=0xD800, max_codepoint=0xDFFF, exclude_categories=())
+    | st.characters(min_codepoint=0x61, max_codepoint=0x7A),
+    min_size=1,
+    max_size=6,
+)
+# Where a value reaches the exported record, not only the native inventory.
+STRUCTURED = {
+    "rag_config.json": st.fixed_dictionaries(
+        {
+            "vector_store": st.fixed_dictionaries(
+                {"provider": SURROGATE_TEXT, "collection": SURROGATE_TEXT}
+            ),
+            "embedding_model": SURROGATE_TEXT,
+        }
+    ),
+    ".well-known/agent.json": st.fixed_dictionaries(
+        {
+            "name": SURROGATE_TEXT,
+            "url": st.just("https://agent.example/"),
+            "skills": st.lists(
+                st.fixed_dictionaries({"id": SURROGATE_TEXT, "name": SURROGATE_TEXT}),
+                max_size=2,
+            ),
+        }
+    ),
+    "package.json": st.fixed_dictionaries(
+        {"dependencies": st.dictionaries(st.just("openai") | SURROGATE_TEXT, SURROGATE_TEXT)}
+    ),
+    ".mcp.json": st.fixed_dictionaries(
+        {
+            "mcpServers": st.dictionaries(
+                SURROGATE_TEXT,
+                st.fixed_dictionaries(
+                    {"command": SURROGATE_TEXT, "args": st.lists(SURROGATE_TEXT)}
+                ),
+                max_size=2,
+            )
+        }
+    ),
+}
+FORMATS = st.sampled_from(["json", "cyclonedx", "spdx", "sarif"])
+LONE_SURROGATE_ESCAPE = re.compile(rb"\\u[dD][89a-fA-F][0-9a-fA-F]{2}")
+
+
+def documented_export_failure(fmt: str, content: bytes, exception: BaseException) -> bool:
+    """SECURITY.md, "Malformed input stops some exports with a traceback": only this."""
+    return (
+        fmt != "json"
+        and isinstance(exception, ValueError)
+        and LONE_SURROGATE_ESCAPE.search(content) is not None
+    )
 
 
 @pytest.mark.parametrize("name", COLLECTED_FILES)
 @settings(max_examples=max(5, settings.default.max_examples // 10))
-@given(content=CONTENT)
-def test_any_content_in_a_collected_file_yields_an_inventory_not_a_crash(name, content):
+@given(data=st.data())
+def test_any_content_in_a_collected_file_yields_an_inventory_not_a_crash(name, data):
+    strategy = CONTENT
+    if name in STRUCTURED:
+        strategy = strategy | STRUCTURED[name].map(lambda value: json.dumps(value).encode())
+    content = data.draw(strategy)
+    fmt = data.draw(FORMATS)
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         path = root / "project" / name
@@ -371,9 +484,72 @@ def test_any_content_in_a_collected_file_yields_an_inventory_not_a_crash(name, c
         path.write_bytes(content)
         output = root / "inventory.json"
         result = CliRunner().invoke(
-            main, ["scan", str(root / "project"), "--report-only", "-f", "json", "-o", str(output)]
+            main, ["scan", str(root / "project"), "--report-only", "-f", fmt, "-o", str(output)]
         )
-        assert result.exception is None or isinstance(result.exception, SystemExit), result.output
-        if result.exit_code == 0:
-            inventory = json.loads(output.read_text())
-            assert isinstance(inventory.get("components"), list)
+        exception = result.exception
+        if exception is not None and not isinstance(exception, SystemExit):
+            assert documented_export_failure(fmt, content, exception), (fmt, repr(exception))
+        if result.exit_code != 0:
+            return
+        document = json.loads(output.read_text())
+        assert isinstance(document, dict)
+        if fmt != "json":
+            return
+        assert isinstance(document.get("components"), list)
+        try:
+            inventory = AIBOM.load(output)
+        except ValueError:
+            # Documented too: native JSON holding a lone surrogate is refused on reading.
+            assert LONE_SURROGATE_ESCAPE.search(content) is not None
+            return
+        report = AIBOMDiffer().diff(inventory, AIBOM.load(output))
+        assert not report.has_changes and report.total_changes == 0
+        assert report.security_alerts == []
+
+
+NESTING = 1_000
+NESTED_INPUTS = {
+    "requirements.txt": (
+        "torch; " + "(" * NESTING + 'python_version >= "3"' + ")" * NESTING + "\nopenai==1.0\n"
+    ),
+    ".mcp.json": '{"mcpServers": ' + '{"a": ' * NESTING + "1" + "}" * NESTING + "}",
+    "package.json": '{"dependencies": ' + "[" * NESTING + "]" * NESTING + "}",
+    "pyproject.toml": (
+        "[project]\nname = 'x'\nversion = '1'\ndependencies = ["
+        + "[" * NESTING
+        + "]" * NESTING
+        + "]\n"
+    ),
+    ".well-known/agent.json": "[" * NESTING + "]" * NESTING,
+    "rag_config.json": '{"vector_store": ' + "[" * NESTING + "]" * NESTING + "}",
+}
+
+
+@pytest.mark.parametrize("name", sorted(NESTED_INPUTS))
+def test_deeply_nested_input_fails_closed_in_bounded_time(tmp_path, name):
+    path = tmp_path / "project" / name
+    path.parent.mkdir(parents=True)
+    path.write_text(NESTED_INPUTS[name])
+    output = tmp_path / "inventory.json"
+    started = time.perf_counter()
+    result = CliRunner().invoke(
+        main, ["scan", str(tmp_path / "project"), "--report-only", "-f", "json", "-o", str(output)]
+    )
+    assert time.perf_counter() - started < 30
+    assert result.exception is None or isinstance(result.exception, SystemExit), result.output
+    if not output.exists():
+        assert result.exit_code != 0
+        return
+    inventory = json.loads(output.read_text())
+    completeness = inventory["metadata"]["completeness"]
+    refs = {component["bom_ref"] for component in inventory["components"]}
+    if name == "requirements.txt":
+        # Each line is understood, a gap, or its collector is reported as failed.
+        failed = completeness["scanner_status"].get("registry") == "failed"
+        gaps = [*completeness["scan_failures"], *completeness["surfaces_excluded"]]
+        assert "registry:pypi/openai" in refs or failed
+        assert (
+            "registry:pypi/torch" in refs
+            or failed
+            or any("requirements.txt" in gap for gap in gaps)
+        )
