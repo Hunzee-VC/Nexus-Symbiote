@@ -69,6 +69,11 @@ def test_command_runner_never_uses_shell(monkeypatch, tmp_path):
     assert captured["kwargs"].get("shell", False) is False
 
 
+def _published(outputs: Path) -> dict[str, str]:
+    # GITHUB_OUTPUT applies lines in order, so the last value of a name wins.
+    return dict(line.split("=", 1) for line in outputs.read_text().splitlines())
+
+
 @pytest.mark.parametrize("status", [1, 7])
 def test_validation_failure_fails_action_and_preserves_export(tmp_path, status):
     config = configuration(tmp_path)
@@ -78,15 +83,23 @@ def test_validation_failure_fails_action_and_preserves_export(tmp_path, status):
         calls.append(args[0])
         if args[0] == "scan":
             Path(args[args.index("--output") + 1]).write_text("{}")
+        if args[0] == "risk":
+            return subprocess.CompletedProcess(args, 0, '{"overall_score": 0, "passed": true}', "")
         return subprocess.CompletedProcess(
             args, status if args[0] == "validate" else 0, "", "failed"
         )
 
     outputs = tmp_path / "outputs"
     assert runner.run(config, command=command, outputs=outputs) == 1
-    assert calls == ["scan", "validate"]
+    # Every enabled gate runs, so one run reports every failure.
+    assert calls == ["scan", "validate", "risk"]
     assert config.output.exists()
-    assert "aibom_path=" in outputs.read_text()
+    published = _published(outputs)
+    assert published["aibom_path"] == str(config.output)
+    assert published["validation_passed"] == "false"
+    assert published["passed"] == "true"
+    assert published["result"] == "failed"
+    assert json.loads(published["gates"])["completeness"] == "failed"
 
 
 @pytest.mark.parametrize("report", ["{}", '{"overall_score": "0"}', '{"overall_score": NaN}'])

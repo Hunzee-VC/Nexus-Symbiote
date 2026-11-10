@@ -477,14 +477,31 @@ def test_policy_notice_names_the_file_literally(tmp_path):
     assert "\\[old]" not in result.stderr
 
 
-def test_shipped_risk_hook_applies_the_repository_policy_like_the_scan_hook():
+def test_shipped_hooks_gate_with_the_built_in_policy_and_write_nothing(tmp_path):
+    import shlex
+
     import yaml
 
     hooks = yaml.safe_load((Path(__file__).parents[1] / ".pre-commit-hooks.yaml").read_text())
-    entries = {hook["id"]: hook["entry"].split() for hook in hooks}
-    assert entries["nexus-symbiote-scan"][:3] == ["nexus-symbiote", "scan", "."]
-    risk = entries["nexus-symbiote-risk"]
-    assert risk[risk.index("--project") + 1] == "."
+    assert {hook["id"] for hook in hooks} == {"nexus-symbiote-scan", "nexus-symbiote-risk"}
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "AGENTS.md").write_text("Keep receipts.")
+    # A checkout must not pick the gate it is checked under.
+    (project / ".nexus-symbiote.yaml").write_text("scan: {failure_mode: report-only}\n")
+    (project / "classifier.pkl").write_bytes(b"unsafe-format-fixture")
+    for hook in hooks:
+        program, *args = shlex.split(hook["entry"])
+        assert program == "nexus-symbiote"
+        assert "--no-project-policy" in args and "-o" not in args and "--output" not in args
+        result = CliRunner().invoke(main, [str(project) if a == "." else a for a in args])
+        assert result.exit_code == 1, result.output
+        assert "Scan gate failed" in result.output and "classifier.pkl" in result.output
+        assert sorted(p.name for p in project.iterdir()) == [
+            ".nexus-symbiote.yaml",
+            "AGENTS.md",
+            "classifier.pkl",
+        ]
 
 
 def test_project_policy_applies_through_project_and_is_named_otherwise(tmp_path):

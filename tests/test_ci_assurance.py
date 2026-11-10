@@ -118,7 +118,7 @@ def test_consumer_action_installs_only_locked_dependencies_before_source():
         step for step in action["runs"]["steps"] if step["name"] == "Install reviewed Action source"
     )
     source = install["run"]
-    assert 'python -I -m venv "$action_venv"' in source
+    assert '"$SYMBIOTE_BASE_PYTHON" -I -m venv "$action_venv"' in source
     assert (
         '--require-hashes --only-binary=:all: -r "$SYMBIOTE_ACTION_PATH/requirements-action.lock"'
         in source

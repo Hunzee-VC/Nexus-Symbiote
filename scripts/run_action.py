@@ -1,4 +1,12 @@
-"""GitHub Action entry point: inputs are data, and exports share one collection."""
+"""GitHub Action entry point: inputs are data, and exports share one collection.
+
+Everything this script prints reaches the job log, where the runner acts on workflow
+commands: "::name::" at the start of a line and "##[name]" anywhere in one. Text from
+the scanned checkout is therefore printed only inside a stop-commands block with a
+random token, neutralized and behind a fixed prefix. Every declared output is written
+to GITHUB_OUTPUT before collection starts, and that file is applied after the step,
+so a command printed during the step could not set an output in any case.
+"""
 
 from __future__ import annotations
 
@@ -8,12 +16,15 @@ import importlib
 import json
 import math
 import os
+import re
+import secrets
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 SCANNERS = frozenset(
     {"shadowscan", "mcp", "model", "prompt", "rag", "registry", "a2a", "ide_agents"}
@@ -26,32 +37,90 @@ SIGSTORE_MODULES = (
     "sigstore.verify.policy",
     "sigstore_models.common.v1",
 )
+GATES = ("collection", "completeness", "integrity", "risk", "drift")
+THRESHOLD = re.compile(r"(?:0|[1-9][0-9]{0,2})(?:\.[0-9]{1,4})?")
+MAX_BASELINE_BYTES = 16 * 1024 * 1024
+MAX_LIMITS_LENGTH = 1024
+LIMITS_ENV = "NEXUS_SYMBIOTE_LIMITS"
+RELAY_PREFIX = "| "
 
 
-def _boolean(value: str) -> bool:
+class InputError(ValueError):
+    """An invalid Action input. The message is fixed text, safe to print."""
+
+
+class ActionError(ValueError):
+    """A gate that could not be evaluated. The message is fixed text, safe to print."""
+
+
+def _say(text: str) -> None:
+    print(text, file=sys.stderr, flush=True)
+
+
+def _neutralize(text: object) -> str:
+    from nexus_symbiote.utils.terminal import neutralize
+
+    return neutralize(text)
+
+
+def _command_data(text: object) -> str:
+    # The runner decodes %0A and the like in a command's data, so escape them first.
+    return _neutralize(text).replace("%", "%25")
+
+
+def _annotate(kind: str, text: str) -> None:
+    _say(f"::{kind} title=Nexus SymBiote::{_command_data(text)}")
+
+
+def _relay(label: str, lines: Iterable[str]) -> None:
+    """Print untrusted lines so that the runner acts on none of them.
+
+    A stop-commands block with an unguessable token disables both workflow command
+    forms until the token appears again; neutralization and a fixed prefix hold even
+    where a runner ignores the block.
+    """
+    shown = [RELAY_PREFIX + _neutralize(line) for line in lines]
+    if not shown:
+        return
+    _say(f"{label}:")
+    token = secrets.token_hex(16)
+    _say(f"::stop-commands::{token}")
+    for line in shown:
+        _say(line)
+    _say(f"::{token}::")
+
+
+def _process_lines(*streams: str | None) -> list[str]:
+    return [line for stream in streams if stream for line in stream.splitlines()]
+
+
+def _boolean(value: str, name: str) -> bool:
     if value not in {"true", "false"}:
-        raise ValueError("boolean inputs must be true or false")
+        raise InputError(f"{name} must be true or false")
     return value == "true"
 
 
-def _within(workspace: Path, value: str) -> Path:
+def _within(workspace: Path, value: str, name: str) -> Path:
     if not value or any(c in value for c in "\r\n\x00"):
-        raise ValueError("paths must be nonempty and contain no newline or NUL")
+        raise InputError(f"{name} must be nonempty and contain no newline or NUL")
     path = (workspace / value).absolute()
     if (
         ".." in path.parts
         or not path.is_relative_to(workspace)
         or not path.resolve().is_relative_to(workspace)
     ):
-        raise ValueError("Action paths must stay within GITHUB_WORKSPACE")
+        raise InputError("Action paths must stay within GITHUB_WORKSPACE")
+    if Path(os.path.normpath(path)) != path.resolve():
+        # The checkout decides which names inside the workspace are links, so a linked
+        # path would let the code under review choose what is collected or written.
+        raise InputError(f"{name} must not pass through a symbolic link")
     return path
 
 
-def _caller_owned(workspace: Path, value: str) -> bytes:
+def _caller_owned(workspace: Path, value: str, name: str, limit: int) -> bytes:
     from nexus_symbiote.core.hashing import open_regular_file
-    from nexus_symbiote.signature_policy import MAX_POLICY_BYTES
 
-    outside = "signature-policy must be an absolute path outside GITHUB_WORKSPACE"
+    outside = f"{name} must be an absolute path outside GITHUB_WORKSPACE"
     path = Path(value)
     if (
         any(c in value for c in "\r\n\x00")
@@ -59,28 +128,24 @@ def _caller_owned(workspace: Path, value: str) -> bytes:
         or ".." in path.parts
         or path.is_relative_to(workspace)
     ):
-        raise ValueError(outside)
+        raise InputError(outside)
     try:
         # No-follow traversal makes the literal path the real one. Comparing its
         # ancestors' device and inode with the workspace also catches aliases
         # that a lexical check misses: case-insensitive names and bind mounts.
         with open_regular_file(path) as stream:
-            content = stream.read(MAX_POLICY_BYTES + 1)
+            content = stream.read(limit + 1)
             links = os.fstat(stream.fileno()).st_nlink
         ancestors = {(s.st_dev, s.st_ino) for s in map(os.stat, path.parents)}
     except OSError:
-        raise ValueError(
-            "signature-policy must be a regular file reached without symlinks"
-        ) from None
+        raise InputError(f"{name} must be a regular file reached without symlinks") from None
     root = os.stat(workspace)
     if (root.st_dev, root.st_ino) in ancestors:
-        raise ValueError(outside)
+        raise InputError(outside)
     if links != 1:
-        raise ValueError(
-            "signature-policy must not be a hard link, which can alias a workspace file"
-        )
-    if len(content) > MAX_POLICY_BYTES:
-        raise ValueError("signature-policy exceeds the byte limit")
+        raise InputError(f"{name} must not be a hard link, which can alias a workspace file")
+    if len(content) > limit:
+        raise InputError(f"{name} exceeds the byte limit")
     return content
 
 
@@ -91,7 +156,7 @@ def _require_sigstore() -> None:
         for module in SIGSTORE_MODULES:
             importlib.import_module(module)
     except ImportError:
-        raise ValueError(
+        raise InputError(
             "signature-policy needs sigstore, which this Action runtime cannot import"
         ) from None
 
@@ -108,47 +173,73 @@ class Config:
     threshold: float
     sarif: bool
     signature_policy: bytes | None = field(default=None, repr=False)
+    integrity: bool = True
+    limits: str = ""
+    baseline: bytes | None = field(default=None, repr=False)
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> Config:
-        workspace = Path(env["GITHUB_WORKSPACE"]).resolve(strict=True)
-        project = _within(workspace, env.get("SYMBIOTE_SCAN_PATH", "."))
+        try:
+            workspace = Path(env["GITHUB_WORKSPACE"]).resolve(strict=True)
+        except (KeyError, OSError):
+            raise InputError("GITHUB_WORKSPACE must name the checked-out workspace") from None
+        project = _within(workspace, env.get("SYMBIOTE_SCAN_PATH", "."), "scan-path")
         if not project.is_dir():
-            raise ValueError("scan-path must be an existing directory")
+            raise InputError("scan-path must be an existing directory")
         output_value = env.get("SYMBIOTE_OUTPUT_FILE", "nexus-symbiote-aibom.json")
         if any(c in output_value for c in "*?[]!"):
-            raise ValueError("output-file must be a literal artifact path without glob syntax")
-        output = _within(workspace, output_value)
+            raise InputError("output-file must be a literal artifact path without glob syntax")
+        output = _within(workspace, output_value, "output-file")
         fmt = env.get("SYMBIOTE_FORMAT", "json")
         if fmt not in FORMATS:
-            raise ValueError("unsupported output format")
+            raise InputError("unsupported output format")
         scanners = tuple(
             s.strip() for s in env.get("SYMBIOTE_SCANNERS", "").split(",") if s.strip()
         )
         if len(scanners) != len(set(scanners)) or set(scanners) - SCANNERS:
-            raise ValueError("scanners must be distinct supported names")
-        threshold = float(env.get("SYMBIOTE_RISK_THRESHOLD", "50"))
-        if not math.isfinite(threshold) or not 0 <= threshold <= 100:
-            raise ValueError("risk-threshold must be finite and between 0 and 100")
+            raise InputError("scanners must be distinct supported names")
+        raw = env.get("SYMBIOTE_RISK_THRESHOLD", "50")
+        if not THRESHOLD.fullmatch(raw) or float(raw) > 100:
+            raise InputError("risk-threshold must be a decimal number from 0 to 100, such as 50")
+        threshold = float(raw)
+        limits = env.get("SYMBIOTE_LIMITS", "")
+        if len(limits) > MAX_LIMITS_LENGTH or any(c in limits for c in "\r\n\x00"):
+            raise InputError("limits must be one line of NAME=VALUE pairs separated by commas")
+        _boolean(env.get("SYMBIOTE_UPLOAD_ARTIFACT", "true"), "upload-artifact")
+        from nexus_symbiote.signature_policy import MAX_POLICY_BYTES
+
         policy = env.get("SYMBIOTE_SIGNATURE_POLICY", "")
-        signers = _caller_owned(workspace, policy) if policy else None
+        signers = (
+            _caller_owned(workspace, policy, "signature-policy", MAX_POLICY_BYTES)
+            if policy
+            else None
+        )
         if signers is not None:
             _require_sigstore()
+        reviewed = env.get("SYMBIOTE_REVIEWED_BASELINE", "")
+        baseline = (
+            _caller_owned(workspace, reviewed, "reviewed-baseline", MAX_BASELINE_BYTES)
+            if reviewed
+            else None
+        )
         return cls(
             workspace,
             project,
             output,
             fmt,
             scanners,
-            _boolean(env.get("SYMBIOTE_VALIDATE", "true")),
-            _boolean(env.get("SYMBIOTE_RISK_CHECK", "true")),
+            _boolean(env.get("SYMBIOTE_VALIDATE", "true"), "validate"),
+            _boolean(env.get("SYMBIOTE_RISK_CHECK", "true"), "risk-check"),
             threshold,
-            _boolean(env.get("SYMBIOTE_SARIF", "false")),
+            _boolean(env.get("SYMBIOTE_SARIF", "false"), "sarif-upload"),
             signers,
+            _boolean(env.get("SYMBIOTE_VALIDATE_INTEGRITY", "true"), "validate-integrity"),
+            limits,
+            baseline,
         )
 
 
-def _run(args: list[str], *, private: Path) -> subprocess.CompletedProcess[str]:
+def _run(args: list[str], *, private: Path, limits: str = "") -> subprocess.CompletedProcess[str]:
     # Offline Sigstore verification trusts any trusted_root.json in the per-user
     # cache without checking it, and an earlier job or step can plant one there.
     # An empty private home makes sigstore seed it from its hash-locked package.
@@ -158,6 +249,10 @@ def _run(args: list[str], *, private: Path) -> subprocess.CompletedProcess[str]:
         "XDG_CACHE_HOME": str(private / "cache"),
         "XDG_DATA_HOME": str(private / "data"),
     }
+    # Collection limits come only from the limits input, never from the job environment.
+    env.pop(LIMITS_ENV, None)
+    if limits:
+        env[LIMITS_ENV] = limits
     # The executable is this interpreter; arguments never pass through a shell.
     return subprocess.run(  # noqa: S603
         [sys.executable, "-I", "-m", "nexus_symbiote", *args],
@@ -184,7 +279,109 @@ def _export(native: Path, output: Path, fmt: str, *, root: Path | None = None) -
     from nexus_symbiote.generators.spdx import SPDXGenerator
 
     generators = {"cyclonedx": CycloneDXGenerator, "sarif": SARIFGenerator, "spdx": SPDXGenerator}
-    _write(output, generators[fmt]().generate_json(AIBOM.load(native)), root=root)
+    try:
+        document = generators[fmt]().generate_json(AIBOM.load(native))
+    except (ValueError, RecursionError):
+        # Export checks quote inventory values; name the format, never the values.
+        raise ActionError(f"the {fmt} export failed its schema or consistency checks") from None
+    _write(output, document, root=root)
+
+
+def _imports_discovery(native: Path) -> bool:
+    from nexus_symbiote.core.aibom import AIBOM
+    from nexus_symbiote.generators._common import imports_discovery
+
+    try:
+        claim = AIBOM.load(native).metadata.completeness
+    except (OSError, ValueError, RecursionError):
+        raise ActionError("the collected inventory could not be read back") from None
+    return claim is not None and imports_discovery(claim)
+
+
+def _json_object(text: str) -> dict[str, Any] | None:
+    try:
+        document = json.loads(text)
+    except (ValueError, RecursionError):
+        return None
+    return document if isinstance(document, dict) else None
+
+
+def _report(lines: Iterable[tuple[str, str | None]]) -> list[str]:
+    return [text for text, _ in lines]
+
+
+def _section(document: Mapping[str, Any] | None, key: str, passed: bool) -> str:
+    states = {"pass": "passed", "fail": "failed", "unknown": "failed", "skipped": "skipped"}
+    section = document.get(key) if document is not None else None
+    status = section.get("status") if isinstance(section, Mapping) else None
+    return states.get(str(status), "passed" if passed else "failed")
+
+
+def _markdown(text: object) -> str:
+    # Backslash-escape every ASCII punctuation character so that no text becomes markup.
+    return re.sub(r"([!-/:-@\[-`{-~])", r"\\\1", _neutralize(text))
+
+
+class _Outputs:
+    def __init__(self, path: Path | None, workspace: Path) -> None:
+        self.path = path
+        self.workspace = workspace
+
+    def emit(self, **values: str) -> None:
+        if self.path is None:
+            return
+        with self.path.open("a", encoding="utf-8") as stream:
+            for name, value in values.items():
+                if any(c in value for c in "\r\n"):
+                    raise ActionError("invalid multiline Action output")
+                stream.write(f"{name}={value}\n")
+
+    def emit_path(self, name: str, path: Path) -> None:
+        # Upload steps take these paths as globs; only files in the workspace qualify.
+        if not path.resolve().is_relative_to(self.workspace):
+            raise ActionError("Action output paths must stay within GITHUB_WORKSPACE")
+        self.emit(**{name: str(path)})
+
+
+def _announce(config: Config) -> None:
+    _say("Nexus SymBiote AgentBOM Action")
+    _say(f"  scan-path: {_neutralize(config.project.relative_to(config.workspace))}")
+    if not config.validate:
+        _annotate(
+            "warning",
+            "validate is 'false': completeness and integrity are not checked, so nothing in "
+            "this run compares the inventory with the checkout or verifies a hash",
+        )
+    elif not config.integrity:
+        _annotate(
+            "warning",
+            "validate-integrity is 'false': only completeness is checked; no model, "
+            "instruction or tool hash or signature is verified",
+        )
+    if not config.risk_check:
+        _annotate(
+            "warning",
+            "risk-check is 'false': no finding, not even a critical one, fails this run",
+        )
+    elif config.threshold == 0:
+        _annotate(
+            "notice",
+            "risk-threshold is 0: the aggregate score does not fail this run; critical "
+            "findings, unverified SafeTensors, incomplete coverage and missing evidence still do",
+        )
+    if config.limits:
+        _annotate("notice", "collection limits set by the limits input: " + config.limits)
+    if config.baseline is None:
+        _say("  drift gate: not configured (set reviewed-baseline to fail on drift)")
+
+
+def _summary_text(result: str, gates: Mapping[str, str], notes: Iterable[str]) -> str:
+    rows = "".join(f"| {gate} | {status} |\n" for gate, status in gates.items())
+    body = "".join(f"- {note}\n" for note in notes)
+    return (
+        f"### Nexus SymBiote gates: {result}\n\n| Gate | Result |\n| --- | --- |\n{rows}\n"
+        f"{body}\nReasons and findings are in the job log of this step.\n"
+    )
 
 
 def run(
@@ -193,14 +390,45 @@ def run(
     command: Callable[[list[str]], subprocess.CompletedProcess[str]] | None = None,
     export: Callable[[Path, Path, str], None] | None = None,
     outputs: Path | None = None,
+    summary: Path | None = None,
 ) -> int:
-    def emit(**values: str) -> None:
-        if outputs is not None:
-            with outputs.open("a", encoding="utf-8") as stream:
-                for name, value in values.items():
-                    if any(c in value for c in "\r\n"):
-                        raise ValueError("invalid multiline Action output")
-                    stream.write(f"{name}={value}\n")
+    from nexus_symbiote.reporting import (
+        diff_report_lines,
+        risk_report_lines,
+        validation_report_lines,
+    )
+
+    out = _Outputs(outputs, config.workspace)
+    gates = dict.fromkeys(GATES, "not-run")
+    notes: list[str] = []
+    out.emit(
+        aibom_path="",
+        sarif_path="",
+        risk_score="",
+        passed="not-run",
+        validation_passed="not-run",
+        drift_passed="not-run",
+        drift_alerts="",
+        gates=json.dumps(gates),
+        result="failed",
+        signature_policy_digest="",
+    )
+
+    def record(gate: str, status: str) -> None:
+        gates[gate] = status
+        out.emit(gates=json.dumps(gates))
+
+    def finish() -> int:
+        result = "passed" if "failed" not in gates.values() else "failed"
+        if result == "passed" and gates["collection"] != "passed":
+            result = "failed"
+        out.emit(gates=json.dumps(gates), result=result)
+        if summary is not None:
+            with summary.open("a", encoding="utf-8") as stream:
+                stream.write(_summary_text(result, gates, notes))
+        states = ", ".join(f"{gate} {status}" for gate, status in gates.items())
+        _say(f"Nexus SymBiote result: {result} ({states})")
+        return 0 if result == "passed" else 1
 
     def emit_export(native: Path, output: Path, fmt: str) -> None:
         if export is None:
@@ -208,14 +436,14 @@ def run(
         else:
             export(native, output, fmt)
 
-    emit(risk_score="", passed="skipped")
+    _announce(config)
     with tempfile.TemporaryDirectory(prefix="nexus-symbiote-action-") as created:
         # The CLI refuses symlinked directories, and macOS temp paths contain one.
         scratch = Path(created).resolve(strict=True)
         if command is None:
             private = scratch / "home"
             private.mkdir(mode=0o700)
-            command = functools.partial(_run, private=private)
+            command = functools.partial(_run, private=private, limits=config.limits)
         native = scratch / "native.json"
         signers: list[str] = []
         if config.signature_policy is not None:
@@ -224,7 +452,7 @@ def run(
             snapshot.write_bytes(config.signature_policy)
             signers = ["--signature-policy", str(snapshot)]
             digest = hashlib.sha256(config.signature_policy).hexdigest()
-            emit(signature_policy_digest=f"sha256:{digest}")
+            out.emit(signature_policy_digest=f"sha256:{digest}")
         args = [
             "scan",
             "--no-project-policy",
@@ -238,67 +466,154 @@ def run(
         for scanner in config.scanners:
             args.extend(["--scanner", scanner])
         collected = command([*args, "--", str(config.project)])
+        _relay(
+            "nexus-symbiote scan (its own gate is reported, not enforced; the Action's gates follow)",
+            _process_lines(collected.stdout, collected.stderr),
+        )
         if collected.returncode != 0:
-            print(collected.stderr, file=sys.stderr)
-            return 1
+            record("collection", "failed")
+            _say("Collection did not complete: no inventory was written and no gate ran.")
+            return finish()
+        imported = config.format == "sarif" or config.sarif
+        imported = imported and _imports_discovery(native)
+        if imported and config.format == "sarif":
+            record("collection", "failed")
+            _say(
+                "format 'sarif' cannot carry imported ShadowScan discovery coverage; choose "
+                "json, cyclonedx or spdx. No artifact was exported and no gate ran."
+            )
+            return finish()
         emit_export(native, config.output, config.format)
-        emit(aibom_path=str(config.output))
-        inventory = json.loads(native.read_text(encoding="utf-8"))
-        if inventory.get("metadata", {}).get("completeness", {}).get("scan_failures"):
-            print("Collection failed; review the partial inventory", file=sys.stderr)
-            return 1
-        if config.sarif:
+        out.emit_path("aibom_path", config.output)
+        inventory = _json_object(native.read_text(encoding="utf-8")) or {}
+        claim = (inventory.get("metadata") or {}).get("completeness") or {}
+        failures = claim.get("scan_failures")
+        if failures:
+            record("collection", "failed")
+            _say(
+                f"Collection failed: {len(failures)} collection failures were recorded (listed "
+                "above and in the inventory's metadata.completeness), so no gate ran."
+            )
+            return finish()
+        record("collection", "passed")
+        if config.sarif and imported:
+            _annotate(
+                "warning",
+                "SARIF upload skipped: the inventory merges imported ShadowScan discovery, "
+                "whose coverage SARIF cannot carry; the evidence artifact keeps it",
+            )
+            notes.append("SARIF upload skipped: imported discovery cannot be carried in SARIF")
+        elif config.sarif:
             sarif = config.output.with_name(config.output.name + ".sarif")
             emit_export(native, sarif, "sarif")
-            emit(sarif_path=str(sarif))
-        if config.validate:
-            validated = command(
-                [
-                    "validate",
-                    "--no-project-policy",
-                    str(native),
-                    "--project",
-                    str(config.project),
-                    *signers,
-                ]
+            out.emit_path("sarif_path", sarif)
+
+        if not config.validate:
+            record("completeness", "skipped")
+            record("integrity", "skipped")
+            out.emit(validation_passed="skipped")
+        else:
+            arguments = ["validate", "--no-project-policy", "--json-output", str(native)]
+            arguments += ["--project", str(config.project), *signers]
+            if not config.integrity:
+                arguments.append("--skip-integrity")
+            validated = command(arguments)
+            document = _json_object(validated.stdout)
+            passed = (
+                validated.returncode == 0
+                and document is not None
+                and document.get("passed", True) is True
             )
-            if validated.returncode != 0:
-                print(validated.stderr, file=sys.stderr)
-                return 1
-        if config.risk_check and config.threshold != 0:
-            scored = command(
-                [
-                    "risk",
-                    "--no-project-policy",
-                    str(native),
-                    "--threshold",
-                    str(config.threshold),
-                    "--json-output",
-                ]
+            scanned = config.project.relative_to(config.workspace)
+            shown = (
+                _report(validation_report_lines(document, project=scanned))
+                if document is not None
+                else []
             )
+            _relay("nexus-symbiote validate", [*shown, *_process_lines(validated.stderr)])
+            completeness = _section(document, "completeness", passed)
+            integrity = _section(document, "integrity", passed) if config.integrity else "skipped"
+            if not passed and "failed" not in (completeness, integrity):
+                # The discovery producer, assurance and graph checks gate with completeness.
+                completeness = "failed"
+            record("completeness", completeness)
+            record("integrity", integrity)
+            out.emit(validation_passed="true" if passed else "false")
+
+        if not config.risk_check:
+            record("risk", "skipped")
+            out.emit(passed="skipped")
+        else:
+            arguments = ["risk", "--no-project-policy", str(native), "--json-output"]
+            if config.threshold == 0:
+                arguments.append("--no-score-threshold")
+            else:
+                arguments += ["--threshold", str(config.threshold)]
+            scored = command(arguments)
             if scored.returncode not in {0, 1}:
-                raise ValueError("risk evaluation failed to run")
-            report = json.loads(scored.stdout)
-            score = report.get("overall_score")
+                _relay("nexus-symbiote risk", _process_lines(scored.stderr))
+                raise ActionError("risk evaluation failed to run")
+            report = _json_object(scored.stdout)
+            score = report.get("overall_score") if report is not None else None
             if (
-                isinstance(score, bool)
+                report is None
+                or isinstance(score, bool)
                 or not isinstance(score, (int, float))
                 or not math.isfinite(score)
             ):
-                raise ValueError("risk evaluation returned no finite numeric score")
-            emit(risk_score=str(score), passed="true" if scored.returncode == 0 else "false")
-            if scored.returncode != 0:
-                return 1
-    return 0
+                raise ActionError("risk evaluation returned no finite numeric score")
+            passed = scored.returncode == 0 and report.get("passed", True) is True
+            shown = _report(risk_report_lines({**report, "passed": passed}))
+            _relay("nexus-symbiote risk", [*shown, *_process_lines(scored.stderr)])
+            out.emit(risk_score=str(score), passed="true" if passed else "false")
+            record("risk", "passed" if passed else "failed")
+            notes.append(f"Risk score: {float(score):.1f}")
+            if not passed:
+                reasons = [_markdown(r) for r in report.get("gate_reasons") or []]
+                notes.extend(f"Risk gate reason: {reason}" for reason in reasons)
+
+        if config.baseline is None:
+            record("drift", "skipped")
+            out.emit(drift_passed="skipped")
+        else:
+            reviewed = scratch / "reviewed-baseline.json"
+            reviewed.write_bytes(config.baseline)
+            compared = command(
+                ["diff", str(reviewed), str(native), "--fail-on-alert", "--json-output"]
+            )
+            document = _json_object(compared.stdout)
+            if document is None:
+                _relay("nexus-symbiote diff", _process_lines(compared.stderr))
+                _say("The reviewed baseline could not be compared: is it a native AgentBOM?")
+                record("drift", "failed")
+                out.emit(drift_passed="false")
+            else:
+                alerts = len(document.get("security_alerts") or [])
+                passed = compared.returncode == 0 and alerts == 0
+                shown = _report(diff_report_lines(document))
+                _relay("nexus-symbiote diff", [*shown, *_process_lines(compared.stderr)])
+                out.emit(drift_passed="true" if passed else "false", drift_alerts=str(alerts))
+                record("drift", "passed" if passed else "failed")
+                notes.append(f"Drift alerts against the reviewed baseline: {alerts}")
+    return finish()
 
 
 def main() -> int:
     try:
         config = Config.from_env(os.environ)
-        output_path = Path(os.environ["GITHUB_OUTPUT"]) if os.environ.get("GITHUB_OUTPUT") else None
-        return run(config, outputs=output_path)
-    except (OSError, ValueError, KeyError) as exc:
-        print(f"Nexus SymBiote action failed: {exc}", file=sys.stderr)
+        outputs = os.environ.get("GITHUB_OUTPUT")
+        summary = os.environ.get("GITHUB_STEP_SUMMARY")
+        return run(
+            config,
+            outputs=Path(outputs) if outputs else None,
+            summary=Path(summary) if summary else None,
+        )
+    except (InputError, ActionError) as exc:
+        _say(f"Nexus SymBiote action failed: {exc}")
+        return 1
+    except Exception as exc:
+        # Other messages can quote inventory or checkout text; name only the error class.
+        _say(f"Nexus SymBiote action failed: unexpected {type(exc).__name__}")
         return 1
 
 

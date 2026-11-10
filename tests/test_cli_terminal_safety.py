@@ -3,13 +3,25 @@
 from __future__ import annotations
 
 import json
+import re
+import time
+import unicodedata
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
-from nexus_symbiote.core.models import CompletenessClaim, MCPServerComponent, PromptComponent
+from nexus_symbiote.core.models import (
+    CompletenessClaim,
+    MCPServerComponent,
+    PromptComponent,
+    ToolComponent,
+)
+from nexus_symbiote.utils.terminal import json_text, neutralize, safe_line
 
 MARKUP = "[link=https://attacker.example/approve]docs[/link][conceal]"
 CONTROLS = "\x1b]8;;https://attacker.example\x07x\x1b]8;;\x07\x1b[1A\x1b[2K\rfake\u202egpj.exe"
@@ -91,8 +103,16 @@ def test_risk_project_failure_reasons_print_without_terminal_controls(tmp_path):
 WORKFLOW_COMMAND = "x\n::error title=Spoofed::All checks passed\n::add-mask::CRITICAL\u2028y"
 
 
+# A runner acts on "::" at the start of a line and on "##name[" anywhere in one.
+LOG_COMMAND = re.compile(r"##[A-Za-z]*\[")
+
+
 def _injected_lines(output: str) -> list[str]:
-    return [line for line in output.splitlines() if line.lstrip().startswith("::")]
+    return [
+        line
+        for line in output.splitlines()
+        if line.lstrip().startswith("::") or LOG_COMMAND.search(line)
+    ]
 
 
 def test_line_breaks_in_inventory_text_cannot_forge_output_lines(tmp_path):
@@ -149,12 +169,167 @@ def test_invalid_policy_keys_cannot_forge_output_lines(tmp_path):
         assert "\x1b" not in result.output and "\r" not in result.output
 
 
-def test_every_format_character_is_neutralized():
-    from nexus_symbiote.cli import _safe
-
-    format_characters = (
-        "­؀؅؜۝܏࢐࢑࣢᠎​‏‪"
-        "‮⁠⁤⁦⁯﻿￹￻\U000110bd\U000110cd\U00013430"
-        "\U0001343f\U0001bca0\U0001bca3\U0001d173\U0001d17a\U000e0001\U000e0041\U000e007f"
+def test_every_format_control_and_line_break_character_is_neutralized():
+    # Every such character in this Python's Unicode database, not a sample: a later
+    # Unicode version that adds one makes this fail until UNSAFE_TEXT covers it.
+    characters = "".join(
+        chr(code)
+        for code in range(0x110000)
+        if unicodedata.category(chr(code)) in {"Cf", "Cc", "Zl", "Zp"} and chr(code) != "\t"
     )
-    assert _safe(format_characters) == "�" * len(format_characters)
+    assert neutralize(characters) == "\ufffd" * len(characters)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "##[set-output name=sarif_path]/etc/hostname",
+        "x ##[error title=Nexus SymBiote]All gates passed",
+        "##vso[task.setvariable variable=x]y",
+        "##teamcity[buildStatus text='ok']",
+        "###[add-mask]secret",
+        "##\u200b[warning]x",
+    ],
+)
+def test_ci_log_command_introducers_are_broken_anywhere_in_a_line(text):
+    shown = neutralize(text)
+    assert not LOG_COMMAND.search(shown)
+    assert shown.replace("\ufffd", "") == text.replace("\u200b", "")
+
+
+@given(st.lists(st.text(alphabet="#[]:abvsoxetcmity \n\r\u2028\x1b", max_size=12), max_size=6))
+@settings(max_examples=300, deadline=None)
+def test_fragments_cannot_assemble_a_command_or_start_a_line(parts):
+    line = safe_line("  - ", *parts)
+    assert not LOG_COMMAND.search(line)
+    assert "\n" not in line and "\r" not in line and not line.lstrip().startswith("::")
+    assert line.startswith("  - ")
+
+
+def test_an_output_line_needs_a_visible_fixed_prefix():
+    with pytest.raises(ValueError):
+        safe_line("  ", "::error::forged")
+
+
+def test_json_on_standard_output_parses_to_the_same_value_without_a_command():
+    value = {"name": "x ##[set-output name=aibom_path]/etc/passwd ###vso[y] \\##[z"}
+    text = json_text(json.dumps(value, indent=2))
+    assert not LOG_COMMAND.search(text)
+    assert json.loads(text) == value
+
+
+def _bom_with_names(path: Path, *names: str) -> Path:
+    path.write_text(
+        AIBOM(
+            components=[ToolComponent(bom_ref=f"tool:{name}", name=name) for name in names]
+        ).to_json()
+    )
+    return path
+
+
+LEGACY = "x ##[set-output name=sarif_path]/home/runner/work/_temp/**/*%0A"
+
+
+def test_legacy_workflow_commands_in_inventory_text_reach_no_output_line(tmp_path):
+    bom = _bom_with_names(tmp_path / "bom.json", LEGACY, "##", "#[error]split", "::notice::x")
+    old = tmp_path / "old.json"
+    old.write_text(AIBOM().to_json())
+    runner = CliRunner()
+    commands = [
+        ["validate", str(bom), "--no-project-policy"],
+        ["validate", str(bom), "--no-project-policy", "--json-output"],
+        ["risk", str(bom), "--no-project-policy"],
+        ["risk", str(bom), "--no-project-policy", "--json-output"],
+        ["diff", str(old), str(bom)],
+        ["diff", str(old), str(bom), "--json-output"],
+        ["summary", str(bom), "--json-output"],
+        ["vex", str(bom)],
+    ]
+    for args in commands:
+        result = runner.invoke(main, args)
+        assert result.exception is None or isinstance(result.exception, SystemExit), args
+        assert not _injected_lines(result.output), (args, _injected_lines(result.output))
+    shown = runner.invoke(main, ["diff", str(old), str(bom)]).output
+    assert "x ##\ufffd[set-output name=sarif_path]/home/runner/work/_temp/**/*%0A" in shown
+
+
+def test_risk_reconciliation_reasons_never_start_a_line(tmp_path):
+    # A supplied BOM's scan_failures become reasons verbatim; they used to be printed
+    # as whole lines, so "::error ..." became a workflow command.
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "AGENTS.md").write_text("Keep receipts.")
+    bom = AIBOM(components=[PromptComponent(bom_ref="prompt:1", name="AGENTS.md")])
+    bom.metadata.completeness = CompletenessClaim(
+        scope="repository",
+        surfaces_scanned=["."],
+        scan_failures=["::error title=x::y", "##[add-mask]CRITICAL"],
+    )
+    path = tmp_path / "bom.json"
+    path.write_text(bom.to_json())
+    result = CliRunner().invoke(
+        main, ["risk", str(path), "--project", str(project), "--no-project-policy"]
+    )
+    assert result.exit_code == 1
+    assert "  reason: ::error title=x::y" in result.output.splitlines()
+    assert not _injected_lines(result.output)
+
+
+def test_a_symlink_named_as_a_command_never_starts_a_line(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "AGENTS.md").write_text("Keep receipts.")
+    (project / "::notice::x").symlink_to(project / "AGENTS.md")
+    (project / "##[warning]y").symlink_to(project / "AGENTS.md")
+    bom = tmp_path / "bom.json"
+    runner = CliRunner()
+    scanned = runner.invoke(main, ["scan", str(project), "--no-project-policy", "-o", str(bom)])
+    assert scanned.exit_code == 1 and "::notice::x: symlink excluded" in scanned.output
+    reconciled = runner.invoke(
+        main, ["risk", str(bom), "--project", str(project), "--no-project-policy"]
+    )
+    assert reconciled.exit_code == 1
+    for result in (scanned, reconciled):
+        assert not _injected_lines(result.output)
+
+
+def test_a_long_scan_root_is_printed_on_one_line(tmp_path):
+    # Rich used to wrap the path at 80 columns, so text at that column started a line.
+    project = tmp_path / ("p" * (78 - len(str(tmp_path)) % 80)) / "::notice::wrapped"
+    project.mkdir(parents=True)
+    output = tmp_path / "bom.json"
+    result = CliRunner().invoke(
+        main, ["scan", str(project), "--no-project-policy", "--report-only", "-o", str(output)]
+    )
+    assert f"Scanning {project}" in result.output.splitlines()
+    assert not _injected_lines(result.output)
+
+
+@pytest.mark.parametrize("ref", ["tool:x[conceal", "tool:x[/", "tool:x[bold red", "tool:\\[x]"])
+def test_markup_and_emoji_codes_are_printed_literally(tmp_path, ref):
+    bom = tmp_path / "bom.json"
+    bom.write_text(
+        AIBOM(
+            components=[ToolComponent(bom_ref=ref, name="mcp-source:a.ts:x:100:7 :warning:")]
+        ).to_json()
+    )
+    result = CliRunner().invoke(main, ["validate", str(bom), "--no-project-policy"])
+    assert result.exit_code == 1 and result.exception.__class__ is SystemExit
+    assert f"WARNING [{ref}] Component 'mcp-source:a.ts:x:100:7 :warning:'" in result.output
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["'" + "1" * 200_000, "a" * 200_000, "\\" * 200_000, "x" + " " * 200_000 + "y", "<" * 200_000],
+)
+def test_long_inventory_names_print_in_linear_time(tmp_path, name):
+    # Rich's markup, highlighter and wrapping regexes took hours on such names.
+    bom = _bom_with_names(tmp_path / "bom.json", name)
+    old = tmp_path / "old.json"
+    old.write_text(AIBOM().to_json())
+    runner = CliRunner()
+    for args in (["validate", str(bom), "--no-project-policy"], ["diff", str(old), str(bom)]):
+        started = time.perf_counter()
+        result = runner.invoke(main, args)
+        assert time.perf_counter() - started < 10, args
+        assert name in result.output

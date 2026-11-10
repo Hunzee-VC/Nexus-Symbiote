@@ -12,7 +12,7 @@ import click
 
 from nexus_symbiote import modes
 from nexus_symbiote.core.aibom import AIBOM
-from nexus_symbiote.utils.terminal import neutralize, output_failure, write_cli_output
+from nexus_symbiote.utils.terminal import json_text, neutralize, output_failure, write_cli_output
 
 
 def _load_inventory(path: Path) -> AIBOM:
@@ -156,8 +156,18 @@ def register_supply_chain_commands(main: click.Group) -> None:
             )
             # A project policy may select report-only mode; it cannot authorize
             # promotion of incomplete evidence into an approved baseline.
-            passed, _ = RiskScorer().passes_gate(AIBOM.load(staged))
+            scorer = RiskScorer()
+            passed, report = scorer.passes_gate(AIBOM.load(staged))
             if not passed:
+                from nexus_symbiote.reporting import gate_reason_lines, print_lines
+
+                document = {
+                    **report.to_dict(),
+                    "fail_on_severity": scorer.fail_on_severity,
+                    "score_threshold": scorer.fail_threshold,
+                }
+                heading = "Built-in scan gate failed; a project policy cannot relax it here:"
+                print_lines([(heading, "red"), *gate_reason_lines(document)], err=True)
                 raise click.ClickException("Baseline was not written: static scan gate failed")
             write_cli_output(target, staged.read_text(encoding="utf-8"))
         finally:
@@ -188,7 +198,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
         if output:
             write_cli_output(output, text)
         else:
-            click.echo(text)
+            click.echo(json_text(text))
 
     @main.command()
     @click.argument("aibom_path", type=click.Path(exists=True, path_type=Path))

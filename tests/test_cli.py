@@ -215,7 +215,10 @@ class TestValidateCommand:
         bom_path = tmp_path / "test.json"
         runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_path)])
         result = runner.invoke(main, ["validate", str(bom_path)])
-        assert result.exit_code in (0, 1)
+        # The zero-filled SafeTensors file and the prompt cannot be verified without a project.
+        assert result.exit_code == 1
+        assert "Assessment basis: supplied-bom" in result.stdout
+        assert result.stdout.splitlines()[-1] == "Validation: FAILED"
 
     def test_validate_with_project(self, tmp_path):
         project = _create_test_project(tmp_path)
@@ -223,7 +226,10 @@ class TestValidateCommand:
         bom_path = tmp_path / "test.json"
         runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_path)])
         result = runner.invoke(main, ["validate", str(bom_path), "--project", str(project)])
-        assert result.exit_code in (0, 1)
+        assert result.exit_code == 1
+        lines = result.stdout.splitlines()
+        assert any(line.startswith("Assessment basis: project-reconciled") for line in lines)
+        assert lines[lines.index("Integrity check") + 1] == "  Status: UNKNOWN"
 
 
 class TestRiskCommand:
@@ -233,7 +239,8 @@ class TestRiskCommand:
         bom_path = tmp_path / "test.json"
         runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_path)])
         result = runner.invoke(main, ["risk", str(bom_path)])
-        assert result.exit_code in (0, 1)
+        assert result.exit_code == 1
+        assert "  reason: SafeTensors structural safety is unverified" in result.stdout.splitlines()
 
     def test_risk_json_output(self, tmp_path):
         project = _create_test_project(tmp_path)
@@ -242,8 +249,10 @@ class TestRiskCommand:
         runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_path)])
         result = runner.invoke(main, ["risk", str(bom_path), "--json-output"])
         data = json.loads(result.output)
+        assert result.exit_code == 1 and data["passed"] is False
         assert "overall_score" in data
         assert "risk_level" in data
+        assert data["gate_reasons"] == ["SafeTensors structural safety is unverified"]
 
     def test_risk_custom_threshold(self, tmp_path):
         project = _create_test_project(tmp_path)
@@ -276,6 +285,11 @@ class TestDiffCommand:
 
         result = runner.invoke(main, ["diff", str(bom_a), str(bom_b)])
         assert result.exit_code == 0
+        assert "changes detected" in result.stdout
+        assert any(line.startswith("  + langchain") for line in result.stdout.splitlines())
+        assert (
+            runner.invoke(main, ["diff", str(bom_a), str(bom_b), "--fail-on-alert"]).exit_code == 1
+        )
 
     def test_diff_json_output(self, tmp_path):
         project = _create_test_project(tmp_path)
