@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 
 import pytest
@@ -116,6 +117,7 @@ def ci_workflow():
         ("quality", "scripts/check_locks.py"),
         ("action", "sys.exit(bool(failures))"),
         ("action-annotations", "symbiote-injected-annotation"),
+        ("action-annotations", "set-output"),
     ],
 )
 def test_a_gate_job_hollowed_out_under_its_name_is_rejected(tmp_path, job, command):
@@ -126,6 +128,172 @@ def test_a_gate_job_hollowed_out_under_its_name_is_rejected(tmp_path, job, comma
     path = tmp_path / "ci.yml"
     path.write_text(yaml.safe_dump(workflow))
     assert any(f"{job} no longer runs {command}" in error for error in checker.check(path))
+
+
+def workflow_errors(tmp_path, name, change):
+    """The checker's errors for the repository's workflow `name` after `change` edits it."""
+    workflow = yaml.safe_load((ROOT / ".github/workflows" / name).read_text())
+    change(workflow["jobs"])
+    path = tmp_path / name
+    path.write_text(yaml.safe_dump(workflow))
+    return checker.check(path)
+
+
+def step_running(job, command):
+    return next(step for step in job["steps"] if command in step.get("run", step.get("uses", "")))
+
+
+def condition(job, command, value):
+    def change(jobs):
+        step_running(jobs[job], command)["if"] = value
+
+    return change
+
+
+@pytest.mark.parametrize(
+    "name,job,command,value",
+    [
+        ("ci.yml", "test", "python -m pytest", False),
+        ("ci.yml", "quality", "mypy src/nexus_symbiote scripts", "false"),
+        ("ci.yml", "quality", "scripts/check_workflows.py", "${{ false }}"),
+        ("ci.yml", "coverage", "scripts/check_coverage.py", "github.event_name == 'never'"),
+        ("ci.yml", "codeql", "github/codeql-action/init@", False),
+        ("ci.yml", "action", "sys.exit(bool(failures))", False),
+        ("ci.yml", "action-annotations", "symbiote-injected-annotation", "failure()"),
+        (
+            "release.yml",
+            "build",
+            "scripts/check_repository_controls.py",
+            "inputs.publish == 'never'",
+        ),
+        # The preflight's reviewed condition does not carry over to another gate.
+        ("release.yml", "build", "python -m pytest", "inputs.publish != 'none'"),
+        ("release.yml", "compatibility", "scripts/check_installed_wheel.py", False),
+    ],
+)
+def test_a_gate_step_that_a_condition_can_skip_is_rejected(tmp_path, name, job, command, value):
+    errors = workflow_errors(tmp_path, name, condition(job, command, value))
+    assert any(f"{job} may skip {command}" in error for error in errors), errors
+
+
+@pytest.mark.parametrize(
+    "name,job,value",
+    [
+        ("ci.yml", "quality", False),
+        ("ci.yml", "test", "github.event_name == 'push'"),
+        ("ci.yml", "action-annotations", "success() && false"),
+        ("release.yml", "build", "github.ref == 'refs/heads/release'"),
+        ("release.yml", "compatibility", "${{ false }}"),
+    ],
+)
+def test_a_required_job_that_a_condition_can_skip_is_rejected(tmp_path, name, job, value):
+    def change(jobs):
+        jobs[job]["if"] = value
+
+    errors = workflow_errors(tmp_path, name, change)
+    assert any(f"required job {job} may be skipped" in error for error in errors), errors
+
+
+@pytest.mark.parametrize("value", ["success()", "always()", "${{ always() }}", " ${{success()}} "])
+def test_a_gate_may_run_on_success_or_always(tmp_path, value):
+    def change(jobs):
+        for job, command in (("test", "python -m pytest"), ("codeql", "init@")):
+            step_running(jobs[job], command)["if"] = value
+        jobs["quality"]["if"] = value
+
+    assert workflow_errors(tmp_path, "ci.yml", change) == []
+
+
+def edit_run(job, command, old, new):
+    def change(jobs):
+        step = step_running(jobs[job], command)
+        assert old in step["run"]
+        step["run"] = step["run"].replace(old, new, 1)
+
+    return change
+
+
+TEST_STEP = 'tee "$PYTEST_LOG"\n'
+# A here-string is not a here-document: the next line still runs as a command.
+HERE_STRING = "cat <<<EOF\nmypy src/nexus_symbiote scripts || true\nEOF"
+
+
+@pytest.mark.parametrize(
+    "name,job,command,old,new",
+    [
+        ("release.yml", "build", "python -m pytest", "--strict-skips", "--strict-skips || true"),
+        ("release.yml", "build", "python -m pytest", "--strict-skips", "--strict-skips ||true"),
+        ("release.yml", "build", "python -m pytest", "--strict-skips", "--strict-skips \\\n|| :"),
+        ("release.yml", "build", "python -m pytest", "--strict-skips", "--strict-skips ||\n true"),
+        ("ci.yml", "test", "python -m pytest", TEST_STEP, 'tee "$PYTEST_LOG" || true\n'),
+        ("ci.yml", "test", "python -m pytest", TEST_STEP, 'tee "$PYTEST_LOG" &\n'),
+        ("ci.yml", "quality", "mypy src", "mypy src/nexus_symbiote scripts", HERE_STRING),
+        ("ci.yml", "test", "python -m pytest", "\n  '\n", "\n  ' || exit 0\n"),
+        ("ci.yml", "quality", "mypy src/nexus_symbiote scripts", "scripts", "scripts || :"),
+        ("ci.yml", "quality", "scripts/check_locks.py", ".py", ".py; true"),
+        ("ci.yml", "quality", "scripts/check_workflows.py", ".py", ".py || /usr/bin/true"),
+        ("ci.yml", "distribution", "python -m build --no-isolation", "isolation", "isolation &"),
+        ("ci.yml", "action-annotations", "gh api --paginate", '/check-runs"\n', '/check-runs" &\n'),
+        ("ci.yml", "action", "sys.exit(bool(failures))", "<<'PY'", "<<'PY' || true"),
+        ("release.yml", "build", "check_repository_controls", '"$PUBLISH"', '"$PUBLISH" || echo'),
+    ],
+)
+def test_a_gate_command_whose_status_is_discarded_is_rejected(
+    tmp_path, name, job, command, old, new
+):
+    errors = workflow_errors(tmp_path, name, edit_run(job, command, old, new))
+    assert any(f"{job} discards the exit status of" in error for error in errors), errors
+
+
+@pytest.mark.parametrize(
+    "job,command,old,new",
+    [
+        ("quality", "mypy src", "mypy", "pip cache purge || true\nmypy"),
+        ("quality", "mypy src", "scripts", "scripts || exit 1"),
+        ("quality", "mypy src", "scripts", "scripts || { echo 'mypy failed'; exit 1; }"),
+        ("action", "$EVIDENCE/hostile.json", "set -euo", "echo 'a & b || true' >&2\nset -euo"),
+        ("action-annotations", "gh api", '/jobs"', '/jobs?per_page=100&filter=latest"'),
+        ("quality", "check_locks", ".py", '.py --title "Locks & pins"'),
+    ],
+)
+def test_status_handling_that_keeps_the_gate_is_accepted(tmp_path, job, command, old, new):
+    assert workflow_errors(tmp_path, "ci.yml", edit_run(job, command, old, new)) == []
+
+
+@pytest.mark.parametrize(
+    "old,new",
+    [
+        ("mypy src/nexus_symbiote scripts", "true # mypy src/nexus_symbiote scripts"),
+        ("mypy src/nexus_symbiote scripts", "# mypy src/nexus_symbiote scripts\ntrue"),
+        ("mypy src/nexus_symbiote scripts", "true;# mypy src/nexus_symbiote scripts"),
+    ],
+)
+def test_a_gate_command_left_only_in_a_comment_is_rejected(tmp_path, old, new):
+    errors = workflow_errors(tmp_path, "ci.yml", edit_run("quality", "mypy", old, new))
+    assert any("quality no longer runs mypy src/nexus_symbiote scripts" in e for e in errors)
+
+
+def test_the_annotation_check_fails_on_the_runners_legacy_command_warning(tmp_path):
+    # The Action pre-seeds its outputs in GITHUB_OUTPUT, so a set-output that the runner
+    # executed changes nothing; the deprecation warning it annotates is the only trace.
+    step = step_running(ci_workflow()["jobs"]["action-annotations"], "gh api --paginate")
+    pattern = re.compile(re.search(r"grep -Ei '([^']+)'", step["run"])[1], re.IGNORECASE)
+    deprecated = (
+        "The `{}` command is deprecated and will be disabled soon. Please upgrade to using"
+        " Environment Files."
+    )
+    assert pattern.search(deprecated.format("set-output"))
+    assert pattern.search(deprecated.format("save-state"))
+    assert pattern.search("Warning ##[warning]symbiote-injected-annotation.pkl")
+    assert not pattern.search(" Process completed with exit code 1.")
+    reverted = edit_run(
+        "action-annotations",
+        "gh api --paginate",
+        "grep -Ei 'symbiote-injected-annotation|set-output|save-state'",
+        "grep -F 'symbiote-injected-annotation'",
+    )
+    errors = workflow_errors(tmp_path, "ci.yml", reverted)
+    assert any("action-annotations no longer runs set-output" in error for error in errors)
 
 
 def test_a_gating_job_cannot_continue_on_error(tmp_path):
@@ -243,3 +411,36 @@ def test_a_step_may_continue_on_error_only_when_its_outcome_is_checked(tmp_path)
     workflow["jobs"]["codeql"]["continue-on-error"] = True
     path.write_text(yaml.safe_dump(workflow))
     assert any("continue on error" in error for error in checker.check(path))
+
+
+@pytest.mark.parametrize(
+    "value,swallowed",
+    [
+        (False, True),
+        ("failure()", True),
+        ("always()", False),
+        ("steps.probe.outcome != 'failure'", False),
+    ],
+)
+def test_the_step_that_checks_an_outcome_must_run(tmp_path, value, swallowed):
+    workflow = ci_workflow()
+    steps = workflow["jobs"]["codeql"]["steps"]
+    steps[-2].update({"id": "probe", "continue-on-error": True})
+    steps.append(
+        {
+            "name": "The probe must have failed",
+            "if": value,
+            "env": {"OUTCOME": "${{ steps.probe.outcome }}"},
+            "run": 'test "$OUTCOME" = failure',
+        }
+    )
+    path = tmp_path / "ci.yml"
+    path.write_text(yaml.safe_dump(workflow))
+    assert any("continue on error" in error for error in checker.check(path)) is swallowed
+
+
+def test_the_action_jobs_outcome_assertions_must_run(tmp_path):
+    errors = workflow_errors(
+        tmp_path, "ci.yml", condition("action", "sys.exit(bool(failures))", False)
+    )
+    assert any("action must not continue on error" in error for error in errors), errors

@@ -334,7 +334,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
             # replace the command's result.
             with contextlib.suppress(OSError):
                 staged.unlink(missing_ok=True)
-        click.echo(f"Unsigned baseline staged for review: {target}")
+        echo_line("Unsigned baseline staged for review: ", target)
 
     @main.command()
     @click.argument("aibom_path", type=click.Path(exists=True, path_type=Path))

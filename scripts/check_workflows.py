@@ -6,8 +6,9 @@ and are checked like any other. Expressions never reach shell source. Workflows 
 reviewed triggers, read-only top-level permissions, write scopes only in the reviewed jobs
 that need them, a job time limit and checkouts without persisted credentials; scheduled runs
 cannot cancel each other. In the gating workflows no job continues on error, a step may only
-when a later step reads its outcome, and each verification job still runs the command that
-makes it a gate.
+when a later step that runs reads its outcome, and each verification job still runs the
+command that makes it a gate: outside a shell comment, in a job and a step that only a
+reviewed condition can skip, and without discarding the command's exit status.
 """
 
 from __future__ import annotations
@@ -109,14 +110,15 @@ REQUIRED_COMMANDS: dict[str, dict[str, tuple[str, ...]]] = {
         ),
         # The composite Action from this checkout on passing, failing and hostile fixtures,
         # with each leg's outcome, outputs and evidence checked; then no annotation the
-        # hostile fixture planted may exist on the run.
+        # hostile fixture planted may exist on the run, nor the runner's warning that it
+        # executed a set-output command, the only trace one leaves.
         "action": (
             "./",
             "symbiote-injected-annotation",
             "sys.exit(bool(failures))",
             "$EVIDENCE/hostile.json",
         ),
-        "action-annotations": ("gh api --paginate", "symbiote-injected-annotation"),
+        "action-annotations": ("gh api --paginate", "symbiote-injected-annotation", "set-output"),
     },
     "release.yml": {
         "build": (
@@ -130,6 +132,27 @@ REQUIRED_COMMANDS: dict[str, dict[str, tuple[str, ...]]] = {
         "compatibility": ("scripts/check_installed_wheel.py",),
     },
 }
+# A gate job or step runs by default, with success() or with always(). Besides those, the
+# release build runs only from main, and its repository-controls preflight only for a run
+# that publishes, as the publish job does; neither condition may skip any other gate.
+ALWAYS_RUNS = frozenset({"success()", "always()"})
+REVIEWED_JOB_CONDITIONS: dict[str, dict[str, str]] = {
+    "release.yml": {"build": "github.ref == 'refs/heads/main'"},
+}
+REVIEWED_STEP_CONDITIONS: dict[str, dict[str, frozenset[str]]] = {
+    "release.yml": {
+        "inputs.publish != 'none'": frozenset({"scripts/check_repository_controls.py", "--publish"})
+    },
+}
+# After a gate command on its line: "|| true", "|| :", "|| exit 0" or "|| echo" turn its
+# failure into success, "; true" ends the line in success whatever it returned, and a
+# trailing "&" runs it in the background.
+DISCARDED = re.compile(
+    r"\|\|\s*(?:true|:|exit\s+0|(?:/usr)?/bin/true|echo|printf)(?![\w./-])"
+    r"|;\s*(?:true|:|exit\s+0|(?:/usr)?/bin/true)(?![\w./-])"
+    r"|(?<![&|<>])&[\s'\")}]*$"
+)
+HEREDOC = re.compile(r"<<(-?)[ \t]*(['\"]?)([A-Za-z_][\w.-]*)\2")
 
 
 def _triggers(document: dict[Any, Any]) -> set[str]:
@@ -185,28 +208,160 @@ def _steps(job: dict[str, Any]) -> list[dict[str, Any]]:
     return [step for step in steps if isinstance(step, dict)] if isinstance(steps, list) else []
 
 
+def _condition(entry: dict[str, Any]) -> str | None:
+    """A job's or step's `if:` without the optional ${{ }} around it; None when it has none."""
+    if "if" not in entry:
+        return None
+    value = entry["if"]
+    text = value.strip() if isinstance(value, str) else json.dumps(value, default=str)
+    if text.startswith("${{") and text.endswith("}}"):
+        text = text[3:-2].strip()
+    return text
+
+
 def _continues_unchecked(job: dict[str, Any]) -> bool:
-    """A job that continues on error, or a step that does with nothing reading its outcome."""
+    """A job that continues on error, or a step that does with no step reading its outcome.
+
+    Only a later step sure to run counts: one with no condition beyond success() or
+    always(), or one whose condition reads that outcome.
+    """
     if job.get("continue-on-error", False) is not False:
         return True
     steps = _steps(job)
     for index, step in enumerate(steps):
         if step.get("continue-on-error", False) is False:
             continue
-        identifier = step.get("id")
-        later = json.dumps(steps[index + 1 :])
-        if not isinstance(identifier, str) or f"steps.{identifier}.outcome" not in later:
+        outcome = f"steps.{step.get('id')}.outcome"
+        if not isinstance(step.get("id"), str) or not any(
+            outcome in json.dumps(later, default=str)
+            and (_condition(later) in (None, *ALWAYS_RUNS) or outcome in str(later["if"]))
+            for later in steps[index + 1 :]
+        ):
             return True
     return False
 
 
-def _job_text(job: dict[str, Any]) -> str:
-    parts = []
+def _here_document(script: str, start: int, delimiter: str, tabs: bool) -> tuple[str, int]:
+    """The here-document starting at ``start`` and the index after its delimiter line."""
+    lines = []
+    index = start
+    while index < len(script):
+        end = script.find("\n", index)
+        end = len(script) if end < 0 else end
+        line = script[index:end]
+        index = end + 1
+        if (line.lstrip("\t") if tabs else line) == delimiter:
+            break
+        lines.append(line)
+    return " ".join(" ".join(lines).split()), index
+
+
+def _logical_lines(script: str) -> list[tuple[str, str]]:
+    """Each logical line of a shell script, with the here-documents it reads, without comments.
+
+    A line break inside quotes, after a backslash or after "|", "||" or "&&" continues the
+    line; a "#" that starts a word outside quotes starts a comment.
+    """
+    lines: list[tuple[str, str]] = []
+    text: list[str] = []
+    documents: list[str] = []
+    pending: list[tuple[str, bool]] = []
+    quote = ""
+    index = 0
+    while index < len(script):
+        char = script[index]
+        if quote == "'":
+            quote = "" if char == "'" else quote
+        elif char == "\\":
+            pair = script[index : index + 2]
+            if pair != "\\\n":
+                text.append(pair)
+            index += 2
+            continue
+        elif quote:
+            quote = "" if char == '"' else quote
+        elif char in "'\"":
+            quote = char
+        elif char == "#" and (not text or text[-1][-1] in " \t;&|()"):
+            end = script.find("\n", index)
+            index = len(script) if end < 0 else end
+            continue
+        elif script.startswith("<<<", index):
+            text.append("<<<")
+            index += 3
+            continue
+        elif char == "<" and (heredoc := HEREDOC.match(script, index)) is not None:
+            pending.append((heredoc[3], bool(heredoc[1])))
+            text.append(heredoc[0])
+            index = heredoc.end()
+            continue
+        elif char == "\n":
+            line = "".join(text).rstrip()
+            index += 1
+            if not pending and line.endswith(("|", "&&")):
+                text.append(" ")
+                continue
+            for delimiter, tabs in pending:
+                document, index = _here_document(script, index, delimiter, tabs)
+                documents.append(document)
+            lines.append((" ".join(line.split()), " ".join(documents)))
+            text, documents, pending = [], [], []
+            continue
+        text.append(char)
+        index += 1
+    lines.append((" ".join("".join(text).split()), " ".join(documents)))
+    return lines
+
+
+def _step_lines(step: dict[str, Any]) -> list[tuple[str, str]]:
+    """A step's action, or its script's logical lines with their here-documents."""
+    lines = [(step["uses"], "")] if isinstance(step.get("uses"), str) else []
+    if isinstance(step.get("run"), str):
+        lines.extend(_logical_lines(step["run"]))
+    return lines
+
+
+def _discards_status(lines: list[tuple[str, str]], command: str) -> bool:
+    """Whether a line that runs the command turns its failure into success."""
+    for line, documents in lines:
+        if command in line:
+            after = line[line.index(command) + len(command) :]
+        elif command in documents:
+            after = line
+        else:
+            continue
+        if DISCARDED.search(after):
+            return True
+    return False
+
+
+def _gate_issues(path: Path, name: str, job: dict[str, Any]) -> list[str]:
+    """A required job's gate commands must run, unskippable, and keep their exit status."""
+    commands = REQUIRED_COMMANDS.get(path.name, {}).get(name, ())
+    errors = []
+    condition = _condition(job)
+    reviewed_job = REVIEWED_JOB_CONDITIONS.get(path.name, {}).get(name)
+    if commands and condition not in (None, *ALWAYS_RUNS, reviewed_job):
+        errors.append(f"{path}: required job {name} may be skipped (if: {condition})")
+    reviewed = REVIEWED_STEP_CONDITIONS.get(path.name, {})
+    found: set[str] = set()
     for step in _steps(job):
-        for key in ("run", "uses"):
-            if isinstance(step.get(key), str):
-                parts.append(step[key])
-    return "\n".join(" ".join(part.split()) for part in parts)
+        lines = _step_lines(step)
+        text = "\n".join(f"{line}\n{documents}" for line, documents in lines)
+        condition = _condition(step)
+        skippable = (
+            frozenset()
+            if condition is None or condition in ALWAYS_RUNS
+            else frozenset(commands) - reviewed.get(condition, frozenset())
+        )
+        for command in (command for command in commands if command in text):
+            found.add(command)
+            if command in skippable:
+                errors.append(f"{path}: {name} may skip {command} (if: {condition})")
+            if _discards_status(lines, command):
+                errors.append(f"{path}: {name} discards the exit status of {command}")
+    errors.extend(f"{path}: {name} no longer runs {c}" for c in commands if c not in found)
+    return errors
 
 
 def _workflow_issues(path: Path, document: dict[Any, Any]) -> list[str]:
@@ -266,9 +421,7 @@ def _workflow_issues(path: Path, document: dict[Any, Any]) -> list[str]:
                 options = step.get("with")
                 if not isinstance(options, dict) or options.get("persist-credentials") is not False:
                     errors.append(f"{path}: {name} must check out with persist-credentials: false")
-        for command in REQUIRED_COMMANDS.get(path.name, {}).get(str(name), ()):
-            if command not in _job_text(job):
-                errors.append(f"{path}: {name} no longer runs {command}")
+        errors.extend(_gate_issues(path, str(name), job))
     for name in REQUIRED_COMMANDS.get(path.name, {}):
         if name not in jobs:
             errors.append(f"{path}: required job {name} is missing")
