@@ -11,10 +11,11 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from nexus_symbiote.cli import main
-from nexus_symbiote.scanners import a2a, mcp
+from nexus_symbiote.scanners import a2a, mcp, rag
 from nexus_symbiote.scanners.a2a import A2AScanner
 from nexus_symbiote.scanners.base import ScanResult, SourceBudget
 from nexus_symbiote.scanners.mcp import MCPScanner, without_js_comments
+from nexus_symbiote.scanners.rag import RAGScanner
 
 _OLD_COMMENTS = re.compile(r"/\*.*?\*/|(?m:^\s*//[^\n]*$)", re.S)
 
@@ -85,6 +86,19 @@ def test_exhausted_a2a_budget_is_one_named_gap(tmp_path, monkeypatch):
     failures = A2AScanner().scan(tmp_path).scan_failures
     assert failures == [
         "a2a code references exceed the combined size limit: the rest were not read"
+    ]
+
+
+def test_exhausted_rag_budget_is_one_named_gap(tmp_path, monkeypatch):
+    # The vector-store import heuristic reads under the same source budget, so it never
+    # stops reading silently.
+    _write_many(tmp_path, ".py", 40, "#" * 200 + "\n")
+    monkeypatch.setattr(
+        rag, "SourceBudget", lambda label, result: SourceBudget(label, result, 1024)
+    )
+    failures = RAGScanner().scan(tmp_path).scan_failures
+    assert failures == [
+        "rag vector-store imports exceed the combined size limit: the rest were not read"
     ]
 
 

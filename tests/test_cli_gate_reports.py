@@ -61,7 +61,7 @@ def test_a_symlink_names_its_collector_and_failure(tmp_path):
     result = CliRunner().invoke(main, ["scan", str(project), "--no-project-policy", "--check"])
     assert result.exit_code == 1
     failures = [line for line in _lines(result.stderr) if line.startswith("  - collection: ")]
-    assert "  - collection: AGENTS.md: symlink excluded (from mcp)" in failures
+    assert "  - collection: AGENTS.md: symlink target is absolute (from mcp)" in failures
     assert any(
         line.startswith("  - collection: AGENTS.md: ") and line.endswith(" (from prompt)")
         for line in failures

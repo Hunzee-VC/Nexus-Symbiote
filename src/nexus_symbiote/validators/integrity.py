@@ -198,7 +198,10 @@ def _locate_artifact(project_root: Path, source_path: str) -> Path | str:
     """Return the in-root artifact a component names, or the fixed reason it is refused.
 
     Every reader applies these rules: no parent traversal, inside the resolved root,
-    not a symbolic link, and a regular file. Reasons never quote the path.
+    not a symbolic link, and a regular file. Collectors read through one in-root
+    symlink at any component, such as CLAUDE.md -> AGENTS.md or .claude ->
+    config/claude, resolved lexically without following anything, so the artifact is
+    that target; the rules then apply to it. Reasons never quote the path.
     """
     root = project_root.resolve()
     candidate = Path(source_path)
@@ -207,6 +210,10 @@ def _locate_artifact(project_root: Path, source_path: str) -> Path | str:
     if not candidate.is_absolute():
         candidate = root / candidate
     try:
+        if candidate.is_relative_to(root):
+            with ConfinedCollection(root, []) as files:
+                target = files.in_root_target(candidate.relative_to(root))
+            candidate = candidate if target is None else root / target
         if candidate.is_symlink() or not candidate.resolve().is_relative_to(root):
             return "Artifact path escapes the supplied project root or is a symlink"
         if not candidate.is_file():

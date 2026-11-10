@@ -75,7 +75,7 @@ output:
 
 `ignore_categories` and suppressions match category names exactly. Read them from the `category` field of `risk --json-output` findings. This version emits:
 
-`attestation`, `authentication`, `bidi_override`, `capability_scope`, `code_execution`, `completeness`, `data_integrity`, `detection_method`, `instruction_layering`, `invalid_safetensors`, `invisible_characters`, `mutable_image_tag`, `permission_scope`, `prompt_size`, `rag_discovery`, `serialization_format`, `serialization_format_unknown`, `shadowscan-heuristic`, `shadowscan-inventory-unmatched`, `signing_status`, `tag_characters`, `transport_security` and `version_pinning`.
+`additional_directories`, `attestation`, `authentication`, `bidi_override`, `capability_scope`, `code_execution`, `completeness`, `credential_helper`, `data_integrity`, `detection_method`, `directional_marks`, `hidden_markup`, `hook_commands`, `instruction_layering`, `invalid_safetensors`, `invisible_characters`, `mcp_auto_approval`, `mutable_image_tag`, `permission_scope`, `plugin_sources`, `prompt_size`, `rag_discovery`, `serialization_format`, `serialization_format_unknown`, `shadowscan-heuristic`, `shadowscan-inventory-unmatched`, `signing_status`, `tag_characters`, `transport_security` and `version_pinning`.
 
 A name that matches no finding is accepted and has no effect.
 

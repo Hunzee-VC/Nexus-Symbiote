@@ -413,7 +413,7 @@ def test_a_symlink_named_as_a_command_never_starts_a_line(tmp_path):
     bom = tmp_path / "bom.json"
     runner = CliRunner()
     scanned = runner.invoke(main, ["scan", str(project), "--no-project-policy", "-o", str(bom)])
-    assert scanned.exit_code == 1 and "::notice::x: symlink excluded" in scanned.output
+    assert scanned.exit_code == 1 and "::notice::x: symlink target is absolute" in scanned.output
     reconciled = runner.invoke(
         main, ["risk", str(bom), "--project", str(project), "--no-project-policy"]
     )

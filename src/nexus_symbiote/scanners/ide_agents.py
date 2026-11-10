@@ -2,25 +2,34 @@
 
 Discovers configurations for IDE-integrated AI coding agents:
   - Claude Code (.claude/, CLAUDE.md, .claude/settings.json)
-  - Codex (.codex/, codex.md)
-  - Cursor (.cursor/, .cursorrules, .cursor/mcp.json)
+  - Codex (.codex/, codex.md, .codex/config.toml)
+  - Cursor (.cursor/, .cursorrules, .cursor/mcp.json, .cursor/hooks.json)
+  - Gemini CLI (GEMINI.md, .gemini/settings.json)
   - Antigravity (.antigravity/)
   - XAI IDE agent configs
   - Windsurf (.windsurfrules, .windsurf/)
   - Cline (.clinerules, .cline/)
   - GitHub Copilot (.github/copilot-instructions.md)
+
+Markers and settings are read at fixed paths beneath the project root; the tree is
+walked only for the `.claude` settings of subdirectories.
 """
 
 from __future__ import annotations
 
+import os
 import re
+import tomllib
 from pathlib import Path
 from typing import Any
 
 from nexus_symbiote.core.enums import RiskSeverity, TrustTier
-from nexus_symbiote.core.hashing import hash_canonical
+from nexus_symbiote.core.hashing import hash_canonical, parse_json_strict
 from nexus_symbiote.core.models import IDEAgentComponent, RiskAssessment, VerifiedExtensionComponent
 from nexus_symbiote.scanners.base import Scanner, ScanResult
+from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
+from nexus_symbiote.scanners.source_binding import BindingError, value_binding
+from nexus_symbiote.utils.confined import ConfinedCollection, fold_name
 from nexus_symbiote.utils.secrets import redact_text
 
 IDE_AGENT_CONFIGS: dict[str, dict[str, Any]] = {
@@ -30,13 +39,19 @@ IDE_AGENT_CONFIGS: dict[str, dict[str, Any]] = {
             ".claude/settings.local.json",
             "CLAUDE.md",
             ".claude/CLAUDE.md",
+            "CLAUDE.local.md",
             ".claude/commands",
             ".claude/skills",
+            ".claude/agents",
+            ".claude/rules",
+            ".claude-plugin/plugin.json",
+            ".claude-plugin/marketplace.json",
         ],
         "mcp_config": [".claude/mcp.json", ".mcp.json"],
     },
     "codex": {
         "markers": [
+            ".codex/config.toml",
             ".codex/config.json",
             "codex.md",
             "CODEX.md",
@@ -49,8 +64,14 @@ IDE_AGENT_CONFIGS: dict[str, dict[str, Any]] = {
             ".cursorrules",
             ".cursor/rules",
             ".cursor/settings.json",
+            ".cursor/cli.json",
+            ".cursor/hooks.json",
         ],
         "mcp_config": [".cursor/mcp.json"],
+    },
+    "gemini": {
+        "markers": ["GEMINI.md", ".gemini/settings.json"],
+        "mcp_config": [],
     },
     "antigravity": {
         "markers": [
@@ -85,10 +106,142 @@ IDE_AGENT_CONFIGS: dict[str, dict[str, Any]] = {
         "markers": [
             ".github/copilot-instructions.md",
             ".github/copilot-extensions.json",
+            ".github/instructions",
         ],
         "mcp_config": [],
     },
 }
+_CODEX_SPELLINGS = frozenset({"codex.md", "CODEX.md"})
+CLAUDE_SETTINGS = [".claude/settings.json", ".claude/settings.local.json"]
+_FOLDED_SETTINGS_NAMES = {
+    fold_name(name): name for name in ("settings.json", "settings.local.json")
+}
+# A Claude Code plugin repository's own manifests; its root hooks/hooks.json is the
+# plugin's hook configuration only when one of them is present.
+CLAUDE_PLUGIN_MANIFESTS = [".claude-plugin/plugin.json", ".claude-plugin/marketplace.json"]
+CLAUDE_PLUGIN_HOOKS = "hooks/hooks.json"
+# The `agent.permissionMode` key read for these hosts is a project convention that
+# vendor documentation does not describe; the files are read for it, and digested.
+_AGENT_MODE_SETTINGS = {
+    "cursor": [".cursor/settings.json"],
+    "windsurf": [".windsurf/settings.json"],
+    "cline": [".cline/settings.json"],
+    "codex": [".codex/config.json"],
+}
+# The keyed binding of every settings file an IDE record digests in `settings_hashes`.
+SETTINGS_VALUE_BINDING_PROFILE = "nexus-symbiote/ide-settings-values/v1"
+CURSOR_HOOKS = ".cursor/hooks.json"
+GEMINI_SETTINGS = ".gemini/settings.json"
+_PERMISSION_MODES = frozenset(
+    {
+        "default",
+        "manual",
+        "plan",
+        "acceptEdits",
+        "bypassPermissions",
+        "dontAsk",
+        "ask",
+        "auto",
+        "read-only",
+        "workspace-write",
+        "full-access",
+        "danger-full-access",
+        "untrusted",
+        "on-failure",
+        "on-request",
+        "never",
+        "always",
+    }
+)
+_MAX_SETTINGS_DEPTH = 64
+# Tools whose unscoped grant gives a whole capability class, by Claude Code's names.
+_SCOPED_TOOL_CLASSES = {
+    "bash": "shell commands",
+    "edit": "file edits",
+    "write": "file edits",
+    "multiedit": "file edits",
+    "notebookedit": "file edits",
+    "read": "file reads",
+    "webfetch": "web fetches",
+}
+# A specifier made only of these characters names everything: Bash(*), Bash(:*),
+# Edit(//**), Read(~/**), Edit(./**).
+_WILDCARD_SPECIFIER = re.compile(r"[\s*:/~.]*")
+_EXTENSION_ID = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9-]*\.[a-zA-Z0-9][a-zA-Z0-9._-]*")
+
+
+def _broad_grants(allowed: list[str]) -> list[str]:
+    """Capability classes that the allow list grants without a narrowing specifier."""
+    classes: set[str] = set()
+    for value in allowed:
+        rule = value.strip()
+        if rule == "*":
+            classes.add("every tool")
+            continue
+        tool, opened, rest = rule.partition("(")
+        tool = tool.strip()
+        specifier = None
+        if opened:
+            if not rest.endswith(")"):
+                continue
+            specifier = rest[:-1].strip()
+        key = tool.lower()
+        if key.startswith("mcp__"):
+            server = key.removeprefix("mcp__")
+            whole_server = "__" not in server or server.endswith("__*")
+            if server in {"", "*"} or (whole_server and specifier in (None, "", "*")):
+                classes.add("MCP server tools")
+            continue
+        broad = specifier is None or bool(_WILDCARD_SPECIFIER.fullmatch(specifier))
+        if key == "webfetch" and specifier is not None:
+            broad |= specifier.replace(" ", "") in {"domain:*", "domain:"}
+        if key == "read" and specifier is None:
+            # A bare Read grant covers the working directory, as reading does by default.
+            continue
+        if broad and key in _SCOPED_TOOL_CLASSES:
+            classes.add(_SCOPED_TOOL_CLASSES[key])
+    return sorted(classes)
+
+
+def _projection(value: Any, depth: int = 0, *, env: bool = False) -> Any:
+    """Settings as an unkeyed digest may cover them: redacted text, no env values."""
+    if depth > _MAX_SETTINGS_DEPTH:
+        raise ValueError("settings nested too deeply")
+    if isinstance(value, dict):
+        if env:
+            return sorted(redact_text(str(key)) for key in value)
+        return {
+            redact_text(str(key)): _projection(item, depth + 1, env=key == "env")
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_projection(item, depth + 1) for item in value]
+    if isinstance(value, str):
+        return redact_text(value)
+    return value
+
+
+def _settings_digest(data: dict[str, Any], *, keyed: bool) -> str:
+    """The RFC 8785 digest of one settings file, as `settings_hashes` records it.
+
+    Without the operator key it covers the file as read, so any changed value changes
+    it. With the key, the keyed binding covers the values as read, and this unkeyed
+    digest covers the file after the standard redaction and with environment variable
+    names only, so it cannot confirm a guess of a value the redaction removes.
+    """
+    projected: dict[str, Any] = _projection(data) if keyed else data
+    return hash_canonical(projected)
+
+
+def _hook_commands(value: Any, depth: int = 0) -> int:
+    if depth > _MAX_SETTINGS_DEPTH:
+        raise ValueError("settings nested too deeply")
+    if isinstance(value, dict):
+        own = 1 if isinstance(value.get("command"), str) else 0
+        return own + sum(_hook_commands(item, depth + 1) for item in value.values())
+    if isinstance(value, list):
+        return sum(_hook_commands(item, depth + 1) for item in value)
+    return 0
 
 
 def _declared_hooks(hooks: object) -> dict[str, int]:
@@ -108,189 +261,576 @@ def _declared_hooks(hooks: object) -> dict[str, int]:
     return counts
 
 
+def _count(value: Any) -> int:
+    return len(value) if isinstance(value, (list, dict)) else 0
+
+
+def _starting_mode_risk(ide_type: str, mode: str | None) -> RiskAssessment | None:
+    """The finding for a declared starting mode that skips approval prompts."""
+    if mode == "bypassPermissions":
+        return RiskAssessment(
+            severity=RiskSeverity.HIGH,
+            category="permission_scope",
+            detail=(
+                f"IDE agent '{ide_type}' declares a starting mode that skips "
+                "permission prompts; effective approval remains unverified."
+            ),
+            recommendation=(
+                "Remove the project-level bypass mode, or confine the agent to "
+                "an isolated environment with no credentials it should not use."
+            ),
+        )
+    if mode == "acceptEdits":
+        return RiskAssessment(
+            severity=RiskSeverity.MEDIUM,
+            category="permission_scope",
+            detail=(
+                f"IDE agent '{ide_type}' declares a starting mode that accepts file edits "
+                "without a prompt; effective approval remains unverified."
+            ),
+            recommendation=(
+                "Use the default or plan mode in project settings; grant narrow allow "
+                "rules instead."
+            ),
+        )
+    return None
+
+
+def _strip_jsonc(text: str) -> str:
+    """Remove comments and trailing commas outside strings, as VS Code's parser accepts."""
+    out: list[str] = []
+    index, length = 0, len(text)
+    in_string = False
+    while index < length:
+        char = text[index]
+        if in_string:
+            out.append(char)
+            if char == "\\" and index + 1 < length:
+                out.append(text[index + 1])
+                index += 2
+                continue
+            in_string = char != '"'
+            index += 1
+            continue
+        if char == '"':
+            in_string = True
+        elif text.startswith("//", index):
+            end = text.find("\n", index)
+            index = length if end == -1 else end
+            continue
+        elif text.startswith("/*", index):
+            end = text.find("*/", index + 2)
+            if end == -1:
+                raise ValueError("unterminated comment")
+            out.append(" ")
+            index = end + 2
+            continue
+        out.append(char)
+        index += 1
+    stripped = "".join(out)
+    cleaned: list[str] = []
+    in_string = False
+    for position, char in enumerate(stripped):
+        if in_string:
+            if char == '"' and not _escaped(stripped, position):
+                in_string = False
+        elif char == '"':
+            in_string = True
+        elif char == ",":
+            following = position + 1
+            while following < len(stripped) and stripped[following] in " \t\r\n":
+                following += 1
+            if following < len(stripped) and stripped[following] in "}]":
+                continue
+        cleaned.append(char)
+    return "".join(cleaned)
+
+
+def _escaped(text: str, position: int) -> bool:
+    backslashes = 0
+    while position - backslashes - 1 >= 0 and text[position - backslashes - 1] == "\\":
+        backslashes += 1
+    return backslashes % 2 == 1
+
+
 class IDEAgentScanner(Scanner):
     name = "ide_agents"
 
     def scan(self, project_root: Path) -> ScanResult:
         result = ScanResult(scanner_name=self.name)
         with self._collection(project_root, result) as files:
-            available = {path.as_posix() for path in files.iter_files()}
             for ide_type, config in IDE_AGENT_CONFIGS.items():
                 found: list[str] = []
                 for marker in config["markers"]:
-                    evidence = (
-                        marker
-                        if marker in available
-                        else next(
-                            (path for path in sorted(available) if path.startswith(marker + "/")),
-                            None,
-                        )
-                    )
-                    if evidence and files.read_bytes(evidence) is not None:
+                    evidence = self._marker(files, marker)
+                    if evidence is not None:
                         found.append(marker)
-                        result.surfaces_scanned.append(str(files.root / evidence))
-                if not found:
+                        result.surfaces_scanned.append(evidence)
+                if found:
+                    result.components.append(
+                        self._agent(files, result, ide_type, found, config["mcp_config"])
+                    )
+            # A host started in a subdirectory, such as one package of a monorepo, reads
+            # that directory's .claude settings as its project settings, and on a
+            # case-insensitive file system those of another spelling of either name.
+            nested: dict[str, list[str]] = {}
+            links: list[Path] = []
+            for path in files.iter_files(directory_links=links):
+                if len(path.parts) <= 2 or fold_name(path.parts[-2]) != ".claude":
                     continue
-                declared: dict[str, Any] = {}
-                settings = self._read_ide_settings(
-                    files.root, ide_type, result, available, declared
-                )
-                mode = self._extract_permission_mode(settings or {}, ide_type, result)
-                risks: list[RiskAssessment] = []
-                if mode == "bypassPermissions":
-                    risks.append(
-                        RiskAssessment(
-                            severity=RiskSeverity.HIGH,
-                            category="permission_scope",
-                            detail=(
-                                f"IDE agent '{ide_type}' declares a starting mode that skips "
-                                "permission prompts; effective approval remains unverified."
-                            ),
-                            recommendation=(
-                                "Remove the project-level bypass mode, or confine the agent to "
-                                "an isolated environment with no credentials it should not use."
-                            ),
-                        )
-                    )
-                if self._has_broad_permissions(settings or {}, ide_type, result):
-                    risks.append(
-                        RiskAssessment(
-                            severity=RiskSeverity.MEDIUM,
-                            category="permission_scope",
-                            detail=(
-                                f"IDE agent '{ide_type}' declares unscoped tool allowances; "
-                                "effective approval remains unverified."
-                            ),
-                            recommendation=(
-                                "Review deny/ask rules, workspace trust, user and managed "
-                                "settings, and runtime controls; enforce resource-scoped authority."
-                            ),
-                        )
-                    )
-                layered = (
-                    ide_type == "claude-code" and {"CLAUDE.md", ".claude/CLAUDE.md"}.issubset(found)
-                ) or (ide_type == "cursor" and {".cursorrules", ".cursor/rules"}.issubset(found))
-                if layered:
-                    risks.append(
-                        RiskAssessment(
-                            severity=RiskSeverity.LOW,
-                            category="instruction_layering",
-                            detail=f"IDE agent '{ide_type}' has multiple declared instruction locations.",
-                            recommendation="Document loading order, modification authority and approved digests.",
-                        )
-                    )
-                mcp_configs = []
-                for config_name in config.get("mcp_config", []):
-                    if config_name in available:
-                        data = self._read_mapping(files.root / config_name, result)
-                        if data is not None:
-                            mcp_configs.append(config_name)
-                # Configuration locators are not component references. The MCP
-                # collector binds actual client/server components separately.
+                name = _FOLDED_SETTINGS_NAMES.get(fold_name(path.name))
+                if name is None:
+                    continue
+                if path.parts[-2] != ".claude" or path.name != name:
+                    files.report_case_variant(path, Path(*path.parts[:-2], ".claude", name))
+                    continue
+                nested.setdefault(Path(*path.parts[:-2]).as_posix(), []).append(path.as_posix())
+            for link in links:
+                self._linked_settings(files, link, nested)
+            for base, paths in sorted(nested.items()):
+                result.surfaces_scanned.extend(sorted(paths))
                 result.components.append(
-                    IDEAgentComponent(
-                        bom_ref=f"ide-agent:{ide_type}",
-                        name=ide_type,
-                        ide_type=ide_type,
-                        config_files=found,
-                        mcp_server_refs=[],
-                        permission_mode=mode,
-                        source_path=str(files.root / found[0]),
-                        trust_tier=TrustTier.INTERNAL_UNVERIFIED,
-                        risks=risks,
-                        properties={
-                            "collection_mode": "static-project-configuration",
-                            "mcp_config_paths": mcp_configs,
-                            **declared,
-                            "permission_evidence": "declaration-only",
-                            "effective_authorization_verified": False,
-                            "permission_policy_limitations": [
-                                (
-                                    "User and managed settings, workspace trust, per-session "
-                                    "flags and runtime controls were not observed."
-                                ),
-                                "Deny and ask rules may narrow declared allow rules.",
-                                (
-                                    "Project/local starting-mode declarations may be ignored "
-                                    "by the host or version."
-                                ),
-                            ],
-                        },
-                    )
+                    self._agent(files, result, "claude-code", sorted(paths), [], base=base)
                 )
-            self._scan_extensions(files.root, result, available)
+            self._scan_extensions(files, result)
         if not result.components and not result.scan_failures and not result.surfaces_excluded:
             result.surfaces_scanned.append("ide-agents (no IDE agent configs found)")
         return result
 
-    def _read_ide_settings(
+    def _agent(
         self,
-        root: Path,
-        ide_type: str,
+        files: ConfinedCollection,
         result: ScanResult,
-        available: set[str],
-        declared: dict[str, Any],
-    ) -> dict[str, Any] | None:
-        settings_paths = {
-            "claude-code": [".claude/settings.json", ".claude/settings.local.json"],
-            "cursor": [".cursor/settings.json"],
-            "windsurf": [".windsurf/settings.json"],
-            "cline": [".cline/settings.json"],
-            "codex": [".codex/config.json"],
+        ide_type: str,
+        found: list[str],
+        mcp_config: list[str],
+        *,
+        base: str = "",
+    ) -> IDEAgentComponent:
+        """One agent's record; ``base`` names the subdirectory of nested settings."""
+        risks: list[RiskAssessment] = []
+        properties: dict[str, Any] = {"settings_directory": base} if base else {}
+        # Every JSON settings file the record reads, as read; each is digested.
+        documents: dict[str, dict[str, Any]] = {}
+        if ide_type == "claude-code":
+            settings = self._claude_settings(result, risks, properties, documents, base=base)
+        else:
+            settings = self._agent_mode_settings(ide_type, result, documents)
+        if ide_type == "codex":
+            self._codex_settings(files, result, risks, properties)
+        elif ide_type == "gemini":
+            self._gemini_settings(files, result, documents)
+        elif ide_type == "cursor":
+            self._cursor_hooks(files, result, risks, properties, documents)
+        self._bind_settings(documents, result, properties)
+        mode = self._extract_permission_mode(settings or {}, ide_type, result)
+        if ide_type == "codex" and mode is None:
+            mode = properties.get("approval_policy")
+        broad = self._broad_permissions(settings or {}, ide_type, result)
+        if broad:
+            risks.insert(
+                0,
+                RiskAssessment(
+                    severity=RiskSeverity.MEDIUM,
+                    category="permission_scope",
+                    detail=(
+                        f"IDE agent '{ide_type}' declares unscoped tool allowances "
+                        f"({', '.join(broad)}); effective approval remains unverified."
+                    ),
+                    recommendation=(
+                        "Review deny/ask rules, workspace trust, user and managed "
+                        "settings, and runtime controls; enforce resource-scoped authority."
+                    ),
+                ),
+            )
+        starting_mode = _starting_mode_risk(ide_type, mode)
+        if starting_mode is not None:
+            risks.insert(0, starting_mode)
+        layered = (
+            ide_type == "claude-code" and {"CLAUDE.md", ".claude/CLAUDE.md"}.issubset(found)
+        ) or (ide_type == "cursor" and {".cursorrules", ".cursor/rules"}.issubset(found))
+        if layered:
+            risks.append(
+                RiskAssessment(
+                    severity=RiskSeverity.LOW,
+                    category="instruction_layering",
+                    detail=f"IDE agent '{ide_type}' has multiple declared instruction locations.",
+                    recommendation="Document loading order, modification authority and approved digests.",
+                )
+            )
+        mcp_configs = []
+        for config_name in mcp_config:
+            data = self._read_mapping(Path(config_name), result)
+            if data is not None:
+                mcp_configs.append(config_name)
+        # Markers and settings read through an in-root symlink, with the file that held them.
+        links = {
+            path: target
+            for path in (*found, *documents)
+            if (target := files.link_target(path)) is not None
         }
+        if links:
+            properties["symlink_targets"] = dict(sorted(links.items()))
+        # Configuration locators are not component references. The MCP
+        # collector binds actual client/server components separately.
+        return IDEAgentComponent(
+            bom_ref=f"ide-agent:{ide_type}" + (f"@{base}" if base else ""),
+            name=ide_type + (f" ({base})" if base else ""),
+            ide_type=ide_type,
+            config_files=found,
+            mcp_server_refs=[],
+            permission_mode=mode,
+            source_path=found[0],
+            trust_tier=TrustTier.INTERNAL_UNVERIFIED,
+            risks=risks,
+            properties={
+                "collection_mode": "static-project-configuration",
+                "mcp_config_paths": mcp_configs,
+                "permission_evidence": "declaration-only",
+                "effective_authorization_verified": False,
+                "permission_policy_limitations": [
+                    (
+                        "User and managed settings, workspace trust, per-session "
+                        "flags and runtime controls were not observed."
+                    ),
+                    "Deny and ask rules may narrow declared allow rules.",
+                    (
+                        "Project/local starting-mode declarations may be ignored "
+                        "by the host or version."
+                    ),
+                ],
+                **properties,
+            },
+        )
+
+    @staticmethod
+    def _linked_settings(
+        files: ConfinedCollection, link: Path, nested: dict[str, list[str]]
+    ) -> None:
+        """Nested settings below a ``.claude`` directory symlink, which the walk skips.
+
+        The walk covers the target under its own name, where the settings files are not
+        recognised, so they are looked up through the link as a host started there would.
+        """
+        if len(link.parts) < 2 or fold_name(link.name) != ".claude":
+            return
+        for name in _FOLDED_SETTINGS_NAMES.values():
+            path = link / name
+            if files.regular_file(path) is None:
+                # Records a refused link, or another spelling below the link.
+                files.read_bytes(path, missing_ok=True)
+            elif link.name != ".claude":
+                files.report_case_variant(path, link.with_name(".claude") / name)
+            else:
+                nested.setdefault(link.parent.as_posix(), []).append(path.as_posix())
+
+    @staticmethod
+    def _marker(files: ConfinedCollection, marker: str) -> str | None:
+        """The path that shows a marker exists: the file, or a file in the directory."""
+        if files.is_directory(marker):
+            for path in files.iter_files(marker):
+                return path.as_posix()
+            return None
+        variants = _CODEX_SPELLINGS if marker in _CODEX_SPELLINGS else ()
+        if files.read_bytes(marker, missing_ok=True, variants_read=variants) is None:
+            return None
+        return marker
+
+    def _claude_settings(
+        self,
+        result: ScanResult,
+        risks: list[RiskAssessment],
+        properties: dict[str, Any],
+        documents: dict[str, dict[str, Any]],
+        *,
+        base: str = "",
+    ) -> dict[str, Any] | None:
+        """Merge permission layers and count what the settings and plugin files declare.
+
+        Every file is bound by its digest, so a changed hook, rule, helper, plugin or
+        marketplace changes the record. The merged summary does not resolve effective
+        permissions across trust, user or managed policy, flags or product versions.
+        """
         merged: dict[str, Any] = {}
-        # Keep declared allowances from every collected Claude settings layer.
-        # This summary does not resolve effective permissions across trust,
-        # user/managed policy, ask/deny rules, flags or product versions.
-        for relative in settings_paths.get(ide_type, []):
-            if relative in available:
-                data = self._read_mapping(root / relative, result)
-                if data is not None:
-                    # Bind every settings layer, so a change no field here models
-                    # (a hook, a removed deny rule) still differs between snapshots.
-                    try:
-                        digest = hash_canonical(data)
-                    except (TypeError, ValueError, RecursionError):
-                        result.scan_failures.append(f"{relative}: settings cannot be canonicalized")
+        for relative in (f"{base}/{name}" if base else name for name in CLAUDE_SETTINGS):
+            data = self._read_mapping(Path(relative), result)
+            if data is None:
+                continue
+            documents[relative] = data
+            hooks = _declared_hooks(data.get("hooks"))
+            if hooks:
+                properties.setdefault("declared_hooks", {})[relative] = hooks
+            if "permissions" in data:
+                permissions = data["permissions"]
+                if not isinstance(permissions, dict):
+                    result.scan_failures.append(f"{relative}: invalid permission settings object")
+                    continue
+                previous = merged.get("permissions", {})
+                combined = {**previous, **permissions}
+                for key in ("allow", "ask", "deny"):
+                    earlier, current = previous.get(key, []), permissions.get(key, [])
+                    if not all(
+                        isinstance(values, list) and all(isinstance(value, str) for value in values)
+                        for values in (earlier, current)
+                    ):
+                        result.scan_failures.append(
+                            f"{relative}: invalid declared permission {key}-list"
+                        )
+                        combined.pop(key, None)
                     else:
-                        declared.setdefault("settings_hashes", {})[relative] = digest
-                    if ide_type == "claude-code":
-                        hooks = _declared_hooks(data.get("hooks"))
-                        if hooks:
-                            declared.setdefault("declared_hooks", {})[relative] = hooks
-                    if ide_type == "claude-code" and "permissions" in data:
-                        permissions = data["permissions"]
-                        if not isinstance(permissions, dict):
-                            result.scan_failures.append(
-                                f"{relative}: invalid permission settings object"
-                            )
-                            continue
-                        previous = merged.get("permissions", {})
-                        combined = {**previous, **permissions}
-                        for key in ("allow", "ask", "deny"):
-                            earlier, current = previous.get(key, []), permissions.get(key, [])
-                            if not all(
-                                isinstance(values, list)
-                                and all(isinstance(value, str) for value in values)
-                                for values in (earlier, current)
-                            ):
-                                result.scan_failures.append(
-                                    f"{relative}: invalid declared permission {key}-list"
-                                )
-                                combined.pop(key, None)
-                            else:
-                                combined[key] = list(dict.fromkeys([*earlier, *current]))
-                        data = {**data, "permissions": combined}
-                    merged.update(data)
-        permissions = merged.get("permissions")
-        if ide_type == "claude-code" and isinstance(permissions, dict):
-            counts = {
-                key: len(permissions[key])
-                for key in ("allow", "ask", "deny")
-                if isinstance(permissions.get(key), list)
-            }
-            if counts:
-                declared["declared_permission_rule_counts"] = counts
+                        combined[key] = list(dict.fromkeys([*earlier, *current]))
+                data = {**data, "permissions": combined}
+            merged.update(data)
+        plugins: dict[str, dict[str, Any]] = {}
+        for relative in CLAUDE_PLUGIN_MANIFESTS if not base else ():
+            data = self._read_mapping(Path(relative), result)
+            if data is not None:
+                plugins[relative] = data
+        if plugins:
+            hooks_file = self._read_mapping(Path(CLAUDE_PLUGIN_HOOKS), result)
+            if hooks_file is not None:
+                plugins[CLAUDE_PLUGIN_HOOKS] = hooks_file
+                hooks = _declared_hooks(hooks_file.get("hooks"))
+                if hooks:
+                    properties.setdefault("declared_hooks", {})[CLAUDE_PLUGIN_HOOKS] = hooks
+            properties["plugin_manifests"] = sorted(plugins)
+        # Only settings files merge into the permission summary; every file is bound.
+        documents.update(plugins)
+        if not documents:
+            return None
+        declared_permissions = merged.get("permissions")
+        rules: dict[str, Any] = (
+            declared_permissions if isinstance(declared_permissions, dict) else {}
+        )
+        counts = {
+            key: len(rules[key])
+            for key in ("allow", "ask", "deny")
+            if isinstance(rules.get(key), list)
+        }
+        if counts:
+            properties["declared_permission_rule_counts"] = counts
+        hook_commands = 0
+        for relative, data in documents.items():
+            try:
+                hook_commands += _hook_commands(
+                    data if relative == CLAUDE_PLUGIN_HOOKS else data.get("hooks")
+                )
+            except ValueError:
+                result.scan_failures.append(f"{relative}: settings cannot be canonicalized")
+        declared = {
+            "additional_directories": _count(rules.get("additionalDirectories")),
+            "enabled_plugins": _count(merged.get("enabledPlugins")),
+            "extra_known_marketplaces": _count(merged.get("extraKnownMarketplaces")),
+            "enabled_mcpjson_servers": _count(merged.get("enabledMcpjsonServers")),
+            "disabled_mcpjson_servers": _count(merged.get("disabledMcpjsonServers")),
+            "env_variables": _count(merged.get("env")),
+            "api_key_helper": merged.get("apiKeyHelper") is not None,
+            "enable_all_project_mcp_servers": merged.get("enableAllProjectMcpServers") is True,
+        }
+        properties["settings_declarations"] = declared
+        for category, severity, present, detail in (
+            (
+                "hook_commands",
+                RiskSeverity.MEDIUM,
+                hook_commands > 0,
+                f"declares {hook_commands} hook command(s) that run automatically on agent events",
+            ),
+            (
+                "mcp_auto_approval",
+                RiskSeverity.MEDIUM,
+                declared["enable_all_project_mcp_servers"],
+                "approves every MCP server in the project's .mcp.json without a prompt",
+            ),
+            (
+                "credential_helper",
+                RiskSeverity.MEDIUM,
+                declared["api_key_helper"],
+                "declares apiKeyHelper, a command that runs to obtain credentials",
+            ),
+            (
+                "plugin_sources",
+                RiskSeverity.LOW,
+                bool(declared["enabled_plugins"] or declared["extra_known_marketplaces"]),
+                "enables plugins or registers plugin marketplaces, which can add commands, "
+                "agents, hooks and MCP servers",
+            ),
+            (
+                "additional_directories",
+                RiskSeverity.LOW,
+                bool(declared["additional_directories"]),
+                "grants access to directories outside the project",
+            ),
+        ):
+            if present:
+                risks.append(
+                    RiskAssessment(
+                        severity=severity,
+                        category=category,
+                        detail=f"IDE agent 'claude-code' {detail}.",
+                        recommendation="Review this setting and approve its exact value.",
+                    )
+                )
+        return merged
+
+    @staticmethod
+    def _bind_settings(
+        documents: dict[str, dict[str, Any]], result: ScanResult, properties: dict[str, Any]
+    ) -> None:
+        """Digest each settings file into `settings_hashes`; bind their values with the key.
+
+        Without the operator key each digest covers the file as read. With it, the
+        digests leave out what the redaction removes and the environment values, and an
+        HMAC under the key covers every file as read, so the inventory never carries an
+        unkeyed digest of those values.
+        """
+        if not documents:
+            return
+        keyed = bool(os.environ.get(SOURCE_BINDING_KEY_ENV))
+        hashes: dict[str, str] = {}
+        for relative, data in documents.items():
+            try:
+                hashes[relative] = _settings_digest(data, keyed=keyed)
+            except (TypeError, ValueError, RecursionError):
+                result.scan_failures.append(f"{relative}: settings cannot be canonicalized")
+        if hashes:
+            properties["settings_hashes"] = hashes
+        try:
+            binding = value_binding(SETTINGS_VALUE_BINDING_PROFILE, documents)
+        except BindingError as exc:
+            result.scan_failures.append(f"{next(iter(documents))}: {exc}")
+            return
+        properties["source_values_bound"] = bool(binding)
+        properties.update(binding)
+
+    def _codex_settings(
+        self,
+        files: ConfinedCollection,
+        result: ScanResult,
+        risks: list[RiskAssessment],
+        properties: dict[str, Any],
+    ) -> None:
+        text = files.read_text(".codex/config.toml", missing_ok=True)
+        if text is None:
+            return
+        try:
+            config = tomllib.loads(text)
+        except (tomllib.TOMLDecodeError, ValueError, RecursionError):
+            result.scan_failures.append(".codex/config.toml: invalid TOML")
+            return
+        approval, sandbox = config.get("approval_policy"), config.get("sandbox_mode")
+        if approval is not None and (
+            not isinstance(approval, str) or approval not in _PERMISSION_MODES
+        ):
+            result.scan_failures.append(".codex/config.toml: unsupported approval_policy")
+            approval = None
+        if sandbox is not None and (
+            not isinstance(sandbox, str) or sandbox not in _PERMISSION_MODES
+        ):
+            result.scan_failures.append(".codex/config.toml: unsupported sandbox_mode")
+            sandbox = None
+        properties["approval_policy"] = approval
+        properties["sandbox_mode"] = sandbox
+        if sandbox == "danger-full-access" or approval == "never":
+            risks.append(
+                RiskAssessment(
+                    severity=RiskSeverity.HIGH
+                    if sandbox == "danger-full-access"
+                    else RiskSeverity.MEDIUM,
+                    category="permission_scope",
+                    detail=(
+                        "IDE agent 'codex' declares "
+                        + (
+                            "an unsandboxed full-access mode"
+                            if sandbox == "danger-full-access"
+                            else "that commands never ask for approval"
+                        )
+                        + "; effective approval remains unverified."
+                    ),
+                    recommendation="Keep the workspace-write sandbox and on-request approval.",
+                )
+            )
+        servers = config.get("mcp_servers")
+        if isinstance(servers, dict) and servers:
+            result.surfaces_excluded.append(
+                f".codex/config.toml: {len(servers)} MCP server declaration(s) are not inventoried"
+            )
+
+    def _gemini_settings(
+        self,
+        files: ConfinedCollection,
+        result: ScanResult,
+        documents: dict[str, dict[str, Any]],
+    ) -> None:
+        """Report the MCP servers that Gemini CLI project settings declare as a gap."""
+        data = self._read_jsonc(files, GEMINI_SETTINGS, result)
+        if data is None:
+            return
+        documents[GEMINI_SETTINGS] = data
+        servers = data.get("mcpServers")
+        if isinstance(servers, dict) and servers:
+            result.surfaces_excluded.append(
+                f"{GEMINI_SETTINGS}: {len(servers)} MCP server declaration(s) are not inventoried"
+            )
+
+    def _cursor_hooks(
+        self,
+        files: ConfinedCollection,
+        result: ScanResult,
+        risks: list[RiskAssessment],
+        properties: dict[str, Any],
+        documents: dict[str, dict[str, Any]],
+    ) -> None:
+        """Count the commands that Cursor project hooks run on agent events."""
+        data = self._read_jsonc(files, CURSOR_HOOKS, result)
+        if data is None:
+            return
+        documents[CURSOR_HOOKS] = data
+        try:
+            hooks = _hook_commands(data.get("hooks"))
+        except ValueError:
+            result.scan_failures.append(f"{CURSOR_HOOKS}: settings cannot be canonicalized")
+            return
+        properties["hook_commands"] = hooks
+        if hooks:
+            risks.append(
+                RiskAssessment(
+                    severity=RiskSeverity.MEDIUM,
+                    category="hook_commands",
+                    detail=(
+                        f"IDE agent 'cursor' declares {hooks} hook command(s) that run "
+                        "automatically on agent events."
+                    ),
+                    recommendation="Review this setting and approve its exact value.",
+                )
+            )
+
+    @staticmethod
+    def _read_jsonc(
+        files: ConfinedCollection, relative: str, result: ScanResult
+    ) -> dict[str, Any] | None:
+        """A JSON object that may hold comments and trailing commas, as editors accept."""
+        text = files.read_text(relative, missing_ok=True)
+        if text is None:
+            return None
+        try:
+            data = parse_json_strict(_strip_jsonc(text))
+        except (ValueError, RecursionError):
+            result.scan_failures.append(f"{relative}: invalid JSON or duplicate keys")
+            return None
+        if not isinstance(data, dict):
+            result.scan_failures.append(f"{relative}: expected a mapping")
+            return None
+        return data
+
+    def _agent_mode_settings(
+        self, ide_type: str, result: ScanResult, documents: dict[str, dict[str, Any]]
+    ) -> dict[str, Any] | None:
+        merged: dict[str, Any] = {}
+        for relative in _AGENT_MODE_SETTINGS.get(ide_type, []):
+            data = self._read_mapping(Path(relative), result)
+            if data is not None:
+                documents[relative] = data
+                merged.update(data)
         return merged or None
 
     def _extract_permission_mode(
@@ -308,53 +848,31 @@ class IDEAgentScanner(Scanner):
         if not isinstance(mode, str):
             result.scan_failures.append(f"{ide_type}: invalid declared permission mode")
             return None
-        if mode not in {
-            "default",
-            "manual",
-            "plan",
-            "acceptEdits",
-            "bypassPermissions",
-            "dontAsk",
-            "ask",
-            "auto",
-            "read-only",
-            "workspace-write",
-            "full-access",
-            "untrusted",
-            "on-request",
-            "never",
-            "always",
-        }:
+        if mode not in _PERMISSION_MODES:
             result.scan_failures.append(f"{ide_type}: unsupported declared permission mode")
             return None
         return mode
 
-    def _has_broad_permissions(
+    def _broad_permissions(
         self, settings: dict[str, Any], ide_type: str, result: ScanResult
-    ) -> bool:
+    ) -> list[str]:
         if ide_type != "claude-code":
-            return False
+            return []
         permissions = settings.get("permissions", {})
         if not isinstance(permissions, dict):
-            return False
+            return []
         allowed = permissions.get("allow", [])
         if not isinstance(allowed, list) or not all(isinstance(value, str) for value in allowed):
             result.scan_failures.append(f"{ide_type}: invalid declared permission allow-list")
-            return False
-        return any(
-            value in allowed
-            for value in ("Bash", "Edit", "Write", "Bash(*)", "Edit(*)", "Write(*)", "*")
-        )
+            return []
+        return _broad_grants(allowed)
 
-    def _scan_extensions(self, root: Path, result: ScanResult, available: set[str]) -> None:
+    def _scan_extensions(self, files: ConfinedCollection, result: ScanResult) -> None:
         relative = ".vscode/extensions.json"
-        if relative not in available:
-            return
-        path = root / relative
-        data = self._read_mapping(path, result)
+        data = self._read_jsonc(files, relative, result)
         if data is None:
             return
-        result.surfaces_scanned.append(str(path))
+        result.surfaces_scanned.append(relative)
         recommendations = data.get("recommendations", [])
         if not isinstance(recommendations, list) or len(recommendations) > 1000:
             result.scan_failures.append("extensions.json: invalid or oversized recommendation list")
@@ -372,9 +890,7 @@ class IDEAgentScanner(Scanner):
             "agent",
         )
         for extension in recommendations:
-            if not isinstance(extension, str) or not re.fullmatch(
-                r"[a-zA-Z0-9][a-zA-Z0-9-]*\.[a-zA-Z0-9][a-zA-Z0-9._-]*", extension
-            ):
+            if not isinstance(extension, str) or not _EXTENSION_ID.fullmatch(extension):
                 result.scan_failures.append("extensions.json: invalid extension identifier")
                 continue
             if any(pattern in extension.lower() for pattern in ai_patterns):
@@ -387,7 +903,7 @@ class IDEAgentScanner(Scanner):
                         publisher=extension.split(".", 1)[0],
                         publisher_verified=False,
                         attestation_status="unverified",
-                        source_path=str(path),
+                        source_path=relative,
                         trust_tier=TrustTier.UNKNOWN,
                         properties={
                             "collection_mode": "recommended-extension",
