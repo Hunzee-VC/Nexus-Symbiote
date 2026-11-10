@@ -80,7 +80,7 @@ then notes, then the added, removed and modified components and relationships.
 | Relationship kept but its assurance or conditions changed | high |
 | Coverage regressed: a new scan failure, coverage gap or exclusion; a collector's status got worse or is no longer recorded; fewer collectors requested or completed; a different scope; more unobserved surfaces; lower coverage assurance; no completeness claim in the new snapshot | high, naming the collector or entries |
 | ShadowScan: report content changed; report bytes changed without comparable content digests; source status worse; more unmapped entries; new projection limitations; a lossy format | high |
-| The new snapshot has graph problems the baseline did not (dangling or mistyped references), or uses an unsupported `spec_version` | high |
+| The new snapshot has graph problems the baseline did not (dangling or mistyped references), or either snapshot uses a `spec_version` this release does not support | high |
 
 A relationship to a component that was itself added or removed is listed but alerts
 through that component, unless its own rating is high.

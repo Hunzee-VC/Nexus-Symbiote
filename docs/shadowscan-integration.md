@@ -201,11 +201,12 @@ changed report content raises the high alert "ShadowScan report content changed"
 Findings are matched by their source identifier, not their position: a finding
 inserted before others alerts only as an added component, and reordering the
 CycloneDX `dependencies` array changes no relationship. An inventory
-written by an earlier version has no content digests, so the first comparison
-after an upgrade raises the high completeness alert and a medium alert for
-every imported component, even when the report bytes are unchanged, because the
-new inventory adds the content digests, the v3 projection profile and the
-per-component finding digests. Later comparisons use the content digests. The content
+written by an earlier version may have no content digests or an older projection
+profile. The first comparison after an upgrade then falls back to the exact report
+digest, which raises a high alert when the report bytes differ, and raises a medium
+alert for every imported component, even when the report bytes are unchanged,
+because the new inventory adds the content digests, the v4 projection profile and
+the per-component finding digests. Later comparisons use the content digests. The content
 digests are not authentication; `validate --project` compares them with the
 local report as it does the exact digest. Text output prints the note under
 Notes; `--json-output` lists it in `metadata_changes`.
