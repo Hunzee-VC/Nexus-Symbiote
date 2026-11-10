@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 from nexus_symbiote.core.enums import RiskSeverity, TrustTier
 from nexus_symbiote.core.hashing import hash_canonical
 from nexus_symbiote.core.models import RAGSourceComponent, RiskAssessment
+from nexus_symbiote.policy import read_sexagesimal_integers_as_text
 from nexus_symbiote.scanners.base import (
     Scanner,
     ScanResult,
@@ -449,6 +450,7 @@ class RAGScanner(Scanner):
             UniqueSafeLoader.add_constructor(
                 yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, unique_mapping
             )
+            read_sexagesimal_integers_as_text(UniqueSafeLoader)
             loader = UniqueSafeLoader(content)
             try:
                 value = loader.get_single_data()

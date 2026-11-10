@@ -239,6 +239,21 @@ def weakened_settings(policy: Policy) -> list[str]:
     return weaker
 
 
+def read_sexagesimal_integers_as_text(loader: type[Any]) -> None:
+    """Make a SafeLoader subclass read ``1:30`` and ``12:30:45`` as text, as YAML 1.2 does.
+
+    PyYAML builds a YAML 1.1 base-60 integer on ever larger integers, in time quadratic in
+    its number of parts. A scalar tagged ``!!int`` that holds a colon is text too; every
+    other integer is constructed as before.
+    """
+    loader.add_constructor("tag:yaml.org,2002:int", _integer_or_text)
+
+
+def _integer_or_text(loader: Any, node: Any) -> Any:
+    text = loader.construct_scalar(node)
+    return text if ":" in text else loader.construct_yaml_int(node)
+
+
 def parse_yaml_mapping(text: str) -> dict[str, Any]:
     try:
         import yaml
@@ -258,12 +273,14 @@ def parse_yaml_mapping(text: str) -> dict[str, Any]:
         return data
 
     UniqueLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, mapping)
+    read_sexagesimal_integers_as_text(UniqueLoader)
     try:
         data = yaml.load(text, Loader=UniqueLoader)  # noqa: S506 - subclass of SafeLoader with unique-key enforcement
         if not isinstance(data, dict):
             raise PolicyError("configuration must be a nonempty YAML mapping")
         return data
-    except (yaml.YAMLError, RecursionError) as exc:
+    # OverflowError: PyYAML's YAML 1.1 base-60 float overflows from 175 parts on.
+    except (yaml.YAMLError, RecursionError, OverflowError) as exc:
         raise PolicyError("invalid YAML document") from exc
 
 
