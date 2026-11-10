@@ -16,6 +16,7 @@ to operate the gateway.
 - [Contracts](#contracts)
 - [Endpoint identities](#endpoint-identities)
 - [Tool definition digest](#tool-definition-digest)
+- [Input schema evaluation](#input-schema-evaluation)
 - [Verification order](#verification-order)
 - [Reason codes](#reason-codes)
 - [Gateway configuration](#gateway-configuration)
@@ -209,7 +210,12 @@ gateway admits a call only when the scope resolver derives the same pair from th
 arguments. Arguments are bounded to 1 MiB, 32 levels and 20,000 values, and must
 stay in the I-JSON domain: pass a larger integer, such as a 64-bit ID, as a
 string. The executor receives the arguments as the caller sent them, in their key
-order and number spelling; the request digest covers their RFC 8785 form.
+order and number spelling; the request digest covers their RFC 8785 form, so the
+caller chooses an order and spelling that no approver saw. A gateway constructed
+with `canonical_arguments=True` gives the executor the RFC 8785 form itself: keys
+in RFC 8785 order and integral numbers below 10^21 as integers. Use it, or reject
+non-canonical arguments in the scope resolver, when a backend depends on key
+order or number type.
 
 `ServedTool` is what the description adapter returns: `endpoint_identity`, the
 authenticated identity of the endpoint that served the tool, and `definition`,
@@ -228,6 +234,11 @@ one spelling per endpoint:
   `https` and `wss`, 80 for `http` and `ws`), no `.` or `..` path segments,
   uppercase percent-encoding only for characters that need it, and an empty
   path for the root: `https://mcp.example.test`, not `https://mcp.example.test/`.
+  An IP address has the one spelling Python's `ipaddress` prints: a dotted quad
+  without leading zeros (`127.0.0.1`, not `127.000.000.001`, `127.1` or
+  `2130706433`) and a compressed, lowercase IPv6 address (`[::1]`, not
+  `[0:0:0:0:0:0:0:1]` or `[::ffff:127.0.0.1]`). A host whose last label is a
+  number, which URL parsers read as an IPv4 address, must be such a dotted quad.
 
 A misspelled revocation entry is therefore rejected when the status is signed
 instead of silently matching nothing. The gateway compares the identity the
@@ -250,6 +261,29 @@ other top-level member, such as `icons` or `execution`, is refused
 so a server that writes volatile data there, such as a timestamp, is denied
 until its grant is re-approved; strip such data in the description adapter only
 if your approval process reviews the descriptor the adapter returns.
+
+## Input schema evaluation
+
+Step 10 below validates the arguments against the approved descriptor's
+`inputSchema` in a separate, bounded worker. The schema's `$schema` names its
+dialect: draft-04, draft-06, draft-07, 2019-09 or 2020-12, with or without a
+trailing `#`. Without `$schema` the dialect is 2020-12, and any other value makes
+the schema invalid (`schema-invalid`). So does a constraint that the dialect would
+ignore: an assertion keyword that only other supported dialects define, and in
+draft-04 to draft-07 an assertion next to `$ref`. `format` is never asserted, and
+references resolve only within the schema.
+
+`pattern` and `patternProperties` are ECMA-262 regular expressions read with the
+`u` flag. Syntax that the `u` flag rejects and that would otherwise be read
+differently is `schema-invalid`: inline flags and other Python-only groups,
+possessive quantifiers (`a*+`), quantifiers without a minimum (`{,n}`), quantified
+assertions, and `\d`, `\w` or `\s` as a range bound (`[%-\w]`). The empty
+classes `[]` and `[^]` are refused too. An escaped surrogate pair such as
+`\uD83D\uDE00` is one code point. Annex B syntax that the `u` flag rejects, such
+as `\-` outside a class or an octal escape, keeps its Annex B meaning, except in a
+pattern that names a character outside the Basic Multilingual Plane or a
+surrogate: Annex B counts UTF-16 code units there, so such a pattern must be valid
+with the `u` flag.
 
 ## Verification order
 
@@ -309,7 +343,14 @@ raised by the integrator's adapters (`authenticate`, `describe`, `resolve_scope`
 `ReferenceGateway.register_snapshot(snapshot, trust=...)` runs steps 3 and 4 for
 the snapshot's own tenant, deployment and agent, without a workload context or a
 companion BOM, so an operator can retire older snapshots as soon as a new one is
-issued.
+issued. `ReferenceGateway.registrar(snapshot_keys=..., trust_keys=..., state=...)`
+returns a gateway without adapters that can only register snapshots, and
+`runtime register` runs the same checks from the command line.
+
+Steps 3 and 4 read the recorded heads first. A trust status or snapshot that is
+older than the recorded one, or that has the recorded serial with other content,
+is refused from that read, without the store's write lock; heads only move
+forward, so the later transaction would refuse it too.
 
 `runtime verify` checks only signatures, purpose, subject, canonical form,
 validity window and, for a snapshot, the companion BOM. Revocation, signer
@@ -327,6 +368,7 @@ other code is permanent for the evidence presented.
 | `denied` | Authorization evidence is incomplete or invalid (used by adapters that raise without a code) |
 | `configuration-invalid` | Gateway, signer or quorum configuration is invalid |
 | `json-invalid` | Input is not strict JSON |
+| `json-not-object` | Input must be a JSON object (`runtime` commands) |
 | `json-out-of-domain` | Value is outside the canonical JSON domain |
 | `json-budget-exceeded` | JSON exceeds the supported size or complexity |
 | `json-number-out-of-range` | JSON contains an integer outside the I-JSON range |
@@ -405,9 +447,10 @@ other code is permanent for the evidence presented.
 
 The `runtime` commands print the code in parentheses at the end of the error,
 next to their own codes: `runtime-input-error` for a contract that does not
-validate (naming fields and contract rules, never values), `runtime-key-error`
-for a key or passphrase that cannot be used, and `runtime-io-error` for a file
-that cannot be read or written safely.
+validate (naming fields and contract rules, never values), `runtime-input-too-large`
+for an input file over its size limit, `runtime-key-error` for a key path, key or
+passphrase that cannot be used, `runtime-io-error` for a file that cannot be read
+or written safely, and `runtime-contract-error` for any other failure.
 
 ## Gateway configuration
 
@@ -424,6 +467,7 @@ that cannot be read or written safely.
 | `authenticate`, `describe`, `resolve_scope`, `execute` | The integrator's adapters, below |
 | `clock` | Returns the current time as an aware `datetime` (default: system UTC time) |
 | `on_decision` | Called with a `Decision` for every admitted or denied call |
+| `canonical_arguments` | Give the executor the RFC 8785 form of the arguments that the approval binds instead of the form the caller sent (default `False`) |
 
 An approval quorum counts people, not keys: the signers' `approval_actors` must
 include at least `approval_threshold` distinct names, and the approval's `actor`
@@ -457,6 +501,12 @@ store's `store_id`. It never holds argument values. The call labels come from th
 caller, so treat them as untrusted text. An exception raised by `on_decision`
 propagates; after admission it prevents execution and the approval stays
 consumed.
+
+`ReferenceGateway.registrar(...)` takes the rings, quorums, signer scopes,
+`allow_shared_keys`, `clock` and `state` above, without adapters, and returns a
+gateway whose only use is `register_snapshot`; `invoke` on it is refused with
+`configuration-invalid`. `approval_keys` is optional and only checked, so the
+gateways' scope map can be reused.
 
 `bind_adapters(describe=..., execute=...)` returns a gateway with the same policy
 and state that uses other description and execution adapters, as
@@ -495,8 +545,10 @@ fresh snapshot before restarting.
 ## Key lifecycle
 
 - **Generate** one key pair per purpose: `runtime keygen` writes both files with
-  mode 0600 and, with `--passphrase-file`, encrypts the private key. `runtime
-  sign` refuses a private key file that its group or others can read. A key held
+  mode 0600 and, with `--passphrase-file`, encrypts the private key with the
+  file's first line, at most 1,023 bytes. `runtime sign` refuses a private key
+  file, and both commands refuse a passphrase file, that its group or others can
+  read. A key held
   in a KMS, an HSM or an agent can sign through `sign_contract` by implementing
   `ContractSigner`: `sign(data) -> bytes` and `public_key()`.
 - **Distribute** public keys to every gateway's rings and give each approval key
@@ -514,9 +566,10 @@ fresh snapshot before restarting.
   binds only tenants whose statuses list it. Keep a separately protected recovery
   trust key, and do not pre-sign trust statuses for later windows: a presenter
   could withhold the newest one until the older ones expire.
-- **Supersede** a snapshot by issuing a higher serial and calling
-  `register_snapshot` on a gateway that shares the store; to retire it on stores
-  you cannot reach, list its digest in `revoked_snapshots` of the next status.
+- **Supersede** a snapshot by issuing a higher serial and registering it on
+  every store with `runtime register` or `register_snapshot`; to retire it on
+  stores you cannot reach, list its digest in `revoked_snapshots` of the next
+  status.
 
 ## What an integrator must provide
 
@@ -535,7 +588,8 @@ mediates tool calls must supply:
   endpoint with credentials no broader than the grant.
 - **Evidence distribution.** Snapshots, trust statuses and the companion BOM
   come from an operator-controlled channel, not from the mediated agent. Refresh
-  trust statuses well within their hour, and register each new snapshot.
+  trust statuses well within their hour, and register each new snapshot with
+  `runtime register` or `ReferenceGateway.registrar`.
 - **Approval issuance.** A reviewer sees the request, and an approval service
   signs an `ActionApproval` with `request_digest(call)`, the snapshot's
   `contract_digest` and the context's digest, a fresh nonce and the reviewer's

@@ -54,7 +54,9 @@ and never pre-sign trust statuses for later windows.
 
 Create one Ed25519 key pair per purpose, outside scanned repositories. A key in
 more than one purpose ring is refused unless the gateway is constructed with
-`allow_shared_keys=True`:
+`allow_shared_keys=True`. Each passphrase file holds its passphrase, at most 1,023
+bytes, on the first line and must be readable only by its owner (mode 0600, for
+example written under `umask 077`):
 
 ```sh
 nexus-symbiote runtime keygen --private-key snapshot.pem --public-key snapshot.pub --passphrase-file snapshot.pass
@@ -78,8 +80,10 @@ to a scan result automatically. It refuses a contract that could never verify,
 because its validity window is longer than its purpose allows or has already
 ended, refuses a private key file that its group or others can read, and prints
 the contract digest. `--passphrase-file` encrypts a new private key or unlocks an
-encrypted one. Keys held in a KMS, an HSM or an agent sign through
-`sign_contract` with any object that has `sign(data)` and `public_key()`.
+encrypted one; a passphrase file that its group or others can read is refused, and
+`runtime keygen` keeps neither key if either cannot be written. Keys held in a
+KMS, an HSM or an agent sign through `sign_contract` with any object that has
+`sign(data)` and `public_key()`.
 
 Outputs use DSSE pre-authentication encoding and in-toto statements. Complete
 companion content is digest-bound; selective disclosure is not supported by this
@@ -160,8 +164,15 @@ field, such as `icons`, fails closed until the digest profile is upgraded.
 Arguments are copied before checking; schema references cannot trigger network
 retrieval. Identities and validity are checked again immediately before execution.
 The executor receives the arguments as the caller sent them; the approval binds
-their RFC 8785 form, in which `1` and `1.0` are equal. Integers must lie between
--(2^53 - 1) and 2^53 - 1; pass larger values, such as 64-bit IDs, as strings.
+their RFC 8785 form, in which `1` and `1.0` are equal and key order does not
+count. The caller therefore chooses the key order and number spelling that the
+executor sees, which the approver of the canonical form never saw. When a backend
+depends on either, for example a command named by its first key or a strictly
+typed integer, construct the gateway with `canonical_arguments=True`: the executor
+then receives exactly the form the approval binds, with keys in RFC 8785 order and
+integral numbers below 10^21 as integers. Alternatively, reject non-canonical
+arguments in `resolve_scope`. Integers must lie between -(2^53 - 1) and
+2^53 - 1; pass larger values, such as 64-bit IDs, as strings.
 
 Schema validity does not bound validation cost. Approved tool schemas and hostile
 arguments are checked in disposable isolated Python workers with a 256 MiB
@@ -183,12 +194,24 @@ mode; a source tree available only through `PYTHONPATH` is insufficient and fail
 closed.
 
 Schemas are evaluated in the dialect their `$schema` declares: draft-04, draft-06,
-draft-07, 2019-09 or 2020-12. A schema without `$schema` is evaluated as 2020-12,
-where draft-07 keywords such as `dependencies` have no effect, so declare the
-dialect. Any other dialect is refused. `pattern` and `patternProperties` have
-ECMA-262 meaning: `$` does not match before a final newline, `\d` and `\w` are
-ASCII, and `.` excludes line terminators. Pattern syntax without an ECMA-262
-meaning, such as inline flags, makes the schema invalid.
+draft-07, 2019-09 or 2020-12. A schema without `$schema` is evaluated as 2020-12.
+Any other dialect is refused. A constraint that the declared dialect would ignore
+makes the schema invalid rather than approved but unenforced: a keyword of another
+dialect, such as draft-07 `dependencies` in a schema without `$schema` or `const`
+in a draft-04 schema, and an assertion next to `$ref` in draft-04 to draft-07,
+which ignore the siblings of `$ref`. `format` is an annotation and is never
+asserted. `pattern` and `patternProperties` have ECMA-262 meaning, read with the
+`u` flag that JSON Schema recommends: `$` does not match before a final newline,
+`\d` and `\w` are ASCII, `\s` and `.` use ECMA-262's whitespace and line
+terminators, and `[\s\S]` matches any character. Pattern syntax that ECMA-262
+rejects or reads differently and that has no translation makes the schema
+invalid: inline flags, possessive quantifiers such as `a*+`, `{,n}`, quantified
+assertions, and `\d`, `\w` or `\s` as a range bound, such as `[%-\w]`. A pattern
+that is valid only without the `u` flag, such as `^\-?\d+$`, keeps that meaning,
+but is refused if it also names characters outside the Basic Multilingual Plane.
+Every worker first checks that patterns have this meaning in each dialect; if a
+jsonschema upgrade changed that, the worker does not start and calls fail with
+`validation-unavailable`.
 
 Revocation and required operation approvals are checked before schema evaluation.
 The worker cannot retrieve schema references from the network. Validation failure
@@ -239,10 +262,21 @@ A snapshot that passes its signature, validity, context, revocation and
 signer-scope checks becomes the current snapshot for its tenant, deployment and
 agent as soon as it is seen, even if that call is denied later; a lower serial is
 then denied with `snapshot-superseded`. To retire a superseded snapshot before
-the agent presents its replacement, call
-`gateway.register_snapshot(new_snapshot, trust=current_status)` when you issue
-the replacement. To retire it on stores you cannot reach, list its digest in
-`revoked_snapshots` of the next trust status.
+the agent presents its replacement, register the replacement when you issue it,
+on the host of each store:
+
+```sh
+nexus-symbiote runtime register snapshot.dsse.json --trust trust.dsse.json --state state.sqlite --snapshot-key snapshot.pub --trust-key trust.pub
+```
+
+Registration checks the snapshot and the current trust status as `invoke` does,
+except the workload context and the companion BOM, so pass the rings, quorums and
+`--signer-scopes` that the gateways use. In Python, call
+`gateway.register_snapshot(new_snapshot, trust=current_status)`, or build a
+registration-only gateway without adapters with `ReferenceGateway.registrar(...)`.
+To retire a snapshot on stores you cannot reach, list its digest in
+`revoked_snapshots` of the next trust status. A superseded snapshot or an older
+trust status is refused from a read of the store, without taking its write lock.
 
 Fresh authenticated revocation knowledge is retained even when the current
 operation is denied. Failed signature or binding checks cannot advance snapshot
@@ -305,9 +339,10 @@ over-long validity windows, replayed approvals and rollback, and asserts each
 one's reason code. `tests/test_runtime_supersession.py`,
 `tests/test_runtime_policy.py` and `tests/test_runtime_state.py` cover snapshot
 supersession and registration, approval quorums, signer scopes, decision
-records and the state store. `tests/test_runtime_vectors.py` checks known-answer
-vectors for signed contracts and every digest an approval binds, and
-`tests/test_runtime_reference.py` runs the reference's worked example.
+records and the state store, and `tests/test_runtime_schema_semantics.py` covers
+schema dialects and ECMA-262 pattern meaning. `tests/test_runtime_vectors.py`
+checks known-answer vectors for signed contracts and every digest an approval
+binds, and `tests/test_runtime_reference.py` runs the reference's worked example.
 `tests/test_lineage.py` covers source withdrawal, cross-tenant rejection, ACL
 revocation and hosted identity verification boundaries. These fixtures establish
 local contract behavior, not a production penetration test or a comparative

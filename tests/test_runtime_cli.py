@@ -9,10 +9,14 @@ import click
 import pytest
 from click.testing import CliRunner
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from nexus_symbiote.runtime import (
     ApprovedSnapshot,
+    AuthorizationError,
     ExecutionContext,
+    ReferenceGateway,
+    StateStore,
     ToolCall,
     ToolGrant,
     TrustStatus,
@@ -267,8 +271,14 @@ def test_deeply_nested_inputs_end_without_a_traceback(tmp_path):
     assert result.exit_code == 1 and "(json-invalid)" in result.output
 
 
+def secret(tmp_path, name, value):
+    path = write(tmp_path, name, value)
+    path.chmod(0o600)
+    return path
+
+
 def test_encrypted_private_keys_need_their_passphrase(tmp_path):
-    passphrase = write(tmp_path, "passphrase.txt", "correct horse battery staple\n")
+    passphrase = secret(tmp_path, "passphrase.txt", "correct horse battery staple\n")
     private, public = keypair(tmp_path, "key", "--passphrase-file", passphrase)
     assert private.read_bytes().startswith(b"-----BEGIN ENCRYPTED PRIVATE KEY-----")
     now = datetime.now(UTC)
@@ -279,7 +289,7 @@ def test_encrypted_private_keys_need_their_passphrase(tmp_path):
     missing = run("sign", contract, "--kind", "trust", "--key", private, "--out", tmp_path / "a")
     assert missing.exit_code == 1 and "encrypted" in missing.output
     assert "runtime-key-error" in missing.output
-    wrong = write(tmp_path, "wrong.txt", "not the passphrase\n")
+    wrong = secret(tmp_path, "wrong.txt", "not the passphrase\n")
     refused = run(
         "sign",
         contract,
@@ -331,6 +341,84 @@ def test_keygen_failure_is_reported_and_leaves_no_partial_pair(tmp_path):
     assert not public.exists()
 
 
+@pytest.mark.parametrize(
+    ("passphrase", "mode", "message"),
+    [
+        ("x" * 2000, 0o600, "at most 1023 bytes"),
+        ("correct horse battery staple", 0o644, "group or others"),
+        ("", 0o600, "empty"),
+    ],
+)
+def test_keygen_refuses_an_unusable_passphrase_before_writing_a_key(
+    tmp_path, passphrase, mode, message
+):
+    secret_file = write(tmp_path, "passphrase.txt", passphrase + "\n")
+    secret_file.chmod(mode)
+    private, public = tmp_path / "key.pem", tmp_path / "key.pub"
+    result = run(
+        "keygen", "--private-key", private, "--public-key", public, "--passphrase-file", secret_file
+    )
+    assert result.exit_code == 1 and "(runtime-key-error)" in result.output
+    assert message in result.output
+    assert not private.exists() and not public.exists()
+    assert keypair(tmp_path, "key")
+
+
+def test_keygen_removes_the_public_key_when_the_private_key_cannot_be_written(
+    tmp_path, monkeypatch
+):
+    import nexus_symbiote.runtime_cli as runtime_cli
+
+    written = []
+    write_new = runtime_cli._write_new
+
+    def fail_second(path, content, mode=0o600):
+        if written:
+            raise ValueError("refused")
+        written.append(path)
+        write_new(path, content, mode)
+
+    monkeypatch.setattr(runtime_cli, "_write_new", fail_second)
+    private, public = tmp_path / "key.pem", tmp_path / "key.pub"
+    result = run("keygen", "--private-key", private, "--public-key", public)
+    assert result.exit_code == 1 and written == [public]
+    assert not private.exists() and not public.exists()
+
+
+def test_keygen_names_existing_paths_with_a_reason_code(tmp_path):
+    private, public = keypair(tmp_path, "key")
+    again = run("keygen", "--private-key", private, "--public-key", tmp_path / "other.pub")
+    assert again.exit_code == 1
+    assert "choose distinct, nonexistent key paths (runtime-key-error)" in again.output
+    same = tmp_path / "same.pem"
+    result = run("keygen", "--private-key", same, "--public-key", same)
+    assert result.exit_code == 1 and "(runtime-key-error)" in result.output
+
+
+@pytest.mark.parametrize("kind", ["snapshot", "context", "request", "tool", "bom"])
+def test_digest_of_a_json_value_that_is_not_an_object_says_so(tmp_path, kind):
+    path = write(tmp_path, "array.json", "[]")
+    result = run("digest", path, "--kind", kind)
+    assert result.exit_code == 1
+    assert "input must be a JSON object (json-not-object)" in result.output
+
+
+def test_sign_and_verify_of_a_json_value_that_is_not_an_object_say_so(tmp_path):
+    private, public = keypair(tmp_path, "key")
+    path = write(tmp_path, "array.json", "[1]")
+    signed = run("sign", path, "--kind", "trust", "--key", private, "--out", tmp_path / "o")
+    verified = run("verify", path, "--kind", "trust", "--public-key", public)
+    for result in (signed, verified):
+        assert result.exit_code == 1 and "(json-not-object)" in result.output
+
+
+def test_oversized_inputs_end_with_a_reason_code(tmp_path):
+    large = write(tmp_path, "large.pub", "x" * 70_000)
+    result = run("key-id", large)
+    assert result.exit_code == 1
+    assert "input exceeds its size limit (runtime-input-too-large)" in result.output
+
+
 def test_digest_and_key_id_commands_match_the_library(tmp_path):
     _, public = keypair(tmp_path, "key")
     bom = {"components": [{"name": "send", "version": 1.0}]}
@@ -373,3 +461,98 @@ def test_digest_and_key_id_commands_match_the_library(tmp_path):
     private_as_public = run("key-id", tmp_path / "key.pem")
     assert private_as_public.exit_code == 1 and "runtime-key-error" in private_as_public.output
     assert stat.S_IMODE(os.stat(public).st_mode) == 0o600
+
+
+def public_file(tmp_path, name, key):
+    path = tmp_path / name
+    path.write_bytes(
+        key.public_key().public_bytes(
+            serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+    )
+    return path
+
+
+def envelope_file(tmp_path, name, envelope):
+    return write(tmp_path, name, json.dumps(envelope.model_dump(mode="json", by_alias=True)))
+
+
+def test_register_makes_a_new_snapshot_current_without_a_gateway(tmp_path):
+    snapshot_key, trust_key = Ed25519PrivateKey.generate(), Ed25519PrivateKey.generate()
+    now = datetime.now(UTC)
+    status = TrustStatus(
+        tenant="acme",
+        serial=1,
+        not_before=now - timedelta(seconds=1),
+        not_after=now + timedelta(minutes=30),
+    )
+    older, newer = current_snapshot({}), current_snapshot({}, serial=2)
+    signed = {
+        name: envelope_file(tmp_path, f"{name}.dsse.json", sign_contract(value, kind, (key,)))
+        for name, value, kind, key in (
+            ("older", older, "snapshot", snapshot_key),
+            ("newer", newer, "snapshot", snapshot_key),
+            ("trust", status, "trust", trust_key),
+        )
+    }
+    state = tmp_path / "state.sqlite"
+    StateStore.initialize(state)
+    args = [
+        "--trust",
+        signed["trust"],
+        "--state",
+        state,
+        "--snapshot-key",
+        public_file(tmp_path, "snapshot.pub", snapshot_key),
+        "--trust-key",
+        public_file(tmp_path, "trust.pub", trust_key),
+    ]
+    result = run("register", signed["newer"], *args)
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout) == {
+        "registered": True,
+        "tenant": "acme",
+        "deployment_id": "prod",
+        "agent_id": "agent:triage",
+        "serial": 2,
+        "digest": contract_digest(newer),
+    }
+    assert run("register", signed["newer"], *args).exit_code == 0
+    superseded = run("register", signed["older"], *args)
+    assert superseded.exit_code == 1 and "(snapshot-superseded)" in superseded.output
+    # Every gateway that shares the store now denies serial 1.
+    gateway = ReferenceGateway.registrar(
+        snapshot_keys={key_id(snapshot_key.public_key()): snapshot_key.public_key()},
+        trust_keys={key_id(trust_key.public_key()): trust_key.public_key()},
+        state=StateStore(state),
+    )
+    with pytest.raises(AuthorizationError) as denied:
+        gateway.register_snapshot(
+            sign_contract(older, "snapshot", (snapshot_key,)),
+            trust=sign_contract(status, "trust", (trust_key,)),
+        )
+    assert denied.value.reason == "snapshot-superseded"
+    with pytest.raises(AuthorizationError) as refused:
+        gateway.invoke(
+            ToolCall(server_id="s", tool_name="t", action="a", resource="r"),
+            **{
+                "snapshot": sign_contract(newer, "snapshot", (snapshot_key,)),
+                "trust": sign_contract(status, "trust", (trust_key,)),
+                "bom": {},
+            },
+        )
+    assert refused.value.reason == "configuration-invalid"
+
+    snapshot_id = key_id(snapshot_key.public_key())
+    other_tenant = write(
+        tmp_path, "scopes.json", json.dumps({snapshot_id: {"tenants": ["globex"]}})
+    )
+    scoped = run("register", signed["newer"], *args, "--signer-scopes", other_tenant)
+    assert scoped.exit_code == 1 and "(signers-out-of-scope)" in scoped.output
+    unknown = write(tmp_path, "unknown.json", json.dumps({"0" * 64: {"tenants": ["acme"]}}))
+    misconfigured = run("register", signed["newer"], *args, "--signer-scopes", unknown)
+    assert misconfigured.exit_code == 1 and "(configuration-invalid)" in misconfigured.output
+    missing = tmp_path / "missing.sqlite"
+    absent = run("register", signed["newer"], *args[:2], "--state", missing, *args[4:])
+    assert absent.exit_code == 1 and "(state-missing)" in absent.output
+    assert not missing.exists()

@@ -149,28 +149,45 @@ def test_worker_crash_or_invalid_protocol_fails_closed(body, monkeypatch):
     assert denied.value.reason == "validation-failed"
 
 
-def test_worker_that_never_starts_is_unavailable_and_reaped(tmp_path, monkeypatch):
-    pid = tmp_path / "pid"
-    fake_worker(monkeypatch, f"open({str(pid)!r}, 'w').write(str(os.getpid()))\ntime.sleep(30)\n")
+def started_workers(monkeypatch) -> list[subprocess.Popen[bytes]]:
+    """Record each worker process, also one killed before its interpreter starts."""
+    started: list[subprocess.Popen[bytes]] = []
+    popen = subprocess.Popen
+
+    def record(*args, **kwargs):
+        process = popen(*args, **kwargs)
+        started.append(process)
+        return process
+
+    monkeypatch.setattr(validation.subprocess, "Popen", record)
+    return started
+
+
+def assert_reaped(started: list[subprocess.Popen[bytes]]) -> None:
+    assert len(started) == 1 and started[0].returncode is not None
+    with pytest.raises(ProcessLookupError):
+        os.kill(started[0].pid, 0)
+
+
+def test_worker_that_never_starts_is_unavailable_and_reaped(monkeypatch):
+    started = started_workers(monkeypatch)
+    fake_worker(monkeypatch, "time.sleep(30)\n")
     monkeypatch.setattr(validation, "WORKER_STARTUP_SECONDS", 0.5)
     with pytest.raises(validation.ValidationBudgetError, match="did not start") as denied:
         validation.validate_arguments({"type": "object"}, {})
     assert denied.value.reason == "validation-unavailable"
-    with pytest.raises(ProcessLookupError):
-        os.kill(int(pid.read_text()), 0)
+    assert_reaped(started)
 
 
-def test_worker_timeout_fails_closed_reaps_worker_and_releases_capacity(tmp_path, monkeypatch):
-    pid = tmp_path / "pid"
-    body = f"open({str(pid)!r}, 'w').write(str(os.getpid()))\n" + READY + "time.sleep(30)\n"
+def test_worker_timeout_fails_closed_reaps_worker_and_releases_capacity(monkeypatch):
     with monkeypatch.context() as patch:
-        fake_worker(patch, body)
+        started = started_workers(patch)
+        fake_worker(patch, READY + "time.sleep(30)\n")
         patch.setattr(validation, "WORKER_TIMEOUT_SECONDS", 0.5)
         with pytest.raises(validation.ValidationBudgetError, match="timed out") as denied:
             validation.validate_arguments({"type": "object"}, {})
     assert denied.value.reason == "validation-timeout"
-    with pytest.raises(ProcessLookupError):
-        os.kill(int(pid.read_text()), 0)
+    assert_reaped(started)
     for _ in range(validation.WORKER_SLOTS + 1):
         validation.validate_arguments({"type": "object"}, {})
 

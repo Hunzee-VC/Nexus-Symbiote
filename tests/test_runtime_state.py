@@ -10,7 +10,7 @@ from datetime import timedelta
 
 import pytest
 
-from nexus_symbiote.runtime import AuthorizationError, StateStore, digest
+from nexus_symbiote.runtime import AuthorizationError, StateStore, TrustStatus, digest
 from tests.test_runtime_authorization import NOW, fixture, invoke
 
 
@@ -126,3 +126,39 @@ def test_snapshot_heads_advance_only_through_snapshot_scopes(tmp_path):
     with pytest.raises(AuthorizationError) as refused:
         store.advance_snapshot("trust:acme", 99, "sha256:" + "0" * 64)
     assert refused.value.reason == "configuration-invalid"
+
+
+def test_older_or_forked_heads_are_refused_without_the_write_lock(tmp_path):
+    store = StateStore.initialize(tmp_path / "state.sqlite")
+    scope = "snapshot:" + digest(["acme", "prod", "agent:triage"])
+    store.advance_snapshot(scope, 2, "sha256:" + "2" * 64)
+    status = TrustStatus(
+        tenant="acme", serial=2, not_before=NOW, not_after=NOW + timedelta(minutes=5)
+    )
+    signers = {"a" * 64}
+    store.accept_trust_status(status, signers)
+    attempts = [
+        (lambda: store.advance_snapshot(scope, 1, "sha256:" + "1" * 64), "snapshot-superseded"),
+        (lambda: store.advance_snapshot(scope, 2, "sha256:" + "3" * 64), "snapshot-fork"),
+        (
+            lambda: store.accept_trust_status(status.model_copy(update={"serial": 1}), signers),
+            "trust-rollback",
+        ),
+        (
+            lambda: store.accept_trust_status(
+                status.model_copy(update={"not_after": NOW + timedelta(minutes=6)}), signers
+            ),
+            "trust-fork",
+        ),
+    ]
+    with sqlite3.connect(tmp_path / "state.sqlite", isolation_level=None) as holder:
+        holder.execute("BEGIN IMMEDIATE")
+        try:
+            for attempt, expected in attempts:
+                started = time.monotonic()
+                with pytest.raises(AuthorizationError) as refused:
+                    attempt()
+                assert refused.value.reason == expected
+                assert time.monotonic() - started < 5
+        finally:
+            holder.execute("ROLLBACK")

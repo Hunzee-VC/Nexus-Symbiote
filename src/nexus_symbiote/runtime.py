@@ -13,6 +13,7 @@ import base64
 import binascii
 import copy
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -24,7 +25,7 @@ from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Annotated, Any, Generic, Literal, Protocol, TypeVar, cast
+from typing import Annotated, Any, Generic, Literal, NoReturn, Protocol, TypeVar, cast
 
 import rfc8785
 from cryptography.exceptions import InvalidSignature
@@ -96,6 +97,7 @@ REASONS: dict[str, str] = {
     "denied": "authorization evidence is incomplete or invalid",
     "configuration-invalid": "gateway, signer or quorum configuration is invalid",
     "json-invalid": "input is not strict JSON",
+    "json-not-object": "input must be a JSON object",
     "json-out-of-domain": "value is outside the canonical JSON domain",
     "json-budget-exceeded": "JSON exceeds the supported size or complexity",
     "json-number-out-of-range": "JSON contains an integer outside the I-JSON range",
@@ -231,8 +233,26 @@ _URL_IDENTITY = re.compile(
     r"(?::(?P<port>[1-9][0-9]{0,4}))?"
     r"(?P<path>(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-F]{2})*)*)"
 )
+_NUMERIC_LABEL = re.compile(r"[0-9]+|0x[0-9a-f]*")
 _DEFAULT_PORTS = {"http": 80, "https": 443, "ws": 80, "wss": 443}
 _UNRESERVED = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+
+
+def _canonical_host(host: str) -> bool:
+    """Accept an IP literal only in the form ``ipaddress`` prints, its one spelling."""
+    if host.startswith("["):
+        try:
+            return f"[{ipaddress.IPv6Address(host[1:-1])}]" == host
+        except ValueError:
+            return False
+    # URL parsers read a host whose last label is a number as an IPv4 address, in
+    # forms such as 2130706433, 127.1 or 0x7f.0.0.1.
+    if _NUMERIC_LABEL.fullmatch(host.rsplit(".", 1)[-1]):
+        try:
+            return str(ipaddress.IPv4Address(host)) == host
+        except ValueError:
+            return False
+    return True
 
 
 def _endpoint_identity(value: str) -> str:
@@ -244,7 +264,8 @@ def _endpoint_identity(value: str) -> str:
         raise ValueError("endpoint identity is not a launcher pin or canonical URL")
     port, path = match["port"], match["path"]
     if (
-        (port is not None and (int(port) > 65535 or int(port) == _DEFAULT_PORTS.get(match[1])))
+        not _canonical_host(match["host"])
+        or (port is not None and (int(port) > 65535 or int(port) == _DEFAULT_PORTS.get(match[1])))
         or path == "/"
         or any(segment in {".", ".."} for segment in path.split("/"))
         or any(chr(int(code, 16)) in _UNRESERVED for code in re.findall("%(..)", path))
@@ -680,6 +701,7 @@ def _verified(
 _RULES = {
     "validity_window": "contract rule: validity window",
     "duplicate_tool_grants": "contract rule: duplicate tool grant",
+    "model_type": "input is not a JSON object",
 }
 
 
@@ -960,24 +982,30 @@ def _migrate(db: sqlite3.Connection) -> None:
     )
 
 
+def _is_recorded(old: Sequence[Any] | None, serial: int, value: str) -> bool:
+    """Whether a snapshot head is already recorded; refuse an older or forked one."""
+    if old is None or serial > old[0]:
+        return False
+    if serial < old[0]:
+        raise AuthorizationError(
+            "snapshot is superseded by a newer recorded snapshot",
+            reason="snapshot-superseded",
+        )
+    if value != old[1]:
+        raise AuthorizationError(
+            "snapshot rollback/fork: another snapshot has this serial",
+            reason="snapshot-fork",
+        )
+    return True
+
+
 def _advance(db: sqlite3.Connection, scope: str, serial: int, value: str) -> None:
     old = db.execute("SELECT serial, digest FROM heads WHERE scope=?", (scope,)).fetchone()
-    if old is not None:
-        if serial < old[0]:
-            raise AuthorizationError(
-                "snapshot is superseded by a newer recorded snapshot",
-                reason="snapshot-superseded",
-            )
-        if serial == old[0]:
-            if value != old[1]:
-                raise AuthorizationError(
-                    "snapshot rollback/fork: another snapshot has this serial",
-                    reason="snapshot-fork",
-                )
-            return
-    db.execute(
-        "INSERT OR REPLACE INTO heads(scope,serial,digest) VALUES (?,?,?)", (scope, serial, value)
-    )
+    if not _is_recorded(old, serial, value):
+        db.execute(
+            "INSERT OR REPLACE INTO heads(scope,serial,digest) VALUES (?,?,?)",
+            (scope, serial, value),
+        )
 
 
 class StateStore:
@@ -1088,9 +1116,16 @@ class StateStore:
             raise AuthorizationError(
                 "trust status requires unrevoked signers", reason="trust-signer-revoked"
             )
-        # Re-presenting the recorded status changes nothing: skip the write lock.
-        if self._head(scope) == (status.serial, head[2], revoked):
+        # Re-presenting the recorded status changes nothing, and a recorded status
+        # only moves forward, so an older or forked one is refused from the read.
+        # Neither takes the store-wide write lock.
+        current = self._head(scope)
+        if current == (status.serial, head[2], revoked):
             return head
+        if current is not None and status.serial < current[0]:
+            raise AuthorizationError("trust-status rollback/fork", reason="trust-rollback")
+        if current is not None and status.serial == current[0] and head[2] != current[1]:
+            raise AuthorizationError("trust-status rollback/fork", reason="trust-fork")
         with self._transaction() as db:
             old = db.execute(
                 "SELECT serial, digest, revoked_signers FROM heads WHERE scope=?", (scope,)
@@ -1122,8 +1157,9 @@ class StateStore:
             raise AuthorizationError(
                 "only snapshot heads advance here", reason="configuration-invalid"
             )
-        current = self._head(scope)
-        if current is not None and (current[0], current[1]) == (serial, value):
+        # Heads only move forward, so a recorded, superseded or forked snapshot is
+        # settled by a read, without the store-wide write lock.
+        if _is_recorded(self._head(scope), serial, value):
             return
         with self._transaction() as db:
             _advance(db, scope, serial, value)
@@ -1237,6 +1273,7 @@ class ReferenceGateway(Generic[T]):
         signer_scopes: Mapping[str, SignerScope] | None = None,
         allow_shared_keys: bool = False,
         on_decision: Callable[[Decision], None] | None = None,
+        canonical_arguments: bool = False,
     ) -> None:
         for threshold, keys in (
             (snapshot_threshold, snapshot_keys),
@@ -1275,6 +1312,48 @@ class ReferenceGateway(Generic[T]):
         self.signer_scopes = dict(signer_scopes or {})
         self.allow_shared_keys = allow_shared_keys
         self.on_decision = on_decision
+        self.canonical_arguments = canonical_arguments
+
+    @staticmethod
+    def registrar(
+        *,
+        snapshot_keys: Mapping[str, Ed25519PublicKey],
+        trust_keys: Mapping[str, Ed25519PublicKey],
+        state: StateStore,
+        approval_keys: Mapping[str, Ed25519PublicKey] | None = None,
+        snapshot_threshold: int = 1,
+        trust_threshold: int = 1,
+        signer_scopes: Mapping[str, SignerScope] | None = None,
+        allow_shared_keys: bool = False,
+        clock: Callable[[], datetime] | None = None,
+    ) -> ReferenceGateway[NoReturn]:
+        """Return a gateway that only registers snapshots, for an issuance pipeline.
+
+        It needs no adapters, and ``invoke`` on it is refused. Give it the rings,
+        quorums and signer scopes of the gateways that share ``state``;
+        ``approval_keys`` is only checked, so one scope map can serve both.
+        """
+
+        def no_adapter(*_: object) -> NoReturn:
+            raise AuthorizationError(
+                "this gateway only registers snapshots", reason="configuration-invalid"
+            )
+
+        return ReferenceGateway(
+            snapshot_keys=snapshot_keys,
+            approval_keys=approval_keys or {},
+            trust_keys=trust_keys,
+            state=state,
+            authenticate=no_adapter,
+            describe=no_adapter,
+            resolve_scope=no_adapter,
+            execute=no_adapter,
+            clock=clock,
+            snapshot_threshold=snapshot_threshold,
+            trust_threshold=trust_threshold,
+            signer_scopes=signer_scopes,
+            allow_shared_keys=allow_shared_keys,
+        )
 
     def bind_adapters(
         self,
@@ -1553,6 +1632,10 @@ class ReferenceGateway(Generic[T]):
             not_after=None if consent is None else consent.not_after,
             check_time=check_time,
         )
+        if self.canonical_arguments:
+            # Exactly the form the request digest binds: keys in RFC 8785 order and
+            # integral numbers below 1e21 as integers.
+            return ToolCall.model_validate(json.loads(request_bytes))
         return call
 
     def _check_approval(

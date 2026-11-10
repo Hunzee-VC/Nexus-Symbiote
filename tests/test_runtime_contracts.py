@@ -174,6 +174,8 @@ def test_contract_that_can_never_verify_is_not_signed(tmp_path, kind, index, lif
         "https://mail.example.test:8443/mcp/",
         "http://127.0.0.1:8080/mcp",
         "https://[::1]/mcp",
+        "https://[fe80::1]/mcp",
+        "https://mcp.0xample/mcp",
         "spiffe://acme.example/ns/prod/sa/mail",
         "stdio+launcher:sha256:" + "0" * 64,
     ],
@@ -208,6 +210,16 @@ def test_canonical_endpoint_identities_are_accepted(identity):
         "stdio+launcher:SHA256:" + "0" * 64,
         "stdio+launcher:sha256:" + "A" * 64,
         "",
+        # An IP address has one accepted spelling, the one ipaddress prints.
+        "https://[0:0:0:0:0:0:0:1]/mcp",
+        "https://[::0001]/mcp",
+        "https://[::ffff:127.0.0.1]/mcp",
+        "https://[127.0.0.1]/mcp",
+        "https://127.000.000.001/mcp",
+        "https://2130706433/mcp",
+        "https://127.1/mcp",
+        "https://0x7f.0.0.1/mcp",
+        "https://mcp.example.0x1f/mcp",
     ],
 )
 def test_noncanonical_endpoint_identities_are_rejected_where_they_are_signed(identity):
@@ -322,6 +334,39 @@ def test_executor_receives_arguments_as_sent(tmp_path):
     assert [type(executed[key]) for key in ("zeta", "alpha", "big")] == [float, float, float]
     assert str(executed["alpha"]) == "-0.0"
     assert executed is not arguments
+
+
+def test_executor_can_receive_the_form_the_approval_binds(tmp_path):
+    values = list(fixture(tmp_path))
+    autonomous(values)
+    values[0] = values[0].bind_adapters(describe=values[0].describe, execute=values[0].execute)
+    values[0].canonical_arguments = True
+    arguments = {"to": "team@example.test", "zeta": 1.0, "alpha": -0.0, "big": 1e20}
+    values[1] = values[1].model_copy(update={"arguments": arguments})
+    assert invoke(values, approval=None) == "executed"
+    executed = values[-1][0].arguments
+    assert list(executed) == ["alpha", "big", "to", "zeta"]
+    assert executed == {"alpha": 0, "big": 10**20, "to": "team@example.test", "zeta": 1}
+    assert {type(executed[key]) for key in ("alpha", "big", "zeta")} == {int}
+
+
+def test_canonical_arguments_is_a_gateway_option(tmp_path):
+    gateway = fixture(tmp_path)[0]
+    assert gateway.canonical_arguments is False
+    options = {
+        name: getattr(gateway, name)
+        for name in (
+            "snapshot_keys",
+            "approval_keys",
+            "trust_keys",
+            "state",
+            "authenticate",
+            "describe",
+            "resolve_scope",
+            "execute",
+        )
+    }
+    assert runtime.ReferenceGateway(**options, canonical_arguments=True).canonical_arguments
 
 
 def test_request_digest_is_over_the_canonical_form():

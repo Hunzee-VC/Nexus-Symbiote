@@ -11,14 +11,14 @@ from click.testing import CliRunner
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from nexus_symbiote.runtime_cli import _read, register_runtime_commands
+from nexus_symbiote.runtime_cli import _InputTooLargeError, _read, register_runtime_commands
 
 
 def test_runtime_input_accepts_exact_byte_limit_and_rejects_overflow(tmp_path):
     path = tmp_path / "contract.json"
     path.write_bytes(b"1234")
     assert _read(path, maximum=4) == b"1234"
-    with pytest.raises(click.ClickException, match="size limit"):
+    with pytest.raises(_InputTooLargeError):
         _read(path, maximum=3)
 
 

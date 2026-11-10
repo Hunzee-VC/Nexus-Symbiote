@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+import sqlite3
+import time
 from datetime import timedelta
 
 import pytest
 
-from nexus_symbiote.runtime import AuthorizationError, StateStore, digest, sign_contract
+from nexus_symbiote.runtime import (
+    AuthorizationError,
+    ReferenceGateway,
+    StateStore,
+    digest,
+    sign_contract,
+)
 from tests.test_runtime_authorization import NOW, fixture, invoke
 
 
@@ -140,3 +148,54 @@ def test_snapshot_registered_during_an_inflight_call_denies_it_and_keeps_the_non
     gateway.describe = describe
     current = reissued(values, 2, values[5].nonce)
     assert invoke(current) == "executed"
+
+
+def test_superseded_snapshot_is_refused_without_taking_the_write_lock(tmp_path):
+    # Anyone holding an old, still valid snapshot must not be able to make every
+    # request wait for the store-wide write lock before it is refused.
+    values = list(fixture(tmp_path))
+    register(values, snapshot=values[3].model_copy(update={"serial": 2}))
+    with sqlite3.connect(tmp_path / "state.sqlite", isolation_level=None) as holder:
+        holder.execute("BEGIN IMMEDIATE")
+        try:
+            started = time.monotonic()
+            with pytest.raises(AuthorizationError) as superseded:
+                invoke(values)
+            assert time.monotonic() - started < 5
+        finally:
+            holder.execute("ROLLBACK")
+    assert superseded.value.reason == "snapshot-superseded"
+
+
+def test_registrar_registers_without_adapters_for_every_gateway_sharing_the_store(tmp_path):
+    values = list(fixture(tmp_path))
+    gateway, call, bom, snapshot, status, _, release, _, trust_key, executed = values
+    registrar = ReferenceGateway.registrar(
+        snapshot_keys=gateway.snapshot_keys,
+        trust_keys=gateway.trust_keys,
+        approval_keys=gateway.approval_keys,
+        state=StateStore(tmp_path / "state.sqlite"),
+        clock=lambda: NOW,
+    )
+    newer = snapshot.model_copy(update={"serial": 2})
+    trust = sign_contract(status, "trust", (trust_key,))
+    assert registrar.register_snapshot(sign_contract(newer, "snapshot", (release,)), trust=trust)
+    with pytest.raises(AuthorizationError) as superseded:
+        invoke(values)
+    assert superseded.value.reason == "snapshot-superseded"
+    assert executed == []
+    with pytest.raises(AuthorizationError) as refused:
+        registrar.invoke(
+            call, snapshot=sign_contract(newer, "snapshot", (release,)), trust=trust, bom=bom
+        )
+    assert refused.value.reason == "configuration-invalid"
+
+
+def test_registrar_checks_its_configuration_like_a_gateway(tmp_path):
+    values = fixture(tmp_path)
+    keys = values[0].snapshot_keys
+    with pytest.raises(AuthorizationError) as shared:
+        ReferenceGateway.registrar(
+            snapshot_keys=keys, trust_keys=keys, state=StateStore(tmp_path / "state.sqlite")
+        )
+    assert shared.value.reason == "configuration-invalid"
