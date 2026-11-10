@@ -950,6 +950,7 @@ def risk(
         raise click.BadParameter("threshold must be positive and finite", param_hint="--threshold")
     basis = "supplied-bom"
     supplier_claims: list[dict[str, str]] = []
+    supplier_claims_omitted = 0
     producer = "not-verified" if carries_discovery_evidence(bom) else "not-applicable"
     if root is not None:
         from nexus_symbiote.validators.completeness import (
@@ -999,13 +1000,15 @@ def risk(
             else:
                 click.echo("Risk unknown. Project reconciliation failed.", err=True)
                 for reason in reasons:
-                    click.echo(_UNSAFE_TEXT.sub("\ufffd", reason), err=True)
+                    # Reasons can quote supplied text, which must never start a CI log line.
+                    click.echo("  - " + _UNSAFE_TEXT.sub("\ufffd", reason), err=True)
             raise click.exceptions.Exit(1)
         basis = checked.basis
         supplier_claims = [
             {"subject": c.subject, "kind": c.kind, "detail": c.detail}
             for c in checked.supplier_claims
         ]
+        supplier_claims_omitted = checked.supplier_claims_omitted
     scorer = RiskScorer.from_policy(
         policy.risk, fail_threshold=threshold, fail_on_severity=fail_on_severity
     )
@@ -1022,6 +1025,7 @@ def risk(
                     },
                     "assessment_basis": basis,
                     "supplier_claims": supplier_claims,
+                    "supplier_claims_omitted": supplier_claims_omitted,
                     "discovery_producer": producer,
                     "policy_source": policy_source,
                     "policy_weakened": policy_weakened,

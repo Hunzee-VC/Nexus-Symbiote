@@ -131,7 +131,7 @@ Stricter values, such as a lower threshold or `fail_on_severity: high`, are not 
 ## Where the governing policy is recorded
 
 - `scan` writes `policy_source` (`built-in`, or `project:.nexus-symbiote.yaml`) and `policy_weakened` into the inventory's `metadata`, so the artifact itself shows a weakened gate.
-- `risk --json-output` reports `policy_source`, `policy_weakened` and a `gate` object with the effective `fail_threshold`, `warn_threshold`, `fail_on_severity`, `ignore_categories` and number of suppressions, each with its source: `cli`, `project policy` or `built-in`.
+- `risk --json-output` reports `policy_source`, `policy_weakened` and a `gate` object with the effective `fail_threshold`, `warn_threshold`, `fail_on_severity`, `ignore_categories` and number of suppressions, each with its source: `cli`, `project policy` (the policy file sets the key) or `built-in`. A `warn_threshold` the policy file does not set is `built-in`, even when the built-in rule lowered it to the project's `fail_threshold`.
 - `validate` prints `Policy:` with the source.
 
 ## Not supported

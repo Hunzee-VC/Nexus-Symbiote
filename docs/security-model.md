@@ -40,9 +40,12 @@ locally collected components. It needs at least one local subject. A supplied
 component or relationship the checkout cannot corroborate fails reconciliation
 when it claims local provenance, verified assurance or internal-verified trust;
 otherwise it is listed as a supplier claim and the basis becomes
-`project-reconciled-with-supplier-claims`. A mismatch
-makes the project-backed risk command exit unsuccessfully with an unknown risk
-level and a null score. Without a project, `risk` scores the supplied claims
+`project-reconciled-with-supplier-claims`. A claim the supplier adds to a locally
+collected component, including one in place of a claim the collector could not
+make, is listed the same way and fails when it asserts verified assurance. A
+mismatch makes `validate` report the basis `project-reconciliation-failed` and
+makes the project-backed risk command exit unsuccessfully with that basis, an
+unknown risk level and a null score. Without a project, `risk` scores the supplied claims
 and labels the result `supplied-bom`. For an operator-configured signature
 check, supply the trusted signer policy when validating the project. In the
 GitHub Action, pass it with the `signature-policy` input as a caller-owned file

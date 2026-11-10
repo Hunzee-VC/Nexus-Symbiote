@@ -228,6 +228,13 @@ def _server_ref(doc: dict) -> str:
     return next(c["bom_ref"] for c in doc["components"] if c["component_type"] == "mcp-server")
 
 
+def _tool(doc: dict) -> dict:
+    return next(c for c in doc["components"] if c["component_type"] == "tool")
+
+
+VERIFIED_RUNTIME_CLAIM = {"method": "sigstore", "scope": "runtime", "assurance": "verified"}
+
+
 def _validate(project: Path, target: Path, doc: dict):
     target.write_text(json.dumps(doc))
     args = ["validate", "--no-project-policy", str(target), "--project", str(project)]
@@ -244,6 +251,8 @@ def _validate(project: Path, target: Path, doc: dict):
         "agent-refs-emptied",
         "extra-verified-component",
         "extra-internal-trust-component",
+        "local-tool-verified-claim",
+        "agent-gap-filled-with-verified-claim",
     ],
 )
 def test_reconciliation_compares_relationships_agent_and_extras(tmp_path, edit):
@@ -269,25 +278,33 @@ def test_reconciliation_compares_relationships_agent_and_extras(tmp_path, edit):
         agent["autonomy_level"] = "L0-chatbot"
     elif edit == "agent-refs-emptied":
         agent["tool_refs"] = []
+    elif edit == "local-tool-verified-claim":
+        _tool(doc)["claims"]["attestation"] = VERIFIED_RUNTIME_CLAIM
+    elif edit == "agent-gap-filled-with-verified-claim":
+        # The collector records deployment as not collected. A supplier may fill that
+        # gap with its own claim, which is listed, but never with verified assurance.
+        agent["claims"]["deployment"] = VERIFIED_RUNTIME_CLAIM
     else:
+        verified = edit == "extra-verified-component"
         doc["components"].append(
             {
                 "bom_ref": "guardrail:prod",
                 "component_type": "guardrail-policy",
                 "name": "prod",
-                "assurance_level": "verified" if edit == "extra-verified-component" else "declared",
+                "assurance_level": "verified" if verified else "declared",
                 "trust_tier": "internal-verified",
                 "claims": {
                     "deployment": {
                         "method": "attested",
                         "scope": "runtime",
-                        "assurance": "verified",
+                        "assurance": "verified" if verified else "declared",
                     }
                 },
             }
         )
     result = _validate(project, target, doc)
     assert result.exit_code == 1, result.output
+    assert "Basis: project-reconciliation-failed" in result.output
     risk = CliRunner().invoke(
         main,
         ["risk", str(target), "--project", str(project), "--no-project-policy", "--json-output"],
@@ -305,6 +322,12 @@ def test_supplier_enrichment_is_reported_as_supplier_claims_not_reconciled(tmp_p
     agent = _agent(doc)
     agent["capabilities"] = {"human_in_the_loop": "required"}
     agent["authorizations"] = [{"principal": "ciso", "action": "deploy"}]
+    agent["claims"]["deployment"] = {"method": "change-ticket", "scope": "runtime"}
+    _tool(doc)["claims"]["attestation"] = {
+        "method": "sigstore",
+        "scope": "runtime",
+        "assurance": "observed",
+    }
     result = _validate(project, target, doc)
     assert result.exit_code == 0, result.output
     assert "Basis: project-reconciled-with-supplier-claims" in result.output
@@ -327,8 +350,27 @@ def test_supplier_enrichment_is_reported_as_supplier_claims_not_reconciled(tmp_p
     assert {
         (agent["bom_ref"], "field", "capabilities"),
         (agent["bom_ref"], "field", "authorizations"),
+        (agent["bom_ref"], "claim", "deployment"),
+        (_tool(doc)["bom_ref"], "claim", "attestation"),
         ("tool:observed", "component", "supplementary observation"),
     } <= claimed
+    assert payload["supplier_claims_omitted"] == 0
+
+
+def test_risk_json_counts_supplier_claims_beyond_the_listed_ones(tmp_path):
+    from nexus_symbiote.validators.completeness import MAX_REPORTED_SUPPLIER_CLAIMS
+
+    project, target, doc = _scanned(tmp_path)
+    _agent(doc)["properties"].update(
+        {f"supplier-note-{index}": index for index in range(MAX_REPORTED_SUPPLIER_CLAIMS + 5)}
+    )
+    result = _validate(project, target, doc)
+    assert result.exit_code == 0, result.output
+    assert "5 further supplier claims omitted" in result.output
+    args = ["risk", str(target), "--project", str(project), "--no-project-policy"]
+    payload = json.loads(CliRunner().invoke(main, [*args, "--json-output"]).stdout)
+    assert len(payload["supplier_claims"]) == MAX_REPORTED_SUPPLIER_CLAIMS
+    assert payload["supplier_claims_omitted"] == 5
 
 
 def test_repository_agent_from_another_checkout_location_is_matched_by_identity(tmp_path):

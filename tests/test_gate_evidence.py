@@ -6,6 +6,7 @@ import json
 import time
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from nexus_symbiote.cli import main
@@ -93,6 +94,34 @@ def test_risk_json_records_the_effective_gate_and_its_origin(tmp_path):
     assert overridden["gate"]["fail_on_severity_source"] == "cli"
 
 
+@pytest.mark.parametrize(
+    ("policy", "fail_source", "warn_threshold"),
+    [
+        ("validate: {minimum_assurance_level: observed}\n", "built-in", 25.0),
+        ("risk: {fail_threshold: 20}\n", "project policy", 20.0),
+    ],
+)
+def test_a_derived_warning_threshold_is_not_attributed_to_the_project_policy(
+    tmp_path, policy, fail_source, warn_threshold
+):
+    from nexus_symbiote.policy import Policy
+
+    assert Policy.model_validate({"risk": {"fail_threshold": 20.0}}).risk.model_fields_set == {
+        "fail_threshold"
+    }
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "AGENTS.md").write_text("Keep receipts.")
+    (project / ".nexus-symbiote.yaml").write_text(policy)
+    target = tmp_path / "bom.json"
+    _scan(project, target)
+    args = ["risk", str(target), "--project", str(project), "--json-output"]
+    gate = json.loads(CliRunner().invoke(main, args).stdout)["gate"]
+    assert gate["fail_threshold_source"] == fail_source
+    assert gate["warn_threshold"] == warn_threshold
+    assert gate["warn_threshold_source"] == "built-in"
+
+
 def test_every_failing_gate_carries_a_reason(tmp_path):
     empty = tmp_path / "empty"
     empty.mkdir()
@@ -126,14 +155,18 @@ def test_legacy_absolute_paths_explain_the_reconciliation_failure(tmp_path):
         if component["bom_ref"] == "prompt:CLAUDE.md":
             component["source_path"] = "/elsewhere/checkout/CLAUDE.md"
     target.write_text(json.dumps(doc))
+    # A current-format inventory that does not match was altered, not written by an
+    # older version, so it gets no advice to re-collect.
     report = CompletenessValidator().validate_against_project(AIBOM.load(target), project)
-    assert not report.is_complete
+    assert not report.is_complete and report.basis == "project-reconciliation-failed"
+    assert not [issue for issue in report.issues if issue.surface == "format"]
+    doc["metadata"]["spec_version"] = "1.0.0"
+    target.write_text(json.dumps(doc))
+    report = CompletenessValidator().validate_against_project(AIBOM.load(target), project)
     assert any(
         issue.severity == "info" and "absolute scan-host paths" in issue.description
         for issue in report.issues
     )
-    doc["metadata"]["spec_version"] = "1.0.0"
-    target.write_text(json.dumps(doc))
     legacy = CliRunner().invoke(
         main, ["validate", str(target), "--project", str(project), "--no-project-policy"]
     )

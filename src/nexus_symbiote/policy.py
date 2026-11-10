@@ -107,7 +107,9 @@ class RiskPolicy(PolicySection):
     def valid_thresholds(self) -> RiskPolicy:
         if "warn_threshold" not in self.model_fields_set:
             # A stricter fail threshold alone must not trip the default warning threshold.
-            self.warn_threshold = min(DEFAULT_WARN_THRESHOLD, self.fail_threshold)
+            # Writing __dict__ keeps the derived default out of model_fields_set, which
+            # gate reports read as the keys the policy file itself set.
+            self.__dict__["warn_threshold"] = min(DEFAULT_WARN_THRESHOLD, self.fail_threshold)
         if self.warn_threshold > self.fail_threshold:
             raise ValueError("warn_threshold cannot exceed fail_threshold")
         if any(not c.strip() for c in self.ignore_categories):

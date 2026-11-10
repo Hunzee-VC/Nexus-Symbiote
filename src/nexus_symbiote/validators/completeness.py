@@ -54,7 +54,12 @@ _BLOCKING = frozenset({"critical", "error", "unknown"})
 _SEVERITY_RANK = {"critical": 0, "error": 0, "unknown": 1, "warning": 2, "info": 3}
 NO_LOCAL_SUBJECT = "No local project subject was available to reconcile."
 
-Basis = Literal["supplied-claims", "project-reconciled", "project-reconciled-with-supplier-claims"]
+Basis = Literal[
+    "supplied-claims",
+    "project-reconciled",
+    "project-reconciled-with-supplier-claims",
+    "project-reconciliation-failed",
+]
 
 
 def _binding_equal(supplied: object, local: object) -> bool:
@@ -174,6 +179,13 @@ def _asserts_unestablished_trust(component: AnyComponent) -> bool:
         component.assurance_level is AssuranceLevel.VERIFIED
         or component.trust_tier is TrustTier.INTERNAL_VERIFIED
         or any(claim.assurance is AssuranceLevel.VERIFIED for claim in component.claims.values())
+    )
+
+
+def _unestablished_trust(ref: str) -> str:
+    return (
+        "Supplied component asserts verified assurance or internal-verified trust "
+        f"without local corroboration: {ref}"
     )
 
 
@@ -339,15 +351,18 @@ class CompletenessValidator:
                     f"Missing or mismatched local component from {source_kind}: {actual.bom_ref}",
                 )
             elif not is_imported(actual):
-                for claim in self._supplier_only(declared, actual, ignore=ignore):
-                    report.add_supplier_claim(claim)
-        legacy = bom.metadata.spec_version.startswith("1.0.") or any(
-            c.source_path and c.source_path.startswith("/") for c in bom.components
-        )
-        if mismatched and legacy:
+                if any(
+                    declared.claims[name].assurance is AssuranceLevel.VERIFIED
+                    for name in self._added_claims(declared, actual)
+                ):
+                    incomplete(actual.bom_ref, _unestablished_trust(actual.bom_ref))
+                else:
+                    for claim in self._supplier_only(declared, actual, ignore=ignore):
+                        report.add_supplier_claim(claim)
+        if mismatched and bom.metadata.spec_version.startswith("1.0."):
             incomplete(
                 "format",
-                "The inventory uses native format 1.0.0 or records absolute scan-host paths; "
+                "The inventory uses native format 1.0, which records absolute scan-host paths; "
                 "re-collect it with this version before reconciling it with a project.",
                 "info",
             )
@@ -366,17 +381,15 @@ class CompletenessValidator:
                     f"Supplied component has no matching local evidence: {extra.bom_ref}",
                 )
             elif _asserts_unestablished_trust(extra):
-                incomplete(
-                    extra.bom_ref,
-                    "Supplied component asserts verified assurance or internal-verified trust "
-                    f"without local corroboration: {extra.bom_ref}",
-                )
+                incomplete(extra.bom_ref, _unestablished_trust(extra.bom_ref))
             else:
                 report.add_supplier_claim(
                     SupplierClaim(extra.bom_ref, "component", "supplementary observation")
                 )
         if report.supplier_claims or report.supplier_claims_omitted:
             report.basis = "project-reconciled-with-supplier-claims"
+        if not report.is_complete:
+            report.basis = "project-reconciliation-failed"
         report.bound_issues()
         return report
 
@@ -487,9 +500,23 @@ class CompletenessValidator:
         )
         claims.extend(
             SupplierClaim(supplied.bom_ref, "claim", name)
-            for name in sorted(supplied.claims.keys() - local.claims.keys())
+            for name in CompletenessValidator._added_claims(supplied, local)
         )
         return claims
+
+    @staticmethod
+    def _added_claims(supplied: AnyComponent, local: AnyComponent) -> list[str]:
+        """Claims the supplier added, including one that replaces a not-collected gap."""
+        added: list[str] = []
+        for name, claim in sorted(supplied.claims.items()):
+            evidence = local.claims.get(name)
+            if evidence is None or (
+                evidence.method == "not-collected"
+                and claim.model_dump(exclude={"observed_at"})
+                != evidence.model_dump(exclude={"observed_at"})
+            ):
+                added.append(name)
+        return added
 
     @staticmethod
     def _compared_fields(supplied: AnyComponent, local: AnyComponent) -> set[str]:
