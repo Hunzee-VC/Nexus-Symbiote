@@ -17,7 +17,7 @@ from nexus_symbiote import limits
 from nexus_symbiote.core.aibom import DependencyEdge
 from nexus_symbiote.core.models import AnyComponent, MCPClientComponent
 from nexus_symbiote.limits import Bound
-from nexus_symbiote.utils.confined import ConfinedCollection
+from nexus_symbiote.utils.confined import BoundedRecords, ConfinedCollection
 
 MAX_CONFIG_BYTES = 4 * 1024 * 1024
 MAX_MODEL_BYTES = 1024 * 1024 * 1024
@@ -97,7 +97,12 @@ def project_relative(root: Path) -> Callable[[str], str]:
 
 @dataclass
 class ScanResult:
-    """The output of a single scanner pass."""
+    """The output of a single scanner pass.
+
+    Its failures and excluded surfaces are listed within the listing bounds, past
+    which they are counted, so a collector that records one for every file it meets
+    still yields an inventory that loads.
+    """
 
     scanner_name: str
     components: list[AnyComponent] = field(default_factory=list)
@@ -114,6 +119,12 @@ class ScanResult:
     source_projection_limitations: list[str] | None = None
     source_unmapped_count: int = 0
     source_unmapped_indexes: list[int] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.scan_failures, BoundedRecords):
+            self.scan_failures = BoundedRecords(self.scan_failures)
+        if not isinstance(self.surfaces_excluded, BoundedRecords):
+            self.surfaces_excluded = BoundedRecords(self.surfaces_excluded, noun="excluded surface")
 
     def make_portable(self, root: Path) -> None:
         """Record locations inside the project rather than where it was checked out.
@@ -173,10 +184,16 @@ def source_collection_bytes() -> Bound:
     """The byte limit of a collection that also searches source text.
 
     Source text is charged to the collection as well, so its limit is the operator's
-    ``total-bytes`` plus ``source-scan-bytes``: the source budget binds first.
+    ``total-bytes`` plus ``source-scan-bytes``, and every read of the collection counts
+    against that sum. A failure states both values as the operator set them.
     """
     settings = limits.current()
-    return Bound(settings.total_bytes + settings.source_scan_bytes, "total-bytes")
+    total, source = settings.total_bytes, settings.source_scan_bytes
+    shown = (
+        f"{limits.format_value('total-bytes', total)} (plus "
+        f"{limits.format_value('source-scan-bytes', source)} source-scan-bytes for source search)"
+    )
+    return Bound(total + source, "total-bytes", shown=shown)
 
 
 class Scanner(ABC):

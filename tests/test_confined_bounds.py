@@ -5,6 +5,7 @@ from __future__ import annotations
 import errno
 import os
 import time
+import tracemalloc
 from dataclasses import replace
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.hashing import open_regular_file, pathname_identity
 from nexus_symbiote.limits import Bound
+from nexus_symbiote.scanners.base import ScanResult, source_collection_bytes
 from nexus_symbiote.scanners.mcp import MCPScanner
 from nexus_symbiote.scanners.model import ModelScanner
 from nexus_symbiote.scanners.prompt import PromptScanner
@@ -278,6 +280,120 @@ def test_a_tree_of_failing_entries_still_yields_an_inventory_that_loads(tmp_path
     assert all(f": {REFUSED} (and " in failure for failure in summaries)
     result = runner.invoke(main, ["validate", str(output)])
     assert "not a valid native AIBOM file" not in result.output
+
+
+def test_every_failure_a_collection_records_is_listed_within_the_bounds(tmp_path):
+    # Only walks and bounded blocks were bounded: one read after another listed them all.
+    failures: list[str] = []
+    with ConfinedCollection(tmp_path, failures) as files:
+        for index in range(MAX_LISTED_FAILURES + 20):
+            assert files.read_bytes(f"m{index:05d}.json") is None
+    assert len(failures) == MAX_LISTED_FAILURES + 1
+    assert failures[-1] == (
+        f"m{MAX_LISTED_FAILURES:05d}.json: file unavailable during collection "
+        "(and 19 more not listed)"
+    )
+
+
+def test_case_variants_past_the_bounds_are_summed_up_in_one_line(tmp_path):
+    # The reason names the path that was asked for, so one line per reason was one
+    # line per variant.
+    count = MAX_LISTED_FAILURES + 20
+    for index in range(count):
+        (tmp_path / f"d{index:05d}").mkdir()
+        (tmp_path / f"d{index:05d}" / "Settings.json").write_text("{}")
+    failures: list[str] = []
+    with ConfinedCollection(tmp_path, failures) as files:
+        for index in range(count):
+            assert files.read_bytes(f"d{index:05d}/settings.json", missing_ok=True) is None
+    listed, summary = failures[:-1], failures[-1]
+    assert sum(map(len, listed)) <= MAX_LISTED_FAILURE_CHARACTERS
+    first = len(listed)
+    assert summary == (
+        f"d{first:05d}/Settings.json: case variant of d{first:05d}/settings.json is the "
+        "active file on case-insensitive file systems and is not inventoried "
+        f"(and {count - first - 1} more not listed)"
+    )
+
+
+def test_a_summary_names_at_most_64_reasons_and_counts_the_rest(tmp_path):
+    failures: list[str] = []
+    with ConfinedCollection(tmp_path, failures) as files:
+        for index in range(MAX_LISTED_FAILURES):
+            files._fail(f"f{index}", "listed")
+        for reason in range(70):
+            for index in range(2):
+                files._fail(f"r{reason}-{index}", f"reason {reason}")
+    assert len(failures) == MAX_LISTED_FAILURES + 65
+    assert failures[MAX_LISTED_FAILURES:] == [
+        *(f"r{reason}-0: reason {reason} (and 1 more not listed)" for reason in range(64)),
+        "12 more failures for 6 other reasons not listed",
+    ]
+
+
+def test_failures_past_the_bounds_are_counted_not_kept(tmp_path):
+    def retained(count: int) -> int:
+        failures: list[str] = []
+        tracemalloc.start()
+        try:
+            with ConfinedCollection(tmp_path, failures) as files:
+                start = tracemalloc.get_traced_memory()[0]
+                for index in range(count):
+                    files._fail("x" * 200 + str(index), "failed")
+                return tracemalloc.get_traced_memory()[0] - start
+        finally:
+            tracemalloc.stop()
+
+    # Twice the failures past the bounds keep no more memory than the first half.
+    assert retained(10_000) < retained(5_000) + 64 * 1024
+
+
+def test_records_a_collector_appends_are_listed_within_the_bounds():
+    result = ScanResult(scanner_name="x", scan_failures=["a: failed", "b: failed"])
+    for index in range(MAX_LISTED_FAILURES + 10):
+        result.scan_failures.append(f"f{index:05d}: failed")
+        result.surfaces_excluded.append(f"g{index:05d}: not inventoried")
+    result.scan_failures += ["late: failed"]
+    result.scan_failures.extend(["later: failed"])
+    assert len(result.scan_failures) == MAX_LISTED_FAILURES + 1
+    assert result.scan_failures[:2] == ["a: failed", "b: failed"]
+    assert result.scan_failures[-1] == "f00998: failed (and 13 more failures not listed)"
+    assert len(result.surfaces_excluded) == MAX_LISTED_FAILURES + 1
+    assert result.surfaces_excluded[-1] == (
+        "g01000: not inventoried (and 9 more excluded surfaces not listed)"
+    )
+    kind = type(result.scan_failures)
+    result.make_portable(Path("/checkout"))
+    assert type(result.scan_failures) is kind
+    result.scan_failures.append("after: failed")
+    assert result.scan_failures[-1] == "f00998: failed (and 14 more failures not listed)"
+    long = ScanResult(scanner_name="x", surfaces_excluded=["y" * 70_000, "z: gap"])
+    assert long.surfaces_excluded == ["y" * 70_000 + " (and 1 more excluded surface not listed)"]
+
+
+def test_a_collection_sums_up_its_own_failures_before_the_line_that_counts_the_rest(tmp_path):
+    result = ScanResult(scanner_name="x")
+    with ConfinedCollection(tmp_path, result.scan_failures, result.surfaces_excluded) as files:
+        for index in range(MAX_LISTED_FAILURES + 5):
+            assert files.read_bytes(f"m{index:05d}") is None
+        result.scan_failures.append("direct: failed")
+        result.scan_failures.append("again: failed")
+    assert len(result.scan_failures) == MAX_LISTED_FAILURES + 2
+    assert result.scan_failures[-2:] == [
+        f"m{MAX_LISTED_FAILURES:05d}: file unavailable during collection (and 4 more not listed)",
+        "direct: failed (and 1 more failure not listed)",
+    ]
+
+
+def test_a_collection_that_also_searches_source_states_both_limits():
+    configured = replace(limits.DEFAULTS, total_bytes=2 * limits.KIB, source_scan_bytes=limits.KIB)
+    with limits.applied(configured):
+        bound = source_collection_bytes()
+    assert bound.value == 3 * limits.KIB
+    assert bound.exceeded() == (
+        "total-bytes limit of 2 KiB (plus 1 KiB source-scan-bytes for source search) "
+        "exceeded; raise it with --limit total-bytes=N"
+    )
 
 
 def test_messages_are_recorded_once_even_when_the_caller_appends_too(tmp_path):
