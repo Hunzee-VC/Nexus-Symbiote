@@ -80,14 +80,19 @@ nexus-symbiote advisories [OPTIONS] AIBOM_PATH
 | `-o`, `--output` `PATH` | Write the advisory report to this file instead of standard output. |
 | `--fail-on-advisory` / `--no-fail-on-advisory` | Exit with status 1 when an advisory is found (default: fail). |
 | `--exclude` `NAME` | Never send this package name to OSV; a trailing `*` matches a prefix (repeatable). |
-| `--exclude-private-origins` | Never send packages whose recorded registry origin is not the public PyPI or npm registry. |
+| `--exclude-private-origins` | Send only packages whose lockfile resolution records the public PyPI or npm registry. pip requirements record no index, so pip packages are withheld; withhold private names with `--exclude` instead to keep public ones checked. |
 | `--dry-run` | List the package identities that would be sent, without contacting OSV (works offline). |
 
 The command sends each package's ecosystem, normalized name and exact version to
 `https://api.osv.dev/v1/querybatch`, including packages resolved from a private
-registry unless you exclude them. It exits 1 when an advisory is found, or when not
-every package in scope was looked up (`coverage` is `partial` or `none`, including
-an inventory with no exact PyPI or npm package).
+registry unless you exclude them. The registry collector labels every pip package
+with the public PyPI origin because requirements files name no index, so only
+`--exclude` (previewed with `--dry-run`) keeps a private pip package name local
+while public ones are still checked. It exits 1 when an advisory is found, or when
+not every package in scope was looked up (`coverage` is `partial` or `none`,
+including an inventory with no exact PyPI or npm package). A report keeps at most
+10,000 advisories per package and 20,000 in total; beyond that, lookups end with an
+error and `coverage` is `partial`.
 
 ### `baseline`
 

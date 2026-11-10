@@ -6,6 +6,11 @@ What leaves the machine: for each component in scope, the ecosystem (``PyPI`` or
 are included unless the operator excludes them. Nothing else from the inventory
 is sent. Batch ordering and per-query pagination:
 https://google.github.io/osv.dev/post-v1-querybatch/
+
+Only a lockfile resolution records where a package came from. pip requirements
+name no index, so the registry collector labels every pip package with the
+public PyPI origin; under ``exclude_private_origins`` such a label is not
+evidence, and a package without a lockfile-backed public origin is not sent.
 """
 
 from __future__ import annotations
@@ -31,6 +36,10 @@ MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 MAX_COMPONENTS = 500
 BATCH_SIZE = 100
 MAX_PAGES = 10
+# One reply may list 10,000 advisories per package; across pages and packages the
+# report keeps at most these many, so a hostile reply cannot grow it without bound.
+MAX_ADVISORIES_PER_PACKAGE = 10_000
+MAX_ADVISORIES = 20_000
 TOTAL_TIMEOUT_SECONDS = 120.0
 PUBLIC_REGISTRY_ORIGINS = {
     "pypi": frozenset({"https://pypi.org", "https://files.pythonhosted.org"}),
@@ -163,6 +172,16 @@ def _excluded(kind: str, name: str, patterns: Iterable[str]) -> bool:
     return False
 
 
+def _origin_exclusion(component: Any, kind: str) -> str | None:
+    """Why ``exclude_private_origins`` withholds a package, or None to send it."""
+    origin = getattr(component, "registry_uri", None)
+    if "package_resolution" not in component.claims or not isinstance(origin, str):
+        return "registry origin is not recorded by a lockfile resolution"
+    if origin.rstrip("/") not in PUBLIC_REGISTRY_ORIGINS[kind]:
+        return "resolved from a non-public registry origin"
+    return None
+
+
 def _in_scope(component: Any) -> str | None:
     """``pypi`` or ``npm`` for a queried package, "" for a package in another ecosystem.
 
@@ -193,7 +212,9 @@ def fetch_advisories(
     """Query only OSV over pinned HTTPS; report missing identity and lookup failures.
 
     One malformed or failed reply stops only its batch: earlier results are kept
-    and every unfinished component in that batch gets an error.
+    and every unfinished component in that batch gets an error. A package with
+    more than ``MAX_ADVISORIES_PER_PACKAGE`` advisories, or a report reaching
+    ``MAX_ADVISORIES``, ends those lookups with an error instead of growing further.
     """
     if not 0 < timeout <= 30:
         raise ValueError("timeout must be in (0, 30] seconds")
@@ -224,16 +245,11 @@ def fetch_advisories(
         except (ValueError, TypeError, UnicodeError):
             report.errors.append(f"{component.bom_ref}: exact package identity unavailable")
             continue
-        origin = getattr(component, "registry_uri", None)
         reason = None
         if _excluded(kind, name, patterns):
             reason = "excluded by the operator"
-        elif (
-            exclude_private_origins
-            and origin is not None
-            and origin.rstrip("/") not in PUBLIC_REGISTRY_ORIGINS[kind]
-        ):
-            reason = "resolved from a non-public registry origin"
+        elif exclude_private_origins:
+            reason = _origin_exclusion(component, kind)
         if reason is not None:
             report.components_excluded += 1
             report.excluded.append({"component_ref": component.bom_ref, "reason": reason})
@@ -245,6 +261,8 @@ def fetch_advisories(
                 "token": None,
                 "seen": set(),
                 "done": False,
+                "found": 0,
+                "error": None,
             }
         )
         report.queries.append(
@@ -262,10 +280,13 @@ def fetch_advisories(
         return report
     client = transport or PinnedHTTPTransport()
     deadline = time.monotonic() + TOTAL_TIMEOUT_SECONDS
+    recorded: set[tuple[Any, ...]] = set()
     for start in range(0, len(queries), BATCH_SIZE):
         batch = queries[start : start + BATCH_SIZE]
         try:
-            _query_batch(client, batch, report, timeout=timeout, deadline=deadline)
+            _query_batch(
+                client, batch, report, recorded=recorded, timeout=timeout, deadline=deadline
+            )
             failure = None
         except _BatchLookupError as exc:
             failure = str(exc)
@@ -275,10 +296,62 @@ def fetch_advisories(
             if state["done"]:
                 report.components_checked += 1
             else:
-                report.errors.append(
-                    f"{state['component'].bom_ref}: {failure or 'OSV lookup incomplete'}"
-                )
+                reason = state["error"] or failure or "OSV lookup incomplete"
+                report.errors.append(f"{state['component'].bom_ref}: {reason}")
     return report
+
+
+def _within(deadline: float) -> None:
+    if time.monotonic() > deadline:
+        raise _BatchLookupError("OSV lookup deadline exceeded")
+
+
+def _collect(
+    state: dict[str, Any],
+    vulns: list[Any],
+    report: AdvisoryReport,
+    recorded: set[tuple[Any, ...]],
+    deadline: float,
+) -> bool:
+    """Record one result's advisories; False when the package exceeds its limit.
+
+    Each entry costs constant time, so a large untrusted reply stays linear, and
+    the deadline is checked per entry, not only between pages.
+    """
+    query = state["query"]
+    ref = state["component"].bom_ref
+    package_url = getattr(state["component"], "package_url", None)
+    ecosystem, version = query["package"]["ecosystem"], query["version"]
+    for vuln in vulns:
+        _within(deadline)
+        advisory = vuln.get("id") if isinstance(vuln, dict) else None
+        if (
+            not isinstance(advisory, str)
+            or re.fullmatch(r"[A-Za-z0-9_.:-]{1,200}", advisory) is None
+        ):
+            raise _BatchLookupError("OSV reply was malformed or reported an error")
+        key = (ref, package_url, advisory, ecosystem, version)
+        if key in recorded:
+            continue
+        if state["found"] >= MAX_ADVISORIES_PER_PACKAGE:
+            state["error"] = "OSV advisories for this package exceed the per-package limit"
+            return False
+        if len(report.advisories) >= MAX_ADVISORIES:
+            raise _BatchLookupError("OSV advisories exceed the report limit")
+        recorded.add(key)
+        state["found"] += 1
+        # No uncontrolled nested API data is propagated as verified local evidence.
+        report.advisories.append(
+            {
+                "component_ref": ref,
+                "package_url": package_url,
+                "advisory_id": advisory,
+                "ecosystem": ecosystem,
+                "version": version,
+                "url": "https://osv.dev/vulnerability/" + advisory,
+            }
+        )
+    return True
 
 
 def _query_batch(
@@ -286,11 +359,14 @@ def _query_batch(
     batch: list[dict[str, Any]],
     report: AdvisoryReport,
     *,
+    recorded: set[tuple[Any, ...]],
     timeout: float,
     deadline: float,
 ) -> None:
     pending = list(batch)
     for _ in range(MAX_PAGES):
+        if len(report.advisories) >= MAX_ADVISORIES:
+            raise _BatchLookupError("OSV advisories exceed the report limit")
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise _BatchLookupError("OSV lookup deadline exceeded")
@@ -326,30 +402,14 @@ def _query_batch(
             raise _BatchLookupError("OSV reply was malformed or reported an error")
         following = []
         for state, result in zip(pending, results, strict=True):
+            _within(deadline)
             if not isinstance(result, dict) or result.keys() - {"vulns", "next_page_token"}:
                 raise _BatchLookupError("OSV reply was malformed or reported an error")
             vulns = result.get("vulns", [])
-            if not isinstance(vulns, list) or len(vulns) > 10_000:
+            if not isinstance(vulns, list) or len(vulns) > MAX_ADVISORIES_PER_PACKAGE:
                 raise _BatchLookupError("OSV reply was malformed or reported an error")
-            query = state["query"]
-            for vuln in vulns:
-                advisory = vuln.get("id") if isinstance(vuln, dict) else None
-                if (
-                    not isinstance(advisory, str)
-                    or re.fullmatch(r"[A-Za-z0-9_.:-]{1,200}", advisory) is None
-                ):
-                    raise _BatchLookupError("OSV reply was malformed or reported an error")
-                # No uncontrolled nested API data is propagated as verified local evidence.
-                record = {
-                    "component_ref": state["component"].bom_ref,
-                    "package_url": getattr(state["component"], "package_url", None),
-                    "advisory_id": advisory,
-                    "ecosystem": query["package"]["ecosystem"],
-                    "version": query["version"],
-                    "url": "https://osv.dev/vulnerability/" + advisory,
-                }
-                if record not in report.advisories:
-                    report.advisories.append(record)
+            if not _collect(state, vulns, report, recorded, deadline):
+                continue
             token = result.get("next_page_token", "")
             if not isinstance(token, str) or len(token) > 2048 or token in state["seen"]:
                 raise _BatchLookupError("OSV pagination is malformed or repeats a page")

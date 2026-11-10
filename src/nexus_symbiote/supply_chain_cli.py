@@ -331,7 +331,11 @@ def register_supply_chain_commands(main: click.Group) -> None:
     @click.option(
         "--exclude-private-origins",
         is_flag=True,
-        help="Never send packages whose recorded registry origin is not the public PyPI or npm registry.",
+        help=(
+            "Send only packages whose lockfile resolution records the public PyPI or npm "
+            "registry. pip requirements record no index, so pip packages are withheld; "
+            "withhold private names with --exclude instead to keep public ones checked."
+        ),
     )
     @click.option(
         "--dry-run",
