@@ -161,12 +161,12 @@ workflow from the pull request's merge commit, so a hostile pull request can
 change the inputs above, switch a gate off or delete the step, and pass. The
 Action prints every gate an input switches off as a warning and reports each
 gate in its `gates` output, but to make the check one a pull request cannot
-edit, require the workflow through a ruleset or run it on `pull_request_target`
-with read-only permissions and the pull request checked out as data, as the
-[README](../../README.md#github-action) shows. SARIF upload needs
-`security-events: write` added to the job and the repository's code-scanning
-entitlement; fork pull requests may have restricted tokens, in which case the
-retained evidence is the fallback.
+edit, require the workflow through an organization ruleset or run it on
+`pull_request_target` with read-only permissions and the pull request checked
+out as data, as the [README](../../README.md#github-action) shows. SARIF upload
+needs `security-events: write` added to the job and the repository's
+code-scanning entitlement; fork pull requests may have restricted tokens, in
+which case the retained evidence is the fallback.
 
 ## 8. What you have, and what you don't
 

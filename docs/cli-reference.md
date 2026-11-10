@@ -63,8 +63,8 @@ and `blast-radius`, the inventory that `scan` and `vex` print without `-o`, and 
 carry the inventory: `nexus-symbiote summary bom.json > summary.txt` keeps the summary,
 and `2>/dev/null` hides only diagnostics.
 
-Text taken from an inventory or a checkout, such as names, paths, references and
-descriptions, is printed literally and inert, in a terminal and in a CI log:
+The offline commands print text taken from an inventory or a checkout, such as names,
+paths, references and descriptions, literally and inert, in a terminal and in a CI log:
 
 - control, format and line-break characters are replaced with U+FFFD, so such text
   cannot move the cursor, rewrite earlier output or start a new line;
@@ -79,6 +79,13 @@ The JSON that `scan` and `vex` print without `-o`, and the `--json-output` docum
 `validate`, `risk`, `diff`, `summary` and `blast-radius`, write a `[` that follows such a
 `##` as `\u005b`; the document parses to exactly the same value. Files written
 with `-o` are not changed.
+
+These rules do not cover what the live commands print on standard output: the JSON of
+`discover-mcp` and `advisories` without `-o`, and of `verify-live --json-output` and
+`--record`, escapes control and line-break characters but not a `##` introducer, and it
+quotes what a server or an inventory supplied. In CI, write that output to a file
+(`-o`, or redirect standard output) instead of printing it into the log.
+
 Colors are used only on a terminal, and `NO_COLOR` turns them off.
 
 ## Exit codes
@@ -99,6 +106,11 @@ What exit status 1 means for each gate:
 | `diff` | `--fail-on-alert` was given and the diff reports a security alert. |
 | `baseline` | The scan gate failed, under the project policy or the built-in one. |
 | `verify-artifact`, `verify-discovery`, `verify-live` | The digest, signature, projection or observation does not match. |
+
+`--report-only` on `scan` and `import-shadowscan` reports collection failures and
+findings without turning them into exit status 1, as a project policy with
+`failure_mode: report-only` does for `scan`. It is for exploration, not approval:
+`baseline` applies the built-in gate whatever the project policy says.
 
 ## Environment variables
 
