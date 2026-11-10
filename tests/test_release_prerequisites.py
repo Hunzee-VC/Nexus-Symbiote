@@ -113,8 +113,18 @@ def committed_ruleset(**changes):
     return {"id": 7, **ruleset, **changes}
 
 
-def test_the_committed_release_tag_ruleset_satisfies_the_preflight():
-    assert controls.evaluate_tag_rulesets([committed_ruleset()]) == []
+def workflow_view(**changes):
+    """The committed ruleset as GitHub returns it to a caller that cannot edit it."""
+    ruleset = committed_ruleset(**{"current_user_can_bypass": "never", **changes})
+    del ruleset["bypass_actors"]
+    return ruleset
+
+
+def test_the_committed_release_tag_ruleset_satisfies_the_administrator_check():
+    for verify in (False, True):
+        assert controls.evaluate_tag_rulesets(
+            [committed_ruleset()], verify_bypass_actors=verify
+        ) == ([], [])
 
 
 @pytest.mark.parametrize(
@@ -128,11 +138,33 @@ def test_the_committed_release_tag_ruleset_satisfies_the_preflight():
         {"conditions": {"ref_name": {"include": ["refs/tags/release-*"], "exclude": []}}},
         {"conditions": {"ref_name": {"include": ["refs/tags/v*"], "exclude": ["refs/tags/v0*"]}}},
         {"bypass_actors": [{"actor_id": 5, "actor_type": "RepositoryRole"}]},
+        {"bypass_actors": "none"},
+        {"current_user_can_bypass": "always"},
+        {"current_user_can_bypass": "pull_requests_only"},
     ],
 )
 def test_a_ruleset_that_lets_release_tags_move_is_rejected(changes):
-    assert controls.evaluate_tag_rulesets([committed_ruleset(**changes)])
-    assert controls.evaluate_tag_rulesets([])
+    errors, notices = controls.evaluate_tag_rulesets([committed_ruleset(**changes)])
+    assert errors and not notices
+    assert controls.evaluate_tag_rulesets([])[0]
+
+
+@pytest.mark.parametrize("ruleset", [workflow_view(), committed_ruleset(bypass_actors=None)])
+def test_an_unreadable_bypass_list_is_reported_never_taken_as_empty(ruleset):
+    errors, notices = controls.evaluate_tag_rulesets([ruleset])
+    assert errors == []
+    assert len(notices) == 1 and "visible only to administrators" in notices[0]
+    errors, notices = controls.evaluate_tag_rulesets([ruleset], verify_bypass_actors=True)
+    assert len(errors) == 1 and "administrator's token" in errors[0]
+    assert notices == []
+    # Seeing that the caller itself may bypass is enough to reject, whoever else may.
+    errors, _ = controls.evaluate_tag_rulesets([workflow_view(current_user_can_bypass="always")])
+    assert errors and "no active ruleset" in errors[0]
+
+
+def test_a_known_empty_bypass_list_outweighs_an_unreadable_one():
+    rulesets = [workflow_view(), committed_ruleset(id=8)]
+    assert controls.evaluate_tag_rulesets(rulesets, verify_bypass_actors=True) == ([], [])
 
 
 def environment(**changes):
@@ -284,9 +316,40 @@ def test_a_stated_override_publishes_a_fresh_commit_and_is_logged(live, capsys):
         ("fetch_tag_rulesets", []),
         ("fetch_environment", (environment(can_admins_bypass=True), MAIN_ONLY)),
         ("fetch_release_tag", (None, None)),
+        ("fetch_runs", None),
     ],
 )
 def test_each_unmet_prerequisite_blocks_pypi_publication(live, fetcher, value):
     live.setattr(controls, fetcher, lambda *_: value)
     live.setattr("sys.argv", [*ARGV, "--publish", "pypi"])
     assert controls.main() == 1
+
+
+def test_an_unusable_run_listing_leaves_the_soak_unproven(live, capsys):
+    # The commit date is well past the soak, but without the push runs it is only the
+    # committer's claim.
+    live.setattr(controls, "fetch_runs", lambda *_: None)
+    live.setattr("sys.argv", [*ARGV, "--publish", "pypi"])
+    assert controls.main() == 1
+    assert "reached the branch is unavailable" in capsys.readouterr().err
+
+
+def test_the_workflow_token_reports_what_it_cannot_see(live, capsys):
+    live.setattr(controls, "fetch_tag_rulesets", lambda *_: [workflow_view()])
+    live.setattr("sys.argv", [*ARGV, "--publish", "pypi"])
+    assert controls.main() == 0
+    out = capsys.readouterr().out
+    assert "Repository controls notice:" in out and "--verify-bypass-actors" in out
+    live.setattr("sys.argv", [*ARGV, "--publish", "pypi", "--verify-bypass-actors"])
+    assert controls.main() == 1
+    assert "administrator's token" in capsys.readouterr().err
+    live.setattr(controls, "fetch_tag_rulesets", lambda *_: [committed_ruleset()])
+    assert controls.main() == 0
+    assert "notice" not in capsys.readouterr().out
+
+
+def test_the_administrator_check_needs_a_publication_target(live):
+    live.setattr("sys.argv", [*ARGV, "--verify-bypass-actors"])
+    with pytest.raises(SystemExit) as raised:
+        controls.main()
+    assert raised.value.code == 2

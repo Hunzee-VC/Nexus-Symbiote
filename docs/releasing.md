@@ -53,7 +53,10 @@ as described below.
    first `v*` tag: the README's verified-release install trusts the tag to stay on the
    published commit. Turn off administrator bypass on both environments. The
    preflight of every `testpypi` and `pypi` run checks the ruleset and the
-   environment and refuses to publish while either is missing.
+   environment and refuses to publish while either is missing. It cannot see who may
+   bypass the ruleset, which GitHub shows only to administrators; the administrator
+   check in [repository controls](repository-controls.md#apply-the-outstanding-controls)
+   verifies that list.
 5. **Register the tag-signing key** as a signing key on the maintainer's GitHub
    account, so that GitHub reports the release tag as verified; the preflight of a
    `pypi` run requires that.
@@ -126,10 +129,14 @@ as described below.
 5. Wait until the release commit has been on `main` for 24 hours, the soak period that
    stands in for a second reviewer, then dispatch with `publish=pypi` and approve the
    `pypi` environment. The preflight refuses an earlier run, a tag that is missing,
-   unverified or on another commit, and an environment or tag ruleset that is not
-   protected. Review the artifacts of this exact run at the approval gate. For an
-   urgent security fix, set `soak_override` to the reason instead of waiting; say so
-   in the release notes.
+   unverified or on another commit, and an environment or tag ruleset that is missing
+   or not protected. Its run log notes that the workflow token could not read the
+   ruleset's bypass list: before approving, run the administrator check
+   (`--verify-bypass-actors`, see
+   [repository controls](repository-controls.md#apply-the-outstanding-controls)) for
+   the release commit. Review the artifacts of this exact run at the approval gate.
+   For an urgent security fix, set `soak_override` to the reason instead of waiting;
+   say so in the release notes.
 6. Verify the published files against this run's checksums and provenance. Constrain
    the signer, ref, commit and runner, not only the repository:
 
@@ -195,9 +202,10 @@ as described below.
 A `testpypi` or `pypi` run fails closed if its read-only preflight cannot establish
 the required branch controls, successful CI for the exact source commit, the
 release-tag ruleset and the environment's protection; a `pypi` run also needs the
-24-hour soak and the signed tag on that commit. Candidate runs remain available
-before those controls are configured; an inspectable candidate is not publication
-approval.
+24-hour soak and the signed tag on that commit. Who may bypass the ruleset is not
+readable with the workflow token; the administrator check covers it. Candidate runs
+remain available before those controls are configured; an inspectable candidate is not
+publication approval.
 
 ## What the pipeline guarantees
 

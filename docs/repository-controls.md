@@ -66,9 +66,16 @@ trusted run that is pending or failed still wins over an older success. An unbou
 status with the same name cannot satisfy the protection preflight.
 
 With `--publish testpypi` or `--publish pypi`, as the release workflow passes, it
-also requires an active ruleset without bypass actors that stops `refs/tags/v*` from
-being updated or deleted, and requires the named environment to have a required
-reviewer, administrator bypass turned off and deployments limited to `main`. With
+also requires an active ruleset that stops `refs/tags/v*` from being updated or
+deleted and that the checking token itself cannot bypass, and requires the named
+environment to have a required reviewer, administrator bypass turned off and
+deployments limited to `main`. GitHub returns a ruleset's bypass actors only to a
+caller that may edit the ruleset, so the release workflow's read-only token cannot
+tell whether an administrator, a team or an app may bypass it: the run prints a
+notice saying so instead of treating the unseen list as empty. Only the
+[administrator check](#apply-the-outstanding-controls), run with
+`--verify-bypass-actors` and an administrator's token, verifies that the list is
+empty, and it fails when the list cannot be read. With
 `--publish pypi` it further requires the release commit to have been on `main` for
 24 hours, measured from the later of its commit time and the first `push` run GitHub
 created for it, unless the `SOAK_OVERRIDE` variable states a reason of at least 20
@@ -176,7 +183,8 @@ through the GitHub API on 2026-11-06, with what the 0.1.0 publication on 2026-11
 established. Re-check live settings before relying on any row; this table is a
 dated record, not enforcement. The publication preflight now checks the tag ruleset
 and the environments at every `testpypi` and `pypi` run, so the rows marked
-"checked at publication" are verified, or the publication refused, each time.
+"checked at publication" are verified, or the publication refused, each time; the
+ruleset's bypass list is the exception, which only the administrator check can read.
 
 | Control | Observed state | Required action |
 | --- | --- | --- |
@@ -187,7 +195,7 @@ and the environments at every `testpypi` and `pypi` run, so the rows marked
 | Secret scanning and push protection | Enabled | None |
 | `testpypi` and `pypi` environments | Both exist with @aisecnomad as the required reviewer, *Prevent self-review* off because there is a single maintainer (see [releasing](releasing.md)), and deployments limited to `main`. On 2026-11-06 administrators could bypass the protection rules; whether that was turned off before 0.1.0 was not recorded. Checked at publication | Turn off administrator bypass before the next publication, which is refused otherwise; turn on *Prevent self-review* once a second reviewer exists |
 | Trusted publishers | Confirmed by the 0.1.0 uploads on 2026-11-08: the OIDC uploads to TestPyPI (01:04 UTC) and PyPI (01:28 UTC) succeeded, and the PyPI files carry provenance naming `release.yml` and the `pypi` environment | None |
-| Release tags `v*` | `v0.1.0` (signed, annotated, on `d8c54e4`) was created on 2026-11-09, after publication. Whether the release-tag ruleset was applied first was not recorded; without it, anyone with write access can move or delete the tag. The README's verified-release install requires the wheel's attestation to name the commit the tag points at. That stops a plain tag move, but not a move to a second commit that differs only in its lock file: candidate runs are attested without approval. Only the ruleset keeps the tag on the published commit. Checked at publication | Confirm with `gh api repos/Hunzee-VC/Nexus-Symbiote/rulesets`; apply [the release-tag ruleset](../config/github-release-tag-ruleset.json) if it is missing, which the next publication otherwise refuses |
+| Release tags `v*` | `v0.1.0` (signed, annotated, on `d8c54e4`) was created on 2026-11-09, after publication. Whether the release-tag ruleset was applied first was not recorded; without it, anyone with write access can move or delete the tag. The README's verified-release install requires the wheel's attestation to name the commit the tag points at. That stops a plain tag move, but not a move to a second commit that differs only in its lock file: candidate runs are attested without approval. Only the ruleset keeps the tag on the published commit. Checked at publication, except who may bypass it | Confirm with `gh api repos/Hunzee-VC/Nexus-Symbiote/rulesets`; apply [the release-tag ruleset](../config/github-release-tag-ruleset.json) if it is missing, which the next publication otherwise refuses |
 
 The repository is public, so branch protection, rulesets, artifact attestations
 and environment protection are available on every GitHub plan; the
@@ -207,11 +215,15 @@ gh api --method POST repos/Hunzee-VC/Nexus-Symbiote/rulesets \
   --input config/github-release-tag-ruleset.json
 
 # 2. Confirm the publication preflight accepts the live state, including the
-#    tag ruleset and the testpypi environment
+#    tag ruleset, its empty bypass list, and the testpypi environment
 GH_TOKEN="$(gh auth token)" python scripts/check_repository_controls.py \
   --repo Hunzee-VC/Nexus-Symbiote --branch main --sha "$(git rev-parse origin/main)" \
-  --publish testpypi
+  --publish testpypi --verify-bypass-actors
 ```
+
+Step 2 is the administrator check. Run it after any change to the ruleset and before
+approving each publication: it is the only check of who may bypass the release-tag
+ruleset, because GitHub does not show that list to the release workflow's token.
 
 Turn off administrator bypass for the `pypi` and `testpypi` environments under
 *Settings → Environments* first; step 2 fails while it is on. Step 2 passes only once
@@ -244,7 +256,8 @@ git for-each-ref --merged origin/main --format='%(refname:strip=3) %(objectname)
 args=()
 while read -r name sha; do args+=("--force-with-lease=refs/heads/$name:$sha" ":refs/heads/$name"); done \
   < merged-branches.txt
-git push --atomic origin "${args[@]}"
+# With no refspec, git push would push the current branch instead of deleting nothing.
+if [ "${#args[@]}" -gt 0 ]; then git push --atomic origin "${args[@]}"; fi
 ```
 
 Branches with commits that are not on `main` need a decision each: tag them under

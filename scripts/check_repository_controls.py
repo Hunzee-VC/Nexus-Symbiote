@@ -4,8 +4,11 @@ Read-only. For the published SHA it requires branch protection, the newest trust
 to have succeeded, and, with ``--publish``, the release-tag ruleset and the index
 environment's protection. Publishing to PyPI also requires the commit to have been on the
 branch for 24 hours (``SOAK_OVERRIDE`` with a stated reason waives that for an urgent fix)
-and the signed release tag to point at it. Administrative configuration is a separate
-operator action; a checked-in policy file does not protect a GitHub branch.
+and the signed release tag to point at it. Only an administrator's token can see who may
+bypass the ruleset: the workflow reports that it could not, and ``--verify-bypass-actors``,
+for the administrator's own run, fails unless the list is readable and empty.
+Administrative configuration is a separate operator action; a checked-in policy file does
+not protect a GitHub branch.
 """
 
 from __future__ import annotations
@@ -298,33 +301,61 @@ def fetch_tag_rulesets(repo: str, token: str) -> list[Any]:
     ]
 
 
-def evaluate_tag_rulesets(rulesets: list[Any]) -> list[str]:
-    """Require an active, unbypassable ruleset that stops v* tags from moving or vanishing."""
+def _guards_release_tags(ruleset: Any) -> bool:
+    """Active, covering every v* tag, blocking updates and deletions, binding the caller too."""
+    if (
+        not isinstance(ruleset, dict)
+        or ruleset.get("target") != "tag"
+        or ruleset.get("enforcement") != "active"
+        # Reported for the caller's own token: a workflow that may bypass could move a tag.
+        or ruleset.get("current_user_can_bypass", "never") != "never"
+    ):
+        return False
+    conditions = ruleset.get("conditions")
+    names = conditions.get("ref_name") if isinstance(conditions, dict) else None
+    include = names.get("include") if isinstance(names, dict) else None
+    exclude = names.get("exclude", []) if isinstance(names, dict) else None
+    if not isinstance(include, list) or exclude:
+        return False
+    if TAG_PATTERN not in include and "~ALL" not in include:
+        return False
+    rules = ruleset.get("rules")
+    types = (
+        {r.get("type") for r in rules if isinstance(r, dict)} if isinstance(rules, list) else set()
+    )
+    return {"update", "deletion"} <= types
+
+
+def evaluate_tag_rulesets(
+    rulesets: list[Any], *, verify_bypass_actors: bool = False
+) -> tuple[list[str], list[str]]:
+    """Errors and notices for the ruleset that must stop v* tags from moving or vanishing.
+
+    GitHub returns ``bypass_actors`` only to a caller that may edit the ruleset, which means an
+    administrator; the release workflow's token never sees it. A missing list is therefore
+    unknown, not empty: the workflow reports it, and the administrator's check
+    (``verify_bypass_actors``) fails on it.
+    """
+    unknown = False
     for ruleset in rulesets:
-        if (
-            not isinstance(ruleset, dict)
-            or ruleset.get("target") != "tag"
-            or ruleset.get("enforcement") != "active"
-            or ruleset.get("bypass_actors")
-        ):
+        if not _guards_release_tags(ruleset):
             continue
-        conditions = ruleset.get("conditions")
-        names = conditions.get("ref_name") if isinstance(conditions, dict) else None
-        include = names.get("include") if isinstance(names, dict) else None
-        exclude = names.get("exclude", []) if isinstance(names, dict) else None
-        if not isinstance(include, list) or exclude:
-            continue
-        if TAG_PATTERN not in include and "~ALL" not in include:
-            continue
-        rules = ruleset.get("rules")
-        types = (
-            {r.get("type") for r in rules if isinstance(r, dict)}
-            if isinstance(rules, list)
-            else set()
-        )
-        if {"update", "deletion"} <= types:
-            return []
-    return ["no active ruleset without bypass stops refs/tags/v* from being moved or deleted"]
+        actors = ruleset.get("bypass_actors")
+        if actors == []:
+            return [], []
+        unknown = unknown or actors is None
+    if unknown and verify_bypass_actors:
+        return [
+            "this token cannot read who may bypass the release-tag ruleset; run the check"
+            " with a repository administrator's token"
+        ], []
+    if unknown:
+        return [], [
+            "the release-tag ruleset's bypass actors are visible only to administrators, so"
+            " this token could not check them; the administrator check"
+            " (--verify-bypass-actors) does"
+        ]
+    return ["no active ruleset without bypass stops refs/tags/v* from being moved or deleted"], []
 
 
 def fetch_environment(repo: str, name: str, token: str) -> tuple[Any, Any]:
@@ -440,7 +471,16 @@ def main() -> int:
     parser.add_argument(
         "--publish", choices=["testpypi", "pypi"], help="also check this index's prerequisites"
     )
+    parser.add_argument(
+        "--verify-bypass-actors",
+        action="store_true",
+        help="fail unless the release-tag ruleset's bypass list is readable and empty;"
+        " needs a repository administrator's token",
+    )
     args = parser.parse_args()
+    if args.verify_bypass_actors and not args.publish:
+        parser.error("--verify-bypass-actors needs --publish")
+    notices: list[str] = []
     try:
         if not _valid_sha(args.sha):
             raise ValueError("an exact source commit SHA is required")
@@ -453,14 +493,24 @@ def main() -> int:
                 evaluate_verification(run, jobs, repo=args.repo, branch=args.branch, sha=args.sha)
             )
         if not errors and args.publish:
-            errors.extend(evaluate_tag_rulesets(fetch_tag_rulesets(args.repo, token)))
+            ruleset_errors, notices = evaluate_tag_rulesets(
+                fetch_tag_rulesets(args.repo, token),
+                verify_bypass_actors=args.verify_bypass_actors,
+            )
+            errors.extend(ruleset_errors)
             environment, policies = fetch_environment(args.repo, args.publish, token)
             errors.extend(
                 evaluate_environment(environment, policies, name=args.publish, branch=args.branch)
             )
         if not errors and args.publish == "pypi":
-            runs = fetch_runs(args.repo, args.sha, token) or []
-            landed = landed_at(metadata, runs, repo=args.repo, branch=args.branch, sha=args.sha)
+            # A truncated or malformed listing leaves the landing time unknown; the commit
+            # date alone is whatever the committer's clock said.
+            runs = fetch_runs(args.repo, args.sha, token)
+            landed = (
+                None
+                if runs is None
+                else landed_at(metadata, runs, repo=args.repo, branch=args.branch, sha=args.sha)
+            )
             override = os.environ.get("SOAK_OVERRIDE", "")
             errors.extend(evaluate_soak(landed, datetime.now(UTC), override))
             if not errors and override_reason(override):
@@ -481,6 +531,8 @@ def main() -> int:
         print("Repository controls: " + error, file=sys.stderr)
     if errors:
         return 1
+    for notice in notices:
+        print("Repository controls notice: " + notice)
     checked = "protected branch and successful CI for the exact source"
     if args.publish:
         checked += f", the release-tag ruleset and the {args.publish} environment"
