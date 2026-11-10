@@ -77,9 +77,23 @@ def test_pinned_schema_dispatch_preserves_every_exact_branch_and_source():
         return leaves(node["then"]) + leaves(node["else"])
 
     assert leaves(compiled["$defs"]["AnyClass"]["then"]) == official["$defs"]["AnyClass"]["anyOf"]
-    assert {k: v for k, v in compiled["$defs"].items() if k != "AnyClass"} == {
-        k: v for k, v in official["$defs"].items() if k != "AnyClass"
-    }
+    assert compiled["$defs"].keys() == official["$defs"].keys()
+    split = 0
+    for name, definition in official["$defs"].items():
+        if name == "AnyClass":
+            continue
+        if not name.endswith("_derived"):
+            assert compiled["$defs"][name] == definition
+            continue
+        # Reference unions keep their exact alternatives, split by instance type.
+        rest = definition["anyOf"][1:]
+        assert compiled["$defs"][name] == {
+            "if": {"type": "object"},
+            "then": definition,
+            "else": {"anyOf": rest} if rest else False,
+        }
+        split += 1
+    assert split == 90
     assert {k: v for k, v in compiled.items() if k != "$defs"} == {
         k: v for k, v in official.items() if k != "$defs"
     }
@@ -223,3 +237,112 @@ def test_official_schema_type_and_property_adversaries_are_equivalent():
         tag = dispatch._tag(official, branch)
         document = {"@context": context, "@graph": [{"type": tag}]}
         assert fast.is_valid(document) == original.is_valid(document), tag
+
+
+def _reference_schema():
+    schema = _small_schema()
+    schema["$defs"]["Ref_derived"] = {
+        "anyOf": [
+            {
+                "type": "object",
+                "unevaluatedProperties": False,
+                "anyOf": [{"$ref": "#/$defs/A"}, {"$ref": "#/$defs/B"}],
+            },
+            {"const": "Named"},
+            {"type": "string", "pattern": "^urn:"},
+        ]
+    }
+    schema["$defs"]["B"]["allOf"][1]["properties"]["link"] = {"$ref": "#/$defs/Ref_derived"}
+    return schema
+
+
+@pytest.mark.parametrize(
+    "link",
+    [
+        "Named",
+        "urn:x",
+        "other",
+        3,
+        None,
+        [],
+        True,
+        {"type": "A", "payload": 1},
+        {"type": "A", "payload": "bad"},
+        {"type": "A", "payload": 1, "extra": 1},
+        {"type": "B", "name": "n"},
+        {},
+    ],
+)
+def test_reference_union_type_split_is_equivalent(monkeypatch, link):
+    schema = _reference_schema()
+    compiled = _compile_for_proof(schema, monkeypatch)
+    assert compiled["$defs"]["Ref_derived"]["if"] == {"type": "object"}
+    value = {"type": "B", "name": "n", "link": link}
+    assert _accepts(compiled, value) == _accepts(schema, value)
+
+
+@pytest.mark.parametrize("change", ["first-not-object", "extra-keyword", "sibling", "interior-ref"])
+def test_unsupported_reference_unions_keep_the_official_union(monkeypatch, change):
+    schema = _reference_schema()
+    union = schema["$defs"]["Ref_derived"]
+    if change == "first-not-object":
+        union["anyOf"][0]["type"] = ["object", "string"]
+    elif change == "extra-keyword":
+        union["anyOf"][0]["required"] = ["type"]
+    elif change == "sibling":
+        union["not"] = {"const": "Named"}
+    else:
+        schema["allOf"] = [{"$ref": "#/$defs/Ref_derived/anyOf/1"}]
+    compiled = _compile_for_proof(schema, monkeypatch)
+    if change == "interior-ref":
+        assert compiled is schema
+    else:
+        assert compiled["$defs"]["Ref_derived"] == union
+
+
+@pytest.mark.parametrize(
+    "reference",
+    [
+        "urn:x",
+        "_:blank",
+        "NoneElement",
+        "SpdxOrganization",
+        "expandedlicensing_NoAssertionLicense",
+        "no-colon",
+        3,
+        None,
+        [],
+        {"type": "Tool", "spdxId": "urn:t", "creationInfo": "_:creation"},
+        {"type": "Tool", "spdxId": "urn:t", "creationInfo": "_:creation", "extra": 1},
+        {"type": "Hash", "algorithm": "sha256", "hashValue": "ab" * 32},
+        {"type": "Tool"},
+        {},
+    ],
+)
+def test_official_reference_values_are_equivalent(reference):
+    official = _schema("spdx/spdx-json-schema-3.0.1.json")
+    original = Draft202012Validator(official, format_checker=FormatChecker())
+    fast = Draft202012Validator(
+        dispatch.dispatched_spdx_schema(official), format_checker=FormatChecker()
+    )
+    context = "https://spdx.org/rdf/3.0.1/spdx-context.jsonld"
+    nodes = [
+        {"type": "SpdxDocument", "spdxId": "urn:d", "creationInfo": "_:c", "element": [reference]},
+        {
+            "type": "Relationship",
+            "spdxId": "urn:r",
+            "creationInfo": "_:c",
+            "relationshipType": "other",
+            "from": reference,
+            "to": [reference],
+        },
+        {
+            "type": "software_Package",
+            "spdxId": "urn:p",
+            "creationInfo": "_:c",
+            "suppliedBy": reference,
+        },
+    ]
+    for node in nodes:
+        document = {"@context": context, "@graph": [node]}
+        assert fast.is_valid(document) == original.is_valid(document), node

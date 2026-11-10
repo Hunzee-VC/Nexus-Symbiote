@@ -3,6 +3,10 @@ Vendored schema resources retain their upstream licenses.
 CycloneDX schema resources are from the OWASP CycloneDX specification project.
 Copyright OWASP Foundation. Distributed under Apache License 2.0.
 Source https://github.com/CycloneDX/specification/tree/1.7.2/schema
+bom-1.7.schema.json references cryptography-defs.schema.json. That file was copied
+from the cyclonedx-python-lib 11.12.0 wheel, the CycloneDX project's Python library,
+where it is cyclonedx/schema/_res/cryptography-defs.SNAPSHOT.schema.json and ships
+with the same bom-1.7 schema. It was not compared with the specification repository.
 
 SPDX JSON schema and JSON-LD context resources are generated from the SPDX
 Specification 3.0.1 by the SPDX project (SPDX Working Group). The SPDX
@@ -13,7 +17,12 @@ Unported (CC-BY-3.0). LICENSE-SPDX-3.0.1.txt is the specification's license file
 at tag 3.0.1, unchanged: https://github.com/spdx/spdx-spec/blob/3.0.1/LICENSE
 Source https://spdx.github.io/spdx-spec/v3.0.1/
 
-SOURCES.json records exact source locations and the SHA-256 digests of the copied
-files. Each copied schema/context resource equals its source except for one added
-final newline. SymBiote validation and projection
-code is separate from these third-party schema resources.
+SOURCES.json records the source of each copied file, the SHA-256 digest of the copy
+(sha256) and the SHA-256 digest of the source bytes (sourceSha256). Each copy equals
+its source except for one added final newline, so sourceSha256 is the digest of the
+copy without its last byte; compare it with the digest of a fresh download of the
+source to check a copy. jsf-0.82.schema.json also equals, byte for byte, the copy in
+cyclonedx-python-lib 11.12.0. The package checks every copy against sha256 before it
+validates an export. These are offline records: they do not authenticate the
+upstream publisher. SymBiote validation and projection code is separate from these
+third-party schema resources.

@@ -35,7 +35,7 @@ A schema-valid document is not a verified one. Validity says nothing about wheth
 
 ## Compatibility
 
-Unknown fields are rejected rather than ignored, so a producer cannot smuggle unreviewed semantics into a document. Missing security values mean **unknown**, not `false`; see the [security defaults migration](../docs/security-defaults-migration.md). Standard exports (CycloneDX 1.7 and SPDX 3.0.1) are validated against the official schemas vendored under `src/nexus_symbiote/generators/schemas/vendor/`, whose provenance digests the hygiene check verifies.
+Unknown fields are rejected rather than ignored, so a producer cannot smuggle unreviewed semantics into a document. Missing security values mean **unknown**, not `false`; see the [security defaults migration](../docs/security-defaults-migration.md). Standard exports (CycloneDX 1.7 and SPDX 3.0.1) are validated against the official schemas vendored under `src/nexus_symbiote/generators/schemas/vendor/`, whose provenance digests the hygiene check and the package verify. [Standard exports](../docs/standard-exports.md#extension-properties) lists the properties that carry the native semantics.
 
 When a model changes, regenerate the affected schema from it and review the diff together with the model change. These commands reproduce the committed files byte for byte:
 

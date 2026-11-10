@@ -320,7 +320,7 @@ class TestCycloneDXGeneratorFull:
         assert props["nexus-symbiote:serializationFormat"] == "safetensors"
         assert props["nexus-symbiote:serializationSafety"] == "safe"
         assert props["nexus-symbiote:signingStatus"] == "sigstore-signed"
-        assert props["nexus-symbiote:trustRemoteCode"] == "True"
+        assert props["nexus-symbiote:trustRemoteCode"] == "true"
 
     def test_model_version_and_supplier(self):
         gen = CycloneDXGenerator()
@@ -381,8 +381,8 @@ class TestCycloneDXGeneratorFull:
         m = next(c for c in result["components"] if c["name"] == "conversation-store")
         props = {p["name"]: p["value"] for p in m.get("properties", [])}
         assert props["nexus-symbiote:storeType"] == "conversation"
-        assert props["nexus-symbiote:tenantIsolated"] == "True"
-        assert props["nexus-symbiote:encryptionAtRest"] == "True"
+        assert props["nexus-symbiote:tenantIsolated"] == "true"
+        assert props["nexus-symbiote:encryptionAtRest"] == "true"
 
     def test_rag_properties(self):
         gen = CycloneDXGenerator()
@@ -398,7 +398,7 @@ class TestCycloneDXGeneratorFull:
         r = next(c for c in result["components"] if c["name"] == "npm-registry")
         props = {p["name"]: p["value"] for p in r.get("properties", [])}
         assert props["nexus-symbiote:registryType"] == "npm"
-        assert props["nexus-symbiote:publisherVerified"] == "True"
+        assert props["nexus-symbiote:publisherVerified"] == "true"
 
     def test_skill_properties(self):
         gen = CycloneDXGenerator()

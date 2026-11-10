@@ -115,7 +115,7 @@ def test_cdx_preserves_false_annotations_and_merges_adjacency():
     props = next(c for c in document["components"] if c["bom-ref"] == "tool:send")["properties"]
     assert {p["name"]: p["value"] for p in props}[
         "nexus-symbiote:annotation.destructiveHint"
-    ] == "False"
+    ] == "false"
     assert "properties" not in document["dependencies"][0]
 
 
@@ -148,7 +148,10 @@ def test_spdx_aggregation_keeps_revisions_and_references_distinct():
     assert len(nodes) == len(combined["@graph"])
     for graph, version in zip(graphs, versions, strict=True):
         document = graph[0]
-        (root,) = document["rootElement"]
+        (sbom,) = document["rootElement"]
+        assert nodes[sbom]["type"] == "software_Sbom"
+        (root,) = nodes[sbom]["rootElement"]
+        assert root in nodes[sbom]["element"]
         (edge,) = (
             nodes[ref]
             for ref in document["element"]
@@ -229,8 +232,13 @@ def test_sarif_has_stable_fingerprints_and_relative_encoded_paths(tmp_path: Path
         result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
         == "config%20with%20spaces.json"
     )
+    # A path outside the source root is never disclosed; the result is anchored instead.
     tool.source_path = "/outside/secret/config.json"
-    assert "locations" not in exporter.generate(bom)["runs"][0]["results"][0]
+    outside = exporter.generate(bom)["runs"][0]["results"][0]
+    assert outside["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] == (
+        ".nexus-symbiote.yaml"
+    )
+    assert "outside" not in json.dumps(outside)
 
 
 def test_export_validation_is_offline(monkeypatch):

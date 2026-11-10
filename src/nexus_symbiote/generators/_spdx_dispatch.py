@@ -1,14 +1,17 @@
-"""Compile a disjoint SPDX class union without changing its accepted instances.
+"""Compile SPDX's class and reference unions without changing their accepted instances.
 
 The original schema remains the fallback. A fast path is permitted only when
 all alternatives necessarily require an object with a unique literal ``type``.
 Leaf validators are the exact official alternatives, including their references.
+Reference unions (``*_derived``) get a type split: a value that is not an object
+skips the alternative that only an object can satisfy.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import re
 from copy import deepcopy
 from typing import Any
 from urllib.parse import unquote
@@ -20,16 +23,16 @@ _PINNED_SCHEMA_DIGEST = "862ea1a210fd3df4072bea752cfd6fb95f13418da7a2a5638eade5c
 _SCOPE_KEYS = frozenset(
     {"$id", "$anchor", "$dynamicAnchor", "$dynamicRef", "$recursiveRef", "$recursiveAnchor"}
 )
+_INTERIOR_REF = re.compile(r"#/\$defs/[^/]*/")
+_OBJECT_ALTERNATIVE_KEYS = frozenset({"type", "anyOf", "unevaluatedProperties"})
 
 
 def _unscoped(value: Any) -> bool:
     if isinstance(value, dict):
         ref = value.get("$ref")
-        if ref is not None and (
-            not isinstance(ref, str) or unquote(ref).startswith("#/$defs/AnyClass/")
-        ):
-            # The original union's interior paths must not disappear underneath
-            # another constraint. Whole-union references retain their meaning.
+        if ref is not None and (not isinstance(ref, str) or _INTERIOR_REF.match(unquote(ref))):
+            # A rewritten union's interior paths must not disappear underneath
+            # another constraint. Whole-definition references retain their meaning.
             return False
         return not _SCOPE_KEYS.intersection(value) and all(_unscoped(v) for v in value.values())
     if isinstance(value, list):
@@ -107,6 +110,35 @@ def _tree(branches: list[tuple[str, dict[str, Any]]]) -> dict[str, Any]:
     return {"if": _guard([tag for tag, _ in left]), "then": _tree(left), "else": _tree(right)}
 
 
+def _object_split(definition: Any) -> dict[str, Any] | None:
+    """Split a reference union whose first alternative accepts only objects.
+
+    A property value is either a class instance (an object) or an identifier (a
+    string). A value that is not an object cannot satisfy an alternative that
+    asserts ``"type": "object"``, so for it the union equals the remaining
+    alternatives; an object keeps the whole original union. The guard asserts
+    only ``type`` and evaluates no property, so annotations are unchanged.
+    """
+    if not isinstance(definition, dict) or set(definition) != {"anyOf"}:
+        return None
+    alternatives = definition["anyOf"]
+    if not isinstance(alternatives, list) or not alternatives:
+        return None
+    first = alternatives[0]
+    if (
+        not isinstance(first, dict)
+        or first.get("type") != "object"
+        or not set(first) <= _OBJECT_ALTERNATIVE_KEYS
+    ):
+        return None
+    rest = alternatives[1:]
+    return {
+        "if": {"type": "object"},
+        "then": deepcopy(definition),
+        "else": {"anyOf": deepcopy(rest)} if rest else False,
+    }
+
+
 def dispatched_spdx_schema(schema: dict[str, Any]) -> dict[str, Any]:
     """Return an equivalent class dispatch, or the unmodified official schema.
 
@@ -145,4 +177,8 @@ def dispatched_spdx_schema(schema: dict[str, Any]) -> dict[str, Any]:
     # The copied reference targets remain identical JSON structures.
     original = {"anyOf": copied_union.pop("anyOf")}
     copied_union.update({"if": _guard(tags), "then": _tree(deepcopy(branches)), "else": original})
+    for name, definition in schema["$defs"].items():
+        split = _object_split(definition) if name.endswith("_derived") else None
+        if split is not None:
+            result["$defs"][name] = split
     return result

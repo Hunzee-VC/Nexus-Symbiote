@@ -1,0 +1,673 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.7",
+  "version": 1,
+  "serialNumber": "urn:uuid:3c7a1d8e-2b5f-4c1a-9e0d-7f6b5a4c3d21",
+  "metadata": {
+    "timestamp": "2026-11-10T12:00:00+00:00",
+    "tools": {
+      "components": [
+        {
+          "type": "application",
+          "name": "nexus-symbiote",
+          "version": "0.1.0",
+          "publisher": "aisecnomad"
+        }
+      ]
+    },
+    "authors": [
+      {
+        "name": "Example Operator"
+      }
+    ],
+    "properties": [
+      {
+        "name": "nexus-symbiote:dependency:relationship",
+        "value": "{\"conditional\":true,\"from\":\"agent:support\",\"to\":\"mcp-server:files\",\"type\":\"configured-with\"}"
+      },
+      {
+        "name": "nexus-symbiote:dependency:relationship",
+        "value": "{\"conditional\":true,\"from\":\"agent:support\",\"to\":\"prompt:system\",\"type\":\"reads-instructions\"}"
+      },
+      {
+        "name": "nexus-symbiote:dependency:relationship",
+        "value": "{\"from\":\"agent:support\",\"to\":\"model:classifier\",\"type\":\"depends-on\"}"
+      },
+      {
+        "name": "nexus-symbiote:dependency:relationship",
+        "value": "{\"from\":\"agent:support\",\"to\":\"tool:read\",\"type\":\"invokes\"}"
+      },
+      {
+        "name": "nexus-symbiote:dependency:relationship",
+        "value": "{\"from\":\"mcp-server:files\",\"to\":\"tool:delete\",\"type\":\"provides-tool\"}"
+      },
+      {
+        "name": "nexus-symbiote:dependency:relationship",
+        "value": "{\"from\":\"mcp-server:files\",\"to\":\"tool:read\",\"type\":\"provides-tool\"}"
+      },
+      {
+        "name": "nexus-symbiote:dependency:relationship",
+        "value": "{\"from\":\"model:classifier\",\"to\":\"data:tickets\",\"type\":\"trained-on\"}"
+      },
+      {
+        "name": "nexus-symbiote:document",
+        "value": "{\"components\":[{\"assurance_level\":\"declared\",\"authentication_required\":false,\"bom_ref\":\"a2a-server:research\",\"claims\":{},\"component_type\":\"a2a-server\",\"endpoint_url\":\"https://agents.example\",\"hashes\":{},\"name\":\"research\",\"properties\":{},\"risks\":[{\"category\":\"authentication\",\"detail\":\"A2A agent 'research' has no nonempty authentication requirement declared.\",\"references\":[],\"severity\":\"medium\"}],\"skills_declared\":[],\"source_path\":\".well-known/agent.json\",\"supported_protocols\":[],\"trust_tier\":\"unknown\",\"version\":\"0.3.0\"},{\"assurance_level\":\"declared\",\"authorizations\":[],\"autonomy_level\":null,\"bom_ref\":\"agent:support\",\"claims\":{},\"component_type\":\"agent\",\"data_refs\":[],\"deployment_status\":\"unknown\",\"description\":\"Customer support agent\",\"framework\":\"langgraph\",\"guardrail_refs\":[],\"hashes\":{},\"memory_refs\":[],\"model_refs\":[],\"name\":\"support-agent\",\"prompt_refs\":[],\"properties\":{},\"risks\":[],\"skill_refs\":[],\"sub_agent_refs\":[],\"supplier\":\"Example Org\",\"tool_refs\":[],\"trust_tier\":\"unknown\",\"version\":\"2.1.0\"},{\"assurance_level\":\"declared\",\"bom_ref\":\"data:tickets\",\"claims\":{},\"component_type\":\"data-source\",\"content_hash\":\"sha256:0101010101010101010101010101010101010101010101010101010101010101\",\"dataset_type\":\"fine-tuning\",\"hashes\":{},\"name\":\"tickets\",\"properties\":{},\"risks\":[],\"trust_tier\":\"unknown\"},{\"args\":[],\"assurance_level\":\"declared\",\"bom_ref\":\"mcp-server:files\",\"claims\":{},\"command\":\"npx\",\"component_type\":\"mcp-server\",\"env\":{},\"hashes\":{},\"launcher_package\":\"npm:@modelcontextprotocol/server-filesystem\",\"name\":\"files\",\"properties\":{},\"risks\":[{\"category\":\"transport_security\",\"detail\":\"MCP server 'files' uses stdio transport (local process).\",\"recommendation\":\"Ensure the command binary is integrity-checked.\",\"references\":[],\"severity\":\"medium\"}],\"source_path\":\".mcp.json\",\"tool_count\":2,\"tool_refs\":[\"tool:read\",\"tool:delete\"],\"transport\":\"stdio\",\"trust_tier\":\"unknown\",\"version\":\"2025.8.21\",\"version_pinned\":true},{\"assurance_level\":\"declared\",\"bom_ref\":\"memory:conversations\",\"claims\":{},\"component_type\":\"memory-store\",\"hashes\":{},\"name\":\"conversations\",\"properties\":{},\"risks\":[],\"store_type\":\"conversation\",\"tenant_isolated\":false,\"trust_tier\":\"unknown\"},{\"assurance_level\":\"declared\",\"bom_ref\":\"model:classifier\",\"claims\":{},\"component_type\":\"model\",\"hashes\":{\"sha256\":\"sha256:abababababababababababababababababababababababababababababababab\"},\"model_type\":\"classifier\",\"name\":\"classifier.safetensors\",\"properties\":{},\"risks\":[{\"category\":\"signing_status\",\"detail\":\"Model 'classifier.safetensors' has no verified artifact-bound signature (unsigned).\",\"recommendation\":\"Sign with OpenSSF Model Signing (Sigstore).\",\"references\":[],\"severity\":\"high\"}],\"serialization_format\":\"safetensors\",\"serialization_safety\":\"safe\",\"signing_status\":\"unsigned\",\"source_path\":\"models/classifier.safetensors\",\"trust_tier\":\"unknown\"},{\"assurance_level\":\"declared\",\"bom_ref\":\"prompt:system\",\"claims\":{},\"component_type\":\"prompt-template\",\"content_hash\":\"sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\",\"hashes\":{},\"name\":\"system_prompt.md\",\"prompt_type\":\"system-prompt\",\"properties\":{},\"risks\":[],\"source_path\":\"system_prompt.md\",\"trust_tier\":\"unknown\"},{\"assurance_level\":\"declared\",\"bom_ref\":\"rag:docs\",\"claims\":{},\"component_type\":\"rag-source\",\"corpus_type\":\"vector-store\",\"hashes\":{},\"index_snapshot_hash\":\"sha256:efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef\",\"name\":\"docs\",\"properties\":{},\"risks\":[{\"category\":\"data_integrity\",\"detail\":\"RAG source 'docs' has no declared content filtering control.\",\"references\":[],\"severity\":\"medium\"}],\"source_path\":\"rag_config.json\",\"source_uris\":[],\"trust_tier\":\"unknown\"},{\"assurance_level\":\"declared\",\"bom_ref\":\"registry:docker/ollama/ollama:latest\",\"claims\":{},\"component_type\":\"registry-entry\",\"hashes\":{},\"name\":\"ollama/ollama:latest\",\"properties\":{},\"registry_type\":\"docker-hub\",\"risks\":[{\"category\":\"version_pinning\",\"detail\":\"Docker image 'ollama/ollama:latest' lacks an immutable digest pin.\",\"references\":[],\"severity\":\"high\"}],\"source_path\":\"Dockerfile.agent\",\"trust_tier\":\"unknown\"},{\"assurance_level\":\"declared\",\"bom_ref\":\"registry:npm/@modelcontextprotocol/sdk\",\"claims\":{},\"component_type\":\"registry-entry\",\"hashes\":{},\"name\":\"@modelcontextprotocol/sdk\",\"properties\":{},\"registry_type\":\"npm\",\"risks\":[{\"category\":\"version_pinning\",\"detail\":\"npm package '@modelcontextprotocol/sdk' has a nonexact declared reference: ^1.2.3\",\"references\":[],\"severity\":\"medium\"}],\"source_path\":\"package.json\",\"trust_tier\":\"unknown\",\"version\":\"^1.2.3\"},{\"assurance_level\":\"declared\",\"bom_ref\":\"registry:npm/zod\",\"claims\":{},\"component_type\":\"registry-entry\",\"hashes\":{},\"name\":\"zod\",\"package_url\":\"pkg:npm/zod@3.23.8\",\"properties\":{\"lockfile_integrity\":\"sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==\"},\"registry_type\":\"npm\",\"risks\":[],\"source_path\":\"package-lock.json\",\"trust_tier\":\"unknown\",\"version\":\"3.23.8\"},{\"assurance_level\":\"declared\",\"bom_ref\":\"registry:pypi/anthropic\",\"claims\":{},\"component_type\":\"registry-entry\",\"hashes\":{},\"name\":\"anthropic\",\"properties\":{},\"registry_type\":\"pypi\",\"risks\":[{\"category\":\"version_pinning\",\"detail\":\"PyPI package 'anthropic' has an unresolved or nonexact declared reference.\",\"references\":[],\"severity\":\"medium\"}],\"source_path\":\"requirements.txt\",\"trust_tier\":\"unknown\",\"version\":\"<2,>=1.0; python_version >= \\\"3.11\\\"\"},{\"assurance_level\":\"declared\",\"bom_ref\":\"registry:pypi/openai\",\"claims\":{},\"component_type\":\"registry-entry\",\"hashes\":{},\"name\":\"openai\",\"package_url\":\"pkg:pypi/openai@1.2.3\",\"properties\":{},\"registry_type\":\"pypi\",\"risks\":[],\"source_path\":\"requirements.txt\",\"trust_tier\":\"unknown\",\"version\":\"==1.2.3\"},{\"annotations\":{\"destructiveHint\":true},\"assurance_level\":\"declared\",\"bom_ref\":\"tool:delete\",\"claims\":{},\"component_type\":\"tool\",\"hashes\":{},\"mcp_server_ref\":\"mcp-server:files\",\"name\":\"delete\",\"properties\":{},\"risks\":[{\"category\":\"capability_scope\",\"detail\":\"Tool 'delete' has destructive side effects.\",\"recommendation\":\"Ensure human-in-the-loop approval for destructive operations.\",\"references\":[],\"severity\":\"high\"}],\"source_path\":\".mcp.json\",\"trust_tier\":\"unknown\"},{\"annotations\":{\"readOnlyHint\":true,\"title\":\"Read\"},\"assurance_level\":\"declared\",\"bom_ref\":\"tool:read\",\"claims\":{},\"component_type\":\"tool\",\"hashes\":{},\"mcp_server_ref\":\"mcp-server:files\",\"name\":\"read\",\"properties\":{},\"risks\":[],\"source_path\":\".mcp.json\",\"trust_tier\":\"unknown\"}],\"dependencies\":[{\"assurance_level\":\"declared\",\"conditions\":\"repository association; runtime use and authority unobserved\",\"relationship\":\"configured-with\",\"source_ref\":\"agent:support\",\"target_ref\":\"mcp-server:files\"},{\"assurance_level\":\"declared\",\"relationship\":\"provides-tool\",\"source_ref\":\"mcp-server:files\",\"target_ref\":\"tool:delete\"},{\"assurance_level\":\"declared\",\"relationship\":\"provides-tool\",\"source_ref\":\"mcp-server:files\",\"target_ref\":\"tool:read\"},{\"conditions\":\"only for interactive sessions\",\"relationship\":\"reads-instructions\",\"source_ref\":\"agent:support\",\"target_ref\":\"prompt:system\"},{\"relationship\":\"depends-on\",\"source_ref\":\"agent:support\",\"target_ref\":\"model:classifier\"},{\"relationship\":\"invokes\",\"source_ref\":\"agent:support\",\"target_ref\":\"tool:read\"},{\"relationship\":\"trained-on\",\"source_ref\":\"model:classifier\",\"target_ref\":\"data:tickets\"}],\"metadata\":{\"authors\":[\"Example Operator\"],\"completeness\":{\"assurance_level\":\"declared\",\"collectors_completed\":[\"mcp\",\"registry\"],\"collectors_requested\":[\"mcp\",\"registry\"],\"exclusions\":[\"**/.git\",\"**/node_modules\"],\"scan_failures\":[],\"scanner_status\":{\"mcp\":\"complete\",\"registry\":\"partial\"},\"scope\":\"repository\",\"source_unmapped_count\":0,\"source_unmapped_indexes\":[],\"surfaces_excluded\":[\"package-lock.json: local link resolution is unverified\"],\"surfaces_scanned\":[\".mcp.json\",\"package.json\",\"requirements.txt\"],\"unobserved_surfaces\":[\"runtime\",\"network\"]},\"serial_number\":\"urn:uuid:3c7a1d8e-2b5f-4c1a-9e0d-7f6b5a4c3d21\",\"spec_version\":\"1.0.0\",\"timestamp\":\"2026-11-10T12:00:00Z\",\"tool_name\":\"nexus-symbiote\",\"tool_vendor\":\"aisecnomad\",\"tool_version\":\"0.1.0\",\"version\":1}}"
+      },
+      {
+        "name": "nexus-symbiote:documentDigest",
+        "value": "sha256:2398e07b7f17fd5c5cf3700b759dfcd53b1537ec63a6b9f28dc5f92b6739ee3f"
+      },
+      {
+        "name": "nexus-symbiote:lossReport",
+        "value": "{\"admissionAuthority\":false,\"extensionRoundTripComplete\":true,\"itemCoverage\":\"selected-security-fields\",\"items\":[{\"path\":\"\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"agent authority, assurance, and coverage require the Nexus Symbiote extension\",\"severity\":\"info\"},{\"path\":\"/metadata/completeness\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Complete collection coverage and discovery provenance require the extension\",\"severity\":\"warning\"},{\"path\":\"/components/0/trust_tier\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/0/assurance_level\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/1/trust_tier\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/1/assurance_level\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/2/trust_tier\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/2/assurance_level\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/3/trust_tier\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/3/assurance_level\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/4/trust_tier\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/4/assurance_level\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/5/trust_tier\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/5/assurance_level\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/6/trust_tier\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/6/assurance_level\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/7/trust_tier\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/7/assurance_level\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/8/trust_tier\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/8/assurance_level\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/9/trust_tier\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/9/assurance_level\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/10/trust_tier\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/10/assurance_level\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/11/trust_tier\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/11/assurance_level\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/12/trust_tier\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/12/assurance_level\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/13/trust_tier\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/13/assurance_level\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/14/trust_tier\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/14/assurance_level\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/dependencies/0/relationship\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Complete relationship semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/dependencies/0/assurance_level\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Complete relationship semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/dependencies/0/conditions\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Complete relationship semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/dependencies/1/relationship\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Complete relationship semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/dependencies/1/assurance_level\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Complete relationship semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/dependencies/2/relationship\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Complete relationship semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/dependencies/2/assurance_level\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Complete relationship semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/dependencies/3/relationship\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Complete relationship semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/dependencies/3/conditions\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Complete relationship semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/dependencies/4/relationship\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Complete relationship semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/dependencies/5/relationship\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Complete relationship semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/dependencies/6/relationship\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Complete relationship semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"}],\"nativeSemanticsComplete\":false,\"normalizations\":[\"component and dependency collections sorted for deterministic output\",\"valid declared package URLs canonicalized; standard package versions use their exact PURL version\"],\"profile\":\"nexus-symbiote-export/v1\",\"sourceDigest\":\"sha256:2398e07b7f17fd5c5cf3700b759dfcd53b1537ec63a6b9f28dc5f92b6739ee3f\",\"target\":\"cyclonedx-1.7\"}"
+      }
+    ]
+  },
+  "components": [
+    {
+      "type": "application",
+      "bom-ref": "a2a-server:research",
+      "name": "research",
+      "version": "0.3.0",
+      "properties": [
+        {
+          "name": "nexus-symbiote:componentType",
+          "value": "a2a-server"
+        },
+        {
+          "name": "nexus-symbiote:trustTier",
+          "value": "unknown"
+        },
+        {
+          "name": "nexus-symbiote:assuranceLevel",
+          "value": "declared"
+        },
+        {
+          "name": "nexus-symbiote:component",
+          "value": "{\"assurance_level\":\"declared\",\"authentication_required\":false,\"bom_ref\":\"a2a-server:research\",\"claims\":{},\"component_type\":\"a2a-server\",\"endpoint_url\":\"https://agents.example\",\"hashes\":{},\"name\":\"research\",\"properties\":{},\"risks\":[{\"category\":\"authentication\",\"detail\":\"A2A agent 'research' has no nonempty authentication requirement declared.\",\"references\":[],\"severity\":\"medium\"}],\"skills_declared\":[],\"source_path\":\".well-known/agent.json\",\"supported_protocols\":[],\"trust_tier\":\"unknown\",\"version\":\"0.3.0\"}"
+        },
+        {
+          "name": "agentbom:kind",
+          "value": "a2a-server"
+        },
+        {
+          "name": "agentbom:claimsVerifiedByExporter",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "application",
+      "bom-ref": "agent:support",
+      "name": "support-agent",
+      "version": "2.1.0",
+      "supplier": {
+        "name": "Example Org"
+      },
+      "description": "Customer support agent",
+      "properties": [
+        {
+          "name": "nexus-symbiote:componentType",
+          "value": "agent"
+        },
+        {
+          "name": "nexus-symbiote:trustTier",
+          "value": "unknown"
+        },
+        {
+          "name": "nexus-symbiote:assuranceLevel",
+          "value": "declared"
+        },
+        {
+          "name": "nexus-symbiote:autonomyLevel",
+          "value": "unknown"
+        },
+        {
+          "name": "nexus-symbiote:framework",
+          "value": "langgraph"
+        },
+        {
+          "name": "nexus-symbiote:component",
+          "value": "{\"assurance_level\":\"declared\",\"authorizations\":[],\"autonomy_level\":null,\"bom_ref\":\"agent:support\",\"claims\":{},\"component_type\":\"agent\",\"data_refs\":[],\"deployment_status\":\"unknown\",\"description\":\"Customer support agent\",\"framework\":\"langgraph\",\"guardrail_refs\":[],\"hashes\":{},\"memory_refs\":[],\"model_refs\":[],\"name\":\"support-agent\",\"prompt_refs\":[],\"properties\":{},\"risks\":[],\"skill_refs\":[],\"sub_agent_refs\":[],\"supplier\":\"Example Org\",\"tool_refs\":[],\"trust_tier\":\"unknown\",\"version\":\"2.1.0\"}"
+        },
+        {
+          "name": "agentbom:kind",
+          "value": "agent"
+        },
+        {
+          "name": "agentbom:claimsVerifiedByExporter",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "data",
+      "bom-ref": "data:tickets",
+      "name": "tickets",
+      "properties": [
+        {
+          "name": "nexus-symbiote:componentType",
+          "value": "data-source"
+        },
+        {
+          "name": "nexus-symbiote:trustTier",
+          "value": "unknown"
+        },
+        {
+          "name": "nexus-symbiote:assuranceLevel",
+          "value": "declared"
+        },
+        {
+          "name": "nexus-symbiote:component",
+          "value": "{\"assurance_level\":\"declared\",\"bom_ref\":\"data:tickets\",\"claims\":{},\"component_type\":\"data-source\",\"content_hash\":\"sha256:0101010101010101010101010101010101010101010101010101010101010101\",\"dataset_type\":\"fine-tuning\",\"hashes\":{},\"name\":\"tickets\",\"properties\":{},\"risks\":[],\"trust_tier\":\"unknown\"}"
+        },
+        {
+          "name": "agentbom:kind",
+          "value": "data-source"
+        },
+        {
+          "name": "agentbom:claimsVerifiedByExporter",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "application",
+      "bom-ref": "mcp-server:files",
+      "name": "files",
+      "version": "2025.8.21",
+      "properties": [
+        {
+          "name": "nexus-symbiote:componentType",
+          "value": "mcp-server"
+        },
+        {
+          "name": "nexus-symbiote:trustTier",
+          "value": "unknown"
+        },
+        {
+          "name": "nexus-symbiote:assuranceLevel",
+          "value": "declared"
+        },
+        {
+          "name": "nexus-symbiote:transport",
+          "value": "stdio"
+        },
+        {
+          "name": "nexus-symbiote:toolCount",
+          "value": "2"
+        },
+        {
+          "name": "nexus-symbiote:versionPinned",
+          "value": "True"
+        },
+        {
+          "name": "nexus-symbiote:component",
+          "value": "{\"args\":[],\"assurance_level\":\"declared\",\"bom_ref\":\"mcp-server:files\",\"claims\":{},\"command\":\"npx\",\"component_type\":\"mcp-server\",\"env\":{},\"hashes\":{},\"launcher_package\":\"npm:@modelcontextprotocol/server-filesystem\",\"name\":\"files\",\"properties\":{},\"risks\":[{\"category\":\"transport_security\",\"detail\":\"MCP server 'files' uses stdio transport (local process).\",\"recommendation\":\"Ensure the command binary is integrity-checked.\",\"references\":[],\"severity\":\"medium\"}],\"source_path\":\".mcp.json\",\"tool_count\":2,\"tool_refs\":[\"tool:read\",\"tool:delete\"],\"transport\":\"stdio\",\"trust_tier\":\"unknown\",\"version\":\"2025.8.21\",\"version_pinned\":true}"
+        },
+        {
+          "name": "agentbom:kind",
+          "value": "mcp-server"
+        },
+        {
+          "name": "agentbom:claimsVerifiedByExporter",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "data",
+      "bom-ref": "memory:conversations",
+      "name": "conversations",
+      "properties": [
+        {
+          "name": "nexus-symbiote:componentType",
+          "value": "memory-store"
+        },
+        {
+          "name": "nexus-symbiote:trustTier",
+          "value": "unknown"
+        },
+        {
+          "name": "nexus-symbiote:assuranceLevel",
+          "value": "declared"
+        },
+        {
+          "name": "nexus-symbiote:storeType",
+          "value": "conversation"
+        },
+        {
+          "name": "nexus-symbiote:tenantIsolated",
+          "value": "False"
+        },
+        {
+          "name": "nexus-symbiote:component",
+          "value": "{\"assurance_level\":\"declared\",\"bom_ref\":\"memory:conversations\",\"claims\":{},\"component_type\":\"memory-store\",\"hashes\":{},\"name\":\"conversations\",\"properties\":{},\"risks\":[],\"store_type\":\"conversation\",\"tenant_isolated\":false,\"trust_tier\":\"unknown\"}"
+        },
+        {
+          "name": "agentbom:kind",
+          "value": "memory-store"
+        },
+        {
+          "name": "agentbom:claimsVerifiedByExporter",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "machine-learning-model",
+      "bom-ref": "model:classifier",
+      "name": "classifier.safetensors",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "abababababababababababababababababababababababababababababababab"
+        }
+      ],
+      "properties": [
+        {
+          "name": "nexus-symbiote:componentType",
+          "value": "model"
+        },
+        {
+          "name": "nexus-symbiote:trustTier",
+          "value": "unknown"
+        },
+        {
+          "name": "nexus-symbiote:assuranceLevel",
+          "value": "declared"
+        },
+        {
+          "name": "nexus-symbiote:modelType",
+          "value": "classifier"
+        },
+        {
+          "name": "nexus-symbiote:serializationFormat",
+          "value": "safetensors"
+        },
+        {
+          "name": "nexus-symbiote:serializationSafety",
+          "value": "safe"
+        },
+        {
+          "name": "nexus-symbiote:signingStatus",
+          "value": "unsigned"
+        },
+        {
+          "name": "nexus-symbiote:component",
+          "value": "{\"assurance_level\":\"declared\",\"bom_ref\":\"model:classifier\",\"claims\":{},\"component_type\":\"model\",\"hashes\":{\"sha256\":\"sha256:abababababababababababababababababababababababababababababababab\"},\"model_type\":\"classifier\",\"name\":\"classifier.safetensors\",\"properties\":{},\"risks\":[{\"category\":\"signing_status\",\"detail\":\"Model 'classifier.safetensors' has no verified artifact-bound signature (unsigned).\",\"recommendation\":\"Sign with OpenSSF Model Signing (Sigstore).\",\"references\":[],\"severity\":\"high\"}],\"serialization_format\":\"safetensors\",\"serialization_safety\":\"safe\",\"signing_status\":\"unsigned\",\"source_path\":\"models/classifier.safetensors\",\"trust_tier\":\"unknown\"}"
+        },
+        {
+          "name": "agentbom:kind",
+          "value": "model"
+        },
+        {
+          "name": "agentbom:claimsVerifiedByExporter",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "data",
+      "bom-ref": "prompt:system",
+      "name": "system_prompt.md",
+      "properties": [
+        {
+          "name": "nexus-symbiote:componentType",
+          "value": "prompt-template"
+        },
+        {
+          "name": "nexus-symbiote:trustTier",
+          "value": "unknown"
+        },
+        {
+          "name": "nexus-symbiote:assuranceLevel",
+          "value": "declared"
+        },
+        {
+          "name": "nexus-symbiote:promptType",
+          "value": "system-prompt"
+        },
+        {
+          "name": "nexus-symbiote:contentHash",
+          "value": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+        },
+        {
+          "name": "nexus-symbiote:component",
+          "value": "{\"assurance_level\":\"declared\",\"bom_ref\":\"prompt:system\",\"claims\":{},\"component_type\":\"prompt-template\",\"content_hash\":\"sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\",\"hashes\":{},\"name\":\"system_prompt.md\",\"prompt_type\":\"system-prompt\",\"properties\":{},\"risks\":[],\"source_path\":\"system_prompt.md\",\"trust_tier\":\"unknown\"}"
+        },
+        {
+          "name": "agentbom:kind",
+          "value": "prompt-template"
+        },
+        {
+          "name": "agentbom:claimsVerifiedByExporter",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "data",
+      "bom-ref": "rag:docs",
+      "name": "docs",
+      "properties": [
+        {
+          "name": "nexus-symbiote:componentType",
+          "value": "rag-source"
+        },
+        {
+          "name": "nexus-symbiote:trustTier",
+          "value": "unknown"
+        },
+        {
+          "name": "nexus-symbiote:assuranceLevel",
+          "value": "declared"
+        },
+        {
+          "name": "nexus-symbiote:corpusType",
+          "value": "vector-store"
+        },
+        {
+          "name": "nexus-symbiote:component",
+          "value": "{\"assurance_level\":\"declared\",\"bom_ref\":\"rag:docs\",\"claims\":{},\"component_type\":\"rag-source\",\"corpus_type\":\"vector-store\",\"hashes\":{},\"index_snapshot_hash\":\"sha256:efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef\",\"name\":\"docs\",\"properties\":{},\"risks\":[{\"category\":\"data_integrity\",\"detail\":\"RAG source 'docs' has no declared content filtering control.\",\"references\":[],\"severity\":\"medium\"}],\"source_path\":\"rag_config.json\",\"source_uris\":[],\"trust_tier\":\"unknown\"}"
+        },
+        {
+          "name": "agentbom:kind",
+          "value": "rag-source"
+        },
+        {
+          "name": "agentbom:claimsVerifiedByExporter",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "platform",
+      "bom-ref": "registry:docker/ollama/ollama:latest",
+      "name": "ollama/ollama:latest",
+      "properties": [
+        {
+          "name": "nexus-symbiote:componentType",
+          "value": "registry-entry"
+        },
+        {
+          "name": "nexus-symbiote:trustTier",
+          "value": "unknown"
+        },
+        {
+          "name": "nexus-symbiote:assuranceLevel",
+          "value": "declared"
+        },
+        {
+          "name": "nexus-symbiote:registryType",
+          "value": "docker-hub"
+        },
+        {
+          "name": "nexus-symbiote:component",
+          "value": "{\"assurance_level\":\"declared\",\"bom_ref\":\"registry:docker/ollama/ollama:latest\",\"claims\":{},\"component_type\":\"registry-entry\",\"hashes\":{},\"name\":\"ollama/ollama:latest\",\"properties\":{},\"registry_type\":\"docker-hub\",\"risks\":[{\"category\":\"version_pinning\",\"detail\":\"Docker image 'ollama/ollama:latest' lacks an immutable digest pin.\",\"references\":[],\"severity\":\"high\"}],\"source_path\":\"Dockerfile.agent\",\"trust_tier\":\"unknown\"}"
+        },
+        {
+          "name": "agentbom:kind",
+          "value": "registry-entry"
+        },
+        {
+          "name": "agentbom:claimsVerifiedByExporter",
+          "value": "false"
+        },
+        {
+          "name": "nexus-symbiote:packageIdentifierProjection",
+          "value": "unknown"
+        }
+      ]
+    },
+    {
+      "type": "platform",
+      "bom-ref": "registry:npm/@modelcontextprotocol/sdk",
+      "name": "@modelcontextprotocol/sdk",
+      "version": "^1.2.3",
+      "properties": [
+        {
+          "name": "nexus-symbiote:componentType",
+          "value": "registry-entry"
+        },
+        {
+          "name": "nexus-symbiote:trustTier",
+          "value": "unknown"
+        },
+        {
+          "name": "nexus-symbiote:assuranceLevel",
+          "value": "declared"
+        },
+        {
+          "name": "nexus-symbiote:registryType",
+          "value": "npm"
+        },
+        {
+          "name": "nexus-symbiote:component",
+          "value": "{\"assurance_level\":\"declared\",\"bom_ref\":\"registry:npm/@modelcontextprotocol/sdk\",\"claims\":{},\"component_type\":\"registry-entry\",\"hashes\":{},\"name\":\"@modelcontextprotocol/sdk\",\"properties\":{},\"registry_type\":\"npm\",\"risks\":[{\"category\":\"version_pinning\",\"detail\":\"npm package '@modelcontextprotocol/sdk' has a nonexact declared reference: ^1.2.3\",\"references\":[],\"severity\":\"medium\"}],\"source_path\":\"package.json\",\"trust_tier\":\"unknown\",\"version\":\"^1.2.3\"}"
+        },
+        {
+          "name": "agentbom:kind",
+          "value": "registry-entry"
+        },
+        {
+          "name": "agentbom:claimsVerifiedByExporter",
+          "value": "false"
+        },
+        {
+          "name": "nexus-symbiote:packageIdentifierProjection",
+          "value": "unknown"
+        }
+      ]
+    },
+    {
+      "type": "platform",
+      "bom-ref": "registry:npm/zod",
+      "name": "zod",
+      "version": "3.23.8",
+      "purl": "pkg:npm/zod@3.23.8",
+      "properties": [
+        {
+          "name": "nexus-symbiote:componentType",
+          "value": "registry-entry"
+        },
+        {
+          "name": "nexus-symbiote:trustTier",
+          "value": "unknown"
+        },
+        {
+          "name": "nexus-symbiote:assuranceLevel",
+          "value": "declared"
+        },
+        {
+          "name": "nexus-symbiote:registryType",
+          "value": "npm"
+        },
+        {
+          "name": "nexus-symbiote:component",
+          "value": "{\"assurance_level\":\"declared\",\"bom_ref\":\"registry:npm/zod\",\"claims\":{},\"component_type\":\"registry-entry\",\"hashes\":{},\"name\":\"zod\",\"package_url\":\"pkg:npm/zod@3.23.8\",\"properties\":{\"lockfile_integrity\":\"sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==\"},\"registry_type\":\"npm\",\"risks\":[],\"source_path\":\"package-lock.json\",\"trust_tier\":\"unknown\",\"version\":\"3.23.8\"}"
+        },
+        {
+          "name": "agentbom:kind",
+          "value": "registry-entry"
+        },
+        {
+          "name": "agentbom:claimsVerifiedByExporter",
+          "value": "false"
+        },
+        {
+          "name": "nexus-symbiote:packageIdentifierProjection",
+          "value": "declared"
+        }
+      ]
+    },
+    {
+      "type": "platform",
+      "bom-ref": "registry:pypi/anthropic",
+      "name": "anthropic",
+      "version": "<2,>=1.0; python_version >= \"3.11\"",
+      "properties": [
+        {
+          "name": "nexus-symbiote:componentType",
+          "value": "registry-entry"
+        },
+        {
+          "name": "nexus-symbiote:trustTier",
+          "value": "unknown"
+        },
+        {
+          "name": "nexus-symbiote:assuranceLevel",
+          "value": "declared"
+        },
+        {
+          "name": "nexus-symbiote:registryType",
+          "value": "pypi"
+        },
+        {
+          "name": "nexus-symbiote:component",
+          "value": "{\"assurance_level\":\"declared\",\"bom_ref\":\"registry:pypi/anthropic\",\"claims\":{},\"component_type\":\"registry-entry\",\"hashes\":{},\"name\":\"anthropic\",\"properties\":{},\"registry_type\":\"pypi\",\"risks\":[{\"category\":\"version_pinning\",\"detail\":\"PyPI package 'anthropic' has an unresolved or nonexact declared reference.\",\"references\":[],\"severity\":\"medium\"}],\"source_path\":\"requirements.txt\",\"trust_tier\":\"unknown\",\"version\":\"<2,>=1.0; python_version >= \\\"3.11\\\"\"}"
+        },
+        {
+          "name": "agentbom:kind",
+          "value": "registry-entry"
+        },
+        {
+          "name": "agentbom:claimsVerifiedByExporter",
+          "value": "false"
+        },
+        {
+          "name": "nexus-symbiote:packageIdentifierProjection",
+          "value": "unknown"
+        }
+      ]
+    },
+    {
+      "type": "platform",
+      "bom-ref": "registry:pypi/openai",
+      "name": "openai",
+      "version": "1.2.3",
+      "purl": "pkg:pypi/openai@1.2.3",
+      "properties": [
+        {
+          "name": "nexus-symbiote:componentType",
+          "value": "registry-entry"
+        },
+        {
+          "name": "nexus-symbiote:trustTier",
+          "value": "unknown"
+        },
+        {
+          "name": "nexus-symbiote:assuranceLevel",
+          "value": "declared"
+        },
+        {
+          "name": "nexus-symbiote:registryType",
+          "value": "pypi"
+        },
+        {
+          "name": "nexus-symbiote:component",
+          "value": "{\"assurance_level\":\"declared\",\"bom_ref\":\"registry:pypi/openai\",\"claims\":{},\"component_type\":\"registry-entry\",\"hashes\":{},\"name\":\"openai\",\"package_url\":\"pkg:pypi/openai@1.2.3\",\"properties\":{},\"registry_type\":\"pypi\",\"risks\":[],\"source_path\":\"requirements.txt\",\"trust_tier\":\"unknown\",\"version\":\"==1.2.3\"}"
+        },
+        {
+          "name": "agentbom:kind",
+          "value": "registry-entry"
+        },
+        {
+          "name": "agentbom:claimsVerifiedByExporter",
+          "value": "false"
+        },
+        {
+          "name": "nexus-symbiote:packageIdentifierProjection",
+          "value": "declared"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "tool:delete",
+      "name": "delete",
+      "properties": [
+        {
+          "name": "nexus-symbiote:componentType",
+          "value": "tool"
+        },
+        {
+          "name": "nexus-symbiote:trustTier",
+          "value": "unknown"
+        },
+        {
+          "name": "nexus-symbiote:assuranceLevel",
+          "value": "declared"
+        },
+        {
+          "name": "nexus-symbiote:annotation.destructiveHint",
+          "value": "True"
+        },
+        {
+          "name": "nexus-symbiote:component",
+          "value": "{\"annotations\":{\"destructiveHint\":true},\"assurance_level\":\"declared\",\"bom_ref\":\"tool:delete\",\"claims\":{},\"component_type\":\"tool\",\"hashes\":{},\"mcp_server_ref\":\"mcp-server:files\",\"name\":\"delete\",\"properties\":{},\"risks\":[{\"category\":\"capability_scope\",\"detail\":\"Tool 'delete' has destructive side effects.\",\"recommendation\":\"Ensure human-in-the-loop approval for destructive operations.\",\"references\":[],\"severity\":\"high\"}],\"source_path\":\".mcp.json\",\"trust_tier\":\"unknown\"}"
+        },
+        {
+          "name": "agentbom:kind",
+          "value": "tool"
+        },
+        {
+          "name": "agentbom:claimsVerifiedByExporter",
+          "value": "false"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "tool:read",
+      "name": "read",
+      "properties": [
+        {
+          "name": "nexus-symbiote:componentType",
+          "value": "tool"
+        },
+        {
+          "name": "nexus-symbiote:trustTier",
+          "value": "unknown"
+        },
+        {
+          "name": "nexus-symbiote:assuranceLevel",
+          "value": "declared"
+        },
+        {
+          "name": "nexus-symbiote:annotation.readOnlyHint",
+          "value": "True"
+        },
+        {
+          "name": "nexus-symbiote:annotation.title",
+          "value": "Read"
+        },
+        {
+          "name": "nexus-symbiote:component",
+          "value": "{\"annotations\":{\"readOnlyHint\":true,\"title\":\"Read\"},\"assurance_level\":\"declared\",\"bom_ref\":\"tool:read\",\"claims\":{},\"component_type\":\"tool\",\"hashes\":{},\"mcp_server_ref\":\"mcp-server:files\",\"name\":\"read\",\"properties\":{},\"risks\":[],\"source_path\":\".mcp.json\",\"trust_tier\":\"unknown\"}"
+        },
+        {
+          "name": "agentbom:kind",
+          "value": "tool"
+        },
+        {
+          "name": "agentbom:claimsVerifiedByExporter",
+          "value": "false"
+        }
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "agent:support",
+      "dependsOn": [
+        "model:classifier"
+      ]
+    }
+  ],
+  "compositions": [
+    {
+      "aggregate": "incomplete"
+    }
+  ]
+}
