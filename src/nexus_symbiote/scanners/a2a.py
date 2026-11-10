@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import ast
-import hmac
-import os
+import base64
+import json
 import re
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -18,10 +18,22 @@ from nexus_symbiote.core.models import (
     CapabilityDeclaration,
     RiskAssessment,
 )
-from nexus_symbiote.scanners.base import Scanner, ScanResult, parse_python, sanitized_origin
-from nexus_symbiote.scanners.mcp import _MIN_SOURCE_BINDING_KEY_LENGTH, SOURCE_BINDING_KEY_ENV
+from nexus_symbiote.scanners.base import Scanner, ScanResult, parse_python
+from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
+from nexus_symbiote.scanners.source_binding import ORIGIN_PATHS as _ORIGIN_PATHS
+from nexus_symbiote.scanners.source_binding import BindingError as _BindingError
+from nexus_symbiote.scanners.source_binding import beyond_origin as _beyond_origin
+from nexus_symbiote.scanners.source_binding import origin as _origin
+from nexus_symbiote.scanners.source_binding import url_shape as _url_shape
+from nexus_symbiote.scanners.source_binding import url_shapes as _url_shapes
+from nexus_symbiote.scanners.source_binding import value_binding as _value_binding
+from nexus_symbiote.utils.confined import ConfinedCollection, fold_name
 from nexus_symbiote.utils.secrets import REDACTED, redact_text
+from nexus_symbiote.utils.terminal import neutralize
 
+AGENT_CARD_NAMES = ("agent.json", "agent-card.json")
+# Cards are read from these root paths and from a .well-known directory at any depth,
+# such as public/.well-known/agent-card.json, where web frameworks serve static files.
 AGENT_CARD_FILES = [
     ".well-known/agent.json",
     ".well-known/agent-card.json",
@@ -29,15 +41,37 @@ AGENT_CARD_FILES = [
     "agent-card.json",
     "a2a/agent.json",
 ]
+# Outside .well-known these names are generic, so a file there is a card only when it
+# carries a field that only A2A cards declare.
+_GENERIC_CARD_PATHS = frozenset({"agent.json", "agent-card.json", "a2a/agent.json"})
+_CARD_MARKERS = frozenset(
+    {
+        "url",
+        "supportedInterfaces",
+        "supported_interfaces",
+        "additionalInterfaces",
+        "skills",
+        "securitySchemes",
+        "security_schemes",
+        "securityRequirements",
+        "security_requirements",
+        "capabilities",
+        "protocolVersion",
+        "protocol_version",
+        "preferredTransport",
+        "defaultInputModes",
+        "default_input_modes",
+    }
+)
 A2A_CONFIG_FILES = ["a2a.json", "a2a.yaml", "a2a.yml", "a2a_config.json"]
 
 # Exports keep only URL origins, and paths or queries may carry credentials, so no
-# unkeyed digest covers them: it would let anyone holding the BOM confirm guesses.
-# The structure digests cover names, counts, flags and values exported in clear. They
+# unkeyed digest covers them: it would let anyone holding the BOM confirm guesses. The
+# structure digests cover names, counts, flags and values exported in clear. They
 # also cover the requirement values of schemes other than OAuth 2.0 and OpenID Connect,
 # which are not exported, so a BOM holder can confirm guesses of those values. Other
 # values are bound only by an HMAC under the operator key, as for MCP.
-CARD_STRUCTURE_PROFILE = "nexus-symbiote/a2a-card-structure/v2"
+CARD_STRUCTURE_PROFILE = "nexus-symbiote/a2a-card-structure/v3"
 CARD_VALUE_BINDING_PROFILE = "nexus-symbiote/a2a-card-values/v1"
 CLIENT_STRUCTURE_PROFILE = "nexus-symbiote/a2a-client-structure/v1"
 CLIENT_VALUE_BINDING_PROFILE = "nexus-symbiote/a2a-client-values/v1"
@@ -59,23 +93,39 @@ _WRAPPED_SCHEME_TYPES = {
     "mtlsSecurityScheme": "mutualTLS",
     "mtls_security_scheme": "mutualTLS",
 }
+# Legacy scheme and client method names that declare no authentication.
+_ANONYMOUS = frozenset({"none", "noauth", "no-auth", "anonymous", "public", "unauthenticated"})
 _MAX_ENTRIES = 1000
 _MAX_DEPTH = 8
-_ORIGIN_PATHS = frozenset({"", "/"})
+_MAX_NAME = 256
+# OAuth scopes are short public identifiers; a longer value is withheld unmatched,
+# which also keeps the token-shape search linear.
+_MAX_SCOPE = 512
+_MAX_PROTECTED_HEADER = 8192
 _CARD_PATHS = _ORIGIN_PATHS | {"/.well-known/agent.json", "/.well-known/agent-card.json"}
-_HOSTNAME = re.compile(r"[\w.-]+|[0-9a-f:.]+")
-# A2A 1.0 gRPC interfaces give a "hostname:port" address without a scheme.
-_HOST_PORT = re.compile(r"(?:(?:[\w-]+\.)+[\w-]+|localhost|\[[0-9a-f:.]+\]):\d{1,5}", re.I)
 # Credential formats that redact_text leaves intact; no OAuth scope takes these forms.
+# Both alternatives start only where a word starts, so a long run is scanned once.
 _TOKEN_SHAPE = re.compile(
-    r"eyJ[\w-]{8,}\.[\w-]{8,}"
-    r"|(?<![\w-])(?:gh[oprsu]_|github_pat_|glpat-|xox[abeoprs]-|sk-|[rs]k_live_|AKIA|ASIA|AIza)"
-    r"[\w-]{12,}"
+    r"(?<![\w-])(?:eyJ[\w-]{8,}\.[\w-]{8,}"
+    r"|(?:gh[oprsu]_|github_pat_|glpat-|xox[abeoprs]-|sk-|[rs]k_live_|AKIA|ASIA|AIza)"
+    r"[\w-]{12,})"
 )
+_JWS_ALGORITHM = re.compile(r"[A-Za-z0-9+._-]{1,32}")
+_KEY_ID = re.compile(r"[\w.:#+=/-]{1,256}")
+_SERVER_CALLS = frozenset(
+    {"AgentCard", "A2AStarletteApplication", "A2AFastAPIApplication", "A2ARESTFastAPIApplication"}
+)
+_CLIENT_CALLS = frozenset({"A2AClient", "A2ACardResolver", "ClientFactory"})
+_SDK_MARKERS = (b"a2a", b"AgentCard", b"A2AClient")
+_MAX_PYTHON_CHARACTERS = 262_144
 
 
-class _BindingError(ValueError):
-    pass
+class _CodeReferences(NamedTuple):
+    server: list[str]
+    client: list[str]
+    built_cards: list[str]
+    loaded_cards: list[str]
+    unparsed_cards: list[str]
 
 
 class _Security(NamedTuple):
@@ -112,7 +162,7 @@ def _fields(declaration: dict[str, Any]) -> list[str]:
 
 def _scope(value: str) -> str:
     """Export a scope, a public identifier (RFC 6749 section 3.3), unless it may be a secret."""
-    if _TOKEN_SHAPE.search(value):
+    if len(value) > _MAX_SCOPE or _TOKEN_SHAPE.search(value):
         return REDACTED
     redacted = redact_text(value)
     if redacted == value:
@@ -132,70 +182,6 @@ def _scope(value: str) -> str:
     ):
         return value
     return redacted
-
-
-def _odd_host(url: str) -> bool:
-    """urlsplit keeps "host\\path" in the host, where WHATWG parsers read a path."""
-    try:
-        hostname = urlsplit(url).hostname
-    except ValueError:
-        return True
-    return hostname is not None and not _HOSTNAME.fullmatch(hostname)
-
-
-def _authority(url: str) -> str:
-    return f"//{url}" if _HOST_PORT.fullmatch(url) else url
-
-
-def _origin(url: str) -> str:
-    """Export scheme, host and port; a URL without a scheme keeps "//host:port"."""
-    url = _authority(url)
-    if _odd_host(url):
-        return "[redacted]"
-    if not url.startswith("//"):
-        return sanitized_origin(url)
-    try:
-        parsed = urlsplit(url)
-        host, port = parsed.hostname, parsed.port
-    except ValueError:
-        return "[redacted]"
-    if not host:
-        return "[redacted]"
-    host = f"[{host}]" if ":" in host else host
-    return f"//{host}" + (f":{port}" if port is not None else "")
-
-
-def _url_shape(url: str | None, plain_paths: frozenset[str]) -> dict[str, Any] | None:
-    """Describe what an origin-only export omits from a URL, without the values."""
-    if url is None:
-        return None
-    try:
-        parsed = urlsplit(url)
-    except ValueError:
-        return {"valid": False}
-    return {
-        "path_separators": parsed.path.count("/"),
-        "plain_path": parsed.path if parsed.path in plain_paths else None,
-        "query": bool(parsed.query),
-        "fragment": bool(parsed.fragment),
-        "userinfo": "@" in parsed.netloc,
-    }
-
-
-def _url_shapes(urls: list[str]) -> list[dict[str, Any] | None]:
-    return sorted((_url_shape(url, _ORIGIN_PATHS) for url in urls), key=canonical_json)
-
-
-def _beyond_origin(url: str, plain_paths: frozenset[str]) -> bool:
-    """Whether the export leaves part of a URL unbound, all of it when no origin was kept."""
-    if _origin(url) == "[redacted]":
-        return True
-    parsed = urlsplit(_authority(url))
-    return (
-        parsed.path not in plain_paths
-        or bool(parsed.query or parsed.fragment)
-        or "@" in parsed.netloc
-    )
 
 
 def _declared_urls(value: Any, depth: int = 0) -> list[str]:
@@ -220,32 +206,6 @@ def _declared_urls(value: Any, depth: int = 0) -> list[str]:
     if len(urls) > _MAX_ENTRIES:
         raise ValueError("oversized declaration")
     return urls
-
-
-def _value_binding(profile: str, declaration: dict[str, Any]) -> dict[str, str]:
-    key = os.environ.get(SOURCE_BINDING_KEY_ENV, "")
-    if not key:
-        return {}
-    if len(key) < _MIN_SOURCE_BINDING_KEY_LENGTH:
-        raise _BindingError(
-            f"{SOURCE_BINDING_KEY_ENV} must contain at least "
-            f"{_MIN_SOURCE_BINDING_KEY_LENGTH} characters"
-        )
-    try:
-        message = canonical_json({"profile": profile, "configuration": declaration})
-    except ValueError as exc:
-        raise _BindingError(
-            f"{SOURCE_BINDING_KEY_ENV} binding needs RFC 8785 JSON values (quote YAML "
-            "dates; avoid lone surrogates and integers beyond 2**53)"
-        ) from exc
-    material = key.encode()
-    key_id = hmac.new(material, b"nexus-symbiote/source-binding-key-id", "sha256").hexdigest()
-    return {
-        "static_value_binding": "hmac-sha256:"
-        + hmac.new(material, message.encode(), "sha256").hexdigest(),
-        "static_value_binding_key_id": key_id[:32],
-        "static_value_binding_profile": profile,
-    }
 
 
 def _member(declaration: dict[str, Any], name: str, proto_name: str) -> Any:
@@ -318,6 +278,20 @@ def _requirement_forms(declaration: dict[str, Any]) -> tuple[tuple[str, Any], ..
     )
 
 
+def _declares_current_security(data: dict[str, Any]) -> bool:
+    return any(
+        data.get(name) is not None
+        for name in (
+            "securitySchemes",
+            "security_schemes",
+            "securityRequirements",
+            "security_requirements",
+            "supportedInterfaces",
+            "supported_interfaces",
+        )
+    )
+
+
 def _requires_authentication(alternatives: list[dict[str, list[str]]], typed: set[str]) -> bool:
     # An empty alternative ({}) permits anonymous access, as in OpenAPI.
     return all(alternative and set(alternative) <= typed for alternative in alternatives)
@@ -373,7 +347,8 @@ def _security(data: dict[str, Any], skills: list[tuple[str, dict[str, Any]]]) ->
     typed: set[str] = set()
     for scheme_name, scheme in schemes.items():
         kinds[scheme_name], stated = _scheme_type(scheme)
-        if stated:
+        # A type such as "none" or an unknown extension shows no authentication.
+        if stated and kinds[scheme_name] != "other":
             typed.add(scheme_name)
     scheme_urls = _declared_urls(schemes)
     decisions: list[bool] = []
@@ -418,8 +393,15 @@ def _security(data: dict[str, Any], skills: list[tuple[str, dict[str, Any]]]) ->
         named_schemes = [] if named_schemes is None else named_schemes
         if not isinstance(named_schemes, list):
             raise ValueError("invalid authentication schemes")
-        legacy_count = sum(1 for scheme in _string_list(named_schemes) if scheme.strip())
-        decisions.append(legacy_count > 0)
+        legacy_count = sum(
+            1
+            for scheme in _string_list(named_schemes)
+            if scheme.strip() and scheme.strip().lower() not in _ANONYMOUS
+        )
+        # Clients of cards that use the 0.3 or 1.0 security declarations do not read
+        # the earlier authentication object, so it cannot decide for such a card.
+        if not _declares_current_security(data):
+            decisions.append(legacy_count > 0)
     structure = {
         "security_schemes": sorted([redact_text(name), kind] for name, kind in kinds.items()),
         "security_scheme_urls": _url_shapes(scheme_urls),
@@ -449,60 +431,292 @@ def _security(data: dict[str, Any], skills: list[tuple[str, dict[str, Any]]]) ->
     )
 
 
+def _bounded_name(value: str) -> str:
+    if len(value) > _MAX_NAME:
+        raise ValueError("name exceeds the supported length")
+    return redact_text(value)
+
+
+def _signatures(data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Read each card signature's protected JWS header; nothing is verified."""
+    declared = data.get("signatures")
+    if declared is None:
+        return []
+    if not isinstance(declared, list) or len(declared) > _MAX_ENTRIES:
+        raise ValueError("invalid signatures")
+    records = []
+    for entry in declared:
+        if not isinstance(entry, dict):
+            raise ValueError("invalid signature")
+        header: Any = None
+        protected = entry.get("protected")
+        if isinstance(protected, str) and len(protected) <= _MAX_PROTECTED_HEADER:
+            try:
+                raw = base64.urlsafe_b64decode(protected + "=" * (-len(protected) % 4))
+                header = json.loads(raw.decode("utf-8"))
+            except (ValueError, RecursionError):
+                header = None
+        if not isinstance(header, dict):
+            records.append({"alg": None, "kid": None, "header": "unreadable"})
+            continue
+        alg, kid = header.get("alg"), header.get("kid")
+        records.append(
+            {
+                "alg": alg
+                if isinstance(alg, str) and _JWS_ALGORITHM.fullmatch(alg)
+                else (None if alg is None else "[redacted]"),
+                "kid": _key_id(kid),
+                "header": "read",
+            }
+        )
+    return sorted(records, key=canonical_json)
+
+
+def _key_id(value: Any) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        return "[redacted]"
+    if "://" in value:
+        return _origin(value)
+    return value if _KEY_ID.fullmatch(value) else "[redacted]"
+
+
+def _capabilities(data: dict[str, Any]) -> tuple[dict[str, bool], list[dict[str, Any]], list[str]]:
+    """Return boolean capability flags, extensions and their URIs, without descriptions."""
+    flags: dict[str, bool] = {}
+    for name in ("supportsAuthenticatedExtendedCard", "supports_authenticated_extended_card"):
+        if isinstance(data.get(name), bool):
+            flags[name] = data[name]
+    declared = data.get("capabilities")
+    if declared is None:
+        return flags, [], []
+    if not isinstance(declared, dict) or len(declared) > _MAX_ENTRIES:
+        raise ValueError("invalid capabilities")
+    for key, value in declared.items():
+        if isinstance(value, bool):
+            flags[redact_text(key)] = value
+    extensions = declared.get("extensions")
+    extensions = [] if extensions is None else extensions
+    if not isinstance(extensions, list) or len(extensions) > _MAX_ENTRIES:
+        raise ValueError("invalid extensions")
+    records, uris = [], []
+    for extension in extensions:
+        if not isinstance(extension, dict):
+            raise ValueError("invalid extension")
+        uri, required = extension.get("uri"), extension.get("required")
+        if (uri is not None and not isinstance(uri, str)) or (
+            required is not None and not isinstance(required, bool)
+        ):
+            raise ValueError("invalid extension")
+        if uri is not None:
+            uris.append(uri)
+        records.append(
+            {
+                "origin": _origin(uri) if uri else None,
+                "required": bool(required),
+                "uri": _url_shape(uri, _ORIGIN_PATHS),
+            }
+        )
+    return flags, sorted(records, key=canonical_json), uris
+
+
+def _provider_url(data: dict[str, Any]) -> str | None:
+    provider = data.get("provider")
+    if provider is None:
+        return None
+    if not isinstance(provider, dict):
+        raise ValueError("invalid provider")
+    url = provider.get("url")
+    if url is not None and not isinstance(url, str):
+        raise ValueError("invalid provider")
+    return url
+
+
+def _client_methods(declared: Any) -> list[str]:
+    # The dict form names methods by key and enables each one by its value.
+    if isinstance(declared, dict):
+        declared = [
+            key for key, value in declared.items() if value not in (False, None, "", [], {})
+        ]
+    return _strings(declared)
+
+
+def _card_location(path: Path) -> tuple[str, bool] | None:
+    """The supported card path a walked file spells, and whether it spells it exactly."""
+    parts = path.parts
+    folded = [fold_name(part) for part in parts]
+    if len(parts) >= 2 and folded[-2] == ".well-known" and folded[-1] in AGENT_CARD_NAMES:
+        canonical = (*parts[:-2], ".well-known", folded[-1])
+    elif "/".join(folded) in _GENERIC_CARD_PATHS:
+        canonical = tuple(folded)
+    else:
+        return None
+    return "/".join(canonical), tuple(parts) == canonical
+
+
+def _card_preference(path: str) -> tuple[bool, int, bool, str]:
+    # The 0.3 well-known name first, then the earlier one, then other locations.
+    parts = path.split("/")
+    return (parts[-2:-1] != [".well-known"], len(parts), not path.endswith("card.json"), path)
+
+
+def _calls(tree: ast.Module) -> tuple[set[str], bool, bool]:
+    """Names of called SDK constructors, and whether AgentCard is built from literals."""
+    called: set[str] = set()
+    literal_card = mapping_card = False
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Name):
+            name = func.id
+        elif isinstance(func, ast.Attribute):
+            name = func.attr
+        else:
+            continue
+        called.add(name)
+        if name == "AgentCard":
+            if node.args or any(keyword.arg is not None for keyword in node.keywords):
+                literal_card = True
+            else:
+                mapping_card = True
+    return called, literal_card, mapping_card
+
+
+def _module_roles(tree: ast.Module) -> tuple[bool, bool, bool]:
+    """Whether the source imports the a2a SDK, and its server or client packages."""
+    imported = server = client = False
+    for node in ast.walk(tree):
+        modules: list[str] = []
+        if isinstance(node, ast.ImportFrom) and node.module is not None and node.level == 0:
+            modules = [node.module]
+        elif isinstance(node, ast.Import):
+            modules = [alias.name for alias in node.names]
+        for module in modules:
+            parts = module.split(".")
+            if parts[0] != "a2a":
+                continue
+            imported = True
+            server |= parts[1:2] == ["server"]
+            client |= parts[1:2] == ["client"]
+    return imported, server, client
+
+
 class A2AScanner(Scanner):
     name = "a2a"
 
     def scan(self, project_root: Path) -> ScanResult:
         result = ScanResult(scanner_name=self.name)
         with self._collection(project_root, result) as files:
-            for relative in AGENT_CARD_FILES:
-                path = files.root / relative
-                data = self._read_mapping(path, result)
+            cards: list[str] = []
+            sources: list[Path] = []
+            for path in files.iter_files():
+                location = _card_location(path)
+                if location is None:
+                    if path.suffix == ".py":
+                        sources.append(path)
+                    continue
+                canonical, exact = location
+                if exact:
+                    cards.append(canonical)
+                elif self._is_card(path, canonical, files):
+                    result.scan_failures.append(
+                        f"{path.as_posix()}: case variant of {canonical} is the active "
+                        "file on case-insensitive file systems and is not inventoried"
+                    )
+            parsed: list[tuple[str, dict[str, Any]]] = []
+            for relative in sorted(cards, key=_card_preference):
+                data = self._read_mapping(Path(relative), result)
                 if data is None:
                     continue
-                result.surfaces_scanned.append(str(path))
-                try:
-                    result.components.append(self._parse_agent_card(data, relative, path))
-                except _BindingError as exc:
-                    result.scan_failures.append(f"{relative}: {exc}")
-                except (TypeError, ValueError, RecursionError):
-                    result.scan_failures.append(f"{relative}: invalid A2A card field types")
+                if relative in _GENERIC_CARD_PATHS and not _CARD_MARKERS & set(data):
+                    continue
+                result.surfaces_scanned.append(relative)
+                parsed.append((relative, data))
+            self._record_cards(parsed, result)
             for relative in A2A_CONFIG_FILES:
-                path = files.root / relative
-                data = self._read_mapping(path, result)
+                data = self._read_mapping(Path(relative), result)
                 if data is None:
                     continue
-                result.surfaces_scanned.append(str(path))
-                clients = data.get("clients", data.get("remoteAgents", []))
-                if not isinstance(clients, list) or len(clients) > 1000:
-                    result.scan_failures.append(f"{relative}: invalid or oversized A2A client list")
-                    continue
-                for client in clients:
-                    try:
-                        if not isinstance(client, dict):
-                            raise ValueError("invalid client")
-                        result.components.append(self._parse_a2a_client(client, path))
-                    except _BindingError as exc:
-                        result.scan_failures.append(f"{relative}: {exc}")
-                    except (TypeError, ValueError, RecursionError):
-                        result.scan_failures.append(f"{relative}: invalid A2A client field types")
-            self._scan_code_patterns(files.root, result)
+                result.surfaces_scanned.append(relative)
+                self._record_clients(relative, data, result)
+            self._scan_code_patterns(files, sources, result)
         if not result.components and not result.scan_failures and not result.surfaces_excluded:
             result.surfaces_scanned.append("a2a (no A2A configurations found)")
         return result
 
+    @staticmethod
+    def _is_card(path: Path, canonical: str, files: ConfinedCollection) -> bool:
+        if canonical not in _GENERIC_CARD_PATHS:
+            return True
+        # A generic name is a card only with an A2A field; a read failure is recorded.
+        data = files.read_json(path)
+        return data is None or (isinstance(data, dict) and bool(_CARD_MARKERS & set(data)))
+
+    def _record_cards(self, parsed: list[tuple[str, dict[str, Any]]], result: ScanResult) -> None:
+        """One record per card; byte-identical declarations at several paths are merged."""
+        recorded: dict[str, tuple[dict[str, Any], A2AServerComponent]] = {}
+        for relative, data in parsed:
+            try:
+                component = self._parse_agent_card(data, relative, relative)
+            except _BindingError as exc:
+                result.scan_failures.append(f"{relative}: {exc}")
+                continue
+            except (TypeError, ValueError, RecursionError):
+                result.scan_failures.append(f"{relative}: invalid A2A card field types")
+                continue
+            previous = recorded.get(component.bom_ref)
+            if previous is None:
+                recorded[component.bom_ref] = (data, component)
+                result.components.append(component)
+            elif previous[0] == data:
+                paths = previous[1].properties["agent_card_paths"]
+                paths.append(relative)
+                paths.sort()
+            else:
+                result.scan_failures.append(
+                    f"{relative}: declares the same agent as "
+                    f"{previous[1].agent_card_path} with different content"
+                )
+
+    def _record_clients(self, relative: str, data: dict[str, Any], result: ScanResult) -> None:
+        declared = [data[key] for key in ("clients", "remoteAgents") if data.get(key) is not None]
+        if data and not declared and not {"clients", "remoteAgents"} & set(data):
+            result.surfaces_excluded.append(
+                f"{relative}: unrecognised A2A client configuration shape is not inventoried"
+            )
+            return
+        if not all(isinstance(value, list) for value in declared) or (
+            sum(len(value) for value in declared) > _MAX_ENTRIES
+        ):
+            result.scan_failures.append(f"{relative}: invalid or oversized A2A client list")
+            return
+        for client in (entry for value in declared for entry in value):
+            try:
+                if not isinstance(client, dict):
+                    raise ValueError("invalid client")
+                result.components.append(self._parse_a2a_client(client, relative))
+            except _BindingError as exc:
+                result.scan_failures.append(f"{relative}: {exc}")
+            except (TypeError, ValueError, RecursionError):
+                result.scan_failures.append(f"{relative}: invalid A2A client field types")
+
     def _parse_agent_card(
-        self, data: dict[str, Any], rel_path: str, card_path: Path
+        self, data: dict[str, Any], rel_path: str, card_path: str
     ) -> A2AServerComponent:
-        name, version = data.get("name", "unnamed-agent"), data.get("version")
+        declared_name, version = data.get("name"), data.get("version")
         endpoint = data.get("url") or data.get("endpoint")
         if (
-            not isinstance(name, str)
+            (declared_name is not None and not isinstance(declared_name, str))
             or (version is not None and not isinstance(version, str))
             or (endpoint is not None and not isinstance(endpoint, str))
         ):
             raise ValueError("invalid card identity")
-        name = redact_text(name)
+        name = _bounded_name(declared_name) if declared_name is not None else "unnamed-agent"
+        # An unnamed card is identified by its location, so two of them do not collide.
+        bom_ref = f"a2a-server:{name}" if declared_name is not None else f"a2a-server:{rel_path}"
+        shown = neutralize(name)
         protocols = _strings(data.get("protocols", []))
         declared_skills = data.get("skills", [])
         if not isinstance(declared_skills, list) or len(declared_skills) > 1000:
@@ -514,7 +728,7 @@ class A2AScanner(Scanner):
             )
             if not isinstance(label, str):
                 raise ValueError("invalid skill name")
-            skills.append(redact_text(label))
+            skills.append(_bounded_name(label))
             if isinstance(skill, dict):
                 skill_declarations.append((skills[-1], skill))
         # This records declarations only; neither a card nor this collector proves
@@ -525,6 +739,9 @@ class A2AScanner(Scanner):
         supported = _supported_interfaces(data)
         supported_urls: list[str] = [entry["url"] for entry in supported]
         endpoint = endpoint or (supported_urls[0] if supported_urls else None)
+        signatures = _signatures(data)
+        flags, extensions, extension_uris = _capabilities(data)
+        provider_url = _provider_url(data)
         structure_hash = hash_canonical(
             {
                 "profile": CARD_STRUCTURE_PROFILE,
@@ -535,6 +752,10 @@ class A2AScanner(Scanner):
                     "supported_interfaces": [
                         _url_shape(url, _ORIGIN_PATHS) for url in supported_urls
                     ],
+                    "signatures": signatures,
+                    "capabilities": dict(sorted(flags.items())),
+                    "extensions": extensions,
+                    "provider_url": _url_shape(provider_url, _ORIGIN_PATHS),
                     **security.structure,
                 },
             }
@@ -557,6 +778,10 @@ class A2AScanner(Scanner):
                 ),
                 # A tenant routes requests on the same origin, as a path does.
                 ("supported interface tenants", any(entry.get("tenant") for entry in supported)),
+                (
+                    "extension URIs beyond their exported origins",
+                    any(_beyond_origin(uri, _ORIGIN_PATHS) for uri in extension_uris),
+                ),
             )
             if gap
         ] + security.unbound
@@ -570,7 +795,7 @@ class A2AScanner(Scanner):
                 RiskAssessment(
                     severity=RiskSeverity.HIGH,
                     category="transport_security",
-                    detail=f"A2A agent '{name}' declares an endpoint without HTTPS.",
+                    detail=f"A2A agent '{shown}' declares an endpoint without HTTPS.",
                     recommendation="Use authenticated HTTPS transport for agent endpoints.",
                 )
             )
@@ -584,7 +809,7 @@ class A2AScanner(Scanner):
                 RiskAssessment(
                     severity=RiskSeverity.MEDIUM,
                     category="authentication",
-                    detail=f"A2A agent '{name}' {gap}.",
+                    detail=f"A2A agent '{shown}' {gap}.",
                     recommendation="Declare and independently verify endpoint authentication requirements.",
                 )
             )
@@ -593,7 +818,7 @@ class A2AScanner(Scanner):
                 RiskAssessment(
                     severity=RiskSeverity.LOW,
                     category="completeness",
-                    detail=f"A2A agent '{name}' declares no skills in its agent card.",
+                    detail=f"A2A agent '{shown}' declares no skills in its agent card.",
                     recommendation="Document declared skills and separately verify effective capabilities.",
                 )
             )
@@ -602,12 +827,12 @@ class A2AScanner(Scanner):
                 RiskAssessment(
                     severity=RiskSeverity.LOW,
                     category="completeness",
-                    detail=f"A2A agent '{name}' values not bound in this inventory: {'; '.join(unbound)}.",
+                    detail=f"A2A agent '{shown}' values not bound in this inventory: {'; '.join(unbound)}.",
                     recommendation=f"Set {SOURCE_BINDING_KEY_ENV} during collection to detect changes to these values.",
                 )
             )
         return A2AServerComponent(
-            bom_ref=f"a2a-server:{name}",
+            bom_ref=bom_ref,
             name=name,
             version=redact_text(version) if version else None,
             agent_card_path=rel_path,
@@ -618,16 +843,25 @@ class A2AScanner(Scanner):
             capabilities=(
                 CapabilityDeclaration(oauth_scopes=security.scopes) if security.scopes else None
             ),
-            source_path=str(card_path),
+            source_path=card_path,
             trust_tier=TrustTier.INTERNAL_UNVERIFIED,
             risks=risks,
             properties={
                 "collection_mode": "static-agent-card",
+                "agent_card_paths": [rel_path],
                 "authentication_evidence": "declaration-only",
                 "security_scheme_types": security.scheme_types,
                 "security_scheme_origins": sorted({_origin(url) for url in security.scheme_urls}),
                 "additional_interface_origins": sorted({_origin(url) for url in interface_urls}),
                 "supported_interface_origins": [_origin(url) for url in supported_urls],
+                "card_signatures": signatures,
+                "card_signature_verified": "not-checked",
+                "capability_flags": dict(sorted(flags.items())),
+                "extensions": [
+                    {"origin": record["origin"], "required": record["required"]}
+                    for record in extensions
+                ],
+                "provider_origin": _origin(provider_url) if provider_url else None,
                 "source_values_bound": bool(binding),
                 "static_card_hash": structure_hash,
                 "static_card_hash_profile": CARD_STRUCTURE_PROFILE,
@@ -635,16 +869,19 @@ class A2AScanner(Scanner):
             },
         )
 
-    def _parse_a2a_client(self, config: dict[str, Any], config_path: Path) -> A2AClientComponent:
+    def _parse_a2a_client(self, config: dict[str, Any], config_path: str) -> A2AClientComponent:
         name = config.get("name", config.get("agentName", "unnamed-client"))
-        card_url = config.get("agentCardUrl", config.get("url", config.get("endpoint")))
-        auth_methods = config.get("authMethods", config.get("authentication", []))
-        if isinstance(auth_methods, dict):
-            auth_methods = list(auth_methods)
-        auth_methods = _strings(auth_methods)
-        if not isinstance(name, str) or (card_url is not None and not isinstance(card_url, str)):
+        urls = [
+            config[key]
+            for key in ("agentCardUrl", "url", "endpoint")
+            if config.get(key) is not None
+        ]
+        auth_methods = _client_methods(config.get("authMethods", config.get("authentication", [])))
+        if not isinstance(name, str) or not all(isinstance(url, str) for url in urls):
             raise ValueError("invalid client identity")
-        name = redact_text(name)
+        card_url = urls[0] if urls else None
+        name = _bounded_name(name)
+        shown = neutralize(name)
         structure_hash = hash_canonical(
             {
                 "profile": CLIENT_STRUCTURE_PROFILE,
@@ -655,23 +892,23 @@ class A2AScanner(Scanner):
             }
         )
         binding = _value_binding(CLIENT_VALUE_BINDING_PROFILE, config)
-        path_bound = bool(binding) or not (card_url and _beyond_origin(card_url, _CARD_PATHS))
+        path_bound = bool(binding) or not any(_beyond_origin(url, _CARD_PATHS) for url in urls)
         risks = []
-        if card_url and not card_url.lower().startswith("https://"):
+        if any(url and not url.lower().startswith("https://") for url in urls):
             risks.append(
                 RiskAssessment(
                     severity=RiskSeverity.HIGH,
                     category="transport_security",
-                    detail=f"A2A client '{name}' declares an insecure endpoint transport.",
+                    detail=f"A2A client '{shown}' declares an insecure endpoint transport.",
                     recommendation="Use authenticated HTTPS for agent card retrieval.",
                 )
             )
-        if not auth_methods:
+        if not any(method.strip().lower() not in _ANONYMOUS for method in auth_methods):
             risks.append(
                 RiskAssessment(
                     severity=RiskSeverity.MEDIUM,
                     category="authentication",
-                    detail=f"A2A client '{name}' has no authentication method declared.",
+                    detail=f"A2A client '{shown}' has no authentication method declared.",
                     recommendation="Configure and independently verify remote-agent authentication.",
                 )
             )
@@ -680,86 +917,109 @@ class A2AScanner(Scanner):
                 RiskAssessment(
                     severity=RiskSeverity.LOW,
                     category="completeness",
-                    detail=f"A2A client '{name}' agent card URL beyond its exported origin is not bound in this inventory.",
+                    detail=f"A2A client '{shown}' agent card URL beyond its exported origin is not bound in this inventory.",
                     recommendation=f"Set {SOURCE_BINDING_KEY_ENV} during collection to detect same-origin card changes.",
                 )
             )
+        properties: dict[str, Any] = {
+            "collection_mode": "static-config",
+            "remote_agent_contacted": False,
+            "source_values_bound": bool(binding),
+            "static_config_hash": structure_hash,
+            "static_config_hash_profile": CLIENT_STRUCTURE_PROFILE,
+            **binding,
+        }
+        if len(urls) > 1:
+            properties["endpoint_origins"] = [_origin(url) for url in urls[1:]]
         return A2AClientComponent(
             bom_ref=f"a2a-client:{name}",
             name=name,
             agent_card_url=_origin(card_url) if card_url else None,
             authentication_methods=auth_methods,
-            source_path=str(config_path),
+            source_path=config_path,
             trust_tier=TrustTier.UNKNOWN,
             risks=risks,
-            properties={
-                "collection_mode": "static-config",
-                "remote_agent_contacted": False,
-                "source_values_bound": bool(binding),
-                "static_config_hash": structure_hash,
-                "static_config_hash_profile": CLIENT_STRUCTURE_PROFILE,
-                **binding,
-            },
+            properties=properties,
         )
 
-    def _scan_code_patterns(self, root: Path, result: ScanResult) -> None:
-        if self._files is None:
-            raise RuntimeError("_scan_code_patterns called outside a _collection context")
-        sources = [
-            path
-            for path in self._files.iter_files()
-            if path.suffix == ".py"
-            and (len(path.parts) == 1 or (len(path.parts) == 2 and path.parts[0] == "src"))
-        ]
-        if len(sources) > 20:
-            result.scan_failures.append("a2a code references: 20-file collection limit exceeded")
-        for path in sources[:20]:
-            content = self._files.read_text(path)
-            if content is None:
-                continue
-            result.surfaces_scanned.append(str(root / path))
-            if len(content) > 262_144:
-                result.scan_failures.append(f"{path}: syntax collection size limit exceeded")
-                continue
-            try:
-                tree = parse_python(content)
-            except (SyntaxError, ValueError, RecursionError):
-                result.scan_failures.append(f"{path}: invalid Python syntax")
-                continue
-            detected = any(
-                (
-                    isinstance(node, ast.ImportFrom)
-                    and node.module is not None
-                    and node.module.split(".")[0] == "a2a"
-                )
-                or (
-                    isinstance(node, ast.Import)
-                    and any(alias.name.split(".")[0] == "a2a" for alias in node.names)
-                )
-                or (
-                    isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Name)
-                    and node.func.id in {"A2AClient", "AgentCard"}
-                )
-                for node in ast.walk(tree)
+    def _code_references(self, root: Path, sources: list[Path]) -> _CodeReferences:
+        """Find SDK use in Python source; a file that is merely unreadable is no gap.
+
+        Source is read under its own byte budget and its failures are not kept, so an
+        ordinary repository's Python files never fail this collector. Only a file that
+        builds an agent card, or one that names AgentCard and cannot be parsed, is a gap.
+        """
+        references = _CodeReferences([], [], [], [], [])
+        with ConfinedCollection(root, [], exclude_paths=self._exclude_paths) as heuristic:
+            for path in sources:
+                raw = heuristic.read_bytes(path)
+                if raw is None or not any(marker in raw for marker in _SDK_MARKERS):
+                    continue
+                relative = path.as_posix()
+                try:
+                    content = raw.decode("utf-8")
+                    if len(content) > _MAX_PYTHON_CHARACTERS:
+                        raise ValueError("oversized source")
+                    tree = parse_python(content)
+                except (SyntaxError, ValueError):
+                    if b"AgentCard" in raw:
+                        references.unparsed_cards.append(relative)
+                    continue
+                imported, server, client = _module_roles(tree)
+                called, literal_card, mapping_card = _calls(tree)
+                if literal_card:
+                    references.built_cards.append(relative)
+                elif mapping_card:
+                    references.loaded_cards.append(relative)
+                if server or called & _SERVER_CALLS:
+                    references.server.append(relative)
+                elif client or called & _CLIENT_CALLS or imported:
+                    references.client.append(relative)
+        return references
+
+    def _scan_code_patterns(
+        self, files: ConfinedCollection, sources: list[Path], result: ScanResult
+    ) -> None:
+        references = self._code_references(files.root, sources)
+        result.surfaces_scanned.append("a2a: Python SDK references (heuristic)")
+        static_cards = any(
+            component.bom_ref.startswith("a2a-server:") for component in result.components
+        )
+        result.surfaces_excluded.extend(
+            f"{path}: A2A agent card built in Python code is not inventoried"
+            for path in references.built_cards
+        )
+        result.surfaces_excluded.extend(
+            f"{path}: Python source that names AgentCard could not be parsed; "
+            "an agent card it builds is not inventoried"
+            for path in references.unparsed_cards
+        )
+        if not static_cards:
+            # With a static card present, a card built from loaded data is taken to be it.
+            result.surfaces_excluded.extend(
+                f"{path}: A2A agent card loaded in Python code is not inventoried"
+                for path in references.loaded_cards
             )
-            if detected and not any(
-                component.bom_ref.startswith("a2a-") for component in result.components
-            ):
-                result.components.append(
-                    A2AClientComponent(
-                        bom_ref="a2a-client:code-detected",
-                        name="a2a-client (code-detected)",
-                        source_path=str(root / path),
-                        trust_tier=TrustTier.INTERNAL_UNVERIFIED,
-                        properties={"collection_mode": "static-syntax-reference"},
-                        risks=[
-                            RiskAssessment(
-                                severity=RiskSeverity.INFO,
-                                category="detection_method",
-                                detail="A2A SDK reference detected in Python syntax; deployment not verified.",
-                                recommendation="Add explicit client configuration and deployment evidence.",
-                            )
-                        ],
-                    )
+        if any(component.bom_ref.startswith("a2a-") for component in result.components):
+            return
+        for kind, paths in (("server", references.server), ("client", references.client)):
+            if not paths:
+                continue
+            component_type = A2AServerComponent if kind == "server" else A2AClientComponent
+            result.components.append(
+                component_type(
+                    bom_ref=f"a2a-{kind}:code-detected",
+                    name=f"a2a-{kind} (code-detected)",
+                    source_path=min(paths),
+                    trust_tier=TrustTier.INTERNAL_UNVERIFIED,
+                    properties={"collection_mode": "static-syntax-reference"},
+                    risks=[
+                        RiskAssessment(
+                            severity=RiskSeverity.INFO,
+                            category="detection_method",
+                            detail=f"A2A SDK {kind} reference detected in Python syntax; deployment not verified.",
+                            recommendation="Add explicit agent card or client configuration and deployment evidence.",
+                        )
+                    ],
                 )
+            )

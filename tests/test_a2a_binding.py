@@ -330,16 +330,63 @@ def test_authentication_is_required_only_when_every_alternative_names_declared_s
         ({"schemes": ["bearer"]}, None, True),
         ({"schemes": []}, None, False),
         ({}, None, False),
+        ({"schemes": ["none"]}, None, False),
+        ({"schemes": ["Anonymous", " public "]}, None, False),
         ({"schemes": ["bearer"]}, [{}], False),
-        ({"schemes": []}, [{"oauth": []}], False),
+        # A card that uses the 0.3 declarations is decided by them alone.
+        ({"schemes": []}, [{"oauth": []}], True),
     ],
 )
 def test_legacy_authentication_needs_nonempty_schemes(tmp_path, authentication, security, required):
     card = {**CARD, "authentication": authentication}
     card.pop("security")
+    card.pop("securitySchemes")
     if security is not None:
+        card["securitySchemes"] = CARD["securitySchemes"]
         card["security"] = security
     assert _server(tmp_path, card).authentication_required is required
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        # Clients of a card with securitySchemes do not read the earlier object.
+        {"authentication": {"schemes": ["bearer"]}},
+        {"supportedInterfaces": [{"url": "https://a.example"}]},
+    ],
+)
+def test_legacy_authentication_does_not_decide_for_current_cards(tmp_path, change):
+    card = {**CARD, "authentication": {"schemes": ["bearer"]}, **change}
+    card.pop("security")
+    server = _server(tmp_path, card)
+    assert server.authentication_required is False
+    assert [r.severity for r in server.risks if r.category == "authentication"] == ["medium"]
+
+
+@pytest.mark.parametrize("kind", ["none", "x-custom", "Anonymous"])
+def test_scheme_of_unknown_type_does_not_count_as_authentication(tmp_path, kind):
+    card = copy.deepcopy(CARD)
+    card["securitySchemes"] = {"anon": {"type": kind}}
+    card["security"] = [{"anon": []}]
+    server = _server(tmp_path, card)
+    assert server.authentication_required is False
+    assert server.properties["security_scheme_types"] == ["other"]
+
+
+@pytest.mark.parametrize(
+    ("methods", "flagged"),
+    [
+        (["none"], True),
+        ({"enabled": False}, True),
+        ({"bearer": True, "apiKey": False}, False),
+        (["api-key"], False),
+    ],
+)
+def test_client_authentication_methods_are_read_by_value(tmp_path, methods, flagged):
+    client = _client(
+        tmp_path, {"name": "c", "agentCardUrl": "https://a.example", "authMethods": methods}
+    )
+    assert any(r.category == "authentication" for r in client.risks) is flagged
 
 
 @pytest.mark.parametrize(
@@ -969,17 +1016,21 @@ VECTOR_CLIENT = {"name": "c", "agentCardUrl": "https://a.example/.well-known/age
 VECTORS = [
     (
         "static_card_hash",
-        '{"profile":"nexus-symbiote/a2a-card-structure/v2",'
+        '{"profile":"nexus-symbiote/a2a-card-structure/v3",'
         '"structure":{"additional_interfaces":[{"fragment":false,"path_separators":0,'
         '"plain_path":"","query":false,"userinfo":false}],"authentication_schemes":null,'
+        '"capabilities":{},'
         '"endpoint":{"fragment":false,"path_separators":1,"plain_path":null,"query":false,'
-        '"userinfo":false},"fields":["additionalInterfaces","name","security","securitySchemes",'
-        '"skills","url"],"security":[{"k":["role"]},{"o":["https://a.example/scope","s"]}],'
+        '"userinfo":false},"extensions":[],'
+        '"fields":["additionalInterfaces","name","security","securitySchemes",'
+        '"skills","url"],"provider_url":null,'
+        '"security":[{"k":["role"]},{"o":["https://a.example/scope","s"]}],'
         '"security_requirements":null,"security_scheme_urls":[{"fragment":false,'
         '"path_separators":1,"plain_path":null,"query":false,"userinfo":false}],'
-        '"security_schemes":[["k","apiKey"],["o","oauth2"]],"skill_security":[["lookup",'
+        '"security_schemes":[["k","apiKey"],["o","oauth2"]],"signatures":[],'
+        '"skill_security":[["lookup",'
         '{"security":[{"o":["t"]}]}]],"supported_interfaces":[]}}',
-        "sha256:b29ca4fd11e1d7a5e326d37bf1a550bc209f14c57bc6ee05ec6efbfb664de594",
+        "sha256:8e16287a6387ae5e87c1fbbb20df0d183b31c0ee3b0ec4e2055347c6946b90d2",
     ),
     (
         "static_value_binding",
@@ -1059,13 +1110,14 @@ VECTOR_CARD_1_0 = {
     ],
 }
 VECTOR_1_0 = (
-    '{"profile":"nexus-symbiote/a2a-card-structure/v2","structure":{"additional_interfaces":[],'
-    '"authentication_schemes":null,"endpoint":{"fragment":false,"path_separators":1,'
-    '"plain_path":null,"query":false,"userinfo":false},"fields":["name","securityRequirements",'
-    '"securitySchemes","skills","supportedInterfaces"],"security":null,'
+    '{"profile":"nexus-symbiote/a2a-card-structure/v3","structure":{"additional_interfaces":[],'
+    '"authentication_schemes":null,"capabilities":{},"endpoint":{"fragment":false,'
+    '"path_separators":1,"plain_path":null,"query":false,"userinfo":false},"extensions":[],'
+    '"fields":["name","securityRequirements",'
+    '"securitySchemes","skills","supportedInterfaces"],"provider_url":null,"security":null,'
     '"security_requirements":[{"k":["role"]},{"o":["s"]}],'
     '"security_scheme_urls":[{"fragment":false,"path_separators":1,"plain_path":null,"query":false,'
-    '"userinfo":false}],"security_schemes":[["k","apiKey"],["o","oauth2"]],'
+    '"userinfo":false}],"security_schemes":[["k","apiKey"],["o","oauth2"]],"signatures":[],'
     '"skill_security":[["lookup",{"security_requirements":[{"k":["r2"],"o":["t"]}]}]],'
     '"supported_interfaces":[{"fragment":false,"path_separators":1,"plain_path":null,"query":false,'
     '"userinfo":false},{"fragment":false,"path_separators":0,"plain_path":null,"query":false,'
@@ -1074,7 +1126,7 @@ VECTOR_1_0 = (
 
 
 def test_a2a_1_0_card_matches_its_published_structure_vector(tmp_path):
-    expected = "sha256:4e15192e6d059a3454939bc7fc892cd470a254ac268091ec4fa038b7f428d923"
+    expected = "sha256:e85679a927eaaec1a504c194a168fab78590dc2274e07b49145e5d5777707b65"
     assert "sha256:" + hashlib.sha256(VECTOR_1_0.encode()).hexdigest() == expected
     card = _server(tmp_path, VECTOR_CARD_1_0)
     assert card.properties["static_card_hash"] == expected
