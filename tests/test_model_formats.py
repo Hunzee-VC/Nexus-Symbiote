@@ -155,6 +155,15 @@ def test_gguf_named_templates_and_nested_arrays_are_read():
     assert metadata.chat_templates == (("tokenizer.chat_template.tool_use", b"{{ tools }}"),)
 
 
+def test_gguf_template_names_with_control_characters_are_named_by_position():
+    data = gguf(
+        (b"tokenizer.chat_template", 8, gguf_string(b"{{ a }}")),
+        (b"tokenizer.chat_template.\x1b[31mx", 8, gguf_string(b"{{ b }}")),
+    )
+    names = [name for name, _ in gguf_metadata(io.BytesIO(data).read).chat_templates]
+    assert names == ["tokenizer.chat_template", "tokenizer.chat_template.#1"]
+
+
 def test_gguf_architecture_must_be_a_plain_name():
     data = gguf((b"general.architecture", 8, gguf_string(b"Llama\n::warning::x")))
     assert gguf_metadata(io.BytesIO(data).read).architecture is None

@@ -336,6 +336,7 @@ _GGUF_SCALARS = {0: 1, 1: 1, 2: 2, 3: 2, 4: 4, 5: 4, 6: 4, 7: 1, 10: 8, 11: 8, 1
 _GGUF_STRING = 8
 _GGUF_ARRAY = 9
 _ARCHITECTURE = re.compile(rb"[a-z0-9][a-z0-9_.-]{0,63}")
+_TEMPLATE_KEY = re.compile(rb"tokenizer\.chat_template(?:\.[A-Za-z0-9_-]{1,64})?")
 
 
 @dataclass(frozen=True)
@@ -396,7 +397,13 @@ def gguf_metadata(read: Read, budget: InspectionBudget | None = None) -> GGUFMet
         if kind == _GGUF_STRING and (template or key == b"general.architecture"):
             value = _gguf_string(reader)
             if template:
-                templates.append((key.decode("ascii", "replace"), value))
+                # Key names reach the inventory; an unusual one is named by position.
+                name = (
+                    key.decode("ascii")
+                    if _TEMPLATE_KEY.fullmatch(key)
+                    else f"tokenizer.chat_template.#{len(templates)}"
+                )
+                templates.append((name, value))
             elif _ARCHITECTURE.fullmatch(value):
                 architecture = value.decode("ascii")
         else:
