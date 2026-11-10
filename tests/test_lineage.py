@@ -110,3 +110,55 @@ def test_alias_is_not_cryptographically_pinned_and_attestation_must_verify():
     with pytest.raises(ValueError):
         claimed.verify_attestation(envelope, {}, now=NOW)
     assert not claimed.immutable_identity_established
+
+
+def _chain(depth: int) -> list[DataVersion]:
+    versions = [version("v0")]
+    versions += [version(f"v{i}", "memory", (f"v{i - 1}",)) for i in range(1, depth)]
+    return versions
+
+
+def test_deep_append_only_lineage_stays_usable():
+    depth = 5_000
+    index = LineageIndex("acme", tuple(reversed(_chain(depth))))
+    record = index.retrieve(
+        (f"v{depth - 1}",),
+        principal="reader",
+        acl_revision="v1",
+        observed_at=NOW,
+        read_watermark="commit:1",
+    )
+    assert record.source_versions == (f"v{depth - 1}",)
+    assert len(index.withdraw("v0")) == depth
+    with pytest.raises(PermissionError):
+        index.retrieve(
+            (f"v{depth - 1}",),
+            principal="reader",
+            acl_revision="v1",
+            observed_at=NOW,
+            read_watermark="commit:2",
+        )
+
+
+def test_cycles_and_self_parents_are_rejected():
+    with pytest.raises(ValueError):
+        LineageIndex("acme", (version("a", "chunk", ("b",)), version("b", "chunk", ("a",))))
+    with pytest.raises(ValueError):
+        LineageIndex("acme", (version("a"), version("b", "chunk", ("b",))))
+    with pytest.raises(ValueError):
+        LineageIndex("acme", (version("a"), version("a")))
+
+
+def test_an_earlier_acl_revision_cannot_be_restored():
+    index = LineageIndex("acme", (version("source"),))
+    index.update_acl("source", revision="v2", principals=())
+    with pytest.raises(ValueError, match="already used"):
+        index.update_acl("source", revision="v1", principals=("reader",))
+    with pytest.raises(PermissionError):
+        index.retrieve(
+            ("source",),
+            principal="reader",
+            acl_revision="v1",
+            observed_at=NOW,
+            read_watermark="commit:3",
+        )

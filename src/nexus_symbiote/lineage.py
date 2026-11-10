@@ -1,4 +1,9 @@
-"""Identity and data-lineage evidence without inferring unavailable guarantees."""
+"""Identity and data-lineage evidence without inferring unavailable guarantees.
+
+A library helper for integrations that mediate retrieval; no command uses it. Every
+operation is linear in the size of the lineage, and ancestry checks are iterative, so
+append-only memory and cache lineages of any depth stay usable.
+"""
 
 from __future__ import annotations
 
@@ -115,14 +120,29 @@ class LineageIndex:
     def __init__(self, tenant: str, versions: tuple[DataVersion, ...] = ()) -> None:
         self.tenant = tenant
         self.versions: dict[str, DataVersion] = {}
-        pending = list(versions)
-        while pending:
-            available = [v for v in pending if all(p in self.versions for p in v.parents)]
-            if not available:
-                raise ValueError("lineage contains missing parents or a cycle")
-            for value in available:
-                self.add(value)
-                pending.remove(value)
+        self._children: dict[str, list[str]] = {}
+        self._acl_revisions: dict[str, set[str]] = {}
+        by_id: dict[str, DataVersion] = {}
+        for value in versions:
+            if value.id in by_id:
+                raise ValueError("cross-tenant or duplicate lineage version")
+            by_id[value.id] = value
+        # Kahn's algorithm: each version is added once all of its parents are.
+        waiting = {value.id: len(set(value.parents)) for value in versions}
+        dependents: dict[str, list[str]] = {}
+        for value in versions:
+            for parent in set(value.parents):
+                dependents.setdefault(parent, []).append(value.id)
+        ready = deque(value.id for value in versions if waiting[value.id] == 0)
+        while ready:
+            current = ready.popleft()
+            self.add(by_id[current])
+            for child in dependents.get(current, ()):
+                waiting[child] -= 1
+                if waiting[child] == 0:
+                    ready.append(child)
+        if len(self.versions) != len(by_id):
+            raise ValueError("lineage contains missing parents or a cycle")
 
     def add(self, value: DataVersion) -> None:
         if value.tenant != self.tenant or value.id in self.versions:
@@ -134,6 +154,9 @@ class LineageIndex:
         if any(self.versions[p].withdrawn for p in value.parents):
             raise ValueError("cannot derive from withdrawn records")
         self.versions[value.id] = value
+        self._acl_revisions[value.id] = {value.acl_revision}
+        for parent in set(value.parents):
+            self._children.setdefault(parent, []).append(value.id)
 
     def withdraw(self, source_id: str) -> tuple[str, ...]:
         if source_id not in self.versions:
@@ -146,11 +169,21 @@ class LineageIndex:
                 continue
             affected.add(current)
             self.versions[current] = self.versions[current].model_copy(update={"withdrawn": True})
-            queue.extend(v.id for v in self.versions.values() if current in v.parents)
+            queue.extend(self._children.get(current, ()))
         return tuple(sorted(affected))
 
     def update_acl(self, version: str, *, revision: str, principals: tuple[str, ...]) -> None:
+        """Apply a new ACL revision; a revision used before cannot be restored.
+
+        Revisions have no order, so reuse is what is refused: otherwise an earlier, wider
+        ACL could be reinstated under its old revision and replay retrievals approved
+        against it.
+        """
         current = self.versions[version]
+        used = self._acl_revisions.setdefault(version, {current.acl_revision})
+        if revision in used:
+            raise ValueError("ACL revision was already used for this version")
+        used.add(revision)
         self.versions[version] = current.model_copy(
             update={"acl_revision": revision, "allowed_principals": principals}
         )
@@ -167,8 +200,9 @@ class LineageIndex:
         if observed_at.utcoffset() is None:
             raise ValueError("retrieval time must be timezone-aware")
         selected = [self.versions[i] for i in ids]
+        checked: set[str] = set()
         for value in selected:
-            self._authorize_ancestry(value.id, principal, acl_revision, set())
+            self._authorize_ancestry(value.id, principal, acl_revision, checked)
         return RetrievalRecord(
             tenant=self.tenant,
             principal=principal,
@@ -180,15 +214,17 @@ class LineageIndex:
         )
 
     def _authorize_ancestry(self, version: str, principal: str, acl: str, seen: set[str]) -> None:
-        if version in seen:
-            return
-        seen.add(version)
-        value = self.versions[version]
-        if (
-            value.withdrawn
-            or principal not in value.allowed_principals
-            or value.acl_revision != acl
-        ):
-            raise PermissionError("withdrawn, unauthorized, or stale ACL evidence")
-        for parent in value.parents:
-            self._authorize_ancestry(parent, principal, acl, seen)
+        pending = [version]
+        while pending:
+            current = pending.pop()
+            if current in seen:
+                continue
+            seen.add(current)
+            value = self.versions[current]
+            if (
+                value.withdrawn
+                or principal not in value.allowed_principals
+                or value.acl_revision != acl
+            ):
+                raise PermissionError("withdrawn, unauthorized, or stale ACL evidence")
+            pending.extend(value.parents)
