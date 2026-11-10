@@ -336,3 +336,116 @@ def test_configuration_read_through_an_in_root_link_names_its_target(tmp_path):
     (component,) = result.components
     assert component.source_path == "rag_config.json"
     assert component.properties["symlink_target"] == "configs/rag.json"
+
+
+def _scan_config(root: Path, config: dict[str, Any]) -> list[RAGSourceComponent]:
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "rag_config.json").write_text(json.dumps(config))
+    result = RAGScanner().scan(root)
+    assert not result.scan_failures, result.scan_failures
+    return [c for c in result.components if isinstance(c, RAGSourceComponent)]
+
+
+@pytest.mark.parametrize(
+    ("field", "before", "after"),
+    [
+        (
+            "vector_store",
+            {"url": "https://qdrant.corp.example/kb"},
+            {"url": "https://evil.example/kb"},
+        ),
+        (
+            "embeddings",
+            {"model": "m", "api_base": "https://api.openai.com/v1"},
+            {"model": "m", "api_base": "https://evil.example/v1"},
+        ),
+        ("vector_store", "https://qdrant.corp.example/kb", "https://qdrant.corp.example/a/b"),
+    ],
+)
+def test_nested_endpoint_changes_alter_the_record_without_a_key(tmp_path, field, before, after):
+    first = _source(tmp_path / "a", {**BASE, field: before})
+    second = _source(tmp_path / "b", {**BASE, field: after})
+    assert first.properties["static_config_hash"] != second.properties["static_config_hash"]
+    run = _scan_and_diff(tmp_path, {**BASE, field: before}, {**BASE, field: after})
+    assert run.exit_code == 1, run.output
+
+
+def test_unexported_nested_values_are_unbound_without_a_key_and_bound_with_one(
+    tmp_path, monkeypatch
+):
+    before = {**BASE, "sanitization": None, "content_filter": {"enabled": True, "mode": "block"}}
+    after = {**before, "content_filter": {"enabled": True, "mode": "log-only"}}
+    first, second = _source(tmp_path / "a", before), _source(tmp_path / "b", after)
+    assert first == second
+    (gap,) = [r for r in first.risks if r.category == "completeness"]
+    assert "field values that the record does not export" in gap.detail
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    run = _scan_and_diff(tmp_path, before, after)
+    assert run.exit_code == 1, run.output
+
+
+def test_nested_cleartext_endpoint_is_a_transport_finding(tmp_path):
+    component = _source(
+        tmp_path, {**BASE, "vector_store": {"url": "http://qdrant.corp.example:6333/kb"}}
+    )
+    (finding,) = [r for r in component.risks if r.severity.value == "high"]
+    assert finding.detail == (
+        "RAG source 'kb' declares an unencrypted endpoint: http://qdrant.corp.example:6333"
+    )
+    assert component.properties["endpoint_origins"] == ["http://qdrant.corp.example:6333"]
+
+
+def test_fields_beside_the_source_lists_are_digested_bound_and_checked(tmp_path, monkeypatch):
+    def config(endpoint: str) -> dict[str, Any]:
+        return {
+            "retriever": {"endpoint": endpoint, "top_k": 5},
+            "sources": [BASE, {**BASE, "name": "kb2"}],
+        }
+
+    first = _scan_config(tmp_path / "a", config("https://a.example/x"))
+    moved = _scan_config(tmp_path / "b", config("https://evil.example/x"))
+    assert [c.properties["static_config_hash"] for c in first] != [
+        c.properties["static_config_hash"] for c in moved
+    ]
+    assert first[1].properties["configuration_endpoint_origins"] == ["https://a.example"]
+    assert any(
+        r.category == "completeness" and "RAG configuration 'rag_config.json'" in r.detail
+        for r in first[0].risks
+    )
+    cleartext = _scan_config(tmp_path / "c", config("http://a.example/x"))
+    findings = [r for c in cleartext for r in c.risks if r.severity.value == "high"]
+    assert [r.detail for r in findings] == [
+        "RAG configuration 'rag_config.json' declares an unencrypted endpoint: http://a.example"
+    ]
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    keyed = _scan_config(tmp_path / "d", config("https://a.example/x"))
+    rekeyed = _scan_config(tmp_path / "e", config("https://a.example/y"))
+    assert (
+        keyed[0].properties["static_value_binding"] != rekeyed[0].properties["static_value_binding"]
+    )
+    assert not any(r.category == "completeness" for c in keyed for r in c.risks)
+
+
+def test_empty_source_list_beside_source_fields_is_read_as_one_source(tmp_path):
+    (component,) = _scan_config(tmp_path, {"sources": [], "source_uris": ["http://evil.example/p"]})
+    assert component.bom_ref == "rag:rag_config.json#0"
+    assert component.source_uris == ["http://evil.example"]
+    assert any(r.severity.value == "high" for r in component.risks)
+
+
+def test_case_variant_of_a_configuration_name_is_a_failure(tmp_path):
+    (tmp_path / "configs").mkdir()
+    (tmp_path / "configs" / "Rag_Config.json").write_text(json.dumps(BASE))
+    (tmp_path / "Knowledge_Base.json").write_text(json.dumps([{"title": "data"}]))
+    result = RAGScanner().scan(tmp_path)
+    assert result.scan_failures == [
+        "configs/Rag_Config.json: case variant of configs/rag_config.json is the active file "
+        "on case-insensitive file systems and is not inventoried"
+    ]
+
+
+def test_uri_shown_in_findings_is_neutralised(tmp_path):
+    component = _source(
+        tmp_path, {**BASE, "source_uris": ["http://moc.elpmaxe\u202e.evil.example/x"]}
+    )
+    assert all("\u202e" not in r.detail for r in component.risks)

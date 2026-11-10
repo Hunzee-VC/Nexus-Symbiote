@@ -24,7 +24,7 @@ from nexus_symbiote.scanners.source_binding import (
     url_shape,
     value_binding,
 )
-from nexus_symbiote.utils.confined import ConfinedCollection
+from nexus_symbiote.utils.confined import ConfinedCollection, fold_name
 from nexus_symbiote.utils.secrets import redact_text, redact_url
 from nexus_symbiote.utils.terminal import neutralize
 
@@ -72,11 +72,31 @@ _SOURCE_FIELDS = frozenset(
         "content_filter",
     }
 )
-# Fields whose values the record exports or digests; others are bound only by the key.
-_EXPORTED_FIELDS = _SOURCE_FIELDS | {"name", "type"}
 _IDENTITY_FIELDS = ("index_name", "collection", "collection_name", "namespace")
 _CONTROLS = ("sanitization", "content_filter")
+# Fields read into the record. Any other field, such as vector_store, the members of
+# embeddings other than model and those of a control object other than enabled, is
+# digested by its names, flags and URL origins and shapes; its other values are bound
+# only by the key.
+_READ_FIELDS = frozenset(
+    {
+        "name",
+        "type",
+        "store_type",
+        "embedding_model",
+        "embeddings",
+        "chunking_strategy",
+        "chunk_size",
+        "source_uris",
+        "documents",
+        *_IDENTITY_FIELDS,
+        *_CONTROLS,
+    }
+)
+_LIST_KEYS = ("sources", "knowledge_bases")
+_FOLDED_CONFIG_NAMES = {fold_name(name): name for name in RAG_CONFIG_PATTERNS}
 _MAX_ENTRIES = 1000
+_MAX_DEPTH = 32
 _MAX_NAME = 256
 _MAX_URI = 4096
 _MAX_PYTHON_CHARACTERS = 262_144
@@ -173,6 +193,85 @@ def _control(value: Any) -> str:
     return "unrecognized"
 
 
+def _describe(value: Any, urls: list[str], depth: int = 0) -> tuple[Any, bool]:
+    """A nested value as the unkeyed digest covers it, and whether it leaves values unbound.
+
+    Names, booleans and nulls are kept, and URLs by their exported origin and their
+    shape, which ``urls`` collects for the transport check. Other text and numbers are
+    kept only as their type, since the record does not export them.
+    """
+    if depth > _MAX_DEPTH:
+        raise _SourceError("RAG configuration nested too deeply")
+    if isinstance(value, dict | list) and len(value) > _MAX_ENTRIES:
+        raise _SourceError("oversized RAG configuration value")
+    if isinstance(value, dict):
+        described: dict[str, Any] = {}
+        unbound = False
+        for key, item in value.items():
+            name = redact_text(str(key))
+            described[name], gap = _describe(item, urls, depth + 1)
+            unbound |= gap or name != key
+        return described, unbound
+    if isinstance(value, list):
+        items = [_describe(item, urls, depth + 1) for item in value]
+        return [item for item, _ in items], any(gap for _, gap in items)
+    if value is None or isinstance(value, bool):
+        return value, False
+    if isinstance(value, str) and _scheme(value) is not None:
+        if len(value) > _MAX_URI:
+            raise _SourceError(f"RAG configuration URL exceeds {_MAX_URI} characters")
+        urls.append(value)
+        exported, unbound = _exported_uri(value)
+        return {"url": exported, "shape": url_shape(value.strip(), ORIGIN_PATHS)}, unbound
+    return type(value).__name__, True
+
+
+def _transport_risks(subject: str, urls: list[str], noun: str) -> list[RiskAssessment]:
+    """One finding for each declared locator without a transport shown to be encrypted."""
+    risks = []
+    article = "an" if noun == "endpoint" else "a"
+    for uri in urls:
+        scheme = _scheme(uri)
+        shown = neutralize(_exported_uri(uri)[0])
+        if scheme in _CLEAR_TEXT_SCHEMES:
+            risks.append(
+                RiskAssessment(
+                    severity=RiskSeverity.HIGH,
+                    category="data_integrity",
+                    detail=f"{subject} declares an unencrypted {noun}: {shown}",
+                    recommendation="Use authenticated encrypted transport for data connections.",
+                )
+            )
+        elif scheme is not None and scheme not in _PROTECTED_SCHEMES:
+            risks.append(
+                RiskAssessment(
+                    severity=RiskSeverity.LOW,
+                    category="transport_security",
+                    detail=(
+                        f"{subject} declares {article} {noun} whose transport is not shown to "
+                        f"be encrypted: {shown}"
+                    ),
+                    recommendation="Confirm that the connection is encrypted and authenticated.",
+                )
+            )
+    return risks
+
+
+def _unbound_risk(subject: str, unbound: list[str]) -> RiskAssessment:
+    return RiskAssessment(
+        severity=RiskSeverity.LOW,
+        category="completeness",
+        detail=f"{subject} values not bound in this inventory: {'; '.join(unbound)}.",
+        recommendation=(
+            f"Set {SOURCE_BINDING_KEY_ENV} during collection to detect changes to these values."
+        ),
+    )
+
+
+def _declares_rag(data: dict[str, Any]) -> bool:
+    return bool({*_LIST_KEYS, *_SOURCE_FIELDS, "type"} & set(data))
+
+
 def _named_list(data: dict[str, Any], key: str) -> list[Any]:
     value = data.get(key)
     if value is None:
@@ -194,6 +293,8 @@ class RAGScanner(Scanner):
             for path in files.iter_files():
                 if path.name in RAG_CONFIG_PATTERNS:
                     result.components.extend(self._scan_rag_config(path, files, result))
+                elif fold_name(path.name) in _FOLDED_CONFIG_NAMES:
+                    self._config_variant(path, files, result)
                 elif path.name in ENV_FILES and len(path.parts) == 1:
                     raw = files.read_bytes(path)
                     if raw is not None:
@@ -259,6 +360,22 @@ class RAGScanner(Scanner):
             for store in sorted(detected)
         ]
 
+    def _config_variant(self, path: Path, files: ConfinedCollection, result: ScanResult) -> None:
+        """Record another spelling of a configuration name as a collection failure.
+
+        Case-insensitive file systems open it in place of the configuration name. A data
+        file spelled like a knowledge base is not a configuration, as for the exact name.
+        """
+        canonical = _FOLDED_CONFIG_NAMES[fold_name(path.name)]
+        if canonical in _DATA_NAMES:
+            data = self._read_config(path, files, result)
+            if not (isinstance(data, dict) and _declares_rag(data)):
+                return
+        result.scan_failures.append(
+            f"{path.as_posix()}: case variant of {path.with_name(canonical).as_posix()} is the "
+            "active file on case-insensitive file systems and is not inventoried"
+        )
+
     def _read_config(self, path: Path, files: ConfinedCollection, result: ScanResult) -> Any:
         if path.suffix == ".json":
             return files.read_json(path)
@@ -316,23 +433,39 @@ class RAGScanner(Scanner):
         data = self._read_config(path, files, result)
         if data is None:
             return []
-        declared = isinstance(data, dict) and bool(
-            ({"sources", "knowledge_bases"} | _SOURCE_FIELDS | {"type"}) & set(data)
-        )
+        declared = isinstance(data, dict) and _declares_rag(data)
         if path.name in _DATA_NAMES and not declared:
             return []
         result.surfaces_scanned.append(relative)
         if not isinstance(data, dict):
             result.scan_failures.append(f"{relative}: expected a RAG configuration object")
             return []
+        configuration_urls: list[str] = []
         try:
             # Both list names are read, so neither can hide entries behind the other.
-            if {"sources", "knowledge_bases"} & set(data):
+            if set(_LIST_KEYS) & set(data):
                 sources = _named_list(data, "sources") + _named_list(data, "knowledge_bases")
+                configuration = {k: v for k, v in data.items() if k not in _LIST_KEYS}
+                if not sources and configuration:
+                    # No source would carry these fields, so they are read as one.
+                    sources, configuration = [configuration], {}
             else:
-                sources = [data]
-        except _SourceError as exc:
+                sources, configuration = [data], {}
+            described, configuration_unbound = _describe(configuration, configuration_urls)
+            # Digested and bound once, so each source carries a fixed-size result.
+            shared = (
+                (
+                    hash_canonical({"configuration": described}),
+                    value_binding(SOURCE_VALUE_BINDING_PROFILE, {"configuration": configuration}),
+                )
+                if configuration
+                else None
+            )
+        except (_SourceError, BindingError) as exc:
             result.scan_failures.append(f"{relative}: {exc}")
+            return []
+        except (TypeError, ValueError, RecursionError):
+            result.scan_failures.append(f"{relative}: invalid RAG configuration field types")
             return []
         if len(sources) > _MAX_ENTRIES:
             result.scan_failures.append(f"{relative}: invalid or oversized RAG source list")
@@ -344,9 +477,13 @@ class RAGScanner(Scanner):
                 result.scan_failures.append(f"{relative}: RAG source must be an object")
                 continue
             try:
-                component = self._source(relative, index, source)
+                component = self._source(relative, index, source, shared)
                 if target is not None:
                     component.properties["symlink_target"] = target
+                if configuration_urls:
+                    component.properties["configuration_endpoint_origins"] = sorted(
+                        {_exported_uri(url)[0] for url in configuration_urls}
+                    )
                 components.append(component)
             except BindingError as exc:
                 result.scan_failures.append(f"{relative}: {exc}")
@@ -354,9 +491,28 @@ class RAGScanner(Scanner):
                 result.scan_failures.append(f"{relative}: {exc}")
             except (TypeError, ValueError, RecursionError):
                 result.scan_failures.append(f"{relative}: invalid RAG source field types")
+        if components:
+            # Fields beside the source lists apply to every source; their findings are
+            # recorded once, on the first source.
+            subject = f"RAG configuration '{neutralize(relative)}'"
+            first = components[0]
+            first.risks.extend(_transport_risks(subject, configuration_urls, "endpoint"))
+            if configuration_unbound and not first.properties["source_values_bound"]:
+                first.risks.append(_unbound_risk(subject, ["fields beside the source lists"]))
         return components
 
-    def _source(self, relative: str, index: int, source: dict[str, Any]) -> RAGSourceComponent:
+    def _source(
+        self,
+        relative: str,
+        index: int,
+        source: dict[str, Any],
+        shared: tuple[str, dict[str, str]] | None,
+    ) -> RAGSourceComponent:
+        """One source's record.
+
+        ``shared`` is the digest and binding of the fields beside the source lists, which
+        apply to every source.
+        """
         declared_name = source.get("name")
         if declared_name is None:
             name, bom_ref = f"rag-source-{index}", f"rag:{relative}#{index}"
@@ -405,6 +561,19 @@ class RAGScanner(Scanner):
             raise _SourceError("invalid RAG source documents")
         documents_hash = hash_canonical({"documents": documents}) if documents is not None else None
         controls = {control: _control(source.get(control)) for control in _CONTROLS}
+        urls: list[str] = []
+        values, values_unbound = _describe(
+            {
+                "fields": {k: v for k, v in source.items() if k not in _READ_FIELDS},
+                "embeddings": {k: v for k, v in (embeddings or {}).items() if k != "model"},
+                "controls": {
+                    control: {k: v for k, v in source[control].items() if k != "enabled"}
+                    for control in _CONTROLS
+                    if isinstance(source.get(control), dict)
+                },
+            },
+            urls,
+        )
         structure_hash = hash_canonical(
             {
                 "profile": SOURCE_STRUCTURE_PROFILE,
@@ -422,35 +591,19 @@ class RAGScanner(Scanner):
                     ],
                     "documents": documents_hash,
                     "controls": controls,
+                    "values": values,
+                    "configuration": None if shared is None else shared[0],
                 },
             }
         )
-        binding = value_binding(SOURCE_VALUE_BINDING_PROFILE, source)
-        risks: list[RiskAssessment] = []
+        configuration_binding = None if shared is None else shared[1].get("static_value_binding")
+        binding = value_binding(
+            SOURCE_VALUE_BINDING_PROFILE,
+            {"configuration": configuration_binding, "source": source},
+        )
         # One finding per locator, as each one is a separate connection.
-        for uri, (value, _) in zip(locators, exported, strict=True):
-            scheme = _scheme(uri)
-            if scheme in _CLEAR_TEXT_SCHEMES:
-                risks.append(
-                    RiskAssessment(
-                        severity=RiskSeverity.HIGH,
-                        category="data_integrity",
-                        detail=f"RAG source '{shown}' declares an unencrypted URI: {value}",
-                        recommendation="Use authenticated encrypted transport for data connections.",
-                    )
-                )
-            elif scheme is not None and scheme not in _PROTECTED_SCHEMES:
-                risks.append(
-                    RiskAssessment(
-                        severity=RiskSeverity.LOW,
-                        category="transport_security",
-                        detail=(
-                            f"RAG source '{shown}' declares a URI whose transport is not shown "
-                            f"to be encrypted: {value}"
-                        ),
-                        recommendation="Confirm that the connection is encrypted and authenticated.",
-                    )
-                )
+        risks = _transport_risks(f"RAG source '{shown}'", locators, "URI")
+        risks.extend(_transport_risks(f"RAG source '{shown}'", urls, "endpoint"))
         if "enabled" not in controls.values():
             risks.append(
                 RiskAssessment(
@@ -464,29 +617,22 @@ class RAGScanner(Scanner):
                     ),
                 )
             )
+        exported_identifiers = (corpus_type, store_type, embedding, strategy, chunk_size)
+        redacted = (declared_name is not None and name != declared_name) or _REDACTED in (
+            *exported_identifiers,
+            *identities.values(),
+        )
         unbound = [
             label
             for label, gap in (
                 ("source URIs beyond their exported origins", any(gap for _, gap in exported)),
-                ("values of fields that are not exported", bool(set(source) - _EXPORTED_FIELDS)),
+                ("values exported only as redaction markers", redacted),
+                ("field values that the record does not export", values_unbound),
             )
             if gap
         ]
         if unbound and not binding:
-            risks.append(
-                RiskAssessment(
-                    severity=RiskSeverity.LOW,
-                    category="completeness",
-                    detail=(
-                        f"RAG source '{shown}' values not bound in this inventory: "
-                        f"{'; '.join(unbound)}."
-                    ),
-                    recommendation=(
-                        f"Set {SOURCE_BINDING_KEY_ENV} during collection to detect changes "
-                        "to these values."
-                    ),
-                )
-            )
+            risks.append(_unbound_risk(f"RAG source '{shown}'", unbound))
         properties: dict[str, Any] = {
             "collection_mode": "static-config",
             # URLs keep only their origin, plain paths are exported as written, and any
@@ -506,6 +652,8 @@ class RAGScanner(Scanner):
             properties["inline_documents_hash"] = documents_hash
         if strategy is not None and chunk_size is not None:
             properties["chunk_size"] = chunk_size
+        if urls:
+            properties["endpoint_origins"] = sorted({_exported_uri(url)[0] for url in urls})
         component = RAGSourceComponent(
             bom_ref=bom_ref,
             name=name,
