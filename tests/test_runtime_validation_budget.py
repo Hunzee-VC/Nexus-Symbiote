@@ -205,3 +205,24 @@ def test_worker_import_skips_format_checkers_and_fits_the_cpu_budget():
     assert loaded == "[]"
     # The worker's RLIMIT_CPU is 1 second; startup and imports must leave most of it.
     assert float(cpu) < 0.5
+
+
+def test_apply_worker_limits_darwin_rlimit_as_vs_linux_fail_closed(monkeypatch):
+    import resource
+
+    applied: list[tuple[int, tuple[int, int]]] = []
+
+    def fake_setrlimit(limit: int, bounds: tuple[int, int]) -> None:
+        if limit == resource.RLIMIT_AS:
+            raise ValueError("current limit exceeds maximum limit")
+        applied.append((limit, bounds))
+
+    monkeypatch.setattr(resource, "setrlimit", fake_setrlimit)
+    monkeypatch.setattr(validation.sys, "platform", "darwin")
+    validation._apply_worker_limits()
+    assert (resource.RLIMIT_CPU, (1, 1)) in applied
+    assert (resource.RLIMIT_CORE, (0, 0)) in applied
+
+    monkeypatch.setattr(validation.sys, "platform", "linux")
+    with pytest.raises(ValueError, match="current limit exceeds maximum limit"):
+        validation._apply_worker_limits()

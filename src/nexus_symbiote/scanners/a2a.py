@@ -18,9 +18,19 @@ from nexus_symbiote.core.models import (
     CapabilityDeclaration,
     RiskAssessment,
 )
-from nexus_symbiote.scanners.base import Scanner, ScanResult, parse_python, sanitized_origin
+from nexus_symbiote.scanners.base import (
+    MAX_SOURCE_BYTES,
+    Scanner,
+    ScanResult,
+    SourceBudget,
+    parse_python,
+    sanitized_origin,
+)
 from nexus_symbiote.scanners.mcp import _MIN_SOURCE_BINDING_KEY_LENGTH, SOURCE_BINDING_KEY_ENV
+from nexus_symbiote.utils.confined import MAX_TOTAL_BYTES
 from nexus_symbiote.utils.secrets import REDACTED, redact_text
+
+_A2A_SOURCE_HINTS = (b"a2a", b"A2AClient", b"AgentCard")
 
 AGENT_CARD_FILES = [
     ".well-known/agent.json",
@@ -454,7 +464,8 @@ class A2AScanner(Scanner):
 
     def scan(self, project_root: Path) -> ScanResult:
         result = ScanResult(scanner_name=self.name)
-        with self._collection(project_root, result) as files:
+        limits = {"max_total_bytes": MAX_TOTAL_BYTES + MAX_SOURCE_BYTES}
+        with self._collection(project_root, result, **limits) as files:
             for relative in AGENT_CARD_FILES:
                 path = files.root / relative
                 data = self._read_mapping(path, result)
@@ -705,17 +716,28 @@ class A2AScanner(Scanner):
     def _scan_code_patterns(self, root: Path, result: ScanResult) -> None:
         if self._files is None:
             raise RuntimeError("_scan_code_patterns called outside a _collection context")
-        sources = [
+        excluded_dirs = {"tests", "test", "dist", "build", "docs", "benchmarks", "examples"}
+        candidates = [
             path
             for path in self._files.iter_files()
-            if path.suffix == ".py"
-            and (len(path.parts) == 1 or (len(path.parts) == 2 and path.parts[0] == "src"))
+            if path.suffix == ".py" and not excluded_dirs.intersection(path.parts)
         ]
-        if len(sources) > 20:
-            result.scan_failures.append("a2a code references: 20-file collection limit exceeded")
-        for path in sources[:20]:
-            content = self._files.read_text(path)
-            if content is None:
+        candidates.sort(key=lambda path: len(path.parts) > 1)
+        budget = SourceBudget("a2a code references", result)
+        for path in candidates:
+            if budget.exhausted:
+                break
+            raw = self._files.read_bytes(path)
+            if raw is None or not budget.admit(len(raw)):
+                continue
+            # Nested modules are decoded only when they can name A2A, so an unrelated
+            # module is neither parsed nor a decoding failure.
+            if len(path.parts) > 1 and not any(hint in raw for hint in _A2A_SOURCE_HINTS):
+                continue
+            try:
+                content = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                result.scan_failures.append(f"{path}: invalid UTF-8")
                 continue
             result.surfaces_scanned.append(str(root / path))
             if len(content) > 262_144:

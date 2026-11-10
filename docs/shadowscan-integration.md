@@ -158,7 +158,7 @@ search can find zero matching files. Git metadata, dependency directories and
 virtual environments are outside the built-in scope. The inventory lists those
 patterns under `exclusions`. Unreadable files, unsupported declarations and
 additional policy exclusions encountered inside the scope keep coverage partial.
-A baseline also requires a local subject. The path-inferred repository agent
+A baseline also requires a local subject. The inferred repository agent
 and imported findings alone provide no evidence of a local agent or artifact.
 
 The collector reads a report at one of three paths beneath the project root:

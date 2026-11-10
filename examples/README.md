@@ -32,8 +32,8 @@ nexus-symbiote summary demo.aibom.json
 ```
 
 All eight collectors complete and record 11 components across 9 types. The scan
-passes the default gate (exit 0) with a risk warning: score 33, below the default
-fail threshold of 50, from three high and three medium findings:
+passes the default gate (exit 0) with a risk warning: score 36, below the default
+fail threshold of 50, from three high, three medium and three low findings:
 
 | Severity | Component | Finding |
 |---|---|---|
@@ -42,6 +42,7 @@ fail threshold of 50, from three high and three medium findings:
 | high | `ollama/ollama:latest` container image | No immutable digest pin |
 | medium | `notes` and `memory` MCP servers | stdio transport: each runs as a local process |
 | medium | `product-notes` retrieval source | No declared content-filtering control |
+| low | `notes` and `tickets` MCP servers, `support-research-assistant` A2A card | Values not bound without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`: a launch argument, an endpoint path |
 
 ### 2. Check it
 
@@ -90,7 +91,9 @@ Security Alerts:
   [HIGH] High change in 'notes': Version changed: 2025.8.21 → None; Version pin removed — now floating or unknown.; Risk findings added: 1 high (version_pinning).
 ```
 
-In CI, keep the reviewed snapshot where the change under review cannot rewrite it;
+An inventory records paths relative to the project, so a snapshot of one checkout
+compares cleanly with a scan of a copy in another directory. In CI, keep the reviewed
+snapshot where the change under review cannot rewrite it;
 [Gate drift in CI](../docs/drift-gate.md) explains where, how to take comparable
 snapshots, and what each alert means.
 

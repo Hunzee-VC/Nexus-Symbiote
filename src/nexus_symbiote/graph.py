@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 from urllib.parse import quote
@@ -36,11 +36,19 @@ MAX_MANIFEST_BYTES = 1024 * 1024
 MAX_MANIFEST_YAML_TOKENS = 20_000
 # Without a declared id the agent is "this repository", wherever it is checked out:
 # the same tree scanned at two locations must yield the same inventory.
-INFERRED_AGENT_REF = "agent:repository:inferred"
+INFERRED_AGENT_IDENTITY = "."
 INFERRED_AGENT_NAME = "repository"
 MAX_GRAPH_ISSUES = 100
 _SHOWN = 200
 _REPOSITORY_ASSOCIATION = "repository association; runtime use and authority unobserved"
+
+
+def _repository_agent_ref(identity: str) -> str:
+    """The repository agent's reference for a declared id, or for the inferred identity."""
+    return "agent:repository:" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
+
+
+INFERRED_AGENT_REF = _repository_agent_ref(INFERRED_AGENT_IDENTITY)
 
 
 class ModelDeclaration(BaseModel):
@@ -86,17 +94,16 @@ def _manifest_path(value: str) -> Path | None:
     return path
 
 
-def _root_relative(source_path: str | None, root: Path) -> str | None:
-    """A recorded location as root-relative POSIX text; earlier releases recorded absolute paths."""
+def _root_relative(source_path: str | None, relative: Callable[[str], str]) -> str | None:
+    """A recorded location as root-relative POSIX text, or None when it names none.
+
+    ``relative`` is the rule collection records paths by (``project_relative``), so a
+    record an earlier release wrote with an absolute path under the root reads the same.
+    """
     if not source_path or "://" in source_path:
         return None
-    path = Path(source_path)
-    if path.is_absolute():
-        try:
-            path = path.relative_to(root)
-        except ValueError:
-            return None
-    if ".." in path.parts or not path.parts:
+    path = Path(relative(source_path))
+    if path.is_absolute() or ".." in path.parts or not path.parts:
         return None
     return path.as_posix()
 
@@ -152,13 +159,15 @@ def _manifest_dependencies(
     problems: list[str],
 ) -> list[AnyComponent]:
     """Bind declared instructions and local models to collected records before changing the BOM."""
+    from nexus_symbiote.scanners.base import project_relative
     from nexus_symbiote.scanners.prompt import detect_invisible_characters
     from nexus_symbiote.utils.confined import MAX_HASH_BYTES
 
+    in_root = project_relative(files.root)
     collected_text: dict[str, list[AnyComponent]] = {}
     collected_models: dict[str, list[ModelComponent]] = {}
     for comp in bom.components:
-        relative = _root_relative(comp.source_path, files.root)
+        relative = _root_relative(comp.source_path, in_root)
         if relative is None:
             continue
         if isinstance(comp, (PromptComponent, SkillPackageComponent)):
@@ -245,7 +254,7 @@ def _manifest_dependencies(
             problems.append(f"{locator}: the declared local model has no collected model artifact")
             continue
         for comp in matches:
-            relative = _root_relative(comp.source_path, files.root)
+            relative = _root_relative(comp.source_path, in_root)
             assert relative is not None
             try:
                 with files.open_regular(relative, max_bytes=MAX_HASH_BYTES):
@@ -299,12 +308,9 @@ def assemble_repository_agent(
     ) as files:
         text = files.read_text(MANIFEST, missing_ok=True)
     declared = None if text is None else _parse_manifest(text, problems)
-    identity = declared.id if declared and declared.id else None
-    agent_ref = (
-        "agent:repository:" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
-        if identity
-        else INFERRED_AGENT_REF
-    )
+    # Without a declared id the agent is "this repository", wherever it is checked out.
+    identity = declared.id if declared and declared.id else INFERRED_AGENT_IDENTITY
+    agent_ref = _repository_agent_ref(identity)
     additions: list[AnyComponent] = []
     if declared is not None:
         # Entries are checkout text, not paths found on disk: a read problem is recorded

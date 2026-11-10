@@ -18,6 +18,7 @@ from nexus_symbiote.core.models import (
     ToolComponent,
 )
 from nexus_symbiote.graph import (
+    INFERRED_AGENT_REF,
     MAX_GRAPH_ISSUES,
     assemble_repository_agent,
     blast_radius,
@@ -86,8 +87,8 @@ def test_cli_prints_dependents(tmp_path):
     output = _scanned(tmp_path)
     result = CliRunner().invoke(main, ["blast-radius", str(output), "registry:pypi/openai"])
     assert result.exit_code == 0, result.output
-    assert "Agents: agent:repository:inferred" in result.output
-    assert "Dependents: agent:repository:inferred" in result.output
+    assert f"Agents: {INFERRED_AGENT_REF}" in result.output
+    assert f"Dependents: {INFERRED_AGENT_REF}" in result.output
 
 
 def test_dependents_are_reported_without_any_agent():

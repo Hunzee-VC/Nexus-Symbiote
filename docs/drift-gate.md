@@ -6,7 +6,11 @@ page says where the reviewed snapshot must come from, how to take both snapshots
 they compare, and what each alert means.
 
 The gate compares what the inventory records. Content the collectors do not record,
-such as Claude Code hooks, deny and ask rules or skill scripts, cannot alert; the
+such as Codex `config.toml` settings or instruction files under names the `prompt`
+collector does not read, cannot alert. Without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`,
+neither can a changed MCP launch argument other than the launcher package, a changed
+environment value, or an endpoint path changed on the same host; see
+[source binding](verification-source-binding.md). The
 [known limitations](../SECURITY.md#known-limitations-in-010) list those surfaces.
 
 ## The trust anchor is the baseline
@@ -55,10 +59,15 @@ request with itself, and that gate can never fail.
 - **Use the same policy for both.** `--no-project-policy` keeps a policy file in the
   checkout from narrowing either snapshot. `baseline` accepts it, and
   `--signature-policy`, like `scan`.
+- **Use the same binding key for both.** Set one `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`
+  of 32 or more characters for the baseline and every candidate scan. Without it, the
+  values described above cannot alert; with a different key, every MCP and A2A
+  binding changes and alerts. See [source binding](verification-source-binding.md).
 - **Paths are root-relative.** Recorded paths are relative to the scan root, so a
   snapshot taken in `/Users/alice/agent` compares with one taken in
   `/home/runner/work/agent/agent`. Without a manifest `id`, the repository agent is
-  `agent:repository:inferred` wherever the checkout is. An
+  `agent:repository:cdb4ee2aea69cc6a83331bbe`, named `repository`, wherever the
+  checkout is. An
   [agent manifest](agent-manifest.md) `id` gives it a stable, named reference.
 - **Upgrading from 0.1.0: re-create the baseline.** Snapshots written by 0.1.0
   record absolute paths and a path-derived agent reference. `diff` does not treat

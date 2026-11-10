@@ -21,6 +21,12 @@ secret. Keep the key in the CI secret store, use the same key for a baseline and
 its candidates, and rotate it by recollecting both. A keyed BOM validated without
 the key, or with a different key, fails reconciliation.
 
+Without the key, a server whose values go beyond what the inventory exports carries a
+low `completeness` risk that names the key and lists what is unbound: launch arguments
+other than the recorded launcher package, environment values, or an endpoint path or
+query. A server with only a pinned launcher package, or a bare endpoint origin, carries
+none.
+
 Profile v1 records (an unkeyed digest over raw configuration, including secret
 values) let anyone holding the BOM confirm guesses for low-entropy secrets. They
 fail reconciliation as unknown and require recollection; treat existing v1 exports

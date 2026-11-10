@@ -47,7 +47,8 @@ are checked only when a scan reads the manifest.
 ## What it changes
 
 - **Identity.** Without `agent.yaml`, or without `id`, the repository agent is
-  `agent:repository:inferred`, named `repository`, the same in every checkout.
+  `agent:repository:cdb4ee2aea69cc6a83331bbe` (derived as if `id` were `.`, "this
+  repository"), named `repository`, the same in every checkout.
   `id` gives it a reference of your own. Changing `id` replaces the agent, so
   `diff` reports it removed and added.
 - **Instructions.** A listed file that the `prompt` collector already reads, such
@@ -55,9 +56,9 @@ are checked only when a scan reads the manifest.
   bytes must still match what the collector recorded. Any other listed file is
   inventoried as `prompt:manifest:<digest of its path>` with its SHA-256 and the same
   hidden-character checks the collector applies to instruction files. This is how
-  instruction files outside the fixed paths, such as nested or `docs/` files, enter
-  the inventory. `surfaces_scanned` lists `agent.yaml` once it is read, and each
-  file inventoried only because the manifest declares it.
+  instruction files the collector does not read, such as `docs/agents/rules.md` or a
+  nested `GEMINI.md`, enter the inventory. `surfaces_scanned` lists `agent.yaml`
+  once it is read, and each file inventoried only because the manifest declares it.
 - **Local models.** A `path` must match a model artifact the `model` collector
   recorded: the file itself, or a file directly in that directory. The manifest adds
   no model of its own; it confirms the declared artifact was collected.

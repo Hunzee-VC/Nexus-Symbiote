@@ -34,11 +34,85 @@ from nexus_symbiote.utils.terminal import UNSAFE_TEXT
 AI_PACKAGE_PATTERNS = [
     re.compile(r"(?:^|/)@modelcontextprotocol/", re.I),
     re.compile(r"(?:^|/)mcp[-_]", re.I),
-    re.compile(r"(?:^|/)(?:langchain|llama[-_]index|crewai|autogen|openai|anthropic|cohere)", re.I),
+    re.compile(
+        r"(?:^|/)(?:langchain|langgraph|llama[-_]index|crewai|autogen|openai|anthropic|cohere|fastmcp|pydantic[-_]ai|google[-_]adk|smolagents|semantic[-_]kernel)",
+        re.I,
+    ),
     re.compile(r"(?:^|/)(?:transformers|torch|tensorflow|safetensors|tokenizers)", re.I),
     re.compile(r"(?:^|/)(?:chromadb|pinecone|qdrant|weaviate|pgvector|faiss)", re.I),
     re.compile(r"(?:^|/)(?:guardrails|nemo[-_]guardrails|rebuff)", re.I),
 ]
+# Names the prefixes above cannot express: packages whose whole name is the
+# product ("mcp", "ai"), and npm scopes that hold a vendor's agent packages.
+AI_PACKAGE_NAMES = frozenset(
+    {
+        "a2a-sdk",
+        "ag2",
+        "agno",
+        "ai",
+        "claude-agent-sdk",
+        "claude-code-sdk",
+        "diffusers",
+        "dspy",
+        "dspy-ai",
+        "fastmcp",
+        "google-adk",
+        "google-genai",
+        "google-generativeai",
+        "groq",
+        "haystack-ai",
+        "huggingface-hub",
+        "instructor",
+        "lancedb",
+        "langgraph",
+        "langsmith",
+        "litellm",
+        "llama-cpp-python",
+        "llamaindex",
+        "mastra",
+        "mcp",
+        "mem0ai",
+        "mistralai",
+        "nemoguardrails",
+        "ollama",
+        "onnxruntime",
+        "pyautogen",
+        "pydantic-ai",
+        "pymilvus",
+        "semantic-kernel",
+        "sentence-transformers",
+        "smolagents",
+        "strands-agents",
+        "vertexai",
+        "vllm",
+        "@google/genai",
+        "@google/generative-ai",
+    }
+)
+AI_PACKAGE_SCOPES = frozenset(
+    {
+        "@a2a-js",
+        "@ai-sdk",
+        "@anthropic-ai",
+        "@huggingface",
+        "@langchain",
+        "@llamaindex",
+        "@mastra",
+        "@mistralai",
+        "@modelcontextprotocol",
+        "@openai",
+        "@pinecone-database",
+        "@qdrant",
+    }
+)
+
+# A pnpm lockfile holds about 40 YAML tokens per package, so a lockfile at the 4 MiB
+# read limit is about 650,000. The bound refuses denser input before it is parsed.
+_MAX_PNPM_LOCK_TOKENS = 1_000_000
+
+_EXACT_SEMVER_RE = re.compile(
+    r"\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+)
 
 
 def _url_origin(url: str) -> str:
@@ -250,12 +324,24 @@ class RegistryScanner(Scanner):
             all_deps.update(deps)
         # Parse and bind the same bounded bytes; a second open for hashing could
         # associate a swapped lockfile with a previously parsed resolution.
-        lock_path = root / "package-lock.json"
-        lock_bytes = self._files.read_bytes(lock_path, missing_ok=True)
+        found_locks: list[tuple[str, bytes]] = []
+        for lock_name in ("package-lock.json", "pnpm-lock.yaml", "yarn.lock"):
+            raw = self._files.read_bytes(root / lock_name, missing_ok=True)
+            if raw is not None:
+                result.surfaces_scanned.append(lock_name)
+                found_locks.append((lock_name, raw))
+        if len(found_locks) > 1:
+            names = ", ".join(name for name, _ in found_locks)
+            result.surfaces_excluded.append(
+                f"multiple npm lockfiles present ({names}); resolution is ambiguous"
+            )
+            found_locks = []
+        lock_bytes = (
+            found_locks[0][1] if found_locks and found_locks[0][0] == "package-lock.json" else None
+        )
         resolutions: dict[str, Any] = {}
         lock_digest = None
         if lock_bytes is not None:
-            result.surfaces_scanned.append("package-lock.json")
             try:
                 lock = parse_json_strict(lock_bytes)
                 if (
@@ -308,10 +394,7 @@ class RegistryScanner(Scanner):
                     if (
                         isinstance(resolved_version, str)
                         and len(resolved_version) <= 128
-                        and re.fullmatch(
-                            r"\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?",
-                            resolved_version,
-                        )
+                        and _EXACT_SEMVER_RE.fullmatch(resolved_version)
                     ):
                         version = resolved_version
                     else:
@@ -345,22 +428,12 @@ class RegistryScanner(Scanner):
                     source = "package-lock.json"
                     integrity = record.get("integrity")
                     if integrity is not None:
-                        try:
-                            if not isinstance(integrity, str) or len(integrity) > 1024:
-                                raise ValueError("invalid integrity")
-                            algorithm, encoded = integrity.split("-", 1)
-                            size = {"sha256": 32, "sha384": 48, "sha512": 64}.get(algorithm)
-                            if (
-                                size is None
-                                or len(base64.b64decode(encoded, validate=True)) != size
-                            ):
-                                raise ValueError("invalid integrity")
-                        except (ValueError, binascii.Error):
+                        if self._validate_sri_integrity(integrity):
+                            properties["lockfile_integrity"] = integrity
+                        else:
                             result.scan_failures.append(
                                 "package-lock.json: invalid selected package integrity"
                             )
-                        else:
-                            properties["lockfile_integrity"] = integrity
             risks: list[RiskAssessment] = []
             if not re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][a-zA-Z0-9.-]+)?", raw_spec):
                 risks.append(
@@ -391,7 +464,339 @@ class RegistryScanner(Scanner):
                     claims=claims,
                 )
             )
+        if components and found_locks:
+            lock_kind, raw_lock = found_locks[0]
+            if lock_kind == "pnpm-lock.yaml":
+                self._resolve_pnpm_lockfile(raw_lock, components, result)
+            elif lock_kind == "yarn.lock":
+                self._resolve_yarn_lockfile(raw_lock, components, result)
         return components
+
+    @staticmethod
+    def _validate_sri_integrity(integrity: Any) -> bool:
+        try:
+            if not isinstance(integrity, str) or len(integrity) > 1024:
+                return False
+            algorithm, encoded = integrity.split("-", 1)
+            size = {"sha256": 32, "sha384": 48, "sha512": 64}.get(algorithm)
+            return size is not None and len(base64.b64decode(encoded, validate=True)) == size
+        except (ValueError, binascii.Error):
+            return False
+
+    def _resolve_pnpm_lockfile(
+        self,
+        lock_bytes: bytes,
+        components: list[RegistryEntryComponent],
+        result: ScanResult,
+    ) -> None:
+        try:
+            import yaml
+
+            from nexus_symbiote.policy import PolicyError, parse_yaml_mapping
+
+            text = lock_bytes.decode("utf-8")
+            for index, token in enumerate(yaml.scan(text)):
+                if index >= _MAX_PNPM_LOCK_TOKENS or isinstance(
+                    token, (yaml.AliasToken, yaml.AnchorToken, yaml.TagToken)
+                ):
+                    raise ValueError("unsupported YAML graph")
+            lock_doc = parse_yaml_mapping(text)
+            lock_ver = lock_doc.get("lockfileVersion")
+            if (
+                not isinstance(lock_doc, dict)
+                or lock_ver is None
+                or isinstance(lock_ver, bool)
+                or not isinstance(lock_ver, (str, int, float))
+            ):
+                raise ValueError("unsupported pnpm lockfile structure")
+            packages = lock_doc.get("packages", {})
+            if packages is not None and not isinstance(packages, dict):
+                raise ValueError("unsupported pnpm packages structure")
+        except (ImportError, ValueError, UnicodeError, PolicyError, RecursionError, yaml.YAMLError):
+            result.scan_failures.append("pnpm-lock.yaml: invalid or unsupported lockfile")
+            return
+        lock_digest = hash_bytes(lock_bytes)
+        packages = packages or {}
+        importers = lock_doc.get("importers")
+        root_importer = (
+            importers.get(".", {})
+            if isinstance(importers, dict) and isinstance(importers.get("."), dict)
+            else lock_doc
+        )
+        importer_specs: dict[str, str] = {}
+        for dep_key in ("dependencies", "devDependencies", "optionalDependencies"):
+            dep_map = root_importer.get(dep_key, {})
+            if isinstance(dep_map, dict):
+                for pkg_name, entry in dep_map.items():
+                    if isinstance(entry, dict) and isinstance(entry.get("version"), str):
+                        importer_specs[pkg_name] = entry["version"]
+                    elif isinstance(entry, str):
+                        importer_specs[pkg_name] = entry
+        for comp in components:
+            ver_ref = importer_specs.get(comp.name)
+            matched_pkg_key: str | None = None
+            if ver_ref is None:
+                prefix_matches: list[tuple[str, str]] = []
+                for k in packages:
+                    if not isinstance(k, str):
+                        continue
+                    clean_k = k.lstrip("/")
+                    for sep in ("@", "/"):
+                        if clean_k.startswith(comp.name + sep):
+                            suffix = clean_k[len(comp.name) + 1 :]
+                            if suffix and not suffix.startswith("/"):
+                                prefix_matches.append((k, suffix))
+                                break
+                base_versions = {s.split("(", 1)[0] for _, s in prefix_matches}
+                if len(base_versions) > 1:
+                    result.surfaces_excluded.append(
+                        f"pnpm-lock.yaml: multiple package resolutions for {comp.name} are ambiguous"
+                    )
+                    continue
+                if len(prefix_matches) == 1:
+                    matched_pkg_key, ver_ref = prefix_matches[0]
+            if ver_ref is None:
+                continue
+            if ver_ref.startswith("npm:"):
+                result.surfaces_excluded.append(
+                    "pnpm-lock.yaml: aliased package identity is unresolved"
+                )
+                continue
+            if ver_ref.startswith(("link:", "file:", "workspace:", "git+", "http:", "https:")):
+                result.surfaces_excluded.append(
+                    "pnpm-lock.yaml: local or non-registry resolution is unverified"
+                )
+                continue
+            base_ver = ver_ref.split("(", 1)[0]
+            if base_ver.startswith("/"):
+                pkg_prefix, _, base_ver = base_ver.lstrip("/").rpartition("@")
+                if pkg_prefix and pkg_prefix != comp.name:
+                    result.surfaces_excluded.append(
+                        "pnpm-lock.yaml: aliased package identity is unresolved"
+                    )
+                    continue
+            if len(base_ver) > 128 or not _EXACT_SEMVER_RE.fullmatch(base_ver):
+                result.scan_failures.append(
+                    "pnpm-lock.yaml: selected package lacks an exact version"
+                )
+                continue
+            candidates = (
+                (matched_pkg_key,)
+                if matched_pkg_key is not None
+                else (
+                    f"{comp.name}@{ver_ref}",
+                    f"/{comp.name}@{ver_ref}",
+                    f"{comp.name}@{base_ver}",
+                    f"/{comp.name}@{base_ver}",
+                    f"/{comp.name}/{base_ver}",
+                )
+            )
+            pkg_key = next((c for c in candidates if c in packages), None)
+            registry_origin: str | None = None
+            valid_integrity: str | None = None
+            if pkg_key is not None:
+                pkg_record = packages[pkg_key]
+                if not isinstance(pkg_record, dict):
+                    result.scan_failures.append("pnpm-lock.yaml: invalid selected package record")
+                    continue
+                resolution = pkg_record.get("resolution")
+                if resolution is not None and not isinstance(resolution, dict):
+                    result.scan_failures.append("pnpm-lock.yaml: invalid selected package record")
+                    continue
+                if isinstance(resolution, dict):
+                    tarball = resolution.get("tarball")
+                    if resolution.get("type") in {"directory", "git"} or (
+                        isinstance(tarball, str) and tarball.startswith(("file:", "link:"))
+                    ):
+                        result.surfaces_excluded.append(
+                            "pnpm-lock.yaml: local or non-registry resolution is unverified"
+                        )
+                        continue
+                    if isinstance(tarball, str) and tarball.startswith(("https://", "http://")):
+                        origin = sanitized_origin(tarball)
+                        registry_origin = origin if origin != "[redacted]" else None
+                    integrity = resolution.get("integrity")
+                    if integrity is not None:
+                        if self._validate_sri_integrity(integrity):
+                            valid_integrity = integrity
+                        else:
+                            result.scan_failures.append(
+                                "pnpm-lock.yaml: invalid selected package integrity"
+                            )
+                locator = "pnpm-lock.yaml#/packages/" + pkg_key.replace("~", "~0").replace(
+                    "/", "~1"
+                )
+            else:
+                locator = "pnpm-lock.yaml#/importers/./" + comp.name.replace("~", "~0").replace(
+                    "/", "~1"
+                )
+            comp.version = base_ver
+            comp.package_url = f"pkg:npm/{quote(comp.name, safe='/')}@{quote(base_ver, safe='')}"
+            comp.registry_uri = registry_origin
+            comp.source_path = "pnpm-lock.yaml"
+            comp.assurance_level = AssuranceLevel.DECLARED
+            comp.properties.update(
+                {
+                    "collection_mode": "lockfile-resolution-claim",
+                    "lockfile_sha256": lock_digest,
+                    "lockfile_record": locator,
+                    "artifact_verified": False,
+                }
+            )
+            if valid_integrity is not None:
+                comp.properties["lockfile_integrity"] = valid_integrity
+            comp.claims["package_resolution"] = ClaimEvidence(
+                assurance=AssuranceLevel.DECLARED,
+                method="pnpm-lockfile",
+                scope="dependency-resolution",
+                collector="registry",
+                locator=locator,
+            )
+
+    def _resolve_yarn_lockfile(
+        self,
+        lock_bytes: bytes,
+        components: list[RegistryEntryComponent],
+        result: ScanResult,
+    ) -> None:
+        try:
+            text = lock_bytes.decode("utf-8")
+            lines = text.splitlines()
+            if len(lines) > 100_000:
+                raise ValueError("yarn.lock line limit exceeded")
+            stanzas: list[tuple[list[str], dict[str, str]]] = []
+            current_selectors: list[str] | None = None
+            current_fields: dict[str, str] = {}
+            for raw_line in lines:
+                stripped = raw_line.strip()
+                if not stripped or stripped.startswith("#"):
+                    continue
+                if not raw_line[0].isspace():
+                    if not stripped.endswith(":"):
+                        raise ValueError("invalid yarn.lock header")
+                    if current_selectors is not None and current_selectors != ["__metadata"]:
+                        stanzas.append((current_selectors, current_fields))
+                    header = stripped[:-1].strip()
+                    current_selectors = [
+                        s.strip().strip('"').strip("'") for s in header.split(",") if s.strip()
+                    ]
+                    if not current_selectors:
+                        raise ValueError("empty yarn.lock selector")
+                    current_fields = {}
+                else:
+                    if current_selectors is None:
+                        raise ValueError("orphan yarn.lock field")
+                    if raw_line.startswith("  ") and not raw_line.startswith("   "):
+                        match = re.match(r"^([A-Za-z0-9_]+)(?::\s*|\s+)(.+)$", stripped)
+                        if match:
+                            key = match.group(1)
+                            val = match.group(2).strip().strip('"').strip("'")
+                            if key in current_fields:
+                                raise ValueError("duplicate key in yarn.lock stanza")
+                            current_fields[key] = val
+            if current_selectors is not None and current_selectors != ["__metadata"]:
+                stanzas.append((current_selectors, current_fields))
+            if not stanzas:
+                raise ValueError("empty yarn.lock")
+        except (ValueError, UnicodeError):
+            result.scan_failures.append("yarn.lock: invalid or unsupported lockfile")
+            return
+        lock_digest = hash_bytes(lock_bytes)
+        by_pkg: dict[str, list[tuple[str, dict[str, str], str]]] = {}
+        for selectors, fields in stanzas:
+            first_sel = selectors[0]
+            for sel in selectors:
+                at_idx = sel.find("@", 1) if sel.startswith("@") else sel.find("@")
+                if at_idx <= 0:
+                    continue
+                sel_name, sel_spec = sel[:at_idx], sel[at_idx + 1 :]
+                by_pkg.setdefault(sel_name, []).append((sel_spec, fields, first_sel))
+        for comp in components:
+            entries = by_pkg.get(comp.name)
+            if not entries:
+                continue
+            req = str(comp.properties.get("requested_version", ""))
+            exact_matches = [e for e in entries if e[0] in (req, f"npm:{req}")]
+            chosen = exact_matches or entries
+            distinct_versions = {e[1].get("version") for e in chosen}
+            if len(distinct_versions) > 1:
+                result.surfaces_excluded.append(
+                    f"yarn.lock: multiple package resolutions for {comp.name} are ambiguous"
+                )
+                continue
+            sel_spec, fields, locator_key = chosen[0]
+            resolution_val = fields.get("resolution", "")
+            resolved_val = fields.get("resolved", "")
+            if sel_spec.startswith("npm:") and "@" in sel_spec[4:]:
+                alias_pkg = sel_spec[4:].rsplit("@", 1)[0]
+                if alias_pkg and alias_pkg != comp.name:
+                    result.surfaces_excluded.append(
+                        "yarn.lock: aliased package identity is unresolved"
+                    )
+                    continue
+            if "@npm:" in resolution_val and not resolution_val.startswith(f"{comp.name}@npm:"):
+                result.surfaces_excluded.append("yarn.lock: aliased package identity is unresolved")
+                continue
+            non_registry_prefixes = (
+                "workspace:",
+                "link:",
+                "portal:",
+                "file:",
+                "patch:",
+                "git+",
+                "git:",
+            )
+            if (
+                sel_spec.startswith(non_registry_prefixes)
+                or resolved_val.startswith(non_registry_prefixes)
+                or any(f"@{p}" in resolution_val for p in non_registry_prefixes)
+                or fields.get("linkType") == "soft"
+            ):
+                result.surfaces_excluded.append(
+                    "yarn.lock: local or non-registry resolution is unverified"
+                )
+                continue
+            resolved_version = fields.get("version")
+            if (
+                not isinstance(resolved_version, str)
+                or len(resolved_version) > 128
+                or not _EXACT_SEMVER_RE.fullmatch(resolved_version)
+            ):
+                result.scan_failures.append("yarn.lock: selected package lacks an exact version")
+                continue
+            registry_origin: str | None = None
+            if resolved_val.startswith(("https://", "http://")):
+                origin = sanitized_origin(resolved_val)
+                registry_origin = origin if origin != "[redacted]" else None
+            integrity = fields.get("integrity")
+            if integrity is not None:
+                if self._validate_sri_integrity(integrity):
+                    comp.properties["lockfile_integrity"] = integrity
+                else:
+                    result.scan_failures.append("yarn.lock: invalid selected package integrity")
+            locator = "yarn.lock#/" + locator_key.replace("~", "~0").replace("/", "~1")
+            comp.version = resolved_version
+            comp.package_url = (
+                f"pkg:npm/{quote(comp.name, safe='/')}@{quote(resolved_version, safe='')}"
+            )
+            comp.registry_uri = registry_origin
+            comp.source_path = "yarn.lock"
+            comp.assurance_level = AssuranceLevel.DECLARED
+            comp.properties.update(
+                {
+                    "collection_mode": "lockfile-resolution-claim",
+                    "lockfile_sha256": lock_digest,
+                    "lockfile_record": locator,
+                    "artifact_verified": False,
+                }
+            )
+            comp.claims["package_resolution"] = ClaimEvidence(
+                assurance=AssuranceLevel.DECLARED,
+                method="yarn-lockfile",
+                scope="dependency-resolution",
+                collector="registry",
+                locator=locator,
+            )
 
     def _pip_component(
         self, line: str, path: Path, result: ScanResult | None = None
@@ -838,7 +1243,116 @@ class RegistryScanner(Scanner):
         for component in components:
             if len(sources[component.bom_ref]) > 1:
                 component.properties["declarations"] = sorted(sources[component.bom_ref])
+        if components:
+            self._resolve_python_lockfiles(root, components, result)
         return components
+
+    def _resolve_python_lockfiles(
+        self, root: Path, components: list[RegistryEntryComponent], result: ScanResult
+    ) -> None:
+        if self._files is None:
+            raise RuntimeError("_resolve_python_lockfiles called outside a _collection context")
+        found_locks: list[tuple[str, str, bytes]] = []
+        for lock_name, method in (("uv.lock", "uv-lockfile"), ("poetry.lock", "poetry-lockfile")):
+            raw = self._files.read_bytes(root / lock_name, missing_ok=True)
+            if raw is not None:
+                result.surfaces_scanned.append(lock_name)
+                found_locks.append((lock_name, method, raw))
+        if not found_locks:
+            return
+        if len(found_locks) > 1:
+            result.surfaces_excluded.append(
+                "multiple Python lockfiles present (uv.lock and poetry.lock); resolution is ambiguous"
+            )
+            return
+        lock_name, method, lock_bytes = found_locks[0]
+        try:
+            lock_doc = tomllib.loads(lock_bytes.decode("utf-8"))
+            packages = lock_doc.get("package", [])
+            if (
+                not isinstance(lock_doc, dict)
+                or not isinstance(packages, list)
+                or len(packages) > 10_000
+                or not all(isinstance(item, dict) for item in packages)
+            ):
+                raise ValueError("unsupported Python lockfile structure")
+        except (ValueError, UnicodeError, tomllib.TOMLDecodeError, RecursionError):
+            result.scan_failures.append(f"{lock_name}: invalid or unsupported lockfile")
+            return
+        lock_digest = hash_bytes(lock_bytes)
+        indexed: dict[str, list[tuple[int, dict[str, Any]]]] = {}
+        for index, entry in enumerate(packages):
+            raw_name = entry.get("name")
+            if not isinstance(raw_name, str) or not re.fullmatch(
+                r"[A-Za-z0-9][A-Za-z0-9._-]{0,199}", raw_name
+            ):
+                result.scan_failures.append(f"{lock_name}: invalid package entry name")
+                continue
+            indexed.setdefault(str(canonicalize_name(raw_name)), []).append((index, entry))
+        for comp in components:
+            matches = indexed.get(comp.name)
+            if not matches:
+                continue
+            if comp.version and (";" in comp.version or comp.version.startswith("@ ")):
+                continue
+            if len(matches) > 1:
+                result.surfaces_excluded.append(
+                    f"{lock_name}: multiple package resolutions for {comp.name} are ambiguous"
+                )
+                continue
+            index, record = matches[0]
+            source = record.get("source")
+            if source is not None and not isinstance(source, dict):
+                result.scan_failures.append(f"{lock_name}: invalid selected package source")
+                continue
+            if isinstance(source, dict):
+                non_registry_keys = {"editable", "directory", "path", "git", "virtual", "url"}
+                if (method == "uv-lockfile" and non_registry_keys.intersection(source)) or (
+                    method == "poetry-lockfile"
+                    and source.get("type") in {"directory", "file", "git", "url"}
+                ):
+                    result.surfaces_excluded.append(
+                        f"{lock_name}: non-registry package source is unverified"
+                    )
+                    continue
+            resolved_version = record.get("version")
+            pinned = (
+                extract_version_pin(f"{comp.name}=={resolved_version}", ecosystem="python")
+                if isinstance(resolved_version, str) and len(resolved_version) <= 128
+                else None
+            )
+            if pinned is None or pinned != resolved_version:
+                result.scan_failures.append(f"{lock_name}: selected package lacks an exact version")
+                continue
+            registry_origin: str | None = "https://pypi.org"
+            if isinstance(source, dict):
+                raw_url = source.get("registry") if method == "uv-lockfile" else source.get("url")
+                if isinstance(raw_url, str) and raw_url.startswith(("https://", "http://")):
+                    origin = sanitized_origin(raw_url)
+                    registry_origin = origin if origin != "[redacted]" else None
+            locator = f"{lock_name}#/package/{index}"
+            comp.version = resolved_version
+            comp.package_url = (
+                f"pkg:pypi/{quote(comp.name, safe='')}@{quote(resolved_version, safe='')}"
+            )
+            comp.registry_uri = registry_origin
+            comp.source_path = lock_name
+            comp.assurance_level = AssuranceLevel.DECLARED
+            comp.properties.update(
+                {
+                    "collection_mode": "lockfile-resolution-claim",
+                    "lockfile_sha256": lock_digest,
+                    "lockfile_record": locator,
+                    "artifact_verified": False,
+                }
+            )
+            comp.claims["package_resolution"] = ClaimEvidence(
+                assurance=AssuranceLevel.DECLARED,
+                method=method,
+                scope="dependency-resolution",
+                collector="registry",
+                locator=locator,
+            )
 
     def _scan_requirements(
         self,
@@ -1324,4 +1838,9 @@ class RegistryScanner(Scanner):
         return state.add(second)
 
     def _is_ai_package(self, name: str) -> bool:
-        return any(pattern.search(name) for pattern in AI_PACKAGE_PATTERNS)
+        normal = re.sub(r"[-_.]+", "-", name).lower() if len(name) <= 214 else ""
+        return (
+            normal in AI_PACKAGE_NAMES
+            or normal.partition("/")[0] in AI_PACKAGE_SCOPES
+            or any(pattern.search(name) for pattern in AI_PACKAGE_PATTERNS)
+        )

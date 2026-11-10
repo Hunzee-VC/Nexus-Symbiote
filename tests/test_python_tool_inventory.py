@@ -101,3 +101,114 @@ def test_no_sdk_import_and_scan_cli_confines_python_collection(tmp_path):
         for c in json.loads(out.read_text())["components"]
         if c["component_type"] == "tool"
     ] == ["count"]
+
+
+def test_more_than_50_unrelated_python_files_do_not_trigger_mcp_limit_failure(tmp_path):
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    for index in range(55):
+        (pkg / f"module_{index:02d}.py").write_text(f"VALUE_{index} = {index}\n")
+    (pkg / "z_mcp_server.py").write_text(IMPORT + SERVER + "@server.tool()\ndef ping(): pass\n")
+    result = MCPScanner().scan(tmp_path)
+    assert not result.scan_failures
+    tools = [c for c in result.components if isinstance(c, ToolComponent)]
+    assert [tool.name for tool in tools] == ["ping"]
+
+
+@pytest.mark.parametrize(
+    "import_stmt, decorator_expr, expected_framework, expected_name",
+    [
+        ("from langchain_core.tools import tool\n", "@tool\n", "langchain", "search_kb"),
+        (
+            "from langchain.tools import tool\n",
+            "@tool('custom_search')\n",
+            "langchain",
+            "custom_search",
+        ),
+        (
+            "from crewai.tools import tool as crew_tool\n",
+            "@crew_tool(name_or_callable='delegate_task')\n",
+            "crewai",
+            "delegate_task",
+        ),
+        (
+            "from agents import function_tool\n",
+            "@function_tool(name_override='fetch_profile')\n",
+            "openai-agents",
+            "fetch_profile",
+        ),
+        (
+            "from agents.tool import function_tool\n",
+            "@function_tool\n",
+            "openai-agents",
+            "search_kb",
+        ),
+        (
+            "from smolagents import tool\n",
+            "@tool\n",
+            "smolagents",
+            "search_kb",
+        ),
+        (
+            "from smolagents.tools import tool\n",
+            "@tool\n",
+            "smolagents",
+            "search_kb",
+        ),
+        (
+            "from pydantic_ai import Agent\nagent = Agent('openai:gpt-4o')\n",
+            "@agent.tool\n",
+            "pydantic-ai",
+            "search_kb",
+        ),
+        (
+            "from pydantic_ai.agent import Agent\nagent: Agent = Agent('openai:gpt-4o')\n",
+            "@agent.tool_plain(name='lookup_docs', retries=2)\n",
+            "pydantic-ai",
+            "lookup_docs",
+        ),
+    ],
+)
+def test_collects_standalone_agent_sdk_tool_decorators(
+    tmp_path, import_stmt, decorator_expr, expected_framework, expected_name
+):
+    marker = tmp_path / "executed_sdk"
+    result, tools = scan(
+        tmp_path,
+        import_stmt
+        + f"open({str(marker)!r}, 'w').close()\n"
+        + decorator_expr
+        + "def search_kb(query: str) -> str:\n    return query\n",
+    )
+    assert not marker.exists() and not result.scan_failures and not result.surfaces_excluded
+    assert [tool.name for tool in tools] == [expected_name]
+    assert tools[0].properties["framework"] == expected_framework
+    assert tools[0].claims["tool_definition"].unknown_reason
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from langchain_core.tools import tool\n@tool(dynamic_name)\ndef f(): pass\n",
+        "from langchain_core.tools import tool\nalias = tool\n@alias\ndef f(): pass\n",
+        "from langchain_core.tools import tool\nif flag:\n    @tool\n    def f(): pass\n",
+        "import langchain_core.tools\n",
+        "from pydantic_ai import Agent\nagent = Agent('x')\nalias = agent\n@alias.tool\ndef f(): pass\n",
+        "from pydantic_ai import Agent\nagent = Agent('x')\n@agent.tool(name=dynamic_name)\ndef f(): pass\n",
+    ],
+)
+def test_unresolved_sdk_decorator_is_visible_and_emits_no_tool(tmp_path, source):
+    result, tools = scan(tmp_path, source)
+    assert not tools
+    assert any("Python SDK tool" in gap for gap in result.surfaces_excluded)
+
+
+def test_duplicate_sdk_decorator_name_fails_collection(tmp_path):
+    result, tools = scan(
+        tmp_path,
+        "from langchain_core.tools import tool\n"
+        "@tool('dup')\ndef one(): pass\n"
+        "@tool('dup')\ndef two(): pass\n",
+    )
+    assert [t.name for t in tools] == ["dup"]
+    assert any("duplicate Python SDK tool" in failure for failure in result.scan_failures)

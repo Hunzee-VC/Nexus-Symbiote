@@ -269,3 +269,13 @@ def test_the_documented_example_is_a_valid_manifest():
 
     example = yaml.safe_load(re.search(r"```yaml\n(.*?)```", GUIDE.read_text(), re.S)[1])
     assert not list(Draft202012Validator(json.loads(SCHEMA.read_text())).iter_errors(example))
+
+
+def test_the_inferred_agent_is_the_repository_whatever_its_checkout():
+    import hashlib
+
+    # As if the manifest id were "." ("this repository"), never the checkout path.
+    expected = "agent:repository:" + hashlib.sha256(b".").hexdigest()[:24]
+    assert expected == INFERRED_AGENT_REF
+    for guide in (GUIDE, GUIDE.with_name("drift-gate.md")):
+        assert f"`{INFERRED_AGENT_REF}`" in guide.read_text(), guide.name

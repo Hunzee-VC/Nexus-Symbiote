@@ -27,6 +27,7 @@ from nexus_symbiote.core.models import (
     ToolComponent,
 )
 from nexus_symbiote.diff.differ import AIBOMDiffer
+from nexus_symbiote.graph import INFERRED_AGENT_REF
 from nexus_symbiote.scanners.shadowscan import ShadowScanImporter
 
 REPORT = Path(__file__).parent / "fixtures/shadowscan/code-report-0.1.4.json"
@@ -165,7 +166,7 @@ def test_the_same_tree_in_another_directory_keeps_its_repository_agent(tmp_path)
         {(c["bom_ref"], c["name"]) for c in found if c["component_type"] == "agent"}
         for found in agents
     ]
-    assert refs[0] == refs[1] == {("agent:repository:inferred", "repository")}
+    assert refs[0] == refs[1] == {(INFERRED_AGENT_REF, "repository")}
 
 
 def _baseline(project: Path, output: Path, *extra: str):
