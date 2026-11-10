@@ -22,7 +22,13 @@ from nexus_symbiote.core.models import (
     ToolComponent,
 )
 from nexus_symbiote.scanners.mcp import MCPScanner
-from nexus_symbiote.scanners.model import observe_model_package, verify_weight_files
+from nexus_symbiote.scanners.model import (
+    ModelPackages,
+    memoized,
+    unused_policy_entries,
+    verify_weight_files,
+)
+from nexus_symbiote.utils.confined import ConfinedCollection
 from nexus_symbiote.utils.crypto import (
     ArtifactPolicy,
     SigstoreArtifactPolicy,
@@ -30,7 +36,6 @@ from nexus_symbiote.utils.crypto import (
     verify_file_hash,
     verify_sigstore_bundle,
 )
-from nexus_symbiote.utils.model_formats import InspectionBudget
 
 
 @dataclass
@@ -104,7 +109,7 @@ class IntegrityValidator:
         self._signature_policies: dict[Path, ArtifactPolicy] = {
             p.artifact_path.resolve(): p for p in policy_entries(signature_policies)
         }
-        self._inspection_budget = InspectionBudget()
+        self._packages: tuple[IntegrityReport, ModelPackages] | None = None
         self.require_model_signatures = require_model_signatures
 
     def validate(
@@ -157,6 +162,7 @@ class IntegrityValidator:
                         )
                     )
             self._check_file_hash(comp, project_root, report)
+        self._report_unused_policies(project_root, report)
         return report
 
     def _check_tensor_metadata(
@@ -169,8 +175,6 @@ class IntegrityValidator:
         declared = {key: value for key, value in declared.items() if value is not None}
         if not declared:
             return
-        from nexus_symbiote.scanners.model import safetensors_fingerprint
-
         try:
             if project_root is None or comp.source_path is None:
                 raise ValueError("project root and artifact path are required")
@@ -178,11 +182,22 @@ class IntegrityValidator:
             if not expected_weight:
                 raise ValueError("tensor metadata requires a whole-artifact SHA-256 binding")
             algorithm, hex_digest = normalize_digest(expected_weight, "sha256")
-            live = safetensors_fingerprint(
-                Path(comp.source_path),
-                root=project_root,
-                expected_digest=f"{algorithm}:{hex_digest}",
+            root = project_root.resolve()
+            source = Path(comp.source_path)
+            # The integrity check's observation of the same file; the artifact is
+            # read once per validation.
+            observation = self._model_packages(report, root).observation(
+                source.relative_to(root) if source.is_absolute() else source
             )
+            if (
+                observation is None
+                or observation.safety != SerializationSafety.SAFE
+                or not observation.fingerprint
+            ):
+                raise ValueError("SafeTensors metadata could not be corroborated")
+            if observation.digest != f"{algorithm}:{hex_digest}":
+                raise ValueError("Tensor metadata belongs to different artifact bytes")
+            live = observation.fingerprint
             for key, expected in declared.items():
                 assert expected is not None
                 normalize_digest(expected, "sha256")
@@ -327,11 +342,12 @@ class IntegrityValidator:
             self._unsigned_model(comp, report)
             return
         root = project_root.resolve()
+        packages = self._model_packages(report, root)
         try:
             relative = path.resolve().relative_to(root)
             # The collector's own confined observation: the same verdict, digest and
             # bound weight files for the same bytes, never the BOM's account of them.
-            package = observe_model_package(root, relative, self._inspection_budget)
+            package = packages.observe(relative)
         except (OSError, ValueError):
             package = None
         observation = package.observation if package is not None else None
@@ -379,6 +395,16 @@ class IntegrityValidator:
         if package is None:
             self._unsigned_model(comp, report)
             return
+        if package.budget_exhausted:
+            report.issues.append(
+                IntegrityIssue(
+                    comp.bom_ref,
+                    "validation_budget_exhausted",
+                    "Model files of this inventory exceed the bytes one validation reads "
+                    "(as much as one scan); this model was not read completely",
+                    "unknown",
+                )
+            )
         if not package.complete:
             report.issues.append(
                 IntegrityIssue(
@@ -399,7 +425,10 @@ class IntegrityValidator:
                 )
             )
         verification = verify_weight_files(
-            package.weight_files, root, self._signature_policies, verify=verify_sigstore_bundle
+            package.weight_files,
+            root,
+            self._signature_policies,
+            verify=memoized(verify_sigstore_bundle, packages.verified),
         )
         if verification.status is None:
             self._unsigned_model(comp, report)
@@ -411,6 +440,30 @@ class IntegrityValidator:
             if severity == "unknown" and not self.require_model_signatures:
                 severity = "warning"
             report.issues.append(IntegrityIssue(comp.bom_ref, category, detail, severity))
+
+    def _model_packages(self, report: IntegrityReport, root: Path) -> ModelPackages:
+        """One observer per validation, so models share walks, digests and one byte budget."""
+        current = self._packages
+        if current is None or current[0] is not report or current[1].root != root:
+            current = self._packages = (report, ModelPackages(root))
+        return current[1]
+
+    def _report_unused_policies(self, project_root: Path | None, report: IntegrityReport) -> None:
+        """An operator entry that no model of this inventory uses must not look enforced.
+
+        The model collector reports the same entries when validation recollects the
+        project; this states them even when the completeness check does not run.
+        """
+        if not self._signature_policies or project_root is None:
+            return
+        root = project_root.resolve()
+        covered = self._model_packages(report, root).covered
+        with ConfinedCollection(root, []) as files:
+            unused = unused_policy_entries(files, self._signature_policies, covered)
+        for label, reason in unused:
+            report.issues.append(
+                IntegrityIssue("signature-policy", "unused_policy_entry", f"{label}: {reason}")
+            )
 
     @staticmethod
     def _recorded_weight_files(comp: ModelComponent) -> list[tuple[str, str | None]] | None:

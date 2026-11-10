@@ -39,6 +39,7 @@ from nexus_symbiote.scanners.base import Scanner, ScanResult
 from nexus_symbiote.scanners.shadowscan import REPORT_PATHS
 from nexus_symbiote.utils.confined import MAX_HASH_BYTES, ConfinedCollection
 from nexus_symbiote.utils.crypto import (
+    POLICY_REF_PREFIX,
     SIGNING_EVIDENCE_CLAIM,
     SIGSTORE_MISSING,
     VERIFIED_SIGNING_STATUSES,
@@ -51,6 +52,7 @@ from nexus_symbiote.utils.crypto import (
     verify_sigstore_bundle,
 )
 from nexus_symbiote.utils.model_formats import (
+    GGUF_LIMIT,
     FormatError,
     InspectionBudget,
     gguf_metadata,
@@ -152,6 +154,18 @@ _CONFIG_STRING_FIELDS = ("peft_type", "quantization_method", "quant_method")
 SIGSTORE_METHOD = "sigstore-message-signature"
 DIGEST_PIN_METHOD = "digest-pin"
 DOCUMENTATION = "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/model-integrity.md"
+UNUSED_ENTRY = "signature policy entry names no collected model weight file"
+REPORT_ENTRY_KIND = (
+    "the ShadowScan report needs a sigstore-message-signature entry; "
+    "a digest pin does not authenticate its producer"
+)
+UNREAD_REPORT_ENTRY = (
+    "signature policy entry names a ShadowScan report location that the importer does not read"
+)
+OUTSIDE_ENTRY = "signature policy entry names an artifact outside the root"
+BUDGET_EXHAUSTED = "validation byte budget exhausted"
+
+Verify = Callable[[Path, Path, str | None, str | None], VerificationResult]
 
 
 def _pickle_family(path: Path) -> bool:
@@ -316,7 +330,7 @@ class ModelArtifactObservation:
     onnx_error: str | None = None
     chat_templates: tuple[tuple[str, str], ...] = ()
     gguf_architecture: str | None = None
-    gguf_note: str | None = None
+    gguf_error: str | None = None
 
 
 def observe_model_artifact(
@@ -354,7 +368,7 @@ def observe_model_artifact(
         try:
             metadata = gguf_metadata(_ReplayReader(observed).read, budget)
         except FormatError as exc:
-            extra["gguf_note"] = f"not inspected: {exc}"
+            extra["gguf_error"] = str(exc)
         else:
             extra["gguf_architecture"] = metadata.architecture
             extra["chat_templates"] = tuple(
@@ -457,19 +471,24 @@ def _local_reference(directory: Path, reference: str) -> Path | None:
 
 
 def index_references(
-    files: ConfinedCollection, tree: ModelTree, directory: Path, digests: dict[Path, str | None]
+    files: ConfinedCollection,
+    tree: ModelTree,
+    directory: Path,
+    digests: dict[Path, str | None],
+    read: Callable[[Path], bytes | None] | None = None,
 ) -> dict[Path, list[Path]]:
     """Map each weight file to the shard indexes in ``directory`` that list it.
 
     A shard index decides which files a loader opens, so a reference to a missing
     file, a file outside the directory or a file that is not a collected model
-    file is a collection failure, not an omission.
+    file is a collection failure, not an omission. ``read`` replaces the
+    collection's own bounded read.
     """
     references: dict[Path, list[Path]] = {}
     for index in tree.children.get(directory, ()):
         if _index_base(index) is None:
             continue
-        raw = files.read_bytes(index)
+        raw = (read or files.read_bytes)(index)
         if raw is None:
             continue
         digests[index] = hash_bytes(raw)
@@ -539,38 +558,193 @@ class ModelPackage:
     observation: ModelArtifactObservation | None
     weight_files: tuple[tuple[Path, str | None], ...]
     complete: bool
+    budget_exhausted: bool = False
 
 
-def observe_model_package(
-    root: Path, path: Path, budget: InspectionBudget | None = None
-) -> ModelPackage:
-    """Re-observe one root-relative model file and its bound weight files, as a scan does."""
-    failures: list[str] = []
-    with ConfinedCollection(
-        root, failures, max_total_bytes=MAX_HASH_SIZE + 32 * 1024 * 1024
-    ) as files:
-        tree = ModelTree(files.iter_files(path.parent))
-        observation: ModelArtifactObservation | None = None
+def memoized(verify: Verify, results: dict[tuple[Any, ...], VerificationResult]) -> Verify:
+    """``verify`` that runs once per policy entry while ``results`` lives.
+
+    Several models can bind one weight file, so without this one shared file
+    would be read and verified again for every model that names it.
+    """
+
+    def cached(
+        artifact: Path, bundle: Path, identity: str | None, issuer: str | None
+    ) -> VerificationResult:
+        key = (artifact, bundle, identity, issuer)
+        if key not in results:
+            results[key] = verify(artifact, bundle, identity, issuer)
+        return results[key]
+
+    return cached
+
+
+class ModelPackages:
+    """Re-observe model files and their bound weight files beneath one root, as a scan does.
+
+    One instance serves one validation. Each directory is walked once, each file
+    is inspected or hashed once, and every read is charged to one byte budget the
+    size of a scan's, so a BOM that lists many models, or many models that share
+    one weight file, cannot multiply the work of the scan that produced it.
+    """
+
+    def __init__(self, root: Path, *, byte_budget: int | None = None) -> None:
+        self.root = root
+        self.covered: set[Path] = set()
+        self.verified: dict[tuple[Any, ...], VerificationResult] = {}
+        # The scan's aggregate budget for the same files.
+        self._remaining = MAX_HASH_SIZE + 32 * 1024 * 1024 if byte_budget is None else byte_budget
+        self._refused: set[Path] = set()
+        self._budget = InspectionBudget()
+        self._trees: dict[Path, tuple[ModelTree, bool]] = {}
+        self._indexes: dict[Path, tuple[dict[Path, list[Path]], list[Path], bool]] = {}
+        self._observations: dict[Path, ModelArtifactObservation | None] = {}
+        self._digests: dict[Path, str | None] = {}
+
+    def observe(self, path: Path) -> ModelPackage:
+        """Observe root-relative ``path`` and every weight file a loader reads with it."""
+        failures: list[str] = []
+        directory = path.parent
+        with ConfinedCollection(
+            self.root, failures, max_total_bytes=MAX_HASH_SIZE + 32 * 1024 * 1024
+        ) as files:
+            tree, walked = self._tree(files, directory)
+            observation = self._observe(files, path)
+            index_refs, indexes, indexed = self._index_references(files, tree, directory)
+            weights = [(path, observation.digest if observation is not None else None)]
+            for companion in bound_weight_files(
+                tree, path, observation, index_refs, lambda reason: files._fail(path, reason)
+            ):
+                weights.append((companion, self._hash(files, companion)))
+        self.covered.update(weight for weight, _ in weights)
+        read = {weight for weight, _ in weights}.union(indexes)
+        return ModelPackage(
+            observation,
+            tuple(weights),
+            walked and indexed and not failures and all(digest for _, digest in weights),
+            bool(read & self._refused),
+        )
+
+    def observation(self, path: Path) -> ModelArtifactObservation | None:
+        """The observation of root-relative ``path``, made now unless already made."""
+        if path not in self._observations:
+            with ConfinedCollection(
+                self.root, [], max_total_bytes=MAX_HASH_SIZE + 32 * 1024 * 1024
+            ) as files:
+                self._observe(files, path)
+        return self._observations.get(path)
+
+    def _tree(self, files: ConfinedCollection, directory: Path) -> tuple[ModelTree, bool]:
+        # A walk of an ancestor that met no failure lists exactly what a walk of
+        # ``directory`` would; a walk with failures says nothing about this one.
+        for ancestor in (directory, *directory.parents):
+            cached = self._trees.get(ancestor)
+            if cached is not None and (ancestor == directory or cached[1]):
+                return cached
+        before = len(files.failures)
+        tree = ModelTree(files.iter_files(directory))
+        self._trees[directory] = (tree, len(files.failures) == before)
+        return self._trees[directory]
+
+    def _charge(self, files: ConfinedCollection, path: Path, stream: BinaryIO) -> None:
+        size = os.fstat(stream.fileno()).st_size
+        if size > self._remaining:
+            self._refused.add(path)
+            files._fail(path, BUDGET_EXHAUSTED)
+            raise OSError(BUDGET_EXHAUSTED)
+        self._remaining -= size
+
+    def _observe(self, files: ConfinedCollection, path: Path) -> ModelArtifactObservation | None:
+        if path not in self._observations:
+            observation: ModelArtifactObservation | None = None
+            try:
+                with files.open_regular(path, max_bytes=MAX_HASH_SIZE) as stream:
+                    self._charge(files, path, stream)
+                    observed = observe_model_artifact(path, stream=stream, budget=self._budget)
+                # Commit only after the confined stream confirmed the pathname still
+                # names the bytes that were read.
+                observation = observed
+                self._digests[path] = observed.digest
+            except (OSError, ValueError):
+                files._fail(path, "model inspection or hashing failed")
+            self._observations[path] = observation
+        return self._observations[path]
+
+    def _read(self, files: ConfinedCollection, path: Path) -> bytes | None:
         try:
-            with files.open_regular(path, max_bytes=MAX_HASH_SIZE) as stream:
-                observed = observe_model_artifact(path, stream=stream, budget=budget)
-            # Commit only after the confined stream confirmed the pathname still
-            # names the bytes that were read.
-            observation = observed
+            with files.open_regular(path) as stream:
+                self._charge(files, path, stream)
+                content = bytearray()
+                while chunk := stream.read(65536):
+                    content += chunk
         except (OSError, ValueError):
-            files._fail(path, "model inspection or hashing failed")
-        digests: dict[Path, str | None] = {}
-        index_refs = index_references(files, tree, path.parent, digests)
-        weights: list[tuple[Path, str | None]] = [
-            (path, observation.digest if observation is not None else None)
-        ]
-        for companion in bound_weight_files(
-            tree, path, observation, index_refs, lambda reason: files._fail(path, reason)
-        ):
-            if companion not in digests:
-                digests[companion] = files.hash_file(companion, max_bytes=MAX_HASH_SIZE)
-            weights.append((companion, digests[companion]))
-    return ModelPackage(observation, tuple(weights), not failures)
+            files._fail(path, "read refused")
+            return None
+        return bytes(content)
+
+    def _hash(self, files: ConfinedCollection, path: Path) -> str | None:
+        if path not in self._digests:
+            digest: str | None = None
+            try:
+                with files.open_regular(path, max_bytes=MAX_HASH_SIZE) as stream:
+                    self._charge(files, path, stream)
+                    hasher = hashlib.sha256()
+                    while chunk := stream.read(65536):
+                        hasher.update(chunk)
+                digest = "sha256:" + hasher.hexdigest()
+            except (OSError, ValueError):
+                files._fail(path, "hash refused")
+            self._digests[path] = digest
+        return self._digests[path]
+
+    def _index_references(
+        self, files: ConfinedCollection, tree: ModelTree, directory: Path
+    ) -> tuple[dict[Path, list[Path]], list[Path], bool]:
+        """The directory's shard references, its index files and whether all were read."""
+        if directory not in self._indexes:
+            before = len(files.failures)
+            references = index_references(
+                files, tree, directory, self._digests, read=lambda index: self._read(files, index)
+            )
+            indexes = [path for path in tree.children.get(directory, ()) if _index_base(path)]
+            self._indexes[directory] = (references, indexes, len(files.failures) == before)
+        return self._indexes[directory]
+
+
+def unused_policy_entries(
+    files: ConfinedCollection, policies: Mapping[Path, ArtifactPolicy], covered: Iterable[Path]
+) -> list[tuple[str, str]]:
+    """Operator entries that no check verifies, as (root-relative path, reason) pairs.
+
+    The model checks verify the weight files in ``covered`` (root-relative). The
+    discovery producer check verifies the ShadowScan report the importer reads,
+    the first of its locations that exists, and only under a Sigstore entry.
+    """
+    if not policies:
+        return []
+    used = {(files.root / path).resolve() for path in covered}
+    locations = [files.path_identity(location) for location in REPORT_PATHS]
+    found = [identity for identity in locations if identity is not None]
+    report = found[0] if found else None
+    unused: list[tuple[str, str]] = []
+    for key, policy in sorted(policies.items()):
+        if key in used:
+            continue
+        try:
+            relative = key.relative_to(files.root)
+        except ValueError:
+            unused.append((".", OUTSIDE_ENTRY))
+            continue
+        identity = files.path_identity(relative)
+        if identity is not None and identity == report:
+            if isinstance(policy, SigstoreArtifactPolicy):
+                continue
+            unused.append((relative.as_posix(), REPORT_ENTRY_KIND))
+        elif identity is not None and identity in found:
+            unused.append((relative.as_posix(), UNREAD_REPORT_ENTRY))
+        else:
+            unused.append((relative.as_posix(), UNUSED_ENTRY))
+    return unused
 
 
 @dataclass(frozen=True)
@@ -623,7 +797,7 @@ def verify_weight_files(
             uncovered.append(label)
             continue
         if policy.policy_digest is not None:
-            refs.add(f"policy:{policy.policy_digest}")
+            refs.add(POLICY_REF_PREFIX + policy.policy_digest)
         attempted.append(
             DIGEST_PIN_METHOD if isinstance(policy, DigestPinPolicy) else SIGSTORE_METHOD
         )
@@ -801,6 +975,7 @@ class ModelScanner(Scanner):
         self._digests: dict[Path, str | None] = {}
         self._read: set[Path] = set()
         self._budget = InspectionBudget()
+        self._verified: dict[tuple[Any, ...], VerificationResult] = {}
 
     def scan(self, project_root: Path) -> ScanResult:
         result = ScanResult(scanner_name=self.name)
@@ -811,6 +986,7 @@ class ModelScanner(Scanner):
         ) as files:
             self._tree = tree = ModelTree(files.iter_files())
             self._digests, self._read, self._budget = {}, set(), InspectionBudget()
+            self._verified = {}
             model_dirs = sorted(
                 {
                     path.parent
@@ -831,7 +1007,9 @@ class ModelScanner(Scanner):
                         )
                         result.components.append(component)
                         covered.update(weight_files)
-            self._report_unused_policies(files, covered)
+            # An operator entry that no check verifies must not look enforced.
+            for label, reason in unused_policy_entries(files, self._policies, covered):
+                files._fail(label, reason)
             result.surfaces_scanned.extend(sorted(path.as_posix() for path in self._read))
         return result
 
@@ -998,7 +1176,10 @@ class ModelScanner(Scanner):
         )
         weight_files = [(path, weight_hash), *((c, self._digest(files, c)) for c in companions)]
         verification = verify_weight_files(
-            weight_files, files.root, self._policies, verify=verify_sigstore_bundle
+            weight_files,
+            files.root,
+            self._policies,
+            verify=memoized(verify_sigstore_bundle, self._verified),
         )
         status = verification.status or self._unverified_status(path)
         if status == SigningStatus.VERIFICATION_UNAVAILABLE:
@@ -1036,8 +1217,13 @@ class ModelScanner(Scanner):
             properties["base_model"] = context.base_model
         if observation is not None and observation.gguf_architecture is not None:
             properties["gguf_architecture"] = observation.gguf_architecture
-        if observation is not None and observation.gguf_note is not None:
-            properties["gguf_metadata"] = observation.gguf_note
+        if observation is not None and observation.gguf_error is not None:
+            properties["gguf_metadata"] = f"not inspected: {observation.gguf_error}"
+            if observation.gguf_error == GGUF_LIMIT:
+                # A template behind more metadata than the bounds allow was not checked.
+                gap = f"{path.as_posix()}: GGUF chat templates not inspected: {GGUF_LIMIT}"
+                if gap not in files.exclusions:
+                    files.exclusions.append(gap)
 
         config = context.config
         name = path.as_posix()
@@ -1085,28 +1271,6 @@ class ModelScanner(Scanner):
             return SigningStatus.SIGNATURE_PRESENT_UNVERIFIED
         # A directory-local search cannot prove the absence of external signatures.
         return SigningStatus.SIGNATURE_NOT_FOUND
-
-    def _report_unused_policies(self, files: ConfinedCollection, covered: set[Path]) -> None:
-        """An operator entry that no collector verifies must not look enforced."""
-        if not self._policies:
-            return
-        covered_keys = {(files.root / path).resolve() for path in covered}
-        reports = {files.path_identity(path) for path in REPORT_PATHS} - {None}
-        for key, policy in sorted(self._policies.items()):
-            if key in covered_keys:
-                continue
-            try:
-                relative = key.relative_to(files.root)
-            except ValueError:
-                files._fail(".", "signature policy entry names an artifact outside the root")
-                continue
-            # The discovery producer check verifies an entry for the ShadowScan report.
-            if (
-                isinstance(policy, SigstoreArtifactPolicy)
-                and files.path_identity(relative) in reports
-            ):
-                continue
-            files._fail(relative, "signature policy entry names no collected model weight file")
 
     def _infer_model_type(self, config: dict[str, Any], path: Path) -> str:
         if config.get("peft_type") or config.get("adapter_config"):

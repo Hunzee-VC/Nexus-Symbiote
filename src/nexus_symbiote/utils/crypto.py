@@ -10,7 +10,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from nexus_symbiote.core.hashing import (
     descriptor_binding,
@@ -18,6 +18,9 @@ from nexus_symbiote.core.hashing import (
     open_regular_file,
     pathname_identity,
 )
+
+if TYPE_CHECKING:
+    from nexus_symbiote.core.models import ClaimEvidence
 
 MAX_BUNDLE_BYTES = 4 * 1024 * 1024
 MAX_SIGNED_ARTIFACT_BYTES = 5 * 1024 * 1024 * 1024
@@ -46,6 +49,25 @@ VERIFIED_SIGNING_STATUSES = frozenset(
 )
 # The claim on a model component that records how its signing status was established.
 SIGNING_EVIDENCE_CLAIM = "signing_status"
+# An evidence reference that names the digest of the operator policy file a run used.
+POLICY_REF_PREFIX = "policy:"
+
+
+def component_evidence_refs(refs: Iterable[Any]) -> list[Any]:
+    """``refs`` without policy-file digests, to compare one component across runs.
+
+    The digest identifies the run's policy file, not the component: equivalent
+    policies with other bytes, or one more entry for another artifact, must not
+    make the same verified component look changed or mismatched.
+    """
+    return [ref for ref in refs if not (isinstance(ref, str) and ref.startswith(POLICY_REF_PREFIX))]
+
+
+def comparable_claim(claim: ClaimEvidence) -> dict[str, Any]:
+    """A claim as two runs compare it: without its observation time or policy-file digest."""
+    dumped = claim.model_dump(exclude={"observed_at"})
+    dumped["evidence_refs"] = component_evidence_refs(dumped["evidence_refs"])
+    return dumped
 
 
 def _sha256(value: str | None) -> str | None:

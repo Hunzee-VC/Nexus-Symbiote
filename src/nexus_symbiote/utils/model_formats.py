@@ -117,62 +117,82 @@ MAX_ONNX_FIELDS = 4_000_000
 MAX_ONNX_LOCATION_BYTES = 4096
 _EXTERNAL = 1
 
-_MODEL, _GRAPH, _NODE, _ATTRIBUTE, _TENSOR, _SPARSE, _FUNCTION, _TRAINING, _ENTRY = range(9)
+(
+    _MODEL,
+    _GRAPH,
+    _NODE,
+    _ATTRIBUTE,
+    _TENSOR,
+    _SPARSE,
+    _FUNCTION,
+    _TRAINING,
+    _ENTRY,
+    _VALUE_INFO,
+    _ANNOTATION,
+    _OPSET,
+) = range(12)
 # onnx.proto: the length-delimited fields that can hold a tensor, a subgraph or a
-# StringStringEntryProto. Other fields are skipped by wire type, as protobuf does.
+# StringStringEntryProto, and the messages whose field 1 is a name. Other fields
+# are skipped by wire type, as protobuf does.
 _SCHEMA: dict[int, dict[int, int]] = {
-    _MODEL: {7: _GRAPH, 14: _ENTRY, 20: _TRAINING, 25: _FUNCTION},
-    _GRAPH: {1: _NODE, 5: _TENSOR, 15: _SPARSE, 16: _ENTRY},
+    _MODEL: {7: _GRAPH, 8: _OPSET, 14: _ENTRY, 20: _TRAINING, 25: _FUNCTION},
+    _GRAPH: {
+        1: _NODE,
+        5: _TENSOR,
+        11: _VALUE_INFO,
+        12: _VALUE_INFO,
+        13: _VALUE_INFO,
+        14: _ANNOTATION,
+        15: _SPARSE,
+        16: _ENTRY,
+    },
     _NODE: {5: _ATTRIBUTE, 9: _ENTRY},
     _ATTRIBUTE: {5: _TENSOR, 6: _GRAPH, 10: _TENSOR, 11: _GRAPH, 22: _SPARSE, 23: _SPARSE},
     _TENSOR: {13: _ENTRY, 16: _ENTRY},
     _SPARSE: {1: _TENSOR, 2: _TENSOR},
-    _FUNCTION: {7: _NODE, 11: _ATTRIBUTE, 14: _ENTRY},
+    _FUNCTION: {7: _NODE, 9: _OPSET, 11: _ATTRIBUTE, 12: _VALUE_INFO, 14: _ENTRY},
     _TRAINING: {1: _GRAPH, 2: _GRAPH, 3: _ENTRY, 4: _ENTRY},
     _ENTRY: {},
+    _VALUE_INFO: {4: _ENTRY},
+    _ANNOTATION: {2: _ENTRY},
+    _OPSET: {},
 }
 _KEY = b"location"
-
-
-def _varints(value: int) -> list[bytes]:
-    """Every encoding a protobuf parser accepts for ``value`` < 128, minimal first."""
-    return [bytes([value])] + [bytes([value | 0x80]) + b"\x80" * n + b"\x00" for n in range(9)]
-
-
-_KEY_TAGS = _varints(0x0A)
-_KEY_LENGTHS = _varints(len(_KEY))
-
-
-def _key_marker_at(window: bytes, index: int) -> bool:
-    """Whether ``location`` at ``index`` is preceded by field 1, length 8, in any encoding."""
-    for length in _KEY_LENGTHS:
-        start = index - len(length)
-        if start < 0 or window[start:index] != length:
-            continue
-        if any(start >= len(tag) and window[start - len(tag) : start] == tag for tag in _KEY_TAGS):
-            return True
-    return False
+# Field 1 length-delimited, then a length of 8, then the key, with each varint in any
+# encoding of up to ten bytes: protobuf's C++ parsers, which ONNX Runtime uses, keep
+# only the low 32 bits of a tag. A tenth length byte is not checked further.
+_KEY_MARKER = re.compile(
+    rb"(?:\x0a|\x8a(?:\x80{0,2}\x00|\x80{3}[\x00\x10\x20\x30\x40\x50\x60\x70]"
+    rb"|\x80{3}[\x80\x90\xa0\xb0\xc0\xd0\xe0\xf0][\x80-\xff]{0,4}[\x00-\x7f]))"
+    rb"(?:\x08|\x88(?:\x80{0,7}\x00|\x80{8}[\x00-\x7f]))location"
+)
+_MAX_MARKER_BYTES = 10 + 10 + len(_KEY)
 
 
 class _OnnxReader(_Reader):
-    """Counts every encoded ``location`` key in the raw bytes, parsed or not."""
+    """Counts the ``location`` bytes in the raw stream, parsed or not.
 
-    _TAIL = len(_KEY) + 20
+    ``occurrences`` counts every occurrence and ``markers`` those encoded as a
+    field-1 string of exactly that value, as an external-data key is. Both are
+    counted by the regular expression engine, so hostile bytes cost no more than
+    a linear scan.
+    """
 
     def __init__(self, read: Read) -> None:
         super().__init__(read, ONNX_UNREADABLE)
         self.markers = 0
+        self.occurrences = 0
         self._tail = b""
 
     def _chunk(self) -> bytes:
         chunk = self._read(_CHUNK)
         window = self._tail + chunk
-        index = window.find(_KEY)
-        while index != -1:
-            if index + len(_KEY) > len(self._tail) and _key_marker_at(window, index):
-                self.markers += 1
-            index = window.find(_KEY, index + 1)
-        self._tail = window[-self._TAIL :]
+        self.occurrences += window.count(_KEY, max(len(self._tail) - len(_KEY) + 1, 0))
+        if _KEY in window:
+            # Markers are disjoint, so those ending in this chunk are the window's
+            # minus the tail's, which the previous window counted.
+            self.markers += len(_KEY_MARKER.findall(window)) - len(_KEY_MARKER.findall(self._tail))
+        self._tail = window[-(_MAX_MARKER_BYTES - 1) :]
         return chunk
 
     def varint(self) -> int:
@@ -280,6 +300,10 @@ def _message(
                 value = text
             continue
         child = _SCHEMA[kind].get(number)
+        if child is None and number == 1 and length == len(_KEY):
+            # A name or other scalar data in a parsed message, never an entry key.
+            state.explained += reader.take(length) == _KEY
+            continue
         if child is None:
             reader.skip(length)
             continue
@@ -305,10 +329,11 @@ def onnx_external_data(read: Read, budget: InspectionBudget | None = None) -> tu
 
     Tensors in graphs, subgraphs, node attributes, functions and training graphs
     are followed. A runtime opens external data only through an entry whose key is
-    the literal ``location``, and those bytes appear in the file whatever field
-    holds them. So every encoded ``location`` key must belong to a parsed entry,
-    and a file that the parser cannot read fails only when it holds such a key:
-    without one it cannot name external data, whatever else it contains.
+    the literal ``location``, and those eight bytes appear in the file whatever
+    field holds them and however its tag and length are encoded. So in a parsed
+    file every field-1 string ``location`` must be an entry key or a name the
+    parser read, and a file the parser cannot read fails whenever those bytes
+    occur at all: without them it cannot name external data.
     """
     reader = _OnnxReader(read)
     state = _OnnxState(budget or InspectionBudget())
@@ -316,7 +341,7 @@ def onnx_external_data(read: Read, budget: InspectionBudget | None = None) -> tu
         _message(reader, None, _MODEL, 0, state)
     except (FormatError, RecursionError) as exc:
         reader.drain()
-        if reader.markers:
+        if reader.occurrences:
             raise FormatError(str(exc) if isinstance(exc, FormatError) else ONNX_LIMIT) from None
         return ()
     if reader.markers > state.explained:

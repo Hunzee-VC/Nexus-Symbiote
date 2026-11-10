@@ -10,6 +10,7 @@ from nexus_symbiote.utils.model_formats import (
     GGUF_LIMIT,
     GGUF_UNREADABLE,
     ONNX_LIMIT,
+    ONNX_UNEXPLAINED,
     ONNX_UNREADABLE,
     FormatError,
     InspectionBudget,
@@ -95,6 +96,77 @@ def test_malformed_wire_data_fails_only_when_a_location_key_exists(broken):
     with pytest.raises(FormatError, match=ONNX_UNREADABLE):
         read(graph(message(5, external(b"data.bin"))) + broken)
     assert read(number(1, 8) + broken) == ()
+
+
+# Key encodings protobuf's C++ parser accepts: it keeps the low 32 bits of a tag and
+# the low 64 bits of a length, from varints of up to ten bytes.
+OVERLONG_TAGS = [
+    bytes([0x8A, 0x80, 0x80, 0x80, 0x10]),
+    bytes([0x8A, 0x80, 0x80, 0x80, 0xF0, 0x80, 0x80, 0x80, 0x80, 0x01]),
+]
+OVERLONG_LENGTH = bytes([0x88] + [0x80] * 8 + [0x02])
+
+
+@pytest.mark.parametrize("key_tag", OVERLONG_TAGS)
+def test_a_key_tag_beyond_32_bits_fails_closed(key_tag):
+    key = key_tag + b"\x08location"
+    tensor = message(8, b"w") + message(13, key + message(2, b"data.bin")) + number(14, 1)
+    with pytest.raises(FormatError, match=ONNX_UNREADABLE):
+        read(graph(message(5, tensor)))
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        *(key_tag + b"\x08location" for key_tag in OVERLONG_TAGS),
+        tag(1, 2) + OVERLONG_LENGTH + b"location",
+    ],
+)
+def test_keys_in_any_accepted_encoding_count_in_skipped_fields(key):
+    hidden = message(99, message(13, key + message(2, b"data.bin")))
+    with pytest.raises(FormatError, match=ONNX_UNEXPLAINED):
+        read(graph(message(5, external(b"model.bin"))) + hidden)
+
+
+def place(data: bytes, start: int) -> bytes:
+    """Prefix ``data`` with a doc string so its first ``location`` starts at ``start``."""
+    padded = message(6, b"x" * (start - data.index(b"location") - 4)) + data
+    assert padded.index(b"location") == start
+    return padded
+
+
+@pytest.mark.parametrize("shift", [-28, -21, -20, -9, -8, -7, -4, -1, 0, 1])
+def test_keys_across_read_boundaries_are_counted_once(shift):
+    # The reader reads 64 KiB at a time; a key may straddle any boundary.
+    parsed = graph(message(5, external(b"data.bin")))
+    assert read(place(parsed, 65536 + shift)) == ("data.bin",)
+    for key_tag in [tag(1, 2), *OVERLONG_TAGS]:
+        hidden = message(99, message(13, key_tag + b"\x08location" + message(2, b"x")))
+        with pytest.raises(FormatError, match=ONNX_UNEXPLAINED):
+            read(place(hidden + number(1, 8), 65536 + shift))
+
+
+def test_a_length_beyond_64_bits_is_read_as_protobuf_reads_it():
+    key = tag(1, 2) + OVERLONG_LENGTH + b"location"
+    tensor = message(8, b"w") + message(13, key + message(2, b"data.bin")) + number(14, 1)
+    assert read(graph(message(5, tensor))) == ("data.bin",)
+
+
+def test_an_unreadable_file_fails_on_the_key_bytes_alone():
+    with pytest.raises(FormatError, match=ONNX_UNREADABLE):
+        read(number(1, 8) + b"\x7f location")
+    assert read(number(1, 8) + b"\x7f locator") == ()
+
+
+def test_names_spelled_location_are_not_external_data_keys():
+    named = [
+        message(11, message(1, b"location")),
+        message(1, message(1, b"location") + message(4, b"Relu")),
+        message(1, message(5, message(1, b"location") + number(3, 1)) + message(4, b"Relu")),
+        message(5, message(1, b"location") + message(8, b"w")),
+    ]
+    opset = message(8, message(1, b"location") + number(2, 1))
+    assert read(graph(*named) + opset) == ()
 
 
 def test_nesting_beyond_the_depth_limit_fails_closed():

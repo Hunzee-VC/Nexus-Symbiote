@@ -14,6 +14,7 @@ from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.enums import TrustTier
 from nexus_symbiote.core.hashing import TOOL_DEFINITION_HASH_VERSION
 from nexus_symbiote.core.models import MCPServerComponent
+from nexus_symbiote.utils.crypto import component_evidence_refs
 
 TRUST_TIER_ORDER = {
     TrustTier.INTERNAL_VERIFIED: 0,
@@ -114,6 +115,9 @@ def _semantic_value(value: Any, path: tuple[str, ...]) -> Any:
             if not (len(path) == 2 and path[0] == "claims" and key == "observed_at")
         }
     if isinstance(value, list):
+        if len(path) == 3 and path[0] == "claims" and path[2] == "evidence_refs":
+            # The operator policy file's digest says which run verified, not what.
+            value = component_evidence_refs(value)
         items = [_semantic_value(item, (*path, "[]")) for item in value]
         opaque = any(
             part in {"properties", "input_schema", "annotations", "variable_schema"}

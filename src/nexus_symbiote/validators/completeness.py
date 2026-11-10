@@ -367,7 +367,11 @@ class CompletenessValidator:
                 or supplied.tool_count < local.tool_count
             ):
                 return False
-        from nexus_symbiote.utils.crypto import SIGNING_EVIDENCE_CLAIM, VERIFIED_SIGNING_STATUSES
+        from nexus_symbiote.utils.crypto import (
+            SIGNING_EVIDENCE_CLAIM,
+            VERIFIED_SIGNING_STATUSES,
+            comparable_claim,
+        )
 
         upgraded = (
             isinstance(local, ModelComponent)
@@ -393,9 +397,7 @@ class CompletenessValidator:
             if evidence.method == "not-collected" or (upgraded and name == SIGNING_EVIDENCE_CLAIM):
                 continue  # A separate observation can fill a gap in the static inventory.
             claim = supplied.claims.get(name)
-            if claim is None or evidence.model_dump(exclude={"observed_at"}) != claim.model_dump(
-                exclude={"observed_at"}
-            ):
+            if claim is None or comparable_claim(evidence) != comparable_claim(claim):
                 return False
         # Preserve multiplicity. Independent findings and revised remediation text may be added.
         return Counter((r.severity, r.category, r.detail) for r in local.risks) <= Counter(
@@ -692,6 +694,10 @@ def discovery_producer_problems(
             f"{local.source_report_path}; its producer is unverified."
         )
         return problems
+    if policy.expected_sha256 is not None and not hmac.compare_digest(
+        policy.expected_sha256, recorded
+    ):
+        problems.append("ShadowScan report differs from the operator's expected_sha256 pin.")
     verified = verify_sigstore_bundle(
         policy.artifact_path, policy.bundle_path, policy.expected_identity, policy.expected_issuer
     )

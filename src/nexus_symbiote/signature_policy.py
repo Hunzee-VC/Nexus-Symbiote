@@ -132,11 +132,15 @@ def _record(record: object, version: int) -> tuple[str, dict[str, Any]]:
     return kind, record
 
 
+def _identity(path: Path) -> tuple[int, int]:
+    info = os.stat(path)
+    return info.st_dev, info.st_ino
+
+
 def _read_policy(policy_path: Path, root: Path) -> tuple[bytes, str]:
+    inside = "Signature policy must be provisioned outside the scanned project"
     if policy_path.resolve().is_relative_to(root):
-        raise SignaturePolicyError(
-            "Signature policy must be provisioned outside the scanned project"
-        )
+        raise SignaturePolicyError(inside)
     try:
         with open_regular_file(policy_path) as stream:
             info = os.fstat(stream.fileno())
@@ -146,10 +150,20 @@ def _read_policy(policy_path: Path, root: Path) -> tuple[bytes, str]:
             if info.st_nlink != 1:
                 raise SignaturePolicyError("Signature policy must not have other hard links")
             raw = stream.read(MAX_POLICY_BYTES + 1)
+            # The open followed no symlink, so these are the file's real ancestors.
+            # Their device and inode also reveal the project behind a name that the
+            # lexical check misses: a case variant or a bind mount.
+            ancestors = {_identity(parent) for parent in Path(os.path.abspath(policy_path)).parents}
     except OSError:
         raise SignaturePolicyError(
             "Selected signature policy is unavailable or invalid strict JSON"
         ) from None
+    try:
+        project = _identity(root)
+    except OSError:
+        raise SignaturePolicyError("Project root is unavailable") from None
+    if project in ancestors:
+        raise SignaturePolicyError(inside)
     if len(raw) > MAX_POLICY_BYTES:
         raise SignaturePolicyError("Signature policy exceeds the byte limit")
     return raw, f"sha256:{hashlib.sha256(raw).hexdigest()}"

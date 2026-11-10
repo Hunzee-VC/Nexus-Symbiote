@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import os
@@ -16,15 +17,20 @@ from click.testing import CliRunner
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import RiskSeverity, SerializationSafety, TrustTier
-from nexus_symbiote.scanners.model import ModelScanner, inspect_model_format
+from nexus_symbiote.diff.differ import AIBOMDiffer
+from nexus_symbiote.scanners.model import ModelPackages, ModelScanner, inspect_model_format
 from nexus_symbiote.signature_policy import SignaturePolicyError, load_signature_policies
+from nexus_symbiote.utils.confined import ConfinedCollection
 from nexus_symbiote.utils.crypto import (
     SIGSTORE_MISSING,
     DigestPinPolicy,
     SigstoreArtifactPolicy,
     VerificationResult,
 )
-from nexus_symbiote.validators.completeness import CompletenessValidator
+from nexus_symbiote.validators.completeness import (
+    CompletenessValidator,
+    discovery_producer_problems,
+)
 from nexus_symbiote.validators.integrity import IntegrityValidator
 from nexus_symbiote.validators.risk import RiskScorer
 
@@ -277,7 +283,13 @@ def test_one_inspection_budget_bounds_all_files_of_a_scan(project, monkeypatch):
 
 @pytest.mark.parametrize(
     ("content", "failed"),
-    [(b"model bytes", False), (b"\x7f\x7f\x0a\x08location", True), (b"\x0a\x88\x00location", True)],
+    [
+        (b"model bytes", False),
+        (b"\x7f\x7f\x0a\x08location", True),
+        (b"\x0a\x88\x00location\x00", True),
+        # Not even a key encoding: an unreadable file fails on the bytes alone.
+        (b"\x7f doc: location", True),
+    ],
 )
 def test_unparseable_onnx_fails_only_when_it_names_external_data(project, content, failed):
     (project / "model.onnx").write_bytes(content)
@@ -518,10 +530,21 @@ def test_gguf_template_reaching_python_internals_is_critical_once(project, templ
 def test_unreadable_gguf_metadata_is_noted_without_a_failure(project):
     (project / "model.gguf").write_bytes(b"GGUF\x09\x00\x00\x00 not a supported version")
     result = ModelScanner().scan(project)
-    assert not result.scan_failures
+    assert not result.scan_failures and not result.surfaces_excluded
     assert result.components[0].properties["gguf_metadata"] == (
         "not inspected: GGUF metadata could not be read"
     )
+
+
+def test_gguf_metadata_beyond_the_bounds_is_a_coverage_gap(project, monkeypatch):
+    # A sandbox-escape template behind more metadata than the bounds allow.
+    monkeypatch.setattr("nexus_symbiote.utils.model_formats.MAX_INSPECTION_UNITS", 2)
+    (project / "model.gguf").write_bytes(gguf("{{ x.__class__ }}"))
+    result = ModelScanner().scan(project)
+    assert result.surfaces_excluded == [
+        "model.gguf: GGUF chat templates not inspected: GGUF metadata exceeds the inspection limits"
+    ]
+    assert result.components[0].serialization_safety == SerializationSafety.UNKNOWN
 
 
 # Format detection ---------------------------------------------------------------------
@@ -758,7 +781,29 @@ def test_a_signature_entry_for_the_discovery_report_is_not_unused(tmp_path, proj
     policies = load_signature_policies(write_policy(tmp_path, [record], version=1), project)
     assert not ModelScanner(policies).scan(project).scan_failures
     pinned = write_policy(tmp_path, [pin(project, ".shadowscan/report.json")])
-    assert ModelScanner(load_signature_policies(pinned, project)).scan(project).scan_failures
+    assert ModelScanner(load_signature_policies(pinned, project)).scan(project).scan_failures == [
+        ".shadowscan/report.json: the ShadowScan report needs a sigstore-message-signature "
+        "entry; a digest pin does not authenticate its producer"
+    ]
+
+
+def test_an_entry_for_a_report_location_the_importer_skips_is_unused(tmp_path, project):
+    # The importer reads the first report location that exists, never this one.
+    (project / ".shadowscan").mkdir()
+    (project / ".shadowscan" / "report.json").write_text("{}")
+    (project / "shadowscan.json").write_text("{}")
+    (project / "shadowscan.json.sigstore").write_text("{}")
+    record = {
+        "artifact_path": "shadowscan.json",
+        "bundle_path": "shadowscan.json.sigstore",
+        "expected_identity": "discovery@example.test",
+        "expected_issuer": "https://issuer.example.test",
+    }
+    policies = load_signature_policies(write_policy(tmp_path, [record], version=1), project)
+    assert ModelScanner(policies).scan(project).scan_failures == [
+        "shadowscan.json: signature policy entry names a ShadowScan report location that "
+        "the importer does not read"
+    ]
 
 
 def test_a_supplied_unsigned_inventory_is_corroborated_by_a_new_pin(tmp_path, project):
@@ -961,3 +1006,276 @@ def test_a_pinned_file_that_cannot_be_hashed_fails_verification(tmp_path, projec
     assert component.claims["signing_status"].unknown_reason == (
         "m.safetensors: Artifact could not be hashed through the confined reader"
     )
+
+
+# Validation observes each file once, within one budget ---------------------------------
+
+
+def _calls(monkeypatch, name: str) -> list[Path]:
+    """Record the root-relative path of every call to one ConfinedCollection method."""
+    calls: list[Path] = []
+    original = getattr(ConfinedCollection, name)
+
+    def record(self, path=".", *args, **kwargs):
+        calls.append(Path(path))
+        return original(self, path, *args, **kwargs)
+
+    monkeypatch.setattr(ConfinedCollection, name, record)
+    return calls
+
+
+def test_validation_walks_a_directory_once_for_all_its_models(project, monkeypatch):
+    names = [f"m{index:04d}.ggml" for index in range(1500)]
+    for name in names:
+        (project / name).write_bytes(b"x")
+    bom = AIBOM(components=ModelScanner().scan(project).components)
+    walks = _calls(monkeypatch, "iter_files")
+    opened = _calls(monkeypatch, "open_regular")
+    report = IntegrityValidator(require_model_signatures=False).validate(bom, project)
+    assert report.components_checked == 1500
+    assert walks == [Path(".")]
+    assert sorted(opened) == [Path(name) for name in names]
+
+
+def test_models_sharing_external_data_read_it_once_per_validation(project, monkeypatch):
+    shared = project / "shared.data"
+    shared.write_bytes(b"w" * 4096)
+    for index in range(100):
+        graph = onnx_model(onnx_tensor("w", "shared.data"))
+        (project / f"g{index:03d}.onnx").write_bytes(graph)
+    result = ModelScanner().scan(project)
+    assert not result.scan_failures
+    hashed = _calls(monkeypatch, "hash_file")
+    opened = _calls(monkeypatch, "open_regular")
+    report = IntegrityValidator(require_model_signatures=False).validate(
+        AIBOM(components=result.components), project
+    )
+    assert not [issue for issue in report.issues if issue.category.startswith("weight_files")]
+    assert (hashed + opened).count(Path("shared.data")) == 1
+
+
+def test_tensor_metadata_is_checked_from_the_same_observation(project, monkeypatch):
+    write_safetensors(project / "m.safetensors")
+    bom = AIBOM(components=ModelScanner().scan(project).components)
+    opened = _calls(monkeypatch, "open_regular")
+    report = IntegrityValidator(require_model_signatures=False).validate(bom, project)
+    assert opened == [Path("m.safetensors")]
+    assert not [i for i in report.issues if i.category == "tensor_metadata_unverified"]
+
+
+def test_validation_reads_stop_at_one_byte_budget(project, monkeypatch):
+    write_safetensors(project / "a.safetensors")
+    write_safetensors(project / "b.safetensors")
+    bom = AIBOM(components=ModelScanner().scan(project).components)
+    budget = (project / "a.safetensors").stat().st_size + 1
+    monkeypatch.setattr(
+        "nexus_symbiote.validators.integrity.ModelPackages",
+        functools.partial(ModelPackages, byte_budget=budget),
+    )
+    report = IntegrityValidator(require_model_signatures=False).validate(bom, project)
+    exhausted = [i for i in report.issues if i.category == "validation_budget_exhausted"]
+    assert [(i.component_ref, i.severity) for i in exhausted] == [
+        ("model:b.safetensors", "unknown")
+    ]
+    assert report.status != "pass"
+
+
+def test_a_shared_signed_weight_file_is_verified_once(tmp_path, project, monkeypatch):
+    (project / "shared.data").write_bytes(b"weights")
+    (project / "shared.data.sigstore").write_text("{}")
+    for index in range(20):
+        graph = onnx_model(onnx_tensor("w", "shared.data"))
+        (project / f"g{index:02d}.onnx").write_bytes(graph)
+    record = {
+        "kind": "sigstore-message-signature",
+        "artifact_path": "shared.data",
+        "bundle_path": "shared.data.sigstore",
+        "expected_identity": "release@example.test",
+        "expected_issuer": "https://issuer.example.test",
+    }
+    policies = load_signature_policies(write_policy(tmp_path, [record]), project)
+    calls = []
+
+    def verify(artifact, bundle, identity, issuer):
+        calls.append(Path(artifact))
+        details = {"artifact_digest": sha256(Path(artifact))}
+        return VerificationResult(True, identity=identity, issuer=issuer, details=details)
+
+    monkeypatch.setattr("nexus_symbiote.scanners.model.verify_sigstore_bundle", verify)
+    monkeypatch.setattr("nexus_symbiote.validators.integrity.verify_sigstore_bundle", verify)
+    result = ModelScanner(policies).scan(project)
+    assert not result.scan_failures
+    assert {c.signing_status for c in result.components} == {"partially-verified"}
+    assert len(calls) == 1
+    report = IntegrityValidator(policies).validate(AIBOM(components=result.components), project)
+    assert report.signatures_verified == 20
+    assert len(calls) == 2
+
+
+# Report entries, policy digests and the policy location --------------------------------
+
+REPORT = Path(__file__).parent / "fixtures" / "shadowscan" / "code-report-0.1.4.json"
+
+
+def _discovery_project(tmp_path: Path) -> tuple[Path, Path]:
+    project, bom = tmp_path / "proj", tmp_path / "bom.json"
+    (project / ".shadowscan").mkdir(parents=True)
+    shutil.copy(REPORT, project / ".shadowscan" / "report.json")
+    (project / ".shadowscan" / "report.sigstore.json").write_text("{}")
+    server = {"command": "npx", "args": ["-y", "@acme/payments-mcp@1.2.3"]}
+    (project / ".mcp.json").write_text(json.dumps({"mcpServers": {"payments": server}}))
+    CliRunner().invoke(main, ["scan", str(project), "--no-project-policy", "-o", str(bom)])
+    assert bom.is_file()
+    return project, bom
+
+
+def _report_policy(tmp_path: Path, expected_sha256: str) -> Path:
+    record = {
+        "kind": "sigstore-message-signature",
+        "artifact_path": ".shadowscan/report.json",
+        "bundle_path": ".shadowscan/report.sigstore.json",
+        "expected_identity": "https://github.com/acme/discovery/.github/workflows/scan.yml@main",
+        "expected_issuer": "https://token.actions.githubusercontent.com",
+        "expected_sha256": expected_sha256,
+    }
+    return write_policy(tmp_path, [record])
+
+
+def test_a_pinned_discovery_report_must_match_its_pin(tmp_path, monkeypatch):
+    project, bom = _discovery_project(tmp_path)
+
+    def verify(artifact, bundle, identity, issuer):
+        details = {"artifact_digest": sha256(Path(artifact))}
+        return VerificationResult(True, identity=identity, issuer=issuer, details=details)
+
+    # A valid signature from the expected signer, over an older or another report.
+    monkeypatch.setattr("nexus_symbiote.utils.crypto.verify_sigstore_bundle", verify)
+    other = _report_policy(tmp_path, "sha256:" + "0" * 64)
+    assert discovery_producer_problems(
+        AIBOM.load(bom), project, load_signature_policies(other, project)
+    ) == ["ShadowScan report differs from the operator's expected_sha256 pin."]
+    (project / ".nexus-symbiote.yaml").write_text("validate: {require_integrity: false}\n")
+    args = ["validate", str(bom), "--project", str(project), "--signature-policy"]
+    refused = CliRunner().invoke(main, [*args, str(other)])
+    assert refused.exit_code == 1
+    assert "differs from the operator's expected_sha256 pin" in refused.output
+    exact = _report_policy(tmp_path, sha256(project / ".shadowscan" / "report.json"))
+    accepted = CliRunner().invoke(main, [*args, str(exact)])
+    assert accepted.exit_code == 0, accepted.output
+
+
+def test_equivalent_policies_with_other_bytes_reconcile_and_raise_no_drift(tmp_path, project):
+    write_safetensors(project / "models" / "m.safetensors")
+    write_safetensors(project / "models" / "n.safetensors", b"efgh")
+    entry = pin(project, "models/m.safetensors")
+    supplier = tmp_path / "supplier.json"
+    supplier.write_text(json.dumps({"version": 2, "artifacts": [entry]}))
+    # Same entry, other bytes, and one more entry for another model.
+    consumer = tmp_path / "consumer.json"
+    records = [entry, pin(project, "models/n.safetensors")]
+    consumer.write_text(json.dumps({"version": 2, "artifacts": records}, indent=2))
+    supplied = AIBOM(
+        components=ModelScanner(load_signature_policies(supplier, project)).scan(project).components
+    )
+    policies = load_signature_policies(consumer, project)
+    report = CompletenessValidator().validate_against_project(
+        supplied, project, signature_policies=policies
+    )
+    assert not [issue for issue in report.issues if issue.surface.startswith("model:")]
+    recollected = AIBOM(components=ModelScanner(policies).scan(project).components)
+    changed = {
+        change.bom_ref for change in AIBOMDiffer().diff(supplied, recollected).components_modified
+    }
+    assert changed == {"model:models/n.safetensors"}
+
+
+def test_cli_consumer_validates_a_supplier_inventory_under_its_own_policy(tmp_path, project):
+    write_safetensors(project / "models" / "m.safetensors")
+    entry = pin(project, "models/m.safetensors")
+    supplier = tmp_path / "supplier.json"
+    supplier.write_text(json.dumps({"version": 2, "artifacts": [entry]}))
+    consumer = tmp_path / "consumer.json"
+    consumer.write_text(json.dumps({"version": 2, "artifacts": [entry]}, indent=2))
+    bom = tmp_path / "bom.json"
+    runner = CliRunner()
+    flags = ["--no-project-policy", "--signature-policy"]
+    scanned = runner.invoke(main, ["scan", str(project), "-o", str(bom), *flags, str(supplier)])
+    assert scanned.exit_code == 0, scanned.output
+    checked = runner.invoke(
+        main, ["validate", str(bom), "--project", str(project), *flags, str(consumer)]
+    )
+    assert checked.exit_code == 0, checked.output
+
+
+def test_a_policy_reached_through_another_name_for_the_project_is_refused(
+    tmp_path, project, monkeypatch
+):
+    # A case variant or a bind mount names the project's directory without
+    # matching it lexically; its device and inode still match.
+    write_safetensors(project / "m.safetensors")
+    alias = tmp_path / "alias"
+    alias.mkdir()
+    policy = write_policy(alias, [pin(project, "m.safetensors")])
+    real = os.stat(project)
+
+    def identity(path):
+        info = os.stat(path)
+        if Path(path) == alias:
+            return real.st_dev, real.st_ino
+        return info.st_dev, info.st_ino
+
+    monkeypatch.setattr("nexus_symbiote.signature_policy._identity", identity)
+    with pytest.raises(SignaturePolicyError, match="outside the scanned project"):
+        load_signature_policies(policy, project)
+
+
+def test_validate_reports_unused_entries_when_completeness_is_skipped(tmp_path, project):
+    write_safetensors(project / "m.safetensors")
+    (project / "tokenizer.json").write_text("{}")
+    policy = write_policy(tmp_path, [pin(project, "m.safetensors"), pin(project, "tokenizer.json")])
+    bom = AIBOM(components=ModelScanner().scan(project).components)
+    report = IntegrityValidator(load_signature_policies(policy, project)).validate(bom, project)
+    unused = [i for i in report.issues if i.category == "unused_policy_entry"]
+    assert [(i.component_ref, i.detail, i.severity) for i in unused] == [
+        (
+            "signature-policy",
+            "tokenizer.json: signature policy entry names no collected model weight file",
+            "error",
+        )
+    ]
+    path = tmp_path / "bom.json"
+    path.write_text(bom.to_json())
+    (project / ".nexus-symbiote.yaml").write_text("validate: {require_completeness: false}\n")
+    result = CliRunner().invoke(
+        main,
+        ["validate", str(path), "--project", str(project), "--signature-policy", str(policy)],
+    )
+    assert result.exit_code == 1
+    assert "tokenizer.json: signature policy entry names no collected model weight file" in (
+        result.output
+    )
+
+
+# ONNX keys in every encoding a protobuf runtime accepts --------------------------------
+
+
+def test_an_overlong_external_data_key_tag_fails_closed(project):
+    # protobuf C++ keeps the low 32 bits of a tag: 8A 80 80 80 10 is field 1, wire type 2.
+    key = bytes([0x8A, 0x80, 0x80, 0x80, 0x10]) + b"\x08location"
+    tensor = _field(1, 4) + _field(2, 1) + _field(8, b"w")
+    tensor += _field(13, key + _field(2, b"model.onnx_data")) + _field(14, 1)
+    (project / "model.onnx").write_bytes(_field(1, 8) + _field(7, _field(5, tensor)))
+    (project / "model.onnx_data").write_bytes(b"weights")
+    result = ModelScanner().scan(project)
+    assert result.scan_failures == [
+        "model.onnx: ONNX graph could not be parsed; external weight files are unknown"
+    ]
+
+
+def test_tensors_and_values_named_location_are_not_external_data(project):
+    value = _field(11, _field(1, b"location"))
+    node = _field(1, _field(1, b"location") + _field(4, b"Relu"))
+    (project / "model.onnx").write_bytes(_field(1, 8) + _field(7, value + node))
+    result = ModelScanner().scan(project)
+    assert not result.scan_failures
+    assert "weight_files" not in result.components[0].properties
