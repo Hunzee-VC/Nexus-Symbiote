@@ -316,7 +316,10 @@ def test_apply_worker_limits_darwin_rlimit_as_vs_linux_fail_closed(monkeypatch):
 def test_worker_sets_its_limits_through_the_darwin_tolerant_helper(platform, reply, monkeypatch):
     # The real worker with RLIMIT_AS refused, as macOS kernels refuse it: the worker
     # still answers on Darwin and fails closed elsewhere, so its limits are applied
-    # by _apply_worker_limits and not by a second, intolerant copy.
+    # by _apply_worker_limits and not by a second, intolerant copy. Only the module
+    # under test sees the simulated platform: the standard library also reads
+    # sys.platform while the worker imports (urllib.request loads the macOS-only
+    # _scproxy module on darwin), which a Linux host cannot satisfy.
     script = (
         "import resource, sys\n"
         "real = resource.setrlimit\n"
@@ -325,9 +328,13 @@ def test_worker_sets_its_limits_through_the_darwin_tolerant_helper(platform, rep
         "        raise ValueError('current limit exceeds maximum limit')\n"
         "    real(limit, bounds)\n"
         "resource.setrlimit = refuse_address_space\n"
-        "from nexus_symbiote.runtime_validation import _worker\n"
-        f"sys.platform = {platform!r}\n"
-        "raise SystemExit(_worker())\n"
+        "import nexus_symbiote.runtime_validation as validation\n"
+        "class SimulatedSys:\n"
+        f"    platform = {platform!r}\n"
+        "    def __getattr__(self, name):\n"
+        "        return getattr(sys, name)\n"
+        "validation.sys = SimulatedSys()\n"
+        "raise SystemExit(validation._worker())\n"
     )
     monkeypatch.setattr(validation, "_WORKER_COMMAND", (sys.executable, "-I", "-c", script))
     if reply == "valid":
