@@ -4,7 +4,7 @@ Every test starts without the ambient variables that the tool, the Action runner
 scripts read, with HOME and the XDG directories in a private temporary directory, and must
 leave no operating mode enforced. A test that runs longer than ``test_timeout`` seconds fails
 with its traceback. Every skip is listed with its reason; with ``--strict-skips`` (CI) a skip
-for any reason other than the host's file system fails the run.
+for any reason other than the host's file system, or, outside CI, a missing pip, fails the run.
 """
 
 from __future__ import annotations
@@ -44,6 +44,9 @@ PRIVATE_DIRECTORIES = ("XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XD
 # Skips that depend only on the host: a case-insensitive alias exists only on a
 # case-insensitive file system, and some file systems refuse unusual names.
 EXPECTED_SKIP_REASONS = (re.compile(r"case-sensitive"), re.compile(r"file system rejects"))
+# Expected only outside CI: an environment that uv created has no pip, while CI always
+# installs with pip, so there the differential against pip's own reader has to run.
+LOCAL_SKIP_REASONS = (re.compile(r"pip is not importable"),)
 DEFAULT_TIMEOUT_SECONDS = 300
 
 settings.register_profile(
@@ -83,6 +86,11 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers", "timeout(seconds): this test's own time limit instead of test_timeout"
     )
+    config.addinivalue_line(
+        "markers",
+        "locked_only: compares what a pinned dependency generates, such as a pydantic JSON"
+        " schema, with a committed file; the dependency-floor job deselects it",
+    )
     config.pluginmanager.register(SkipAccounting(config), "nexus-symbiote-skip-accounting")
 
 
@@ -110,10 +118,11 @@ class SkipAccounting:
         self._record(report)
 
     def unexpected(self) -> list[tuple[str, str]]:
+        expected = EXPECTED_SKIP_REASONS + (() if os.environ.get("CI") else LOCAL_SKIP_REASONS)
         return [
             (nodeid, reason)
             for nodeid, reason in self.skips
-            if not any(pattern.search(reason) for pattern in EXPECTED_SKIP_REASONS)
+            if not any(pattern.search(reason) for pattern in expected)
         ]
 
     @pytest.hookimpl(tryfirst=True)

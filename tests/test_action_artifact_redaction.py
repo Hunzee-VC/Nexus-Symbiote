@@ -42,7 +42,12 @@ def test_staged_artifact_omits_descriptor_credential(tmp_path: Path, format_name
     }
     runner = Path(__file__).resolve().parents[1] / "scripts" / "run_action.py"
     result = subprocess.run(  # noqa: S603 -- use the installed interpreter and reviewed Action
-        [sys.executable, "-I", str(runner)], cwd=tmp_path, env=env, capture_output=True, text=True
+        [sys.executable, "-I", str(runner)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=300,
     )
     assert result.returncode == int(fail_risk), result.stderr
     published = dict(line.split("=", 1) for line in outputs.read_text().splitlines())

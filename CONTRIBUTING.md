@@ -26,13 +26,13 @@ python scripts/check_workflows.py
 python scripts/check_repository_hygiene.py
 python scripts/check_locks.py
 python scripts/check_security_regressions.py --out security-regressions.json
-python -m pytest --strict-skips --cov=nexus_symbiote --cov-branch --cov-report=json:coverage.json
+python -m pytest --strict-skips --cov=nexus_symbiote --cov=scripts --cov-branch --cov-report=json:coverage.json
 python scripts/check_coverage.py coverage.json
 python -m build --no-isolation
 python -m twine check --strict dist/*
 ```
 
-`make test-floor` runs the suite on Python 3.11 with every runtime dependency at its declared lower bound (it needs `python3.11`; set `PYTHON_FLOOR` to use another interpreter).
+`make test-floor` runs the suite on Python 3.11 with every runtime dependency at its declared lower bound (it needs `python3.11`; set `PYTHON_FLOOR` to use another interpreter), as the CI `floor` job does. Both leave out the tests marked `locked_only`, which compare what a pinned library generates, such as the JSON schema pydantic derives from the models, with a committed file; every behaviour test still runs. A test that fails only at the floors means the declared floor is wrong: raise it and run `make lock`.
 
 ## Tests
 
@@ -68,7 +68,7 @@ Every CI and release install of a lock uses `--require-hashes --only-binary=:all
 
 `Verified CI` aggregates the test matrix, the dependency-floor tests, coverage, quality, distribution, security-regression, dependency-advisory and CodeQL jobs. Missing, failed, cancelled and skipped prerequisites fail that stable check. Branch protection must require it; see [repository controls](docs/repository-controls.md). `scripts/check_workflows.py` fails if any of those jobs stops running the command that makes it a gate, so a job cannot be emptied while keeping its name.
 
-The coverage gate (`scripts/check_coverage.py`) uses exact counts rather than rounded display percentages. It holds the package to its statement and branch floors and each security-critical module (confined reads, hashing, signature verification and policy, the validators, the differ, the offline guard, runtime authorization, redaction and terminal neutralization) to its own, so that a well-tested average cannot hide an untested module. The job prints the measured figures beside the floors and writes them to the run summary; the floors themselves live only in that script. They prevent regression and are not a completeness claim. Raise them as missing paths gain tests.
+The coverage gate (`scripts/check_coverage.py`) uses exact counts rather than rounded display percentages. It holds the package to its statement and branch floors and each security-critical module (confined reads, hashing, signature verification and policy, the validators, the differ, the offline guard, runtime authorization, redaction and terminal neutralization) to its own, so that a well-tested average cannot hide an untested module. The gate scripts are measured as well, without counting toward the package figure, and the Action's runner `scripts/run_action.py` has a floor of its own; a report that leaves `scripts/` out fails. The job prints the measured figures beside the floors and writes them to the run summary; the floors themselves live only in that script. They prevent regression and are not a completeness claim. Raise them as missing paths gain tests.
 
 ## Architecture boundaries
 

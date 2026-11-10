@@ -17,7 +17,8 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: dependencies-${{ github.ref }}
+  # One group per trigger: the daily run must not cancel a weekly run still in progress.
+  group: dependencies-${{ github.ref }}-${{ github.event.schedule || github.event_name }}
   cancel-in-progress: true
 jobs:
   locked-advisories:

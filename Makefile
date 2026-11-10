@@ -69,11 +69,11 @@ test-floor: ## Run the suite on Python 3.11 with every dependency at its declare
 	"$$floor_dir/bin/python" -m pip install --require-hashes --only-binary=:all: -r requirements-floor.lock; \
 	"$$floor_dir/bin/python" -m pip install --no-deps --no-build-isolation -e .; \
 	"$$floor_dir/bin/python" -m pip check; \
-	"$$floor_dir/bin/python" -m pytest --strict-skips
+	"$$floor_dir/bin/python" -m pytest --strict-skips -m "not locked_only"
 
 .PHONY: coverage
 coverage: ## Run tests with coverage reporting
-	python -m pytest --strict-skips --cov=nexus_symbiote --cov-branch --cov-report=term-missing --cov-report=json:coverage.json
+	python -m pytest --strict-skips --cov=nexus_symbiote --cov=scripts --cov-branch --cov-report=term-missing --cov-report=json:coverage.json
 	python scripts/check_coverage.py coverage.json
 
 .PHONY: security-regressions

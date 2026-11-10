@@ -71,7 +71,7 @@ mypy src/nexus_symbiote scripts
 python scripts/check_workflows.py
 python scripts/check_repository_hygiene.py
 python scripts/check_security_regressions.py --out security-regressions.json
-python -m pytest --cov=nexus_symbiote --cov-branch --cov-report=json:coverage.json
+python -m pytest --cov=nexus_symbiote --cov=scripts --cov-branch --cov-report=json:coverage.json
 python scripts/check_coverage.py coverage.json
 ```
 

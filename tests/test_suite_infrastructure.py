@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import ast
+import re
 from pathlib import Path
 
 import pytest
+import yaml
+
+from tests.support import ROOT
 
 CONFTEST = (Path(__file__).parent / "conftest.py").read_text(encoding="utf-8")
 
@@ -118,3 +123,67 @@ def test_a_test_that_leaves_the_offline_guard_enforced_fails(suite):
     result = suite.runpytest_subprocess("-p", "no:cacheprovider")
     result.assert_outcomes(passed=1, errors=1)
     result.stdout.fnmatch_lines(["*left the offline mode enforced*"])
+
+
+@pytest.mark.parametrize(("ci", "status"), [(None, pytest.ExitCode.OK), ("true", 1)])
+def test_a_missing_pip_is_an_expected_skip_only_outside_ci(suite, monkeypatch, ci, status):
+    if ci is None:
+        monkeypatch.delenv("CI", raising=False)
+    else:
+        monkeypatch.setenv("CI", ci)
+    suite.makepyfile(
+        """
+        import pytest
+
+        def test_skips():
+            pytest.skip("pip is not importable here; CI, which installs with pip, runs this test")
+        """
+    )
+    result = suite.runpytest("-p", "no:cacheprovider", "--strict-skips")
+    assert result.ret == status
+    result.stdout.fnmatch_lines([f"{'UNEXPECTED' if ci else 'expected'}: *pip is not importable*"])
+
+
+def test_locked_only_tests_are_registered_and_left_out_only_at_the_floors(suite):
+    suite.makepyfile(
+        """
+        import pytest
+
+        @pytest.mark.locked_only
+        def test_generated_schema_equals_the_committed_file():
+            pass
+
+        def test_behaviour():
+            pass
+        """
+    )
+    unknown_marks_fail = ("-W", "error::pytest.PytestUnknownMarkWarning")
+    result = suite.runpytest("-p", "no:cacheprovider", *unknown_marks_fail, "-m", "not locked_only")
+    result.assert_outcomes(passed=1, deselected=1)
+    workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+
+    def pytest_runs(job):
+        steps = workflow["jobs"][job]["steps"]
+        return [s["run"] for s in steps if "python -m pytest" in s.get("run", "")]
+
+    assert pytest_runs("floor") and all('-m "not locked_only"' in r for r in pytest_runs("floor"))
+    selects = re.compile(r"\s-[mk]\s+[\"']|locked_only")
+    for job in ("test", "coverage"):
+        assert pytest_runs(job) and not any(selects.search(run) for run in pytest_runs(job))
+
+
+def test_every_subprocess_a_test_starts_has_its_own_timeout():
+    """A hung child process must fail its test, not use up the CI job's time budget."""
+    untimed = []
+    for path in sorted(Path(__file__).parent.glob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "subprocess"
+                and node.func.attr in {"run", "call", "check_call", "check_output"}
+                and not any(k.arg in {"timeout", None} for k in node.keywords)
+            ):
+                untimed.append(f"{path.name}:{node.lineno}")
+    assert untimed == []

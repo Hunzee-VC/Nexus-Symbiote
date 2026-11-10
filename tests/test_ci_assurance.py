@@ -186,11 +186,33 @@ def coverage_report(coverage):
         }
 
     files = {
-        f"src/{module}": {"summary": summary(*floors)}
+        (f"src/{module}" if module.startswith("nexus_symbiote/") else module): {
+            "summary": summary(*floors)
+        }
         for module, floors in coverage["MODULE_FLOORS"].items()
     }
-    totals = summary(coverage["MIN_STATEMENT_PERCENT"], coverage["MIN_BRANCH_PERCENT"])
-    return {"meta": {"branch_coverage": True}, "totals": totals, "files": files}
+    # The rest of the package, sized so that the package total sits exactly at its floors.
+    listed = [entry["summary"] for path, entry in files.items() if "nexus_symbiote" in path]
+    rest = 100_000
+
+    def filler(floor, covered_key, total_key):
+        total = sum(s[total_key] for s in listed) + rest
+        assert floor * total % 100 == 0
+        return floor * total // 100 - sum(s[covered_key] for s in listed)
+
+    files["src/nexus_symbiote/cli.py"] = {
+        "summary": {
+            "covered_lines": filler(
+                coverage["MIN_STATEMENT_PERCENT"], "covered_lines", "num_statements"
+            ),
+            "num_statements": rest,
+            "covered_branches": filler(
+                coverage["MIN_BRANCH_PERCENT"], "covered_branches", "num_branches"
+            ),
+            "num_branches": rest,
+        }
+    }
+    return {"meta": {"branch_coverage": True}, "files": files}
 
 
 @pytest.mark.parametrize(
@@ -205,6 +227,8 @@ def coverage_report(coverage):
         "module-branch",
         "module-missing",
         "module-duplicated",
+        "script-statement",
+        "scripts-unmeasured",
     ],
 )
 def test_coverage_gate_rejects_regressions_and_invalid_measurements(change):
@@ -212,28 +236,51 @@ def test_coverage_gate_rejects_regressions_and_invalid_measurements(change):
     check = coverage["coverage_failures"]
     report = coverage_report(coverage)
     assert check(report) == []
+    package = report["files"]["src/nexus_symbiote/cli.py"]["summary"]
     confined = report["files"]["src/nexus_symbiote/utils/confined.py"]["summary"]
     if change == "statement":
-        report["totals"]["covered_lines"] -= 1
+        package["covered_lines"] -= 1
     elif change == "branch":
-        report["totals"]["covered_branches"] -= 1
+        package["covered_branches"] -= 1
     elif change == "unmeasured":
         report["meta"]["branch_coverage"] = False
     elif change == "missing":
-        del report["totals"]["covered_branches"]
+        del package["covered_branches"]
     elif change == "boolean":
-        report["totals"]["covered_lines"] = True
+        package["covered_lines"] = True
     elif change == "module-statement":
         # One untested security module fails even though the package total still passes.
-        report["totals"]["covered_lines"] += 100
+        package["covered_lines"] += 100
         confined["covered_lines"] -= 1
     elif change == "module-branch":
         confined["covered_branches"] -= 1
     elif change == "module-missing":
         del report["files"]["src/nexus_symbiote/utils/confined.py"]
-    else:
+    elif change == "module-duplicated":
         report["files"]["build/lib/nexus_symbiote/utils/confined.py"] = {"summary": confined}
+    elif change == "script-statement":
+        report["files"]["scripts/run_action.py"]["summary"]["covered_lines"] -= 1
+    else:
+        report["files"] = {
+            path: entry for path, entry in report["files"].items() if "nexus_symbiote" in path
+        }
     assert check(report)
+
+
+def test_measured_scripts_neither_dilute_nor_inflate_the_package_floor():
+    coverage = runpy.run_path(str(ROOT / "scripts/check_coverage.py"))
+    check = coverage["coverage_failures"]
+    report = coverage_report(coverage)
+    untested = {"covered_lines": 0, "num_statements": 10_000}
+    untested |= {"covered_branches": 0, "num_branches": 10_000}
+    report["files"]["scripts/check_wheel_security.py"] = {"summary": untested}
+    assert check(report) == []
+    report["files"]["src/nexus_symbiote/cli.py"]["summary"]["covered_lines"] -= 1
+    untested["covered_lines"] = untested["num_statements"]
+    failures = check(report)
+    assert len(failures) == 1 and failures[0].startswith("package statement: ")
+    rows = coverage["measured"](report)
+    assert rows[2].startswith("| package |") and rows[3].startswith("| scripts |")
 
 
 def test_coverage_floors_cover_the_security_critical_modules_and_exist():
@@ -251,4 +298,8 @@ def test_coverage_floors_cover_the_security_critical_modules_and_exist():
         "nexus_symbiote/runtime.py",
     ):
         assert module in floors
-    assert all((ROOT / "src" / module).is_file() for module in floors)
+    assert "scripts/run_action.py" in floors
+    assert all(
+        (ROOT / ("src" if module.startswith("nexus_symbiote/") else "") / module).is_file()
+        for module in floors
+    )

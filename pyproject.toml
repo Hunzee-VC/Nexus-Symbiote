@@ -45,6 +45,11 @@ classifiers = [
     "Topic :: Software Development :: Quality Assurance",
     "Typing :: Typed",
 ]
+# Every lower bound is tested (requirements-floor.lock), with the extras and the build backend
+# installed beside the core. So three floors are what those need, not what the core was shown
+# to need: pydantic 2.12 (sigstore-models), jsonschema 4.25 (cyclonedx-python-lib's
+# json-validation) and packaging 24.2 (hatchling 1.27). Lower versions are untested, not known
+# to fail.
 dependencies = [
     "click>=8.2.1,<9",
     "packaging>=24.2,<27",

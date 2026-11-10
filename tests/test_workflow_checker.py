@@ -140,3 +140,92 @@ def test_dropping_a_verification_job_from_verified_ci_is_rejected(tmp_path):
     path = tmp_path / "ci.yml"
     path.write_text(yaml.safe_dump(workflow))
     assert any("Verified CI" in error for error in checker.check(path))
+
+
+@pytest.mark.parametrize(
+    "permissions",
+    [
+        "    permissions:\n      contents: write\n",
+        "    permissions:\n      contents: read\n      pull-requests: write\n",
+        "    permissions:\n      id-token: write\n",
+        "    permissions: write-all\n",
+        "    permissions:\n      contents: admin\n",
+    ],
+)
+def test_a_job_cannot_grant_itself_a_write_token(repository, capsys, permissions):
+    workflow = SAFE.replace("    timeout-minutes: 5\n", "    timeout-minutes: 5\n" + permissions)
+    status, output = run_checker(repository, workflow, capsys)
+    assert status == 1
+    assert "test may hold write permissions only for nothing" in output
+
+
+def test_a_write_scope_stays_with_the_job_reviewed_for_it(tmp_path):
+    workflow = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())
+    path = tmp_path / "release.yml"
+    path.write_text(yaml.safe_dump(workflow))
+    assert not any("write permissions" in error for error in checker.check(path))
+    # The build job runs the test suite; it must never hold the publishing token.
+    workflow["jobs"]["build"]["permissions"]["id-token"] = "write"
+    path.write_text(yaml.safe_dump(workflow))
+    assert any(
+        "build may hold write permissions only for nothing" in error
+        for error in checker.check(path)
+    )
+
+
+SCHEDULED = """on:
+  schedule:
+    - cron: "17 5 * * *"
+    - cron: "43 4 * * 2"
+permissions:
+  contents: read
+concurrency:
+  group: {group}
+  cancel-in-progress: {cancel}
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - run: echo safe
+"""
+
+
+@pytest.mark.parametrize(
+    "group,cancel,rejected",
+    [
+        ("scheduled-${{ github.ref }}", "true", True),
+        (
+            "scheduled-${{ github.ref }}-${{ github.event.schedule || github.event_name }}",
+            "true",
+            False,
+        ),
+        ("scheduled-${{ github.ref }}", "false", False),
+    ],
+)
+def test_one_schedule_cannot_cancel_another(repository, capsys, group, cancel, rejected):
+    status, output = run_checker(repository, SCHEDULED.format(group=group, cancel=cancel), capsys)
+    assert (status, "github.event.schedule" in output) == (int(rejected), rejected)
+    single = SCHEDULED.replace('    - cron: "43 4 * * 2"\n', "")
+    assert run_checker(repository, single.format(group=group, cancel=cancel), capsys)[0] == 0
+
+
+def test_a_step_may_continue_on_error_only_when_its_outcome_is_checked(tmp_path):
+    workflow = ci_workflow()
+    steps = workflow["jobs"]["codeql"]["steps"]
+    steps[-2].update({"id": "probe", "continue-on-error": True})
+    path = tmp_path / "ci.yml"
+    path.write_text(yaml.safe_dump(workflow))
+    assert any("continue on error" in error for error in checker.check(path))
+    steps.append(
+        {
+            "name": "The probe must have failed",
+            "env": {"OUTCOME": "${{ steps.probe.outcome }}"},
+            "run": 'test "$OUTCOME" = failure',
+        }
+    )
+    path.write_text(yaml.safe_dump(workflow))
+    assert not any("continue on error" in error for error in checker.check(path))
+    workflow["jobs"]["codeql"]["continue-on-error"] = True
+    path.write_text(yaml.safe_dump(workflow))
+    assert any("continue on error" in error for error in checker.check(path))

@@ -139,6 +139,7 @@ def test_native_schema_checks_deployment_profile_shape():
         jsonschema.validate(bom, schema)
 
 
+@pytest.mark.locked_only
 def test_standalone_deployment_schema_matches_the_runtime_contract():
     schema = json.loads(
         (Path(__file__).parents[1] / "schemas/deployment-profile-1.0.schema.json").read_text()

@@ -3,13 +3,16 @@
 Every remote action is pinned to a commit with a full-version comment that agrees wherever
 the same commit is used, and is no older than its recorded floor. Local actions must exist
 and are checked like any other. Expressions never reach shell source. Workflows use only
-reviewed triggers, read-only top-level permissions, a job time limit and checkouts without
-persisted credentials; the gating workflows never continue on error, and each of their
-verification jobs still runs the command that makes it a gate.
+reviewed triggers, read-only top-level permissions, write scopes only in the reviewed jobs
+that need them, a job time limit and checkouts without persisted credentials; scheduled runs
+cannot cancel each other. In the gating workflows no job continues on error, a step may only
+when a later step reads its outcome, and each verification job still runs the command that
+makes it a gate.
 """
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Iterator
 from pathlib import Path
@@ -22,6 +25,18 @@ ALLOWED_TRIGGERS = frozenset(
     {"push", "pull_request", "workflow_dispatch", "schedule", "branch_protection_rule"}
 )
 READ_ONLY = frozenset({"read", "none"})
+# The only jobs that may hold a write scope, and which: uploading code-scanning results,
+# signing attestations and trusted publishing. A token that could push, comment, approve or
+# publish anywhere else fails the check.
+JOB_WRITE_SCOPES: dict[str, dict[str, frozenset[str]]] = {
+    "ci.yml": {"codeql": frozenset({"security-events"})},
+    "codeql.yml": {"analyze": frozenset({"security-events"})},
+    "release.yml": {
+        "attest": frozenset({"id-token", "attestations"}),
+        "publish": frozenset({"id-token"}),
+    },
+    "scorecard.yml": {"analysis": frozenset({"security-events", "id-token"})},
+}
 GATING = frozenset({"ci.yml", "release.yml"})
 PIN = re.compile(r"[^@\s]+@[0-9a-f]{40}")
 USES_LINE = re.compile(r"^\s*(?:-\s+)?uses:\s*['\"]?([^\s'\"#]+)['\"]?(?:\s+#\s*(\S+))?")
@@ -56,7 +71,12 @@ REQUIRED_COMMANDS: dict[str, dict[str, tuple[str, ...]]] = {
     "ci.yml": {
         "test": ("requirements-ci.lock", "python -m pytest", "--strict-skips"),
         "floor": ("requirements-floor.lock", "python -m pytest", "--strict-skips"),
-        "coverage": ("--cov=nexus_symbiote", "--cov-branch", "scripts/check_coverage.py"),
+        "coverage": (
+            "--cov=nexus_symbiote",
+            "--cov=scripts",
+            "--cov-branch",
+            "scripts/check_coverage.py",
+        ),
         "quality": (
             "ruff check src tests scripts",
             "ruff format --check src tests scripts",
@@ -120,9 +140,52 @@ def _read_only(permissions: Any) -> bool:
     )
 
 
+def _write_scopes(permissions: Any) -> set[str] | None:
+    """The scopes a job's permissions grant write access to; None when unreadable."""
+    if permissions is None or permissions in ("read-all", {}):
+        return set()
+    if not isinstance(permissions, dict) or any(
+        value not in {"read", "write", "none"} for value in permissions.values()
+    ):
+        return None
+    return {str(scope) for scope, value in permissions.items() if value == "write"}
+
+
+def _schedules_cancel_each_other(document: dict[Any, Any]) -> bool:
+    """Two schedules in one cancelling concurrency group: the later run cancels the earlier."""
+    events = document.get("on", document.get(True))
+    schedule = events.get("schedule") if isinstance(events, dict) else None
+    concurrency = document.get("concurrency")
+    if not isinstance(schedule, list) or len(schedule) < 2 or concurrency is None:
+        return False
+    cancels: Any = False
+    if isinstance(concurrency, str):
+        group = concurrency
+    elif isinstance(concurrency, dict):
+        group, cancels = str(concurrency.get("group", "")), concurrency.get("cancel-in-progress")
+    else:
+        return True
+    return cancels not in (None, False) and "github.event.schedule" not in group
+
+
 def _steps(job: dict[str, Any]) -> list[dict[str, Any]]:
     steps = job.get("steps")
     return [step for step in steps if isinstance(step, dict)] if isinstance(steps, list) else []
+
+
+def _continues_unchecked(job: dict[str, Any]) -> bool:
+    """A job that continues on error, or a step that does with nothing reading its outcome."""
+    if job.get("continue-on-error", False) is not False:
+        return True
+    steps = _steps(job)
+    for index, step in enumerate(steps):
+        if step.get("continue-on-error", False) is False:
+            continue
+        identifier = step.get("id")
+        later = json.dumps(steps[index + 1 :])
+        if not isinstance(identifier, str) or f"steps.{identifier}.outcome" not in later:
+            return True
+    return False
 
 
 def _job_text(job: dict[str, Any]) -> str:
@@ -154,6 +217,11 @@ def _workflow_issues(path: Path, document: dict[Any, Any]) -> list[str]:
         errors.append(f"{path}: triggers must be among {', '.join(sorted(ALLOWED_TRIGGERS))}")
     if "permissions" not in document or not _read_only(document["permissions"]):
         errors.append(f"{path}: top-level permissions must be present and read-only")
+    if _schedules_cancel_each_other(document):
+        errors.append(
+            f"{path}: key the concurrency group on github.event.schedule, so that one"
+            " schedule's run cannot cancel another's"
+        )
     jobs = document.get("jobs", {})
     if not isinstance(jobs, dict) or not jobs:
         return [*errors, f"{path}: workflow must define jobs"]
@@ -168,10 +236,18 @@ def _workflow_issues(path: Path, document: dict[Any, Any]) -> list[str]:
         timeout = job.get("timeout-minutes")
         if type(timeout) is not int or timeout <= 0:
             errors.append(f"{path}: {name} must set timeout-minutes")
-        if path.name in GATING and (
-            "continue-on-error" in job or any("continue-on-error" in s for s in _steps(job))
-        ):
-            errors.append(f"{path}: {name} must not continue on error in a gating workflow")
+        granted = _write_scopes(job.get("permissions"))
+        writable = JOB_WRITE_SCOPES.get(path.name, {}).get(str(name), frozenset())
+        if granted is None or granted - writable:
+            errors.append(
+                f"{path}: {name} may hold write permissions only for"
+                f" {', '.join(sorted(writable)) or 'nothing'}"
+            )
+        if path.name in GATING and _continues_unchecked(job):
+            errors.append(
+                f"{path}: {name} must not continue on error in a gating workflow, except in a"
+                " step whose outcome a later step checks"
+            )
         for step in _steps(job):
             uses = step.get("uses")
             if isinstance(uses, str) and uses.startswith("actions/checkout@"):

@@ -143,6 +143,7 @@ def test_cli_writes_a_file_from_pip_inspect(tmp_path):
         capture_output=True,
         text=True,
         check=False,
+        timeout=120,
         env={
             "PATH": "",
             "SOURCE_DATE_EPOCH": "1793827808",

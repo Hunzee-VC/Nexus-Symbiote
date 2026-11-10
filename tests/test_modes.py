@@ -30,7 +30,9 @@ def _attempts() -> dict[str, object]:
         "_socket.getaddrinfo": lambda: _socket.getaddrinfo("example.com", 443),
         "socket.create_connection": lambda: socket.create_connection(("192.0.2.1", 443), 0.01),
         "socket.connect": lambda: socket.socket().connect(("192.0.2.1", 443)),
-        "subprocess": lambda: subprocess.run([sys.executable, "-c", "pass"], check=False),  # noqa: S603
+        "subprocess": lambda: subprocess.run(  # noqa: S603
+            [sys.executable, "-c", "pass"], check=False, timeout=30
+        ),
         "os.system": lambda: os.system("true"),  # noqa: S605, S607
     }
 
@@ -244,7 +246,7 @@ class _ProcessScanner(Scanner):
     name = "process"
 
     def scan(self, project_root: Path) -> ScanResult:
-        subprocess.run(["true"], check=False)  # noqa: S603, S607
+        subprocess.run(["true"], check=False, timeout=30)  # noqa: S603, S607
         return ScanResult(scanner_name=self.name)
 
 

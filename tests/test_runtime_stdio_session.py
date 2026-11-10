@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -21,7 +22,7 @@ def launcher(
     definition = dict(DEFINITION)
     if altered:
         definition["description"] = "changed after approval"
-    script = f"""#!/usr/bin/python3
+    script = f"""#!{sys.executable}
 import json, os, sys, time
 definition = {definition!r}
 log = {str(log)!r}

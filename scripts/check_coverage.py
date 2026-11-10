@@ -1,10 +1,12 @@
 """Enforce measured coverage floors, independently of rounded display values.
 
-The whole package must keep its statement and branch floors, and each security-critical
-module must keep its own: a well-tested package average cannot hide an untested module that
-confines reads, verifies signatures, gates verdicts or enforces offline mode. A listed module
-missing from the report fails. The measured figures are printed, and written to the job
-summary in CI; the floors only rise, as missing paths gain tests.
+The package must keep its statement and branch floors, and each security-critical module
+must keep its own: a well-tested package average cannot hide an untested module that
+confines reads, verifies signatures, gates verdicts or enforces offline mode. The gate
+scripts are measured too, and the Action's runner, which decides its gate outcomes, has a
+floor of its own. A listed file missing from the report, or a report without the scripts,
+fails. The measured figures are printed, and written to the job summary in CI; the floors
+only rise, as missing paths gain tests.
 """
 
 from __future__ import annotations
@@ -15,10 +17,12 @@ import os
 from pathlib import Path
 from typing import Any
 
+PACKAGE = "nexus_symbiote"
+SCRIPTS = "scripts"
 MIN_STATEMENT_PERCENT = 91
 MIN_BRANCH_PERCENT = 83
-# Floors per module, a few points under the coverage measured when they were set; a branch
-# floor of None leaves a module with too few branches for a stable percentage unchecked.
+# Floors per file, a few points under the coverage measured when they were set; a branch
+# floor of None leaves a file with too few branches for a stable percentage unchecked.
 MODULE_FLOORS: dict[str, tuple[int, int | None]] = {
     "nexus_symbiote/utils/confined.py": (88, 78),
     "nexus_symbiote/core/hashing.py": (95, 92),
@@ -33,6 +37,8 @@ MODULE_FLOORS: dict[str, tuple[int, int | None]] = {
     "nexus_symbiote/policy.py": (90, 82),
     "nexus_symbiote/utils/secrets.py": (90, 85),
     "nexus_symbiote/utils/terminal.py": (95, None),
+    # Measured at 87% of statements and 86% of branches when scripts/ joined the report.
+    "scripts/run_action.py": (75, 65),
 }
 COUNTS = (
     ("statement", "covered_lines", "num_statements"),
@@ -59,27 +65,54 @@ def _below(label: str, counts: tuple[int, int] | None, floor: int | None) -> lis
     return []
 
 
-def _module(report: dict[str, Any], suffix: str) -> Any:
+def _files(report: dict[str, Any]) -> dict[str, Any]:
     files = report.get("files")
-    if not isinstance(files, dict):
-        return None
+    return files if isinstance(files, dict) else {}
+
+
+def _module(report: dict[str, Any], suffix: str) -> Any:
     matches = [
         entry
-        for path, entry in files.items()
-        if isinstance(path, str) and Path(path).as_posix().endswith("/" + suffix)
+        for path, entry in _files(report).items()
+        if isinstance(path, str) and ("/" + Path(path).as_posix()).endswith("/" + suffix)
     ]
     return matches[0].get("summary") if len(matches) == 1 and isinstance(matches[0], dict) else None
+
+
+def _in_scope(path: str, scope: str) -> bool:
+    parts = Path(path).parts
+    return scope in parts if scope == PACKAGE else bool(parts) and parts[0] == scope
+
+
+def _aggregate(report: dict[str, Any], scope: str, covered_key: str, total_key: str) -> Any:
+    """Summed counts over every measured file in scope; None when any is invalid or absent."""
+    covered = total = 0
+    found = False
+    for path, entry in _files(report).items():
+        if not isinstance(path, str) or not _in_scope(path, scope):
+            continue
+        counts = _percent(
+            entry.get("summary") if isinstance(entry, dict) else None, covered_key, total_key
+        )
+        if counts is None:
+            return None
+        found = True
+        covered += counts[0]
+        total += counts[1]
+    return (covered, total) if found else None
 
 
 def coverage_failures(report: dict[str, Any]) -> list[str]:
     if report.get("meta", {}).get("branch_coverage") is not True:
         return ["branch coverage was not measured"]
-    totals = report.get("totals", {})
     failures = []
     for (name, covered_key, total_key), floor in zip(
         COUNTS, (MIN_STATEMENT_PERCENT, MIN_BRANCH_PERCENT), strict=True
     ):
-        failures.extend(_below(name, _percent(totals, covered_key, total_key), floor))
+        counts = _aggregate(report, PACKAGE, covered_key, total_key)
+        failures.extend(_below(f"package {name}", counts, floor))
+    if _aggregate(report, SCRIPTS, *COUNTS[0][1:]) is None:
+        failures.append("scripts/: not measured, or measured with invalid counts")
     for module, floors in MODULE_FLOORS.items():
         summary = _module(report, module)
         if summary is None:
@@ -99,11 +132,14 @@ def measured(report: dict[str, Any]) -> list[str]:
     def cell(counts: tuple[int, int] | None) -> str:
         return f"{100 * counts[0] / counts[1]:.2f}%" if counts and counts[1] else "n/a"
 
-    totals = report.get("totals", {})
-    rows.append(
-        f"| package | {cell(_percent(totals, *COUNTS[0][1:]))} | "
-        f"{cell(_percent(totals, *COUNTS[1][1:]))} | {MIN_STATEMENT_PERCENT}% / {MIN_BRANCH_PERCENT}% |"
-    )
+    for label, scope, floors in (
+        ("package", PACKAGE, f"{MIN_STATEMENT_PERCENT}% / {MIN_BRANCH_PERCENT}%"),
+        ("scripts", SCRIPTS, "- / -"),
+    ):
+        rows.append(
+            f"| {label} | {cell(_aggregate(report, scope, *COUNTS[0][1:]))} | "
+            f"{cell(_aggregate(report, scope, *COUNTS[1][1:]))} | {floors} |"
+        )
     for module, (statements, branches) in MODULE_FLOORS.items():
         summary = _module(report, module)
         rows.append(

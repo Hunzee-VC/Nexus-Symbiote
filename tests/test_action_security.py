@@ -275,7 +275,12 @@ def test_real_entry_point_ignores_untrusted_python_path_and_policy(tmp_path, val
     }
     entry = Path(__file__).parents[1] / "scripts" / "run_action.py"
     result = subprocess.run(  # noqa: S603
-        [sys.executable, "-I", str(entry)], cwd=tmp_path, env=env, capture_output=True, check=False
+        [sys.executable, "-I", str(entry)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=300,
     )
     assert result.returncode == (1 if validate else 0)
     assert not (tmp_path / "PWNED").exists()
