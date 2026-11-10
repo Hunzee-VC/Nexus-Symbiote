@@ -391,10 +391,17 @@ def test_executor_can_receive_the_form_the_approval_binds(tmp_path):
     values[0].canonical_arguments = True
     arguments = {"to": "team@example.test", "zeta": 1.0, "alpha": -0.0, "big": 1e20}
     values[1] = values[1].model_copy(update={"arguments": arguments})
+    # RFC 8785 writes 1e20 as an integer outside I-JSON, which the executor would receive.
+    with pytest.raises(AuthorizationError) as out_of_range:
+        invoke(values, approval=None)
+    assert out_of_range.value.reason == "arguments-number-out-of-range"
+    assert values[-1] == []
+    arguments["big"] = 2.0**53 - 1
+    values[1] = values[1].model_copy(update={"arguments": arguments})
     assert invoke(values, approval=None) == "executed"
     executed = values[-1][0].arguments
     assert list(executed) == ["alpha", "big", "to", "zeta"]
-    assert executed == {"alpha": 0, "big": 10**20, "to": "team@example.test", "zeta": 1}
+    assert executed == {"alpha": 0, "big": 2**53 - 1, "to": "team@example.test", "zeta": 1}
     assert {type(executed[key]) for key in ("alpha", "big", "zeta")} == {int}
 
 
