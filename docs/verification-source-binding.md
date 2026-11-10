@@ -1,4 +1,4 @@
-# Reconcile a BOM with its MCP and A2A configuration
+# Reconcile a BOM with its MCP, A2A, RAG and IDE configuration
 
 `validate --project` checks a supplied inventory against freshly collected local
 evidence. Static MCP server records carry two kinds of source binding.

@@ -31,7 +31,7 @@ The three live commands, and what each one contacts:
 |---|---|---|
 | `discover-mcp` | The HTTPS MCP endpoint you name | Exact `--allowed-origin` match; HTTPS only; destination pinned to one public IP address (private, loopback, link-local, site-local, NAT64, 6to4, Teredo, documentation and other special-purpose addresses are refused by an explicit list, whatever the Python version's address tables say); no proxies or redirects; `SSLKEYLOGFILE` is ignored, so no TLS session secrets are written; bounded size and time; never calls a tool; the bearer token is read from `--token-env` and never written to evidence |
 | `advisories` | `https://api.osv.dev/v1/querybatch` | Same pinned HTTPS transport; exact `pkg:pypi`/`pkg:npm` package URLs only; sends each package's ecosystem, normalized name and exact version and nothing else, including packages resolved from a private registry unless you exclude them: `--exclude` withholds names, `--exclude-private-origins` sends only packages whose lockfile records a public registry (requirements files and `pyproject.toml` name no index, so it withholds every Python package that no `uv.lock` or `poetry.lock` resolves; withhold such private names with `--exclude`), `--dry-run` previews; at most 500 packages, 10,000 advisories per package and 20,000 in total, and a 120-second total budget that is also checked while a reply is read; no response text copied into the report |
-| `verify-live` | The operator-pinned stdio launchers in `--launch-policy` | The policy file must live outside the project and outside the repository that holds the project or the inventory, be a single-link file owned by you or root that only its owner can write; each launcher is an absolute path with a SHA-256 pin; a private copy is executed with an empty environment (only `PATH`), no project arguments and no project working directory; 20-second deadline; never calls a tool; servers reached over HTTP are reported as not verifiable here |
+| `verify-live` | The operator-pinned stdio launchers in `--launch-policy` | The policy file must live outside the project and outside the repository that holds the project or the inventory, be a single-link file owned by you or root that only its owner can write; each launcher is an absolute path with a SHA-256 pin; a private copy is executed with an environment that holds only a default `PATH`, no project arguments and no project working directory; 20-second deadline; never calls a tool; servers reached over HTTP are reported as not verifiable here |
 
 **Mode selection.** A `--offline` or `--live` flag (placed before the command) wins;
 otherwise `NEXUS_SYMBIOTE_MODE` decides; otherwise the mode is offline. An
@@ -166,8 +166,8 @@ authorization metadata, or changes after the session. A server can tell an obser
 apart and answer it differently: `discover-mcp` sends no `User-Agent` and the
 `clientInfo` name `nexus-symbiote-discovery` unless you set `--client-name`,
 `--client-version` and `--user-agent` to match your production host, and
-`verify-live` starts launchers with an empty environment, no arguments and a private
-working directory. Both negotiate MCP 2025-11-25, 2025-06-18, 2025-03-26 or
+`verify-live` starts launchers with no arguments, a private working directory and an
+environment that holds only a default `PATH`. Both negotiate MCP 2025-11-25, 2025-06-18, 2025-03-26 or
 2024-11-05 through `initialize`; a server that offers none of them, or only a
 revision without `initialize`, is reported as refused. Server-sent event replies may
 use chunked transfer coding; one event line may use the whole 1 MiB response limit.

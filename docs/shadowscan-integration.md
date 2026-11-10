@@ -111,9 +111,9 @@ dependency. A complete ShadowScan run is only complete for its configured scope;
 Nexus SymBiote records the imported BOM coverage as partial. SARIF is not available
 for imported discovery because its finding projection does not retain complete
 coverage and provenance: `scan -f sarif` and `import-shadowscan -f sarif` refuse
-such an inventory, and the GitHub Action's SARIF output and the `vex` command omit
-imported findings and record how many they omitted in the property
-`nexus-symbiote:omittedImportedFindings`.
+such an inventory, the GitHub Action skips its SARIF upload with a warning, and the
+`vex` command omits imported findings and records how many it omitted in the
+property `nexus-symbiote:omittedImportedFindings`.
 
 ## Import and policy gates
 

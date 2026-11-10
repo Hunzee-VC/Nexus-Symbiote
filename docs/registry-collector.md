@@ -43,7 +43,7 @@ These make the collector partial, so `scan`, `validate` and `risk` fail by defau
 | `<compose file>: YAML merge key cycle not followed` | A mapping merges itself |
 | `<file>: image reference not parsed` | An image that matches the catalog is not a valid image reference |
 
-The requirements-file and Dockerfile gaps are listed in the [README](../README.md#what-it-inventories). A file that cannot be read or parsed, such as invalid TOML, JSON or YAML, a Compose file with a repeated key, a key tagged `!!binary` or with a tag outside YAML's own `tag:yaml.org,2002:` types, or a non-mapping service, or a requirement that packaging cannot parse, is a collection failure, which fails the collector.
+The requirements-file and Dockerfile gaps are listed in the [README](../README.md#registry-gaps-in-requirements-files-and-dockerfiles). A file that cannot be read or parsed, such as invalid TOML, JSON or YAML, a Compose file with a repeated key, a key tagged `!!binary` or with a tag outside YAML's own `tag:yaml.org,2002:` types, or a non-mapping service, or a requirement that packaging cannot parse, is a collection failure, which fails the collector.
 
 ## Findings
 

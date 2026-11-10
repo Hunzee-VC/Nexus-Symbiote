@@ -11,9 +11,9 @@ settings, or instruction files under names the `prompt` collector does not read,
 alert. Without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, neither can a changed MCP launch
 argument other than the launcher package, a changed environment or header value, an
 endpoint or package index path changed on the same host, a changed value of a project
-resolver setting such as an `.npmrc` entry, or a RAG source repointed within its origin;
-see [source binding](verification-source-binding.md). The
-[known limitations](known-limitations.md) list those surfaces.
+resolver setting such as an `.npmrc` entry, or an A2A or RAG URL path changed on the same
+host that keeps its depth; see [source binding](verification-source-binding.md).
+The [known limitations](known-limitations.md) list those surfaces.
 
 ## The trust anchor is the baseline
 
@@ -34,7 +34,9 @@ baseline comes from.
   code-owner review for that path.
 - **Protect the gate itself.** On the `pull_request` event the workflow file comes
   from the pull request, so an author can edit `--fail-on-alert` away. Require the
-  check through a repository ruleset or a required workflow, and require code-owner
+  workflow through an organization ruleset, or run the comparison in a
+  `pull_request_target` job that reads the pull request as data, as the README's
+  [protect the gate](../README.md#protect-the-gate) shows, and require code-owner
   review of `.github/`.
 
 ## Take both snapshots the same way
@@ -45,6 +47,7 @@ through a reviewed pull request (or upload it to a store only maintainers can wr
 ```bash
 # One secret of 32 or more characters, the same for the baseline and every later scan.
 export NEXUS_SYMBIOTE_SOURCE_BINDING_KEY="$AGENTBOM_BINDING_KEY"
+mkdir -p .nexus-symbiote
 nexus-symbiote baseline . --no-project-policy -o .nexus-symbiote/reviewed.json
 ```
 
@@ -68,7 +71,9 @@ request with itself, and that gate can never fail.
   of 32 or more characters for the baseline and every candidate scan. Without it, the
   values described above cannot alert; with a different key, every MCP, A2A, RAG and
   IDE settings binding changes and alerts, and IDE settings digests differ between a
-  keyed and an unkeyed scan. See [source binding](verification-source-binding.md).
+  keyed and an unkeyed scan. A `pull_request_target` job holds no secret, so it scans
+  without the key: approve the baseline it reads without the key too. See
+  [source binding](verification-source-binding.md).
 - **Paths are root-relative.** Recorded paths are relative to the scan root, so a
   snapshot taken in `/Users/alice/agent` compares with one taken in
   `/home/runner/work/agent/agent`. Without a manifest `id`, the repository agent is

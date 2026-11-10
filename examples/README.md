@@ -19,7 +19,7 @@ installed with the hash-locked runtime as described in
 
 ```bash
 git clone https://github.com/Hunzee-VC/Nexus-Symbiote && cd Nexus-Symbiote
-python -m venv .venv && . .venv/bin/activate
+python3 -m venv .venv && . .venv/bin/activate
 python -m pip install --require-hashes --only-binary=:all: -r requirements-action.lock
 python -m pip install --no-deps --no-build-isolation .
 ```

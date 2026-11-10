@@ -35,7 +35,7 @@ Reference material: exact behavior, fields and limits.
 | [AgentBOM schemas](../schemas/README.md) | The native AgentBOM JSON Schema, the deployment-profile schema and a minimal example |
 | [Agent manifest](agent-manifest.md) | The optional `agent.yaml`: its fields, what it adds to the inventory, its failures and its trust limits |
 | [Standard exports](standard-exports.md) | What CycloneDX, SPDX, SARIF and VEX output carry, the extension property names, projection versions and the SARIF rule catalog |
-| [Source binding](verification-source-binding.md) | How static MCP records are bound to their configuration and reconciled with a project |
+| [Source binding](verification-source-binding.md) | How MCP, A2A, RAG and IDE settings records are bound to their configuration, with and without the binding key, and reconciled with a project |
 | [TypeScript inventory](typescript-inventory.md) | Static collection of MCP tool registrations from TypeScript servers, and its limits |
 | [Model integrity](model-integrity.md) | What the model collector binds by digest, the operator signature policy (Sigstore entries and digest pins) and the signing evidence it records |
 | [Registry collector](registry-collector.md) | Which packages and images the registry collector inventories, what it reads, its gaps, findings and limits |

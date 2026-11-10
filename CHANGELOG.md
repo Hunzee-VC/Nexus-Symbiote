@@ -8,14 +8,14 @@ Closes detection gaps listed under 0.1.0's known limitations and others found in
 
 ### Security
 
-- Classify MCP launchers behind wrappers such as `sh -c` and for more package runners such as `pnpm dlx` and `uv run --with`; one that cannot be classified is a high `launcher_identity` finding and a coverage gap.
+- Classify MCP launchers behind wrappers such as `sh -c` and for more package runners such as `pnpm dlx` and `uv run --with`; a known runner that cannot be classified, inline code or a nested launch is a high `launcher_identity` finding and a coverage gap.
 - Withhold an MCP package identity whose registry is redirected, for example by `.npmrc`, and count an MCP container image as pinned only by digest.
 - Read MCP servers from the files of eleven clients and from `.mcp.json`-style files in any subdirectory; without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, MCP and RAG values that only the key binds cannot alert, and raise a low `completeness` finding.
 - Collect nested `CLAUDE.md` and `AGENTS.md` files, `@path` imports, rule, prompt and subagent directories, and every file of a skill; a fixed-path file present only under another case, such as `claude.md`, is a collection failure.
 - Bind Claude Code settings by digest, so an added hook or a removed deny rule alerts, and score `bypassPermissions` (high), `acceptEdits` (medium) and hooks.
-- Match AI packages after name normalisation against one [catalog](docs/registry-collector.md#ai-package-catalog), so `mcp`, `fastmcp`, `@anthropic-ai/sdk`, `llama.index.core` and `langgraph-checkpoint` are inventoried.
+- Match AI packages after name normalization against one [catalog](docs/registry-collector.md#ai-package-catalog), so `mcp`, `fastmcp`, `@anthropic-ai/sdk`, `llama.index.core` and `langgraph-checkpoint` are inventoried.
 - Resolve versions from pnpm, Yarn, uv and Poetry lockfiles, fail on npm, pnpm and Yarn records with SHA-1-only integrity or a non-HTTPS or ambiguous download URL, and report overrides, workspaces and a `Pipfile` as coverage gaps.
-- Digest every weight shard, configuration, tokenizer, chat template and custom-code module of a model, rate Hugging Face custom code high, and detect pickles behind any suffix ([model integrity](docs/model-integrity.md)).
+- Digest every weight shard, configuration, tokenizer, chat template and custom-code module of a model, rate Hugging Face custom code high, and detect pickles behind any model suffix ([model integrity](docs/model-integrity.md)).
 - Count a tool descriptor as verified only when it matches the project's MCP configuration, and refuse supplier claims of verified assurance that no local evidence backs.
 - Keep checkout and inventory text inert in all output: it cannot start a line or form a CI log command (`##[`), markup or a link.
 - Let only the operator set collection limits, and run several parsers that one hostile file could stall, JavaScript comment stripping among them, in linear time.

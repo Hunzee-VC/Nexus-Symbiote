@@ -17,7 +17,7 @@ The schemas check structure. The Python model additionally enforces cross-field 
 nexus-symbiote summary agentbom.json
 ```
 
-That is a structural check only. To check a document's claims, reconcile it with the checkout it describes: `nexus-symbiote validate agentbom.json --project /reviewed/checkout --no-project-policy`. Without `--project`, `validate` can only check the document against itself (its basis is `supplied-claims`), and integrity stays unknown for prompts, models and tool descriptors because nothing local corroborates them.
+That is a structural check only. To check a document's claims, reconcile it with the checkout it describes: `nexus-symbiote validate agentbom.json --project /reviewed/checkout --no-project-policy`. Without `--project`, `validate` can only check the document against itself (its assessment basis is `supplied-bom`), and integrity cannot pass for prompts, models and tool descriptors, because nothing local corroborates them.
 
 To check structure alone, for example in another toolchain, validate with any draft 2020-12 validator. With the `jsonschema` package that the CLI already depends on:
 

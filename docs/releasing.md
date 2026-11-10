@@ -88,7 +88,7 @@ as described below.
    `--extra-index-url`):
 
    ```bash
-   python -m venv /tmp/rehearsal && . /tmp/rehearsal/bin/activate
+   python3 -m venv /tmp/rehearsal && . /tmp/rehearsal/bin/activate
    pip download --no-deps --index-url https://test.pypi.org/simple/ \
      nexus-symbiote==<version> -d /tmp/rehearsal-dist
    cd /tmp/rehearsal-dist

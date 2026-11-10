@@ -104,7 +104,7 @@ An agent's behavior depends on its configuration as much as its code — MCP ser
 | Scope widening | An A2A card's OAuth scope goes from `read:only` to `admin` | High drift alert on the card's [capabilities](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/verification-source-binding.md#a2a-agent-cards-and-client-entries) |
 | Executable model files | Pickle checkpoint; a `.safetensors` file that is not one | Format classification without loading; SafeTensors header validation |
 | Unsigned weights | Model file with no artifact-bound signature | `UNKNOWN` integrity until your [signer policy](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/model-integrity.md#operator-signature-policy) verifies it |
-| Hidden instructions | Bidi or zero-width characters in `CLAUDE.md`; text in an HTML comment | [Hidden-character](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/security-model.md#known-false-positive-and-false-negative-classes) and hidden-comment findings in every file the `prompt` collector reads |
+| Hidden instructions | Bidi or zero-width characters in `CLAUDE.md`; text in an HTML comment | [Hidden-character](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/security-model.md#known-false-positive-and-false-negative-classes) findings in every text file the `prompt` collector reads, and hidden-comment findings in its Markdown and suffix-less files |
 | Over-broad permissions | Claude Code in `bypassPermissions` mode, granted `Bash(*)`, or given a hook command | Permission and hook findings; a digest of each JSON settings file, so any change to one is a drift alert |
 | Credential exposure | Tokens in MCP env blocks or connection strings | Variable names, never values; known secret patterns redacted |
 
@@ -339,7 +339,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: >-
           gh api -H 'Accept: application/vnd.github.raw'
-          "repos/$GITHUB_REPOSITORY/contents/agentbom.reviewed.json?ref=$BASE_SHA"
+          "repos/$GITHUB_REPOSITORY/contents/.nexus-symbiote/reviewed.json?ref=$BASE_SHA"
           > "$RUNNER_TEMP/reviewed.json"
       - uses: Hunzee-VC/Nexus-Symbiote@<reviewed-40-character-commit-sha>
         with:

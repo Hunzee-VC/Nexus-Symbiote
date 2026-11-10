@@ -13,7 +13,7 @@ Contributions are accepted under the project's [MIT licence](LICENSE): by openin
 Use Python 3.11 through 3.14 on Linux and an isolated virtual environment. `make install-locked` installs the locked environment, and `make check` runs the offline subset of the required CI checks: quality, the coverage-gated test suite, the security regression contracts and the distribution build. The individual commands, from a checkout:
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install --require-hashes --only-binary=:all: -r requirements-ci.lock
 python -m pip install --no-deps --no-build-isolation -e .

@@ -206,7 +206,7 @@ A way around a limit that its entry does not describe is worth a
 ## Instructions and IDE settings
 
 - **Instruction files under other names are not recorded.** The `prompt` collector
-  reads the fixed files the [README lists](../README.md#what-it-inventories),
+  reads the fixed files the [README lists](../README.md#what-each-collector-reads),
   `CLAUDE.md` and `AGENTS.md` in any subdirectory, and every file in the rule,
   prompt and subagent directories. Nested names must match exactly, so
   `CLAUDE.local.md`, `GEMINI.md` or `.cursorrules` below the root, `claude.md` in a
@@ -386,9 +386,11 @@ A way around a limit that its entry does not describe is worth a
   embedded native inventory.
 - **Some earlier exports do not recover.** CycloneDX and SPDX exports written by
   builds before 0.1.0 can fail recovery, and so can a 0.1.0 export of an inventory
-  built through the Python API with a package URL this release does not project,
-  such as `pkg:docker` or `pkg:generic`. Regenerate them from the native inventory;
-  see [standard projection versions](fingerprint-migration.md#standard-projection-versions).
+  built through the Python API with a package URL this release does not project:
+  a type other than PyPI, npm and OCI, such as `pkg:docker` or `pkg:generic`, or a
+  PyPI or npm URL with a qualifier other than a `repository_url` that names the
+  component's own registry. Regenerate them from the native inventory; see
+  [standard projection versions](fingerprint-migration.md#standard-projection-versions).
 - **Malformed input stops some exports.** A JSON-escaped lone surrogate, such as
   `\ud800`, in a field that a record carries, such as an A2A skill name or version or
   a `package.json` dependency version, makes CycloneDX, SPDX and SARIF export exit 1
@@ -434,8 +436,8 @@ A way around a limit that its entry does not describe is worth a
   session; see [what a live observation does not cover](offline-and-live-modes.md#what-a-live-observation-does-not-cover).
 - **A server can answer an observer differently.** Set `--client-name`,
   `--client-version` and `--user-agent` to match your production host.
-  `verify-live` starts launchers with an empty environment, no arguments and a
-  private working directory.
+  `verify-live` starts launchers with no arguments, a private working directory and
+  an environment that holds only a default `PATH`.
 - **Some servers cannot be observed.** A server that offers none of the supported
   protocol revisions, or only one without `initialize`, is reported as refused. A
   stream the server closes before its reply ends the observation as incomplete.
@@ -491,7 +493,7 @@ A way around a limit that its entry does not describe is worth a
   Action warns about each switched-off gate and reports every gate in its `gates`
   and `result` outputs, but cannot tell which workflow file a reviewer approved.
   Protect the gate with a workflow that an organization ruleset requires, or with a
-  `pull_request_target` job, as the [README](../README.md#github-action) shows.
+  `pull_request_target` job, as the [README](../README.md#protect-the-gate) shows.
 - **Earlier steps in the job are trusted.** A step that runs untrusted code before
   the Action can change the runner's Python or rewrite files under `RUNNER_TEMP`
   before the Action reads them. Write the signer policy and the reviewed baseline
