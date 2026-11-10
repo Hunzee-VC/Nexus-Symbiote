@@ -29,6 +29,9 @@ SCHEMA_ID = (
     "nexus-symbiote-aibom-1.0.schema.json"
 )
 
+UNDECLARED_SPEC_VERSION = "1.0.0"
+"""The format of a native document that declares no version, as release 0.1.0 read it."""
+
 Relationship = Literal[
     "invokes",
     "delegates-to",
@@ -100,6 +103,28 @@ class AIBOM(BaseModel):
     metadata: AIBOMMetadata = Field(default_factory=AIBOMMetadata)
     components: list[AnyComponent] = Field(default_factory=list)
     dependencies: list[DependencyEdge] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def undeclared_format_version(cls, data: Any) -> Any:
+        """Read a metadata object that declares no spec_version as format 1.0.0.
+
+        Objects built in process pass an AIBOMMetadata instance, or none, and keep the
+        format this build writes.
+        """
+        if isinstance(data, dict):
+            metadata = data.get("metadata")
+            if isinstance(metadata, dict) and "spec_version" not in metadata:
+                return {**data, "metadata": {**metadata, "spec_version": UNDECLARED_SPEC_VERSION}}
+        return data
+
+    @classmethod
+    def model_json_schema(cls, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        """The native schema, whose default is the version an undeclared document is read as."""
+        schema = super().model_json_schema(*args, **kwargs)
+        version = schema["$defs"]["AIBOMMetadata"]["properties"]["spec_version"]
+        version["default"] = UNDECLARED_SPEC_VERSION
+        return schema
 
     @model_validator(mode="after")
     def unique_components(self) -> AIBOM:
@@ -206,6 +231,8 @@ class AIBOM(BaseModel):
             raise NativeFormatError(
                 "It is not strict UTF-8 JSON; duplicate keys and nonfinite numbers are refused."
             ) from exc
+        if isinstance(data, dict) and "metadata" not in data:
+            data = {**data, "metadata": {}}
         metadata = data.get("metadata") if isinstance(data, dict) else None
         if isinstance(metadata, dict) and "spec_version" in metadata:
             try:

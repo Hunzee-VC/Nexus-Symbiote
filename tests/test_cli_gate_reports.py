@@ -260,6 +260,138 @@ def test_validate_with_project_says_what_was_reconciled(tmp_path):
     assert document["integrity"]["status"] == "pass"
 
 
+SKIP_COMPLETENESS = 'version: "1.0"\nvalidate:\n  require_completeness: false\n'
+SKIP_BOTH = SKIP_COMPLETENESS + "  require_integrity: false\n"
+
+
+def _mcp_project(root: Path, policy: str | None = None) -> Path:
+    root.mkdir(parents=True)
+    server = {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem@1.0.0"]}
+    (root / ".mcp.json").write_text(json.dumps({"mcpServers": {"filesystem": server}}))
+    (root / "CLAUDE.md").write_text("Be helpful.\n")
+    if policy is not None:
+        (root / ".nexus-symbiote.yaml").write_text(policy)
+    return root
+
+
+def _scanned(project: Path, output: Path) -> Path:
+    args = ["scan", str(project), "--no-project-policy", "--report-only", "-o", str(output)]
+    result = CliRunner().invoke(main, args)
+    assert result.exit_code == 0, result.output
+    return output
+
+
+def _without_mcp(inventory: Path, output: Path) -> Path:
+    """The inventory with its MCP server and client deleted, consistently enough to pass."""
+    document = json.loads(inventory.read_text())
+    dropped = {
+        component["bom_ref"]
+        for component in document["components"]
+        if component["component_type"] in {"mcp-server", "mcp-client"}
+    }
+    assert dropped
+    document["components"] = [c for c in document["components"] if c["bom_ref"] not in dropped]
+    for component in document["components"]:
+        for key, value in component.items():
+            if key.endswith("_refs") and isinstance(value, list):
+                component[key] = [ref for ref in value if ref not in dropped]
+    document["dependencies"] = [
+        edge
+        for edge in document["dependencies"]
+        if not {edge["source_ref"], edge["target_ref"]} & dropped
+    ]
+    output.write_text(json.dumps(document))
+    return output
+
+
+@pytest.mark.parametrize(
+    ("policy", "inventory", "extra"),
+    [
+        (SKIP_COMPLETENESS, "forged", []),
+        (SKIP_BOTH, "forged", []),
+        (SKIP_COMPLETENESS, "forged", ["--skip-integrity"]),
+        (SKIP_BOTH, "other-directory", []),
+        (SKIP_COMPLETENESS, "other-directory", ["--skip-integrity"]),
+    ],
+    ids=[
+        "completeness-off",
+        "completeness-and-integrity-off",
+        "completeness-off-skip-integrity",
+        "other-directory-both-off",
+        "other-directory-skip-integrity",
+    ],
+)
+def test_validate_never_claims_a_comparison_the_policy_skipped(tmp_path, policy, inventory, extra):
+    project = _mcp_project(tmp_path / "project", policy)
+    if inventory == "forged":
+        path = _without_mcp(_scanned(project, tmp_path / "honest.json"), tmp_path / "forged.json")
+    else:
+        other = tmp_path / "other"
+        other.mkdir()
+        (other / "CLAUDE.md").write_text("A different agent.\n")
+        path = _scanned(other, tmp_path / "other.json")
+    args = ["validate", str(path), "--project", str(project), *extra]
+    runner = CliRunner()
+    result = runner.invoke(main, args)
+    # The policy still decides the verdict; only the stated basis must be true.
+    assert result.exit_code == 0, result.output
+    lines = _lines(result.stdout)
+    assert (
+        "Assessment basis: project-not-reconciled: the completeness check, and with it the "
+        f"comparison with {project}, was skipped by policy"
+    ) in lines
+    assert not any(line.startswith("Assessment basis: project-reconciled") for line in lines)
+    assert "compared with a fresh local collection" not in result.stdout
+    assert "Pass --project" not in result.stdout
+    document = json.loads(runner.invoke(main, [*args, "--json-output"]).stdout)
+    assert document["passed"] is True
+    assert document["assessment_basis"] == "project-not-reconciled"
+    assert document["completeness"] == {"status": "skipped", "skipped_by": "policy"}
+    assert "validate.require_completeness=false" in document["policy_weakened"]
+
+
+def test_validate_reconciles_when_the_project_policy_is_not_read(tmp_path):
+    project = _mcp_project(tmp_path / "project", SKIP_BOTH)
+    honest = _scanned(project, tmp_path / "honest.json")
+    forged = _without_mcp(honest, tmp_path / "forged.json")
+    runner = CliRunner()
+    built_in = ["--project", str(project), "--no-project-policy", "--json-output"]
+    refused = runner.invoke(main, ["validate", str(forged), *built_in])
+    assert refused.exit_code == 1, refused.output
+    assert json.loads(refused.stdout)["assessment_basis"] == "project-reconciliation-failed"
+    reconciled = runner.invoke(main, ["validate", str(honest), *built_in])
+    assert reconciled.exit_code == 0, reconciled.output
+    assert json.loads(reconciled.stdout)["assessment_basis"] == "project-reconciled"
+    without_project = runner.invoke(main, ["validate", str(forged), "--json-output"])
+    assert json.loads(without_project.stdout)["assessment_basis"] == "supplied-bom"
+
+
+def test_the_validation_report_states_only_the_basis_it_was_given():
+    from nexus_symbiote.reporting import validation_report_lines
+
+    def basis_line(document: dict) -> tuple[str, str | None]:
+        (line,) = [
+            entry
+            for entry in validation_report_lines(document, project=Path("/work/agent"))
+            if entry[0].startswith("Assessment basis: ")
+        ]
+        return line
+
+    assert basis_line({"assessment_basis": "project-not-reconciled"}) == (
+        "Assessment basis: project-not-reconciled: the completeness check, and with it the "
+        "comparison with /work/agent, was skipped by policy",
+        "yellow",
+    )
+    assert basis_line({"assessment_basis": "supplied-bom"})[0].endswith(
+        "nothing was compared with a project. Pass --project to reconcile it."
+    )
+    for unknown in ({}, {"assessment_basis": "\x1b[2Jproject-verified"}):
+        text, style = basis_line(unknown)
+        assert style == "yellow" and "\x1b" not in text
+        assert "compared with a fresh" not in text and "Pass --project" not in text
+        assert "not a basis this release reports" in text
+
+
 def test_unknown_integrity_is_named_and_explained(tmp_path):
     bom = AIBOM(
         metadata=AIBOMMetadata(

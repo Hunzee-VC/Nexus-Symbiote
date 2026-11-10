@@ -255,11 +255,35 @@ def validation_report_lines(
                 "red",
             )
         )
-    else:
+    elif basis == "project-not-reconciled":
+        lines.append(
+            (
+                safe_line(
+                    "Assessment basis: project-not-reconciled: the completeness check, and "
+                    "with it the comparison with ",
+                    compared,
+                    ", was skipped by policy",
+                ),
+                "yellow",
+            )
+        )
+    elif basis == "supplied-bom":
         lines.append(
             (
                 "Assessment basis: supplied-bom: only the inventory's own claims were checked; "
                 "nothing was compared with a project. Pass --project to reconcile it.",
+                "yellow",
+            )
+        )
+    else:
+        lines.append(
+            (
+                safe_line(
+                    "Assessment basis: ",
+                    "unknown" if basis is None else basis,
+                    ": not a basis this release reports; nothing shows that the inventory "
+                    "was compared with a project",
+                ),
                 "yellow",
             )
         )

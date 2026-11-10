@@ -1041,7 +1041,7 @@ def validate(
 
     Without --project only the inventory's own claims are checked: its coverage claim
     and its self-consistency. With --project the inventory is compared with a fresh
-    local collection of that project.
+    local collection of that project, unless the policy skips the completeness check.
     """
     bom = _load_bom(aibom_path)
 
@@ -1072,7 +1072,8 @@ def validate(
             "offline validate cannot establish verified assurance; use subject-bound cryptographic verification"
         )
     passed = True
-    basis = "project-reconciled" if root is not None else "supplied-bom"
+    # Only the reconciliation below may claim that the inventory was compared with the project.
+    basis = "project-not-reconciled" if root is not None else "supplied-bom"
     bound_imports: frozenset[str] = frozenset()
     completeness: dict[str, Any] = {"status": "skipped", "skipped_by": "policy"}
     if policy.validation.require_completeness:

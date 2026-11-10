@@ -331,7 +331,7 @@
       "description": "Header metadata for an AgentBOM document.",
       "properties": {
         "spec_version": {
-          "default": "1.1.0",
+          "default": "1.0.0",
           "description": "Native format version. This build reads 1.0.x and 1.1.x; 1.1.0 records scan-root-relative paths",
           "title": "Spec Version",
           "type": "string"

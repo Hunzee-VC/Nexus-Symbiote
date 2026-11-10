@@ -24,7 +24,11 @@ from nexus_symbiote.core.models import (
     MCPServerComponent,
     check_spec_version,
 )
-from nexus_symbiote.utils.crypto import VERIFIED_SIGNING_STATUSES, component_evidence_refs
+from nexus_symbiote.utils.crypto import (
+    VERIFIED_SIGNING_STATUSES,
+    SigningStatus,
+    component_evidence_refs,
+)
 
 SEVERITIES = ("info", "low", "medium", "high", "critical")
 
@@ -148,6 +152,24 @@ _REPORT_DIGEST = "shadowscan:report-sha256"
 _PROJECTION = "shadowscan:projection-profile"
 _DECLARED_AUTONOMY = "declared_autonomy_level"
 
+# A digest as collectors record one, anywhere inside a value: an algorithm-prefixed hex
+# digest, or a Subresource Integrity value such as an npm lockfile's.
+_DIGEST_VALUE = re.compile(
+    r"sha256:[0-9a-f]{64}|sha384:[0-9a-f]{96}|sha512:[0-9a-f]{128}"
+    r"|sha(?:256|384|512)-[A-Za-z0-9+/]{43,86}={0,2}",
+    re.IGNORECASE,
+)
+_DIGEST_NAME = re.compile(r"_(?:hash|hashes|digest|integrity|sha256)\Z", re.IGNORECASE)
+_NAMED_PROPERTIES = 20
+"""How many changed properties of one record a change names; the rest are counted."""
+# Signing evidence from strongest to weakest. Any other status, such as
+# signature-not-found, verification-failed or one this release does not know, is weakest.
+_SIGNING_RANK = {
+    **dict.fromkeys((*sorted(VERIFIED_SIGNING_STATUSES), "pgp-signed"), 0),
+    SigningStatus.PARTIALLY_VERIFIED.value: 1,
+    SigningStatus.SIGNATURE_PRESENT_UNVERIFIED.value: 2,
+}
+_WEAKEST_SIGNING = max(_SIGNING_RANK.values()) + 1
 _STATUS_RANK = {"complete": 0, "partial": 1, "failed": 2, "unknown": 2}
 _ASSURANCE_RANK = {"verified": 0, "observed": 1, "declared": 2}
 _SOURCE_STATUS_RANK = {"complete": 0, "incomplete": 1, "unknown": 2}
@@ -246,6 +268,53 @@ def _semantic_value(value: Any, path: tuple[str, ...]) -> Any:
 
 def _same(old: Any, new: Any, path: tuple[str, ...]) -> bool:
     return _json_text(_semantic_value(old, path)) == _json_text(_semantic_value(new, path))
+
+
+def _signing_rank(status: object) -> int:
+    if not isinstance(status, str):
+        return _WEAKEST_SIGNING
+    return _SIGNING_RANK.get(status, _WEAKEST_SIGNING)
+
+
+def _property_texts(properties: dict[str, Any]) -> dict[str, str]:
+    return {
+        key: _json_text(_semantic_value(value, ("properties", key)))
+        for key, value in properties.items()
+    }
+
+
+def _property_changes(old: dict[str, Any], new: dict[str, Any]) -> list[dict[str, str]]:
+    """Name each changed property; changing or removing one that records a digest is high.
+
+    Collectors keep companion weight files, custom code, settings files and lockfile
+    integrity as digests in properties, so a swapped file shows only there.
+    """
+    before, after = _property_texts(old), _property_texts(new)
+    changes: list[tuple[str, str, str]] = []
+    for key in before.keys() | after.keys():
+        old_text, new_text = before.get(key), after.get(key)
+        if old_text == new_text:
+            continue
+        if old_text is None:
+            changes.append(("medium", key, "added"))
+            continue
+        texts = (old_text,) if new_text is None else (old_text, new_text)
+        digest = _DIGEST_NAME.search(key) is not None or any(
+            _DIGEST_VALUE.search(text) is not None for text in texts
+        )
+        verb = "removed" if new_text is None else "changed"
+        changes.append(("high" if digest else "medium", key, verb))
+    changes.sort(key=lambda change: (-_severity_rank(change[0]), change[1]))
+    named = [
+        {"detail": f"properties.{_clip(key)} {verb}.", "severity": severity}
+        for severity, key, verb in changes[:_NAMED_PROPERTIES]
+    ]
+    rest = [severity for severity, _, _ in changes[_NAMED_PROPERTIES:]]
+    if rest:
+        named.append(
+            {"detail": f"properties: {len(rest)} more changed.", "severity": _max_severity(rest)}
+        )
+    return named
 
 
 def _discovery_finding_drift(old_fields: dict[str, Any], new_fields: dict[str, Any]) -> bool | None:
@@ -633,13 +702,12 @@ class AIBOMDiffer:
         old_signing = getattr(old, "signing_status", None)
         new_signing = getattr(new, "signing_status", None)
         if old_signing != new_signing:
-            # Losing operator-verified signing, a signature or a digest pin, is a downgrade.
-            verified = old_signing in VERIFIED_SIGNING_STATUSES or old_signing == "pgp-signed"
-            sev = "high" if verified else "medium"
+            # A snapshot is unsigned: only a stronger status is a claim to review at medium.
+            raised = _signing_rank(new_signing) < _signing_rank(old_signing)
             modifications.append(
                 {
-                    "detail": f"Signing status changed: {old_signing} → {new_signing}",
-                    "severity": sev,
+                    "detail": f"Signing status changed: {_clip(old_signing)} → {_clip(new_signing)}",
+                    "severity": "medium" if raised else "high",
                 }
             )
 
@@ -683,13 +751,19 @@ class AIBOMDiffer:
                 modifications.append(
                     {"detail": "Declared autonomy level changed.", "severity": "high"}
                 )
+            modifications.extend(_property_changes(old_props, new_props))
+            handled.add("properties")
         for key in sorted((old_fields.keys() | new_fields.keys()) - handled):
             old_value = old_fields.get(key)
             new_value = new_fields.get(key)
             if _same(old_value, new_value, (key,)):
                 continue
             severity = "medium"
-            if key in _SECURITY_FIELDS or key.endswith("_refs") or key.endswith("_ref"):
+            if (
+                key in _SECURITY_FIELDS
+                or key.endswith(("_ref", "_refs"))
+                or _DIGEST_NAME.search(key) is not None
+            ):
                 severity = "high"
             if (key == "trust_remote_code" and new_value is True) or key in {
                 "input_schema",
@@ -1202,8 +1276,8 @@ class AIBOMDiffer:
 
     def _generate_security_alerts(self, report: DiffReport) -> None:
         # An in-place change is at least as consequential as an addition, which
-        # always alerts: a version bump, a swapped lockfile integrity value or a
-        # replaced tool body is rated medium, and must still fail the CI gate.
+        # always alerts: a change rated medium, such as a version bump, must still
+        # fail the CI gate.
         for change in report.components_modified:
             if change.severity in {"medium", "high", "critical"}:
                 report.security_alerts.append(
