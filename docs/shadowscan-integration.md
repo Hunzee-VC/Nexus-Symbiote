@@ -1,5 +1,10 @@
 # ShadowScan discovery and Nexus SymBiote verification
 
+Nexus-ShadowScan is a separate project,
+[Hunzee-VC/Nexus-ShadowScan](https://github.com/Hunzee-VC/Nexus-ShadowScan). Install
+it from that repository at a commit you have reviewed. The PyPI project named
+`shadowscan` is an unrelated tool from another publisher.
+
 Run Nexus-ShadowScan separately with the least privileges needed for the chosen
 connectors and save its JSON report. Keep the report under appropriate access and
 retention controls. For example, following the ShadowScan version's own CLI help:

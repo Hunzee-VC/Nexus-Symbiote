@@ -77,9 +77,9 @@ inventory, so the default gate fails and the evidence stays available for review
 | Scan failure | Cause |
 | --- | --- |
 | `agent.yaml: does not conform to the agent manifest schema` | Not a YAML mapping, an unknown key, a missing `name`, a YAML anchor, alias or tag, or too many tokens. The inferred agent is recorded instead |
-| `agent.yaml: read refused (...)` or `agent.yaml: invalid UTF-8` | A symlink, a non-regular file, a file over 1 MiB, or bytes that are not UTF-8. The inferred agent is recorded instead |
+| `agent.yaml: read refused (...)`, `agent.yaml: symlink target ...`, `agent.yaml: file-bytes limit of 1 MiB exceeded; ...` or `agent.yaml: invalid UTF-8` | A non-regular file, a symbolic link other than a relative one to a regular file in the project, a file over 1 MiB, or bytes that are not UTF-8. The inferred agent is recorded instead |
 | `agent.yaml#/instructions/N: must be a relative path beneath the repository` | An absolute path, a `..` component, a backslash or a NUL character |
-| `agent.yaml#/instructions/N: the declared instruction could not be collected safely` | Missing, a symlink, not a regular file, or over the 4 MiB read limit |
+| `agent.yaml#/instructions/N: the declared instruction could not be collected safely` | Missing, a symbolic link other than a relative one to a regular file in the project, not a regular file, or larger than the `file-bytes` [collection limit](collection-limits.md) (4 MiB by default) |
 | `agent.yaml#/instructions/N: names a path inside a directory that collection never reads` | A path under `.git`, `node_modules`, `__pycache__`, `.venv` or `venv` |
 | `agent.yaml#/instructions/N: instruction changed since scanner collection` | The file changed between collection and assembly |
 | `agent.yaml#/instructions/N: declared instruction is not UTF-8 text` | It cannot be checked for hidden characters |

@@ -475,6 +475,10 @@ other code is permanent for the evidence presented.
 | `state-unavailable` | State database is unavailable or locked |
 | `adapter-error` | An adapter raised an exception other than `AuthorizationError` (decision records only) |
 
+`invoke_pinned_stdio`'s pinned session raises its refusals without a code, so they
+are recorded as `denied`. A session deadline or protocol error before `tools/call` is
+sent is recorded as `adapter-error`. In both cases `tools/call` is never sent.
+
 The `runtime` commands print the code in parentheses at the end of the error,
 next to their own codes: `runtime-input-error` for a contract that does not
 validate (naming fields and contract rules, never values), `runtime-input-too-large`

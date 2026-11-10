@@ -1,6 +1,6 @@
 # Nexus SymBiote documentation
 
-Every page here answers one of three questions: **why** Nexus SymBiote works the way it does, **what** it records and guarantees, or **how** to use, upgrade and release it. New to the project? Read the [README](../README.md), run the [offline demo](../examples/README.md), then follow the [public-agent tutorial](tutorials/scanning-a-public-agent.md).
+Every page here answers one of three questions: **why** Nexus SymBiote works the way it does, **what** it records and guarantees, or **how** to use, upgrade and release it. New to the project? Read the [README](../README.md), run the [offline demo](../examples/README.md), then follow the [public-agent tutorial](tutorials/scanning-a-public-agent.md). The [glossary](glossary.md) defines the terms these pages share.
 
 - [Why: principles and trust model](#why-principles-and-trust-model)
 - [What: formats, collectors and contracts](#what-formats-collectors-and-contracts)
@@ -9,12 +9,13 @@ Every page here answers one of three questions: **why** Nexus SymBiote works the
 
 ## Why: principles and trust model
 
-Read these before you use any result in an approval decision.
+Read these, and the [known limitations](known-limitations.md), before you use any result in an approval decision.
 
 | Page | Read it to understand |
 | --- | --- |
 | [Security model](security-model.md) | [Design principles](security-model.md#design-principles); declared, observed, approved and mediated evidence; [what results do and do not establish](security-model.md#what-results-do-and-do-not-establish); known false-positive and false-negative classes |
-| [Known limitations](known-limitations.md) | What each collector, gate, export and integration does not record or verify, by surface, and what to do about each limit |
+| [Architecture](architecture.md) | How the modules fit together, what a scan does, where untrusted data enters, and which control guards each trust boundary |
+| [Threat model](threat-model.md) | The assets and adversaries the tool is designed against, the control that answers each threat, and the risk that remains |
 | [Offline and live modes](offline-and-live-modes.md#why) | Why every command is offline by default, and how that is enforced |
 | [Security policy](../SECURITY.md) | Security boundaries, supported versions, how to report a vulnerability, and the limits that matter most |
 | [Governance](../GOVERNANCE.md) | Who decides, how changes are reviewed, and which controls are actually active |
@@ -26,6 +27,9 @@ Reference material: exact behavior, fields and limits.
 | Page | Covers |
 | --- | --- |
 | [CLI reference](cli-reference.md) | Every command, option and exit code, kept in sync with the CLI by a test |
+| [Glossary](glossary.md) | AgentBOM and AIBOM, collectors, gaps and failures, assurance levels, the binding key, baselines, gates and the kinds of policy |
+| [Finding catalog](finding-catalog.md) | Every finding category: its severity, the collector that raises it, what it means, what to do, and how findings affect the gates |
+| [Known limitations](known-limitations.md) | What each collector, gate, export and integration does not record or verify, by surface, and what to do about each limit |
 | [Policy reference](policy-reference.md) | Every `.nexus-symbiote.yaml` setting, targeted suppressions, and what `policy_weakened` reports |
 | [Collection limits](collection-limits.md) | Every bound on what a command reads from a project, its default, what happens when it is reached and how to raise it |
 | [AgentBOM schemas](../schemas/README.md) | The native AgentBOM JSON Schema, the deployment-profile schema and a minimal example |

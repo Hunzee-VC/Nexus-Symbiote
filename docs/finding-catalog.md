@@ -1,0 +1,117 @@
+# Finding catalog
+
+A finding, or risk, is a security-relevant observation about one component: its
+category, severity, detail and recommendation. Findings describe declarations in
+the repository; they are not confirmed vulnerabilities. This page lists every
+category this version emits, which collector raises it, what it means and what to
+do about it. Use these names in `ignore_categories` and in
+[suppressions](policy-reference.md#suppressions).
+
+- [How findings affect the gates](#how-findings-affect-the-gates)
+- [Categories](#categories)
+- [Reports that are not findings](#reports-that-are-not-findings)
+- [SARIF rules](#sarif-rules)
+
+## How findings affect the gates
+
+`risk`, and the scan gate of `scan`, `baseline` and the GitHub Action, weigh every
+finding by severity: critical 10, high 7, medium 4, low 1 and info 0. The gate
+fails when any of these holds, with the built-in policy's values in parentheses:
+
+- a finding is at or above `fail_on_severity` (`critical`);
+- the aggregate score, the sum of the weights, is at or above `fail_threshold` (50);
+- an `invalid_safetensors` finding is present, whatever the score;
+- coverage is incomplete or unknown;
+- a repository scan found no agent manifest or supported local inventory evidence;
+- a suppression has expired.
+
+A finding left out by `ignore_categories` or an active suppression counts toward
+none of these. The [policy reference](policy-reference.md) lists the settings that
+change them; the [glossary](glossary.md#risk-level) explains the risk level that
+`risk` prints beside the score.
+
+## Categories
+
+Collectors are named as `--scanner` names them. `risk` adds `invalid_safetensors`
+itself, and adds `serialization_format` or `code_execution` when a model's recorded
+fields call for one that its findings no longer carry, as in an edited inventory.
+
+| Category | Severity | Raised by | Meaning | What to do |
+| --- | --- | --- | --- | --- |
+| `additional_directories` | low | `ide_agents` | Claude Code settings grant access to directories outside the project. | Review the directories and approve the exact value. |
+| `attestation` | low | `ide_agents` | A VS Code extension the project recommends has no verified attestation of its identity or publisher. | Verify the installed extension's identity, publisher and artifact separately. |
+| `authentication` | medium | `a2a` | An A2A agent card declares no nonempty authentication requirement, for itself or for a skill, or an A2A client declares no authentication method. | Declare the requirement, and verify separately that the endpoint enforces it. |
+| `auto_approval` | medium | `mcp` | An MCP server's tools run without per-call approval: `alwaysAllow`, `autoApprove` or `trust: true`. | Require approval for tool calls with side effects. |
+| `bidi_override` | critical | `prompt` | An instruction file contains bidirectional embedding, override or isolate characters, which can make text read differently from how it is processed. | Remove them. |
+| `capability_scope` | high or medium | `mcp` | A tool in a configuration's `tools` array declares destructive or financial side effects (high), or is declared read-only but named for a destructive operation (medium). | Require human approval for destructive operations; verify the tool's effects before relying on `readOnlyHint`. |
+| `code_execution` | critical | `model`, `risk` | A model configuration sets `trust_remote_code: true`, so loading the model runs code from its repository. | Audit that code, or use a model that does not need it. |
+| `completeness` | medium or low | `mcp`, `a2a`, `rag` | Low: values that only the binding key binds, so their changes cannot raise a drift alert, or an A2A card that declares no skills. Medium: MCP identity fields withheld because credential values occur in them. | Set `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` for every scan and baseline ([source binding](verification-source-binding.md)); keep credentials out of names, hosts and package references. |
+| `credential_helper` | medium | `ide_agents` | Claude Code settings declare `apiKeyHelper`, a command that runs to obtain credentials. | Review the command and approve its exact value. |
+| `custom_code` | high | `model` | A model's configuration declares custom code (`auto_map` or `custom_pipelines`), which loading runs under `trust_remote_code`. | Review the declared modules before loading; their digests are recorded, so a change raises a drift alert. |
+| `data_integrity` | high or medium | `rag` | A retrieval endpoint or connection without encryption (high), or a RAG source that declares no content filtering (medium). | Use authenticated encrypted transport; declare and review the ingestion and content controls. |
+| `detection_method` | info | `a2a` | An A2A SDK reference was found in Python source; no deployment is established. | Add an explicit agent card or client configuration. |
+| `directional_marks` | medium | `prompt` | An instruction file contains LRM, RLM or ALM marks, which are ordinary in right-to-left text but can reorder neutral characters. | Confirm that each mark belongs to right-to-left text. |
+| `endpoint_identity` | high or medium | `mcp` | An MCP endpoint's host cannot be established from its URL (high), or the endpoint depends on the environment (medium). | Declare a literal `https://` URL whose host every URL parser reads the same way. |
+| `hidden_markup` | low | `prompt` | An instruction file contains HTML or Markdown comments, which rendered views hide and agents read. Only their number and length are reported. | Read the comments in the raw file, and move notes out of agent instructions. |
+| `hook_commands` | medium | `ide_agents` | Claude Code or Cursor settings declare hook commands that run automatically on agent events. | Review each hook and approve its exact value. |
+| `instruction_layering` | low | `ide_agents` | An IDE agent reads instructions from two locations: `CLAUDE.md` and `.claude/CLAUDE.md`, or `.cursorrules` and `.cursor/rules`. | Document the loading order and who may change each file. |
+| `invalid_safetensors` | high | `risk` | A model recorded as SafeTensors has no established structural safety: its header is malformed, over the inspection limit, or was not inspected. The risk gate fails at any score. | Replace the file with a SafeTensors file that validates, then collect again. |
+| `invisible_characters` | high | `prompt` | An instruction file contains invisible format characters, variation selectors or blank fillers other than bidirectional controls, directional marks and tag characters. | Remove them, or document why each one is there. |
+| `launch_context` | high, medium or low | `mcp` | High: privileged mode, a container runtime socket or host root mount, disabled confinement, a host-level capability or a command-valued field. Medium: a host namespace, added capabilities, host devices, a broad host mount, or an option, variable or setting that loads local code. Low: a launch through a shell or wrapper. | Remove host-level privileges and code-loading options, or isolate the server; launch the executable directly. |
+| `launcher_identity` | high | `mcp` | The launched package and its pin cannot be established: an unclassified runner, inline code, a nested launch, or a package from git without a full commit, from a URL or from a local path. The server is also a coverage gap. | Launch a registry package pinned to an exact version, or an image pinned by digest, in a form the collector classifies ([known limitations](known-limitations.md#mcp-servers-and-tools)). |
+| `local_process` | medium | `mcp` | An MCP server runs as a local process whose executable the inventory does not verify. | Check the executable's integrity, for example with `verify-live` and a pinned launch policy. |
+| `lockfile_resolution_mismatch` | high | `registry` | An npm lockfile record's tarball URL names another package or version than the record. | Regenerate the lockfile from the registry and review the change. |
+| `lockfile_unread` | low | `registry` | A package may be resolved by `Pipfile.lock`, `pdm.lock`, `bun.lock` or `bun.lockb`, which the collector does not read. | Review that lockfile's record for the package. |
+| `mcp_auto_approval` | medium | `ide_agents` | Claude Code settings set `enableAllProjectMcpServers`, which approves every server in `.mcp.json` without a prompt. | Approve servers one by one. |
+| `missing_lockfile_integrity` | medium | `registry` | An npm lockfile record has no integrity value. | Regenerate the lockfile so that it records a `sha512` integrity value. |
+| `mutable_image_tag` | medium | `mcp`, `registry` | A container image is pinned by a tag, which can be moved to other content, instead of a digest. | Pin the image by its SHA-256 digest. |
+| `nonregistry_source` | high or medium | `registry` | An npm or PyPI package is declared from a git, URL or path source instead of a registry; high when that source can change, such as git without a full commit or plain `http://`. | Install it from a registry with an exact version and integrity evidence, or pin the source to a full commit. |
+| `package_alias` | low | `registry` | An npm dependency installs a package under another name (`npm:` alias). | Check that the aliased package is the one the code expects. |
+| `package_source` | medium | `mcp` | An MCP server resolves packages through a non-default registry or index, so name and version do not establish identity. | Review that registry or index, and pin an artifact digest or integrity hash. |
+| `permission_scope` | high or medium | `ide_agents` | A project-level starting mode that skips permission prompts (high) or accepts edits without one (medium), unscoped tool allowances (medium), or Codex's `danger-full-access` sandbox (high) or `never` approval (medium). Effective approval stays unverified. | Keep the default or plan mode, scope allow rules to resources, and keep Codex's workspace-write sandbox with on-request approval. |
+| `plugin_sources` | low | `ide_agents` | Claude Code settings enable plugins or register plugin marketplaces, which can add commands, agents, hooks and MCP servers. | Review each plugin and marketplace, and approve the exact value. |
+| `prompt_size` | medium | `prompt` | An instruction file is larger than 50,000 bytes, which makes review for injected text harder. | Remove unnecessary content. |
+| `rag_discovery` | info | `rag` | A vector store library is imported in Python code, or a vector store is named by environment variable names, without a declared configuration. | Document whether the deployment uses it. |
+| `registry_origin` | low | `registry` | An npm package is resolved from a registry other than the default one. | Confirm that the registry is intended and trusted for the package. |
+| `serialization_format` | critical | `model`, `risk` | A model file's format or loader can execute code, such as a pickle-based format, or a GGUF chat template reaches Python internals. | Convert the weights to SafeTensors; remove or replace the template ([model integrity](model-integrity.md)). |
+| `serialization_format_unknown` | high | `model` | The safety of a model file's format or loader could not be established: a format without a structural validator, such as ONNX or GGUF, or a SafeTensors file that does not validate. | Validate the container and the loader that will read it before admission. |
+| `shadowscan-heuristic` | the report's rating | `shadowscan` | An imported ShadowScan report rated the component. The rating is a heuristic, not a verified vulnerability. | Review the source evidence in the report. |
+| `shadowscan-inventory-unmatched` | info | `shadowscan` | The ShadowScan report found no matching entry in the inventory it was given; authorization is not established. | Reconcile the report's scope with the finding. |
+| `signing_status` | high | `model` | Not every weight file of a model is Sigstore-signed or digest-pinned in the operator's signer policy. | Pin the SHA-256 of every weight file, or sign each one with a Sigstore message signature, in a [signer policy](model-integrity.md#operator-signature-policy). |
+| `tag_characters` | critical | `prompt` | An instruction file contains Unicode tag characters (U+E0000 to U+E007F) outside a flag emoji, a known way to hide prompt text. | Remove them. |
+| `transport_ambiguity` | low | `mcp` | An MCP server declares both a launch command and an endpoint. | Declare one of the two, and an explicit transport type. |
+| `transport_security` | high or low | `mcp`, `a2a`, `rag` | An MCP or A2A endpoint without HTTPS, or an MCP endpoint URL that embeds credentials (high); a RAG locator whose transport is not shown to be encrypted (low). | Use authenticated HTTPS, and pass credentials in a header or an environment reference. |
+| `version_pinning` | high, medium or low | `mcp`, `registry` | A package or image without an exact version or digest: an unpinned MCP launcher package or an image with neither digest nor release tag (high), a nonexact npm or PyPI declaration (medium), or a PyPI pin that applies only under environment markers (low). | Pin an exact version or digest, and keep integrity evidence such as lockfile hashes. |
+
+[Known false-positive and false-negative classes](security-model.md#known-false-positive-and-false-negative-classes)
+explains how some of these are classified, such as why a `.bin` file is critical and
+which characters count as hidden.
+
+## Reports that are not findings
+
+- **Collection failures and coverage gaps** are coverage records, not findings: they
+  have no category or severity, and they fail the gates through coverage. See the
+  [glossary](glossary.md#coverage-gap).
+- **`validate` issues** have categories of their own, such as `unpinned_version` or
+  `weight_files_mismatch`, in `validate --json-output`. They decide the completeness
+  and integrity checks, not the risk score.
+- **Drift alerts** rate changes between two inventories. A finding added between
+  them is one alert among others; [what the alerts mean](drift-gate.md#what-the-alerts-mean)
+  rates every change `diff` reports.
+
+## SARIF rules
+
+In SARIF output each finding's rule is `nexus_symbiote/<category>/<severity>`, so a
+finding whose severity changes moves to another rule
+([migration](fingerprint-migration.md#sarif-rule-identifiers)). Findings on
+components imported from a ShadowScan report are left out of SARIF. Of the 44
+categories, 23 have a rule in the catalog that
+[standard exports](standard-exports.md#sarif-for-github-code-scanning) lists, with
+its title, CWE and OWASP tags. The other 21 have no catalog entry and get a generic
+rule titled after the category and tagged only `security`: `additional_directories`,
+`auto_approval`, `credential_helper`, `custom_code`, `directional_marks`,
+`endpoint_identity`, `hidden_markup`, `hook_commands`, `invalid_safetensors`,
+`launch_context`, `launcher_identity`, `lockfile_resolution_mismatch`,
+`lockfile_unread`, `mcp_auto_approval`, `missing_lockfile_integrity`,
+`nonregistry_source`, `package_alias`, `package_source`, `plugin_sources`,
+`registry_origin` and `transport_ambiguity`.

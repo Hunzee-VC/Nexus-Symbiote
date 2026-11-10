@@ -344,12 +344,15 @@ identity invalidates the cached verification. Behavioral canaries are drift
 signals and never establish immutable model identity.
 
 `LineageIndex` records tenant-local source, chunk, index, cache and memory versions.
-Retrieval requires current ACL evidence across the ancestry and records returned
-version identifiers, content digests, principal, time and read watermark. Source
-withdrawal cascades to derived records; source ACL revocation blocks subsequent
-retrieval of derived records. Connect these helpers to the actual datastore's
-transaction/snapshot and ACL enforcement APIs. They do not by themselves delete
-remote content or authorize access to a live vector database.
+It is a library helper; no command uses it. Retrieval requires current ACL evidence
+across the ancestry and records returned version identifiers, content digests,
+principal, time and read watermark. Source withdrawal cascades to derived records;
+source ACL revocation blocks subsequent retrieval of derived records. `update_acl`
+refuses a revision already used for that version, so an earlier, wider ACL cannot
+be restored under its old revision to replay retrievals approved against it.
+Connect these helpers to the actual datastore's transaction/snapshot and ACL
+enforcement APIs. They do not by themselves delete remote content or authorize
+access to a live vector database.
 
 ## Verification evidence
 
