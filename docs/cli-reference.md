@@ -49,6 +49,8 @@ selects the mode; without either, the mode is offline. See
 | [`runtime keygen`](#runtime-keygen) | offline | Create an Ed25519 key pair for runtime contracts |
 | [`runtime sign`](#runtime-sign) | offline | Sign a runtime contract |
 | [`runtime verify`](#runtime-verify) | offline | Verify a signed runtime contract's purpose, signers and validity window |
+| [`runtime digest`](#runtime-digest) | offline | Print the digest a runtime contract, approval or revocation list binds |
+| [`runtime key-id`](#runtime-key-id) | offline | Print the key ID of an Ed25519 public key |
 | [`discover-mcp`](#discover-mcp) | **live** | List the tools an HTTPS MCP server serves, without calling them |
 | [`advisories`](#advisories) | **live** | Query OSV for advisories affecting exact PyPI and npm package versions |
 | [`verify-live`](#verify-live) | **live** | Compare an AgentBOM with the tools that operator-pinned stdio servers serve |
@@ -186,6 +188,9 @@ nexus-symbiote runtime keygen [OPTIONS]
 |---|---|
 | `--private-key` `PATH` | New PEM private key file, created with mode 0600; must not exist. (required) |
 | `--public-key` `PATH` | New PEM public key file, created with mode 0600; must not exist. (required) |
+| `--passphrase-file` `PATH` | Encrypt the private key with the passphrase on the first line of this file. |
+
+Use one key pair per purpose: snapshot, approval and trust rings must not share keys.
 
 ### `runtime sign`
 
@@ -198,8 +203,13 @@ nexus-symbiote runtime sign [OPTIONS] CONTRACT_PATH
 | Option | Description |
 |---|---|
 | `--kind` `snapshot\|approval\|trust\|model` | Contract purpose; a signature is valid only for this purpose. (required) |
-| `--key` `PATH` | Ed25519 private key PEM; repeat for multiple signers. (required, repeatable) |
+| `--key` `PATH` | Ed25519 private key PEM with mode 0600; repeat for multiple signers. (required, repeatable) |
 | `--out` `PATH` | Signed envelope file to create; must not exist. (required) |
+| `--passphrase-file` `PATH` | Passphrase for encrypted private keys, on the first line of this file. |
+
+A contract that could never verify, because its validity window is longer than its
+purpose allows or has already ended, is refused. The output includes the contract
+`digest` that approvals and revocation lists use.
 
 ### `runtime verify`
 
@@ -215,6 +225,32 @@ nexus-symbiote runtime verify [OPTIONS] ENVELOPE_PATH
 | `--public-key` `PATH` | Trusted Ed25519 public key PEM; repeat to build the trusted key ring. (required, repeatable) |
 | `--threshold` `INTEGER RANGE` | Minimum number of distinct trusted signatures (default: 1). |
 | `--bom` `PATH` | The exact companion BOM; required for snapshot contracts. |
+
+Revocation, signer scopes, approver identities and an approval's bindings are
+checked only by the gateway. A failure names its reason code, listed in the
+[runtime contract reference](runtime-contract-reference.md#reason-codes).
+
+### `runtime digest`
+
+Print the canonical digest that contracts, approvals and revocations bind.
+
+```text
+nexus-symbiote runtime digest [OPTIONS] INPUT_PATH
+```
+
+| Option | Description |
+|---|---|
+| `--kind` `snapshot\|approval\|trust\|model\|context\|request\|tool\|bom` | What the file holds: an unsigned contract, an execution context, a tool call, a served tool descriptor or a companion BOM. (required) |
+
+It verifies nothing and works for contracts that are not yet valid or expired.
+
+### `runtime key-id`
+
+Print the key ID that envelopes, key rings and revocation lists use.
+
+```text
+nexus-symbiote runtime key-id [OPTIONS] PUBLIC_KEY
+```
 
 ### `scan`
 

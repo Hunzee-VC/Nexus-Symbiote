@@ -33,7 +33,8 @@ def test_each_admission_quorum_requires_distinct_authorized_signers(tmp_path, pu
     other = Ed25519PrivateKey.generate()
     keys = dict(getattr(gateway, purpose + "_keys"))
     keys[key_id(other.public_key())] = other.public_key()
-    actors = {**gateway.approval_actors, key_id(other.public_key()): "approver"}
+    # An approval quorum counts distinct approvers, so the second key is another person's.
+    actors = {**gateway.approval_actors, key_id(other.public_key()): "second-approver"}
     gateway = configured_gateway(
         gateway,
         **{purpose + "_keys": keys, purpose + "_threshold": 2, "approval_actors": actors},
@@ -86,7 +87,11 @@ def test_pinned_stdio_preserves_gateway_quorum_policy(tmp_path, purpose):
     other = Ed25519PrivateKey.generate()
     keys = dict(getattr(gateway, purpose + "_keys"))
     keys[key_id(other.public_key())] = other.public_key()
-    gateway = configured_gateway(gateway, **{purpose + "_keys": keys, purpose + "_threshold": 2})
+    actors = {**gateway.approval_actors, key_id(other.public_key()): "second-approver"}
+    gateway = configured_gateway(
+        gateway,
+        **{purpose + "_keys": keys, purpose + "_threshold": 2, "approval_actors": actors},
+    )
     path, pin, log = launcher(tmp_path)
     with pytest.raises(AuthorizationError, match="insufficient distinct trusted signers"):
         invoke_pinned_stdio(

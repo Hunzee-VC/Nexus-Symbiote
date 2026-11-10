@@ -100,7 +100,7 @@ def test_oversized_or_overcomplex_json_is_denied_before_worker_start(kind, monke
     def unexpected(*_, **__):
         pytest.fail("budget violation must not start a worker")
 
-    monkeypatch.setattr(validation.subprocess, "run", unexpected)
+    monkeypatch.setattr(validation.subprocess, "Popen", unexpected)
     schema = {"type": "object"}
     arguments = {}
     if kind == "arguments":
@@ -122,28 +122,91 @@ def test_oversized_or_overcomplex_json_is_denied_before_worker_start(kind, monke
         validation.validate_arguments(schema, arguments)
 
 
+def fake_worker(monkeypatch, body: str) -> None:
+    """Run ``body`` as the worker, so the real two-phase protocol talks to it."""
+    script = "import os, sys, time\nout = sys.stdout.buffer\n" + body
+    monkeypatch.setattr(validation, "_WORKER_COMMAND", (sys.executable, "-I", "-c", script))
+
+
+READY = "out.write(b'ready\\n'); out.flush()\n"
+
+
 @pytest.mark.parametrize(
-    ("returncode", "stdout"), [(-9, b""), (1, b"valid\n"), (0, b""), (0, b"valid\nextra")]
+    "body",
+    [
+        READY + "os.kill(os.getpid(), 9)\n",
+        READY + "sys.stdin.buffer.read(); out.write(b'valid\\n'); raise SystemExit(1)\n",
+        READY + "sys.stdin.buffer.read()\n",
+        READY + "sys.stdin.buffer.read(); out.write(b'valid\\nextra')\n",
+        READY + "sys.stdin.buffer.read(); out.write(b'VALID\\n')\n",
+    ],
+    ids=["killed", "nonzero-exit", "no-reply", "trailing-data", "unknown-reply"],
 )
-def test_worker_crash_or_invalid_protocol_fails_closed(returncode, stdout, monkeypatch):
-    monkeypatch.setattr(
-        validation.subprocess,
-        "run",
-        lambda *_, **__: subprocess.CompletedProcess([], returncode, stdout=stdout),
-    )
-    with pytest.raises(validation.ValidationBudgetError):
+def test_worker_crash_or_invalid_protocol_fails_closed(body, monkeypatch):
+    fake_worker(monkeypatch, body)
+    with pytest.raises(validation.ValidationBudgetError) as denied:
+        validation.validate_arguments({"type": "object"}, {})
+    assert denied.value.reason == "validation-failed"
+
+
+def test_worker_that_never_starts_is_unavailable_and_reaped(tmp_path, monkeypatch):
+    pid = tmp_path / "pid"
+    fake_worker(monkeypatch, f"open({str(pid)!r}, 'w').write(str(os.getpid()))\ntime.sleep(30)\n")
+    monkeypatch.setattr(validation, "WORKER_STARTUP_SECONDS", 0.5)
+    with pytest.raises(validation.ValidationBudgetError, match="did not start") as denied:
+        validation.validate_arguments({"type": "object"}, {})
+    assert denied.value.reason == "validation-unavailable"
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(pid.read_text()), 0)
+
+
+def test_worker_timeout_fails_closed_reaps_worker_and_releases_capacity(tmp_path, monkeypatch):
+    pid = tmp_path / "pid"
+    body = f"open({str(pid)!r}, 'w').write(str(os.getpid()))\n" + READY + "time.sleep(30)\n"
+    with monkeypatch.context() as patch:
+        fake_worker(patch, body)
+        patch.setattr(validation, "WORKER_TIMEOUT_SECONDS", 0.5)
+        with pytest.raises(validation.ValidationBudgetError, match="timed out") as denied:
+            validation.validate_arguments({"type": "object"}, {})
+    assert denied.value.reason == "validation-timeout"
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(pid.read_text()), 0)
+    for _ in range(validation.WORKER_SLOTS + 1):
         validation.validate_arguments({"type": "object"}, {})
 
 
-def test_worker_timeout_fails_closed_and_releases_capacity(monkeypatch):
-    def timed_out(*_, **__):
-        raise subprocess.TimeoutExpired("worker", validation.WORKER_TIMEOUT_SECONDS)
-
-    with monkeypatch.context() as patch:
-        patch.setattr(validation.subprocess, "run", timed_out)
-        with pytest.raises(validation.ValidationBudgetError, match="timed out"):
-            validation.validate_arguments({"type": "object"}, {})
+def test_slow_start_up_does_not_spend_the_evaluation_deadline(monkeypatch):
+    # Start-up that takes longer than the whole evaluation deadline still validates:
+    # the deadline starts when the worker reports it is ready.
+    fake_worker(
+        monkeypatch,
+        "time.sleep(1.0)\n" + READY + "sys.stdin.buffer.read(); out.write(b'valid\\n')\n",
+    )
+    monkeypatch.setattr(validation, "WORKER_TIMEOUT_SECONDS", 0.5)
     validation.validate_arguments({"type": "object"}, {})
+
+
+def test_start_up_cpu_is_not_counted_against_the_evaluation_cpu_budget(monkeypatch):
+    # A host where interpreter start-up and imports cost more than the evaluation's
+    # one CPU second, simulated by burning CPU before the real worker runs. A CPU
+    # limit that counted start-up would kill this worker before it answered.
+    script = (
+        "import time\n"
+        "end = time.process_time() + 1.3\n"
+        "while time.process_time() < end:\n"
+        "    pass\n"
+        "from nexus_symbiote.runtime_validation import _worker\n"
+        "raise SystemExit(_worker())\n"
+    )
+    monkeypatch.setattr(validation, "_WORKER_COMMAND", (sys.executable, "-I", "-c", script))
+    validation.validate_arguments({"type": "object"}, {})
+
+
+def test_worker_that_cannot_be_started_is_unavailable(monkeypatch, tmp_path):
+    monkeypatch.setattr(validation, "_WORKER_COMMAND", (str(tmp_path / "missing-python"),))
+    with pytest.raises(validation.ValidationBudgetError) as denied:
+        validation.validate_arguments({"type": "object"}, {})
+    assert denied.value.reason == "validation-unavailable"
 
 
 def test_concurrent_worker_capacity_exhaustion_denies_without_waiting():
@@ -203,5 +266,5 @@ def test_worker_import_skips_format_checkers_and_fits_the_cpu_budget():
     )
     loaded, cpu = result.stdout.rsplit(" ", 1)
     assert loaded == "[]"
-    # The worker's RLIMIT_CPU is 1 second; startup and imports must leave most of it.
+    # Start-up has its own budget, but every call pays for it; keep the imports cheap.
     assert float(cpu) < 0.5

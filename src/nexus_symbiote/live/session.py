@@ -246,19 +246,5 @@ def invoke_pinned_stdio(
 ) -> dict[str, Any]:
     """Authorize and execute via the same pinned launcher process, never reconnecting."""
     with PinnedStdioSession(command=command, sha256=sha256, server_id=call.server_id) as session:
-        bound: ReferenceGateway[dict[str, Any]] = ReferenceGateway(
-            snapshot_keys=gateway.snapshot_keys,
-            approval_keys=gateway.approval_keys,
-            trust_keys=gateway.trust_keys,
-            state=gateway.state,
-            authenticate=gateway.authenticate,
-            describe=session.describe,
-            resolve_scope=gateway.resolve_scope,
-            execute=session.execute,
-            approval_actors=gateway.approval_actors,
-            clock=gateway.clock,
-            snapshot_threshold=gateway.snapshot_threshold,
-            approval_threshold=gateway.approval_threshold,
-            trust_threshold=gateway.trust_threshold,
-        )
+        bound = gateway.bind_adapters(describe=session.describe, execute=session.execute)
         return bound.invoke(call, snapshot=snapshot, trust=trust, bom=bom, approval=approval)
