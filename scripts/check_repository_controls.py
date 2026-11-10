@@ -3,10 +3,11 @@
 Read-only. For the published SHA it requires branch protection, the newest trusted CI run
 to have succeeded, and, with ``--publish``, the release-tag ruleset and the index
 environment's protection. Publishing to PyPI also requires the commit to have been on the
-branch for 24 hours (``SOAK_OVERRIDE`` with a stated reason waives that for an urgent fix)
-and the signed release tag to point at it. Only an administrator's token can see who may
-bypass the ruleset: the workflow reports that it could not, and ``--verify-bypass-actors``,
-for the administrator's own run, fails unless the list is readable and empty.
+branch for 24 hours, as its trusted CI runs show (``SOAK_OVERRIDE`` with a stated reason
+waives that for an urgent fix), and the signed release tag to point at it. Only an
+administrator's token can see who may bypass the ruleset: the workflow reports that it
+could not, and ``--verify-bypass-actors``, for the administrator's own run, fails unless
+the list is readable and empty and GitHub reports that the token cannot bypass it either.
 Administrative configuration is a separate operator action; a checked-in policy file does
 not protect a GitHub branch.
 """
@@ -192,10 +193,13 @@ def _timestamp(value: Any) -> datetime | None:
 def landed_at(
     metadata: Any, runs: list[Any], *, repo: str, branch: str, sha: str
 ) -> datetime | None:
-    """When the SHA reached the branch: the later of its commit time and its first push run.
+    """When the SHA reached the branch, or None when no trusted run of it shows that.
 
-    GitHub creates the push run when the commit lands; the commit time alone is whatever
-    the committer's clock said.
+    The commit time is whatever the committer's clock said, so the landing is the later of
+    that and the first trusted run. GitHub creates the push run as the commit lands; a
+    commit pushed with "[skip ci]" has none, and then its first dispatch on the branch,
+    which can only follow the landing, stands in. A dispatch names its ref only by name,
+    which a tag can share with the branch, so a push run wins when there is one.
     """
     commit = metadata.get("commit") if isinstance(metadata, dict) else None
     details = commit.get("commit") if isinstance(commit, dict) else None
@@ -204,13 +208,15 @@ def landed_at(
     if committed is None:
         return None
     pushes: list[datetime] = []
+    others: list[datetime] = []
     for run in runs:
-        if _trusted(run, repo=repo, branch=branch, sha=sha) and run.get("event") == "push":
+        if _trusted(run, repo=repo, branch=branch, sha=sha):
             created = _timestamp(run.get("created_at"))
             if created is None:
                 return None
-            pushes.append(created)
-    return max(committed, min(pushes)) if pushes else committed
+            (pushes if run["event"] == "push" else others).append(created)
+    first = min(pushes or others, default=None)
+    return None if first is None else max(committed, first)
 
 
 def override_reason(override: str) -> str:
@@ -302,13 +308,11 @@ def fetch_tag_rulesets(repo: str, token: str) -> list[Any]:
 
 
 def _guards_release_tags(ruleset: Any) -> bool:
-    """Active, covering every v* tag, blocking updates and deletions, binding the caller too."""
+    """Active, covering every v* tag and blocking updates and deletions."""
     if (
         not isinstance(ruleset, dict)
         or ruleset.get("target") != "tag"
         or ruleset.get("enforcement") != "active"
-        # Reported for the caller's own token: a workflow that may bypass could move a tag.
-        or ruleset.get("current_user_can_bypass", "never") != "never"
     ):
         return False
     conditions = ruleset.get("conditions")
@@ -331,31 +335,50 @@ def evaluate_tag_rulesets(
 ) -> tuple[list[str], list[str]]:
     """Errors and notices for the ruleset that must stop v* tags from moving or vanishing.
 
-    GitHub returns ``bypass_actors`` only to a caller that may edit the ruleset, which means an
-    administrator; the release workflow's token never sees it. A missing list is therefore
-    unknown, not empty: the workflow reports it, and the administrator's check
-    (``verify_bypass_actors``) fails on it.
+    No one may bypass it, the checking token included. GitHub returns ``bypass_actors`` only
+    to a caller that may edit the ruleset, which means an administrator; the release
+    workflow's token never sees it. ``current_user_can_bypass`` says whether the caller
+    itself may. A missing or null value of either is unknown, never empty or "never": the
+    workflow reports it, and the administrator's check (``verify_bypass_actors``) fails on it.
     """
-    unknown = False
+    unknown_actors = unknown_caller = False
     for ruleset in rulesets:
         if not _guards_release_tags(ruleset):
             continue
         actors = ruleset.get("bypass_actors")
-        if actors == []:
+        caller = ruleset.get("current_user_can_bypass")
+        if actors not in (None, []) or caller not in (None, "never"):
+            continue
+        if actors == [] and caller == "never":
             return [], []
-        unknown = unknown or actors is None
-    if unknown and verify_bypass_actors:
+        unknown_actors = unknown_actors or actors is None
+        unknown_caller = unknown_caller or caller is None
+    gaps: list[tuple[str, str]] = []
+    if unknown_caller:
+        gaps.append(
+            (
+                "GitHub did not report whether this token may bypass the release-tag ruleset",
+                "GitHub did not report whether this token may bypass the release-tag ruleset;"
+                " the administrator check (--verify-bypass-actors) shows whether anyone may",
+            )
+        )
+    if unknown_actors:
+        gaps.append(
+            (
+                "this token cannot read who may bypass the release-tag ruleset; run the check"
+                " with a repository administrator's token",
+                "the release-tag ruleset's bypass actors are visible only to administrators, so"
+                " this token could not check them; the administrator check"
+                " (--verify-bypass-actors) does",
+            )
+        )
+    if not gaps:
         return [
-            "this token cannot read who may bypass the release-tag ruleset; run the check"
-            " with a repository administrator's token"
+            "no active ruleset without bypass stops refs/tags/v* from being moved or deleted"
         ], []
-    if unknown:
-        return [], [
-            "the release-tag ruleset's bypass actors are visible only to administrators, so"
-            " this token could not check them; the administrator check"
-            " (--verify-bypass-actors) does"
-        ]
-    return ["no active ruleset without bypass stops refs/tags/v* from being moved or deleted"], []
+    if verify_bypass_actors:
+        return [error for error, _ in gaps], []
+    return [], [notice for _, notice in gaps]
 
 
 def fetch_environment(repo: str, name: str, token: str) -> tuple[Any, Any]:

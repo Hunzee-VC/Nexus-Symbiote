@@ -307,6 +307,9 @@ jobs:
           printf 'unsafe-format-fixture' > "$fixtures/failing/models/classifier.pkl"
           # Workflow commands in names the inventory prints: a legacy set-output aimed
           # at the upload paths and annotations carrying a marker the next job looks for.
+          # The Action pre-seeds every output in GITHUB_OUTPUT, which the runner applies
+          # after the step, so a set-output it executed would change no output; the
+          # runner's deprecation warning for it is the evidence the next job looks for.
           printf '%s\n' 'name: Demo' 'instructions: [CLAUDE.md]' 'models:' '  m:' \
             '    provider: example' \
             '    requested_ref: "x ##[set-output name=sarif_path]/etc/hostname%0A ::set-output name=aibom_path::/etc/hostname"' \
@@ -445,7 +448,7 @@ jobs:
       actions: read
       checks: read
     steps:
-      - name: Reject any annotation that carries the injected marker
+      - name: Reject any annotation that carries the injected marker or a legacy command
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -460,7 +463,8 @@ jobs:
               --jq '.[] | (.title // "") + " " + (.message // "")'
           done < "$RUNNER_TEMP/check-runs" > "$RUNNER_TEMP/annotations"
           cat "$RUNNER_TEMP/annotations"
-          if grep -F 'symbiote-injected-annotation' "$RUNNER_TEMP/annotations"; then
+          # An executed set-output or save-state leaves only the runner's deprecation warning.
+          if grep -Ei 'symbiote-injected-annotation|set-output|save-state' "$RUNNER_TEMP/annotations"; then
             echo "A workflow command from the scanned checkout created an annotation"
             exit 1
           fi

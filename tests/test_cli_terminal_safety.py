@@ -422,6 +422,56 @@ def test_a_symlink_named_as_a_command_never_starts_a_line(tmp_path):
         assert not _injected_lines(result.output)
 
 
+STAGED = "Unsigned baseline staged for review: "
+
+
+@pytest.mark.parametrize(
+    "directory,output",
+    [
+        ("##[set-output name=approved]true", None),
+        ("x\n::error title=Forged::All gates passed\n::add-mask::CRITICAL", None),
+        ("esc\x1b]0;pwned-title\x07\x1b[2K\rFORGED", None),
+        ("agent", "##[warning]dir/base.json"),
+        ("agent", "##vso[task.setvariable variable=APPROVED]true/base.json"),
+        ("agent", "##teamcity[buildStatus status='SUCCESS' text='forged']/base.json"),
+        ("agent", "x\n::error title=Forged::All gates passed/base.json"),
+    ],
+)
+def test_baseline_prints_its_output_path_on_one_inert_line(
+    tmp_path, monkeypatch, directory, output
+):
+    # Workflows that loop over agent directories derive both the working directory and
+    # the -o name from checkout names.
+    project = tmp_path / directory
+    project.mkdir()
+    (project / "CLAUDE.md").write_text("Use the configured tools.\n")
+    (project / "agent.yaml").write_text("name: Demo\ninstructions: [CLAUDE.md]\n")
+    monkeypatch.chdir(project)
+    args = ["baseline", ".", "--no-project-policy"]
+    if output is not None:
+        (project / output).parent.mkdir()
+        args += ["-o", output]
+    result = CliRunner().invoke(main, args)
+    assert result.exit_code == 0, result.output
+    target = project / (output or ".nexus-symbiote-baseline.json")
+    assert target.is_file()
+    assert result.stdout.splitlines() == [safe_line(STAGED, target)]
+    assert not _injected_lines(result.output)
+    for character in ("\x1b", "\x07", "\r"):
+        assert character not in result.output
+
+
+def test_an_ordinary_baseline_path_is_printed_unchanged(tmp_path, monkeypatch):
+    project = tmp_path / "agents" / "billing"
+    project.mkdir(parents=True)
+    (project / "CLAUDE.md").write_text("Use the configured tools.\n")
+    (project / "agent.yaml").write_text("name: Demo\ninstructions: [CLAUDE.md]\n")
+    monkeypatch.chdir(project)
+    result = CliRunner().invoke(main, ["baseline", ".", "--no-project-policy"])
+    assert result.exit_code == 0, result.output
+    assert result.stdout == f"{STAGED}{project / '.nexus-symbiote-baseline.json'}\n"
+
+
 def test_a_long_scan_root_is_printed_on_one_line(tmp_path):
     # Rich used to wrap the path at 80 columns, so text at that column started a line.
     project = tmp_path / ("p" * (78 - len(str(tmp_path)) % 80)) / "::notice::wrapped"

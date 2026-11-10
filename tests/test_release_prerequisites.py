@@ -66,7 +66,42 @@ def test_the_landing_time_is_the_later_of_commit_and_first_push_run():
     runs = [run(), run(id=200, event="workflow_dispatch", created_at="2026-11-10T11:00:00Z")]
     runs.append(run(id=300, event="pull_request", created_at="2026-11-01T00:00:00Z"))
     assert landed(old, runs) == datetime(2026, 11, 9, 6, 1, tzinfo=UTC)
-    assert landed(branch(), []) == datetime(2026, 11, 9, 6, 0, tzinfo=UTC)
+    # Without a trusted run, the commit date is only the committer's claim.
+    assert landed(branch(), []) is None
+
+
+DISPATCHED = "2026-11-10T11:50:00Z"
+
+
+def test_a_backdated_commit_without_a_push_run_waits_from_its_first_dispatch():
+    # A "[skip ci]" push creates no push run; its commit date can say anything.
+    backdated = branch("2026-11-07T12:00:00Z")
+    only_dispatch = [run(event="workflow_dispatch", created_at=DISPATCHED)]
+    moment = landed(backdated, only_dispatch)
+    assert moment == datetime(2026, 11, 10, 11, 50, tzinfo=UTC)
+    assert controls.evaluate_soak(moment, NOW, "")
+    assert controls.evaluate_soak(moment, moment + timedelta(hours=23, minutes=59), "")
+    assert controls.evaluate_soak(moment, moment + timedelta(hours=24), "") == []
+    # The first trusted run counts, whatever its event; runs elsewhere count for nothing.
+    later = run(id=124, event="workflow_dispatch", created_at="2026-11-10T11:55:00Z")
+    early = "2026-11-01T00:00:00Z"
+    elsewhere = [
+        run(id=90, event="workflow_dispatch", head_branch="release-prep", created_at=early),
+        run(id=91, event="pull_request", created_at=early),
+        run(id=92, head_repository={"full_name": "fork/repo"}, created_at=early),
+        run(id=93, path=".github/workflows/other.yml", created_at=early),
+    ]
+    assert landed(backdated, [later, *only_dispatch, *elsewhere]) == moment
+    assert landed(backdated, elsewhere) is None
+
+
+def test_a_push_run_marks_the_landing_even_after_an_earlier_dispatch():
+    # A dispatch names its ref only by name, which a tag can share with the branch, so a
+    # dispatch "on main" before the push run cannot pull the landing time back.
+    early = run(id=50, event="workflow_dispatch", created_at="2026-11-01T00:00:00Z")
+    assert landed(branch("2026-10-01T00:00:00Z"), [early, run()]) == datetime(
+        2026, 11, 9, 6, 1, tzinfo=UTC
+    )
 
 
 @pytest.mark.parametrize(
@@ -76,6 +111,8 @@ def test_the_landing_time_is_the_later_of_commit_and_first_push_run():
         (branch("2026-11-09T06:00:00"), None),
         ({"commit": {"sha": SHA}}, None),
         (branch(), [run(created_at=None)]),
+        (branch(), [run(event="workflow_dispatch", created_at="yesterday")]),
+        (branch(), [run(), run(id=124, event="workflow_dispatch", created_at=None)]),
     ],
 )
 def test_an_unreadable_landing_time_is_unknown(metadata, runs):
@@ -109,13 +146,14 @@ def test_the_override_reason_cannot_carry_runner_commands():
 
 
 def committed_ruleset(**changes):
+    """The committed ruleset as GitHub returns it to an administrator, who cannot bypass it."""
     ruleset = json.loads((ROOT / "config/github-release-tag-ruleset.json").read_text())
-    return {"id": 7, **ruleset, **changes}
+    return {"id": 7, **ruleset, "current_user_can_bypass": "never", **changes}
 
 
 def workflow_view(**changes):
     """The committed ruleset as GitHub returns it to a caller that cannot edit it."""
-    ruleset = committed_ruleset(**{"current_user_can_bypass": "never", **changes})
+    ruleset = committed_ruleset(**changes)
     del ruleset["bypass_actors"]
     return ruleset
 
@@ -165,6 +203,47 @@ def test_an_unreadable_bypass_list_is_reported_never_taken_as_empty(ruleset):
 def test_a_known_empty_bypass_list_outweighs_an_unreadable_one():
     rulesets = [workflow_view(), committed_ruleset(id=8)]
     assert controls.evaluate_tag_rulesets(rulesets, verify_bypass_actors=True) == ([], [])
+
+
+def unreported_caller(view, value):
+    ruleset = view()
+    if value == "absent":
+        del ruleset["current_user_can_bypass"]
+    else:
+        ruleset["current_user_can_bypass"] = value
+    return ruleset
+
+
+@pytest.mark.parametrize("value", ["absent", None])
+@pytest.mark.parametrize("view", [committed_ruleset, workflow_view])
+def test_an_unreported_caller_bypass_is_unknown_never_taken_as_never(view, value):
+    # Whether the checking token itself may move a v* tag is unknown, not "never".
+    ruleset = unreported_caller(view, value)
+    errors, notices = controls.evaluate_tag_rulesets([ruleset])
+    assert errors == []
+    assert any("whether this token may bypass" in notice for notice in notices)
+    assert len(notices) == (1 if view is committed_ruleset else 2)
+    errors, notices = controls.evaluate_tag_rulesets([ruleset], verify_bypass_actors=True)
+    assert any("whether this token may bypass" in error for error in errors)
+    assert notices == []
+    # A ruleset that reports both fields, in full, still settles it.
+    assert controls.evaluate_tag_rulesets(
+        [ruleset, committed_ruleset(id=8)], verify_bypass_actors=True
+    ) == ([], [])
+
+
+def test_the_workflow_token_reports_an_unreported_caller_bypass(live, capsys, tmp_path):
+    summary = tmp_path / "summary.md"
+    live.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    ruleset = unreported_caller(workflow_view, "absent")
+    live.setattr(controls, "fetch_tag_rulesets", lambda *_: [ruleset])
+    live.setattr("sys.argv", [*ARGV, "--publish", "pypi"])
+    assert controls.main() == 0
+    assert "whether this token may bypass" in capsys.readouterr().out
+    assert "whether this token may bypass" in summary.read_text()
+    live.setattr("sys.argv", [*ARGV, "--publish", "pypi", "--verify-bypass-actors"])
+    assert controls.main() == 1
+    assert "whether this token may bypass" in capsys.readouterr().err
 
 
 def environment(**changes):
@@ -283,18 +362,42 @@ def test_the_preflight_passes_when_every_prerequisite_holds(live, index, capsys)
     assert "release-tag ruleset" in capsys.readouterr().out
 
 
+def stamp(moment):
+    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def test_a_fresh_commit_blocks_pypi_but_not_the_testpypi_rehearsal(live, capsys):
-    live.setattr(
-        controls,
-        "fetch_branch",
-        lambda *_: branch(datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")),
-    )
-    live.setattr(controls, "fetch_runs", lambda *_: [])
+    now = stamp(datetime.now(UTC))
+    live.setattr(controls, "fetch_branch", lambda *_: branch(now))
+    live.setattr(controls, "fetch_runs", lambda *_: [run(created_at=now)])
     live.setattr("sys.argv", [*ARGV, "--publish", "pypi"])
     assert controls.main() == 1
     assert "waits 24 hours" in capsys.readouterr().err
     live.setattr("sys.argv", [*ARGV, "--publish", "testpypi"])
     assert controls.main() == 0
+
+
+def test_a_backdated_skip_ci_commit_waits_for_its_dispatch_on_the_branch(live, capsys):
+    # Pushed with "[skip ci]" and dated three days back; CI was then dispatched on main.
+    now = datetime.now(UTC)
+    live.setattr(controls, "fetch_branch", lambda *_: branch(stamp(now - timedelta(days=3))))
+    dispatch = run(event="workflow_dispatch", created_at=stamp(now))
+    live.setattr(controls, "fetch_runs", lambda *_: [dispatch])
+    live.setattr("sys.argv", [*ARGV, "--publish", "pypi"])
+    assert controls.main() == 1
+    assert "waits 24 hours" in capsys.readouterr().err
+
+
+def test_without_a_trusted_run_the_soak_needs_a_stated_override(live, capsys):
+    # The commit date is past the soak, but no run shows when the commit reached main.
+    elsewhere = [run(head_branch="release-prep"), run(id=124, event="pull_request")]
+    live.setattr(controls, "fetch_runs", lambda *_: elsewhere)
+    live.setattr("sys.argv", [*ARGV, "--publish", "pypi"])
+    assert controls.main() == 1
+    assert "reached the branch is unavailable" in capsys.readouterr().err
+    live.setenv("SOAK_OVERRIDE", "Publishes the fix for an actively exploited gate bypass")
+    assert controls.main() == 0
+    assert "Soak period waived by the publishing maintainer" in capsys.readouterr().out
 
 
 def test_a_stated_override_publishes_a_fresh_commit_and_is_logged(live, capsys):
