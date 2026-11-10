@@ -6,33 +6,49 @@ evidence. Static MCP server records carry two kinds of source binding.
 `static_config_hash` (profile `nexus-symbiote/mcp-static-config/v3`) is an RFC 8785
 digest of the server's exported structure: configuration field names, the displayed
 command basename, the classified launcher with its wrappers and effective command,
-the identities of the packages it launches, package source origins, launch context
-flags and counts, transport, endpoint origin, argument count, environment variable and
-header names, client settings (auto-approval, disabled, tool filters) and declared
-tool names. It covers only information the record exports in clear, so it reveals
-nothing about secret values. It detects added or removed arguments, environment
-variables, headers, fields and tools, and changed launchers, package identities,
-package source origins, launch context and endpoint origins. Package versions are
-compared as their own fields, so a version bump is not a binding change.
+the identity, version and pin of every package it launches, package source origins,
+the names of the project resolver settings that apply to it, launch context flags and
+counts, transport, endpoint origin, argument count, environment variable and header
+names, client settings (auto-approval, disabled, tool filters) and declared tool names.
+It covers only information the record exports in clear, so it reveals nothing about
+secret values. It detects added or removed arguments, environment variables, headers,
+fields, resolver settings and tools, and changed launchers, package identities and
+versions (including dependencies added with `--with`), package source origins, launch
+context and endpoint origins.
 
 Package sources are the registry and index options of a launcher (`--registry`,
 `--@scope:registry`, `--index-url`, `--find-links` and similar), environment
 variables that redirect resolution (`npm_config_registry`, `UV_INDEX_URL`,
-`PIP_INDEX_URL`, `GOPROXY` and similar) and project-root resolver settings that apply
-to the launched package: `.npmrc` (`registry` and `@scope:registry`) for npm, pnpm,
-bun and Deno `npm:` specifiers, `bunfig.toml` for bun, `.yarnrc.yml` for `yarn dlx`,
-and `uv.toml` and `pyproject.toml` `[tool.uv]` for `uv run`. They are exported as
-`package_sources` entries such as `.npmrc:@acme:registry=https://npm.acme.example`:
-the origin only, `[local]` for a path and `[unresolved]` for a value with `${...}`
-expansion. A redirected package keeps its version but loses `launcher_package` and
-`package_url`, and carries a medium `package_source` risk.
+`PIP_INDEX_URL`, `UV_PYTHON_INSTALL_MIRROR`, `JSR_URL`, `DOCKER_HOST`, `GOPROXY` and
+similar), container engine options (`docker -H`, `--context`, `--config`; `podman
+--url`, `--root`), `pipx --pip-args` index and trust options (matched by unique
+prefix, as pip's parser does; an unknown option is a gap) and project-root resolver
+settings that apply to the launched package: `.npmrc` for npm, pnpm, bun and Deno
+`npm:` specifiers, `bunfig.toml` for bun, `.yarnrc.yml` for `yarn dlx`, and `uv.toml`
+and `pyproject.toml` `[tool.uv]` (indexes, mirrors, insecure hosts and `sources`
+entries for a launched package) for `uv run`. `.npmrc` is read as npm reads it: keys
+and values are trimmed, JSON-decoded when quoted and cut at an unescaped `;` or `#`
+otherwise, lines end at a carriage return or line feed, keys after the first
+`[section]` line are ignored, and a key containing `${...}` is `[unresolved]`. Its
+registry, cache, offline, proxy, `strict-ssl=false`, CA, user and global
+configuration, prefix and store settings are sources; auth settings (`//host/:...`,
+`_auth`, `username` and similar) are ignored. They are exported as `package_sources`
+entries such as `.npmrc:@acme:registry=https://npm.acme.example`: the origin only,
+`[local]` for a path or other value and `[unresolved]` for a value with `${...}`
+expansion. A server that runs in another working directory (a `cwd` other than the
+root, `env -C`, `uv --directory` or `--project`, `deno --config`) may read other
+resolver files, so it carries `working-directory=[unresolved]`. A redirected package
+keeps its version but loses `launcher_package` and `package_url`, and carries a
+medium `package_source` risk. The names of the other `.npmrc` settings are exported as
+`resolver_settings` and digested; their values enter only the keyed binding.
 
 Values are bound only when the operator sets `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` to
 a secret of at least 32 characters during collection and validation. Generate it
 randomly, for example with `openssl rand -hex 32`: the exported key identifier lets
 anyone holding the BOM test guesses of a weak key. Records then also carry
 `static_value_binding`, an HMAC-SHA256 under that key over the original server object
-and the raw values of the project resolver settings that apply to it (profile
+and the raw values of every project resolver setting that applies to it, auth
+settings excepted (profile
 `nexus-symbiote/mcp-static-values/v2`), and a key identifier. This detects a different
 package with the same version, changed arguments, environment and header values,
 endpoint and index paths and the directory of a command. The key never enters the
