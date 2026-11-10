@@ -187,3 +187,19 @@ def test_every_subprocess_a_test_starts_has_its_own_timeout():
             ):
                 untimed.append(f"{path.name}:{node.lineno}")
     assert untimed == []
+
+
+def test_the_scaling_check_tells_linear_from_quadratic_work():
+    from tests.support import scaling_ratio
+
+    def linear(scale):
+        sum(range(2_000_000 * scale))
+
+    def quadratic(scale):
+        n = 1_000 * scale
+        for _ in range(n):
+            for _ in range(n):
+                pass
+
+    assert scaling_ratio(linear) < 10
+    assert scaling_ratio(quadratic) > 10

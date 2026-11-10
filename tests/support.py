@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import time
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 
@@ -32,3 +34,22 @@ def load_script(name: str) -> ModuleType:
         if added:
             sys.path.remove(str(SCRIPTS))
     return module
+
+
+def scaling_ratio(run: Callable[[int], object], factor: int = 4, repeats: int = 2) -> float:
+    """CPU time of run(factor) over run(1), each the best of ``repeats`` runs.
+
+    Linear work grows about ``factor`` times, quadratic work about ``factor`` squared. Two
+    sizes measured on the same machine cancel what an absolute bound cannot: a slow or busy
+    runner and coverage tracing.
+    """
+
+    def best(scale: int) -> float:
+        timings = []
+        for _ in range(repeats):
+            started = time.process_time()
+            run(scale)
+            timings.append(time.process_time() - started)
+        return max(min(timings), 1e-3)
+
+    return best(factor) / best(1)

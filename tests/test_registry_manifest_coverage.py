@@ -13,6 +13,7 @@ from click.testing import CliRunner
 
 from nexus_symbiote.cli import main
 from nexus_symbiote.scanners.registry import RegistryScanner
+from tests.support import scaling_ratio
 
 NOTHING_FOUND = "registry (no AI-related dependencies found)"
 
@@ -703,13 +704,17 @@ def test_dockerfile_parsing_is_linear(tmp_path):
 
 
 def test_heredoc_parsing_is_linear(tmp_path):
-    (tmp_path / "Dockerfile").write_text('RUN <<EOF "' + "a" * 3_000_000 + "\n")
-    (tmp_path / "Dockerfile.agent").write_text(
-        "RUN <<A <<B\nx\nA\nB\n" * 100_000 + "FROM ollama/ollama:1\n"
-    )
-    started = time.monotonic()
-    result = RegistryScanner().scan(tmp_path)
-    assert time.monotonic() - started < 5
+    roots = {}
+    for scale in (1, 4):
+        root = roots[scale] = tmp_path / f"scale-{scale}"
+        root.mkdir()
+        (root / "Dockerfile").write_text('RUN <<EOF "' + "a" * 375_000 * scale + "\n")
+        (root / "Dockerfile.agent").write_text(
+            "RUN <<A <<B\nx\nA\nB\n" * 12_500 * scale + "FROM ollama/ollama:1\n"
+        )
+    # Four times the input: about four times the work if linear, sixteen if quadratic.
+    assert scaling_ratio(lambda scale: RegistryScanner().scan(roots[scale])) < 10
+    result = RegistryScanner().scan(roots[1])
     assert result.surfaces_excluded == ["Dockerfile: heredoc not parsed"]
     assert [c.name for c in result.components] == ["ollama/ollama:1"]
 
