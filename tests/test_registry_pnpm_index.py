@@ -297,6 +297,11 @@ def test_twenty_thousand_names_that_redact_alike_are_resolved_in_linear_time(tmp
     dependencies = {f"mcp-token={index}": "^1.0.0" for index in range(20_000)}
     keys = [f"mcp-token=***@1.0.{index}" for index in range(20_000)]
     result = _timed_scan(tmp_path, dependencies, keys)
-    assert set(result.surfaces_excluded) == {
-        "pnpm-lock.yaml: multiple package resolutions for mcp-token=*** are ambiguous"
-    }
+    # Every one of the 20,000 is the same gap; the bounded gap list keeps the first ones
+    # and counts the rest on its last line.
+    gap = "pnpm-lock.yaml: multiple package resolutions for mcp-token=*** are ambiguous"
+    assert gap in result.surfaces_excluded
+    assert all(
+        entry == gap or (entry.startswith(gap + " (and ") and entry.endswith(" not listed)"))
+        for entry in result.surfaces_excluded
+    )

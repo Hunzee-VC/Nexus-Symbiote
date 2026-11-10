@@ -351,6 +351,7 @@ def test_what_is_listed_past_the_bound_does_not_depend_on_hash_order(tmp_path):
             capture_output=True,
             check=True,
             text=True,
+            timeout=120,
         ).stdout
         for seed in ("1", "2", "3")
     }
