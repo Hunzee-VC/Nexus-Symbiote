@@ -92,6 +92,54 @@ def label_bounds(scores: dict) -> dict:
     }
 
 
+def critical_gate(report) -> bool:
+    """The gate fails because of a critical finding, not merely because it fails."""
+    return report.severity_counts.get("critical", 0) > 0 and any(
+        "critical" in reason for reason in report.gate_reasons
+    )
+
+
+def unknown_coverage_gate(project: Path, scratch: Path) -> bool:
+    """The real scan, with every collector, refuses a project that yields no evidence."""
+    runner = CliRunner()
+    output = scratch / "gate.json"
+    output.unlink(missing_ok=True)
+    scanned = runner.invoke(main, ["scan", str(project), "--no-project-policy", "-o", str(output)])
+    if scanned.exit_code == 0 or not output.exists():
+        return False
+    risk = runner.invoke(main, ["risk", str(output), "--json-output", "--no-project-policy"])
+    try:
+        reasons = json.loads(risk.stdout).get("gate_reasons")
+    except ValueError:
+        return False
+    return risk.exit_code != 0 and isinstance(reasons, list) and bool(reasons)
+
+
+def policy_rejected(project: Path, scratch: Path) -> bool:
+    """The checkout's policy is refused before anything is collected or written.
+
+    A scan that merely fails its gate still writes the inventory; a rejected policy
+    stops it first, so a fixture that also fails the gate cannot pass this check.
+    """
+    output = scratch / "policy.json"
+    output.unlink(missing_ok=True)
+    result = CliRunner().invoke(main, ["scan", str(project), "--report-only", "-o", str(output)])
+    return result.exit_code != 0 and not output.exists() and "policy" in result.output.lower()
+
+
+def operator_policy_isolated(project: Path, scratch: Path) -> bool:
+    """With the operator's --no-project-policy the hostile policy cannot hide the model."""
+    output = scratch / "isolated.json"
+    output.unlink(missing_ok=True)
+    result = CliRunner().invoke(
+        main, ["scan", str(project), "--no-project-policy", "--report-only", "-o", str(output)]
+    )
+    if result.exit_code != 0 or not output.exists():
+        return False
+    components = json.loads(output.read_text()).get("components", [])
+    return any(c.get("component_type") == "model" for c in components)
+
+
 def run() -> dict:
     manifest = parse_json_strict(read_regular_text(DIRECTORY / "manifest.json"))
     rows = []
@@ -187,15 +235,14 @@ def run() -> dict:
                         and models[0].signing_status != "sigstore-signed"
                         and models[0].assurance_level.value != "verified"
                     )
-                elif name in {"critical_gate", "unknown_coverage_gate"}:
-                    passed, report = RiskScorer().passes_gate(bom)
-                    ok = not passed and (
-                        name != "critical_gate" or report.severity_counts.get("critical", 0) > 0
-                    )
+                elif name == "critical_gate":
+                    ok = critical_gate(RiskScorer().score(bom))
+                elif name == "unknown_coverage_gate":
+                    ok = unknown_coverage_gate(project, root)
                 elif name == "policy_rejected":
-                    ok = CliRunner().invoke(main, ["scan", str(project)]).exit_code != 0
+                    ok = policy_rejected(project, root)
                 elif name == "operator_policy_isolated":
-                    ok = bool(models)
+                    ok = operator_policy_isolated(project, root)
                 else:
                     raise ValueError(f"Unknown benchmark assertion {name}")
                 checks[name] = ok

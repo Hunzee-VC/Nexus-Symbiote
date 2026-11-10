@@ -25,8 +25,8 @@ reported as null, not perfect performance. These are worst/best case bounds for
 the selected labels, not statistical confidence intervals. Names with no label
 are still reported separately, not assigned to either bound. Aggregate counts
 are case-label occurrences: repeated names across cases are not distinct real
-deployments. The release statement signs the new results along with existing
-corpus and scanner materials.
+deployments. The release statement binds the new results to the corpus and scanner
+materials, and the release workflow attests the archive that holds them.
 
 The manifest's `version` identifies the corpus and labels, not the result wire
 format; it is unchanged because the cases and labels are unchanged. The additional
@@ -50,9 +50,13 @@ process and limits; do not treat this regression corpus as that held-out set.
 No representative sample or independently adjudicated performance claim is
 provided by this repository today.
 
-### Sign and check a result
+### Sign and check a result outside a release
 
-Install the project's Sigstore extra. Prepare the evidence directory on a trusted checkout. Sign the statement with the release operator's authorized OIDC identity. Consumers can verify the exact result bytes offline with their own signer and issuer policy.
+Releases use the workflow attestation described in the next section. For a result you
+produce yourself, install the project's Sigstore extra, prepare the evidence directory
+on a trusted checkout and sign the statement with your authorized OIDC identity.
+Consumers can verify the exact result bytes offline with their own signer and issuer
+policy.
 
 ```sh
 python benchmarks/inventory/evidence.py prepare run
@@ -60,7 +64,11 @@ python -m sigstore sign --bundle run/statement.sigstore.json run/statement.json
 python benchmarks/inventory/evidence.py verify run --identity "$EXPECTED_SIGNER" --issuer "$EXPECTED_ISSUER"
 ```
 
-The statement binds the output, the corpus, the runner, and the installed scanner source. It records Python and key library versions. Add `--compare-installation` to require the local scanner, fixtures and runner to match. Publish `results.json`, `statement.json`, and the signature bundle together.
+The statement binds the output, the corpus, the runner, and every file of the installed
+scanner package, its vendored schemas included. It records the Python version and the
+version of every installed distribution. Add `--compare-installation` to require the
+local scanner, fixtures, runner and installed distributions to match. Publish
+`results.json`, `statement.json`, and the signature bundle together.
 
 
 The harness calls installed static MCP and model collectors directly with their
@@ -93,4 +101,14 @@ gh attestation verify inventory-benchmark.tar.gz \
 For a retained copy of the attestation, download `inventory-benchmark-attestation`
 from that run and supply its file to `gh attestation verify` with `--bundle`.
 Compare the candidate wheel against `wheel.sha256` before using the results for
-that distribution. The counts describe the versioned public fixtures.
+that distribution. The archive has no Sigstore bundle of its own; once its
+attestation verifies, check that the statement binds the results, and, in an
+environment where that wheel is installed with `requirements-action.lock`, that it
+binds that installation:
+
+```sh
+mkdir inventory && tar -xzf inventory-benchmark.tar.gz -C inventory
+python benchmarks/inventory/evidence.py check inventory --compare-installation
+```
+
+The counts describe the versioned public fixtures.

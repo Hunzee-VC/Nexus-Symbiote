@@ -1,5 +1,7 @@
 """Pinned public MCP source and signed inventory-regression evidence."""
 
+import importlib.util
+import json
 import runpy
 from pathlib import Path
 
@@ -141,3 +143,71 @@ def test_inventory_statement_binds_results_and_scanner_materials(tmp_path, monke
     (target / "results.json").write_bytes(b"{}")
     with pytest.raises(ValueError, match="bind"):
         evidence.verify(target, "signer", "authority")
+
+
+def test_every_inventory_control_can_fail(tmp_path):
+    """Each check is falsifiable: a broken input turns it false, the real one true."""
+    from nexus_symbiote.core.aibom import AIBOM
+    from nexus_symbiote.core.enums import RiskSeverity
+    from nexus_symbiote.core.models import ModelComponent, RiskAssessment
+    from nexus_symbiote.validators.risk import RiskScorer
+
+    harness = runpy.run_path(str(ROOT / "benchmarks/inventory/run_inventory.py"))
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "weights.safetensors").write_text("invalid")
+    # The invalid weights fail the scan gate on their own: without the hostile policy
+    # the scan still writes an inventory, so the policy check cannot pass by accident.
+    assert harness["policy_rejected"](project, tmp_path) is False
+    (project / ".nexus-symbiote.yaml").write_text("scan:\n  scanners: []\n")
+    assert harness["policy_rejected"](project, tmp_path) is True
+
+    assert harness["operator_policy_isolated"](project, tmp_path) is True
+    (project / "weights.safetensors").unlink()
+    assert harness["operator_policy_isolated"](project, tmp_path) is False
+
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert harness["unknown_coverage_gate"](empty, tmp_path) is True
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    (evidence / "AGENTS.md").write_text("Keep receipts.")
+    assert harness["unknown_coverage_gate"](evidence, tmp_path) is False
+
+    risky = AIBOM()
+    risky.add_component(
+        ModelComponent(
+            bom_ref="model:m",
+            name="m",
+            risks=[RiskAssessment(severity=RiskSeverity.CRITICAL, category="x", detail="x")],
+        )
+    )
+    assert harness["critical_gate"](RiskScorer().score(risky)) is True
+    # Unknown coverage alone also fails the gate, but must not count as a critical gate.
+    assert harness["critical_gate"](RiskScorer().score(AIBOM())) is False
+
+
+def test_an_attested_release_archive_is_checked_without_a_sigstore_bundle(tmp_path, monkeypatch):
+    import pytest
+
+    monkeypatch.syspath_prepend(str(ROOT / "benchmarks/inventory"))
+    spec = importlib.util.spec_from_file_location(
+        "inventory_evidence_check", ROOT / "benchmarks/inventory/evidence.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    target = tmp_path / "run"
+    module.prepare(target)
+    statement = json.loads((target / "statement.json").read_text())
+    materials = statement["predicate"]["materialsSha256"]
+    # Package data such as the vendored schemas is bound, not only Python source.
+    assert any(name.endswith(".json") for name in materials if name.startswith("package/"))
+    assert "click" in statement["predicate"]["packageVersions"]
+    assert not (target / "statement.sigstore.json").exists()
+    module.check(target, compare_installation=True)
+    monkeypatch.setattr(module, "installed_versions", lambda: {"click": "0"})
+    with pytest.raises(ValueError, match="distributions differ"):
+        module.check(target, compare_installation=True)
+    (target / "results.json").write_bytes(b"{}")
+    with pytest.raises(ValueError, match="bind"):
+        module.check(target)
