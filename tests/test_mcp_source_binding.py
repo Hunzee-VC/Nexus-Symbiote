@@ -650,6 +650,8 @@ def test_every_npmrc_setting_is_bound_and_named_but_auth_is_not(tmp_path, monkey
         {"command": "uv", "args": ["run", "--directory", "sub", "--with", "t==1.2.3", "s.py"]},
         {"command": "uv", "args": ["--project", "sub", "run", "--with", "t==1.2.3", "s.py"]},
         {"command": "deno", "args": ["run", "--config", "sub/deno.json", "npm:t@1.2.3"]},
+        {"command": "pwsh", "args": ["-WorkingDirectory", "sub", "-Command", "npx -y t@1.2.3"]},
+        {"command": "wsl", "args": ["--cd", "sub", "npx", "-y", "@acme/files-mcp@1.0.0"]},
     ],
 )
 def test_another_working_directory_leaves_resolver_files_unresolved(tmp_path, config):
@@ -662,6 +664,19 @@ def test_another_working_directory_leaves_resolver_files_unresolved(tmp_path, co
 def test_root_working_directory_keeps_the_identity(tmp_path, cwd):
     server = _server(tmp_path, {**PINNED_NPX, "cwd": cwd})
     assert server.launcher_package == "npm:@acme/files-mcp"
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"command": "env", "args": ["-C", ".", "npx", "-y", "@acme/files-mcp@1.0.0"]},
+        {"command": "uv", "args": ["run", "--directory", ".", "--with", "t==1.2.3", "s.py"]},
+        {"command": "deno", "args": ["run", "--config", "./deno.json", "npm:t@1.2.3"]},
+    ],
+)
+def test_root_working_directory_options_keep_the_identity(tmp_path, config):
+    server = _server(tmp_path, config)
+    assert server.launcher_package is not None and "package_sources" not in server.properties
 
 
 @pytest.mark.parametrize(

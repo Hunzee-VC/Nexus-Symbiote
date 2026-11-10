@@ -35,6 +35,11 @@ def _set(words: str) -> frozenset[str]:
     return frozenset(words.split())
 
 
+def _moves(directory: str) -> bool:
+    """Whether a working directory given to a launcher is other than the project root."""
+    return directory.strip() not in {"", ".", "./", ".\\"}
+
+
 MAX_WRAPPERS = 4
 MAX_SCRIPT_CHARS = 4096
 MAX_SCRIPT_TOKENS = 256
@@ -987,10 +992,14 @@ def _unwrap_env(rest: list[str], launch: Launch) -> list[str] | None:
         if word in {"-i", "-", "--ignore-environment", "-0", "--null", "-v", "--debug", "--"}:
             index += 1
         elif word in {"-u", "-C", "--unset", "--chdir"}:
-            launch.relocated = launch.relocated or word in {"-C", "--chdir"}
+            if word in {"-C", "--chdir"} and _moves(
+                rest[index + 1] if index + 1 < len(rest) else ""
+            ):
+                launch.relocated = True
             index += 2
         elif word.startswith(("--unset=", "--chdir=")):
-            launch.relocated = launch.relocated or word.startswith("--chdir=")
+            if word.startswith("--chdir=") and _moves(word.partition("=")[2]):
+                launch.relocated = True
             index += 1
         elif word in {"-S", "--split-string"} or word.startswith(("-S", "--split-string=")):
             if word in {"-S", "--split-string"}:
@@ -1124,6 +1133,8 @@ def _unwrap_powershell(rest: list[str], launch: Launch) -> list[str] | None:
             launch.executable = "powershell"
             return None
         if word in with_value:
+            if word in {"-workingdirectory", "-wd"} and index + 1 < len(rest):
+                launch.relocated = launch.relocated or _moves(rest[index + 1])
             index += 2
         elif word.startswith("-") and not word.startswith(("-e", "-enc")):
             index += 1
@@ -1147,6 +1158,8 @@ def _unwrap_wsl(rest: list[str], launch: Launch) -> list[str] | None:
     while index < len(rest):
         word = rest[index]
         if word in {"-d", "--distribution", "-u", "--user", "--cd", "--shell-type"}:
+            if word == "--cd" and index + 1 < len(rest):
+                launch.relocated = launch.relocated or _moves(rest[index + 1])
             index += 2
         elif word in {"-e", "--exec"}:
             direct = True
@@ -1353,7 +1366,7 @@ def _python_options(options: list[tuple[str, str | None]], launch: Launch) -> No
         if option in _UV_SOURCE:
             launch.sources.append((option, value))
         elif option in _UV_LOCATION:
-            launch.relocated = True
+            launch.relocated = launch.relocated or _moves(value)
         elif option in {"--python", "-p"} and re.search(r"[\\/]", value):
             # An interpreter path runs local code in place of a managed Python.
             launch.mark("code_loading_option")
@@ -1665,7 +1678,9 @@ def _deno(name: str, rest: list[str], launch: Launch) -> None:
     options, position = scanned
     for option, value in options:
         if option in {"-c", "--config"}:
-            launch.relocated = True
+            # Deno reads .npmrc next to its configuration file.
+            directory = re.split(r"[\\/]", value or "")[:-1]
+            launch.relocated = launch.relocated or _moves("/".join(directory))
         elif option in _DENO_SOURCES and value is not None:
             launch.sources.append((option, value))
         elif option in {"--preload", "--require"}:

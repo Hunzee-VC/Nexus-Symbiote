@@ -36,10 +36,10 @@ configuration, prefix and store settings are sources; auth settings (`//host/:..
 entries such as `.npmrc:@acme:registry=https://npm.acme.example`: the origin only,
 `[local]` for a path or other value and `[unresolved]` for a value with `${...}`
 expansion. A server that runs in another working directory (a `cwd` other than the
-root, `env -C`, `uv --directory` or `--project`, `deno --config`) may read other
-resolver files, so it carries `working-directory=[unresolved]`. A redirected package
-keeps its version but loses `launcher_package` and `package_url`, and carries a
-medium `package_source` risk. The names of the other `.npmrc` settings are exported as
+root, `env -C`, `pwsh -WorkingDirectory`, `wsl --cd`, `uv --directory` or `--project`,
+`deno --config`) may read other resolver files, so it carries
+`working-directory=[unresolved]`. A redirected package keeps its version but loses
+`launcher_package` and `package_url`, and carries a medium `package_source` risk. The names of the other `.npmrc` settings are exported as
 `resolver_settings` and digested; their values enter only the keyed binding.
 
 Values are bound only when the operator sets `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` to
