@@ -38,6 +38,7 @@ from nexus_symbiote.core.hashing import (
     extract_version_pin,
     hash_canonical,
     hash_tool_definition,
+    tool_definition_extensions,
 )
 from nexus_symbiote.core.models import (
     CapabilityDeclaration,
@@ -630,7 +631,13 @@ class MCPScanner(Scanner):
                     ):
                         raise ValueError("invalid tool fields")
 
-                    def_hash = hash_tool_definition(t_name, t_desc, t_schema, t_annotations)
+                    def_hash = hash_tool_definition(
+                        t_name,
+                        t_desc,
+                        t_schema,
+                        t_annotations,
+                        **tool_definition_extensions(tool_def),
+                    )
                     tool_ref = (
                         "tool:"
                         + hash_canonical({"server": server_ref, "name": t_name}).split(":", 1)[1]

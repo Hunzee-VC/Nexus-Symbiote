@@ -255,7 +255,10 @@ class ToolComponent(ComponentBase):
     )
     definition_hash: str | None = Field(
         default=None,
-        description="JCS canonical hash of (name, description, inputSchema, annotations)",
+        description=(
+            "RFC 8785 JCS hash of name, description, inputSchema and annotations, plus "
+            "title, outputSchema and _meta when the descriptor declares them"
+        ),
     )
     redacted_definition_hash: str | None = Field(
         default=None,

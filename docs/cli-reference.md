@@ -70,8 +70,9 @@ and `blast-radius`, the inventory that `scan` and `vex` print without `-o`, and 
 carry the inventory: `nexus-symbiote summary bom.json > summary.txt` keeps the summary,
 and `2>/dev/null` hides only diagnostics.
 
-The offline commands print text taken from an inventory or a checkout, such as names,
-paths, references and descriptions, literally and inert, in a terminal and in a CI log:
+Every command prints text taken from an inventory, a checkout or a live server, such as
+names, paths, references and descriptions, literally and inert, in a terminal and in a
+CI log:
 
 - control, format and line-break characters are replaced with U+FFFD, so such text
   cannot move the cursor, rewrite earlier output or start a new line;
@@ -82,16 +83,11 @@ paths, references and descriptions, literally and inert, in a terminal and in a 
   cannot become a `::command::` workflow command;
 - nothing is read as markup or emoji codes, and lines are never wrapped.
 
-The JSON that `scan` and `vex` print without `-o`, and the `--json-output` documents of
-`validate`, `risk`, `diff`, `summary` and `blast-radius`, write a `[` that follows such a
-`##` as `\u005b`; the document parses to exactly the same value. Files written
-with `-o` are not changed.
-
-These rules do not cover what the live commands print on standard output: the JSON of
-`discover-mcp` and `advisories` without `-o`, and of `verify-live --json-output` and
-`--record`, escapes control and line-break characters but not a `##` introducer, and it
-quotes what a server or an inventory supplied. In CI, write that output to a file
-(`-o`, or redirect standard output) instead of printing it into the log.
+The JSON that `scan`, `vex`, `discover-mcp` and `advisories` print without `-o`, the
+candidate inventory that `verify-live --record` prints, and the `--json-output`
+documents of `validate`, `risk`, `diff`, `summary`, `blast-radius` and `verify-live`,
+write a `[` that follows such a `##` as `\u005b`; the document parses to exactly the
+same value. Files written with `-o` are not changed.
 
 Colors are used only on a terminal, and `NO_COLOR` turns them off.
 
@@ -101,7 +97,7 @@ Colors are used only on a terminal, and `NO_COLOR` turns them off.
 |---|---|
 | `0` | The command completed and every requested gate passed. |
 | `1` | A gate or check failed (risk gate, integrity, digest or signature mismatch, `diff --fail-on-alert`, incomplete collection or observation), the input could not be read or parsed, `import-shadowscan` ran without `--report-only`, or an unexpected internal error occurred. |
-| `2` | Usage error: an unknown command or option, a missing argument or file, a `PROJECT_PATH` of `scan` or `baseline` or a `--project` of `validate`, `risk` or `verify-artifact` that is a file, an invalid value (including a malformed `verify-artifact --sha256` and an incomplete `--bundle`, `--signer-identity` and `--issuer` set), a relative project path that a symbolic link leads outside the working directory, an invalid `NEXUS_SYMBIOTE_MODE`, a `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` shorter than 32 characters, or a live command run without live mode. |
+| `2` | Usage error: an unknown command or option, a missing argument or file, a `PROJECT_PATH` of `scan` or `baseline` or a `--project` of `validate`, `risk`, `verify-artifact` or `verify-live` that is a file, a `verify-live` launch policy kept where the [launch policy](#launch-policy) rules forbid, an invalid value (including a malformed `verify-artifact --sha256` and an incomplete `--bundle`, `--signer-identity` and `--issuer` set), a relative project path that a symbolic link leads outside the working directory, an invalid `NEXUS_SYMBIOTE_MODE`, a `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` shorter than 32 characters, or a live command run without live mode (`advisories --dry-run` contacts nothing and runs in either mode). |
 
 What exit status 1 means for each gate:
 
@@ -112,7 +108,10 @@ What exit status 1 means for each gate:
 | `risk` | The risk gate failed, or `--project` reconciliation failed. |
 | `diff` | `--fail-on-alert` was given and the diff reports a security alert. |
 | `baseline` | The scan gate failed, under the project policy or the built-in one. |
-| `verify-artifact`, `verify-discovery`, `verify-live` | The digest, signature, projection or observation does not match. |
+| `verify-artifact`, `verify-discovery` | The digest, signature or projection does not match. |
+| `verify-live` | A stdio server could not be observed completely (a run with no stdio server observes nothing), or a server's served tools, declarations or identity differ from the inventory; with `--record`, such drift fails unless `--accept-drift` is given. |
+| `discover-mcp` | The observation is incomplete; with `--record`, nothing is written. |
+| `advisories` | An advisory was found (unless `--no-fail-on-advisory`), or not every package in scope was looked up (`coverage` is `partial` or `none`). |
 
 `--report-only` on `scan` and `import-shadowscan` reports collection failures and
 findings without turning them into exit status 1, as a project policy with
@@ -160,7 +159,7 @@ refused.
 ### Launch policy
 
 `verify-live --launch-policy` takes a JSON object, outside the project, that maps each
-MCP server's `bom_ref` to exactly a `command` and a `sha256`:
+stdio MCP server's `bom_ref` to exactly a `command` and a `sha256`:
 
 ```json
 {
@@ -174,6 +173,13 @@ MCP server's `bom_ref` to exactly a `command` and a `sha256`:
 `command` is an absolute path to a standalone executable, and `sha256` is the SHA-256
 of its bytes as `sha256:<64 lowercase hexadecimal characters>`. A server without an
 entry is not started.
+
+The file must lie outside the project and outside the repository (the nearest
+directory with a `.git` entry) that holds the project or the inventory. On POSIX
+systems it must also be a single-link regular file owned by you or root that only its
+owner can write, in a directory owned by you or root that others cannot write unless
+it is sticky. A policy that breaks these rules is a usage error (exit 2). The checks
+catch a misplaced policy; they do not authenticate it.
 
 ### JSON documents
 
@@ -222,6 +228,21 @@ nexus-symbiote advisories [OPTIONS] AIBOM_PATH
 | Option | Description |
 |---|---|
 | `-o`, `--output` `PATH` | Write the advisory report to this file instead of standard output. |
+| `--fail-on-advisory` / `--no-fail-on-advisory` | Exit with status 1 when an advisory is found (default: fail). |
+| `--exclude` `NAME` | Never send this package name to OSV; a trailing `*` matches a prefix (repeatable). |
+| `--exclude-private-origins` | Send only packages whose lockfile resolution records the public PyPI or npm registry. pip requirements record no index, so pip packages are withheld; withhold private names with `--exclude` instead to keep public ones checked. |
+| `--dry-run` | List the package identities that would be sent, without contacting OSV (works offline). |
+
+The command sends each package's ecosystem, normalized name and exact version to
+`https://api.osv.dev/v1/querybatch`, including packages resolved from a private
+registry unless you exclude them. The registry collector labels every pip package
+with the public PyPI origin because requirements files name no index, so only
+`--exclude` (previewed with `--dry-run`) keeps a private pip package name local
+while public ones are still checked. It exits 1 when an advisory is found, or when
+not every package in scope was looked up (`coverage` is `partial` or `none`,
+including an inventory with no exact PyPI or npm package). A report keeps at most
+10,000 advisories per package and 20,000 in total; beyond that, lookups end with an
+error and `coverage` is `partial`.
 
 ### `baseline`
 
@@ -283,6 +304,12 @@ nexus-symbiote discover-mcp [OPTIONS] ENDPOINT
 | `--allowed-origin` `TEXT` | Exact HTTPS origin explicitly approved by the operator (required, repeatable) |
 | `--token-env` `TEXT` | Environment variable holding a bearer token; the token is never written to evidence |
 | `-o`, `--output` `PATH` | Write the observation to this file instead of standard output. |
+| `--record` | Write a native AgentBOM inventory of a complete observation, for `diff`, instead of the observation report; an incomplete observation writes nothing. |
+| `--server-ref` `TEXT` | Component reference of the observed server in the inventory (default: derived from the endpoint). |
+| `--client-name` `TEXT` | `clientInfo` name sent in `initialize` (default: `nexus-symbiote-discovery`); use your production host's so the server cannot single out the observer. |
+| `--client-version` `TEXT` | `clientInfo` version sent in `initialize` (default: the tool version). |
+| `--user-agent` `TEXT` | `User-Agent` header to send; none is sent by default. |
+| `--raw-descriptors` `PATH` | Also write the unredacted server info, capabilities, instructions, tool descriptors, prompts and resource templates to this new file (mode 0600) for review; only the bearer token and session ID are masked. |
 
 ### `import-shadowscan`
 
@@ -508,10 +535,18 @@ nexus-symbiote verify-live [OPTIONS] AIBOM_PATH
 
 | Option | Description |
 |---|---|
-| `--project` `PATH` | Untrusted project root (default: current directory); the launch policy must be outside it. |
+| `--project` `DIRECTORY` | Untrusted project root (required); the launch policy must be outside it and outside the repository that holds the project or the inventory. |
 | `--launch-policy` `FILE` | Operator-owned JSON outside the project: exact server references to absolute commands and SHA-256 pins; see [launch policy](#launch-policy). (required) |
 | `--json-output` | Output the verification report as JSON. |
-| `--record` | Print an unsigned candidate BOM with the observed descriptors instead of a report. |
+| `--record` | Print an unsigned candidate BOM with the observed descriptors instead of a report; exits 1 when served tools, declarations or the server identity drifted, unless `--accept-drift`. |
+| `--accept-drift` | With `--record`, exit 0 although changed or new tools, declarations or server identity were recorded. |
+
+Servers whose transport is `sse`, `streamable-http` or `http` are reported as not
+verifiable by `verify-live` (reason `remote-transport`) and do not make the run
+incomplete; observe them with `discover-mcp --record` and compare the inventories
+with `diff`. Any transport label other than these and `stdio` fails with reason
+`unsupported-transport`. The [launch policy](#launch-policy) section gives the
+policy's format and where it may be kept.
 
 ### `vex`
 

@@ -12,8 +12,9 @@ import os
 import re
 import stat
 import sys
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, BinaryIO, Literal
+from typing import Any, BinaryIO, Literal, TypedDict
 
 import rfc8785
 from packaging.requirements import InvalidRequirement, Requirement
@@ -229,14 +230,38 @@ def hash_canonical(data: dict[str, Any], algorithm: str = "sha256") -> str:
     return f"{algorithm}:{h.hexdigest()}"
 
 
+class ToolDefinitionExtensions(TypedDict):
+    title: str | None
+    output_schema: dict[str, Any] | None
+    meta: dict[str, Any] | None
+
+
+def tool_definition_extensions(descriptor: Mapping[str, Any]) -> ToolDefinitionExtensions:
+    """Read the optional MCP descriptor members that ``hash_tool_definition`` binds."""
+    title, output_schema, meta = (descriptor.get(key) for key in ("title", "outputSchema", "_meta"))
+    if (
+        (title is not None and not isinstance(title, str))
+        or (output_schema is not None and not isinstance(output_schema, dict))
+        or (meta is not None and not isinstance(meta, dict))
+    ):
+        raise ValueError("invalid tool fields")
+    return {"title": title, "output_schema": output_schema, "meta": meta}
+
+
 def hash_tool_definition(
     name: str,
     description: str,
     input_schema: dict[str, Any] | None = None,
     annotations: dict[str, Any] | None = None,
+    *,
+    title: str | None = None,
+    output_schema: dict[str, Any] | None = None,
+    meta: dict[str, Any] | None = None,
 ) -> str:
     """Hash v2 model-visible metadata, normalizing omitted annotations to {}.
 
+    ``title``, ``outputSchema`` and ``_meta`` enter the definition only when they
+    are not None, so a definition without them keeps the digest it always had.
     Callers carry TOOL_DEFINITION_HASH_VERSION beside the digest. Comparing to an
     authenticated approved baseline detects metadata drift; this fingerprint does
     not establish publisher identity or constrain a tool's implementation.
@@ -250,6 +275,12 @@ def hash_tool_definition(
     # Missing and empty MCP annotations have the same defined digest contract.
     # A producer and consumer must not disagree because the model fills defaults.
     definition["annotations"] = annotations or {}
+    if title is not None:
+        definition["title"] = title
+    if output_schema is not None:
+        definition["outputSchema"] = output_schema
+    if meta is not None:
+        definition["_meta"] = meta
     return hash_canonical(definition)
 
 

@@ -9,6 +9,7 @@ from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.hashing import hash_tool_definition
 from nexus_symbiote.core.models import ToolComponent
+from nexus_symbiote.live.stdio import PinnedObservation
 from nexus_symbiote.live.verify import record_candidate, verify_mcp_servers
 from nexus_symbiote.scanners.live_mcp import _tool
 from nexus_symbiote.scanners.mcp import MCPScanner
@@ -107,8 +108,14 @@ def test_live_https_and_recorded_stdio_omit_schema_values(tmp_path, monkeypatch)
 
     write_config(tmp_path, raw)
     bom = AIBOM(components=MCPScanner().scan(tmp_path).components)
+    hello = {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {"tools": {}},
+        "serverInfo": {"name": "fixture", "version": "1"},
+    }
     monkeypatch.setattr(
-        "nexus_symbiote.live.verify.fetch_tools_from_config", lambda *a, **kw: ("stdio", [raw])
+        "nexus_symbiote.live.verify.fetch_observation",
+        lambda *a, **kw: PinnedObservation(hello, [raw]),
     )
     report = verify_mcp_servers(bom)
     assert report.complete and not report.has_drift

@@ -123,7 +123,7 @@ def test_vex_is_schema_valid_with_unique_ids_and_truthful_triage():
 
 
 class _Transport:
-    def __init__(self, body: bytes = b'{"vulns":[]}', status: int = 200):
+    def __init__(self, body: bytes = b'{"results":[{}]}', status: int = 200):
         self.body, self.status, self.calls = body, status, []
 
     def request(self, endpoint, body, headers, *, timeout, max_bytes):
@@ -143,18 +143,30 @@ def _package(**kw):
 
 
 def test_osv_exact_identity_bound_transport_and_timeout():
-    transport = _Transport(b'{"vulns":[{"id":"GHSA-test"}]}')
+    transport = _Transport(b'{"results":[{"vulns":[{"id":"GHSA-test"}]}]}')
     report = fetch_advisories(AIBOM(components=[_package()]), timeout=0.25, transport=transport)
     assert report.components_checked == 1 and not report.errors
     assert transport.calls == [
         (
-            "https://api.osv.dev/v1/query",
-            {"package": {"name": "requests", "ecosystem": "PyPI"}, "version": "2.19.0"},
+            "https://api.osv.dev/v1/querybatch",
+            {
+                "queries": [
+                    {"package": {"name": "requests", "ecosystem": "PyPI"}, "version": "2.19.0"}
+                ]
+            },
             0.25,
             MAX_RESPONSE_BYTES,
         )
     ]
     assert report.advisories[0]["advisory_id"] == "GHSA-test"
+    assert report.queries == [
+        {
+            "component_ref": "registry:pypi/requests",
+            "ecosystem": "PyPI",
+            "name": "requests",
+            "version": "2.19.0",
+        }
+    ]
 
 
 @pytest.mark.parametrize(

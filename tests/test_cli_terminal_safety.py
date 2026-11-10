@@ -21,9 +21,20 @@ from nexus_symbiote.core.models import (
     CompletenessClaim,
     MCPServerComponent,
     PromptComponent,
+    RegistryEntryComponent,
     ToolComponent,
 )
+from nexus_symbiote.scanners import live_mcp
 from nexus_symbiote.utils.terminal import json_text, neutralize, safe_line
+from tests.test_live_mcp import (
+    ENDPOINT,
+    ORIGIN,
+    FixtureTransport,
+    notification_accepted,
+    rpc_result,
+    tool,
+)
+from tests.test_verify_live_scope import launcher
 
 MARKUP = "[link=https://attacker.example/approve]docs[/link][conceal]"
 CONTROLS = "\x1b]8;;https://attacker.example\x07x\x1b]8;;\x07\x1b[1A\x1b[2K\rfake\u202egpj.exe"
@@ -306,6 +317,69 @@ def test_legacy_workflow_commands_in_inventory_text_reach_no_output_line(tmp_pat
         assert not _injected_lines(result.output), (args, _injected_lines(result.output))
     shown = runner.invoke(main, ["diff", str(old), str(bom)]).output
     assert "x ##\ufffd[set-output name=sarif_path]/home/runner/work/_temp/**/*%0A" in shown
+
+
+def test_live_commands_print_server_and_inventory_text_without_a_log_command(monkeypatch, tmp_path):
+    # The live commands print what a server or an inventory supplied under the same
+    # rules: their JSON parses to the same value, and no line carries a log command.
+    real_discover = live_mcp.discover_tools
+    hostile_tool = tool(LEGACY, description=LEGACY)
+    hello = {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {"tools": {}},
+        "serverInfo": {"name": LEGACY, "version": "1"},
+    }
+
+    def served(endpoint, **kwargs):
+        replies = [
+            rpc_result(1, hello),
+            notification_accepted(),
+            rpc_result(2, {"tools": [hostile_tool]}),
+        ]
+        return real_discover(endpoint, transport=FixtureTransport(replies), **kwargs)
+
+    monkeypatch.setattr("nexus_symbiote.live_cli.discover_tools", served)
+    project, operator = tmp_path / "checkout", tmp_path / "operator"
+    project.mkdir()
+    operator.mkdir()
+    bom, pinned_bom = project / "bom.json", project / "pinned.json"
+    AIBOM(
+        components=[
+            MCPServerComponent(bom_ref=f"mcp:{LEGACY}", name=LEGACY, transport="stdio"),
+            MCPServerComponent(
+                bom_ref=f"mcp:remote {LEGACY}",
+                name=LEGACY,
+                transport="streamable-http",
+                endpoint_url="https://mcp.example.com",
+            ),
+            RegistryEntryComponent(bom_ref=f"registry:{LEGACY}", name="x", registry_type="cargo"),
+        ]
+    ).save(bom)
+    AIBOM(
+        components=[MCPServerComponent(bom_ref="mcp:weather", name="weather", transport="stdio")]
+    ).save(pinned_bom)
+    policy, pinned = operator / "launch-policy.json", operator / "pinned-policy.json"
+    policy.write_text("{}")
+    pinned.write_text(json.dumps(launcher(operator, tools=[hostile_tool])))
+    discover = ["--live", "discover-mcp", ENDPOINT, "--allowed-origin", ORIGIN]
+    verify = ["--live", "verify-live", str(bom), "--project", str(project)]
+    record = ["--live", "verify-live", str(pinned_bom), "--project", str(project), "--record"]
+    shown = LEGACY.replace("##", "##\ufffd")
+    runner = CliRunner()
+    for args, document, line in (
+        (discover, True, None),
+        ([*discover, "--record"], True, None),
+        ([*verify, "--launch-policy", str(policy)], False, f"Server mcp:{shown}: missing"),
+        ([*verify, "--launch-policy", str(policy), "--json-output"], True, None),
+        ([*record, "--launch-policy", str(pinned)], True, f"mcp:weather: new tool {shown}"),
+        (["advisories", str(bom), "--dry-run"], True, None),
+    ):
+        result = runner.invoke(main, args)
+        assert result.exception is None or isinstance(result.exception, SystemExit), args
+        assert not _injected_lines(result.output), (args, _injected_lines(result.output))
+        if document:
+            assert LEGACY in json.dumps(json.loads(result.stdout)), args
+        assert line is None or line in result.stderr, (args, result.stderr)
 
 
 def test_risk_reconciliation_reasons_never_start_a_line(tmp_path):

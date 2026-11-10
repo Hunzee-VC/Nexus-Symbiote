@@ -1,12 +1,15 @@
-"""Compare approved inventory with descriptors served by operator-pinned stdio launchers."""
+"""Compare approved inventory with descriptors served by operator-pinned stdio launchers.
+
+verify-live starts only pinned stdio launchers. A server reached over HTTP is
+reported as not verifiable here, without making the stdio verification fail;
+observe it with ``discover-mcp --record`` and compare the inventories with ``diff``.
+"""
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from typing import Any
-
-from jsonschema import Draft202012Validator
-from jsonschema.exceptions import SchemaError
 
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.hashing import (
@@ -17,8 +20,71 @@ from nexus_symbiote.core.hashing import (
 )
 from nexus_symbiote.core.models import MCPServerComponent, ToolComponent
 from nexus_symbiote.graph import validate_graph
-from nexus_symbiote.live.stdio import list_pinned_tools
-from nexus_symbiote.utils.secrets import redact_descriptor
+from nexus_symbiote.live import stdio
+from nexus_symbiote.live.stdio import (
+    LaunchPolicyError,
+    PinnedObservation,
+    SessionDeadlineError,
+    StdioProtocolError,
+    observe_pinned,
+)
+from nexus_symbiote.scanners.live_mcp import (
+    DECLARATION_PROFILE,
+    IDENTITY_PROFILE,
+    CheckedDescriptor,
+    DiscoveryError,
+    check_listed_item,
+    check_served_tool,
+    check_server_hello,
+    declaration_hash,
+)
+from nexus_symbiote.utils.secrets import redact_text
+
+# Fixed, nonsecret explanations; reports never carry exception text or server data.
+REASONS: dict[str, str] = {
+    "missing-launch-policy": "No operator launch policy entry names this server reference.",
+    "invalid-launch-policy": (
+        "The launch policy entry is not exactly an absolute command and a SHA-256 pin."
+    ),
+    "launcher-unavailable": (
+        "The pinned launcher is missing, not a regular file, a symbolic link, or too large."
+    ),
+    "launcher-digest-mismatch": "The launcher bytes differ from the SHA-256 pin in the policy.",
+    "launcher-start-failed": "The pinned launcher could not be started.",
+    "deadline": (
+        "The pinned server's bounded MCP exchange and the checks of its descriptors did "
+        "not finish before the deadline."
+    ),
+    "unsupported-protocol-version": (
+        "The pinned server negotiated an MCP protocol version this client does not speak."
+    ),
+    "protocol": (
+        "The pinned server's MCP messages were invalid, out of order or over protocol limits."
+    ),
+    "invalid-descriptor": (
+        "A served tool, prompt or resource template is invalid or exceeds the validation budget."
+    ),
+    "ambiguous-approved-tools": "The inventory approves two tools with one name for this server.",
+    "remote-transport": (
+        "Remote MCP server: verify-live starts only pinned stdio launchers. Observe it with "
+        "discover-mcp --record and compare the inventories with diff."
+    ),
+    "unsupported-transport": (
+        "The inventory names a transport that is neither stdio nor a remote MCP transport "
+        "(sse, streamable-http, http), so the server cannot be verified."
+    ),
+    "internal-error": "The pinned observation stopped on an unexpected internal error.",
+}
+
+
+# Transport labels of servers reached over the network; discover-mcp observes them.
+REMOTE_TRANSPORTS = frozenset({"sse", "streamable-http", "http"})
+
+
+class _RefusedError(Exception):
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
 
 
 @dataclass
@@ -28,6 +94,10 @@ class LiveToolFinding:
     status: str  # "match" | "changed" | "new" | "missing" | "unverifiable"
 
     descriptor: dict[str, Any] | None = field(default=None, repr=False)
+    previous_hash: str | None = None
+    display_differs: bool = False
+    observed_hash: str | None = field(default=None, repr=False)
+    unprofiled_fields: tuple[str, ...] = ()
 
 
 @dataclass
@@ -39,22 +109,54 @@ class ServerVerifyResult:
     transport: str | None = None
     tool_findings: list[LiveToolFinding] = field(default_factory=list)
     live_schema_hash: str | None = None
+    reason: str | None = None
+    status: str = "failed"  # "verified" | "failed" | "not-verifiable"
+    protocol_version: str | None = None
+    launcher_sha256: str | None = None
+    declaration_hash: str | None = None
+    declaration_status: str | None = None  # "match" | "changed" | "new"
+    declaration: dict[str, Any] | None = field(default=None, repr=False)
+    identity_hash: str | None = None
+    identity_status: str | None = None  # "match" | "changed" | "unrecorded"
 
     @property
     def rug_pull_detected(self) -> bool:
-        return any(f.status != "match" for f in self.tool_findings)
+        return (
+            any(f.status != "match" for f in self.tool_findings)
+            or self.declaration_status in {"changed", "new"}
+            or self.identity_status == "changed"
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "server": self.server_name,
             "server_ref": self.server_ref,
+            "status": self.status,
             "reachable": self.reachable,
+            "reason": self.reason,
             "error": self.error,
             "transport": self.transport,
+            "protocol_version": self.protocol_version,
+            "launcher_sha256": self.launcher_sha256,
             "rug_pull_detected": self.rug_pull_detected,
             "live_schema_hash": self.live_schema_hash,
+            "declaration_hash": self.declaration_hash,
+            "declaration_status": self.declaration_status,
+            "identity_hash": self.identity_hash,
+            "identity_status": self.identity_status,
             "tools": [
-                {"name": f.name, "definition_hash": f.definition_hash, "status": f.status}
+                {
+                    "name": f.name,
+                    "definition_hash": f.definition_hash,
+                    "status": f.status,
+                    **({"previous_definition_hash": f.previous_hash} if f.previous_hash else {}),
+                    **({"display_differs": True} if f.display_differs else {}),
+                    **(
+                        {"fields_outside_profile": list(f.unprofiled_fields)}
+                        if f.unprofiled_fields
+                        else {}
+                    ),
+                }
                 for f in self.tool_findings
             ],
         }
@@ -64,7 +166,9 @@ class ServerVerifyResult:
 class LiveVerifyReport:
     servers_checked: int = 0
     servers_reachable: int = 0
+    servers_skipped: int = 0
     results: list[ServerVerifyResult] = field(default_factory=list)
+    inputs: dict[str, str] = field(default_factory=dict)
 
     @property
     def has_drift(self) -> bool:
@@ -87,9 +191,24 @@ class LiveVerifyReport:
             "complete": self.complete,
             "servers_checked": self.servers_checked,
             "servers_reachable": self.servers_reachable,
+            "servers_skipped": self.servers_skipped,
             "has_drift": self.has_drift,
+            "inputs": dict(self.inputs),
             "results": [r.to_dict() for r in self.results],
         }
+
+
+def _launcher(entry: Any) -> tuple[str, str]:
+    if entry is None:
+        raise LaunchPolicyError("missing-launch-policy", "no launch policy entry")
+    if (
+        not isinstance(entry, dict)
+        or set(entry) != {"command", "sha256"}
+        or not isinstance(entry["command"], str)
+        or not isinstance(entry["sha256"], str)
+    ):
+        raise LaunchPolicyError("invalid-launch-policy", "invalid operator launch policy")
+    return entry["command"], entry["sha256"]
 
 
 def list_tools_stdio(
@@ -97,20 +216,76 @@ def list_tools_stdio(
 ) -> list[dict[str, Any]]:
     """Caller must supply a trusted binary digest. Only standalone launchers are supported."""
     if args or not expected_sha256:
-        raise OSError("a pinned standalone executable without arguments is required")
-    return list_pinned_tools(command, expected_sha256)
+        raise LaunchPolicyError(
+            "invalid-launch-policy", "a pinned standalone executable without arguments is required"
+        )
+    return observe_pinned(command, expected_sha256).tools
+
+
+def fetch_observation(trusted_launcher: Any) -> PinnedObservation:
+    """Observe the launcher an independent operator policy names; project config confers nothing."""
+    command, pin = _launcher(trusted_launcher)
+    return observe_pinned(command, pin)
 
 
 def fetch_tools_from_config(
     server_name: str, config: dict[str, Any], *, trusted_launcher: dict[str, str] | None = None
 ) -> tuple[str, list[dict[str, Any]]]:
     """Legacy project config conveys no authority to start a process."""
-    if not isinstance(trusted_launcher, dict) or set(trusted_launcher) != {"command", "sha256"}:
-        raise OSError("missing or invalid operator launch policy for this server reference")
-    command, pin = trusted_launcher["command"], trusted_launcher["sha256"]
-    if not isinstance(command, str) or not isinstance(pin, str):
-        raise OSError("invalid operator launch policy")
-    return "stdio", list_tools_stdio(command, [], expected_sha256=pin)
+    return "stdio", fetch_observation(trusted_launcher).tools
+
+
+@dataclass
+class _Declaration:
+    version: str
+    shown: dict[str, Any]
+    instructions: str | None
+    lists: dict[str, dict[str, str] | None]
+    identity: str
+
+
+def _declaration(observation: PinnedObservation) -> _Declaration:
+    """Validate the session's server declarations and prepare their redacted display."""
+    try:
+        version, server_info, capabilities, instructions, identity = check_server_hello(
+            observation.hello
+        )
+    except DiscoveryError as exc:
+        raise _RefusedError("protocol") from exc
+    declaration = _Declaration(
+        version,
+        {"protocol_version": version, "server_info": server_info, "capabilities": capabilities},
+        instructions,
+        {},
+        identity,
+    )
+    if instructions is not None:
+        declaration.shown["instructions"] = redact_text(instructions)
+        declaration.shown["instructions_hash"] = hash_canonical({"instructions": instructions})
+    for key, identity, items in (
+        ("prompts", "name", observation.prompts),
+        ("resource_templates", "uriTemplate", observation.resource_templates),
+    ):
+        if items is None:
+            declaration.lists[key] = None
+            continue
+        digests: dict[str, str] = {}
+        shown = []
+        for raw in items:
+            item = check_listed_item(raw, identity)
+            digests[item.identity] = item.digest
+            shown.append(
+                {
+                    "identity": redact_text(item.identity),
+                    "digest": item.digest,
+                    "descriptor": item.descriptor,
+                }
+            )
+        declaration.lists[key] = digests
+        declaration.shown[key] = sorted(
+            shown, key=lambda entry: (entry["identity"], entry["digest"])
+        )
+    return declaration
 
 
 def verify_mcp_servers(
@@ -136,33 +311,28 @@ def verify_mcp_servers(
         result = ServerVerifyResult(
             server_name=server.name, server_ref=server.bom_ref, transport=server.transport
         )
-        report.servers_checked += 1
         report.results.append(result)
+        if server.transport in REMOTE_TRANSPORTS:
+            result.status, result.reason = "not-verifiable", "remote-transport"
+            result.error = REASONS["remote-transport"]
+            report.servers_skipped += 1
+            continue
+        report.servers_checked += 1
+        if server.transport not in ("stdio", None):
+            result.reason = "unsupported-transport"
+            result.error = REASONS[result.reason]
+            continue
+        deadline = time.monotonic() + stdio.DEADLINE_SECONDS
         try:
-            if server.transport not in ("stdio", None):
-                raise ValueError("unsupported transport")
-            _, tools = fetch_tools_from_config(
-                server.name, {}, trusted_launcher=(trusted_launchers or {}).get(server.bom_ref)
-            )
-            live = {}
-            for tool in tools:
-                if set(tool) - {"name", "description", "inputSchema", "annotations"}:
-                    raise ValueError("tool fields exceed the approved fingerprint version")
-                desc, annotations = tool.get("description", ""), tool.get("annotations")
-                if not isinstance(desc, str) or (
-                    annotations is not None and not isinstance(annotations, dict)
-                ):
-                    raise ValueError("invalid descriptor")
-                schema = tool.get("inputSchema")
-                if not isinstance(schema, dict) or schema.get("type") != "object":
-                    raise ValueError("MCP tools require an object input schema")
-                Draft202012Validator.check_schema(schema)
-                for hint in ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"):
-                    if annotations and hint in annotations and type(annotations[hint]) is not bool:
-                        raise ValueError("invalid MCP annotation hint")
-                live[tool["name"]] = hash_tool_definition(
-                    tool["name"], desc, tool["inputSchema"], annotations or None
-                )
+            observation = fetch_observation((trusted_launchers or {}).get(server.bom_ref))
+            result.launcher_sha256 = observation.launcher_sha256
+            declared = _declaration(observation)
+            checked: dict[str, CheckedDescriptor] = {}
+            for tool in observation.tools:
+                if time.monotonic() > deadline:
+                    raise SessionDeadlineError("descriptor checks exceeded the deadline")
+                descriptor = check_served_tool(tool)
+                checked[descriptor.name] = descriptor
             approved = [
                 t
                 for t in bom.components
@@ -170,15 +340,59 @@ def verify_mcp_servers(
             ]
             by_name = {t.name: t for t in approved}
             if len(by_name) != len(approved):
-                raise ValueError("ambiguous tool references")
-        except (OSError, ValueError, TypeError, RecursionError, SchemaError):
-            result.error = "Pinned MCP discovery refused or incomplete; review launch policy and protocol limits"
+                raise _RefusedError("ambiguous-approved-tools")
+        except (LaunchPolicyError, SessionDeadlineError, StdioProtocolError) as exc:
+            result.reason = exc.reason
+        except _RefusedError as exc:
+            result.reason = exc.reason
+        except DiscoveryError:
+            result.reason = "invalid-descriptor"
+        except Exception:
+            result.reason = "internal-error"
+        if result.reason is not None:
+            result.error = REASONS[result.reason]
             continue
-        result.reachable = True
+        result.reachable, result.status = True, "verified"
+        result.protocol_version = declared.version
         report.servers_reachable += 1
-        for tool in tools:
-            name = tool["name"]
+        extensions = {
+            name: item.unprofiled_hash
+            for name, item in checked.items()
+            if item.unprofiled_hash is not None
+        }
+        result.declaration_hash = declaration_hash(
+            instructions=declared.instructions,
+            tool_extensions=extensions,
+            prompts=declared.lists["prompts"],
+            resource_templates=declared.lists["resource_templates"],
+        )
+        result.declaration = declared.shown
+        recorded = server.properties.get("observed_declaration_hash")
+        if recorded is not None:
+            result.declaration_status = (
+                "match" if recorded == result.declaration_hash else "changed"
+            )
+        elif (
+            declared.instructions is not None
+            or extensions
+            or declared.lists["prompts"]
+            or declared.lists["resource_templates"]
+        ):
+            # Model-visible server text that no inventory approved is drift, like a new tool.
+            result.declaration_status = "new"
+        else:
+            result.declaration_status = "match"
+        result.identity_hash = declared.identity
+        recorded_identity = server.properties.get("observed_identity_hash")
+        if recorded_identity is None:
+            result.identity_status = "unrecorded"
+        else:
+            result.identity_status = (
+                "match" if recorded_identity == declared.identity else "changed"
+            )
+        for name, item in checked.items():
             old = by_name.get(name)
+            previous = None
             if old is None:
                 status = "new"
             elif (
@@ -189,18 +403,32 @@ def verify_mcp_servers(
             else:
                 try:
                     algorithm, expected = normalize_digest(old.definition_hash, "sha256")
-                    status = "match" if f"{algorithm}:{expected}" == live[name] else "changed"
+                    previous = f"{algorithm}:{expected}"
+                    status = "match" if previous == item.fingerprint else "changed"
                 except ValueError:
                     status = "unverifiable"
-            safe = redact_descriptor(tool)
-            result.tool_findings.append(LiveToolFinding(safe["name"], live[name], status, safe))
+            result.tool_findings.append(
+                LiveToolFinding(
+                    item.display["name"],
+                    item.fingerprint,
+                    status,
+                    item.display,
+                    previous_hash=previous if status == "changed" else None,
+                    display_differs=item.display_differs,
+                    observed_hash=item.observed_hash,
+                    unprofiled_fields=item.unprofiled_fields,
+                )
+            )
         for old in approved:
-            if old.name not in live:
+            if old.name not in checked:
                 result.tool_findings.append(
                     LiveToolFinding(old.name, old.definition_hash, "missing")
                 )
         result.live_schema_hash = hash_canonical(
-            {"profile": TOOL_DEFINITION_HASH_VERSION, "tools": dict(sorted(live.items()))}
+            {
+                "profile": TOOL_DEFINITION_HASH_VERSION,
+                "tools": {name: item.fingerprint for name, item in sorted(checked.items())},
+            }
         )
     return report
 
@@ -219,6 +447,8 @@ def record_candidate(bom: AIBOM, report: LiveVerifyReport) -> None:
     ):
         raise ValueError("incomplete inventory; candidate cannot be emitted")
     for result in report.results:
+        if result.status != "verified":
+            continue
         for finding in result.tool_findings:
             descriptor = finding.descriptor
             if descriptor is None:
@@ -260,6 +490,17 @@ def record_candidate(bom: AIBOM, report: LiveVerifyReport) -> None:
             tool.redacted_definition_hash = (
                 display_hash if display_hash != finding.definition_hash else None
             )
+            for stale in ("previous_definition_hash", "displayed_descriptor_differs"):
+                tool.properties.pop(stale, None)
+            tool.properties.update(
+                observed_tool_properties(
+                    descriptor,
+                    observed_hash=finding.observed_hash,
+                    unprofiled_fields=finding.unprofiled_fields,
+                    previous_hash=finding.previous_hash,
+                    display_differs=finding.display_differs,
+                )
+            )
             tool.assurance_level = AssuranceLevel.OBSERVED
             tool.claims["tool_definition"] = ClaimEvidence(
                 assurance=AssuranceLevel.OBSERVED,
@@ -278,3 +519,65 @@ def record_candidate(bom: AIBOM, report: LiveVerifyReport) -> None:
                 and component.mcp_server_ref == result.server_ref
             ]
             server.tool_count = len(server.tool_refs)
+            server.properties.update(
+                observed_server_properties(
+                    result.declaration or {}, result.declaration_hash, result.identity_hash
+                )
+            )
+
+
+def observed_tool_properties(
+    descriptor: dict[str, Any],
+    *,
+    observed_hash: str | None,
+    unprofiled_fields: tuple[str, ...] | list[str] = (),
+    previous_hash: str | None = None,
+    display_differs: bool = False,
+) -> dict[str, Any]:
+    """Display the fingerprinted members that ToolComponent has no field for."""
+    shown: dict[str, Any] = {
+        "collection_mode": "live-observation",
+        "definition_hash_subject": "served-descriptor",
+        "descriptor_output_may_be_redacted": True,
+    }
+    for key, name in (
+        ("title", "mcp_title"),
+        ("outputSchema", "mcp_output_schema"),
+        ("_meta", "mcp_meta"),
+    ):
+        if key in descriptor:
+            shown[name] = descriptor[key]
+    if observed_hash:
+        shown["observed_descriptor_hash"] = observed_hash
+    if unprofiled_fields:
+        # Their values are bound by observed_descriptor_hash and the server declaration digest.
+        shown["descriptor_fields_outside_profile"] = list(unprofiled_fields)
+    if previous_hash:
+        shown["previous_definition_hash"] = previous_hash
+    if display_differs:
+        shown["displayed_descriptor_differs"] = True
+    return shown
+
+
+def observed_server_properties(
+    shown: dict[str, Any], digest: str | None, identity: str | None
+) -> dict[str, Any]:
+    """Record the server declaration and identity digests and their redacted display."""
+    properties: dict[str, Any] = {
+        "observed_declaration_hash": digest,
+        "observed_declaration_hash_profile": DECLARATION_PROFILE,
+        "observed_identity_hash": identity,
+        "observed_identity_hash_profile": IDENTITY_PROFILE,
+    }
+    for key in (
+        "protocol_version",
+        "server_info",
+        "capabilities",
+        "instructions",
+        "instructions_hash",
+        "prompts",
+        "resource_templates",
+    ):
+        if key in shown:
+            properties[f"observed_{key}"] = shown[key]
+    return properties
