@@ -62,3 +62,128 @@ def test_signature_policy_cli_requires_explicit_project(tmp_path):
     assert result.exit_code != 0 and "requires --project" in result.output
     result = CliRunner().invoke(main, ["scan", str(tmp_path), "--signature-policy", str(policy)])
     assert result.exit_code != 0
+
+
+def _schema_validator() -> Draft202012Validator:
+    return Draft202012Validator(
+        json.loads(
+            (Path(__file__).parents[1] / "schemas/nexus-symbiote-aibom-1.0.schema.json").read_text()
+        )
+    )
+
+
+def test_dependency_edges_reject_unknown_fields_in_schema_and_model():
+    edge = {
+        "source_ref": "agent:a",
+        "target_ref": "agent:a",
+        "relationship": "depends-on",
+        "condition": "only after human approval",
+    }
+    document = AIBOM(components=[AgentComponent(bom_ref="agent:a", name="a")]).to_dict()
+    document["dependencies"] = [edge]
+    assert list(_schema_validator().iter_errors(document))
+    with pytest.raises(ValidationError):
+        AIBOM.model_validate(document)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("trust_remote_code", "no"), ("trust_remote_code", 0), ("tool_count", "3"), ("timestamp", 1)],
+)
+def test_scalars_are_as_strict_as_the_published_schema(field, value):
+    document = AIBOM().to_dict()
+    if field == "timestamp":
+        document["metadata"]["timestamp"] = value
+    elif field == "tool_count":
+        document["components"] = [
+            {"bom_ref": "s", "component_type": "mcp-server", "name": "s", field: value}
+        ]
+    else:
+        document["components"] = [
+            {"bom_ref": "m", "component_type": "model", "name": "m", field: value}
+        ]
+    assert list(_schema_validator().iter_errors(document))
+    with pytest.raises(ValidationError):
+        AIBOM.model_validate(document)
+
+
+@pytest.mark.parametrize(
+    ("version", "shown"),
+    [("2.0.0", "version 2.0.0"), ("1.2.0", "version 1.2.0"), ("\x1b[2Jx", "an unrecognised")],
+)
+def test_unsupported_native_versions_fail_with_the_supported_versions(tmp_path, version, shown):
+    from nexus_symbiote.core.aibom import NativeFormatError
+
+    document = AIBOM().to_dict()
+    document["metadata"]["spec_version"] = version
+    document["metadata"]["future_field"] = True
+    path = tmp_path / "bom.json"
+    path.write_text(json.dumps(document))
+    with pytest.raises(NativeFormatError, match="supported: 1.0.x, 1.1.x") as raised:
+        AIBOM.load(path)
+    assert shown in str(raised.value) and "\x1b" not in str(raised.value)
+    result = CliRunner().invoke(main, ["summary", str(path)])
+    assert result.exit_code == 1 and "supported: 1.0.x, 1.1.x" in result.output
+
+
+def test_format_1_0_documents_still_load_and_new_documents_are_1_1(tmp_path):
+    example = Path(__file__).parents[1] / "schemas/examples/minimal-aibom.json"
+    assert AIBOM.load(example).metadata.spec_version == "1.0.0"
+    assert AIBOM().to_dict()["metadata"]["spec_version"] == "1.1.0"
+
+
+def test_loader_refuses_links_and_special_files_without_blocking(tmp_path):
+    import os
+    import threading
+
+    from nexus_symbiote.core.aibom import NativeFormatError
+
+    real = tmp_path / "real.json"
+    AIBOM().save(real)
+    (tmp_path / "link.json").symlink_to(real)
+    with pytest.raises(NativeFormatError, match="symbolic link"):
+        AIBOM.load(tmp_path / "link.json")
+    fifo = tmp_path / "pipe.json"
+    os.mkfifo(fifo)
+    outcome: list[BaseException] = []
+    reader = threading.Thread(
+        target=lambda: outcome.append(pytest.raises(NativeFormatError, AIBOM.load, fifo).value)
+    )
+    reader.start()
+    reader.join(timeout=10)
+    assert not reader.is_alive() and outcome
+
+
+def test_save_replaces_a_link_instead_of_writing_through_it(tmp_path):
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep")
+    target = tmp_path / "bom.json"
+    target.symlink_to(victim)
+    AIBOM().save(target)
+    assert victim.read_text() == "keep"
+    assert not target.is_symlink() and AIBOM.load(target).components == []
+
+
+def test_writer_and_reader_share_one_size_limit(tmp_path, monkeypatch):
+    from nexus_symbiote.core import aibom as module
+    from nexus_symbiote.core.aibom import NativeFormatError
+
+    bom = AIBOM(components=[AgentComponent(bom_ref=f"agent:{i}", name="a") for i in range(40)])
+    indented, compact = bom.to_json(), json.dumps(bom.to_dict(), separators=(",", ":"))
+    monkeypatch.setattr(module, "MAX_NATIVE_BYTES", len(compact.encode()))
+    assert len(indented) > len(compact)
+    path = tmp_path / "bom.json"
+    bom.save(path)
+    assert path.read_text() == compact and len(AIBOM.load(path).components) == 40
+    monkeypatch.setattr(module, "MAX_NATIVE_BYTES", len(compact.encode()) - 1)
+    with pytest.raises(NativeFormatError, match="limit that native readers accept"):
+        bom.to_native_json()
+    with pytest.raises(NativeFormatError, match="native inventory limit"):
+        AIBOM.load(path)
+
+
+def test_overlong_references_are_refused():
+    from nexus_symbiote.core.models import MAX_REFERENCE_CHARS
+
+    with pytest.raises(ValidationError):
+        AgentComponent(bom_ref="a" * (MAX_REFERENCE_CHARS + 1), name="a")

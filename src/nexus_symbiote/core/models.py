@@ -7,10 +7,19 @@ registry trust, and authorization records.
 
 from __future__ import annotations
 
-from datetime import datetime
+import re
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SerializerFunctionWrapHandler, model_serializer
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    StrictBool,
+    StrictInt,
+    field_validator,
+    model_serializer,
+)
 
 from nexus_symbiote.core.enums import (
     AssuranceLevel,
@@ -24,7 +33,44 @@ from nexus_symbiote.core.enums import (
     SideEffectProfile,
     TrustTier,
 )
-from nexus_symbiote.core.evidence import DeploymentProfile
+from nexus_symbiote.core.evidence import DeploymentProfile, Timestamp
+
+NATIVE_SPEC_VERSION = "1.1.0"
+"""Version written by this build. 1.1.0 records scan-root-relative POSIX paths."""
+
+SUPPORTED_SPEC_MINORS = {1: (0, 1)}
+"""Native format versions this build reads, as major -> supported minor versions."""
+
+MAX_REFERENCE_CHARS = 16_384
+"""Upper bound for a component reference; collector references stay far below it."""
+
+_SPEC_VERSION = re.compile(r"(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,5})")
+
+
+class UnsupportedSpecVersionError(ValueError):
+    """A native document declares a format version this build cannot interpret."""
+
+
+def supported_spec_versions() -> str:
+    return ", ".join(
+        f"{major}.{minor}.x" for major, minors in SUPPORTED_SPEC_MINORS.items() for minor in minors
+    )
+
+
+def check_spec_version(value: object) -> None:
+    """Refuse a native format version this build does not understand.
+
+    The message quotes the declared version only when it has the expected numeric
+    form, so document text cannot reach a terminal through it.
+    """
+    match = _SPEC_VERSION.fullmatch(value) if isinstance(value, str) else None
+    if match is not None and int(match[2]) in SUPPORTED_SPEC_MINORS.get(int(match[1]), ()):
+        return
+    shown = f"version {value}" if match is not None else "an unrecognised version"
+    raise UnsupportedSpecVersionError(
+        f"Native format {shown} is not supported by this build (supported: "
+        f"{supported_spec_versions()}); upgrade nexus-symbiote or re-collect the inventory."
+    )
 
 
 class InventoryModel(BaseModel):
@@ -39,7 +85,7 @@ class ClaimEvidence(InventoryModel):
     scope: str
     collector: str | None = None
     locator: str | None = None
-    observed_at: datetime | None = None
+    observed_at: Timestamp | None = None
     evidence_refs: list[str] = Field(default_factory=list)
     unknown_reason: str | None = None
 
@@ -47,7 +93,9 @@ class ClaimEvidence(InventoryModel):
 class ComponentBase(InventoryModel):
     """Base for every AgentBOM component."""
 
-    bom_ref: str = Field(description="Unique reference within this BOM")
+    bom_ref: str = Field(
+        description="Unique reference within this BOM", max_length=MAX_REFERENCE_CHARS
+    )
     component_type: ComponentType
     name: str
     version: str | None = None
@@ -55,9 +103,21 @@ class ComponentBase(InventoryModel):
     description: str | None = None
     hashes: dict[str, str] = Field(default_factory=dict)
     trust_tier: TrustTier = TrustTier.UNKNOWN
-    assurance_level: AssuranceLevel = AssuranceLevel.DECLARED
+    assurance_level: AssuranceLevel = Field(
+        default=AssuranceLevel.DECLARED,
+        description=(
+            "declared: stated by configuration, a manifest or a supplier; observed: a named "
+            "collector measured the component's identity from bytes (a file, weight or "
+            "descriptor digest); verified: established by cryptographic verification, which "
+            "offline collection never assigns"
+        ),
+    )
     source_path: str | None = Field(
-        default=None, description="Filesystem path or URL where this was discovered"
+        default=None,
+        description=(
+            "Where this was discovered: a POSIX path relative to the scan root (native "
+            "format 1.1.0 and later), or a URL. Format 1.0.0 recorded absolute scan-host paths"
+        ),
     )
     properties: dict[str, Any] = Field(default_factory=dict, description="Extension properties")
     claims: dict[str, ClaimEvidence] = Field(default_factory=dict)
@@ -68,8 +128,14 @@ class CapabilityDeclaration(InventoryModel):
 
     capabilities: list[CapabilityClass] = Field(default_factory=list)
     oauth_scopes: list[str] = Field(default_factory=list)
-    egress_domains: list[str] = Field(default_factory=list)
-    filesystem_paths: list[str] = Field(default_factory=list)
+    egress_domains: list[str] = Field(
+        default_factory=list,
+        description="Reserved: no built-in collector populates this field; supplier assertion",
+    )
+    filesystem_paths: list[str] = Field(
+        default_factory=list,
+        description="Reserved: no built-in collector populates this field; supplier assertion",
+    )
     side_effect_profile: SideEffectProfile = SideEffectProfile.UNKNOWN
     execution_isolation: ExecutionIsolation | None = Field(
         default=None, description="Declared isolation; null or absent means unknown"
@@ -87,8 +153,8 @@ class AuthorizationRecord(InventoryModel):
     action: str
     resource_scope: str | None = None
     conditions: list[str] = Field(default_factory=list)
-    approval_required: bool | None = None
-    expires_at: datetime | None = None
+    approval_required: StrictBool | None = None
+    expires_at: Timestamp | None = None
     policy_reference: str | None = None
 
 
@@ -160,10 +226,13 @@ class MCPServerComponent(ComponentBase):
     args: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
     endpoint_url: str | None = None
-    tool_count: int = 0
+    tool_count: StrictInt = 0
     tool_refs: list[str] = Field(default_factory=list)
-    registry_source: str | None = None
-    version_pinned: bool | None = Field(
+    registry_source: str | None = Field(
+        default=None,
+        description="Reserved: no built-in collector populates this field; supplier assertion",
+    )
+    version_pinned: StrictBool | None = Field(
         default=None,
         description="Exact declared package reference; null when no package is declared",
     )
@@ -224,7 +293,12 @@ class ModelComponent(ComponentBase):
     serialization_format: str | None = None
     serialization_safety: SerializationSafety = SerializationSafety.UNKNOWN
     signing_status: str | None = Field(
-        default=None, description="unsigned, sigstore-signed, pgp-signed"
+        default=None,
+        description=(
+            "Collector-reported signature evidence, such as signature-not-found, "
+            "signature-present-unverified, verification-failed or sigstore-signed; never "
+            "trusted as verification. unsigned and pgp-signed appear only in older inventories"
+        ),
     )
     signing_identity: str | None = None
     base_model_ref: str | None = Field(
@@ -242,7 +316,7 @@ class ModelComponent(ComponentBase):
         description="SHA-256 of tensor names, dtypes, shapes and offsets; not tensor bytes",
     )
     safetensors_header_hash: str | None = None
-    trust_remote_code: bool | None = Field(
+    trust_remote_code: StrictBool | None = Field(
         default=None, description="Declared configuration only; the runtime value may differ"
     )
     risks: list[RiskAssessment] = Field(default_factory=list)
@@ -268,7 +342,10 @@ class PromptComponent(ComponentBase):
 
 
 class GuardrailComponent(ComponentBase):
-    """A safety classifier, content filter, or output validator."""
+    """A safety classifier, content filter, or output validator.
+
+    Reserved: no built-in collector emits this type; it appears only in supplied inventories.
+    """
 
     component_type: Literal[ComponentType.GUARDRAIL_POLICY] = ComponentType.GUARDRAIL_POLICY
     guardrail_type: str | None = Field(
@@ -284,7 +361,10 @@ class GuardrailComponent(ComponentBase):
 
 
 class MemoryStoreComponent(ComponentBase):
-    """Persistent memory (conversation history, learned facts, skills)."""
+    """Persistent memory (conversation history, learned facts, skills).
+
+    Reserved: no built-in collector emits this type; it appears only in supplied inventories.
+    """
 
     component_type: Literal[ComponentType.MEMORY_STORE] = ComponentType.MEMORY_STORE
     store_type: str | None = Field(
@@ -296,8 +376,8 @@ class MemoryStoreComponent(ComponentBase):
         description="Who may write: agent-only, user, system, public",
     )
     retention_policy: str | None = None
-    tenant_isolated: bool | None = None
-    encryption_at_rest: bool | None = None
+    tenant_isolated: StrictBool | None = None
+    encryption_at_rest: StrictBool | None = None
     risks: list[RiskAssessment] = Field(default_factory=list)
 
 
@@ -315,13 +395,16 @@ class RAGSourceComponent(ComponentBase):
     index_snapshot_hash: str | None = None
     source_uris: list[str] = Field(default_factory=list)
     refresh_policy: str | None = None
-    last_indexed_at: datetime | None = None
-    document_count: int | None = None
+    last_indexed_at: Timestamp | None = None
+    document_count: StrictInt | None = None
     risks: list[RiskAssessment] = Field(default_factory=list)
 
 
 class DataSourceComponent(ComponentBase):
-    """A training or fine-tuning dataset."""
+    """A training or fine-tuning dataset.
+
+    Reserved: no built-in collector emits this type; it appears only in supplied inventories.
+    """
 
     component_type: Literal[ComponentType.DATA_SOURCE] = ComponentType.DATA_SOURCE
     dataset_type: str | None = Field(
@@ -346,11 +429,14 @@ class RegistryEntryComponent(ComponentBase):
     )
     registry_type: str | None = Field(
         default=None,
-        description="npm, pypi, huggingface, mcp-registry, skill-marketplace, docker-hub",
+        description=(
+            "npm, pypi or docker-hub from built-in collectors; huggingface, mcp-registry and "
+            "skill-marketplace are reserved for supplied inventories"
+        ),
     )
     registry_uri: str | None = None
     publisher_identity: str | None = None
-    publisher_verified: bool | None = None
+    publisher_verified: StrictBool | None = None
     attestation_status: str | None = None
     signing_key_reference: str | None = None
     trust_model: str | None = Field(default=None, description="tofu, pki, sigstore, none")
@@ -433,13 +519,15 @@ class VerifiedExtensionComponent(ComponentBase):
         default=None, description="plugin, skill, connector, integration, action"
     )
     publisher: str | None = None
-    publisher_verified: bool = False
+    publisher_verified: StrictBool | None = Field(
+        default=None, description="Whether a publisher was verified; null or absent means unknown"
+    )
     attestation_status: str | None = Field(
         default=None, description="verified, unverified, revoked, expired"
     )
     signing_identity: str | None = None
     marketplace_url: str | None = None
-    install_count: int | None = None
+    install_count: StrictInt | None = None
     capabilities: CapabilityDeclaration | None = None
     risks: list[RiskAssessment] = Field(default_factory=list)
 
@@ -451,7 +539,7 @@ class CompletenessClaim(InventoryModel):
     surfaces_scanned: list[str] = Field(default_factory=list)
     surfaces_excluded: list[str] = Field(default_factory=list)
     scan_failures: list[str] = Field(default_factory=list)
-    timestamp: datetime | None = None
+    timestamp: Timestamp | None = None
     assurance_level: AssuranceLevel = AssuranceLevel.DECLARED
     collectors_requested: list[str] = Field(default_factory=list)
     collectors_completed: list[str] = Field(default_factory=list)
@@ -478,8 +566,8 @@ class CompletenessClaim(InventoryModel):
         default=None,
         description="Limitations of the imported discovery projection, independent of static repository coverage",
     )
-    source_unmapped_count: int = Field(default=0, ge=0)
-    source_unmapped_indexes: list[Annotated[int, Field(ge=0)]] = Field(default_factory=list)
+    source_unmapped_count: StrictInt = Field(default=0, ge=0)
+    source_unmapped_indexes: list[Annotated[StrictInt, Field(ge=0)]] = Field(default_factory=list)
 
     scanner_status: dict[str, str] = Field(default_factory=dict)
 
@@ -487,15 +575,38 @@ class CompletenessClaim(InventoryModel):
 class AIBOMMetadata(InventoryModel):
     """Header metadata for an AgentBOM document."""
 
-    spec_version: str = "1.0.0"
+    spec_version: str = Field(
+        default=NATIVE_SPEC_VERSION,
+        description=(
+            "Native format version. This build reads 1.0.x and 1.1.x; 1.1.0 records "
+            "scan-root-relative paths"
+        ),
+    )
     serial_number: str | None = None
-    version: int = 1
-    timestamp: datetime | None = None
+    version: StrictInt = 1
+    timestamp: Timestamp | None = None
     tool_name: str = "nexus-symbiote"
     tool_version: str | None = None
     tool_vendor: str = "aisecnomad"
     authors: list[str] = Field(default_factory=list)
     completeness: CompletenessClaim | None = None
+    policy_source: str | None = Field(
+        default=None,
+        description=(
+            "Policy that governed collection: built-in, or project:<file relative to the scan "
+            "root>. Absent when the producer did not record it"
+        ),
+    )
+    policy_weakened: list[str] | None = Field(
+        default=None,
+        description="Settings of that policy that gate less strictly than the built-in policy",
+    )
+
+    @field_validator("spec_version")
+    @classmethod
+    def supported_version(cls, value: str) -> str:
+        check_spec_version(value)
+        return value
 
 
 AnyComponent = Annotated[

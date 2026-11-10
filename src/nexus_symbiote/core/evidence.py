@@ -8,9 +8,20 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Self
+from typing import Annotated, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator, model_validator
+
+
+def _timestamp_input(value: object) -> object:
+    # JSON has no timestamp type: only ISO 8601 text is a timestamp, never a number.
+    if isinstance(value, datetime | str):
+        return value
+    raise ValueError("timestamps must be ISO 8601 strings")
+
+
+Timestamp = Annotated[datetime, BeforeValidator(_timestamp_input)]
+"""A timestamp that, like the published schema, accepts ISO 8601 text but no numbers."""
 
 
 class ClaimState(str, Enum):
@@ -41,12 +52,12 @@ class EvidenceRecord(BaseModel):
 
     source: str = Field(min_length=1, description="Non-secret source identifier")
     collector: str = Field(min_length=1)
-    collected_at: datetime
+    collected_at: Timestamp
     subject_digest: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
     verification_status: VerificationStatus = VerificationStatus.UNVERIFIED
     verifier: str | None = None
     verification_policy: str | None = None
-    verified_at: datetime | None = None
+    verified_at: Timestamp | None = None
 
     @field_validator("collected_at", "verified_at")
     @classmethod
@@ -81,8 +92,8 @@ class AuthorityClaim(BaseModel):
     resource: str | None = Field(default=None, min_length=1)
     delegating_principal: str | None = Field(default=None, min_length=1)
     audience: str | None = Field(default=None, min_length=1)
-    observed_at: datetime | None = None
-    expires_at: datetime | None = None
+    observed_at: Timestamp | None = None
+    expires_at: Timestamp | None = None
     evidence: list[EvidenceRecord] = Field(default_factory=list)
     unknown_reason: str | None = Field(default=None, min_length=1)
 

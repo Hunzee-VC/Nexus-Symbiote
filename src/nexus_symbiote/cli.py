@@ -16,7 +16,7 @@ from rich.markup import escape
 from rich.table import Table
 
 from nexus_symbiote import __version__, modes
-from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote.core.aibom import AIBOM, NativeFormatError
 from nexus_symbiote.core.enums import AssuranceLevel
 from nexus_symbiote.core.models import AIBOMMetadata, CompletenessClaim
 from nexus_symbiote.graph import validate_graph
@@ -129,8 +129,11 @@ def _failure(exc: Exception) -> click.ClickException:
 
 def _load_bom(path: str | Path) -> AIBOM:
     # Parser and validation messages can quote attacker-controlled input; keep them out.
+    # A NativeFormatError names only the class of problem, never document content.
     try:
         return AIBOM.load(Path(path))
+    except NativeFormatError as exc:
+        raise click.ClickException(f"{path} is not a valid native AIBOM file. {exc}") from exc
     except (OSError, ValueError, RecursionError) as exc:
         raise click.ClickException(f"{path} is not a valid native AIBOM file.") from exc
 
@@ -290,7 +293,10 @@ def _render_aibom(aibom: AIBOM, output_format: str) -> str:
         from nexus_symbiote.generators.sarif import SARIFGenerator
 
         return SARIFGenerator().generate_json(aibom)
-    return aibom.to_json()
+    try:
+        return aibom.to_native_json()
+    except NativeFormatError as exc:
+        raise click.ClickException(f"Inventory not written. {exc}") from exc
 
 
 @main.command()
@@ -530,7 +536,10 @@ def import_shadowscan(
 
         out_data = SPDXGenerator().generate_json(aibom)
     else:
-        out_data = aibom.to_json()
+        try:
+            out_data = aibom.to_native_json()
+        except NativeFormatError as exc:
+            raise click.ClickException(f"Inventory not written. {exc}") from exc
 
     try:
         write_output_file(Path(output), out_data, overwrite=False)
