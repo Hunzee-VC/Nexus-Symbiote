@@ -38,7 +38,8 @@ def _scanners(*components: PromptComponent) -> dict[str, type[Scanner]]:
     def make(name: str, component: PromptComponent) -> type[Scanner]:
         class Fixed(Scanner):
             def scan(self, project_root: Path) -> ScanResult:
-                return ScanResult(scanner_name=name, components=[component.model_copy()])
+                # Independent copies, as two real collectors would return.
+                return ScanResult(scanner_name=name, components=[component.model_copy(deep=True)])
 
         Fixed.name = name
         return Fixed
@@ -66,6 +67,9 @@ def test_identical_duplicate_from_two_collectors_is_kept_once(tmp_path, monkeypa
         "conflicting duplicate" in failure
         for failure in bom["metadata"]["completeness"]["scan_failures"]
     )
+    (kept,) = [c for c in bom["components"] if c["bom_ref"] == "prompt:shared"]
+    presence = kept["claims"]["repository_presence"]
+    assert presence["collector"] == "s0" and presence["evidence_refs"] == ["collector:s1"]
 
 
 def test_conflicting_duplicate_is_a_collection_failure(tmp_path, monkeypatch):

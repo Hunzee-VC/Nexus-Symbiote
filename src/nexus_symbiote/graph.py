@@ -302,11 +302,32 @@ _REF_TYPES: dict[str, set[ComponentType]] = {
 }
 
 
+MAX_GRAPH_ISSUES = 100
+_SHOWN_REF_CHARS = 200
+
+
+def _shown(ref: str) -> str:
+    # One long reference repeated in every message would multiply the input size.
+    return ref if len(ref) <= _SHOWN_REF_CHARS else ref[:_SHOWN_REF_CHARS] + "..."
+
+
 def validate_graph(bom: AIBOM) -> list[str]:
+    """Structural problems, at most ``MAX_GRAPH_ISSUES`` of them plus a count of the rest."""
     nodes = {c.bom_ref: c for c in bom.components}
-    issues: list[str] = []
+    issues: set[str] = set()
+    omitted = 0
+
+    def add(issue: str) -> None:
+        nonlocal omitted
+        if issue in issues:
+            return
+        if len(issues) < MAX_GRAPH_ISSUES:
+            issues.add(issue)
+        else:
+            omitted += 1
+
     if len(nodes) != len(bom.components):
-        issues.append("duplicate component references")
+        add("duplicate component references")
     for component in bom.components:
         for field_name, allowed in _REF_TYPES.items():
             value = getattr(component, field_name, None)
@@ -314,20 +335,26 @@ def validate_graph(bom: AIBOM) -> list[str]:
             for ref in refs:
                 target = nodes.get(ref)
                 if target is None:
-                    issues.append(f"{component.bom_ref}.{field_name}: missing target {ref}")
+                    add(f"{_shown(component.bom_ref)}.{field_name}: missing target {_shown(ref)}")
                 elif target.component_type not in allowed:
-                    issues.append(f"{component.bom_ref}.{field_name}: wrong target type {ref}")
+                    add(
+                        f"{_shown(component.bom_ref)}.{field_name}: wrong target type {_shown(ref)}"
+                    )
     for edge in bom.dependencies:
         if edge.source_ref not in nodes or edge.target_ref not in nodes:
-            issues.append(
-                f"{edge.relationship}: dangling edge {edge.source_ref} -> {edge.target_ref}"
+            add(
+                f"{edge.relationship}: dangling edge "
+                f"{_shown(edge.source_ref)} -> {_shown(edge.target_ref)}"
             )
         elif edge.relationship == "provides-tool" and (
             nodes[edge.source_ref].component_type is not ComponentType.MCP_SERVER
             or nodes[edge.target_ref].component_type is not ComponentType.TOOL
         ):
-            issues.append("provides-tool must link an MCP server to a tool")
-    return sorted(set(issues))
+            add("provides-tool must link an MCP server to a tool")
+    shown = sorted(issues)
+    if omitted:
+        shown.append(f"{omitted} further graph issue occurrences omitted")
+    return shown
 
 
 def blast_radius(bom: AIBOM, component_ref: str) -> dict[str, Any]:

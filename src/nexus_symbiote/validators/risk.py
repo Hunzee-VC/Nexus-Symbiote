@@ -3,15 +3,24 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from datetime import UTC, date, datetime
+from typing import TYPE_CHECKING, Any
 
 from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote.core.collection import is_imported
+from nexus_symbiote.core.coverage import CoverageStatus, assess_coverage
 from nexus_symbiote.core.enums import RiskSeverity, SerializationSafety
 from nexus_symbiote.core.models import AgentComponent, ModelComponent, RiskAssessment
 from nexus_symbiote.scanner_catalog import BUILTIN_SCANNER_NAMES
 
+if TYPE_CHECKING:
+    from nexus_symbiote.policy import RiskPolicy, Suppression
+
 REQUIRED_SCANNERS = BUILTIN_SCANNER_NAMES
+MAX_REPORTED_COVERAGE_GAPS = 50
+NO_LOCAL_EVIDENCE = "no agent manifest or supported local inventory evidence was found"
 
 SEVERITY_WEIGHTS: dict[RiskSeverity, float] = {
     RiskSeverity.CRITICAL: 10.0,
@@ -69,6 +78,12 @@ class RiskFinding:
 
 
 @dataclass
+class SuppressedFinding:
+    finding: RiskFinding
+    suppression: Suppression
+
+
+@dataclass
 class RiskReport:
     overall_score: float = 0.0
     risk_level: str = "unknown"
@@ -81,14 +96,36 @@ class RiskReport:
     ignored_findings: int = 0
     warning_threshold_exceeded: bool = False
     coverage_status: str = "unknown"
+    coverage_gaps: list[str] = field(default_factory=list)
+    suppressed: list[SuppressedFinding] = field(default_factory=list)
+    suppressions_expired: list[Suppression] = field(default_factory=list)
+    suppressions_unused: list[Suppression] = field(default_factory=list)
+    gate: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "overall_score": round(self.overall_score, 2),
             "risk_level": self.risk_level,
             "coverage_status": self.coverage_status,
+            "coverage_gaps": self.coverage_gaps,
             "gate_reasons": self.gate_reasons,
+            "gate": self.gate,
             "ignored_findings": self.ignored_findings,
+            "suppressed_findings": [
+                {
+                    "component_ref": item.finding.component_ref,
+                    "component_name": item.finding.component_name,
+                    "severity": item.finding.severity.value,
+                    "category": item.finding.category,
+                    "detail": item.finding.detail,
+                    "reason": item.suppression.reason,
+                    "owner": item.suppression.owner,
+                    "expires": item.suppression.expires.isoformat(),
+                }
+                for item in self.suppressed
+            ],
+            "suppressions_expired": [_suppression_dict(s) for s in self.suppressions_expired],
+            "suppressions_unused": [_suppression_dict(s) for s in self.suppressions_unused],
             "warning_threshold_exceeded": self.warning_threshold_exceeded,
             "total_components": self.total_components,
             "components_with_risks": self.components_with_risks,
@@ -109,6 +146,16 @@ class RiskReport:
         }
 
 
+def _suppression_dict(suppression: Suppression) -> dict[str, str]:
+    return {
+        "component_ref": suppression.component_ref,
+        "category": suppression.category,
+        "reason": suppression.reason,
+        "owner": suppression.owner,
+        "expires": suppression.expires.isoformat(),
+    }
+
+
 class RiskScorer:
     """Aggregates component-level risks into a scored report."""
 
@@ -119,6 +166,8 @@ class RiskScorer:
         warn_threshold: float = 20.0,
         ignore_categories: list[str] | None = None,
         fail_on_severity: str = "critical",
+        suppressions: Sequence[Suppression] = (),
+        today: date | None = None,
     ) -> None:
         if not math.isfinite(fail_threshold) or fail_threshold <= 0:
             raise ValueError("fail_threshold must be positive and finite")
@@ -131,22 +180,53 @@ class RiskScorer:
         if fail_on_severity not in (*[s.value for s in RiskSeverity], "none"):
             raise ValueError("unknown fail_on_severity")
         self.fail_on_severity = fail_on_severity
+        self.suppressions = list(suppressions)
+        self.today = today
+
+    @classmethod
+    def from_policy(
+        cls,
+        policy: RiskPolicy,
+        *,
+        fail_threshold: float | None = None,
+        fail_on_severity: str | None = None,
+    ) -> RiskScorer:
+        """A scorer for a loaded policy; explicit caller values replace the policy's."""
+        return cls(
+            fail_threshold=policy.fail_threshold if fail_threshold is None else fail_threshold,
+            warn_threshold=policy.warn_threshold,
+            ignore_categories=policy.ignore_categories,
+            fail_on_severity=fail_on_severity or policy.fail_on_severity,
+            suppressions=policy.suppressions,
+        )
 
     def score(self, bom: AIBOM) -> RiskReport:
         report = RiskReport()
         report.total_components = len(bom.components)
+        report.gate = {
+            "fail_threshold": self.fail_threshold,
+            "warn_threshold": self.warn_threshold,
+            "fail_on_severity": self.fail_on_severity,
+            "ignore_categories": sorted(self.ignore_categories),
+            "suppressions": len(self.suppressions),
+        }
         coverage = bom.metadata.completeness
-        if coverage is not None and (coverage.scan_failures or coverage.surfaces_excluded):
+        assessment = assess_coverage(coverage)
+        if assessment.status is CoverageStatus.PARTIAL:
             report.coverage_status = "partial"
-        elif coverage is not None:
-            statuses = coverage.scanner_status
-            if statuses and (
-                not REQUIRED_SCANNERS.issubset(statuses)
-                or any(state != "complete" for state in statuses.values())
-            ):
-                report.coverage_status = "partial"
-            elif statuses and coverage.surfaces_scanned and bom.components:
-                report.coverage_status = "reported"
+        elif assessment.complete and bom.components:
+            report.coverage_status = "reported"
+        gaps = assessment.reasons()
+        if assessment.complete and not bom.components:
+            gaps.append("The inventory has no components.")
+        report.coverage_gaps = gaps[:MAX_REPORTED_COVERAGE_GAPS]
+        if len(gaps) > MAX_REPORTED_COVERAGE_GAPS:
+            report.coverage_gaps.append(
+                f"{len(gaps) - MAX_REPORTED_COVERAGE_GAPS} further coverage gaps omitted"
+            )
+        today = self.today or datetime.now(UTC).date()
+        active = {(s.component_ref, s.category): s for s in self.suppressions}
+        used: set[tuple[str, str]] = set()
         components_with_risks: set[str] = set()
         category_scores: dict[str, float] = {}
 
@@ -162,7 +242,6 @@ class RiskScorer:
                 if risk.category in self.ignore_categories:
                     report.ignored_findings += 1
                     continue
-                components_with_risks.add(comp.bom_ref)
                 sev = risk.severity
                 weight = self.weights.get(sev, 0.0)
 
@@ -176,6 +255,13 @@ class RiskScorer:
                     references=list(risk.references),
                     score=weight,
                 )
+                suppression = active.get((comp.bom_ref, risk.category))
+                if suppression is not None:
+                    used.add((comp.bom_ref, risk.category))
+                    if suppression.expires >= today:
+                        report.suppressed.append(SuppressedFinding(finding, suppression))
+                        continue
+                components_with_risks.add(comp.bom_ref)
                 report.findings.append(finding)
 
                 sev_key = sev.value
@@ -210,7 +296,7 @@ class RiskScorer:
             coverage is not None
             and coverage.scope in {"repository", "repository+shadowscan"}
             and not any(
-                c.properties.get("collection_mode") != "imported-unverified-report"
+                not is_imported(c)
                 and not (
                     isinstance(c, AgentComponent)
                     and c.properties.get("identity_source") == "repository-path"
@@ -218,11 +304,18 @@ class RiskScorer:
                 for c in bom.components
             )
         ):
-            report.gate_reasons.append(
-                "no agent manifest or supported local inventory evidence was found"
-            )
+            report.gate_reasons.append(NO_LOCAL_EVIDENCE)
             if not report.findings:
                 report.risk_level = "unknown"
+        for suppression in self.suppressions:
+            if suppression.expires < today:
+                report.suppressions_expired.append(suppression)
+                report.gate_reasons.append(
+                    f"suppression of {suppression.category} on {suppression.component_ref} "
+                    f"expired on {suppression.expires.isoformat()}"
+                )
+            elif (suppression.component_ref, suppression.category) not in used:
+                report.suppressions_unused.append(suppression)
         report.findings.sort(key=lambda f: self.weights.get(f.severity, 0.0), reverse=True)
 
         return report

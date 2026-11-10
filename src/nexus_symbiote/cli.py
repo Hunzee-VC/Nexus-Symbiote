@@ -50,11 +50,6 @@ def _scanner_error_summary(exc: Exception) -> str:
     return "collector failed (scanner-internal-error)"
 
 
-def _policy(root: Path, *, ignore_project: bool = False) -> Policy:
-    policy, _, _ = _policy_with_source(root, ignore_project=ignore_project)
-    return policy
-
-
 def _policy_with_source(
     root: Path, *, ignore_project: bool = False, warn: bool = True
 ) -> tuple[Policy, str, list[str]]:
@@ -67,20 +62,19 @@ def _policy_with_source(
     from nexus_symbiote.policy import (
         PolicyError,
         default_policy,
-        find_policy_path,
-        load_policy,
+        load_policy_file,
         weakened_settings,
     )
 
     if ignore_project:
         return default_policy(), "built-in", []
     try:
-        path = find_policy_path(root)
-        policy = load_policy(root) or default_policy()
+        loaded = load_policy_file(root)
     except PolicyError as exc:
         raise _failure(exc) from exc
-    if path is None:
-        return policy, "built-in", []
+    if loaded is None:
+        return default_policy(), "built-in", []
+    policy, path, _ = loaded
     weaker = weakened_settings(policy)
     if weaker and warn:
         # The path and the relaxed values come from the checkout, so neither may move
@@ -114,6 +108,25 @@ def _inventory_policy(
                 err=True,
             )
     return default_policy(), "built-in", []
+
+
+def _gate_sources(
+    policy: Policy, policy_source: str, threshold: float | None, fail_on_severity: str | None
+) -> dict[str, str]:
+    """Where each effective risk-gate parameter came from: cli, project policy or built-in."""
+
+    def origin(name: str) -> str:
+        if policy_source.startswith("project:") and name in policy.risk.model_fields_set:
+            return "project policy"
+        return "built-in"
+
+    return {
+        "fail_threshold_source": "cli" if threshold is not None else origin("fail_threshold"),
+        "fail_on_severity_source": "cli" if fail_on_severity else origin("fail_on_severity"),
+        "warn_threshold_source": origin("warn_threshold"),
+        "ignore_categories_source": origin("ignore_categories"),
+        "suppressions_source": origin("suppressions"),
+    }
 
 
 def _safe(value: object) -> str:
@@ -247,31 +260,17 @@ def _merge_scan_result(
     collected: dict[str, Any],
     scan_failures: list[str],
 ) -> None:
-    from nexus_symbiote.core.models import ClaimEvidence
+    from nexus_symbiote.core.collection import merge_collected
 
     accepted_refs: set[str] = set()
     for comp in result.components:
         # Discovery of a file/configuration does not verify every supplier assertion.
-        imported = name == "shadowscan"
-        comp.claims["discovery_report_entry" if imported else "repository_presence"] = (
-            ClaimEvidence(
-                assurance=AssuranceLevel.DECLARED if imported else AssuranceLevel.OBSERVED,
-                method="imported-discovery-report" if imported else "filesystem-inventory",
-                scope="source-report" if imported else "repository",
-                collector=name,
-                locator=comp.source_path,
-                observed_at=aibom.metadata.timestamp,
-            )
-        )
-        if comp.assurance_level is AssuranceLevel.VERIFIED:
-            comp.assurance_level = AssuranceLevel.DECLARED
-        existing = collected.get(comp.bom_ref)
-        if existing is not None and existing != comp:
+        outcome = merge_collected(collected, comp, name, aibom.metadata.timestamp)
+        if outcome == "conflict":
             scan_failures.append(f"{name}: conflicting duplicate component {comp.bom_ref}")
             continue
-        if existing is None:
+        if outcome == "added":
             aibom.components.append(comp)
-            collected[comp.bom_ref] = comp
         accepted_refs.add(comp.bom_ref)
     for edge in result.dependencies:
         if edge.source_ref in accepted_refs and edge.target_ref in accepted_refs:
@@ -349,7 +348,9 @@ def scan(
     from nexus_symbiote.utils.confined import DEFAULT_EXCLUDES
     from nexus_symbiote.validators.risk import RiskScorer
 
-    policy = _policy(root, ignore_project=no_project_policy)
+    policy, policy_source, policy_weakened = _policy_with_source(
+        root, ignore_project=no_project_policy
+    )
     signature_policies = _signer_policies(signature_policy, root)
     output_format = output_format or policy.output.default_format
     all_scanners = _get_scanners()
@@ -362,7 +363,18 @@ def scan(
     if output_format not in {"json", "cyclonedx", "spdx", "sarif"}:
         raise click.BadParameter("Unknown output format", param_hint="--format")
     console.print(f"[bold]Scanning[/] {_safe(root)}")
-    aibom = AIBOM(metadata=AIBOMMetadata(authors=[]))
+    # The policy file always sits in the scan root; record it relative to that root.
+    aibom = AIBOM(
+        metadata=AIBOMMetadata(
+            authors=[],
+            policy_source=(
+                "project:" + policy_source.rsplit("/", 1)[-1]
+                if policy_source.startswith("project:")
+                else policy_source
+            ),
+            policy_weakened=policy_weakened,
+        )
+    )
     aibom.finalize()
     surfaces_scanned: list[str] = []
     surfaces_excluded: list[str] = []
@@ -464,12 +476,7 @@ def scan(
             "network",
         ],
     )
-    passed, risk_report = RiskScorer(
-        fail_threshold=policy.risk.fail_threshold,
-        warn_threshold=policy.risk.warn_threshold,
-        ignore_categories=policy.risk.ignore_categories,
-        fail_on_severity=policy.risk.fail_on_severity,
-    ).passes_gate(aibom)
+    passed, risk_report = RiskScorer.from_policy(policy.risk).passes_gate(aibom)
     report_mode = report_only or policy.scan.failure_mode == "report-only"
 
     if source_report_digest and output_format == "sarif":
@@ -732,22 +739,38 @@ def verify_discovery(
     is_flag=True,
     help="Use built-in policy without reading configuration from the target.",
 )
+@click.option(
+    "--require-discovery-signature",
+    is_flag=True,
+    help=(
+        "Require the operator signature policy to verify any ShadowScan report the inventory "
+        "records or the project contains, whatever the project policy says; requires --project."
+    ),
+)
 def validate(
     aibom_path: str,
     project: str | None,
     signature_policy: Path | None = None,
     no_project_policy: bool = False,
+    require_discovery_signature: bool = False,
 ) -> None:
     """Validate an AIBOM for completeness and integrity."""
     bom = _load_bom(aibom_path)
 
     from nexus_symbiote.validators.completeness import (
         CompletenessValidator,
-        discovery_producer_problems,
+        assurance_problems,
+        carries_discovery_evidence,
+        discovery_producer_check,
         discovery_signature_required,
     )
     from nexus_symbiote.validators.integrity import IntegrityValidator
 
+    if require_discovery_signature and not project:
+        raise click.BadParameter(
+            "--require-discovery-signature requires --project",
+            param_hint="--require-discovery-signature",
+        )
     signature_policies = _signer_policies(signature_policy, Path(project) if project else None)
 
     policy, policy_source, _ = _inventory_policy(
@@ -757,6 +780,7 @@ def validate(
     )
     console.print(f"Policy: {_safe(policy_source)}", soft_wrap=True)
     valid = True
+    bound_imports: frozenset[str] = frozenset()
     console.print("[bold]Completeness check[/]")
     if policy.validation.require_completeness:
         cv = CompletenessValidator()
@@ -770,7 +794,9 @@ def validate(
             if project
             else cv.validate(bom)
         )
+        bound_imports = c_report.bound_imports
         console.print("  Status: " + ("[green]PASS[/]" if c_report.is_complete else "[red]FAIL[/]"))
+        console.print(f"  Basis: {c_report.basis}")
         console.print(f"  Components: {c_report.total_components}")
         for issue in c_report.issues:
             console.print(
@@ -778,6 +804,16 @@ def validate(
                 f"{_safe(issue.description)}",
                 soft_wrap=True,
             )
+        if c_report.issues_omitted:
+            console.print(f"  {c_report.issues_omitted} further issues omitted")
+        for claim in c_report.supplier_claims:
+            console.print(
+                f"  SUPPLIER-CLAIM \\[{_safe(claim.subject)}] {_safe(claim.kind)}: "
+                f"{_safe(claim.detail)}",
+                soft_wrap=True,
+            )
+        if c_report.supplier_claims_omitted:
+            console.print(f"  {c_report.supplier_claims_omitted} further supplier claims omitted")
         valid = valid and c_report.is_complete
     else:
         console.print("  SKIPPED by explicit policy")
@@ -787,6 +823,7 @@ def validate(
             bom,
             Path(project).resolve() if project else None,
             exclude_paths=policy.scan.exclude_paths,
+            bound_imports=bound_imports,
         )
         console.print("  Status: " + ("[green]PASS[/]" if i_report.is_valid else "[red]FAIL[/]"))
         console.print(
@@ -798,40 +835,44 @@ def validate(
                 f"{_safe(integrity_issue.detail)}",
                 soft_wrap=True,
             )
+        if i_report.issues_omitted:
+            console.print(f"  {i_report.issues_omitted} further issues omitted")
         valid = valid and i_report.is_valid
     else:
         console.print("  SKIPPED by explicit policy")
     if project and discovery_signature_required(
-        policy.validation.require_discovery_signature, Path(project).resolve(), signature_policies
+        policy.validation.require_discovery_signature or require_discovery_signature,
+        Path(project).resolve(),
+        signature_policies,
     ):
         console.print("\n[bold]Discovery producer check[/]")
-        problems = discovery_producer_problems(
+        status, problems = discovery_producer_check(
             bom,
             Path(project).resolve(),
             signature_policies,
             exclude_paths=policy.scan.exclude_paths,
         )
-        console.print("  Status: " + ("[red]FAIL[/]" if problems else "[green]PASS[/]"))
+        console.print(
+            "  Status: "
+            + {
+                "verified": "[green]PASS[/]",
+                "failed": "[red]FAIL[/]",
+                "not-applicable": "not applicable (no discovery evidence or report)",
+            }[status]
+        )
         for problem in problems:
             console.print(f"  ERROR \\[shadowscan] {_safe(problem)}", soft_wrap=True)
         valid = valid and not problems
+    elif carries_discovery_evidence(bom):
+        console.print("\nDiscovery producer: not verified (unsigned evidence accepted)")
     minimum = policy.validation.minimum_assurance_level
     if minimum == "verified":
         raise click.ClickException(
             "offline validate cannot establish verified assurance; use subject-bound cryptographic verification"
         )
-    if minimum == "observed":
-        levels = [c.assurance_level for c in bom.components]
-        if (
-            not bom.metadata.completeness
-            or not levels
-            or any(level is AssuranceLevel.DECLARED for level in levels)
-        ):
-            console.print("  ERROR: minimum observed assurance not attained")
-            valid = False
-        elif any(not c.claims for c in bom.components):
-            console.print("  ERROR: observed assurance requires claim provenance")
-            valid = False
+    for problem in assurance_problems(bom, minimum, imported_claims=bound_imports):
+        console.print(f"  ERROR: {_safe(problem)}", soft_wrap=True)
+        valid = False
     # Graph integrity is structural and cannot be disabled by a coverage policy.
     graph_issues = validate_graph(bom)
     if graph_issues:
@@ -869,6 +910,14 @@ def validate(
     is_flag=True,
     help="Use built-in policy without reading configuration from the target.",
 )
+@click.option(
+    "--require-discovery-signature",
+    is_flag=True,
+    help=(
+        "Require the operator signature policy to verify any ShadowScan report the inventory "
+        "records or the project contains, whatever the project policy says; requires --project."
+    ),
+)
 def risk(
     aibom_path: str,
     threshold: float | None,
@@ -877,25 +926,35 @@ def risk(
     no_project_policy: bool = False,
     project: Path | None = None,
     signature_policy: Path | None = None,
+    require_discovery_signature: bool = False,
 ) -> None:
     """Score supply-chain risks in an AIBOM."""
     bom = _load_bom(aibom_path)
 
+    from nexus_symbiote.validators.completeness import carries_discovery_evidence
     from nexus_symbiote.validators.risk import RiskScorer
 
+    if require_discovery_signature and project is None:
+        raise click.BadParameter(
+            "--require-discovery-signature requires --project",
+            param_hint="--require-discovery-signature",
+        )
     root = project.resolve() if project else None
     signature_policies = _signer_policies(signature_policy, root)
     policy, policy_source, policy_weakened = _inventory_policy(
         root, aibom_path, ignore_project=no_project_policy, warn=not json_output
     )
+    threshold_option = threshold
     threshold = threshold if threshold is not None else policy.risk.fail_threshold
     if threshold <= 0 or not math.isfinite(threshold):
         raise click.BadParameter("threshold must be positive and finite", param_hint="--threshold")
     basis = "supplied-bom"
+    supplier_claims: list[dict[str, str]] = []
+    producer = "not-verified" if carries_discovery_evidence(bom) else "not-applicable"
     if root is not None:
         from nexus_symbiote.validators.completeness import (
             CompletenessValidator,
-            discovery_producer_problems,
+            discovery_producer_check,
             discovery_signature_required,
         )
 
@@ -905,19 +964,21 @@ def risk(
             exclude_paths=policy.scan.exclude_paths,
             signature_policies=signature_policies,
         )
-        discovery = (
-            discovery_producer_problems(
+        discovery: list[str] = []
+        if discovery_signature_required(
+            policy.validation.require_discovery_signature or require_discovery_signature,
+            root,
+            signature_policies,
+        ):
+            producer, discovery = discovery_producer_check(
                 bom, root, signature_policies, exclude_paths=policy.scan.exclude_paths
             )
-            if discovery_signature_required(
-                policy.validation.require_discovery_signature, root, signature_policies
-            )
-            else []
-        )
-        if not checked.is_complete or not checked.local_subjects or discovery:
-            reasons = [issue.description for issue in checked.issues if issue.severity == "error"]
-            if not checked.local_subjects:
-                reasons.append("No local project subject was available to reconcile.")
+        if not checked.is_complete or discovery:
+            reasons = [
+                issue.description
+                for issue in checked.issues
+                if issue.severity in {"error", "unknown"}
+            ]
             reasons.extend(discovery)
             if json_output:
                 click.echo(
@@ -928,6 +989,7 @@ def risk(
                             "risk_level": "unknown",
                             "coverage_status": "unreconciled",
                             "gate_reasons": reasons,
+                            "discovery_producer": producer,
                             "policy_source": policy_source,
                             "policy_weakened": policy_weakened,
                         },
@@ -939,12 +1001,13 @@ def risk(
                 for reason in reasons:
                     click.echo(_UNSAFE_TEXT.sub("\ufffd", reason), err=True)
             raise click.exceptions.Exit(1)
-        basis = "project-reconciled"
-    scorer = RiskScorer(
-        fail_threshold=threshold,
-        warn_threshold=policy.risk.warn_threshold,
-        ignore_categories=policy.risk.ignore_categories,
-        fail_on_severity=fail_on_severity or policy.risk.fail_on_severity,
+        basis = checked.basis
+        supplier_claims = [
+            {"subject": c.subject, "kind": c.kind, "detail": c.detail}
+            for c in checked.supplier_claims
+        ]
+    scorer = RiskScorer.from_policy(
+        policy.risk, fail_threshold=threshold, fail_on_severity=fail_on_severity
     )
     passed, report = scorer.passes_gate(bom)
 
@@ -953,7 +1016,13 @@ def risk(
             json.dumps(
                 {
                     **report.to_dict(),
+                    "gate": {
+                        **report.gate,
+                        **_gate_sources(policy, policy_source, threshold_option, fail_on_severity),
+                    },
                     "assessment_basis": basis,
+                    "supplier_claims": supplier_claims,
+                    "discovery_producer": producer,
                     "policy_source": policy_source,
                     "policy_weakened": policy_weakened,
                 },
@@ -982,6 +1051,11 @@ def risk(
         console.print("  Severity breakdown:")
         for sev, count in sorted(report.severity_counts.items()):
             console.print(f"    {sev}: {count}")
+    if report.suppressed:
+        console.print(
+            f"  Suppressed by project policy: {len(report.suppressed)} findings "
+            "(reasons, owners and expiry in --json-output)"
+        )
 
     if report.findings:
         table = Table(title="Top Findings", show_lines=True)
@@ -1114,7 +1188,7 @@ def blast_radius_command(aibom_path: str, component_ref: str, json_output: bool)
 
 
 @main.command()
-@click.option("--force", is_flag=True, help="Overwrite existing .nexus-symbiote.yaml")
+@click.option("--force", is_flag=True, help="Overwrite the existing project policy file")
 @click.option(
     "--path",
     type=click.Path(),
@@ -1123,15 +1197,27 @@ def blast_radius_command(aibom_path: str, component_ref: str, json_output: bool)
 )
 def init(force: bool, path: str) -> None:
     """Initialize a .nexus-symbiote.yaml policy configuration."""
-    from nexus_symbiote.policy import DEFAULT_POLICY_YAML
+    from nexus_symbiote.policy import DEFAULT_POLICY_YAML, POLICY_FILE_NAMES
 
     # absolute(), not resolve(): a symlinked directory is refused like any other output.
-    target = Path(path).absolute() / ".nexus-symbiote.yaml"
+    directory = Path(path).absolute()
     try:
-        exists = target.exists()
+        existing = [
+            directory / name
+            for name in POLICY_FILE_NAMES
+            if (directory / name).exists() or (directory / name).is_symlink()
+        ]
     except OSError as exc:
         raise output_failure(exc) from exc
-    if exists and not force:
+    # A second policy name would shadow, or be shadowed by, the existing one.
+    target = existing[0] if len(existing) == 1 else directory / POLICY_FILE_NAMES[0]
+    if len(existing) > 1:
+        err_console.print(
+            f"[yellow]Warning:[/] both {POLICY_FILE_NAMES[0]} and {POLICY_FILE_NAMES[1]} exist "
+            f"in {_safe(directory)}; keep one policy file."
+        )
+        sys.exit(1)
+    if existing and not force:
         err_console.print(
             f"[yellow]Warning:[/] {_safe(target)} already exists. Use --force to overwrite."
         )

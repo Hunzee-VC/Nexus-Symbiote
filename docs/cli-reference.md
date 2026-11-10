@@ -154,7 +154,7 @@ nexus-symbiote init [OPTIONS]
 
 | Option | Description |
 |---|---|
-| `--force` | Overwrite existing .nexus-symbiote.yaml |
+| `--force` | Overwrite the existing project policy file (`.nexus-symbiote.yaml`, or `.nexus-symbiote.yml` when that is the only one); refused when both exist |
 | `--path` `PATH` | Directory to create .nexus-symbiote.yaml in |
 
 ### `risk`
@@ -173,6 +173,7 @@ nexus-symbiote risk [OPTIONS] AIBOM_PATH
 | `--signature-policy` `PATH` | Explicit operator signer policy for model recollection; requires --project |
 | `--fail-on-severity` `critical\|high\|medium\|low\|info\|none` | Fail on any finding at or above this severity (default: from policy, built-in critical); none disables it. |
 | `--no-project-policy` | Use built-in policy without reading configuration from the target. |
+| `--require-discovery-signature` | Require the operator signature policy to verify any ShadowScan report the inventory records or the project contains, whatever the project policy says; requires --project. JSON output reports the result as `discovery_producer` |
 
 ### `runtime keygen`
 
@@ -254,6 +255,7 @@ nexus-symbiote validate [OPTIONS] AIBOM_PATH
 | `--project` `PATH` | Project root for cross-validation. The only source of a project policy: without it the built-in policy applies |
 | `--signature-policy` `PATH` | Explicit operator signer policy JSON; requires --project |
 | `--no-project-policy` | Use built-in policy without reading configuration from the target. |
+| `--require-discovery-signature` | Require the operator signature policy to verify any ShadowScan report the inventory records or the project contains, whatever the project policy says; requires --project |
 
 ### `verify-artifact`
 

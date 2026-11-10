@@ -13,13 +13,13 @@ from nexus_symbiote.validators.risk import RiskScorer
 def imported_model(**fields) -> AIBOM:
     component = ModelComponent(bom_ref="model:imported", name="imported", **fields)
     bom = AIBOM(components=[component])
+    collectors = ["mcp", "model", "prompt", "rag", "registry", "shadowscan", "a2a", "ide_agents"]
     bom.metadata.completeness = CompletenessClaim(
         scope="repository",
         surfaces_scanned=["all"],
-        scanner_status=dict.fromkeys(
-            ("mcp", "model", "prompt", "rag", "registry", "shadowscan", "a2a", "ide_agents"),
-            "complete",
-        ),
+        scanner_status=dict.fromkeys(collectors, "complete"),
+        collectors_requested=collectors,
+        collectors_completed=collectors,
     )
     document = bom.model_dump(mode="json")
     document["components"][0]["risks"] = []

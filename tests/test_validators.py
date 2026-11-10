@@ -163,7 +163,7 @@ class TestIntegrityValidator:
         assert not report.is_valid
         assert report.hashes_failed > 0
 
-    def test_tool_hash_correct(self):
+    def test_self_consistent_tool_hash_is_not_verification(self):
         from nexus_symbiote.core.hashing import hash_tool_definition
 
         correct_hash = hash_tool_definition("test_tool", "Does something")
@@ -179,8 +179,9 @@ class TestIntegrityValidator:
         )
         iv = IntegrityValidator()
         report = iv.validate(bom)
-        assert report.hashes_verified == 1
+        assert report.hashes_verified == 0
         assert report.hashes_failed == 0
+        assert report.status == "unknown"
 
     def test_unsafe_model_flagged(self):
         bom = AIBOM()
