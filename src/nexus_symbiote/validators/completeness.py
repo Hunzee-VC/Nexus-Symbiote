@@ -259,6 +259,7 @@ class CompletenessValidator:
                     scanner.name, "Local collector failed; inventory could not be reconciled."
                 )
                 continue
+            local.make_portable(root)
             for reason in (*local.scan_failures, *local.surfaces_excluded):
                 incomplete(scanner.name, f"Local collection incomplete: {reason}")
             if scanner.name == "shadowscan":

@@ -18,9 +18,19 @@ from nexus_symbiote.core.models import (
     CapabilityDeclaration,
     RiskAssessment,
 )
-from nexus_symbiote.scanners.base import Scanner, ScanResult, parse_python, sanitized_origin
+from nexus_symbiote.scanners.base import (
+    MAX_SOURCE_BYTES,
+    Scanner,
+    ScanResult,
+    SourceBudget,
+    parse_python,
+    sanitized_origin,
+)
 from nexus_symbiote.scanners.mcp import _MIN_SOURCE_BINDING_KEY_LENGTH, SOURCE_BINDING_KEY_ENV
+from nexus_symbiote.utils.confined import MAX_TOTAL_BYTES
 from nexus_symbiote.utils.secrets import REDACTED, redact_text
+
+_A2A_SOURCE_HINTS = (b"a2a", b"A2AClient", b"AgentCard")
 
 AGENT_CARD_FILES = [
     ".well-known/agent.json",
@@ -454,7 +464,8 @@ class A2AScanner(Scanner):
 
     def scan(self, project_root: Path) -> ScanResult:
         result = ScanResult(scanner_name=self.name)
-        with self._collection(project_root, result) as files:
+        limits = {"max_total_bytes": MAX_TOTAL_BYTES + MAX_SOURCE_BYTES}
+        with self._collection(project_root, result, **limits) as files:
             for relative in AGENT_CARD_FILES:
                 path = files.root / relative
                 data = self._read_mapping(path, result)
@@ -712,19 +723,22 @@ class A2AScanner(Scanner):
             if path.suffix == ".py" and not excluded_dirs.intersection(path.parts)
         ]
         candidates.sort(key=lambda path: len(path.parts) > 1)
-        matched: list[tuple[Path, str]] = []
+        budget = SourceBudget("a2a code references", result)
         for path in candidates:
-            content = self._files.read_text(path)
-            if content is None:
+            if budget.exhausted:
+                break
+            raw = self._files.read_bytes(path)
+            if raw is None or not budget.admit(len(raw)):
                 continue
-            if len(path.parts) > 1 and not any(
-                hint in content for hint in ("a2a", "A2AClient", "AgentCard")
-            ):
+            # Nested modules are decoded only when they can name A2A, so an unrelated
+            # module is neither parsed nor a decoding failure.
+            if len(path.parts) > 1 and not any(hint in raw for hint in _A2A_SOURCE_HINTS):
                 continue
-            matched.append((path, content))
-        if len(matched) > 20:
-            result.scan_failures.append("a2a code references: 20-file collection limit exceeded")
-        for path, content in matched[:20]:
+            try:
+                content = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                result.scan_failures.append(f"{path}: invalid UTF-8")
+                continue
             result.surfaces_scanned.append(str(root / path))
             if len(content) > 262_144:
                 result.scan_failures.append(f"{path}: syntax collection size limit exceeded")

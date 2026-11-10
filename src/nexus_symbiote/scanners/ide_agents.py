@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from nexus_symbiote.core.enums import RiskSeverity, TrustTier
+from nexus_symbiote.core.hashing import hash_canonical
 from nexus_symbiote.core.models import IDEAgentComponent, RiskAssessment, VerifiedExtensionComponent
 from nexus_symbiote.scanners.base import Scanner, ScanResult
 from nexus_symbiote.utils.secrets import redact_text
@@ -90,6 +91,23 @@ IDE_AGENT_CONFIGS: dict[str, dict[str, Any]] = {
 }
 
 
+def _declared_hooks(hooks: object) -> dict[str, int]:
+    """Count handlers per event for the reader; the settings digest is what binds them.
+
+    Commands may carry secrets and stay unrecorded. A shape this does not know
+    is left to the digest rather than guessed at.
+    """
+    counts: dict[str, int] = {}
+    if not isinstance(hooks, dict):
+        return counts
+    for event, matchers in hooks.items():
+        if not isinstance(event, str) or not isinstance(matchers, list):
+            continue
+        handlers = [matcher.get("hooks") for matcher in matchers if isinstance(matcher, dict)]
+        counts[redact_text(event)] = sum(len(h) for h in handlers if isinstance(h, list))
+    return counts
+
+
 class IDEAgentScanner(Scanner):
     name = "ide_agents"
 
@@ -113,9 +131,27 @@ class IDEAgentScanner(Scanner):
                         result.surfaces_scanned.append(str(files.root / evidence))
                 if not found:
                     continue
-                settings = self._read_ide_settings(files.root, ide_type, result, available)
+                declared: dict[str, Any] = {}
+                settings = self._read_ide_settings(
+                    files.root, ide_type, result, available, declared
+                )
                 mode = self._extract_permission_mode(settings or {}, ide_type, result)
                 risks: list[RiskAssessment] = []
+                if mode == "bypassPermissions":
+                    risks.append(
+                        RiskAssessment(
+                            severity=RiskSeverity.HIGH,
+                            category="permission_scope",
+                            detail=(
+                                f"IDE agent '{ide_type}' declares a starting mode that skips "
+                                "permission prompts; effective approval remains unverified."
+                            ),
+                            recommendation=(
+                                "Remove the project-level bypass mode, or confine the agent to "
+                                "an isolated environment with no credentials it should not use."
+                            ),
+                        )
+                    )
                 if self._has_broad_permissions(settings or {}, ide_type, result):
                     risks.append(
                         RiskAssessment(
@@ -165,6 +201,7 @@ class IDEAgentScanner(Scanner):
                         properties={
                             "collection_mode": "static-project-configuration",
                             "mcp_config_paths": mcp_configs,
+                            **declared,
                             "permission_evidence": "declaration-only",
                             "effective_authorization_verified": False,
                             "permission_policy_limitations": [
@@ -187,7 +224,12 @@ class IDEAgentScanner(Scanner):
         return result
 
     def _read_ide_settings(
-        self, root: Path, ide_type: str, result: ScanResult, available: set[str]
+        self,
+        root: Path,
+        ide_type: str,
+        result: ScanResult,
+        available: set[str],
+        declared: dict[str, Any],
     ) -> dict[str, Any] | None:
         settings_paths = {
             "claude-code": [".claude/settings.json", ".claude/settings.local.json"],
@@ -204,6 +246,18 @@ class IDEAgentScanner(Scanner):
             if relative in available:
                 data = self._read_mapping(root / relative, result)
                 if data is not None:
+                    # Bind every settings layer, so a change no field here models
+                    # (a hook, a removed deny rule) still differs between snapshots.
+                    try:
+                        digest = hash_canonical(data)
+                    except (TypeError, ValueError, RecursionError):
+                        result.scan_failures.append(f"{relative}: settings cannot be canonicalized")
+                    else:
+                        declared.setdefault("settings_hashes", {})[relative] = digest
+                    if ide_type == "claude-code":
+                        hooks = _declared_hooks(data.get("hooks"))
+                        if hooks:
+                            declared.setdefault("declared_hooks", {})[relative] = hooks
                     if ide_type == "claude-code" and "permissions" in data:
                         permissions = data["permissions"]
                         if not isinstance(permissions, dict):
@@ -228,6 +282,15 @@ class IDEAgentScanner(Scanner):
                                 combined[key] = list(dict.fromkeys([*earlier, *current]))
                         data = {**data, "permissions": combined}
                     merged.update(data)
+        permissions = merged.get("permissions")
+        if ide_type == "claude-code" and isinstance(permissions, dict):
+            counts = {
+                key: len(permissions[key])
+                for key in ("allow", "ask", "deny")
+                if isinstance(permissions.get(key), list)
+            }
+            if counts:
+                declared["declared_permission_rule_counts"] = counts
         return merged or None
 
     def _extract_permission_mode(

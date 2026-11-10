@@ -46,7 +46,15 @@ from nexus_symbiote.core.models import (
     RiskAssessment,
     ToolComponent,
 )
-from nexus_symbiote.scanners.base import Scanner, ScanResult, parse_python, sanitized_origin
+from nexus_symbiote.scanners.base import (
+    MAX_SOURCE_BYTES,
+    Scanner,
+    ScanResult,
+    SourceBudget,
+    parse_python,
+    sanitized_origin,
+)
+from nexus_symbiote.utils.confined import MAX_TOTAL_BYTES
 from nexus_symbiote.utils.secrets import REDACTED, redact_descriptor, redact_text
 
 MCP_CONFIG_FILES = [
@@ -56,6 +64,85 @@ MCP_CONFIG_FILES = [
     ".cursor/mcp.json",
     ".claude/mcp.json",
 ]
+
+# The same names below the root: a package's own configuration, and the files
+# other hosts read (.vscode/mcp.json, .windsurf/mcp_config.json, ...).
+MCP_CONFIG_NAMES = frozenset(
+    {
+        ".mcp.json",
+        "mcp.json",
+        "mcp-config.json",
+        "mcp_config.json",
+        "mcp-servers.json",
+        "claude_desktop_config.json",
+        "cline_mcp_settings.json",
+    }
+)
+_HOST_DIRECTORIES = {
+    ".claude": "claude-code",
+    ".cursor": "cursor",
+    ".vscode": "vscode",
+    ".windsurf": "windsurf",
+    ".roo": "roo",
+    ".amazonq": "amazon-q",
+    ".kiro": "kiro",
+    ".cline": "cline",
+}
+
+_SDK_IMPORT = re.compile(
+    r"(?:\bfrom\s*[\"']@modelcontextprotocol/sdk(?:/[^\"']*)?[\"']|"
+    r"\brequire\s*\(\s*[\"']@modelcontextprotocol/sdk(?:/[^\"']*)?[\"'])"
+)
+_SPACE = re.compile(r"\s*")
+
+
+def without_js_comments(text: str) -> str:
+    """Drop block comments and whole-line ``//`` comments in one linear pass.
+
+    The pattern this replaces rescanned every run of blank lines from each of its
+    lines, so a file of newlines within the size limit took minutes.
+    """
+    kept: list[str] = []
+    size = len(text)
+    emitted = position = line_from = 0
+    block = text.find("/*")
+    close = -1
+    line: tuple[int, int] | None = None
+    while position < size:
+        if 0 <= block < position:
+            block = text.find("/*", position)
+        if block >= 0:
+            close = text.find("*/", block + 2)
+            if close < 0:
+                block = -1
+        if line is None or line[0] < position:
+            line = None
+            start = max(position, line_from)
+            if start and text[start - 1] != "\n":
+                newline = text.find("\n", start)
+                start = size if newline < 0 else newline + 1
+            while start < size:
+                indent = _SPACE.match(text, start)
+                content = indent.end() if indent else start
+                newline = text.find("\n", content)
+                if text.startswith("//", content):
+                    line = (start, size if newline < 0 else newline)
+                    break
+                start = size if newline < 0 else newline + 1
+            line_from = start
+        if block >= 0 and (line is None or block <= line[0]):
+            begin, end = block, close + 2
+        elif line is not None:
+            begin, end = line
+        else:
+            break
+        kept.append(text[emitted:begin])
+        emitted = position = end
+        if end == begin:
+            position += 1
+    kept.append(text[emitted:])
+    return "".join(kept)
+
 
 _NPM_NAME = r"(?:@[A-Za-z0-9][\w.-]*/)?[A-Za-z0-9][\w.-]*"
 _OCI_REPOSITORY = (
@@ -84,6 +171,24 @@ def _value_binding(config: dict[str, Any]) -> tuple[str, str] | None:
     mac = hmac.new(material, message.encode(), "sha256").hexdigest()
     key_id = hmac.new(material, b"nexus-symbiote/source-binding-key-id", "sha256").hexdigest()
     return "hmac-sha256:" + mac, key_id[:32]
+
+
+def _has_userinfo(url: str) -> bool:
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return False
+    return parsed.username is not None or parsed.password is not None
+
+
+def _has_path_or_query(url: object) -> bool:
+    if not isinstance(url, str):
+        return False
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return True
+    return parsed.path not in {"", "/"} or bool(parsed.query)
 
 
 # Index, registry and find-links options decide where a launcher fetches its package.
@@ -151,8 +256,14 @@ class MCPScanner(Scanner):
         found_any = False
         clients: dict[str, MCPClientComponent] = {}
 
-        with self._collection(project_root, result) as files:
-            for config_name in MCP_CONFIG_FILES:
+        limits = {"max_total_bytes": MAX_TOTAL_BYTES + MAX_SOURCE_BYTES}
+        with self._collection(project_root, result, **limits) as files:
+            sources = list(files.iter_files())
+            nested = sorted(
+                {path.as_posix() for path in sources if path.name in MCP_CONFIG_NAMES}
+                - set(MCP_CONFIG_FILES)
+            )
+            for config_name in (*MCP_CONFIG_FILES, *nested):
                 config_path = files.root / config_name
                 data = files.read_json(config_name, missing_ok=True)
                 if data is None:
@@ -199,7 +310,7 @@ class MCPScanner(Scanner):
                     client.properties["config_paths"].append(str(config_path))
             result.components.extend(clients.values())
             if not config_only:
-                self._scan_code_mcp_clients(files.root, result)
+                self._scan_code_mcp_clients(result, sources)
 
         if not found_any and not result.scan_failures and not result.surfaces_excluded:
             result.surfaces_scanned.append("mcp-config (no config files found)")
@@ -316,13 +427,45 @@ class MCPScanner(Scanner):
                 )
             )
 
-        if endpoint_url and not self._secure_endpoint(endpoint_url):
+        if endpoint_url and _has_userinfo(endpoint_url):
+            risks.append(
+                RiskAssessment(
+                    severity=RiskSeverity.HIGH,
+                    category="transport_security",
+                    detail=f"MCP server '{name}' endpoint URL embeds credentials: {safe_endpoint}",
+                    recommendation="Supply the credential through a header or environment reference.",
+                )
+            )
+        elif endpoint_url and not self._secure_endpoint(endpoint_url):
             risks.append(
                 RiskAssessment(
                     severity=RiskSeverity.HIGH,
                     category="transport_security",
                     detail=f"MCP server '{name}' endpoint is not HTTPS: {safe_endpoint}",
                     recommendation="Use HTTPS for all remote MCP server connections.",
+                )
+            )
+
+        # The launcher package and its version are recorded; every other argument
+        # (a served directory, a mount, a flag) is a redacted position.
+        recorded_args = {"-y", "--yes", package_ref} if launcher_package else set()
+        unrecorded_args = [arg for arg in args if arg not in recorded_args]
+        unbound = [
+            label
+            for label, present in (
+                ("launch arguments", bool(unrecorded_args)),
+                ("environment values", bool(secrets)),
+                ("endpoint path and query", _has_path_or_query(endpoint_url)),
+            )
+            if present
+        ]
+        if unbound and not value_binding:
+            risks.append(
+                RiskAssessment(
+                    severity=RiskSeverity.LOW,
+                    category="completeness",
+                    detail=f"MCP server '{name}' values not bound in this inventory: {'; '.join(unbound)}.",
+                    recommendation=f"Set {SOURCE_BINDING_KEY_ENV} during collection to detect changes to these values.",
                 )
             )
 
@@ -572,23 +715,27 @@ class MCPScanner(Scanner):
 
     @staticmethod
     def _detect_host_from_config(config_name: str) -> str | None:
-        return {
+        path = Path(config_name)
+        by_name = {
             ".mcp.json": "claude-code",
-            ".claude/mcp.json": "claude-code",
             "claude_desktop_config.json": "claude-desktop",
-            ".cursor/mcp.json": "cursor",
-        }.get(config_name)
+            "cline_mcp_settings.json": "cline",
+        }.get(path.name)
+        return by_name or next(
+            (host for part in path.parts[:-1] if (host := _HOST_DIRECTORIES.get(part))), None
+        )
 
-    def _scan_code_mcp_clients(self, root: Path, result: ScanResult) -> None:
+    def _scan_code_mcp_clients(self, result: ScanResult, sources: list[Path]) -> None:
         if self._files is None:
             raise RuntimeError("_scan_code_mcp_clients called outside a _collection context")
-        sources = list(self._files.iter_files())
         from nexus_symbiote.scanners.python_tools import PYTHON_TOOL_HINTS, collect_python_tools
         from nexus_symbiote.scanners.ts_tools import collect_typescript
 
-        collect_typescript(self._files, result, sources)
+        budget = SourceBudget("MCP source references", result)
+        collect_typescript(self._files, result, sources, budget)
         detected: list[str] = []
         excluded_dirs = {"tests", "test", "dist", "build", "docs", "benchmarks", "examples"}
+        python_hints = tuple(hint.encode("ascii") for hint in PYTHON_TOOL_HINTS)
         for suffix in (".py", ".ts", ".js"):
             paths = [
                 path
@@ -600,32 +747,24 @@ class MCPScanner(Scanner):
                 )
             ]
             paths.sort(key=lambda path: len(path.parts) > 1)
-            limit = 50 if suffix == ".py" else 10
-            candidates: list[tuple[Path, str]] = []
+            hints = python_hints if suffix == ".py" else (b"@modelcontextprotocol/sdk",)
             for path in paths:
-                content = self._files.read_text(path)
-                if content is None:
+                if budget.exhausted:
+                    break
+                raw = self._files.read_bytes(path)
+                if raw is None or not budget.admit(len(raw)):
                     continue
-                if (
-                    suffix == ".py"
-                    and len(path.parts) > 1
-                    and not any(hint in content for hint in PYTHON_TOOL_HINTS)
-                ):
+                # Nested modules are decoded only when they can name a supported SDK, so
+                # an unrelated module is neither parsed nor a decoding failure.
+                if len(path.parts) > 1 and not any(hint in raw for hint in hints):
                     continue
-                if (
-                    suffix in {".ts", ".js"}
-                    and len(path.parts) > 1
-                    and "@modelcontextprotocol/sdk" not in content
-                ):
+                try:
+                    content = raw.decode("utf-8")
+                except UnicodeDecodeError:
+                    result.scan_failures.append(f"{path}: invalid UTF-8")
                     continue
-                candidates.append((path, content))
-            if len(candidates) > limit:
-                result.scan_failures.append(
-                    f"MCP {suffix} references: {limit}-file collection limit exceeded"
-                )
-            for path, content in candidates[:limit]:
-                result.surfaces_scanned.append(str(root / path))
-                if len(content.encode("utf-8")) > 262_144:
+                result.surfaces_scanned.append(str(self._files.root / path))
+                if len(raw) > 262_144:
                     result.scan_failures.append(f"{path}: syntax collection size limit exceeded")
                     continue
                 if suffix == ".py":
@@ -650,16 +789,9 @@ class MCPScanner(Scanner):
                 else:
                     # A bounded syntax hint, never a claim that an SDK is installed
                     # or deployed. Strip comments and require the SDK import path.
-                    content = re.sub(r"/\*.*?\*/|(?m:^\s*//[^\n]*$)", "", content, flags=re.S)
-                    found = bool(
-                        re.search(
-                            r"(?:\bfrom\s*[\"']@modelcontextprotocol/sdk(?:/[^\"']*)?[\"']|"
-                            r"\brequire\s*\(\s*[\"']@modelcontextprotocol/sdk(?:/[^\"']*)?[\"'])",
-                            content,
-                        )
-                    )
+                    found = bool(_SDK_IMPORT.search(without_js_comments(content)))
                 if found:
-                    detected.append(str(root / path))
+                    detected.append(str(self._files.root / path))
         if detected:
             result.components.append(
                 MCPClientComponent(

@@ -42,6 +42,69 @@ AI_PACKAGE_PATTERNS = [
     re.compile(r"(?:^|/)(?:chromadb|pinecone|qdrant|weaviate|pgvector|faiss)", re.I),
     re.compile(r"(?:^|/)(?:guardrails|nemo[-_]guardrails|rebuff)", re.I),
 ]
+# Names the prefixes above cannot express: packages whose whole name is the
+# product ("mcp", "ai"), and npm scopes that hold a vendor's agent packages.
+AI_PACKAGE_NAMES = frozenset(
+    {
+        "a2a-sdk",
+        "ag2",
+        "agno",
+        "ai",
+        "claude-agent-sdk",
+        "claude-code-sdk",
+        "diffusers",
+        "dspy",
+        "dspy-ai",
+        "fastmcp",
+        "google-adk",
+        "google-genai",
+        "google-generativeai",
+        "groq",
+        "haystack-ai",
+        "huggingface-hub",
+        "instructor",
+        "lancedb",
+        "langgraph",
+        "langsmith",
+        "litellm",
+        "llama-cpp-python",
+        "llamaindex",
+        "mastra",
+        "mcp",
+        "mem0ai",
+        "mistralai",
+        "nemoguardrails",
+        "ollama",
+        "onnxruntime",
+        "pyautogen",
+        "pydantic-ai",
+        "pymilvus",
+        "semantic-kernel",
+        "sentence-transformers",
+        "smolagents",
+        "strands-agents",
+        "vertexai",
+        "vllm",
+        "@google/genai",
+        "@google/generative-ai",
+    }
+)
+AI_PACKAGE_SCOPES = frozenset(
+    {
+        "@a2a-js",
+        "@ai-sdk",
+        "@anthropic-ai",
+        "@huggingface",
+        "@langchain",
+        "@llamaindex",
+        "@mastra",
+        "@mistralai",
+        "@modelcontextprotocol",
+        "@openai",
+        "@pinecone-database",
+        "@qdrant",
+    }
+)
 
 _EXACT_SEMVER_RE = re.compile(
     r"\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
@@ -1771,4 +1834,9 @@ class RegistryScanner(Scanner):
         return state.add(second)
 
     def _is_ai_package(self, name: str) -> bool:
-        return any(pattern.search(name) for pattern in AI_PACKAGE_PATTERNS)
+        normal = re.sub(r"[-_.]+", "-", name).lower() if len(name) <= 214 else ""
+        return (
+            normal in AI_PACKAGE_NAMES
+            or normal.partition("/")[0] in AI_PACKAGE_SCOPES
+            or any(pattern.search(name) for pattern in AI_PACKAGE_PATTERNS)
+        )
