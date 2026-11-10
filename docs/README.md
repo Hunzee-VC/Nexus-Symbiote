@@ -25,6 +25,7 @@ Reference material: exact behavior, fields and limits.
 | Page | Covers |
 | --- | --- |
 | [CLI reference](cli-reference.md) | Every command, option and exit code, kept in sync with the CLI by a test |
+| [Policy reference](policy-reference.md) | Every `.nexus-symbiote.yaml` setting, targeted suppressions, and what `policy_weakened` reports |
 | [AgentBOM schemas](../schemas/README.md) | The native AgentBOM JSON Schema, the deployment-profile schema and a minimal example |
 | [Agent manifest](agent-manifest.md) | The optional `agent.yaml`: its fields, what it adds to the inventory, its failures and its trust limits |
 | [Standard exports](standard-exports.md) | What CycloneDX, SPDX, SARIF and VEX output carry, the extension property names, projection versions and the SARIF rule catalog |

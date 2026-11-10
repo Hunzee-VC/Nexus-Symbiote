@@ -21,10 +21,17 @@ nexus-symbiote [--offline | --live] [--version] [--help] COMMAND [ARGS]...
 Every `-o`/`--output` file, and the policy file `init --path` creates, is written
 atomically and never through a symbolic link:
 its directory must already exist, and no directory on the path may be a symbolic
-link (on macOS, write under `/private/tmp` rather than `/tmp`). `..` steps to the
+link (the standard macOS root links `/tmp`, `/var` and `/etc` to `/private` are
+the only exception). `..` steps to the
 real parent directory, as the operating system resolves it. A refused path ends the
 command with an error and writes nothing; any other failure, such as a permission
 error, is reported by the operating system's message, without the path.
+
+Every AgentBOM a command reads is opened the same way: neither the file nor any
+directory on its path may be a symbolic link (with the same macOS exception), and
+FIFOs, devices, directories and `/dev/stdin` are refused. The
+error names the reason. Native inventories are limited to 16 MiB for reading and
+writing alike.
 
 Mode flags go before the command. Without a flag, `NEXUS_SYMBIOTE_MODE=offline|live`
 selects the mode; without either, the mode is offline. See
@@ -156,7 +163,7 @@ nexus-symbiote init [OPTIONS]
 
 | Option | Description |
 |---|---|
-| `--force` | Overwrite existing .nexus-symbiote.yaml |
+| `--force` | Overwrite the existing project policy file (`.nexus-symbiote.yaml`, or `.nexus-symbiote.yml` when that is the only one); refused when both exist |
 | `--path` `PATH` | Directory to create .nexus-symbiote.yaml in |
 
 ### `risk`
@@ -175,6 +182,7 @@ nexus-symbiote risk [OPTIONS] AIBOM_PATH
 | `--signature-policy` `PATH` | Explicit operator signer policy for model recollection; requires --project |
 | `--fail-on-severity` `critical\|high\|medium\|low\|info\|none` | Fail on any finding at or above this severity (default: from policy, built-in critical); none disables it. |
 | `--no-project-policy` | Use built-in policy without reading configuration from the target. |
+| `--require-discovery-signature` | Require the operator signature policy to verify any ShadowScan report the inventory records or the project contains, whatever the project policy says; requires --project. JSON output reports the result as `discovery_producer` |
 
 ### `runtime keygen`
 
@@ -256,6 +264,7 @@ nexus-symbiote validate [OPTIONS] AIBOM_PATH
 | `--project` `PATH` | Project root for cross-validation. The only source of a project policy: without it the built-in policy applies |
 | `--signature-policy` `PATH` | Explicit operator signer policy JSON; requires --project |
 | `--no-project-policy` | Use built-in policy without reading configuration from the target. |
+| `--require-discovery-signature` | Require the operator signature policy to verify any ShadowScan report the inventory records or the project contains, whatever the project policy says; requires --project |
 
 ### `verify-artifact`
 

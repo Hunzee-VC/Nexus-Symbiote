@@ -2,17 +2,26 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
+import re
 import stat
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
+
+from nexus_symbiote.core.models import MAX_REFERENCE_CHARS
 
 ScannerName = Literal[
     "mcp", "model", "prompt", "rag", "registry", "shadowscan", "a2a", "ide_agents"
 ]
 OutputFormat = Literal["json", "cyclonedx", "spdx", "sarif"]
+POLICY_FILE_NAMES = (".nexus-symbiote.yaml", ".nexus-symbiote.yml")
+DEFAULT_EXCLUDE_PATHS = ("node_modules", ".git", "__pycache__", ".venv")
+DEFAULT_WARN_THRESHOLD = 25.0
+_ISO_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 
 
 class PolicyError(ValueError):
@@ -29,9 +38,7 @@ def _default_scanners() -> list[ScannerName]:
 
 class ScanPolicy(PolicySection):
     scanners: list[ScannerName] = Field(default_factory=_default_scanners, min_length=1)
-    exclude_paths: list[str] = Field(
-        default_factory=lambda: ["node_modules", ".git", "__pycache__", ".venv"]
-    )
+    exclude_paths: list[str] = Field(default_factory=lambda: list(DEFAULT_EXCLUDE_PATHS))
     failure_mode: Literal["error", "report-only"] = "error"
 
     @model_validator(mode="after")
@@ -46,18 +53,70 @@ class ScanPolicy(PolicySection):
         return self
 
 
+class Suppression(PolicySection):
+    """Accept one finding category on one component, for a stated reason and period.
+
+    Matching is exact: one component reference and one category, no wildcards. An
+    expired entry no longer suppresses anything and fails the risk gate until it is
+    renewed or removed.
+    """
+
+    component_ref: str = Field(min_length=1, max_length=MAX_REFERENCE_CHARS)
+    category: str = Field(min_length=1, max_length=256)
+    reason: str = Field(min_length=1, max_length=2000)
+    owner: str = Field(min_length=1, max_length=256)
+    expires: date
+
+    @field_validator("expires", mode="before")
+    @classmethod
+    def calendar_date(cls, value: object) -> object:
+        # YAML reads an unquoted 2026-12-31 as a date; a quoted one arrives as text.
+        if isinstance(value, datetime):
+            raise ValueError("expires must be a calendar date (YYYY-MM-DD) without a time")
+        if isinstance(value, str):
+            if not _ISO_DATE.fullmatch(value):
+                raise ValueError("expires must be a calendar date (YYYY-MM-DD)")
+            return date.fromisoformat(value)
+        return value
+
+    @model_validator(mode="after")
+    def exact_and_accountable(self) -> Suppression:
+        if any(not v.strip() for v in (self.component_ref, self.category, self.reason, self.owner)):
+            raise ValueError("suppressions need a component_ref, category, reason and owner")
+        if "*" in self.component_ref or "*" in self.category:
+            raise ValueError(
+                "suppressions match one exact component_ref and category; wildcards are not supported"
+            )
+        return self
+
+    def label(self) -> str:
+        return (
+            f"{self.category} on {self.component_ref} until {self.expires.isoformat()} "
+            f"(owner {self.owner})"
+        )
+
+
 class RiskPolicy(PolicySection):
     fail_threshold: float = Field(default=50.0, gt=0)
-    warn_threshold: float = Field(default=25.0, ge=0)
+    warn_threshold: float = Field(default=DEFAULT_WARN_THRESHOLD, ge=0)
     ignore_categories: list[str] = Field(default_factory=list)
     fail_on_severity: Literal["critical", "high", "medium", "low", "info", "none"] = "critical"
+    suppressions: list[Suppression] = Field(default_factory=list, max_length=1000)
 
     @model_validator(mode="after")
     def valid_thresholds(self) -> RiskPolicy:
+        if "warn_threshold" not in self.model_fields_set:
+            # A stricter fail threshold alone must not trip the default warning threshold.
+            # Writing __dict__ keeps the derived default out of model_fields_set, which
+            # gate reports read as the keys the policy file itself set.
+            self.__dict__["warn_threshold"] = min(DEFAULT_WARN_THRESHOLD, self.fail_threshold)
         if self.warn_threshold > self.fail_threshold:
             raise ValueError("warn_threshold cannot exceed fail_threshold")
         if any(not c.strip() for c in self.ignore_categories):
             raise ValueError("ignore_categories must contain nonempty exact category names")
+        keys = [(entry.component_ref, entry.category) for entry in self.suppressions]
+        if len(keys) != len(set(keys)):
+            raise ValueError("each component_ref and category may be suppressed only once")
         return self
 
 
@@ -93,23 +152,42 @@ def find_policy_path(project_root: Path) -> Path | None:
     """Locate the policy file in ``project_root`` itself; ancestors are never consulted.
 
     The policy is part of the checkout it governs. A file above the project root
-    belongs to whoever controls that directory, not to the project.
+    belongs to whoever controls that directory, not to the project. Both file names
+    at once are refused: either could silently shadow the other.
     """
     current = project_root.resolve()
     if current.is_file():
         current = current.parent
-    for name in (".nexus-symbiote.yaml", ".nexus-symbiote.yml"):
+    found: list[Path] = []
+    for name in POLICY_FILE_NAMES:
         candidate = current / name
         if candidate.is_symlink():
             raise PolicyError(f"policy must not be a symlink: {candidate}")
         if candidate.exists():
-            return candidate
-    return None
+            found.append(candidate)
+    if len(found) > 1:
+        raise PolicyError(
+            f"both {POLICY_FILE_NAMES[0]} and {POLICY_FILE_NAMES[1]} exist in {current}; "
+            "keep one policy file"
+        )
+    return found[0] if found else None
+
+
+def load_policy_file(project_root: Path) -> tuple[Policy, Path, str] | None:
+    """Load the project policy with the path and SHA-256 of the exact bytes applied.
+
+    The file is located once, so the reported source is always the policy applied.
+    """
+    path = find_policy_path(project_root)
+    if path is None:
+        return None
+    policy, digest = _parse_policy_with_digest(path)
+    return policy, path, digest
 
 
 def load_policy(project_root: Path) -> Policy | None:
-    path = find_policy_path(project_root)
-    return None if path is None else _parse_policy(path)
+    loaded = load_policy_file(project_root)
+    return None if loaded is None else loaded[0]
 
 
 def nearest_policy_file(start: Path) -> Path | None:
@@ -130,7 +208,12 @@ def nearest_policy_file(start: Path) -> Path | None:
 
 
 def weakened_settings(policy: Policy) -> list[str]:
-    """Name the settings under which this policy gates less strictly than the built-in defaults."""
+    """Name every setting that gates less strictly or changes reported results.
+
+    Compared with the built-in policy: disabled validation, a relaxed severity cutoff
+    or threshold, ignored categories, each suppression, report-only collection, fewer
+    collectors, extra excluded paths and a raised warning threshold.
+    """
     base = Policy()
     weaker: list[str] = []
     if not policy.validation.require_completeness:
@@ -141,12 +224,18 @@ def weakened_settings(policy: Policy) -> list[str]:
         weaker.append("risk.fail_on_severity=none")
     if policy.risk.fail_threshold > base.risk.fail_threshold:
         weaker.append(f"risk.fail_threshold={policy.risk.fail_threshold!r}")
+    if policy.risk.warn_threshold > base.risk.warn_threshold:
+        weaker.append(f"risk.warn_threshold={policy.risk.warn_threshold!r}")
     if policy.risk.ignore_categories:
         weaker.append("risk.ignore_categories=" + ",".join(policy.risk.ignore_categories))
+    weaker.extend(f"risk.suppressions: {entry.label()}" for entry in policy.risk.suppressions)
     if policy.scan.failure_mode == "report-only":
         weaker.append("scan.failure_mode=report-only")
     if set(policy.scan.scanners) < set(base.scan.scanners):
         weaker.append("scan.scanners=" + ",".join(policy.scan.scanners))
+    extra = [path for path in policy.scan.exclude_paths if path not in DEFAULT_EXCLUDE_PATHS]
+    if extra:
+        weaker.append("scan.exclude_paths=" + ",".join(extra))
     return weaker
 
 
@@ -179,6 +268,10 @@ def parse_yaml_mapping(text: str) -> dict[str, Any]:
 
 
 def _parse_policy(path: Path) -> Policy:
+    return _parse_policy_with_digest(path)[0]
+
+
+def _parse_policy_with_digest(path: Path) -> tuple[Policy, str]:
     from pydantic import ValidationError
 
     try:
@@ -192,32 +285,52 @@ def _parse_policy(path: Path) -> Policy:
             raw = stream.read(1024 * 1024 + 1)
             if len(raw) > 1024 * 1024:
                 raise PolicyError("policy exceeds 1 MiB")
-        return Policy.model_validate(parse_yaml_mapping(raw.decode("utf-8")))
+        policy = Policy.model_validate(parse_yaml_mapping(raw.decode("utf-8")))
+        return policy, "sha256:" + hashlib.sha256(raw).hexdigest()
     except ValidationError as exc:
-        locations = [".".join(map(str, e["loc"])) for e in exc.errors()]
+        details = []
+        for error in exc.errors():
+            location = ".".join(map(str, error["loc"])) or "policy"
+            # Messages of this module's own validators name no input value.
+            if error["type"] == "value_error":
+                location += " (" + str(error["msg"]).removeprefix("Value error, ") + ")"
+            details.append(location)
         raise PolicyError(
-            f"invalid policy {path}: invalid or unsupported settings: {', '.join(locations)}"
+            f"invalid policy {path}: invalid or unsupported settings: {', '.join(details)}"
         ) from exc
     except (OSError, UnicodeError, ValueError) as exc:
         raise PolicyError(f"invalid policy {path}: {exc}") from exc
 
 
 DEFAULT_POLICY_YAML = """\
-# Nexus SymBiote policy; malformed or unsupported settings fail closed.
-version: "1.0"
+# Nexus SymBiote project policy. Every key is described in docs/policy-reference.md.
+# Malformed or unsupported settings fail closed. Settings that relax the built-in
+# gates are reported as policy_weakened; --no-project-policy ignores this file.
+version: "1.0"  # quote it: an unquoted 1.0 is a number and is refused
 scan:
+  # Removing a collector leaves coverage partial, which fails the gates.
   scanners: ["mcp", "model", "prompt", "rag", "registry", "shadowscan", "a2a", "ide_agents"]
+  # These four directories are always skipped. Any other path listed here is a
+  # recorded coverage gap, so the scan gate fails; use it only with report-only scans.
   exclude_paths: ["node_modules", ".git", "__pycache__", ".venv"]
-  failure_mode: "error"
+  failure_mode: "error"  # or "report-only": never fail CI
 risk:
-  fail_threshold: 50.0
-  warn_threshold: 25.0
-  fail_on_severity: "critical"
-  ignore_categories: []
+  fail_threshold: 50.0  # aggregate score; lowering it is stricter
+  warn_threshold: 25.0  # must not exceed fail_threshold
+  fail_on_severity: "critical"  # critical, high, medium, low, info or none
+  ignore_categories: []  # whole categories, everywhere; prefer suppressions
+  # Accept one finding category on one component, with a reason, owner and expiry:
+  # suppressions:
+  #   - component_ref: "model:tests/fixtures/firmware.bin"
+  #     category: "serialization_format"
+  #     reason: "Test fixture, never loaded"
+  #     owner: "security@example.test"
+  #     expires: 2027-01-31
+  suppressions: []
 validate:
   require_completeness: true
   require_integrity: true
-  minimum_assurance_level: "declared"
+  minimum_assurance_level: "declared"  # or "observed"
   require_discovery_signature: false
 output:
   default_format: "json"

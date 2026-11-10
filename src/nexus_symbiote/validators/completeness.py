@@ -1,15 +1,22 @@
-"""Completeness validator — checks that an AIBOM covers all expected surfaces."""
+"""Completeness: coverage claims, graph integrity and reconciliation with a project."""
 
 from __future__ import annotations
 
 import hmac
+import json
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
-from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
+from nexus_symbiote.core.collection import (
+    IMPORTED_MODE,
+    is_imported,
+    merge_collected,
+)
+from nexus_symbiote.core.coverage import assess_coverage
 from nexus_symbiote.core.enums import AssuranceLevel, ComponentType, TrustTier
 from nexus_symbiote.core.hashing import canonical_json
 from nexus_symbiote.core.models import (
@@ -29,21 +36,29 @@ if TYPE_CHECKING:
     from nexus_symbiote.utils.crypto import SigstoreArtifactPolicy
 
 REQUIRED_SCANNERS = BUILTIN_SCANNER_NAMES
+MAX_REPORTED_ISSUES = 1000
+MAX_REPORTED_SUPPLIER_CLAIMS = 1000
+LOCAL_CLAIM_SCOPES = frozenset({"repository", "source-declaration", "dependency-resolution"})
+AGENT_REFERENCE_FIELDS = (
+    "model_refs",
+    "tool_refs",
+    "memory_refs",
+    "prompt_refs",
+    "guardrail_refs",
+    "sub_agent_refs",
+    "data_refs",
+    "skill_refs",
+)
+_BLOCKING = frozenset({"critical", "error", "unknown"})
+_SEVERITY_RANK = {"critical": 0, "error": 0, "unknown": 1, "warning": 2, "info": 3}
+NO_LOCAL_SUBJECT = "No local project subject was available to reconcile."
 
-EXPECTED_SURFACES = {
-    "mcp-config": "MCP server configuration (.mcp.json etc.)",
-    "model-weights": "Model weight files and signing status",
-    "prompts": "System prompts and instruction files",
-    "rag-sources": "RAG / vector store configurations",
-    "registry-trust": "Package registry trust and pinning",
-    "tools": "Tool definitions with capability hashes",
-}
-
-MINIMUM_COMPONENT_TYPES = {
-    ComponentType.MCP_SERVER,
-    ComponentType.TOOL,
-    ComponentType.PROMPT_TEMPLATE,
-}
+Basis = Literal[
+    "supplied-claims",
+    "project-reconciled",
+    "project-reconciled-with-supplier-claims",
+    "project-reconciliation-failed",
+]
 
 
 def _binding_equal(supplied: object, local: object) -> bool:
@@ -67,6 +82,15 @@ class CompletenessIssue:
     severity: str = "warning"
 
 
+@dataclass(frozen=True)
+class SupplierClaim:
+    """Supplied content that reconciliation accepted without local evidence for it."""
+
+    subject: str
+    kind: Literal["component", "field", "claim", "property", "relationship"]
+    detail: str
+
+
 @dataclass
 class CompletenessReport:
     is_complete: bool = True
@@ -76,27 +100,96 @@ class CompletenessReport:
     assurance_level: AssuranceLevel = AssuranceLevel.DECLARED
     component_type_coverage: dict[str, int] = field(default_factory=dict)
     total_components: int = 0
+    coverage_status: str = "unknown"
+    basis: Basis = "supplied-claims"
     local_subjects: int | None = None
+    supplier_claims: list[SupplierClaim] = field(default_factory=list)
+    bound_imports: frozenset[str] = frozenset()
+    issues_omitted: int = 0
+    supplier_claims_omitted: int = 0
+
+    def add_issue(self, surface: str, description: str, severity: str = "error") -> None:
+        if severity in _BLOCKING:
+            self.is_complete = False
+        self.issues.append(CompletenessIssue(surface, description, severity))
+
+    def add_supplier_claim(self, claim: SupplierClaim) -> None:
+        if len(self.supplier_claims) < MAX_REPORTED_SUPPLIER_CLAIMS:
+            self.supplier_claims.append(claim)
+        else:
+            self.supplier_claims_omitted += 1
+
+    def bound_issues(self) -> None:
+        """Keep at most ``MAX_REPORTED_ISSUES`` issues, blocking ones first.
+
+        The verdict is fixed before truncation, so an omitted issue still counts.
+        """
+        if len(self.issues) <= MAX_REPORTED_ISSUES:
+            return
+        ranked = sorted(self.issues, key=lambda issue: _SEVERITY_RANK.get(issue.severity, 0))
+        self.issues_omitted += len(ranked) - MAX_REPORTED_ISSUES
+        self.issues = ranked[:MAX_REPORTED_ISSUES]
 
     def to_dict(self) -> dict[str, object]:
         return {
             "is_complete": self.is_complete,
+            "assessment_basis": self.basis,
+            "coverage_status": self.coverage_status,
             "surfaces_covered": self.surfaces_covered,
             "surfaces_missing": self.surfaces_missing,
             "issues": [
                 {"surface": i.surface, "description": i.description, "severity": i.severity}
                 for i in self.issues
             ],
+            "issues_omitted": self.issues_omitted,
             "assurance_level": self.assurance_level.value,
             "component_type_coverage": self.component_type_coverage,
             "total_components": self.total_components,
+            "local_subjects": self.local_subjects,
+            "imported_components_bound": len(self.bound_imports),
+            "supplier_claims": [
+                {"subject": c.subject, "kind": c.kind, "detail": c.detail}
+                for c in self.supplier_claims
+            ],
+            "supplier_claims_omitted": self.supplier_claims_omitted,
         }
+
+
+def _edge_key(edge: DependencyEdge) -> str:
+    return canonical_json(edge.model_dump(mode="json"))
+
+
+def _edge_label(key: str) -> str:
+    data = json.loads(key)
+    return f"{data['source_ref']} -[{data['relationship']}]-> {data['target_ref']}"
+
+
+def _asserts_unestablished_trust(component: AnyComponent) -> bool:
+    return (
+        component.assurance_level is AssuranceLevel.VERIFIED
+        or component.trust_tier is TrustTier.INTERNAL_VERIFIED
+        or any(claim.assurance is AssuranceLevel.VERIFIED for claim in component.claims.values())
+    )
+
+
+def _unestablished_trust(ref: str) -> str:
+    return (
+        "Supplied component asserts verified assurance or internal-verified trust "
+        f"without local corroboration: {ref}"
+    )
 
 
 class CompletenessValidator:
     """Validates that an AIBOM covers all expected attack surfaces."""
 
     def validate(self, bom: AIBOM) -> CompletenessReport:
+        report = self._validate_claims(bom)
+        report.bound_issues()
+        return report
+
+    def _validate_claims(self, bom: AIBOM) -> CompletenessReport:
+        from nexus_symbiote.graph import validate_graph
+
         report = CompletenessReport()
         report.total_components = len(bom.components)
 
@@ -106,69 +199,15 @@ class CompletenessValidator:
             type_counts[key] = type_counts.get(key, 0) + 1
         report.component_type_coverage = type_counts
 
-        if bom.metadata.completeness:
-            report.surfaces_covered = list(bom.metadata.completeness.surfaces_scanned)
-            report.surfaces_missing = list(bom.metadata.completeness.surfaces_excluded)
-            report.assurance_level = bom.metadata.completeness.assurance_level
-        else:
-            report.issues.append(
-                CompletenessIssue(
-                    surface="metadata",
-                    description="AIBOM has no completeness claim — cannot assess coverage.",
-                    severity="error",
-                )
-            )
-            report.is_complete = False
-
         claim = bom.metadata.completeness
-        if claim and claim.scope == "repository" and not claim.collectors_requested:
-            report.is_complete = False
-            report.issues.append(
-                CompletenessIssue(
-                    surface="collection",
-                    severity="error",
-                    description="Repository completeness requires explicit collection records",
-                )
-            )
-        if claim and claim.scan_failures:
-            report.is_complete = False
-            report.issues.extend(
-                CompletenessIssue(surface="collection", description=f, severity="error")
-                for f in claim.scan_failures
-            )
-        if claim and set(claim.collectors_requested) - set(claim.collectors_completed):
-            report.is_complete = False
-            report.issues.append(
-                CompletenessIssue(
-                    surface="collection",
-                    severity="error",
-                    description="Some requested collectors did not complete",
-                )
-            )
         if claim:
-            missing = REQUIRED_SCANNERS - claim.scanner_status.keys()
-            if missing:
-                report.is_complete = False
-                report.issues.append(
-                    CompletenessIssue(
-                        "coverage",
-                        "Missing scanner coverage: " + ", ".join(sorted(missing)),
-                        "error",
-                    )
-                )
-            if claim.surfaces_excluded:
-                report.is_complete = False
-                report.issues.append(
-                    CompletenessIssue(
-                        "coverage", "Excluded surfaces leave coverage incomplete.", "error"
-                    )
-                )
-            for scanner, state in claim.scanner_status.items():
-                if state != "complete":
-                    report.is_complete = False
-                    report.issues.append(
-                        CompletenessIssue(scanner, f"Scanner coverage is {state}.", "error")
-                    )
+            report.surfaces_covered = list(claim.surfaces_scanned)
+            report.surfaces_missing = list(claim.surfaces_excluded)
+            report.assurance_level = claim.assurance_level
+        coverage = assess_coverage(claim)
+        report.coverage_status = coverage.status.value
+        for gap in coverage.gaps:
+            report.add_issue(gap.subject, gap.reason, "error")
         # A repository observation is complete only within its stated collection scope.
         # It does not require tools/prompts to exist in every project.
 
@@ -180,44 +219,14 @@ class CompletenessValidator:
             ):
                 if not (hasattr(c, "content_hash") and c.content_hash):
                     if not (hasattr(c, "definition_hash") and c.definition_hash):
-                        report.issues.append(
-                            CompletenessIssue(
-                                surface=c.bom_ref,
-                                description=f"Component '{c.name}' has no integrity hash.",
-                                severity="warning",
-                            )
+                        report.add_issue(
+                            c.bom_ref, f"Component '{c.name}' has no integrity hash.", "warning"
                         )
-
-        from nexus_symbiote.graph import validate_graph
 
         for issue in validate_graph(bom):
-            report.issues.append(
-                CompletenessIssue(surface="graph", description=issue, severity="error")
-            )
-            report.is_complete = False
-        orphan_refs = self._find_orphan_refs(bom)
-        for ref, field_name in orphan_refs:
-            report.issues.append(
-                CompletenessIssue(
-                    surface=ref,
-                    description=f"Reference '{ref}' in '{field_name}' points to no component.",
-                    severity="error",
-                )
-            )
-            report.is_complete = False
-
-        if report.surfaces_missing:
-            for surface in report.surfaces_missing:
-                for key, _desc in EXPECTED_SURFACES.items():
-                    if key in surface.lower():
-                        report.issues.append(
-                            CompletenessIssue(
-                                surface=key,
-                                description=f"Surface excluded: {surface}",
-                                severity="info",
-                            )
-                        )
-
+            report.add_issue("graph", issue, "error")
+        for surface in report.surfaces_missing:
+            report.add_issue("coverage", f"Surface excluded: {surface}", "info")
         return report
 
     def validate_against_project(
@@ -232,18 +241,19 @@ class CompletenessValidator:
 
         Supplied statuses, exclusions, and paths cannot select or disable a collector.
         Only the local built-in collectors run. None executes project code or uses
-        remote discovery. Integrity and signer policy are checked separately.
+        remote discovery. Components, the repository agent and the relationships among
+        local components must equal the recollection; anything else the supplier added
+        is either refused or listed as a supplier claim, never presented as reconciled.
+        Integrity and signer policy are checked separately.
         """
         from nexus_symbiote.graph import assemble_repository_agent
         from nexus_symbiote.scanners import ALL_SCANNERS, ModelScanner
 
-        report = self.validate(bom)
+        report = self._validate_claims(bom)
+        report.basis = "project-reconciled"
         root = project_root.absolute()
-        observed: dict[str, AnyComponent] = {}
-
-        def incomplete(surface: str, description: str, severity: str = "error") -> None:
-            report.is_complete = False
-            report.issues.append(CompletenessIssue(surface, description, severity))
+        collected: dict[str, AnyComponent] = {}
+        incomplete = report.add_issue
 
         for scanner_type in ALL_SCANNERS:
             scanner = (
@@ -263,28 +273,37 @@ class CompletenessValidator:
             for reason in (*local.scan_failures, *local.surfaces_excluded):
                 incomplete(scanner.name, f"Local collection incomplete: {reason}")
             if scanner.name == "shadowscan":
-                for reason in self._discovery_mismatches(bom, local):
+                problems = self._discovery_mismatches(bom, local)
+                for reason in problems:
                     incomplete(scanner.name, reason)
+                if not problems:
+                    report.bound_imports = frozenset(c.bom_ref for c in local.components)
             for component in local.components:
-                previous = observed.setdefault(component.bom_ref, component)
-                if previous != component:
+                if merge_collected(collected, component, scanner.name, None) == "conflict":
                     incomplete(scanner.name, f"Conflicting local reference: {component.bom_ref}")
 
-        expected = AIBOM(components=list(observed.values()))
+        expected = AIBOM(components=list(collected.values()))
+        agent: AgentComponent | None = None
         try:
             agent = assemble_repository_agent(expected, root, exclude_paths=exclude_paths)
         except (OSError, ValueError, RecursionError):
             incomplete("agent.yaml", "Local agent manifest could not be reconciled.")
-        else:
-            if agent.properties.get("identity_source") == "repository-path":
-                # An inferred, checkout-specific root is not itself a project artifact.
-                expected.components.remove(agent)
 
-        report.local_subjects = sum(
-            c.properties.get("collection_mode") != "imported-unverified-report"
-            for c in expected.components
+        # An agent inferred without a manifest is evidence of nothing in the checkout.
+        inferred_agent = (
+            agent is not None and agent.properties.get("identity_source") == "repository-path"
         )
+        report.local_subjects = sum(
+            not is_imported(c) and not (inferred_agent and c is agent) for c in expected.components
+        )
+        if not report.local_subjects:
+            incomplete("project", NO_LOCAL_SUBJECT)
+
+        # The repository agent's reference and name do not depend on the checkout
+        # location, so every local component, the agent included, is matched by reference.
         supplied = {c.bom_ref: c for c in bom.components}
+        local_refs = {c.bom_ref for c in expected.components if not is_imported(c)}
+        mismatched = False
         for actual in expected.components:
             declared = supplied.pop(actual.bom_ref, None)
             if (
@@ -307,6 +326,7 @@ class CompletenessValidator:
                 or not self._same_subject(root, declared, actual)
                 or not self._retains_local_evidence(declared, actual)
             ):
+                mismatched = True
                 source_kind = {
                     ComponentType.PROMPT_TEMPLATE: "instruction files",
                     ComponentType.MODEL: "model files",
@@ -317,31 +337,142 @@ class CompletenessValidator:
                     actual.bom_ref,
                     f"Missing or mismatched local component from {source_kind}: {actual.bom_ref}",
                 )
+            elif not is_imported(actual):
+                if any(
+                    declared.claims[name].assurance is AssuranceLevel.VERIFIED
+                    for name in self._added_claims(declared, actual)
+                ):
+                    incomplete(actual.bom_ref, _unestablished_trust(actual.bom_ref))
+                else:
+                    for claim in self._supplier_only(declared, actual):
+                        report.add_supplier_claim(claim)
+        if mismatched and bom.metadata.spec_version.startswith("1.0."):
+            incomplete(
+                "format",
+                "The inventory uses native format 1.0, which records absolute scan-host paths; "
+                "re-collect it with this version before reconciling it with a project.",
+                "info",
+            )
+
+        self._reconcile_relationships(bom, expected, local_refs, supplied, report)
         for extra in supplied.values():
-            if (
-                isinstance(extra, AgentComponent)
-                and extra.properties.get("identity_source") == "repository-path"
-            ):
-                continue
+            if is_imported(extra):
+                continue  # _discovery_mismatches binds every imported claim to the report.
             # Supplementary runtime observations have their own provenance. Missing
             # repository subjects cannot be explained by an unrelated observation.
             local_path = extra.source_path is not None and "://" not in extra.source_path
-            local_claim = any(
-                claim.scope in {"repository", "source-declaration", "dependency-resolution"}
-                for claim in extra.claims.values()
-            )
+            local_claim = any(claim.scope in LOCAL_CLAIM_SCOPES for claim in extra.claims.values())
             if local_path or local_claim or not extra.claims:
                 incomplete(
                     extra.bom_ref,
                     f"Supplied component has no matching local evidence: {extra.bom_ref}",
                 )
+            elif _asserts_unestablished_trust(extra):
+                incomplete(extra.bom_ref, _unestablished_trust(extra.bom_ref))
+            else:
+                report.add_supplier_claim(
+                    SupplierClaim(extra.bom_ref, "component", "supplementary observation")
+                )
+        if report.supplier_claims or report.supplier_claims_omitted:
+            report.basis = "project-reconciled-with-supplier-claims"
+        if not report.is_complete:
+            report.basis = "project-reconciliation-failed"
+        report.bound_issues()
         return report
 
     @staticmethod
-    def _retains_local_evidence(supplied: AnyComponent, local: AnyComponent) -> bool:
-        """Compare the fields populated by the collector, independently of supplier claims."""
-        if local.properties.get("collection_mode") == "imported-unverified-report":
-            return True  # _discovery_mismatches checks the entire source projection.
+    def _reconcile_relationships(
+        bom: AIBOM,
+        expected: AIBOM,
+        local_refs: set[str],
+        extras: dict[str, AnyComponent],
+        report: CompletenessReport,
+    ) -> None:
+        """Relationships among local components must equal the local assembly exactly.
+
+        Edges that touch imported discovery components are bound by
+        ``_discovery_mismatches``. Edges to supplementary components are supplier claims
+        and may not assert verified assurance.
+        """
+        imported_refs = {c.bom_ref for c in bom.components if is_imported(c)}
+        local = Counter(
+            _edge_key(edge)
+            for edge in expected.dependencies
+            if edge.source_ref in local_refs and edge.target_ref in local_refs
+        )
+        supplied: Counter[str] = Counter()
+        for edge in bom.dependencies:
+            source, target = edge.source_ref, edge.target_ref
+            if source in imported_refs or target in imported_refs:
+                continue
+            if source in local_refs and target in local_refs:
+                supplied[_edge_key(edge)] += 1
+            elif source in extras or target in extras:
+                if edge.assurance_level == "verified":
+                    report.add_issue(
+                        "relationship",
+                        "Supplied relationship asserts verified assurance without local "
+                        f"evidence: {edge.source_ref} -[{edge.relationship}]-> {edge.target_ref}",
+                    )
+                else:
+                    report.add_supplier_claim(
+                        SupplierClaim(
+                            edge.source_ref,
+                            "relationship",
+                            f"{edge.relationship} {edge.target_ref}",
+                        )
+                    )
+        for key in sorted((local - supplied).elements()):
+            report.add_issue(
+                "relationship", f"Missing or altered local relationship: {_edge_label(key)}"
+            )
+        for key in sorted((supplied - local).elements()):
+            report.add_issue(
+                "relationship",
+                f"Supplied relationship between local components has no local evidence: "
+                f"{_edge_label(key)}",
+            )
+
+    @staticmethod
+    def _supplier_only(supplied: AnyComponent, local: AnyComponent) -> list[SupplierClaim]:
+        """Fields, properties and claims the supplier added where the collector had none."""
+        compared = CompletenessValidator._compared_fields(supplied, local)
+        skip = compared | {"bom_ref", "component_type", "source_path", "risks", "claims"}
+        skip |= {"properties"}
+        local_data = local.model_dump(mode="json")
+        supplied_data = supplied.model_dump(mode="json")
+        claims = [
+            SupplierClaim(supplied.bom_ref, "field", name)
+            for name in type(local).model_fields
+            if name not in skip
+            and canonical_json(local_data.get(name)) != canonical_json(supplied_data.get(name))
+        ]
+        claims.extend(
+            SupplierClaim(supplied.bom_ref, "property", key)
+            for key in sorted(supplied.properties.keys() - local.properties.keys())
+        )
+        claims.extend(
+            SupplierClaim(supplied.bom_ref, "claim", name)
+            for name in CompletenessValidator._added_claims(supplied, local)
+        )
+        return claims
+
+    @staticmethod
+    def _added_claims(supplied: AnyComponent, local: AnyComponent) -> list[str]:
+        """Claims the supplier added, including one that replaces a not-collected gap."""
+        added: list[str] = []
+        for name, claim in sorted(supplied.claims.items()):
+            evidence = local.claims.get(name)
+            if evidence is None or (
+                evidence.method == "not-collected"
+                and claim.model_dump(exclude={"observed_at"})
+                != evidence.model_dump(exclude={"observed_at"})
+            ):
+                added.append(name)
+        return added
+
+    @staticmethod
+    def _compared_fields(supplied: AnyComponent, local: AnyComponent) -> set[str]:
         fields = (local.model_fields_set | {"trust_tier", "assurance_level"}) - {
             "source_path",
             "risks",
@@ -357,17 +488,15 @@ class CompletenessValidator:
                 served
                 and served.scope == "served-descriptor"
                 and served.method == "operator-pinned-stdio-tools-list"
+                and local.assurance_level != AssuranceLevel.OBSERVED
             ):
                 # The served descriptor is a separate observation. Static declarations still match below.
                 fields.discard("assurance_level")
-        if isinstance(local, MCPServerComponent) and isinstance(supplied, MCPServerComponent):
+        if isinstance(local, MCPServerComponent):
             # A served descriptor can add tools beyond the static declarations.
             fields -= {"tool_refs", "tool_count"}
-            if (
-                not set(local.tool_refs) <= set(supplied.tool_refs)
-                or supplied.tool_count < local.tool_count
-            ):
-                return False
+        if isinstance(local, AgentComponent):
+            fields -= set(AGENT_REFERENCE_FIELDS)
         if (
             isinstance(local, ModelComponent)
             and isinstance(supplied, ModelComponent)
@@ -377,6 +506,27 @@ class CompletenessValidator:
         ):
             # A newly supplied operator policy may corroborate an initially unsigned inventory.
             fields -= {"signing_status", "signing_identity", "trust_tier"}
+        return fields
+
+    @staticmethod
+    def _retains_local_evidence(supplied: AnyComponent, local: AnyComponent) -> bool:
+        """Compare the fields populated by the collector, independently of supplier claims."""
+        if is_imported(local):
+            return True  # _discovery_mismatches checks the entire source projection.
+        fields = CompletenessValidator._compared_fields(supplied, local)
+        if isinstance(local, MCPServerComponent) and isinstance(supplied, MCPServerComponent):
+            if (
+                not set(local.tool_refs) <= set(supplied.tool_refs)
+                or supplied.tool_count < local.tool_count
+            ):
+                return False
+        if isinstance(local, AgentComponent) and isinstance(supplied, AgentComponent):
+            # Assembly order follows the collector order, which a scan may choose.
+            if any(
+                sorted(getattr(local, name)) != sorted(getattr(supplied, name))
+                for name in AGENT_REFERENCE_FIELDS
+            ):
+                return False
         if canonical_json(local.model_dump(mode="json", include=fields)) != canonical_json(
             supplied.model_dump(mode="json", include=fields)
         ):
@@ -564,44 +714,6 @@ class CompletenessValidator:
             )
         return True
 
-    def _find_orphan_refs(self, bom: AIBOM) -> list[tuple[str, str]]:
-        all_refs = {c.bom_ref for c in bom.components}
-        orphans: list[tuple[str, str]] = []
-
-        for dep in bom.dependencies:
-            if dep.source_ref not in all_refs:
-                orphans.append((dep.source_ref, "dependency.source_ref"))
-            if dep.target_ref not in all_refs:
-                orphans.append((dep.target_ref, "dependency.target_ref"))
-
-        for c in bom.components:
-            for ref_field in (
-                "model_refs",
-                "tool_refs",
-                "memory_refs",
-                "prompt_refs",
-                "guardrail_refs",
-                "sub_agent_refs",
-            ):
-                refs = getattr(c, ref_field, None)
-                if refs:
-                    for ref in refs:
-                        if ref not in all_refs:
-                            orphans.append((ref, f"{c.bom_ref}.{ref_field}"))
-
-            for ref_field in (
-                "mcp_server_ref",
-                "model_ref",
-                "embedding_model_ref",
-                "registry_ref",
-                "base_model_ref",
-            ):
-                ref = getattr(c, ref_field, None)
-                if ref and ref not in all_refs:
-                    orphans.append((ref, f"{c.bom_ref}.{ref_field}"))
-
-        return orphans
-
 
 def _carries_discovery(bom: AIBOM) -> bool:
     claim = bom.metadata.completeness
@@ -651,35 +763,54 @@ def _report_policy(
         )
 
 
-def discovery_producer_problems(
+DiscoveryProducerStatus = Literal["verified", "failed", "not-applicable"]
+
+
+def discovery_producer_check(
     bom: AIBOM,
     root: Path,
     signature_policies: Sequence[SigstoreArtifactPolicy],
     *,
     exclude_paths: Sequence[str | Path] = (),
-) -> list[str]:
+) -> tuple[DiscoveryProducerStatus, list[str]]:
     """Require an operator-selected Sigstore signer for the exact report the BOM records.
 
     The BOM is never trusted for this: the report is re-read beneath ``root`` with
     the importer's confined reader, its digest must equal the recorded one, and the
-    operator policy entry for that report path must verify over those bytes.
+    operator policy entry for that report path must verify over those bytes. An
+    inventory without discovery evidence is checked against the project as well: a
+    report beneath the root, or one the operator policy names, must not be omitted.
     """
-    from nexus_symbiote.scanners.shadowscan import ShadowScanImporter
+    from nexus_symbiote.scanners.shadowscan import REPORT_PATHS, ShadowScanImporter
     from nexus_symbiote.utils.crypto import SIGSTORE_MISSING, verify_sigstore_bundle
 
+    importer = ShadowScanImporter()
+    importer.configure(exclude_paths=exclude_paths)
     if not _carries_discovery(bom):
-        return []
+        if _report_policy(root, signature_policies, REPORT_PATHS) is not None:
+            return "failed", [
+                "The inventory omits the ShadowScan report that the operator signature policy names."
+            ]
+        local = importer.scan(root)
+        if local.source_report_digest is not None:
+            return "failed", [
+                "The inventory omits the ShadowScan report present beneath the project root."
+            ]
+        if local.scan_failures or local.surfaces_excluded:
+            return "failed", [
+                "ShadowScan report locations could not be read completely; an omitted report "
+                "cannot be ruled out."
+            ]
+        return "not-applicable", []
     claim = bom.metadata.completeness
     recorded = claim.source_report_digest if claim is not None else None
     if recorded is None:
-        return ["ShadowScan evidence has no recorded report digest to authenticate."]
-    importer = ShadowScanImporter()
-    importer.configure(exclude_paths=exclude_paths)
+        return "failed", ["ShadowScan evidence has no recorded report digest to authenticate."]
     local = importer.scan(root)
     if local.source_report_path is None or local.source_report_digest is None:
-        return ["No readable ShadowScan report beneath the project root to authenticate."]
+        return "failed", ["No readable ShadowScan report beneath the project root to authenticate."]
     if not hmac.compare_digest(local.source_report_digest, recorded):
-        return ["Local discovery report differs from the recorded digest."]
+        return "failed", ["Local discovery report differs from the recorded digest."]
     problems = []
     if CompletenessValidator._discovery_mismatches(bom, local):
         problems.append("ShadowScan evidence differs from the projection of the signed report.")
@@ -689,7 +820,7 @@ def discovery_producer_problems(
             "No operator signature policy entry names the ShadowScan report "
             f"{local.source_report_path}; its producer is unverified."
         )
-        return problems
+        return "failed", problems
     verified = verify_sigstore_bundle(
         policy.artifact_path, policy.bundle_path, policy.expected_identity, policy.expected_issuer
     )
@@ -703,4 +834,61 @@ def discovery_producer_problems(
         and hmac.compare_digest(str(verified.details.get("artifact_digest", "")), recorded)
     ):
         problems.append("ShadowScan report signature or signer policy verification failed.")
-    return problems
+    return ("failed" if problems else "verified"), problems
+
+
+def discovery_producer_problems(
+    bom: AIBOM,
+    root: Path,
+    signature_policies: Sequence[SigstoreArtifactPolicy],
+    *,
+    exclude_paths: Sequence[str | Path] = (),
+) -> list[str]:
+    """The reasons ``discovery_producer_check`` fails; empty when verified or not applicable."""
+    return discovery_producer_check(bom, root, signature_policies, exclude_paths=exclude_paths)[1]
+
+
+def carries_discovery_evidence(bom: AIBOM) -> bool:
+    return _carries_discovery(bom)
+
+
+def _observed_composition(component: AnyComponent) -> bool:
+    """A named collector measured this component, or observed it in the repository."""
+    observed = {AssuranceLevel.OBSERVED, AssuranceLevel.VERIFIED}
+    return component.assurance_level in observed or any(
+        claim.assurance in observed and claim.collector for claim in component.claims.values()
+    )
+
+
+def assurance_problems(
+    bom: AIBOM, minimum: str, *, imported_claims: frozenset[str] = frozenset()
+) -> list[str]:
+    """Apply ``validate.minimum_assurance_level`` to the inventory's components.
+
+    ``observed`` requires observed composition: every component's identity was measured
+    from bytes (component ``assurance_level`` observed) or a named collector observed it
+    in the repository (an observed claim naming its collector), and every component
+    carries claim provenance. Components that rest only on a supplier's or discovery
+    report's declaration, such as hosted model aliases, fail. Imported discovery claims
+    that reconciliation bound to the local report are judged as imported claims.
+    """
+    if minimum == "declared":
+        return []
+    if minimum == "verified":
+        return [
+            "offline validate cannot establish verified assurance; use subject-bound "
+            "cryptographic verification"
+        ]
+    subjects = [
+        c
+        for c in bom.components
+        if not (
+            c.properties.get("collection_mode") == IMPORTED_MODE and c.bom_ref in imported_claims
+        )
+    ]
+    declared = sum(not _observed_composition(c) for c in subjects)
+    if not bom.metadata.completeness or not subjects or declared:
+        return [f"minimum observed assurance not attained ({declared} declared components)"]
+    if any(not c.claims for c in subjects):
+        return ["observed assurance requires claim provenance"]
+    return []

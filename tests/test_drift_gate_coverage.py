@@ -14,6 +14,7 @@ from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.enums import RiskSeverity, TrustTier
 from nexus_symbiote.core.models import (
+    NATIVE_SPEC_VERSION,
     A2AClientComponent,
     AgentComponent,
     CompletenessClaim,
@@ -548,6 +549,17 @@ def test_unsupported_spec_version_and_reversed_arguments_are_reported():
         "spec_version this release does not support" in a["alert"] for a in report.security_alerts
     )
     assert any("check the argument order" in note["detail"] for note in report.notes)
+
+
+@pytest.mark.parametrize("version", ["1.0.0", "1.0.7", NATIVE_SPEC_VERSION])
+def test_the_differ_supports_every_format_version_the_reader_accepts(version):
+    old, new = AIBOM(), AIBOM()
+    old.metadata.spec_version = version
+    report = AIBOMDiffer().diff(old, new)
+    assert not any("does not support" in a["alert"] for a in report.security_alerts)
+    new.metadata.spec_version = "1.9.0"
+    report = AIBOMDiffer().diff(old, new)
+    assert any("does not support" in a["alert"] for a in report.security_alerts)
 
 
 def test_legacy_absolute_paths_are_explained():

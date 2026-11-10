@@ -12,6 +12,7 @@ from click.testing import CliRunner
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.models import (
+    MAX_REFERENCE_CHARS,
     AgentComponent,
     MCPServerComponent,
     RegistryEntryComponent,
@@ -152,13 +153,23 @@ def test_blast_radius_memory_is_linear_in_upstream_agents():
 
 
 def test_graph_issues_are_bounded_and_identifiers_shortened():
-    agent = AgentComponent(
-        bom_ref="a" * 100_000, name="a", tool_refs=[f"missing-{i}" for i in range(5000)]
-    )
+    # The model caps bom_ref at MAX_REFERENCE_CHARS; *_refs entries are not capped.
+    refs = [*(f"missing-{i}" for i in range(4999)), "m" * 100_000]
+    agent = AgentComponent(bom_ref="a" * MAX_REFERENCE_CHARS, name="a", tool_refs=refs)
     issues = validate_graph(AIBOM(components=[agent]))
     assert len(issues) == MAX_GRAPH_ISSUES + 1
     assert issues[-1] == f"{5000 - MAX_GRAPH_ISSUES} further graph issues not shown"
     assert max(len(issue) for issue in issues) < 1000
+
+
+def test_repeated_graph_issues_cannot_crowd_out_distinct_ones():
+    repeated = ["missing-0"] * 500
+    agent = AgentComponent(
+        bom_ref="a", name="a", tool_refs=[*repeated, *(f"missing-{i}" for i in range(1, 150))]
+    )
+    issues = validate_graph(AIBOM(components=[agent]))
+    assert len(set(issues[:-1])) == MAX_GRAPH_ISSUES
+    assert issues[-1] == f"{150 - MAX_GRAPH_ISSUES} further graph issues not shown"
 
 
 def test_assembly_does_not_search_the_inventory_per_tool(monkeypatch):

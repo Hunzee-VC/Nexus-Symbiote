@@ -52,7 +52,17 @@ in the report. This reduces leakage but does not create a complete evidence grap
 
 All imported components have declared assurance and unknown trust. The importer
 does not run ShadowScan, execute tools, fetch endpoints, infer agent autonomy, or
-promote a signature filename into verified evidence. ShadowScan risk and shadow
+promote a signature filename into verified evidence.
+
+`validate --project` judges imported components as imported claims, not local
+subjects. Once reconciliation has bound them to the report beneath the project
+root, an imported model or MCP tool that has no local artifact or digest is listed
+as an informational integrity issue instead of making integrity unknown; findings
+about the claim itself, such as an unsafe loading format, still fail. Without
+`--project`, or when the inventory's discovery evidence differs from the report,
+nothing is bound and those components keep integrity unknown. Imported components
+never count as the local subject that `validate --project` and `risk --project`
+require. ShadowScan risk and shadow
 flags remain source-reported heuristics; an inventory mismatch is not proof of
 unauthorized activity. Output contains report and source-ID digests and indexes,
 not raw source descriptions, locations or snippets. Both artifacts may still be
@@ -248,10 +258,18 @@ nexus-symbiote risk agentbom.json --project . --signature-policy /etc/ci/signers
 A signature policy entry that names one of the conventional report paths turns
 the check on. An entry matches the report by path or by file, so another name
 for the same file, such as a different case on a case-insensitive filesystem,
-counts too. So does `validate.require_discovery_signature: true` in the
-project policy, which then fails when no entry names the report. Keep the
-signature policy outside the checkout, as the project policy can be changed by
-the code it gates. When the BOM carries ShadowScan evidence, the check reads
+counts too. So does `--require-discovery-signature` on `validate` or `risk`, or
+`validate.require_discovery_signature: true` in the project policy, which then
+fails when no entry names the report. The project-policy setting is ignored, like
+the rest of the file, under `--no-project-policy`, so CI that ignores the project
+policy passes the command-line flag. Keep the signature policy outside the
+checkout, as the project policy can be changed by the code it gates. When the
+check runs on an inventory without ShadowScan evidence, it fails if a report lies
+beneath the project root or a policy entry names one, so stripping the evidence
+cannot pass it; with no evidence and no report it prints `not applicable`. When
+no check runs, `validate` prints that discovery evidence was accepted unverified
+and `risk --json-output` reports `discovery_producer` as `not-verified`. When the
+BOM carries ShadowScan evidence, the check reads
 the report beneath the project root with the collector's confined reader and
 requires its digest to equal the BOM's recorded `source_report_digest`. It then
 verifies the bundle offline over those exact bytes against the policy's identity

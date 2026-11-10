@@ -4,6 +4,7 @@ from click.testing import CliRunner
 from nexus_symbiote.cli import SCANNER_REGISTRY, main
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.models import CompletenessClaim, ToolComponent
+from nexus_symbiote.scanner_catalog import BUILTIN_SCANNER_NAMES
 from nexus_symbiote.validators.completeness import CompletenessValidator
 
 
@@ -86,3 +87,68 @@ def test_imported_complete_status_cannot_hide_excluded_surfaces():
         surfaces_excluded=["prompts (not scanned)"],
     )
     assert not CompletenessValidator().validate(bom).is_complete
+
+
+def _claims() -> list[CompletenessClaim]:
+    everything = sorted(BUILTIN_SCANNER_NAMES)
+    complete = {
+        "scope": "repository",
+        "surfaces_scanned": ["CLAUDE.md"],
+        "scanner_status": dict.fromkeys(everything, "complete"),
+        "collectors_requested": everything,
+        "collectors_completed": everything,
+    }
+    return [
+        CompletenessClaim(**complete),
+        CompletenessClaim(**{**complete, "scan_failures": ["mcp: read refused"]}),
+        CompletenessClaim(**{**complete, "surfaces_excluded": ["fixtures: excluded"]}),
+        CompletenessClaim(**{**complete, "collectors_completed": everything[1:]}),
+        CompletenessClaim(**{**complete, "collectors_requested": [], "collectors_completed": []}),
+        CompletenessClaim(**{**complete, "scanner_status": {"mcp": "complete"}}),
+        CompletenessClaim(**{**complete, "scanner_status": {}}),
+        CompletenessClaim(**{**complete, "surfaces_scanned": []}),
+        CompletenessClaim(
+            **{**complete, "scanner_status": {**complete["scanner_status"], "rag": "partial"}}
+        ),
+    ]
+
+
+@pytest.mark.parametrize("claim", _claims())
+def test_validate_and_risk_share_one_coverage_verdict(claim):
+    from nexus_symbiote.core.coverage import assess_coverage
+    from nexus_symbiote.core.models import PromptComponent
+    from nexus_symbiote.validators.risk import RiskScorer
+
+    bom = AIBOM(components=[PromptComponent(bom_ref="prompt:CLAUDE.md", name="CLAUDE.md")])
+    bom.metadata.completeness = claim
+    verdict = assess_coverage(claim)
+    completeness = CompletenessValidator().validate(bom)
+    risk = RiskScorer().score(bom)
+    assert completeness.coverage_status == verdict.status.value
+    assert (risk.coverage_status == "reported") is verdict.complete
+    assert (risk.coverage_status == "partial") is (verdict.status.value == "partial")
+    coverage_errors = [
+        issue.description
+        for issue in completeness.issues
+        if issue.severity == "error" and issue.surface != "graph"
+    ]
+    assert coverage_errors == verdict.reasons()
+    assert risk.coverage_gaps == verdict.reasons()
+
+
+def test_every_collector_list_matches_the_catalogue(monkeypatch):
+    import importlib.util
+    import sys
+    from pathlib import Path
+
+    from nexus_symbiote.scanners import ALL_SCANNERS
+
+    assert {scanner.name for scanner in ALL_SCANNERS} == BUILTIN_SCANNER_NAMES
+    spec = importlib.util.spec_from_file_location(
+        "action_runner_catalogue", Path(__file__).parents[1] / "scripts" / "run_action.py"
+    )
+    assert spec is not None and spec.loader is not None
+    runner = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, runner)
+    spec.loader.exec_module(runner)
+    assert set(runner.SCANNERS) == BUILTIN_SCANNER_NAMES

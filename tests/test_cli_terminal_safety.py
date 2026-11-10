@@ -124,6 +124,24 @@ def test_validate_prints_hostile_collection_paths_on_one_line(tmp_path):
     assert not _injected_lines(result.output)
 
 
+def test_supplied_failure_text_cannot_start_a_line_when_reconciliation_fails(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "AGENTS.md").write_text("Keep receipts.")
+    bom = AIBOM()
+    bom.metadata.completeness = CompletenessClaim(
+        scope="repository", scan_failures=["::error title=forged::supplied text"]
+    )
+    path = tmp_path / "forged.json"
+    path.write_text(bom.to_json())
+    result = CliRunner().invoke(
+        main, ["risk", str(path), "--project", str(project), "--no-project-policy"]
+    )
+    assert result.exit_code == 1
+    assert "::error title=forged::supplied text" in result.stderr
+    assert not _injected_lines(result.output)
+
+
 def test_invalid_policy_keys_cannot_forge_output_lines(tmp_path):
     project = tmp_path / "project"
     project.mkdir()

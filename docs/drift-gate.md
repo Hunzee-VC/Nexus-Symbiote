@@ -73,11 +73,13 @@ request with itself, and that gate can never fail.
   record absolute paths and a path-derived agent reference. `diff` does not treat
   `/old/root/CLAUDE.md` and `CLAUDE.md` as the same location, because the old root
   is not recorded and guessing it could hide a file that really moved. It adds a
-  note when one snapshot has absolute paths and the other relative ones. To migrate,
-  check out the commit the old baseline was reviewed at, take a new baseline there
-  with this release, and review `diff old.json new.json`: on the same commit it
-  should show only how the evidence is recorded, not what it contains. Then adopt
-  the new baseline through your usual review.
+  note when one snapshot has absolute paths and the other relative ones. The new
+  native format version also alerts: `spec_version` 1.0.0 against 1.1.0 is high,
+  and the policy record 1.1.0 adds (`policy_source`, `policy_weakened`) is medium.
+  To migrate, check out the commit the old baseline was reviewed at, take a new
+  baseline there with this release, and review `diff old.json new.json`: on the
+  same commit it should show only how the evidence is recorded, not what it
+  contains. Then adopt the new baseline through your usual review.
 - **ShadowScan reports** are compared by normalized content; see
   [comparing discovery across reruns](shadowscan-integration.md#compare-discovery-across-reruns).
 
@@ -102,7 +104,7 @@ then notes, then the added, removed and modified components and relationships.
 | Relationship kept but its assurance or conditions changed | high |
 | Coverage regressed: a new scan failure, coverage gap or exclusion; a collector's status got worse or is no longer recorded; fewer collectors requested or completed; a different scope; more unobserved surfaces; lower coverage assurance; no completeness claim in the new snapshot; or a baseline without a completeness claim (such as a hand-made or supplied BOM) while the new snapshot records a scan failure, a coverage gap, a collector that did not complete or no collector at all, since nothing shows that gap predates the change | high, naming the collector or entries |
 | ShadowScan: report content changed; report bytes changed without comparable content digests; source status worse; more unmapped entries; new projection limitations; a lossy format | high |
-| The new snapshot has graph problems the baseline did not (dangling or mistyped references), or either snapshot uses a `spec_version` this release does not support | high |
+| The new snapshot has graph problems the baseline did not (dangling or mistyped references), the snapshots differ in `spec_version`, or either snapshot uses a `spec_version` this release does not support | high |
 
 A relationship to a component that was itself added or removed is listed but alerts
 through that component, unless its own rating is high.

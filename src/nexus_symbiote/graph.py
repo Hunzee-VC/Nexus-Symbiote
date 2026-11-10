@@ -513,20 +513,24 @@ def _references(component: AnyComponent) -> Iterable[tuple[str, str]]:
 
 
 def validate_graph(bom: AIBOM) -> list[str]:
-    """Structural problems, at most MAX_GRAPH_ISSUES of them, with identifiers shortened.
+    """Structural problems, at most MAX_GRAPH_ISSUES distinct ones, with identifiers shortened.
 
     A hostile inventory can hold a very long reference and a million dangling targets,
-    so the message count and size are bounded, not the work.
+    so the message count and size are bounded, not the work. A repeated message takes
+    one place, so repeats cannot crowd out the distinct problems.
     """
     nodes = {c.bom_ref: c for c in bom.components}
-    issues: list[str] = []
-    total = 0
+    issues: set[str] = set()
+    omitted = 0
 
     def issue(message: str) -> None:
-        nonlocal total
-        total += 1
+        nonlocal omitted
+        if message in issues:
+            return
         if len(issues) < MAX_GRAPH_ISSUES:
-            issues.append(message)
+            issues.add(message)
+        else:
+            omitted += 1
 
     if len(nodes) != len(bom.components):
         issue("duplicate component references")
@@ -548,9 +552,9 @@ def validate_graph(bom: AIBOM) -> list[str]:
             or nodes[edge.target_ref].component_type is not ComponentType.TOOL
         ):
             issue("provides-tool must link an MCP server to a tool")
-    shown = sorted(set(issues))
-    if total > len(issues):
-        shown.append(f"{total - len(issues)} further graph issues not shown")
+    shown = sorted(issues)
+    if omitted:
+        shown.append(f"{omitted} further graph issues not shown")
     return shown
 
 

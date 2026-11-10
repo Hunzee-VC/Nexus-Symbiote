@@ -11,7 +11,7 @@ from pathlib import Path
 import click
 
 from nexus_symbiote import modes
-from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote.core.aibom import AIBOM, NativeFormatError
 from nexus_symbiote.utils.terminal import neutralize, output_failure, write_cli_output
 
 
@@ -175,7 +175,11 @@ def register_supply_chain_commands(main: click.Group) -> None:
             )
             # A project policy may select report-only mode; it cannot authorize
             # promotion of incomplete evidence into an approved baseline.
-            passed, _ = RiskScorer().passes_gate(AIBOM.load(staged))
+            try:
+                staged_bom = AIBOM.load(staged)
+            except NativeFormatError as exc:
+                raise click.ClickException(f"Baseline was not written. {exc}") from exc
+            passed, _ = RiskScorer().passes_gate(staged_bom)
             if not passed:
                 raise click.ClickException("Baseline was not written: static scan gate failed")
             write_cli_output(target, staged.read_text(encoding="utf-8"))

@@ -18,10 +18,14 @@ from typing import Any
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.enums import ComponentType, TrustTier
 from nexus_symbiote.core.hashing import TOOL_DEFINITION_HASH_VERSION, canonical_json
-from nexus_symbiote.core.models import AnyComponent, CompletenessClaim, MCPServerComponent
+from nexus_symbiote.core.models import (
+    AnyComponent,
+    CompletenessClaim,
+    MCPServerComponent,
+    check_spec_version,
+)
 
 SEVERITIES = ("info", "low", "medium", "high", "critical")
-SUPPORTED_SPEC_VERSIONS = frozenset({"1.0.0"})
 
 TRUST_TIER_ORDER = {
     TrustTier.INTERNAL_VERIFIED: 0,
@@ -165,6 +169,15 @@ def _json_text(value: Any) -> str:
         return canonical_json(value)
     except (TypeError, ValueError, OverflowError):
         return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def _readable_spec_version(version: object) -> bool:
+    """The native format rule of ``core.models``, so the differ and the reader agree."""
+    try:
+        check_spec_version(version)
+    except ValueError:
+        return False
+    return True
 
 
 def _clip(value: object) -> str:
@@ -1031,8 +1044,7 @@ class AIBOMDiffer:
         from nexus_symbiote.graph import validate_graph
 
         for label, bom in (("baseline", old), ("candidate", new)):
-            version = bom.metadata.spec_version
-            if version not in SUPPORTED_SPEC_VERSIONS:
+            if not _readable_spec_version(bom.metadata.spec_version):
                 detail = (
                     f"The {label} snapshot uses a spec_version this release does not support; "
                     "the comparison can miss fields."
