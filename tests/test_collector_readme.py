@@ -27,7 +27,15 @@ def _row(collector: str) -> str:
         ("prompt", [*INSTRUCTION_FILES, *INSTRUCTION_DIRECTORIES, *SKILL_DIRECTORIES]),
         ("rag", [*RAG_CONFIG_PATTERNS, *ENV_FILES]),
         ("a2a", [*A2A_CONFIG_FILES, *AGENT_CARD_NAMES, "a2a/agent.json"]),
-        ("ide_agents", [".codex/config.toml", ".vscode/extensions.json"]),
+        (
+            "ide_agents",
+            [
+                ".codex/config.toml",
+                ".cursor/hooks.json",
+                ".gemini/settings.json",
+                ".vscode/extensions.json",
+            ],
+        ),
     ],
 )
 def test_readme_row_names_every_collected_path(collector, paths):
