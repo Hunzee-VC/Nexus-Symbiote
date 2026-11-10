@@ -52,11 +52,6 @@ def is_server_source(path: Path) -> bool:
     )
 
 
-def has_server_markers(content: bytes) -> bool:
-    """Whether a source file names both the SDK package and its server class."""
-    return all(marker in content for marker in SERVER_MARKERS)
-
-
 def _value(node: Node | None) -> str:
     return ((node.text or b"") if node is not None else b"").decode("utf-8")
 

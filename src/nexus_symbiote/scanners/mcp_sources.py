@@ -1,17 +1,25 @@
 """MCP SDK references in Python, TypeScript and JavaScript source, found without running it.
 
-Only files that contain an MCP SDK marker are parsed. Finding them is a bounded
-substring search under its own byte budget, so unrelated source files count
-toward no limit and appear nowhere in the inventory. A file is listed as a
-scanned surface only when it produced a component, a gap or a failure. Every
-limit that stops collection is a scan failure naming the limit and the path.
+Only files that contain an MCP SDK marker are parsed. Finding them is a streaming
+search under its own byte budget, so unrelated source files, however large, count
+toward no limit and appear nowhere in the inventory. Python source is searched as
+CPython reads it: decoded as its encoding declaration says, with identifiers
+compared in NFKC form. A declaration whose decoding static reading cannot follow
+is a failure. A file is listed as a scanned surface only when it produced a
+component, a gap or a failure. Every limit that stops collection is a scan failure
+naming the limit and the path.
 """
 
 from __future__ import annotations
 
 import ast
+import codecs
+import functools
+import io
 import re
+import tokenize
 import unicodedata
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -19,40 +27,141 @@ from pathlib import Path
 from nexus_symbiote import limits
 from nexus_symbiote.core.enums import TrustTier
 from nexus_symbiote.core.models import MCPClientComponent
+from nexus_symbiote.limits import Bound
 from nexus_symbiote.scanners.base import ScanResult, parse_python
 from nexus_symbiote.scanners.python_tools import collect_python_tools
 from nexus_symbiote.scanners.ts_tools import (
+    SERVER_MARKERS,
     collect_typescript_source,
-    has_server_markers,
     is_server_source,
 )
-from nexus_symbiote.utils.confined import ConfinedCollection
+from nexus_symbiote.utils.confined import CollectionError, ConfinedCollection
 
 _PYTHON_SKIPPED = frozenset({"tests", "test", "dist", "build"})
+_PYTHON_MARKERS = ("mcp", "MCPClient")
+_PYTHON_NEEDLES = frozenset(marker.encode() for marker in _PYTHON_MARKERS)
 _CLIENT_MARKER = b"@modelcontextprotocol/sdk"
+_NEEDLES = (*_PYTHON_NEEDLES, *SERVER_MARKERS, _CLIENT_MARKER)
+_OVERLAP = max(len(needle) for needle in _NEEDLES) - 1
+_CHUNK_BYTES = 1024 * 1024
 _SDK_IMPORT = re.compile(
     r"(?:\bfrom\s*[\"']@modelcontextprotocol/sdk(?:/[^\"']*)?[\"']|"
     r"\brequire\s*\(\s*[\"']@modelcontextprotocol/sdk(?:/[^\"']*)?[\"'])"
 )
 _NEXT = re.compile(r"/\*|\n")
 _SPACE = re.compile(r"\s*")
+_LINE = re.compile(rb"([^\r\n]*)(\r\n|\r|\n)?")
+_MAY_DECLARE = re.compile(rb"[ \t\f]*(?:#|\Z)")
+_FOLD_SLICE = 4096
+_FOLD_TAIL = max(len(marker) for marker in _PYTHON_MARKERS) - 1
+# A codec that decodes each probe to its ASCII reading has no shift state (UTF-7,
+# ISO-2022, HZ), escape syntax (unicode_escape), label syntax (IDNA, punycode) or
+# non-ASCII byte order (UTF-16, EBCDIC). The stdlib codecs that pass are single-byte
+# code pages and stateless multibyte codecs, all linear, line-independent C decoders.
+_ASCII_PROBES = (
+    b"+AG0-",
+    b"\\x6d\\u006d\\155",
+    b"\x1b$B#M\x1b(B",
+    b"\x1b$)C\x0e#M\x0f",
+    b"~{#M~}",
+    b"xn--ls8h",
+    bytes(range(128)),
+)
+_INVALID_UTF8 = "invalid UTF-8"
+_INVALID_DECLARED = "invalid text for its declared source encoding"
+_UNSUPPORTED_ENCODING = "unsupported source encoding declaration"
 
 
-def _python_marker(content: bytes) -> bool | None:
-    """Whether Python source can name the MCP SDK; ``None`` when it is not UTF-8.
+class _UnreadableError(ValueError):
+    """A source cannot be read the way Python would read it; the message names why."""
 
-    Python folds identifiers to NFKC, so fullwidth or other compatibility letters
-    can spell ``mcp`` in an import; a non-ASCII file is compared in that form too.
+
+@functools.cache
+def _keeps_ascii(codec: str) -> bool:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        try:
+            return all(probe.decode(codec) == probe.decode("ascii") for probe in _ASCII_PROBES)
+        except (LookupError, ValueError):
+            return False
+
+
+def _declaration_lines(head: bytes, *, complete: bool) -> bytes:
+    """The lines CPython searches for an encoding declaration, split by universal newlines.
+
+    CPython reads a second line only after a blank or comment first line. When
+    ``head`` is only the start of a file and a declaration could still follow
+    beyond it, the codec is unknown and the file is refused.
     """
-    if b"mcp" in content or b"MCPClient" in content:
-        return True
-    if content.isascii():
-        return False
+    lines: list[bytes] = []
+    position = 0
+    while len(lines) < 2:
+        match = _LINE.match(head, position)
+        if match is None:
+            break
+        text = match.group(1)
+        may_declare = bool(_MAY_DECLARE.match(text.removeprefix(codecs.BOM_UTF8)))
+        if match.group(2) is None and not complete and may_declare:
+            raise _UnreadableError(limits.bound("file-bytes").exceeded())
+        if match.end() == position:
+            break
+        lines.append(text + b"\n")
+        position = match.end()
+        if not may_declare:
+            break
+    return b"".join(lines)
+
+
+def _source_encoding(head: bytes, *, complete: bool) -> str:
+    """The codec CPython decodes a Python source with, when static reading can follow it.
+
+    Only codecs that read ASCII as ASCII are followed. A script run directly and a
+    module imported then decode the file alike, so the text searched and parsed
+    here is the text CPython runs; any other declaration is refused.
+    """
+    lines = _declaration_lines(head, complete=complete)
     try:
-        text = unicodedata.normalize("NFKC", content.decode("utf-8"))
+        encoding, _ = tokenize.detect_encoding(io.BytesIO(lines).readline)
+    except SyntaxError:
+        try:
+            lines.decode("utf-8")
+        except UnicodeDecodeError:
+            raise _UnreadableError(_INVALID_UTF8) from None
+        raise _UnreadableError(_UNSUPPORTED_ENCODING) from None
+    if not _keeps_ascii(codecs.lookup(encoding).name):
+        raise _UnreadableError(_UNSUPPORTED_ENCODING)
+    return encoding
+
+
+def _python_text(content: bytes) -> str:
+    """The text CPython compiles from one complete Python source file."""
+    encoding = _source_encoding(content, complete=True)
+    try:
+        return content.decode(encoding)
     except UnicodeDecodeError:
-        return None
-    return "mcp" in text or "MCPClient" in text
+        utf8 = encoding in {"utf-8", "utf-8-sig"}
+        raise _UnreadableError(_INVALID_UTF8 if utf8 else _INVALID_DECLARED) from None
+
+
+def _names_sdk(text: str) -> bool:
+    """Whether Python could read an SDK marker in this text, folding identifiers to NFKC.
+
+    Every run of ASCII letters that NFKC gives an identifier is already adjacent in
+    the NFKD form, which neither moves nor merges letters. Decomposing a slice at a
+    time keeps a hostile character's expansion (up to 18 characters each) to one
+    slice instead of the whole text.
+    """
+    if any(marker in text for marker in _PYTHON_MARKERS):
+        return True
+    if text.isascii() or unicodedata.is_normalized("NFKC", text):
+        return False
+    tail = ""
+    for start in range(0, len(text), _FOLD_SLICE):
+        window = tail + unicodedata.normalize("NFKD", text[start : start + _FOLD_SLICE])
+        if any(marker in window for marker in _PYTHON_MARKERS):
+            return True
+        tail = window[-_FOLD_TAIL:]
+    return False
 
 
 def strip_js_comments(text: str) -> str:
@@ -121,13 +230,83 @@ def _python_client(tree: ast.Module) -> bool:
     )
 
 
+def _server_module(name: str) -> bool:
+    parts = name.split(".")
+    return parts[0] == "fastmcp" or parts[:2] == ["mcp", "server"]
+
+
+def _server_import(tree: ast.Module) -> bool:
+    return any(
+        (
+            isinstance(node, ast.ImportFrom)
+            and node.module is not None
+            and _server_module(node.module)
+        )
+        or (isinstance(node, ast.Import) and any(_server_module(a.name) for a in node.names))
+        for node in ast.walk(tree)
+    )
+
+
+@dataclass(frozen=True)
+class _Source:
+    """What one streaming search found: the file's first bytes, its size and its markers."""
+
+    head: bytes
+    size: int
+    found: frozenset[bytes]
+    ascii: bool
+
+    @property
+    def complete(self) -> bool:
+        return len(self.head) == self.size
+
+
+def _search(files: ConfinedCollection, path: Path, keep: int, bound: Bound) -> _Source:
+    """Read a file in chunks, keeping its first ``keep`` bytes and noting each marker."""
+    head = bytearray()
+    found: set[bytes] = set()
+    tail = b""
+    size = 0
+    plain = True
+    with files.open_regular(path, max_bytes=bound) as stream:
+        while chunk := stream.read(_CHUNK_BYTES):
+            size += len(chunk)
+            if len(head) < keep:
+                head += chunk[: keep - len(head)]
+            window = tail + chunk
+            found.update(needle for needle in _NEEDLES if needle in window)
+            plain = plain and chunk.isascii()
+            tail = window[-_OVERLAP:]
+    return _Source(bytes(head), size, frozenset(found), plain)
+
+
+def _python_candidate(source: _Source) -> bool:
+    if source.found & _PYTHON_NEEDLES:
+        return True
+    if source.ascii:
+        # ASCII reads as itself in every codec followed, so the byte search was exact.
+        _source_encoding(source.head, complete=source.complete)
+        return False
+    if not source.complete:
+        raise _UnreadableError(limits.bound("file-bytes").exceeded())
+    return _names_sdk(_python_text(source.head))
+
+
+def _server_candidate(source: _Source) -> bool:
+    return all(marker in source.found for marker in SERVER_MARKERS)
+
+
+def _client_candidate(source: _Source) -> bool:
+    return _CLIENT_MARKER in source.found
+
+
 @dataclass
 class _Kind:
     """One kind of source reference: which files qualify and which are candidates."""
 
     label: str
     eligible: Callable[[Path], bool]
-    marker: Callable[[bytes], bool | None]
+    candidate: Callable[[_Source], bool]
     selected: list[tuple[Path, bytes]] = field(default_factory=list)
     unparsed: list[Path] = field(default_factory=list)
 
@@ -140,10 +319,6 @@ def _root_source(suffix: str) -> Callable[[Path], bool]:
     return lambda path: len(path.parts) == 1 and path.suffix == suffix
 
 
-def _client_marker(content: bytes) -> bool:
-    return _CLIENT_MARKER in content
-
-
 def _outcome(result: ScanResult) -> tuple[int, int, int]:
     return len(result.components), len(result.surfaces_excluded), len(result.scan_failures)
 
@@ -151,10 +326,10 @@ def _outcome(result: ScanResult) -> tuple[int, int, int]:
 def collect_source_references(files: ConfinedCollection, result: ScanResult) -> None:
     """Inventory MCP servers and clients declared in source beneath the collection root."""
     settings = limits.current()
-    servers = _Kind("TypeScript MCP server", is_server_source, has_server_markers)
-    python = _Kind("Python MCP", _python_source, _python_marker)
-    typescript = _Kind("root TypeScript MCP client", _root_source(".ts"), _client_marker)
-    javascript = _Kind("root JavaScript MCP client", _root_source(".js"), _client_marker)
+    servers = _Kind("TypeScript MCP server", is_server_source, _server_candidate)
+    python = _Kind("Python MCP", _python_source, _python_candidate)
+    typescript = _Kind("root TypeScript MCP client", _root_source(".ts"), _client_candidate)
+    javascript = _Kind("root JavaScript MCP client", _root_source(".js"), _client_candidate)
     kinds = (servers, python, typescript, javascript)
     sources = [path for path in files.iter_files() if any(k.eligible(path) for k in kinds)]
     # Root files first, as before, so the files parsed under a limit stay predictable.
@@ -168,8 +343,10 @@ def collect_source_references(files: ConfinedCollection, result: ScanResult) -> 
 
     with files.separate_budget(limits.bound("source-scan-bytes")) as budget:
         for position, path in enumerate(sources):
-            content = files.read_bytes(path)
-            if content is None:
+            try:
+                source = _search(files, path, settings.file_bytes, budget.bound)
+            except (OSError, CollectionError):
+                # The confined reader recorded why; stop once the search budget is spent.
                 unread = sources[position + 1 :]
                 if budget.exhausted and unread:
                     result.scan_failures.append(
@@ -182,15 +359,18 @@ def collect_source_references(files: ConfinedCollection, result: ScanResult) -> 
             for kind in kinds:
                 if not kind.eligible(path):
                     continue
-                verdict = kind.marker(content)
-                if verdict is None:
-                    fail(path, "invalid UTF-8")
-                elif not verdict:
+                try:
+                    if not kind.candidate(source):
+                        continue
+                except _UnreadableError as exc:
+                    fail(path, str(exc))
                     continue
-                elif len(content) > settings.syntax_bytes:
+                if source.size > settings.syntax_bytes:
                     fail(path, limits.bound("syntax-bytes").exceeded())
+                elif not source.complete:
+                    fail(path, limits.bound("file-bytes").exceeded())
                 elif len(kind.selected) < settings.source_files:
-                    kind.selected.append((path, content))
+                    kind.selected.append((path, source.head))
                 else:
                     kind.unparsed.append(path)
     for kind in kinds:
@@ -208,11 +388,12 @@ def collect_source_references(files: ConfinedCollection, result: ScanResult) -> 
         if _outcome(result) != before:
             surfaces.append(path.as_posix())
     for path, content in python.selected:
+        location = path.as_posix()
         before = _outcome(result)
         try:
-            text = content.decode("utf-8-sig")
-        except UnicodeDecodeError:
-            fail(path, "invalid UTF-8")
+            text = _python_text(content)
+        except _UnreadableError as exc:
+            fail(path, str(exc))
             continue
         try:
             tree = parse_python(text)
@@ -221,14 +402,21 @@ def collect_source_references(files: ConfinedCollection, result: ScanResult) -> 
         else:
             collect_python_tools(tree, text, path, result)
             if _python_client(tree):
-                detected.append(path.as_posix())
-        if _outcome(result) != before or path.as_posix() in detected:
-            surfaces.append(path.as_posix())
+                detected.append(location)
+            if "mcp" not in text and _server_import(tree):
+                # The tool collector looks for the literal name; an NFKC-only spelling
+                # of the import would otherwise drop its servers and tools silently.
+                result.surfaces_excluded.append(
+                    f"{location}: Python MCP server import spelled with compatibility "
+                    "characters; its servers and tools are not collected"
+                )
+        if _outcome(result) != before or location in detected:
+            surfaces.append(location)
     for path, content in (*typescript.selected, *javascript.selected):
         try:
             text = content.decode("utf-8")
         except UnicodeDecodeError:
-            fail(path, "invalid UTF-8")
+            fail(path, _INVALID_UTF8)
             continue
         if _client_reference(text):
             detected.append(path.as_posix())

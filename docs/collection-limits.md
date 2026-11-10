@@ -69,30 +69,53 @@ The pre-commit hooks add their arguments after the command, so set
 
 | Limit | Default | Maximum | What it bounds | When it is reached |
 |---|---|---|---|---|
-| `file-bytes` | 4 MiB | 1 GiB | One file a collector reads into memory: configuration, manifests, lockfiles, instruction files and source searched for MCP SDK references. | The file is not read. |
-| `total-bytes` | 32 MiB | 64 GiB | All bytes one collector reads, apart from model files and the mcp collector's source search, which have their own budgets below. Each collector has its own budget. | The file that would pass it is not read, nor are later ones. |
+| `file-bytes` | 4 MiB | 1 GiB | One file a collector reads into memory: configuration, manifests, lockfiles and instruction files. The mcp collector holds this much of each source file it searches. | The file is not read. A larger source file is still searched, as a stream; see [below](#source-files-the-mcp-collector-searches) for when it fails. |
+| `total-bytes` | 32 MiB | 64 GiB | All bytes one collector reads, apart from model files and the mcp collector's source search, which have their own budgets below. Each collector has its own budget. | That file is not read; later files are read only while they fit in what remains. |
 | `entries` | 100000 | 10000000 | Files and directories one collector lists while it walks the project. Directories named `.git`, `node_modules`, `__pycache__`, `.venv` or `venv`, and paths excluded by policy, count as one entry each and are not listed. | The directory being listed, and everything after it, is not walked. |
 | `depth` | 32 | 256 | Directory nesting below the walk's starting directory. | That directory and everything beneath it are not walked. |
 | `model-bytes` | 64 GiB | 1024 GiB | One model weight or tokenizer file that the model collector inspects and hashes; also the artifact `verify-artifact` hashes and the weights `validate --project` hashes again for tensor metadata. | The file is recorded without a hash. |
-| `model-total-bytes` | 256 GiB | 16384 GiB | All bytes the model collector reads, weights and model configuration included. | The file that would pass it is recorded without a hash, as are later ones. |
+| `model-total-bytes` | 256 GiB | 16384 GiB | All bytes the model collector reads, weights and model configuration included. | That file is recorded without a hash; later files are hashed only while they fit in what remains. |
 | `source-files` | 50 | 100000 | Files containing an MCP SDK reference that the mcp collector parses, counted separately for Python sources, TypeScript server sources, and root-level `.ts` and `.js` client references. Files without a reference are not counted. | The remaining files of that kind are not parsed; the failure names the first one and how many there are. |
-| `source-scan-bytes` | 256 MiB | 64 GiB | Python and TypeScript sources, and root-level JavaScript, that the mcp collector reads to find files containing an MCP SDK reference. | The remaining files are not searched; the failure names the first one and how many there are. |
+| `source-scan-bytes` | 256 MiB | 64 GiB | Python and TypeScript sources, and root-level JavaScript, that the mcp collector reads to find files containing an MCP SDK reference. | The file being read when it runs out is a failure, and the remaining files are not searched; a second failure names the first of them and how many there are. |
 | `syntax-bytes` | 256 KiB | 64 MiB | One file containing an MCP SDK reference that the mcp collector parses. | That file is not parsed. |
 | `ts-nodes` | 20000 | 10000000 | Syntax nodes in one TypeScript MCP server file. | That file is not collected. |
+
+### Source files the mcp collector searches
 
 Which source files the mcp collector searches is unchanged: Python files outside
 directories named `tests`, `test`, `dist` and `build`; TypeScript files outside
 `tests`, `test`, `__tests__`, `dist` and `build`, other than `.d.ts`, `.spec.ts`
-and `.test.ts` files; and `.ts` and `.js` files at the project root. A Python file
-is a candidate when it contains `mcp` or `MCPClient`, also after the NFKC folding
-Python applies to identifiers; a TypeScript server file when it contains both
-`@modelcontextprotocol/` and `McpServer`; a root-level client reference when it
-contains `@modelcontextprotocol/sdk`. A non-UTF-8 Python file without an ASCII
-marker is a failure, because Python could decode it to a reference under a coding
-declaration, and so is a source file larger than `file-bytes`, which is not read.
-Only candidates are parsed and only files whose parse produced a component, a gap
-or a failure are listed under `surfaces_scanned`, so adding an unrelated source
-file does not change the inventory.
+and `.test.ts` files; and `.ts` and `.js` files at the project root. Each is read
+as a stream, and only candidates are parsed:
+
+- A Python file is a candidate when it contains `mcp` or `MCPClient` as Python
+  reads it: decoded as its encoding declaration says, with identifiers in the NFKC
+  form Python compares them in, so fullwidth or other compatibility letters count.
+- A TypeScript server file is a candidate when it contains both
+  `@modelcontextprotocol/` and `McpServer`, and a root-level client reference when
+  it contains `@modelcontextprotocol/sdk`.
+
+These are failures rather than silent skips:
+
+- A Python file whose encoding declaration names a codec that does not read ASCII
+  as ASCII, such as `utf-7`, `unicode_escape`, UTF-16, ISO-2022 or an unknown
+  codec. Such a file can spell a reference in a form that static reading cannot
+  follow, and Python decodes it differently when it is run as a script and when it
+  is imported. Single-byte code pages such as `latin-1` and `cp1252`, and the
+  stateless multibyte codecs such as `shift_jis` and `gbk`, are followed.
+- A Python file that is not valid in its encoding (`invalid UTF-8` when it
+  declares none).
+- A candidate larger than `syntax-bytes`, which is not parsed.
+- A source file larger than `file-bytes` that is a candidate, or that is a Python
+  file that is not plain ASCII, because its NFKC form cannot be searched without
+  holding it. Plain ASCII sources of any size, such as generated protocol buffer
+  modules or bundles, are searched as a stream and pass.
+
+An import of the Python MCP server SDK spelled only with compatibility characters
+is recorded as a gap, because its servers and tools are not collected. Only files
+whose parse produced a component, a gap or a failure are listed under
+`surfaces_scanned`, so adding an unrelated source file does not change the
+inventory.
 
 ## Why these defaults
 
@@ -132,8 +155,13 @@ the file.
 | Native inventories and ShadowScan reports read by any command | 16 MiB |
 | `agent.yaml` and `.nexus-symbiote.yaml` | 1 MiB each |
 | Operator signature policy | 4 MiB |
+| Model artifact named in an operator signature policy | 5 GiB |
+| Sigstore bundle named in an operator signature policy | 4 MiB |
 | Root `requirements*.txt` files, together | 4 MiB |
 
 Some collectors apply further per-file bounds to the formats they parse, such as
 JSON nesting, YAML token counts and A2A card entries; each is reported as a
-failure or gap on the file that reached it.
+failure or gap on the file that reached it. A signature policy entry over either
+signature bound is refused with "Policy artifact or bundle is unavailable beneath
+the project root", which does not yet name the bound; a model artifact above
+5 GiB can be hashed under `model-bytes` but cannot be signer-verified.

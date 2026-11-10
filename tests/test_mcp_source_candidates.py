@@ -6,6 +6,7 @@ import json
 import re
 import shutil
 import time
+import tracemalloc
 from dataclasses import replace
 from pathlib import Path
 
@@ -29,10 +30,10 @@ CLIENT_JS = 'const { Client } = require("@modelcontextprotocol/sdk/client/index.
 OLD_STRIPPER = re.compile(r"/\*.*?\*/|(?m:^\s*//[^\n]*$)", re.S)
 
 
-def _write(root: Path, relative: str, text: str) -> None:
+def _write(root: Path, relative: str, text: str | bytes) -> None:
     path = root / relative
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text)
+    path.write_bytes(text if isinstance(text, bytes) else text.encode("utf-8"))
 
 
 def _unrelated(root: Path, count: int) -> None:
@@ -185,10 +186,118 @@ def test_python_identifiers_are_compared_as_python_reads_them(tmp_path):
     assert client.properties["source_paths"] == ["pkg/direct.py", "pkg/stealth.py"]
 
 
-def test_python_source_python_could_decode_differently_is_a_failure(tmp_path):
+def test_python_source_is_read_in_its_declared_encoding(tmp_path):
     (tmp_path / "latin.py").write_bytes(b"# -*- coding: latin-1 -*-\nname = '\xe9'\n")
+    (tmp_path / "declared.py").write_bytes(b"# -*- coding: latin-1 -*-\nname = 'plain'\n")
     (tmp_path / "ascii.py").write_bytes(b"name = 'plain'\n")
-    assert MCPScanner().scan(tmp_path).scan_failures == ["latin.py: invalid UTF-8"]
+    assert MCPScanner().scan(tmp_path).scan_failures == []
+    fullwidth = "".join(chr(ord(letter) + 0xFEE0) for letter in "mcp")
+    source = f"# coding: cp932\nfrom {fullwidth} import ClientSession\n"
+    _write(tmp_path, "pkg/japanese.py", source.encode("cp932"))
+    _write(
+        tmp_path, "pkg/legacy.py", b"# coding: latin-1\n# caf\xe9\nfrom mcp import ClientSession\n"
+    )
+    _write(tmp_path, "pkg/undeclared.py", b"name = '\xe9'\n")
+    result = MCPScanner().scan(tmp_path)
+    assert result.scan_failures == ["pkg/undeclared.py: invalid UTF-8"]
+    assert result.surfaces_excluded == []
+    client = _client(result)
+    assert client is not None
+    assert client.properties["source_paths"] == ["pkg/japanese.py", "pkg/legacy.py"]
+
+
+HIDDEN_REFERENCES = {
+    "unicode_escape": b"# -*- coding: unicode_escape -*-\nfrom \\x6dcp.client import Client\n",
+    "utf-7": b"# coding: utf-7\nfrom +AG0AYwBw-.client import Client\n",
+    "raw_unicode_escape": b"# coding: raw_unicode_escape\nfrom \\u006dcp.client import Client\n",
+    "carriage_returns": b"\r# coding: utf-7\rfrom +AG0AYwBw-.client import Client\r",
+    "continued_declaration": b"# coding: unicode_escape \\\nfrom \\x6dcp.client import Client\n",
+    "iso2022": b"# coding: iso2022_jp\nfrom \x1b$B#m#c#p\x1b(B.client import Client\n",
+    "utf-16": b"# coding: utf-16\n" + "from mcp.client import Client\n".encode("utf-16-le"),
+    "idna": b"# coding: idna\nfrom xn--mcp.client import Client\n",
+    "unknown": b"# coding: no-such-codec\nfrom mcp.client import Client\n",
+    "bom_conflict": b"\xef\xbb\xbf# coding: latin-1\nfrom mcp.client import Client\n",
+}
+
+
+@pytest.mark.parametrize("location", ["agent.py", "pkg/deep/agent.py"])
+@pytest.mark.parametrize("source", HIDDEN_REFERENCES.values(), ids=HIDDEN_REFERENCES)
+def test_a_declaration_static_reading_cannot_follow_is_a_failure(tmp_path, location, source):
+    path = tmp_path / location
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(source)
+    result = MCPScanner().scan(tmp_path)
+    assert result.scan_failures == [f"{location}: unsupported source encoding declaration"]
+    assert result.components == []
+
+
+def test_a_hostile_declaration_is_refused_without_decoding(tmp_path):
+    payload = b"a" * 2_000_000 + b"-" + b"b" * 2_000_000
+    _write(tmp_path, "slow.py", b"# coding: punycode\n" + payload)
+    started = time.monotonic()
+    failures = MCPScanner().scan(tmp_path).scan_failures
+    assert time.monotonic() - started < 5
+    assert failures == ["slow.py: unsupported source encoding declaration"]
+
+
+def test_an_import_spelled_with_compatibility_characters_is_a_gap(tmp_path):
+    fullwidth = "".join(chr(ord(letter) + 0xFEE0) for letter in "mcp")
+    _write(
+        tmp_path,
+        "pkg/server.py",
+        f"from {fullwidth}.server.fast{fullwidth} import FastMCP\n"
+        'server = FastMCP("files")\n'
+        "@server.tool()\n"
+        "def read(path: str) -> str:\n"
+        "    return path\n",
+    )
+    result = MCPScanner().scan(tmp_path)
+    assert result.surfaces_excluded == [
+        "pkg/server.py: Python MCP server import spelled with compatibility characters; "
+        "its servers and tools are not collected"
+    ]
+    assert result.surfaces_scanned == ["pkg/server.py"]
+    literal = (tmp_path / "pkg" / "server.py").read_text(encoding="utf-8")
+    _write(tmp_path, "pkg/server.py", literal.replace(fullwidth, "mcp"))
+    result = MCPScanner().scan(tmp_path)
+    assert result.surfaces_excluded == []
+    assert [c.name for c in result.components if c.component_type == "tool"] == ["read"]
+
+
+@pytest.mark.parametrize("character", ["\ufdfa", "\u3300", "\uff4d"])
+def test_compatibility_characters_cannot_inflate_the_search(tmp_path, character):
+    # U+FDFA has an 18-character compatibility form; folding the whole text at once
+    # held about 150 MiB and took seconds for this 4 MiB file.
+    body = "# " + character * ((4 * limits.MIB - 16) // len(character.encode()))
+    _write(tmp_path, "wide.py", body + "\n")
+    tracemalloc.start()
+    try:
+        started = time.monotonic()
+        failures = MCPScanner().scan(tmp_path).scan_failures
+        elapsed = time.monotonic() - started
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert failures == []
+    assert peak < 32 * limits.MIB
+    assert elapsed < 10
+
+
+def test_unrelated_sources_larger_than_file_bytes_are_searched_as_a_stream(tmp_path):
+    padding = "x" * (5 * limits.MIB)
+    _write(tmp_path, "pkg/generated_pb2.py", f"DATA = '{padding}'\n")
+    _write(tmp_path, "web/generated.ts", f"export const data = '{padding}';\n")
+    _write(tmp_path, "bundle.js", f"module.exports = '{padding}';\n")
+    _write(tmp_path, "bundle.ts", f"export default '{padding}';\n")
+    assert MCPScanner().scan(tmp_path).scan_failures == []
+    _write(tmp_path, "pkg/text.py", f"DATA = '{padding}\u00e9'\n")
+    # "m" ends the first one-MiB read and "cp" starts the second.
+    marker_across_reads = "x" * (limits.MIB - 3) + "mcp" + padding
+    _write(tmp_path, "pkg/late.py", f"# {marker_across_reads}\n")
+    assert sorted(MCPScanner().scan(tmp_path).scan_failures) == [
+        "pkg/late.py: syntax-bytes limit of 256 KiB exceeded; raise it with --limit syntax-bytes=N",
+        "pkg/text.py: file-bytes limit of 4 MiB exceeded; raise it with --limit file-bytes=N",
+    ]
 
 
 def test_a_byte_order_mark_does_not_make_python_source_invalid(tmp_path):
