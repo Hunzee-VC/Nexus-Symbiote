@@ -198,6 +198,42 @@ def test_private_origin_exclusion_sends_only_lockfile_backed_public_packages(tmp
     assert quiet.calls == []
 
 
+@pytest.mark.parametrize(
+    "lock_name, public_source, private_source",
+    [
+        (
+            "uv.lock",
+            'source = { registry = "https://pypi.org/simple" }',
+            'source = { registry = "https://pypi.acme.internal/simple" }',
+        ),
+        (
+            "poetry.lock",
+            "",
+            'source = { type = "legacy", url = "https://pypi.acme.internal/simple" }',
+        ),
+    ],
+)
+def test_private_origin_exclusion_follows_python_lockfile_resolutions(
+    tmp_path, lock_name, public_source, private_source
+):
+    # uv.lock and poetry.lock record the index each Python package was resolved from, so
+    # a package resolved from the public index is sent and one from a private index is not.
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\ndependencies = ["langgraph>=0.2.0", "mcp-acme-tools>=1.0"]\n'
+    )
+    (tmp_path / lock_name).write_text(
+        "version = 1\n\n"
+        f'[[package]]\nname = "langgraph"\nversion = "0.2.14"\n{public_source}\n\n'
+        f'[[package]]\nname = "mcp-acme-tools"\nversion = "1.0.0"\n{private_source}\n'
+    )
+    bom = AIBOM(components=RegistryScanner().scan(tmp_path).components)
+    transport = Scripted(clean)
+    report = fetch_advisories(bom, transport=transport, exclude_private_origins=True)
+    assert sent_names(transport) == ["langgraph"]
+    withheld = {bom.get_component(e["component_ref"]).name: e["reason"] for e in report.excluded}
+    assert withheld == {"mcp-acme-tools": "resolved from a non-public registry origin"}
+
+
 def test_private_packages_are_sent_unless_excluded():
     transport = Scripted(clean)
     fetch_advisories(

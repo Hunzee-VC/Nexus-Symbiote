@@ -7,10 +7,11 @@ are included unless the operator excludes them. Nothing else from the inventory
 is sent. Batch ordering and per-query pagination:
 https://google.github.io/osv.dev/post-v1-querybatch/
 
-Only a lockfile resolution records where a package came from. pip requirements
-name no index, so the registry collector labels every pip package with the
-public PyPI origin; under ``exclude_private_origins`` such a label is not
-evidence, and a package without a lockfile-backed public origin is not sent.
+Only a lockfile resolution records where a package came from. Requirements
+files and pyproject.toml name no index, so the registry collector labels a
+Python package that no uv.lock or poetry.lock resolves with the public PyPI
+origin; under ``exclude_private_origins`` such a label is not evidence, and a
+package without a lockfile-backed public origin is not sent.
 """
 
 from __future__ import annotations
