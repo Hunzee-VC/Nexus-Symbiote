@@ -342,12 +342,32 @@ def _stamp(path: Path, cutoff: str, python: str, digest: str) -> None:
     path.write_text("\n".join([*lines[:header], *stamp, *lines[header:]]) + "\n", "utf-8")
 
 
+def _install(source: Path, target: Path) -> None:
+    """Replace target in one step, so that an interrupted copy leaves the old lock whole."""
+    staged = target.with_name(f".{target.name}.new")
+    try:
+        shutil.copyfile(source, staged)
+        os.replace(staged, target)
+    finally:
+        staged.unlink(missing_ok=True)
+
+
 def regenerate(root: Path, cutoff: str | None, upgrade: bool) -> None:
+    """Resolve the three locks in a scratch directory; replace them only once all succeed.
+
+    A failed resolution leaves every committed lock, and the cut-off it records, as it was.
+    """
     uv = _uv()
     pyproject = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
     digest = declarations_digest(pyproject)
-    if cutoff is None and not upgrade and (root / CI_LOCK).exists():
+    existing = root / CI_LOCK
+    if cutoff is None and not upgrade and existing.exists():
         cutoff = read_lock(root, CI_LOCK).inputs.get("cutoff")
+        if cutoff is None:
+            raise LockError(
+                f"{CI_LOCK} records no upload cut-off; pass --exclude-newer with the reviewed"
+                " cut-off, or --upgrade to move it"
+            )
     if cutoff is None:
         moment = datetime.now(UTC) - timedelta(days=COOLDOWN_DAYS)
         cutoff = moment.strftime("%Y-%m-%dT00:00:00Z")
@@ -379,6 +399,9 @@ def regenerate(root: Path, cutoff: str | None, upgrade: bool) -> None:
 
     with tempfile.TemporaryDirectory(prefix="nexus-symbiote-lock-") as scratch:
         tmp = Path(scratch)
+        if existing.exists():
+            # uv keeps the pins of the lock it is asked to rewrite unless told to upgrade.
+            shutil.copyfile(existing, tmp / CI_LOCK)
         compile_(
             [
                 "pyproject.toml",
@@ -389,10 +412,10 @@ def regenerate(root: Path, cutoff: str | None, upgrade: bool) -> None:
                 *universal,
                 *(["--upgrade"] if upgrade else []),
                 "-o",
-                CI_LOCK,
+                str(tmp / CI_LOCK),
             ]
         )
-        ci = read_lock(root, CI_LOCK)
+        ci = read_lock(tmp, CI_LOCK)
         _pins_file(tmp / "ci-pins.txt", ci)
         (tmp / "build.in").write_text("\n".join(pyproject["build-system"]["requires"]) + "\n")
         compile_(
@@ -436,14 +459,16 @@ def regenerate(root: Path, cutoff: str | None, upgrade: bool) -> None:
             str(tmp / "tools.txt"): f"{CI_LOCK} (test tools)",
             str(tmp / "build.in"): "pyproject.toml (build-system)",
         }
-        for name in (ACTION_LOCK, FLOOR_LOCK):
+        for name in (CI_LOCK, ACTION_LOCK, FLOOR_LOCK):
             text = (tmp / name).read_text(encoding="utf-8")
             for source, label in labels.items():
                 text = text.replace(source, label)
-            (root / name).write_text(text, encoding="utf-8")
-    _stamp(root / CI_LOCK, cutoff, f"{FLOOR_PYTHON}+", digest)
-    _stamp(root / ACTION_LOCK, cutoff, f"{FLOOR_PYTHON}+", digest)
-    _stamp(root / FLOOR_LOCK, cutoff, FLOOR_PYTHON, digest)
+            (tmp / name).write_text(text, encoding="utf-8")
+        _stamp(tmp / CI_LOCK, cutoff, f"{FLOOR_PYTHON}+", digest)
+        _stamp(tmp / ACTION_LOCK, cutoff, f"{FLOOR_PYTHON}+", digest)
+        _stamp(tmp / FLOOR_LOCK, cutoff, FLOOR_PYTHON, digest)
+        for name in (CI_LOCK, ACTION_LOCK, FLOOR_LOCK):
+            _install(tmp / name, root / name)
 
 
 def main(argv: list[str] | None = None) -> int:
