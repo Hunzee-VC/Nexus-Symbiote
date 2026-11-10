@@ -216,3 +216,95 @@ def test_overlong_references_are_refused():
 
     with pytest.raises(ValidationError):
         AgentComponent(bom_ref="a" * (MAX_REFERENCE_CHARS + 1), name="a")
+
+
+def _versionless(document: dict) -> dict:
+    del document["metadata"]["spec_version"]
+    return document
+
+
+def test_a_document_that_declares_no_format_version_is_read_as_format_1_0(tmp_path):
+    document = _versionless(AIBOM().to_dict())
+    path = tmp_path / "bom.json"
+    path.write_text(json.dumps(document))
+    assert AIBOM.load(path).metadata.spec_version == "1.0.0"
+    assert AIBOM.model_validate(document).metadata.spec_version == "1.0.0"
+    assert "spec_version" not in document["metadata"], "the caller's document is not changed"
+    path.write_text(json.dumps({"components": [], "dependencies": []}))
+    assert AIBOM.load(path).metadata.spec_version == "1.0.0"
+    AIBOM.load(path).save(tmp_path / "saved.json")
+    saved = json.loads((tmp_path / "saved.json").read_text())
+    assert saved["metadata"]["spec_version"] == "1.0.0"
+    assert AIBOM.load(tmp_path / "saved.json").metadata.spec_version == "1.0.0"
+
+
+def test_objects_built_in_process_keep_the_format_this_build_writes(tmp_path):
+    from nexus_symbiote.core.models import NATIVE_SPEC_VERSION, AIBOMMetadata
+
+    assert NATIVE_SPEC_VERSION == "1.1.0"
+    assert AIBOM().metadata.spec_version == NATIVE_SPEC_VERSION
+    assert AIBOM(components=[]).metadata.spec_version == NATIVE_SPEC_VERSION
+    built = AIBOM(metadata=AIBOMMetadata(authors=["a"]))
+    assert built.metadata.spec_version == NATIVE_SPEC_VERSION
+    assert AIBOM.model_validate(built.to_dict()).metadata.spec_version == NATIVE_SPEC_VERSION
+    built.save(tmp_path / "bom.json")
+    assert AIBOM.load(tmp_path / "bom.json").metadata.spec_version == NATIVE_SPEC_VERSION
+
+
+@pytest.mark.parametrize("version", [None, 1, "1.1", "", "2.0.0"])
+def test_a_declared_version_is_still_checked(tmp_path, version):
+    from nexus_symbiote.core.aibom import NativeFormatError
+
+    document = AIBOM().to_dict()
+    document["metadata"]["spec_version"] = version
+    path = tmp_path / "bom.json"
+    path.write_text(json.dumps(document))
+    with pytest.raises(NativeFormatError):
+        AIBOM.load(path)
+    with pytest.raises(ValidationError):
+        AIBOM.model_validate(document)
+
+
+def test_the_published_schema_reads_an_undeclared_version_as_format_1_0():
+    schema = _schema_validator().schema
+    spec_version = schema["$defs"]["AIBOMMetadata"]["properties"]["spec_version"]
+    assert spec_version["default"] == "1.0.0"
+    assert not list(_schema_validator().iter_errors(_versionless(AIBOM().to_dict())))
+
+
+def test_diff_alerts_when_an_undeclared_format_meets_the_current_one(tmp_path):
+    old, new = tmp_path / "old.json", tmp_path / "new.json"
+    old.write_text(json.dumps(_versionless(AIBOM().to_dict())))
+    AIBOM().save(new)
+    result = CliRunner().invoke(
+        main, ["diff", str(old), str(new), "--json-output", "--fail-on-alert"]
+    )
+    assert result.exit_code == 1, result.output
+    assert json.loads(result.stdout)["security_alerts"] == [
+        {
+            "severity": "high",
+            "component": "metadata",
+            "alert": "Snapshot metadata spec_version changed.",
+        }
+    ]
+
+
+def test_validate_explains_an_undeclared_format_1_0_inventory_that_does_not_reconcile(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "CLAUDE.md").write_text("Read-only triage.\n")
+    path = tmp_path / "bom.json"
+    scanned = CliRunner().invoke(
+        main, ["scan", str(project), "--no-project-policy", "--report-only", "-o", str(path)]
+    )
+    assert scanned.exit_code == 0, scanned.output
+    document = json.loads(path.read_text())
+    for component in document["components"]:
+        if component["bom_ref"] == "prompt:CLAUDE.md":
+            component["source_path"] = "/home/reviewer/checkout/CLAUDE.md"
+    path.write_text(json.dumps(_versionless(document)))
+    result = CliRunner().invoke(
+        main, ["validate", str(path), "--project", str(project), "--no-project-policy"]
+    )
+    assert result.exit_code == 1, result.output
+    assert "INFO [format] The inventory uses native format 1.0" in result.stdout

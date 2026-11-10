@@ -566,8 +566,8 @@ def test_requirement_value_change_fails_the_drift_gate_without_a_key(tmp_path, k
     assert run.exit_code == 1, run.output
     alerts = [alert["alert"] for alert in json.loads(run.stdout)["security_alerts"]]
     scoped = kind in {"OAuth2", "OPENIDCONNECT"}
-    expected = "capabilities changed" if scoped else "properties changed"
-    assert any(expected in alert for alert in alerts), alerts
+    expected = "capabilities changed" if scoped else "properties.static_card_hash changed"
+    assert any(expected in alert and alert.startswith("High ") for alert in alerts), alerts
     # Only scopes are exported; other requirement values enter the unkeyed digest only.
     assert ('"read:only"' in boms) is scoped and ('"admin"' in boms) is scoped
     unchanged, _ = _drift(tmp_path / "unchanged", before, copy.deepcopy(before))
@@ -886,8 +886,8 @@ def _skill_requirement(card: dict[str, Any], scheme: str, values: list[str]) -> 
     ("scheme", "before", "after", "alert"),
     [
         ("oauth", "read:only", "admin", "capabilities changed"),
-        ("key", "skill-reader", "skill-writer", "properties changed"),
-        ("undeclared", "skill-reader", "skill-writer", "properties changed"),
+        ("key", "skill-reader", "skill-writer", "properties.static_card_hash changed"),
+        ("undeclared", "skill-reader", "skill-writer", "properties.static_card_hash changed"),
     ],
 )
 def test_skill_requirement_change_fails_the_drift_gate_without_a_key(
@@ -917,8 +917,8 @@ def test_scope_moved_between_skills_changes_only_the_structure_digest(tmp_path):
     run, _ = _drift(tmp_path, card, moved)
     assert run.exit_code == 1, run.output
     alerts = json.loads(run.stdout)["security_alerts"]
-    assert [(a["severity"], "properties changed" in a["alert"]) for a in alerts] == [
-        ("medium", True)
+    assert [(a["severity"], a["alert"]) for a in alerts] == [
+        ("high", "High change in 'billing-agent': properties.static_card_hash changed.")
     ], alerts
 
 
