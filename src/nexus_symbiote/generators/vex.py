@@ -7,6 +7,10 @@ from typing import Any
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.hashing import hash_canonical
 from nexus_symbiote.core.models import ModelComponent
+from nexus_symbiote.generators._common import (
+    OMITTED_IMPORTED_FINDINGS,
+    imported_discovery_component,
+)
 from nexus_symbiote.generators.base import Generator
 from nexus_symbiote.generators.validation import require_valid
 
@@ -21,7 +25,11 @@ class VEXGenerator(Generator):
         vulnerabilities: list[dict[str, Any]] = []
         components: list[dict[str, Any]] = []
         seen: set[str] = set()
+        omitted = 0
         for comp in sorted(bom.components, key=lambda c: c.bom_ref):
+            if imported_discovery_component(comp):
+                omitted += len(comp.risks)
+                continue
             if not comp.risks:
                 continue
             components.append({"type": "application", "bom-ref": comp.bom_ref, "name": comp.name})
@@ -79,5 +87,9 @@ class VEXGenerator(Generator):
             "components": components,
             "vulnerabilities": vulnerabilities,
         }
+        if omitted:
+            document["metadata"] = {
+                "properties": [{"name": OMITTED_IMPORTED_FINDINGS, "value": str(omitted)}]
+            }
         require_valid(document, "cyclonedx")
         return document

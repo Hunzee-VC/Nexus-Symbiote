@@ -26,6 +26,7 @@ Reference material: exact behavior, fields and limits.
 | --- | --- |
 | [CLI reference](cli-reference.md) | Every command, option and exit code, kept in sync with the CLI by a test |
 | [AgentBOM schemas](../schemas/README.md) | The native AgentBOM JSON Schema, the deployment-profile schema and a minimal example |
+| [Agent manifest](agent-manifest.md) | The optional `agent.yaml`: its fields, what it adds to the inventory, its failures and its trust limits |
 | [Source binding](verification-source-binding.md) | How static MCP records are bound to their configuration and reconciled with a project |
 | [TypeScript inventory](typescript-inventory.md) | Static collection of MCP tool registrations from TypeScript servers, and its limits |
 | [npm lockfile evidence](npm-lockfile-evidence.md) | What the registry collector records from `package.json` and npm lockfiles |
@@ -41,6 +42,7 @@ Reference material: exact behavior, fields and limits.
 | --- | --- |
 | [Examples walkthrough](../examples/README.md) | Inventory, validate, export, diff and import on a synthetic agent, offline |
 | [Scanning a public agent](tutorials/scanning-a-public-agent.md) | Run the full workflow on a real repository and wire it into CI |
+| [Gate drift in CI](drift-gate.md) | Keep the reviewed baseline out of the pull request's reach, take comparable snapshots, and read each alert |
 | [Offline and live modes](offline-and-live-modes.md#how) | Observe a live MCP server, query advisories, or verify pinned launchers |
 | [ShadowScan integration](shadowscan-integration.md) | Import and verify Nexus-ShadowScan discovery reports |
 | [Runtime assurance](runtime-assurance.md) | Sign snapshots and approvals, and mediate tool calls through a gateway |

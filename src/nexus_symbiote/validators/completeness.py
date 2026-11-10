@@ -271,7 +271,7 @@ class CompletenessValidator:
 
         expected = AIBOM(components=list(observed.values()))
         try:
-            agent = assemble_repository_agent(expected, root)
+            agent = assemble_repository_agent(expected, root, exclude_paths=exclude_paths)
         except (OSError, ValueError, RecursionError):
             incomplete("agent.yaml", "Local agent manifest could not be reconciled.")
         else:

@@ -6,6 +6,7 @@ These JSON Schemas (draft 2020-12) describe the native Nexus SymBiote formats. T
 | --- | --- | --- |
 | [`nexus-symbiote-aibom-1.0.schema.json`](nexus-symbiote-aibom-1.0.schema.json) | A native AgentBOM document: `metadata`, `components` and `dependencies` | `tests/test_native_contract.py` |
 | [`deployment-profile-1.0.schema.json`](deployment-profile-1.0.schema.json) | The optional `deployment_profile` on an agent component; see [deployment evidence](../docs/deployment-evidence.md) | `tests/test_deployment_evidence_profile.py` |
+| [`agent-manifest-1.0.schema.json`](agent-manifest-1.0.schema.json) | The optional `agent.yaml` at a project root; see [agent manifest](../docs/agent-manifest.md) | `tests/test_agent_manifest.py` |
 | [`examples/minimal-aibom.json`](examples/minimal-aibom.json) | A minimal valid AgentBOM: one agent, an MCP server and its tools, a model, a prompt and a registry entry | `tests/test_native_contract.py` |
 
 ## Validate a document
@@ -41,6 +42,7 @@ When a model changes, regenerate the affected schema from it and review the diff
 ```bash
 python -c "import json; from nexus_symbiote.core.aibom import AIBOM; print(json.dumps(AIBOM.model_json_schema(), indent=2))" > schemas/nexus-symbiote-aibom-1.0.schema.json
 python -c "import json; from nexus_symbiote.core.models import DeploymentProfile; print(json.dumps(DeploymentProfile.model_json_schema(), indent=2, sort_keys=True))" > schemas/deployment-profile-1.0.schema.json
+python -c "import json; from nexus_symbiote.graph import AgentDeclaration; print(json.dumps(AgentDeclaration.model_json_schema(), indent=2, sort_keys=True))" > schemas/agent-manifest-1.0.schema.json
 ```
 
 Do not edit a schema by hand to make a test pass.
