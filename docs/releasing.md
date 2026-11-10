@@ -130,8 +130,8 @@ as described below.
    stands in for a second reviewer, then dispatch with `publish=pypi` and approve the
    `pypi` environment. The preflight refuses an earlier run, a tag that is missing,
    unverified or on another commit, and an environment or tag ruleset that is missing
-   or not protected. Its run log notes that the workflow token could not read the
-   ruleset's bypass list: before approving, run the administrator check
+   or not protected. Its log and job summary note that the workflow token could not
+   read the ruleset's bypass list: before approving, run the administrator check
    (`--verify-bypass-actors`, see
    [repository controls](repository-controls.md#apply-the-outstanding-controls)) for
    the release commit. Review the artifacts of this exact run at the approval gate.

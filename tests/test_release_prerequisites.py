@@ -334,12 +334,16 @@ def test_an_unusable_run_listing_leaves_the_soak_unproven(live, capsys):
     assert "reached the branch is unavailable" in capsys.readouterr().err
 
 
-def test_the_workflow_token_reports_what_it_cannot_see(live, capsys):
+def test_the_workflow_token_reports_what_it_cannot_see(live, capsys, tmp_path):
+    summary = tmp_path / "summary.md"
+    live.setenv("GITHUB_STEP_SUMMARY", str(summary))
     live.setattr(controls, "fetch_tag_rulesets", lambda *_: [workflow_view()])
     live.setattr("sys.argv", [*ARGV, "--publish", "pypi"])
     assert controls.main() == 0
     out = capsys.readouterr().out
     assert "Repository controls notice:" in out and "--verify-bypass-actors" in out
+    # Shown on the run page as well, where the environment approval happens.
+    assert "visible only to administrators" in summary.read_text()
     live.setattr("sys.argv", [*ARGV, "--publish", "pypi", "--verify-bypass-actors"])
     assert controls.main() == 1
     assert "administrator's token" in capsys.readouterr().err

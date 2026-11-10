@@ -533,6 +533,14 @@ def main() -> int:
         return 1
     for notice in notices:
         print("Repository controls notice: " + notice)
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if notices and summary:
+        # The run page is what the maintainer sees at the environment approval.
+        try:
+            with open(summary, "a", encoding="utf-8") as stream:
+                stream.write("".join(f"- Repository controls notice: {n}\n" for n in notices))
+        except OSError:
+            print("The notices could not be added to the job summary.", file=sys.stderr)
     checked = "protected branch and successful CI for the exact source"
     if args.publish:
         checked += f", the release-tag ruleset and the {args.publish} environment"

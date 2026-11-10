@@ -72,7 +72,8 @@ environment to have a required reviewer, administrator bypass turned off and
 deployments limited to `main`. GitHub returns a ruleset's bypass actors only to a
 caller that may edit the ruleset, so the release workflow's read-only token cannot
 tell whether an administrator, a team or an app may bypass it: the run prints a
-notice saying so instead of treating the unseen list as empty. Only the
+notice saying so, in its log and job summary, instead of treating the unseen list as
+empty. Only the
 [administrator check](#apply-the-outstanding-controls), run with
 `--verify-bypass-actors` and an administrator's token, verifies that the list is
 empty, and it fails when the list cannot be read. With
@@ -84,7 +85,8 @@ characters, which is printed; and it requires the signed, annotated tag
 signature GitHub reports as verified.
 
 Missing or truncated run, job, ruleset or environment data, an API failure,
-redirects and an unprotected branch fail closed. The SHA defaults to `GITHUB_SHA`;
+redirects and an unprotected branch fail closed; the one exception is the bypass list
+described above, which the workflow token is never shown. The SHA defaults to `GITHUB_SHA`;
 local invocations must supply their reviewed commit explicitly. The preflight does
 not audit approval counts, force-push and deletion settings or package-index
 ownership; an administrator must review those separately, for example with
