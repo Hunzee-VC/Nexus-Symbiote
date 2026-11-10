@@ -211,3 +211,50 @@ def test_an_attested_release_archive_is_checked_without_a_sigstore_bundle(tmp_pa
     (target / "results.json").write_bytes(b"{}")
     with pytest.raises(ValueError, match="bind"):
         module.check(target)
+
+
+def test_the_installation_comparison_ignores_what_created_the_environment(tmp_path, monkeypatch):
+    from email.message import Message
+    from types import SimpleNamespace
+
+    import pytest
+
+    monkeypatch.syspath_prepend(str(ROOT / "benchmarks/inventory"))
+    spec = importlib.util.spec_from_file_location(
+        "inventory_evidence_bootstrap", ROOT / "benchmarks/inventory/evidence.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    def environment(*entries):
+        def distributions():
+            for name, version in entries:
+                metadata = Message()
+                metadata["Name"] = name
+                yield SimpleNamespace(metadata=metadata, version=version)
+
+        monkeypatch.setattr(module, "distributions", distributions)
+
+    environment(("click", "8.5.0"), ("nexus-symbiote", "0.2.0"), ("pip", "25.3"))
+    assert module.installed_versions() == {"click": "8.5.0", "nexus-symbiote": "0.2.0"}
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    results = b'{"passed": true}\n'
+    (archive / "results.json").write_bytes(results)
+    statement = {
+        "_type": "https://in-toto.io/Statement/v1",
+        "subject": [{"name": "results.json", "digest": {"sha256": module.digest(results)}}],
+        "predicateType": module.PREDICATE_TYPE,
+        "predicate": {
+            "materialsSha256": module.materials(),
+            "packageVersions": module.installed_versions(),
+        },
+    }
+    (archive / "statement.json").write_text(json.dumps(statement))
+    # A uv environment has no pip; another Python patch release seeds other versions.
+    for seeded in [(), (("pip", "24.0"), ("setuptools", "80.9.0"), ("wheel", "0.45.1"))]:
+        environment(("click", "8.5.0"), ("nexus-symbiote", "0.2.0"), *seeded)
+        module.check(archive, compare_installation=True)
+    environment(("click", "8.4.0"), ("nexus-symbiote", "0.2.0"))
+    with pytest.raises(ValueError, match="distributions differ"):
+        module.check(archive, compare_installation=True)

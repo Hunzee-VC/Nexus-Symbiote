@@ -111,4 +111,8 @@ mkdir inventory && tar -xzf inventory-benchmark.tar.gz -C inventory
 python benchmarks/inventory/evidence.py check inventory --compare-installation
 ```
 
+The comparison covers the installed package files and every installed distribution
+except pip, setuptools and wheel, which the tool that created the environment adds at
+its own version and no lock pins.
+
 The counts describe the versioned public fixtures.

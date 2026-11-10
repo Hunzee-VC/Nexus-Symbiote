@@ -27,6 +27,10 @@ def digest(data: bytes) -> str:
 
 
 PREDICATE_TYPE = "https://github.com/aisecnomad/nexus-symbiote/benchmark/inventory/v1"
+# Seeded by whichever tool created the environment (venv, virtualenv, uv) at its own
+# version, never imported by the scanner and pinned by no lock: comparing them would fail
+# every consumer whose Python patch release or environment tool differs from the release's.
+BOOTSTRAP = frozenset({"pip", "setuptools", "wheel"})
 
 
 def materials() -> dict[str, str]:
@@ -49,12 +53,13 @@ def materials() -> dict[str, str]:
 
 
 def installed_versions() -> dict[str, str]:
-    """Every distribution in the running environment: what the scanner actually ran with."""
+    """Every distribution the scanner ran with: the environment without its bootstrap tools."""
     versions: dict[str, str] = {}
     for distribution in distributions():
         name = (distribution.metadata.get_all("Name") or [""])[0]
-        if name:
-            versions[name.lower().replace("_", "-")] = distribution.version
+        normalized = name.lower().replace("_", "-")
+        if normalized and normalized not in BOOTSTRAP:
+            versions[normalized] = distribution.version
     return dict(sorted(versions.items()))
 
 
