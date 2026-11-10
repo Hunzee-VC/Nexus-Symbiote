@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import stat
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -29,9 +28,10 @@ from nexus_symbiote.core.models import (
     ToolComponent,
 )
 from nexus_symbiote.scanners.mcp import MCPScanner
-from nexus_symbiote.scanners.model import inspect_model_artifact
+from nexus_symbiote.scanners.model import inspect_model_artifact, model_format
 from nexus_symbiote.utils.confined import MAX_HASH_BYTES
 from nexus_symbiote.utils.crypto import (
+    MAX_BUNDLE_BYTES,
     SigstoreArtifactPolicy,
     verify_sigstore_bundle,
 )
@@ -42,7 +42,24 @@ VALIDATION_BYTE_BUDGET = 6 * MAX_HASH_BYTES
 A maximal scan inventory (the model collector reads at most ``MAX_HASH_BYTES`` of
 weights) needs at most four passes over its models; the rest is headroom.
 """
+SIGNATURE_VERIFICATION_COST = MAX_BUNDLE_BYTES
+"""Work charged for one offline signature verification beyond the bytes it reads.
+
+Loading the trust root and checking the certificate chain is charged like reading
+this many bytes, so verification work draws on the same budget as artifact reads.
+"""
 MAX_REPORTED_ISSUES = 1000
+_IMPORTED_EVIDENCE_GAPS = frozenset(
+    {
+        "artifact_unavailable",
+        "missing_hash",
+        "missing_definition",
+        "unverified_signature",
+        "unsigned_model",
+        "descriptor_source_unavailable",
+    }
+)
+"""Unknown-evidence categories that a bound imported claim reports without blocking."""
 _BLOCKING = {"critical", "error"}
 _SEVERITY_RANK = {"critical": 0, "error": 0, "unknown": 1, "warning": 2, "info": 3}
 
@@ -169,18 +186,35 @@ class _ArtifactDigests:
         return value
 
 
-def _artifact_size(project_root: Path | None, comp: AnyComponent) -> int:
-    """Size of a component's artifact without reading it; zero when unavailable."""
-    if project_root is None or not comp.source_path:
-        return 0
-    candidate = Path(comp.source_path)
+def _locate_artifact(project_root: Path, source_path: str) -> Path | str:
+    """Return the in-root artifact a component names, or the fixed reason it is refused.
+
+    Every reader applies these rules: no parent traversal, inside the resolved root,
+    not a symbolic link, and a regular file. Reasons never quote the path.
+    """
+    root = project_root.resolve()
+    candidate = Path(source_path)
+    if ".." in candidate.parts:
+        return "Parent traversal is not permitted"
     if not candidate.is_absolute():
-        candidate = project_root / candidate
+        candidate = root / candidate
     try:
-        info = os.lstat(candidate)
+        if candidate.is_symlink() or not candidate.resolve().is_relative_to(root):
+            return "Artifact path escapes the supplied project root or is a symlink"
+        if not candidate.is_file():
+            return "Declared artifact is missing or is not a regular file"
+    except (OSError, RuntimeError, ValueError):
+        return "Declared artifact could not be examined"
+    return candidate
+
+
+def _regular_file_size(path: Path) -> int:
+    """Size of the regular file a no-follow open reaches; zero when there is none."""
+    try:
+        with open_regular_file(path) as stream:
+            return os.fstat(stream.fileno()).st_size
     except (OSError, ValueError):
         return 0
-    return info.st_size if stat.S_ISREG(info.st_mode) else 0
 
 
 class IntegrityValidator:
@@ -206,6 +240,7 @@ class IntegrityValidator:
         self.require_model_signatures = require_model_signatures
         self.byte_budget = byte_budget
         self._digests = _ArtifactDigests(byte_budget)
+        self._inspected_models: set[Path] = set()
 
     def validate(
         self,
@@ -224,6 +259,7 @@ class IntegrityValidator:
         """
         report = IntegrityReport(basis="supplied-bom" if project_root is None else "project")
         self._digests = _ArtifactDigests(self.byte_budget)
+        self._inspected_models = set()
         local_tools: dict[str, ToolComponent | None] = {}
         if project_root is not None and any(isinstance(c, ToolComponent) for c in bom.components):
             # Resolve configuration only inside the operator's root. Never use a BOM-supplied
@@ -273,7 +309,7 @@ class IntegrityValidator:
             self._check_file_hash(comp, project_root, report)
             if comp.bom_ref in bound_imports and is_imported(comp):
                 for issue in report.issues[first_issue:]:
-                    if issue.severity == "unknown":
+                    if issue.severity == "unknown" and issue.category in _IMPORTED_EVIDENCE_GAPS:
                         issue.severity = "info"
                         issue.detail = "Imported discovery claim without local evidence: " + (
                             issue.detail
@@ -296,26 +332,50 @@ class IntegrityValidator:
     def _admit_model(
         self, comp: ModelComponent, project_root: Path | None, report: IntegrityReport
     ) -> bool:
-        """Charge a model's artifact reads to the validation budget before they happen.
+        """Charge a model's artifact work to the validation budget before it happens.
 
         Inspection reads the artifact once, tensor metadata and a signer policy once
-        more each. A component the budget cannot cover is unknown, not skipped silently.
+        more each; a verification also reads its bundle and costs a fixed amount of
+        work. A weights file, or a file the signer policy covers, is inspected for one
+        component only: a later model component naming it fails instead of repeating
+        the work. Other files, such as the manifest that declares hosted models, are
+        charged for each component. A component the budget cannot cover is unknown,
+        not skipped silently. A path the readers refuse costs nothing here; the
+        checks report why.
         """
-        size = _artifact_size(project_root, comp)
-        passes = 1 + bool(comp.tensor_inventory_hash or comp.safetensors_header_hash)
-        if size and project_root is not None and comp.source_path:
-            candidate = Path(comp.source_path)
-            try:
-                if not candidate.is_absolute():
-                    candidate = project_root.resolve() / candidate
-                passes += candidate.resolve() in self._signature_policies
-            except (OSError, RuntimeError, ValueError):
-                pass
+        if project_root is None or not comp.source_path:
+            return True
+        located = _locate_artifact(project_root, comp.source_path)
+        if isinstance(located, str):
+            return True
         try:
-            self._digests.charge(size * passes)
+            artifact = located.resolve()
+        except (OSError, RuntimeError, ValueError):
+            return True
+        policy = self._signature_policies.get(artifact)
+        once = policy is not None or model_format(artifact) is not None
+        if once and artifact in self._inspected_models:
+            report.issues.append(
+                IntegrityIssue(
+                    comp.bom_ref,
+                    "duplicate_artifact",
+                    "An earlier model component already names this artifact; an inventory "
+                    "describes each model artifact once",
+                )
+            )
+            return False
+        size = _regular_file_size(located)
+        cost = size * (1 + bool(comp.tensor_inventory_hash or comp.safetensors_header_hash))
+        if policy is not None:
+            bundle = min(_regular_file_size(policy.bundle_path), MAX_BUNDLE_BYTES + 1)
+            cost += size + bundle + SIGNATURE_VERIFICATION_COST
+        try:
+            self._digests.charge(cost)
         except _BudgetExhaustedError:
             report.issues.append(_budget_issue(comp.bom_ref, self.byte_budget))
             return False
+        if once:
+            self._inspected_models.add(artifact)
         return True
 
     def _check_tensor_metadata(
@@ -448,26 +508,11 @@ class IntegrityValidator:
                 )
             )
             return None
-        root = project_root.resolve()
-        candidate = Path(comp.source_path)
-        if ".." in candidate.parts:
-            report.issues.append(
-                IntegrityIssue(
-                    comp.bom_ref, "missing_artifact", "Parent traversal is not permitted"
-                )
-            )
+        located = _locate_artifact(project_root, comp.source_path)
+        if isinstance(located, str):
+            report.issues.append(IntegrityIssue(comp.bom_ref, "missing_artifact", located))
             return None
-        if not candidate.is_absolute():
-            candidate = root / candidate
-        try:
-            if candidate.is_symlink() or not candidate.resolve().is_relative_to(root):
-                raise ValueError("Artifact path escapes the supplied project root or is a symlink")
-            if not candidate.is_file():
-                raise ValueError("Declared artifact is missing or is not a regular file")
-        except (OSError, ValueError) as exc:
-            report.issues.append(IntegrityIssue(comp.bom_ref, "missing_artifact", str(exc)))
-            return None
-        return candidate
+        return located
 
     def _check_model_integrity(
         self, comp: ModelComponent, project_root: Path | None, report: IntegrityReport
@@ -673,6 +718,6 @@ def _budget_issue(component_ref: str, budget: int) -> IntegrityIssue:
     return IntegrityIssue(
         component_ref,
         "validation_budget_exhausted",
-        f"Not checked: this validation already read its {budget // 1024**3} GiB artifact budget",
+        f"Not checked: the work would exceed this validation's artifact budget of {budget:,} bytes",
         "unknown",
     )

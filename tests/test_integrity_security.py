@@ -526,17 +526,181 @@ def test_validation_byte_budget_fails_closed_with_a_reason(tmp_path):
     assert issue.component_ref == "prompt:other" and issue.severity == "unknown"
 
 
-def test_repeated_models_cannot_multiply_inspection_work(tmp_path):
+def test_repeated_models_are_inspected_once_and_fail_as_duplicates(tmp_path, monkeypatch):
+    from nexus_symbiote.validators import integrity
+
     path = tmp_path / "model.safetensors"
     write_safetensors(path, data=b"abcd" * 1024)
     size = path.stat().st_size
+    inspected: list[Path] = []
+    real_inspect = integrity.inspect_model_artifact
+
+    def inspect(artifact, **kwargs):
+        inspected.append(artifact)
+        return real_inspect(artifact, **kwargs)
+
+    monkeypatch.setattr(integrity, "inspect_model_artifact", inspect)
     models = [
         ModelComponent(bom_ref=f"model:{i}", name="m", source_path="model.safetensors")
         for i in range(50)
     ]
     report = IntegrityValidator(byte_budget=10 * size).validate(AIBOM(components=models), tmp_path)
-    exhausted = [i for i in report.issues if i.category == "validation_budget_exhausted"]
-    assert len(exhausted) == 40 and report.status != "pass"
+    duplicates = [i for i in report.issues if i.category == "duplicate_artifact"]
+    assert len(inspected) == 1 and report.bytes_charged == size
+    assert len(duplicates) == 49 and {i.severity for i in duplicates} == {"error"}
+    assert "model:0" not in {i.component_ref for i in duplicates}
+    assert not [i for i in report.issues if i.category == "validation_budget_exhausted"]
+    assert report.status == "fail"
+
+
+def test_hosted_model_declarations_sharing_one_manifest_are_not_duplicates(tmp_path):
+    from click.testing import CliRunner
+
+    from nexus_symbiote.cli import main
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "CLAUDE.md").write_text("Read-only triage.")
+    (project / "agent.yaml").write_text(
+        "name: triage\ninstructions: [CLAUDE.md]\nmodels:\n"
+        "  chat: {provider: example, requested_ref: latest}\n"
+        "  embed: {provider: example, requested_ref: embed-v2}\n"
+    )
+    target = tmp_path / "bom.json"
+    scan = CliRunner().invoke(
+        main, ["scan", "--no-project-policy", str(project), "-o", str(target)]
+    )
+    assert scan.exit_code == 0, scan.output
+    bom = AIBOM.load(target)
+    hosted = [c for c in bom.components if isinstance(c, ModelComponent)]
+    assert len(hosted) == 2 and {c.source_path for c in hosted} == {"agent.yaml"}
+    report = IntegrityValidator().validate(bom, project)
+    assert report.status == "unknown"
+    assert not [i for i in report.issues if i.category == "duplicate_artifact"]
+
+
+def _signed_weights(tmp_path: Path, bundle_bytes: bytes) -> tuple[Path, SigstoreArtifactPolicy]:
+    weights = tmp_path / "weights"
+    weights.mkdir()
+    path = weights / "model.safetensors"
+    write_safetensors(path)
+    bundle = tmp_path / "model.sigstore"
+    bundle.write_bytes(bundle_bytes)
+    policy = SigstoreArtifactPolicy(
+        path, bundle, "trusted@example.test", "https://issuer.example.test"
+    )
+    return path, policy
+
+
+def test_one_signed_artifact_is_inspected_and_verified_once_however_it_is_named(
+    tmp_path, monkeypatch
+):
+    from nexus_symbiote.validators import integrity
+
+    path, policy = _signed_weights(tmp_path, b"{" + b" " * 65536 + b"}")
+    (tmp_path / "alias").symlink_to(path.parent, target_is_directory=True)
+    verified: list[Path] = []
+    inspected: list[Path] = []
+    real_inspect = integrity.inspect_model_artifact
+
+    def verify(artifact, bundle, identity, issuer):
+        verified.append(artifact)
+        return VerificationResult(
+            True, identity=identity, issuer=issuer, details={"artifact_digest": hash_file(artifact)}
+        )
+
+    def inspect(artifact, **kwargs):
+        inspected.append(artifact)
+        return real_inspect(artifact, **kwargs)
+
+    monkeypatch.setattr(integrity, "verify_sigstore_bundle", verify)
+    monkeypatch.setattr(integrity, "inspect_model_artifact", inspect)
+    spellings = [
+        "weights/model.safetensors",
+        "./weights/model.safetensors",
+        "weights//model.safetensors",
+        str(path),
+        "alias/model.safetensors",
+    ]
+    models = [
+        ModelComponent(
+            bom_ref=f"model:{i}",
+            name="m",
+            source_path=spellings[i % len(spellings)],
+            hashes={"sha256": hash_file(path)},
+        )
+        for i in range(1000)
+    ]
+    report = IntegrityValidator([policy]).validate(AIBOM(components=models), tmp_path)
+    assert len(verified) == 1 and len(inspected) == 1
+    assert report.signatures_checked == report.signatures_verified == 1
+    duplicates = [i for i in report.issues if i.category == "duplicate_artifact"]
+    assert len(duplicates) == 999 and report.status == "fail"
+    size = path.stat().st_size
+    bundle = policy.bundle_path.stat().st_size
+    # Inspection, the verifier's own hash pass and the digest check each read the
+    # weights once; the bundle and a fixed amount of verification work are charged too.
+    assert report.bytes_charged == 3 * size + bundle + integrity.SIGNATURE_VERIFICATION_COST
+
+
+def test_signature_verification_work_draws_on_the_validation_budget(tmp_path, monkeypatch):
+    from nexus_symbiote.validators import integrity
+
+    path, policy = _signed_weights(tmp_path, b"{}")
+    calls: list[Path] = []
+    monkeypatch.setattr(integrity, "verify_sigstore_bundle", lambda *args: calls.append(args[0]))
+    model = ModelComponent(
+        bom_ref="model:m",
+        name="m",
+        source_path="weights/model.safetensors",
+        hashes={"sha256": hash_file(path)},
+    )
+    validator = IntegrityValidator([policy], byte_budget=integrity.SIGNATURE_VERIFICATION_COST)
+    report = validator.validate(AIBOM(components=[model]), tmp_path)
+    (issue,) = [i for i in report.issues if i.category == "validation_budget_exhausted"]
+    assert issue.severity == "unknown" and not calls
+    assert f"{integrity.SIGNATURE_VERIFICATION_COST:,} bytes" in issue.detail
+    assert report.status == "unknown"
+
+
+def test_paths_the_readers_refuse_are_never_charged_to_the_budget(tmp_path):
+    project = tmp_path / "project"
+    (project / "real").mkdir(parents=True)
+    outside = tmp_path / "outside.safetensors"
+    write_safetensors(outside, data=b"\0" * 2_000_000)
+    write_safetensors(project / "real" / "model.safetensors", data=b"\0" * 2_000_000)
+    (project / "linked").symlink_to(project / "real", target_is_directory=True)
+    for source in (str(outside), "linked/model.safetensors"):
+        model = ModelComponent(bom_ref="model:m", name="m", source_path=source)
+        report = IntegrityValidator(byte_budget=1_000_000).validate(
+            AIBOM(components=[model]), project
+        )
+        assert report.bytes_charged == 0, source
+        assert not [i for i in report.issues if i.category == "validation_budget_exhausted"]
+        assert report.status != "pass"
+    escaped = IntegrityValidator(byte_budget=1_000_000).validate(
+        AIBOM(components=[ModelComponent(bom_ref="model:m", name="m", source_path=str(outside))]),
+        project,
+    )
+    assert [i.category for i in escaped.issues if i.severity == "error"] == ["missing_artifact"]
+
+
+def test_bound_imports_report_only_unavailable_evidence_without_blocking(tmp_path):
+    (tmp_path / "weights.bin").write_bytes(b"\0" * 64)
+    imported = ModelComponent(
+        bom_ref="shadowscan:m",
+        name="m",
+        source_path="weights.bin",
+        properties={"collection_mode": "imported-unverified-report"},
+    )
+    report = IntegrityValidator().validate(
+        AIBOM(components=[imported]), tmp_path, bound_imports=frozenset({"shadowscan:m"})
+    )
+    severities = {issue.category: issue.severity for issue in report.issues}
+    assert severities["format_unverified"] == "unknown"
+    assert severities["unverified_signature"] == "info"
+    assert severities["missing_hash"] == "info"
+    assert report.status == "unknown"
 
 
 def test_issue_lists_are_bounded_but_the_verdict_counts_every_issue():
