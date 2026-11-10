@@ -387,3 +387,72 @@ def test_directory_walk_refuses_a_link_to_the_root_or_to_a_directory_holding_it(
         ".claude/skills/all: symlink target is the collection root",
         ".claude/skills/up: symlink target holds the walked directory",
     ]
+
+
+NOT_UTF8 = "symlink target name is not valid UTF-8; not collected"
+
+
+def test_a_link_to_a_name_that_is_not_utf8_is_refused_wherever_it_is_met(tmp_path):
+    # Followed, its target's lone surrogates reached link targets, walked paths and
+    # failure messages, which an inventory cannot hold.
+    raw = os.fsencode(tmp_path)
+    try:
+        os.makedirs(raw + b"/\xffdir")
+        for name in (b"/\xffdir/f.md", b"/\xfe.md"):
+            with open(raw + name, "wb") as stream:
+                stream.write(b"x")
+    except (OSError, UnicodeEncodeError):
+        pytest.skip("file system rejects names that are not UTF-8")
+    os.mkfifo(raw + b"/\xffdir/pipe")
+    os.symlink(b"\xfe.md", raw + b"/file.md")
+    os.symlink(b"\xffdir", raw + b"/dir")
+    os.mkdir(raw + b"/a")
+    os.symlink(b"../\xffdir", raw + b"/a/.claude")
+    failures: list[str] = []
+    links: list[Path] = []
+    with ConfinedCollection(tmp_path, failures) as files:
+        assert files.read_bytes("file.md") is None
+        assert files.link_target("file.md") is None
+        assert files.read_bytes("dir/f.md") is None
+        assert files.regular_file("dir/f.md") is None
+        assert not files.is_directory("dir")
+        assert list(files.iter_files("dir")) == []
+        assert files.read_bytes("a/.claude/settings.json", missing_ok=True) is None
+        assert files.case_variants("a/.claude/Settings.json") == []
+        assert list(files.iter_files(directory_links=links)) == []
+    assert links == []
+    assert failures == [
+        f"file.md: {NOT_UTF8}",
+        f"dir/f.md: {NOT_UTF8}",
+        f"dir: {NOT_UTF8}",
+        f"a/.claude/settings.json: {NOT_UTF8}",
+        f"a/.claude: {NOT_UTF8}",
+        "\\xfe.md: name is not valid UTF-8; not collected",
+        "\\xffdir: name is not valid UTF-8; not collected",
+    ]
+
+
+def test_a_case_variant_is_reported_once_however_many_paths_lead_to_it(tmp_path):
+    (tmp_path / "t").mkdir()
+    (tmp_path / "t" / "Settings.json").write_text("{}")
+    (tmp_path / "t" / "SETTINGS.JSON").write_text("{}")
+    for index in range(3):
+        (tmp_path / f"p{index}").mkdir()
+        (tmp_path / f"p{index}" / ".claude").symlink_to("../t", target_is_directory=True)
+    failures: list[str] = []
+    with ConfinedCollection(tmp_path, failures) as files:
+        for index in range(3):
+            path = f"p{index}/.claude/settings.json"
+            assert files.read_bytes(path, missing_ok=True) is None
+            assert sorted(files.case_variants(path)) == [
+                Path(f"p{index}/.claude/SETTINGS.JSON"),
+                Path(f"p{index}/.claude/Settings.json"),
+            ]
+        files.report_case_variant("t/Settings.json", "t/settings.json")
+        files.report_case_variant("q/.claude/Settings.json", "q/.claude/settings.json")
+    variant = "is the active file on case-insensitive file systems and is not inventoried"
+    assert sorted(failures) == [
+        f"p0/.claude/SETTINGS.JSON: case variant of p0/.claude/settings.json {variant}",
+        f"p0/.claude/Settings.json: case variant of p0/.claude/settings.json {variant}",
+        f"q/.claude/Settings.json: case variant of q/.claude/settings.json {variant}",
+    ]

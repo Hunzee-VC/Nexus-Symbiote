@@ -19,7 +19,7 @@ import unicodedata
 from collections.abc import Collection, Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
-from typing import Any, BinaryIO, NoReturn, cast
+from typing import Any, BinaryIO, NoReturn, Self, cast
 
 from nexus_symbiote import limits
 from nexus_symbiote.core.hashing import descriptor_binding, open_directory_nofollow
@@ -32,11 +32,14 @@ MAX_DEPTH = limits.DEFAULTS.depth
 MAX_TOTAL_BYTES = limits.DEFAULTS.total_bytes
 MAX_HASH_BYTES = limits.DEFAULTS.model_bytes
 DEFAULT_EXCLUDES = frozenset({".git", "node_modules", "__pycache__", ".venv", "venv"})
-# A walk, or a search of every source file, can fail once per entry. Past these
-# bounds one collection lists further such failures as one line per reason, so a
-# tree that reaches its limits still yields an inventory that loads and names them.
+# A walk, a search of every source file, or a collector reading file after file can
+# fail once per entry. Past these bounds a collection, and a collector's own list of
+# failures or gaps, counts further ones instead of listing them, so a tree that
+# reaches its limits still yields an inventory that loads and names them.
 MAX_LISTED_FAILURES = 1_000
 MAX_LISTED_FAILURE_CHARACTERS = 64 * 1024
+# Reasons that one summary of the failures past the bounds names one line each.
+_MAX_SUMMARIZED_REASONS = 64
 _MAX_CHUNK_BYTES = 4 * 1024 * 1024
 
 
@@ -94,17 +97,30 @@ class _VariantSearchStoppedError(Exception):
 
 
 class _MessageLog:
-    """Appends each message once to a caller's list, at constant cost per message.
+    """Lists messages in a caller's list once each, at constant cost per message.
 
     A walk can record one message per entry, so a membership test on the list
     itself would make a large tree quadratic. Entries the caller appends to the
-    list directly are taken into account before the next message.
+    list directly are taken into account before the next message. A bounded log
+    lists at most ``MAX_LISTED_FAILURES`` messages or ``MAX_LISTED_FAILURE_CHARACTERS``
+    characters of them, and once one does not fit, none does. A message that is not
+    listed is not kept either: the caller sums it up, or the log counts it in one line
+    at the end of the list that names the first such message.
     """
 
-    def __init__(self, messages: list[str]) -> None:
+    def __init__(self, messages: list[str], *, bounded: bool = True, noun: str = "failure") -> None:
         self.messages = messages
         self._seen = set(messages)
         self._synced = len(messages)
+        self._bounded = bounded
+        self._noun = noun
+        self._lines = 0
+        self._characters = 0
+        self._full = False
+        # The line that counts messages not listed: its index, first message and count.
+        self._end: int | None = None
+        self._first = ""
+        self._counted = 0
 
     def _sync(self) -> None:
         if len(self.messages) < self._synced:
@@ -117,32 +133,114 @@ class _MessageLog:
         self._sync()
         return message in self._seen
 
-    def add(self, message: str) -> bool:
-        """Append ``message`` unless it is already listed; say whether it was appended."""
-        self._sync()
-        if message in self._seen:
+    def fits(self, message: str) -> bool:
+        """Charge ``message`` to the listing bounds if it fits; once one does not, none does."""
+        if not self._bounded:
+            return True
+        if (
+            self._full
+            or self._lines >= MAX_LISTED_FAILURES
+            or self._characters + len(message) > MAX_LISTED_FAILURE_CHARACTERS
+        ):
+            self._full = True
             return False
+        self._lines += 1
+        self._characters += len(message)
+        return True
+
+    def put(self, message: str) -> None:
+        """List ``message`` without charging it, before the line that counts the rest."""
+        self._sync()
+        if self._end is None:
+            list.append(self.messages, message)
+        else:
+            list.insert(self.messages, self._end, message)
+            self._end += 1
         self._seen.add(message)
-        self.messages.append(message)
         self._synced = len(self.messages)
+
+    def count(self, message: str) -> None:
+        """Count ``message`` as not listed, in the line at the end that names the first."""
+        self._sync()
+        self._counted += 1
+        if self._end is None:
+            self._first, self._end = message, len(self.messages)
+            list.append(self.messages, message)
+        else:
+            more = self._counted - 1
+            noun = self._noun if more == 1 else self._noun + "s"
+            line = f"{self._first} (and {more} more {noun} not listed)"
+            list.__setitem__(self.messages, self._end, line)
+        self._synced = len(self.messages)
+
+    def record(self, message: str) -> None:
+        """List ``message`` within the bounds, or count it."""
+        if self.fits(message):
+            self.put(message)
+        else:
+            self.count(message)
+
+    def add(self, message: str) -> bool:
+        """Record ``message`` unless it is already listed; say whether it was new."""
+        if message in self:
+            return False
+        self.record(message)
         return True
 
 
+class BoundedRecords(list[str]):
+    """A collector's failures or gaps, listed within the listing bounds.
+
+    A collector can record one line for every file it meets. Past the bounds a line
+    is counted instead, in one line at the end that names the first line not listed
+    and how many more there were, so the inventory still loads and still fails the
+    gates. A confined collection over the list lists its own failures within the same
+    bounds and sums up the rest by reason, before that line.
+    """
+
+    def __init__(self, records: Iterable[str] = (), *, noun: str = "failure") -> None:
+        super().__init__()
+        self.log = _MessageLog(self, noun=noun)
+        self.extend(records)
+
+    def append(self, record: str, /) -> None:
+        self.log.record(record)
+
+    def extend(self, records: Iterable[str], /) -> None:
+        for record in records:
+            self.log.record(record)
+
+    def __iadd__(self, records: Iterable[str], /) -> Self:  # type: ignore[override,misc]
+        self.extend(records)
+        return self
+
+
 class _Unlisted:
-    """Failures past the listing bounds: per reason, the first path and how many there were."""
+    """Failures past the listing bounds: per reason, the first and how many there were.
+
+    Reasons are told apart by a key that names no path, so that one line sums up, for
+    example, every case variant. Only ``_MAX_SUMMARIZED_REASONS`` reasons get a line
+    of their own; one more line counts the failures for the others.
+    """
 
     def __init__(self) -> None:
         self._first: dict[str, str] = {}
         self._count: dict[str, int] = {}
 
-    def add(self, path: str, reason: str) -> None:
-        self._first.setdefault(reason, path)
-        self._count[reason] = self._count.get(reason, 0) + 1
+    def add(self, message: str, key: str) -> None:
+        if key not in self._count and len(self._first) < _MAX_SUMMARIZED_REASONS:
+            self._first[key] = message
+        self._count[key] = self._count.get(key, 0) + 1
 
     def lines(self) -> Iterator[str]:
-        for reason, first in self._first.items():
-            more = self._count[reason] - 1
-            yield f"{first}: {reason}" + (f" (and {more} more not listed)" if more else "")
+        for key, first in self._first.items():
+            more = self._count[key] - 1
+            yield first + (f" (and {more} more not listed)" if more else "")
+        others = [count for key, count in self._count.items() if key not in self._first]
+        if others:
+            failures = "failure" if sum(others) == 1 else "failures"
+            reasons = "reason" if len(others) == 1 else "reasons"
+            yield f"{sum(others)} more {failures} for {len(others)} other {reasons} not listed"
 
 
 class _WalkScope:
@@ -166,6 +264,9 @@ class _WalkScope:
 _LINK_ERRNOS = frozenset({errno.ELOOP, errno.EMLINK, errno.ENOTDIR})
 _MAX_CASE_VARIANTS = 16
 _DIRECTORY, _LINK, _OTHER = "directory", "link", "other"
+# Case-variant failures name the path asked for; past the listing bounds they are
+# summed up as one reason.
+_CASE_VARIANT = "case variant of another path"
 # The format characters HFS+ ignores when it compares names.
 _IGNORED_IN_NAMES = dict.fromkeys(
     [*range(0x200C, 0x2010), *range(0x202A, 0x202F), *range(0x206A, 0x2070), 0xFEFF]
@@ -187,10 +288,14 @@ def _lexical_target(directory: Path, text: str) -> Path:
 
     ``..`` may only lead the text: the directory holds no symlink, so leading parent
     steps resolve as the kernel resolves them, while one after a name could pass
-    through a symlink and reach a different file than this lexical answer.
+    through a symlink and reach a different file than this lexical answer. A target
+    name that is not valid UTF-8 could be written to no inventory, so its link is
+    refused, as a walk refuses such a name.
     """
     if not text or os.path.isabs(text):
         raise _LinkRefusedError("symlink target is absolute")
+    if _undecodable(text):
+        raise _LinkRefusedError("symlink target name is not valid UTF-8; not collected")
     parts = list(directory.parts)
     named = False
     for part in PurePosixPath(text).parts:
@@ -335,11 +440,20 @@ class ConfinedCollection:
         self.root = Path(os.path.abspath(self._requested_root))
         self.failures = failures
         self.exclusions = exclusions if exclusions is not None else []
-        self._failure_log = _MessageLog(self.failures)
-        self._exclusion_log = _MessageLog(self.exclusions)
-        self._listed = 0
-        self._listed_characters = 0
-        self._unlisted: _Unlisted | None = None
+        # A collector's own lists share their bounds with what the collection records.
+        self._failure_log = (
+            failures.log if isinstance(failures, BoundedRecords) else _MessageLog(failures)
+        )
+        self._exclusion_log = (
+            self.exclusions.log
+            if isinstance(self.exclusions, BoundedRecords)
+            else _MessageLog(self.exclusions, bounded=False)
+        )
+        # Failures past the listing bounds that no walk or bounded block sums up are
+        # summed up when the collection ends.
+        self._unlisted = _Unlisted()
+        self._block: _Unlisted | None = None
+        self._variants_reported: set[Path] = set()
         self._file_bound = _bound(max_file_bytes, "file-bytes")
         self._entry_bound = _bound(max_entries, "entries")
         self._depth_bound = _bound(max_depth, "depth")
@@ -385,53 +499,58 @@ class ConfinedCollection:
         if self._root_fd is not None:
             os.close(self._root_fd)
             self._root_fd = None
+        unlisted, self._unlisted = self._unlisted, _Unlisted()
+        self._summarize(unlisted)
 
     @property
     def bytes_exhausted(self) -> bool:
         """Whether the collection's total byte budget is spent, so no further read succeeds."""
         return self._budget.exhausted
 
-    def _fail(self, path: str | Path, reason: str) -> None:
-        self._record(path, reason, self._unlisted)
+    def _fail(self, path: str | Path, reason: str, *, key: str | None = None) -> None:
+        self._record(path, reason, self._unlisted if self._block is None else self._block, key)
 
-    def _record(self, path: str | Path, reason: str, unlisted: _Unlisted | None) -> None:
-        """List a failure once; with ``unlisted``, only within the collection's listing bounds."""
+    def _record(
+        self, path: str | Path, reason: str, unlisted: _Unlisted, key: str | None = None
+    ) -> None:
+        """List a failure once within the listing bounds; past them ``unlisted`` counts it.
+
+        ``key`` names the reason for a summary when the reason names a path.
+        """
         message = f"{path!s}: {reason}"
-        if unlisted is None:
-            self._failure_log.add(message)
-        elif (
-            self._listed < MAX_LISTED_FAILURES
-            and self._listed_characters + len(message) <= MAX_LISTED_FAILURE_CHARACTERS
-        ):
-            if self._failure_log.add(message):
-                self._listed += 1
-                self._listed_characters += len(message)
-        elif message not in self._failure_log:
-            unlisted.add(str(path), reason)
+        if message in self._failure_log:
+            return
+        if self._failure_log.fits(message):
+            self._failure_log.put(message)
+        else:
+            unlisted.add(message, reason if key is None else key)
 
     def _summarize(self, unlisted: _Unlisted) -> None:
         for line in unlisted.lines():
-            self._failure_log.add(line)
+            if line not in self._failure_log:
+                self._failure_log.put(line)
 
     @contextmanager
     def bounded_failures(self) -> Iterator[None]:
-        """List the failures recorded in the block only within the listing bounds.
+        """Sum up when the block ends the failures it records past the listing bounds.
 
         For work that can fail once per file, such as searching every source file.
-        Once the collection has listed ``MAX_LISTED_FAILURES`` such failures or
-        ``MAX_LISTED_FAILURE_CHARACTERS`` of them, later ones are counted by reason,
-        and the block ends with one line per reason that names the first path not
-        listed and how many more there were. Every reason is still recorded.
+        Every failure a collection records is listed only within its listing bounds:
+        once it has listed ``MAX_LISTED_FAILURES`` failures or
+        ``MAX_LISTED_FAILURE_CHARACTERS`` of them, later ones are counted by reason.
+        Such a block, like a walk, ends with one line per reason that names the first
+        path not listed and how many more there were; others are summed up when the
+        collection ends. Every reason is still recorded.
         """
-        if self._unlisted is not None:
+        if self._block is not None:
             yield
             return
-        unlisted = self._unlisted = _Unlisted()
+        block = self._block = _Unlisted()
         try:
             yield
         finally:
-            self._unlisted = None
-            self._summarize(unlisted)
+            self._block = None
+            self._summarize(block)
 
     def _relative(self, path: str | Path) -> Path:
         if "\x00" in str(path):
@@ -1207,15 +1326,27 @@ class ConfinedCollection:
         return target
 
     def report_case_variant(self, variant: str | Path, path: str | Path) -> None:
-        """Record ``variant``, another spelling of ``path`` found by a walk, as a failure."""
+        """Record ``variant``, another spelling of ``path`` found by a walk, as a failure.
+
+        A variant is reported once per collection, however many paths lead to it.
+        """
+        self._report_variant(Path(variant), Path(variant), Path(path))
+
+    def _report_variant(self, variant: Path, real: Path, path: Path) -> None:
+        """Report the variant that ``real`` holds, under the path a host opens it by."""
+        if real in self._variants_reported:
+            # Every directory symlink to one directory of spellings would list them again.
+            return
+        self._variants_reported.add(real)
         self._fail(
-            Path(variant),
-            f"case variant of {Path(path).as_posix()} is the active file on "
+            variant,
+            f"case variant of {path.as_posix()} is the active file on "
             "case-insensitive file systems and is not inventoried",
+            key=_CASE_VARIANT,
         )
 
     def _report_case_variants(self, relative: Path, variants_read: Collection[str]) -> None:
         for variant, real in self._variants(relative):
             if variant.as_posix() in variants_read or self.excluded(variant) or self.excluded(real):
                 continue
-            self.report_case_variant(variant, relative)
+            self._report_variant(variant, real, relative)

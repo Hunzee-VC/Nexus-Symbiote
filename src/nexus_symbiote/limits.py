@@ -62,7 +62,7 @@ SPECS: dict[str, LimitSpec] = {
             "bytes",
             64 * GIB,
             "Bytes one collector reads in total, except model weights; the mcp, a2a and "
-            "rag collectors may read source-scan-bytes more while they search source.",
+            "rag collectors, which also search source, may read source-scan-bytes more.",
         ),
         LimitSpec(
             "entries",
@@ -148,14 +148,19 @@ def format_value(name: str, value: int) -> str:
 
 @dataclass(frozen=True)
 class Bound:
-    """A bound one collection enforces, and whether the operator can raise it."""
+    """A bound one collection enforces, and whether the operator can raise it.
+
+    ``shown`` states the value in a failure when the bound adds another limit to the
+    named one, so that the failure gives the numbers the operator set.
+    """
 
     value: int
     name: str
     configurable: bool = True
+    shown: str | None = None
 
     def exceeded(self) -> str:
-        shown = format_value(self.name, self.value)
+        shown = format_value(self.name, self.value) if self.shown is None else self.shown
         if self.configurable:
             return f"{self.name} limit of {shown} exceeded; raise it with {OPTION} {self.name}=N"
         return f"{self.name} limit of {shown} exceeded; this limit is fixed for this input"
