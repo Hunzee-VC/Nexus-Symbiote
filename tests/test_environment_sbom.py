@@ -153,3 +153,46 @@ def test_cli_writes_a_file_from_pip_inspect(tmp_path):
     document = json.loads(out.read_text())
     assert document["metadata"]["timestamp"] == "2026-11-04T21:30:08Z"
     assert validate_cyclonedx(document) == []
+
+
+def test_every_installed_distribution_must_be_locked_at_its_version():
+    from environment_sbom import locked_versions
+
+    root = Path(__file__).resolve().parents[1]
+    lock = (locked_versions((root / "requirements-action.lock").read_text()), "0" * 64)
+    click = locked_versions((root / "requirements-action.lock").read_text())["click"]
+    inspect = json.loads(json.dumps(INSPECT))
+    inspect["installed"][1]["metadata"]["version"] = next(iter(click))
+    document = build_sbom(inspect, timestamp=datetime.now(UTC), lock=lock)
+    assert document["metadata"]["properties"] == [
+        {"name": "nexus-symbiote:lock-sha256", "value": "0" * 64}
+    ]
+    inspect["installed"][1]["metadata"]["version"] = "0.0.1"
+    with pytest.raises(ValueError, match="click==0.0.1 is installed but not locked"):
+        build_sbom(inspect, timestamp=datetime.now(UTC), lock=lock)
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        {"metadata": None},
+        {"metadata": {"name": "x y", "version": "1"}},
+        {"metadata": {"name": "a"}},
+    ],
+)
+def test_a_record_that_cannot_be_represented_fails_instead_of_vanishing(record):
+    inspect = {**INSPECT, "installed": [*INSPECT["installed"], record]}
+    with pytest.raises(ValueError):
+        build_sbom(inspect, timestamp=datetime.now(UTC))
+
+
+def test_a_legacy_license_name_is_kept_but_pasted_licence_text_is_not():
+    def licences(value):
+        record = {"metadata": {"name": "legacy", "version": "1", "license": value}}
+        document = build_sbom(
+            {"environment": LINUX, "installed": [record]}, timestamp=datetime.now(UTC)
+        )
+        return document["components"][0].get("licenses")
+
+    assert licences("MIT") == [{"license": {"name": "MIT"}}]
+    assert licences("Copyright (c) 2020\nPermission is hereby granted...") is None
