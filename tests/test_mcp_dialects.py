@@ -323,13 +323,60 @@ def test_container_launch_context_is_rated_without_values(tmp_path, args, high, 
 
 
 @pytest.mark.parametrize(
+    "server,reason",
+    [
+        ({"command": "node", "args": ["-e", "require('x')"]}, "inline node code"),
+        ({"command": "node", "args": ["--eval=require('x')"]}, "inline node code"),
+        ({"command": "node", "args": ["-pe", "require('x')"]}, "inline node code"),
+        ({"command": "node", "args": ["--import", "data:text/javascript,x"]}, "inline node code"),
+        ({"command": "node", "args": ["--title", "t", "-e", "x"]}, "inline node code"),
+        ({"command": "python3", "args": ["-c", "import x"]}, "inline python code"),
+        ({"command": "python3", "args": ["-Ic", "import x"]}, "inline python code"),
+        ({"command": "python3", "args": ["-W", "ignore", "-c", "x"]}, "inline python code"),
+        ({"command": "ruby", "args": ["-I", "lib", "-e", "x"]}, "inline ruby code"),
+        ({"command": "uv", "args": ["run", "python", "-c", "x"]}, "inline python code"),
+        ({"command": "npx", "args": ["-p", "pkg@1.2.3", "node", "-e", "x"]}, "inline node code"),
+        ({"command": "deno", "args": ["eval", "import('npm:x')"]}, "inline deno code"),
+        ({"command": "deno", "args": ["run", "data:application/javascript,x"]}, "inline deno"),
+    ],
+)
+def test_inline_interpreter_code_is_an_unknown_launcher(tmp_path, server, reason):
+    record, gaps = single(tmp_path, server)
+    finding = next(r for r in record.risks if r.category == "launcher_identity")
+    assert finding.severity.value == "high" and reason in finding.detail
+    assert gaps and "launcher identity unknown" in gaps[0]
+    assert record.version_pinned is False
+
+
+@pytest.mark.parametrize(
+    "server",
+    [
+        {"command": "node", "args": ["server.js", "-e", "production", "-p", "8080"]},
+        {"command": "node", "args": ["--inspect", "dist/index.js"]},
+        {"command": "python3", "args": ["-u", "-m", "my_server", "-c", "config.toml"]},
+        {"command": "python3", "args": ["-X", "dev", "server.py"]},
+    ],
+)
+def test_script_arguments_are_not_interpreter_options(tmp_path, server):
+    record, gaps = single(tmp_path, server)
+    assert not gaps
+    assert not any(r.category == "launcher_identity" for r in record.risks)
+
+
+@pytest.mark.parametrize(
     "server,label",
     [
-        ({"command": "node", "args": ["-e", "require('x')"]}, "inline interpreter code"),
-        ({"command": "python3", "args": ["-c", "import x"]}, "inline interpreter code"),
         (
             {"command": "node", "args": ["--require", "/srv/hook/x.js", "s.js"]},
             "a preloaded module",
+        ),
+        (
+            {"command": "npx", "args": ["--node-options=--require /srv/hook/x.js", "pkg@1.2.3"]},
+            "an option that loads local code",
+        ),
+        (
+            {"command": "npm", "args": ["--script-shell", "/srv/hook/x.sh", "exec", "pkg@1.2.3"]},
+            "an option that loads local code",
         ),
         (
             {

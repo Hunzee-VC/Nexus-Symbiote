@@ -239,8 +239,8 @@ _CONTEXT_MEDIUM = {
     "added_capabilities": "added capabilities",
     "devices": "host devices",
     "broad_host_mount": "a broad host directory mount",
-    "inline_code": "inline interpreter code",
     "preload_module": "a preloaded module",
+    "code_loading_option": "an option that loads local code",
     "code_loading_environment": "environment that changes code loading",
 }
 
@@ -722,8 +722,11 @@ class MCPScanner(Scanner):
             version_pinned = False
         elif packages:
             version_pinned = all(package.pinned for package in packages)
+        # An exact package URL claims what the server is; not while its launch is unknown.
         package_url = (
-            _purl(primary) if primary is not None and launcher_package is not None else None
+            _purl(primary)
+            if primary is not None and launcher_package is not None and not identity_unknown
+            else None
         )
         settings = self._client_settings(config)
         context = dict(launch.context)
