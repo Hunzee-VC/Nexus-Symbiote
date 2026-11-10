@@ -370,11 +370,14 @@ _TRANSPORT_TYPES = {
     "ws": "websocket",
     "websocket": "websocket",
 }
+# Login shells, zsh, fish and Python's user site also load code from HOME, ZDOTDIR,
+# XDG_CONFIG_HOME and PYTHONUSERBASE.
 _CODE_LOADING_ENVIRONMENT = _names(
     "LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT DYLD_INSERT_LIBRARIES DYLD_LIBRARY_PATH "
     "DYLD_FRAMEWORK_PATH NODE_OPTIONS NODE_PATH PYTHONPATH PYTHONSTARTUP PYTHONHOME "
     "PERL5OPT PERL5LIB RUBYOPT RUBYLIB JAVA_TOOL_OPTIONS _JAVA_OPTIONS JDK_JAVA_OPTIONS "
-    "BASH_ENV ENV NPM_CONFIG_NODE_OPTIONS NPM_CONFIG_SCRIPT_SHELL"
+    "BASH_ENV ENV NPM_CONFIG_NODE_OPTIONS NPM_CONFIG_SCRIPT_SHELL "
+    "HOME ZDOTDIR XDG_CONFIG_HOME PYTHONUSERBASE"
 )
 # Environment names that make a package runner resolve from another registry, index,
 # cache, proxy, trust store or engine. npm reads npm_config_<key> for every .npmrc key.
@@ -425,6 +428,61 @@ _TRUST_ENVIRONMENT = {
     "go": r"ssl_cert_file|ssl_cert_dir",
 }
 _PROXY_ENVIRONMENT = r"https?_proxy|all_proxy"
+# Where a runner finds its user and global configuration, caches and programs: npm
+# reads ~/.npmrc and <prefix>/etc/npmrc, uv and pip ~/.config, go $GOENV and
+# ~/.config/go/env, docker ~/.docker, shells their profiles. No file there is read.
+_LOCATION_ENVIRONMENT = _names(
+    "HOME XDG_CONFIG_HOME XDG_CONFIG_DIRS XDG_CACHE_HOME XDG_DATA_HOME ZDOTDIR PYTHONUSERBASE"
+)
+# Read only on Windows, where a drive, UNC or rooted path is absolute.
+_WINDOWS_LOCATION_ENVIRONMENT = _names("USERPROFILE APPDATA LOCALAPPDATA")
+_LOCATION_LISTS = frozenset({"PATH", "XDG_CONFIG_DIRS"})
+_NPM_LOCATION_ENVIRONMENT = _names("PREFIX DESTDIR")
+_RUNNER_LOCATION_ENVIRONMENT = {
+    "npm": _NPM_LOCATION_ENVIRONMENT,
+    "bun": _NPM_LOCATION_ENVIRONMENT,
+    "yarn": _NPM_LOCATION_ENVIRONMENT,
+    "deno": _NPM_LOCATION_ENVIRONMENT,
+    "go": _names("GOENV"),
+}
+# The environment forms of --overrides, --constraints and -r replace or add packages.
+_UV_REPLACEMENT_ENVIRONMENT = _names("UV_OVERRIDE UV_CONSTRAINT UV_BUILD_CONSTRAINT")
+_REPLACEMENT_ENVIRONMENT = {
+    "uv-tool": _UV_REPLACEMENT_ENVIRONMENT,
+    "uv-project": _UV_REPLACEMENT_ENVIRONMENT,
+    "pip": _names("PIP_CONSTRAINT PIP_REQUIREMENT PIP_BUILD_CONSTRAINT"),
+}
+
+
+def _prefixes(*prefixes: str) -> tuple[tuple[re.Pattern[str], str], ...]:
+    return tuple((re.compile(re.escape(prefix) + ".+", re.DOTALL), prefix) for prefix in prefixes)
+
+
+# Each runner reads every setting from its own namespace, matched upper-cased as
+# Windows reads names. go's settings have no underscore, so GOOGLE_API_KEY is not one.
+_COREPACK_NAMESPACE = _prefixes("COREPACK_")
+_UV_NAMESPACE = _prefixes("UV_")
+_NAMESPACE_ENVIRONMENT = {
+    "npm": _COREPACK_NAMESPACE,
+    "yarn": _prefixes("YARN_") + _COREPACK_NAMESPACE,
+    "bun": _prefixes("BUN_"),
+    "deno": _prefixes("DENO_"),
+    "uv-tool": _UV_NAMESPACE,
+    "uv-project": _UV_NAMESPACE,
+    "pip": _prefixes("PIP_", "PIPX_"),
+    "go": ((re.compile(r"GO[A-Z0-9]+"), "GO"),),
+    "oci": _prefixes("DOCKER_", "CONTAINER_", "CONTAINERS_", "CONTAINERD_", "PODMAN_", "NERDCTL_"),
+}
+# Settings in those namespaces that change only what the runner displays.
+_DISPLAY_ENVIRONMENT = _names(
+    "UV_NO_PROGRESS PIP_QUIET PIP_VERBOSE PIP_PROGRESS_BAR PIP_NO_COLOR PIPX_USE_EMOJI"
+    " YARN_SILENT YARN_ENABLE_PROGRESS_BARS YARN_PROGRESS_BAR_STYLE YARN_ENABLE_COLORS"
+    " BUN_CONFIG_VERBOSE_FETCH DOCKER_CLI_HINTS COREPACK_ENABLE_DOWNLOAD_PROMPT"
+)
+_RELOCATED = "environment relocates resolver configuration into the project"
+_SEARCHED = "PATH may search the project for the runner"
+_REPLACED = "environment replaces or constrains the launched package"
+_WINDOWS_ROOT = re.compile(r"[A-Za-z]:[\\/]|[\\/]")
 _LOCATOR = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s,;\"']+")
 _NPM_PURL_NAME = re.compile(r"(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*")
 _CONTEXT_HIGH = {
@@ -444,6 +502,18 @@ _CONTEXT_MEDIUM = {
     "code_loading_environment": "environment that changes code loading",
     "code_loading_setting": "a package manager setting that loads local code",
 }
+
+
+def _declared_type(config: dict[str, Any]) -> Any:
+    return config.get("type", config.get("transport", config.get("transportType")))
+
+
+def _declared_transport(config: dict[str, Any]) -> str | None:
+    """The transport a server declares, normalised; None when it declares none it names."""
+    declared = _declared_type(config)
+    if not isinstance(declared, str):
+        return None
+    return _TRANSPORT_TYPES.get(declared.strip().lower().replace("_", "-"))
 
 
 def _origin_label(value: str) -> list[str]:
@@ -616,6 +686,83 @@ _KNOWN_SETTINGS = (
 def _environment_label(variable: str) -> str:
     """A package source label for an environment variable, never a token-shaped name."""
     return "env:[redacted]" if TOKEN_SHAPE.search(variable) else f"env:{variable}"
+
+
+def _absolute(value: str, *, windows: bool = False) -> bool:
+    """Whether a location names an absolute directory; any other may lie in the project.
+
+    An empty, relative or ``~`` value is relative to the working directory, and an
+    expansion such as ``${workspaceFolder}`` or ``%USERPROFILE%`` may name the project.
+    """
+    if not value or expands(value):
+        return False
+    return bool(_WINDOWS_ROOT.match(value)) if windows else value.startswith("/")
+
+
+def _absolute_list(value: str) -> bool:
+    """Whether every entry of a directory list is absolute however it is split.
+
+    POSIX splits at ``:`` and searches the working directory for an empty entry, so a
+    Windows list such as ``C:\\bin`` names relative directories there; Windows splits
+    at ``;``.
+    """
+    return all(_absolute(entry) for entry in value.split(":")) and all(
+        _absolute(entry, windows=True) for entry in value.split(";") if entry
+    )
+
+
+def _runner_environment(
+    family: str, environment: list[tuple[str, str]]
+) -> tuple[list[tuple[str, str]], list[str]]:
+    """Package sources a runner's environment adds, and why it leaves the identity unknown.
+
+    A location the runner reads its configuration, caches or programs from, a
+    replacement of the package and any non-display setting of the runner's own
+    namespace are sources. A location that may lie in the project, or a replacement,
+    also makes the identity unknown: no file there is read, so a change would go
+    unseen. A PATH of absolute directories is the operator's own and adds nothing.
+    """
+    sources: list[tuple[str, str]] = []
+    reasons: list[str] = []
+    explicit = _REDIRECT_ENVIRONMENT.get(family)
+    for variable, value in environment if family else ():
+        name = variable.upper()
+        windows = name in _WINDOWS_LOCATION_ENVIRONMENT
+        if name == "PATH":
+            if not _absolute_list(value):
+                sources.append((_environment_label(variable), value))
+                reasons.append(_SEARCHED)
+        elif (
+            windows
+            or name in _LOCATION_ENVIRONMENT
+            or name in _RUNNER_LOCATION_ENVIRONMENT.get(family, ())
+        ):
+            sources.append((_environment_label(variable), value))
+            inside = (
+                not _absolute_list(value)
+                if name in _LOCATION_LISTS
+                else not _absolute(value, windows=windows)
+            )
+            if inside:
+                reasons.append(_RELOCATED)
+        elif name in _REPLACEMENT_ENVIRONMENT.get(family, ()):
+            sources.append((_environment_label(variable), value))
+            reasons.append(_REPLACED)
+        elif name not in _DISPLAY_ENVIRONMENT and not (
+            explicit is not None and re.fullmatch(explicit, variable, re.IGNORECASE)
+        ):
+            prefix = next(
+                (
+                    label
+                    for pattern, label in _NAMESPACE_ENVIRONMENT.get(family, ())
+                    if pattern.fullmatch(name)
+                ),
+                None,
+            )
+            if prefix is not None:
+                # A name taken from input is never exported: only its namespace is.
+                sources.append((f"env:{prefix}[other]", value))
+    return sources, reasons
 
 
 def _setting_name(key: str, launched: set[str]) -> str:
@@ -1180,9 +1327,12 @@ class MCPScanner(Scanner):
             or _launch_directory(dialect.path) != ""
         )
         environment = [*env.items(), *launch.environment]
+        runner_sources, runner_reasons = _runner_environment(launch.family or "", environment)
         environment_file = "envFile" in config or launch.injected_environment
         view = self._resolver_view(launch, relocated, environment, environment_file)
-        identity = self._identity(name, config, launch, endpoint_url, env, scrubber, view)
+        identity = self._identity(
+            name, config, launch, endpoint_url, env, scrubber, view, runner_sources
+        )
         gaps: list[str] = []
         for gap in (identity.endpoint_gap, transport_gap):
             if gap:
@@ -1196,7 +1346,9 @@ class MCPScanner(Scanner):
             gaps.append(
                 f"declares {count} field{'s' if count > 1 else ''} the collector does not interpret"
             )
-        identity_unknown = self._identity_unknown(launch) or next(iter(view.identity), None)
+        identity_unknown = self._identity_unknown(launch) or next(
+            iter([*view.identity, *runner_reasons]), None
+        )
         if identity_unknown:
             gaps.append(f"launcher identity unknown ({identity_unknown})")
         if identity.withheld:
@@ -1266,6 +1418,7 @@ class MCPScanner(Scanner):
             settings=settings,
             withheld=identity.withheld,
             endpoints=endpoints,
+            remote_type=_declared_transport(config) not in (None, "stdio"),
         )
         resolver = sorted(view.binding)
         # The launcher package and its version are recorded; every other argument
@@ -1387,6 +1540,7 @@ class MCPScanner(Scanner):
         env: dict[str, str],
         scrubber: SecretScrubber,
         view: _ResolverView,
+        runner_sources: list[tuple[str, str]],
     ) -> _Identity:
         """Compute identity fields from raw values; withhold one that holds a secret value."""
         withheld: list[str] = []
@@ -1423,7 +1577,7 @@ class MCPScanner(Scanner):
                     "pin": package.pin,
                 }
             )
-        sources = self._package_sources(launch, env, scrubber, withheld, view)
+        sources = self._package_sources(launch, env, scrubber, withheld, view, runner_sources)
         return _Identity(
             name=shown_name,
             command=command,
@@ -1451,9 +1605,10 @@ class MCPScanner(Scanner):
         scrubber: SecretScrubber,
         withheld: list[str],
         view: _ResolverView,
+        runner_sources: list[tuple[str, str]],
     ) -> list[str]:
         """Exported sources that redirect package resolution: label and origin only."""
-        found: list[tuple[str, str]] = list(launch.sources)
+        found: list[tuple[str, str]] = [*launch.sources, *runner_sources]
         family = launch.family or ""
         environment = [*env.items(), *launch.environment]
         pattern = _REDIRECT_ENVIRONMENT.get(family)
@@ -1612,14 +1767,15 @@ class MCPScanner(Scanner):
     def _transport(
         self, config: dict[str, Any], dialect: McpDialect, has_command: bool
     ) -> tuple[str, str | None]:
-        declared = config.get("type", config.get("transport", config.get("transportType")))
-        if isinstance(declared, str):
-            normalized = _TRANSPORT_TYPES.get(declared.strip().lower().replace("_", "-"))
-            if normalized is not None:
-                return normalized, None
-            gap: str | None = "declares an unrecognised transport type"
-        else:
-            gap = None
+        declared = _declared_transport(config)
+        gap = (
+            "declares an unrecognised transport type"
+            if declared is None and isinstance(_declared_type(config), str)
+            else None
+        )
+        # Gemini CLI chooses the transport from command, url and httpUrl, not a type.
+        if declared is not None and not (has_command and dialect.url_transport):
+            return declared, None
         if has_command:
             return "stdio", gap
         if config.get("httpUrl"):
@@ -1736,6 +1892,7 @@ class MCPScanner(Scanner):
         settings: dict[str, Any],
         withheld: list[str],
         endpoints: list[str],
+        remote_type: bool,
     ) -> list[RiskAssessment]:
         risks: list[RiskAssessment] = []
 
@@ -1785,11 +1942,15 @@ class MCPScanner(Scanner):
                 f"({', '.join(labels)}); package name and version do not establish identity.",
                 "Review that registry or index, and pin an artifact digest or integrity hash.",
             )
-        if transport == "stdio" and command:
+        # A client may start the command whatever transport the server declares.
+        if command:
             add(
                 RiskSeverity.MEDIUM,
                 "local_process",
-                f"MCP server '{name}' uses stdio transport (local process).",
+                f"MCP server '{name}' uses stdio transport (local process)."
+                if transport == "stdio"
+                else f"MCP server '{name}' declares a launch command (local process) and a "
+                "remote transport.",
                 "Ensure the command binary is integrity-checked.",
             )
         if endpoint_url and _has_userinfo(endpoint_url):
@@ -1820,11 +1981,13 @@ class MCPScanner(Scanner):
                 else f"MCP server '{name}' endpoint host cannot be established from its URL.",
                 "Declare a literal https:// URL whose host every URL parser reads the same way.",
             )
-        if command and endpoints:
+        if command and (endpoints or remote_type):
             add(
                 RiskSeverity.LOW,
                 "transport_ambiguity",
-                f"MCP server '{name}' declares both a launch command and an endpoint.",
+                f"MCP server '{name}' declares both a launch command and an endpoint."
+                if endpoints
+                else f"MCP server '{name}' declares a launch command and a remote transport type.",
                 "Declare either a command or an endpoint, and an explicit transport type.",
             )
         high = [label for flag, label in _CONTEXT_HIGH.items() if context.get(flag)]
