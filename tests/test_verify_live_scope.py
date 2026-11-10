@@ -36,6 +36,9 @@ for line in sys.stdin:
     if method == "notifications/initialized":
         continue
     result = hello if method == "initialize" else lists[method]
+    if "error" in result:
+        print(json.dumps({{"jsonrpc": "2.0", "id": request["id"], "error": result["error"]}}), flush=True)
+        continue
     for note in notes:
         print(json.dumps(note), flush=True)
     print(json.dumps({{"jsonrpc": "2.0", "id": request["id"], "result": result}}), flush=True)
@@ -400,3 +403,17 @@ def test_project_must_be_named(tmp_path):
     )
     assert result.exit_code == 2
     assert "--project" in result.output
+
+
+def test_declared_but_unimplemented_templates_do_not_fail_verification(tmp_path):
+    hello = {**HELLO, "capabilities": {"tools": {}, "resources": {}}}
+    missing = {"resources/templates/list": {"error": {"code": -32601, "message": "missing"}}}
+    report = verify_mcp_servers(
+        inventory(), trusted_launchers=launcher(tmp_path, hello=hello, lists=missing)
+    )
+    assert report.complete and not report.has_drift
+    broken = {"resources/templates/list": {"error": {"code": -32603, "message": "boom"}}}
+    failed = verify_mcp_servers(
+        inventory(), trusted_launchers=launcher(tmp_path, hello=hello, lists=broken, name="b")
+    )
+    assert failed.results[0].reason == "protocol"

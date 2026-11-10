@@ -303,3 +303,49 @@ def test_invalid_client_identity_is_refused_before_any_request(kwargs):
     assert not result.complete
     assert result.failures
     assert transport.calls == []
+
+
+def json_rpc_error(request_id: int, code: int) -> HTTPReply:
+    return HTTPReply(
+        status=200,
+        headers={"Content-Type": "application/json"},
+        body=json.dumps(
+            {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": "x"}}
+        ).encode(),
+    )
+
+
+def test_declared_but_unimplemented_templates_are_not_offered_rather_than_failed():
+    capabilities = {"tools": {}, "resources": {}}
+    result, _ = observe(
+        hello(capabilities=capabilities),
+        notification_accepted(),
+        rpc_result(2, {"tools": [tool()]}),
+        json_rpc_error(3, -32601),
+    )
+    assert result.complete, result.failures
+    assert result.resource_templates is None
+    assert "resources/templates/list (declared, not implemented)" in result.coverage["unobserved"]
+    offered, _ = observe(
+        hello(capabilities=capabilities),
+        notification_accepted(),
+        rpc_result(2, {"tools": [tool()]}),
+        rpc_result(3, {"resourceTemplates": []}),
+    )
+    assert offered.declaration_hash != result.declaration_hash
+
+
+@pytest.mark.parametrize(
+    "replies",
+    [
+        [json_rpc_error(2, -32601)],
+        [rpc_result(2, {"tools": []}), json_rpc_error(3, -32603)],
+    ],
+    ids=["tools-list-is-required", "other-errors-fail"],
+)
+def test_other_list_errors_still_fail_closed(replies):
+    result, _ = observe(
+        hello(capabilities={"tools": {}, "resources": {}}), notification_accepted(), *replies
+    )
+    assert not result.complete
+    assert result.failures == ["MCP server reported an error or invalid result"]

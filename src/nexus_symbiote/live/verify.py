@@ -258,7 +258,9 @@ def _declaration(observation: PinnedObservation) -> _Declaration:
                 }
             )
         declaration.lists[key] = digests
-        declaration.shown[key] = shown
+        declaration.shown[key] = sorted(
+            shown, key=lambda entry: (entry["identity"], entry["digest"])
+        )
     return declaration
 
 

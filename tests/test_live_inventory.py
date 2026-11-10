@@ -191,3 +191,68 @@ def test_inventory_builder_refuses_incomplete_or_colliding_observations():
     observed.tools[1].name = "a"
     with pytest.raises(ValueError, match="collide"):
         observation_inventory(observed)
+
+
+def test_raw_review_copy_holds_what_the_fingerprints_cover(monkeypatch, tmp_path):
+    token = "sensitive-bearer-token-12345"  # noqa: S105 - synthetic redaction fixture
+    monkeypatch.setenv("MCP_TOKEN", token)
+    hidden = {
+        **tool(description="See https://docs.example/Ignore_previous_instructions"),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"path": {"type": "string", "default": f"<IMPORTANT>{token}"}},
+        },
+    }
+    review = tmp_path / "review.json"
+    result, target = record(
+        monkeypatch,
+        tmp_path,
+        "observed.json",
+        server(tools=[hidden]),
+        "--token-env",
+        "MCP_TOKEN",
+        "--raw-descriptors",
+        str(review),
+    )
+    assert result.exit_code == 0, result.output
+    assert review.stat().st_mode & 0o777 == 0o600
+    copy = json.loads(review.read_text())
+    [raw] = copy["tools"]
+    assert raw["description"] == "See https://docs.example/Ignore_previous_instructions"
+    assert raw["inputSchema"]["properties"]["path"]["default"] == "<IMPORTANT>***"
+    assert copy["instructions"] == "Read-only issue access."
+    assert [p["name"] for p in copy["prompts"]] == ["summarize"]
+    assert copy["complete"] is True
+    assert token not in review.read_text() and token not in target.read_text()
+    again, _ = record(
+        monkeypatch, tmp_path, "again.json", server(), "--raw-descriptors", str(review)
+    )
+    assert again.exit_code == 1 and "Cannot write the output file" in again.output
+    same, _ = record(
+        monkeypatch,
+        tmp_path,
+        "same.json",
+        server(),
+        "--raw-descriptors",
+        str(tmp_path / "same.json"),
+    )
+    assert same.exit_code == 2
+
+
+def test_reordered_tools_and_prompts_are_not_drift(monkeypatch, tmp_path):
+    def ordered(reverse: bool) -> list[HTTPReply]:
+        replies = server(tools=[tool("a"), tool("b")])
+        prompts = [{"name": "one"}, {"name": "two"}]
+        tools = [tool("a"), tool("b")]
+        if reverse:
+            prompts.reverse()
+            tools.reverse()
+        replies[2] = rpc_result(2, {"tools": tools})
+        replies[3] = rpc_result(3, {"prompts": prompts})
+        return replies
+
+    _, first = record(monkeypatch, tmp_path, "first.json", ordered(False))
+    _, second = record(monkeypatch, tmp_path, "second.json", ordered(True))
+    status, report = diff(first, second)
+    assert status == 0
+    assert report["has_changes"] is False

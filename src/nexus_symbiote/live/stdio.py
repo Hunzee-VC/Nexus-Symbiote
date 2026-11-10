@@ -17,7 +17,11 @@ from pathlib import Path
 from typing import Any
 
 from nexus_symbiote.core.hashing import open_regular_file, parse_json_strict
-from nexus_symbiote.scanners.live_mcp import PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS
+from nexus_symbiote.scanners.live_mcp import (
+    PROTOCOL_VERSION,
+    SUPPORTED_PROTOCOL_VERSIONS,
+    is_method_not_found,
+)
 
 PROTOCOL = PROTOCOL_VERSION
 MAX_LINE = 1024 * 1024
@@ -146,13 +150,18 @@ def _capture(binary: Path, work: Path) -> PinnedObservation:
                     raise StdioProtocolError("MCP input stream closed")
                 data = data[written:]
 
-        def call(method: str, params: dict[str, Any]) -> dict[str, Any]:
+        def call(
+            method: str, params: dict[str, Any], *, optional: bool = False
+        ) -> dict[str, Any] | None:
+            """One request; with ``optional``, a -32601 reply returns None (not offered)."""
             nonlocal next_id
             next_id += 1
             send({"id": next_id, "method": method, "params": params})
             for msg in frames:
                 if "id" not in msg and isinstance(msg.get("method"), str):
                     continue
+                if optional and msg.get("id") == next_id and is_method_not_found(msg):
+                    return None
                 if (
                     set(msg) != {"jsonrpc", "id", "result"}
                     or type(msg.get("id")) is not int
@@ -165,13 +174,16 @@ def _capture(binary: Path, work: Path) -> PinnedObservation:
                 return result
             raise StdioProtocolError("missing MCP response")
 
-        def listing(method: str, key: str, identity: str) -> list[dict[str, Any]]:
+        def listing(method: str, key: str, identity: str) -> list[dict[str, Any]] | None:
+            """A paginated list, or None when the server does not implement ``method``."""
             items: list[dict[str, Any]] = []
             seen: set[str] = set()
             cursors: set[str] = set()
             params: dict[str, Any] = {}
             for _ in range(64):
-                result = call(method, params)
+                result = call(method, params, optional=method != "tools/list" and not params)
+                if result is None:
+                    return None
                 values = result.get(key)
                 if not isinstance(values, list) or len(items) + len(values) > MAX_TOOLS:
                     raise StdioProtocolError("invalid or oversized MCP list")
@@ -212,7 +224,7 @@ def _capture(binary: Path, work: Path) -> PinnedObservation:
                     "clientInfo": {"name": "nexus-symbiote", "version": "1"},
                 },
             )
-            if hello.get("protocolVersion") not in SUPPORTED_PROTOCOL_VERSIONS:
+            if hello is None or hello.get("protocolVersion") not in SUPPORTED_PROTOCOL_VERSIONS:
                 raise StdioProtocolError(
                     "unsupported MCP protocol version", reason="unsupported-protocol-version"
                 )
@@ -222,7 +234,10 @@ def _capture(binary: Path, work: Path) -> PinnedObservation:
             ):
                 raise StdioProtocolError("MCP tool listing was not negotiated")
             send({"method": "notifications/initialized"})
-            observation = PinnedObservation(hello, listing("tools/list", "tools", "name"))
+            tools = listing("tools/list", "tools", "name")
+            if tools is None:
+                raise StdioProtocolError("MCP tool listing was not negotiated")
+            observation = PinnedObservation(hello, tools)
             if isinstance(capabilities.get("prompts"), dict):
                 observation.prompts = listing("prompts/list", "prompts", "name")
             if isinstance(capabilities.get("resources"), dict):

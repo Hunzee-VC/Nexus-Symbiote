@@ -116,10 +116,17 @@ def observation_inventory(result: DiscoveryResult, *, server_ref: str | None = N
         ("resource_templates", result.resource_templates),
     ):
         if items is not None:
-            shown[key] = [
-                {"identity": item.identity, "digest": item.digest, "descriptor": item.descriptor}
-                for item in items
-            ]
+            shown[key] = sorted(
+                (
+                    {
+                        "identity": item.identity,
+                        "digest": item.digest,
+                        "descriptor": item.descriptor,
+                    }
+                    for item in items
+                ),
+                key=lambda entry: (entry["identity"], entry["digest"]),
+            )
     server_info = result.server_info or {}
     version = server_info.get("version")
     server = MCPServerComponent(

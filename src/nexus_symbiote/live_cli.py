@@ -6,6 +6,7 @@ import json
 import os
 import re
 from pathlib import Path
+from typing import Any
 
 import click
 
@@ -32,8 +33,9 @@ def review_notice(names: list[str]) -> None:
     if names:
         click.echo(
             "Review: the displayed descriptor of these tools omits schema literals or "
-            "reduces URLs that the fingerprint covers; inspect the server's original "
-            "descriptor before approving: " + ", ".join(neutralize(name) for name in names),
+            "reduces URLs that the fingerprint covers; inspect the original descriptor "
+            "(discover-mcp --raw-descriptors writes it) before approving: "
+            + ", ".join(neutralize(name) for name in names),
             err=True,
         )
 
@@ -82,6 +84,15 @@ def review_notice(names: list[str]) -> None:
     help="clientInfo version sent in initialize.",
 )
 @click.option("--user-agent", help="User-Agent header to send; none is sent by default.")
+@click.option(
+    "--raw-descriptors",
+    type=click.Path(path_type=Path),
+    help=(
+        "Also write the unredacted served instructions, tool descriptors, prompts and "
+        "resource templates to this new file (mode 0600) for review; only the bearer "
+        "token and session ID are masked."
+    ),
+)
 def discover_mcp(
     endpoint: str,
     allowed_origin: tuple[str, ...],
@@ -92,6 +103,7 @@ def discover_mcp(
     client_name: str,
     client_version: str,
     user_agent: str | None,
+    raw_descriptors: Path | None,
 ) -> None:
     """Live: observe tools/list without executing tools or starting local servers.
 
@@ -104,9 +116,13 @@ def discover_mcp(
     modes.require_live("discover-mcp")
     if server_ref is not None and not record:
         raise click.UsageError("--server-ref applies only to --record")
+    if raw_descriptors is not None and output is not None:
+        if raw_descriptors.absolute() == output.absolute():
+            raise click.UsageError("--raw-descriptors must name a different file than --output")
     token = os.environ.get(token_env) if token_env else None
     if token_env and not token:
         raise click.ClickException("the explicitly selected token environment variable is empty")
+    raw: dict[str, Any] = {}
     result = discover_tools(
         endpoint,
         allowed_origins=allowed_origin,
@@ -114,7 +130,17 @@ def discover_mcp(
         client_name=client_name,
         client_version=client_version,
         user_agent=user_agent,
+        raw_sink=raw,
     )
+    if raw_descriptors is not None:
+        review = {
+            "note": "Unredacted server-supplied content for review; handle it as sensitive.",
+            "endpoint": result.endpoint,
+            "observed_at": result.observed_at,
+            "complete": result.complete,
+            **raw,
+        }
+        write_cli_output(raw_descriptors, json.dumps(review, indent=2) + "\n", overwrite=False)
     if record:
         _record(result, output, server_ref)
         return

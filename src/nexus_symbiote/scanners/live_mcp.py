@@ -61,6 +61,7 @@ FINGERPRINT_FIELDS = frozenset(
     {"name", "title", "description", "inputSchema", "outputSchema", "annotations", "_meta"}
 )
 DECLARATION_PROFILE = "nexus-symbiote/mcp-server-declaration/v1"
+METHOD_NOT_FOUND = -32601
 OBSERVED_DIGEST_PROFILE = "nexus_symbiote.observed-mcp-tool/2025-06-18/full-v1"
 _RESOLVER_SLOTS = threading.BoundedSemaphore(2)
 # Only headers the client reads must be unambiguous; repeated Set-Cookie or Via
@@ -117,6 +118,21 @@ _NONPUBLIC_NETWORKS = tuple(
 
 class DiscoveryError(ValueError):
     """A bounded, nonsecret discovery failure."""
+
+
+class _MethodNotFoundError(DiscoveryError):
+    """The server answered an optional list request with JSON-RPC -32601."""
+
+
+def is_method_not_found(message: dict[str, Any]) -> bool:
+    """A JSON-RPC error reply whose code is -32601 (Method not found)."""
+    error = message.get("error")
+    return (
+        set(message) == {"jsonrpc", "id", "error"}
+        and isinstance(error, dict)
+        and type(error.get("code")) is int
+        and error["code"] == METHOD_NOT_FOUND
+    )
 
 
 @dataclass(frozen=True)
@@ -614,7 +630,9 @@ def _sse(raw: bytes, maximum: int) -> list[dict[str, Any]]:
     return _SSEDecoder(maximum).feed(raw)
 
 
-def _response(reply: HTTPReply, identifier: int, limits: DiscoveryLimits) -> dict[str, Any]:
+def _response(
+    reply: HTTPReply, identifier: int, limits: DiscoveryLimits, *, optional: bool = False
+) -> dict[str, Any]:
     if reply.status != 200:
         raise DiscoveryError("MCP request returned an unsuccessful HTTP status")
     content_type = reply.headers.get("content-type", "").split(";", 1)[0].lower()
@@ -635,6 +653,8 @@ def _response(reply: HTTPReply, identifier: int, limits: DiscoveryLimits) -> dic
             continue
         if type(message.get("id")) is not int or message["id"] != identifier:
             raise DiscoveryError("JSON-RPC response ID mismatch")
+        if optional and is_method_not_found(message):
+            raise _MethodNotFoundError("MCP server does not implement a declared list method")
         if "error" in message or not isinstance(message.get("result"), dict):
             raise DiscoveryError("MCP server reported an error or invalid result")
         matching.append(message["result"])
@@ -842,6 +862,19 @@ def _observed_tool(checked: CheckedDescriptor) -> ObservedTool:
     )
 
 
+def _mask_exact(value: Any, secrets: list[str]) -> Any:
+    """Mask only the exact credential values; the raw review copy keeps everything else."""
+    if isinstance(value, str):
+        for secret in secrets:
+            value = value.replace(secret, "***")
+        return value
+    if isinstance(value, dict):
+        return {_mask_exact(k, secrets): _mask_exact(v, secrets) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_mask_exact(item, secrets) for item in value]
+    return value
+
+
 def _client_field(value: str | None, *, optional: bool = False) -> str | None:
     if value is None and optional:
         return None
@@ -865,6 +898,7 @@ def discover_tools(
     client_name: str = DEFAULT_CLIENT_NAME,
     client_version: str = DEFAULT_CLIENT_VERSION,
     user_agent: str | None = None,
+    raw_sink: dict[str, Any] | None = None,
 ) -> DiscoveryResult:
     """Observe one explicitly authorized HTTP MCP endpoint without calling tools.
 
@@ -873,9 +907,13 @@ def discover_tools(
     It must never be selected from a repository/configuration being scanned.
     ``client_name``, ``client_version`` and ``user_agent`` let an operator present
     the identity of the production host, since a server can serve a different
-    tool list to a client it recognizes as an observer.
+    tool list to a client it recognizes as an observer. A ``raw_sink`` receives the
+    unredacted instructions, tool descriptors, prompts and resource templates that
+    passed intake, with only the bearer token and session ID masked, for review.
     """
     result = DiscoveryResult()
+    raw: dict[str, Any] = raw_sink if raw_sink is not None else {}
+    raw.update({"instructions": None, "tools": [], "prompts": None, "resourceTemplates": None})
     session: str | None = None
     protected = [bearer_token] if isinstance(bearer_token, str) else []
     try:
@@ -915,7 +953,11 @@ def discover_tools(
         negotiated: str | None = None
 
         def request(
-            method: str, params: dict[str, Any] | None = None, *, notification: bool = False
+            method: str,
+            params: dict[str, Any] | None = None,
+            *,
+            notification: bool = False,
+            optional: bool = False,
         ) -> tuple[dict[str, Any], HTTPReply]:
             nonlocal identifier
             message: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
@@ -971,7 +1013,7 @@ def discover_tools(
                 if reply.status != 202 or reply.body:
                     raise DiscoveryError("initialized notification was not acknowledged")
                 return {}, reply
-            return _response(reply, identifier, limits), reply
+            return _response(reply, identifier, limits, optional=optional), reply
 
         def listing(method: str, key: str) -> list[dict[str, Any]]:
             """Follow bounded pagination; a null or absent cursor ends the list."""
@@ -979,7 +1021,11 @@ def discover_tools(
             cursors: set[str] = set()
             items: list[dict[str, Any]] = []
             for _ in range(limits.max_pages):
-                page, _ = request(method, {"cursor": cursor} if cursor is not None else {})
+                page, _ = request(
+                    method,
+                    {"cursor": cursor} if cursor is not None else {},
+                    optional=method != "tools/list" and cursor is None,
+                )
                 values = page.get(key)
                 if not isinstance(values, list) or len(values) + len(items) > limits.max_tools:
                     raise DiscoveryError("invalid list or item-count limit exceeded")
@@ -1018,6 +1064,7 @@ def discover_tools(
         if instructions is not None:
             result.instructions = redact_text(instructions, secrets)
             result.instructions_hash = hash_canonical({"instructions": instructions})
+            raw["instructions"] = _mask_exact(instructions, secrets)
         if session is not None:
             result.session_established = True
             result.session_digest = "sha256:" + hashlib.sha256(session.encode()).hexdigest()
@@ -1033,14 +1080,24 @@ def discover_tools(
             if checked.unprofiled_hash is not None:
                 extensions[checked.name] = checked.unprofiled_hash
             result.tools.append(_observed_tool(checked))
+            raw["tools"].append(_mask_exact(raw_tool, secrets))
         check_deadline()
 
         def surface(
             method: str, key: str, identity: str
-        ) -> tuple[list[ObservedItem], dict[str, str]]:
+        ) -> tuple[list[ObservedItem] | None, dict[str, str] | None]:
             observed: list[ObservedItem] = []
             digests: dict[str, str] = {}
-            for raw_item in listing(method, key):
+            raw[key] = []
+            try:
+                raw_items = listing(method, key)
+            except _MethodNotFoundError:
+                # Low-level SDK servers advertise resources without implementing
+                # templates; the surface is recorded as not offered, not as empty.
+                result.coverage["unobserved"].append(f"{method} (declared, not implemented)")
+                raw[key] = None
+                return None, None
+            for raw_item in raw_items:
                 check_deadline()
                 item = check_listed_item(raw_item, identity, secrets)
                 if item.identity in digests:
@@ -1048,6 +1105,7 @@ def discover_tools(
                 digests[item.identity] = item.digest
                 item.identity = redact_text(item.identity, secrets)
                 observed.append(item)
+                raw[key].append(_mask_exact(raw_item, secrets))
             return observed, digests
 
         prompts = templates = None

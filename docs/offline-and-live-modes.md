@@ -108,7 +108,11 @@ fails `--fail-on-alert`. An incomplete observation writes no inventory and exits
 so a scheduled job cannot record a partial result as a baseline. When a tool's
 displayed descriptor omits schema literals or reduces URLs that the fingerprint
 covers, the command names the tool on standard error: inspect the server's original
-descriptor before you approve that baseline. A scheduled GitHub Actions job is a
+descriptor before you approve that baseline. `--raw-descriptors review.json` writes
+that original content (instructions, tool descriptors, prompts and resource
+templates, with only the bearer token and session ID masked) to a new file readable
+only by you; it can hold credentials the server embeds, so keep it out of the
+baseline and delete it after review. A scheduled GitHub Actions job is a
 `schedule:` workflow that runs the two commands above against a baseline committed
 after review, with the token in a repository secret.
 
