@@ -19,17 +19,29 @@ than being converted to null.
 The source fingerprint covers the original declared name, description, input
 schema and annotations. Exported schemas omit literal defaults, examples,
 constants and enumeration values, which can contain credentials. When the
-displayed definition differs, `redacted_definition_hash` binds that view. For a
+displayed definition differs, `redacted_definition_hash` binds that view. The
+source fingerprint is an unkeyed digest of the original, so anyone holding the
+BOM who knows the rest of a descriptor can confirm a guess of an omitted
+low-entropy literal or of scrubbed text; keep credentials out of tool
+descriptors and treat exported BOMs as sensitive. For a
 static MCP configuration, run `validate` with `--project` and
 `--no-project-policy` to corroborate the source fingerprint against the
 checkout. A displayed schema with omitted literals is unsuitable for deciding
 which arguments a live tool accepts.
 
-For supported package launchers, new inventories retain `launcher_package`
-alongside the declared version. An older inventory can lack this field even
-when the current checkout identifies the package. Recollect the baseline and
-review the identity before approving the new snapshot. An observed package
-name and version do not establish the identity of installed executable bytes.
+For classified package launchers, new inventories retain `launcher_package`
+alongside the declared version and, for an exact npm or PyPI version resolved
+from the default registry, `package_url`. Inventories written by 0.1.0
+identified only `npx`, `bunx`, `uvx`, `pipx` and `docker run` with a few
+options, recorded a version-tagged image as pinned (only a digest pins an image
+now) and carry static binding profile v2, which `validate --project` reports as
+unknown. Recollect the baseline and review the identity, the new findings and
+the `packages`, `package_sources` and `launch_context` properties before
+approving the new snapshot. Python server references no longer contain the
+declaration line, and the stdio note moved from `transport_security` to
+`local_process`, so `diff` against a 0.1.0 baseline reports those records as
+removed and added or changed once. An observed package name and version do not
+establish the identity of installed executable bytes.
 
 CycloneDX `dependsOn` now contains only unconditional native `depends-on`
 edges. Capability, invocation and conditional relationships remain in the

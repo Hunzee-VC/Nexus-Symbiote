@@ -3,30 +3,57 @@
 `validate --project` checks a supplied inventory against freshly collected local
 evidence. Static MCP server records carry two kinds of source binding.
 
-`static_config_hash` (profile `nexus-symbiote/mcp-static-config/v2`) is an RFC 8785
-digest of the server's structure: configuration field names, the displayed
-launcher, transport, endpoint origin, argument count, environment variable names
-and declared tool names. It covers only information the inventory already exports
-in clear, so it reveals nothing about secret values. It detects added or removed
-arguments, environment variables, fields and tools, and changed endpoint origins.
+`static_config_hash` (profile `nexus-symbiote/mcp-static-config/v3`) is an RFC 8785
+digest of the server's exported structure: configuration field names, the displayed
+command basename, the classified launcher with its wrappers and effective command,
+the identities of the packages it launches, package source origins, launch context
+flags and counts, transport, endpoint origin, argument count, environment variable and
+header names, client settings (auto-approval, disabled, tool filters) and declared
+tool names. It covers only information the record exports in clear, so it reveals
+nothing about secret values. It detects added or removed arguments, environment
+variables, headers, fields and tools, and changed launchers, package identities,
+package source origins, launch context and endpoint origins. Package versions are
+compared as their own fields, so a version bump is not a binding change.
+
+Package sources are the registry and index options of a launcher (`--registry`,
+`--@scope:registry`, `--index-url`, `--find-links` and similar), environment
+variables that redirect resolution (`npm_config_registry`, `UV_INDEX_URL`,
+`PIP_INDEX_URL`, `GOPROXY` and similar) and project-root resolver settings that apply
+to the launched package: `.npmrc` (`registry` and `@scope:registry`) for npm, pnpm,
+bun and Deno `npm:` specifiers, `bunfig.toml` for bun, `.yarnrc.yml` for `yarn dlx`,
+and `uv.toml` and `pyproject.toml` `[tool.uv]` for `uv run`. They are exported as
+`package_sources` entries such as `.npmrc:@acme:registry=https://npm.acme.example`:
+the origin only, `[local]` for a path and `[unresolved]` for a value with `${...}`
+expansion. A redirected package keeps its version but loses `launcher_package` and
+`package_url`, and carries a medium `package_source` risk.
 
 Values are bound only when the operator sets `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` to
-a secret of at least 32 characters during collection and validation. Records then
-also carry `static_value_binding`, an HMAC-SHA256 under that key over the original
-server object (profile `nexus-symbiote/mcp-static-values/v1`), and a key
-identifier. This detects a different package with the same version, changed
-arguments, environment values, endpoint paths and opaque launchers. The key never
-enters the BOM; without it, the binding cannot be used to test guesses for a
-secret. Keep the key in the CI secret store, use the same key for a baseline and
-its candidates, and rotate it by recollecting both. A keyed BOM validated without
-the key, or with a different key, fails reconciliation.
+a secret of at least 32 characters during collection and validation. Generate it
+randomly, for example with `openssl rand -hex 32`: the exported key identifier lets
+anyone holding the BOM test guesses of a weak key. Records then also carry
+`static_value_binding`, an HMAC-SHA256 under that key over the original server object
+and the raw values of the project resolver settings that apply to it (profile
+`nexus-symbiote/mcp-static-values/v2`), and a key identifier. This detects a different
+package with the same version, changed arguments, environment and header values,
+endpoint and index paths and the directory of a command. The key never enters the
+BOM; without it, the binding cannot be used to test guesses for a secret. Keep the key
+in the CI secret store, use the same key for a baseline and its candidates, and rotate
+it by recollecting both. A keyed BOM validated without the key, or with a different
+key, fails reconciliation. A key shorter than 32 characters is one scan failure per
+configuration file that names the variable, and no server of that file is recorded.
+Every record states `source_values_bound`; without the key, a record with arguments,
+environment or header values, an endpoint path or a command directory also carries a
+low `completeness` risk that names the key.
 
 Profile v1 records (an unkeyed digest over raw configuration, including secret
 values) let anyone holding the BOM confirm guesses for low-entropy secrets. They
 fail reconciliation as unknown and require recollection; treat existing v1 exports
-as sensitive and replace them. Neither binding authenticates a publisher,
-identifies the installed executable or establishes that a tool backend is benign.
-JSON object-key ordering and whitespace do not change either binding.
+as sensitive and replace them. Profile v2 records (0.1.0) were digested before
+launchers, package sources and launch context were classified; `validate --project`
+reports them as unknown and asks for recollection, like v1. Neither binding
+authenticates a publisher, identifies the installed executable or establishes that a
+tool backend is benign. JSON object-key ordering and whitespace do not change either
+binding.
 
 Configured tool entries retain their configuration source path and static
 collection mode. Validation compares their descriptor digest, fingerprint
@@ -198,6 +225,7 @@ Live candidates whose served descriptors differ from the declaration need their
 own authenticated review; passing one scope does not establish the other.
 
 The regression cases in `tests/test_mcp_source_binding.py` cover changed source,
-edited supplied descriptors, missing legacy evidence, redaction and canonical
-object-key ordering. These cases test the stated contract, not detection efficacy
+edited supplied descriptors, missing legacy evidence, redaction, canonical
+object-key ordering and project resolver settings, and hold the known-answer vectors
+for the v3 structure digest and the v2 keyed binding. These cases test the stated contract, not detection efficacy
 across an independently sampled population of agent deployments.
