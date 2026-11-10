@@ -50,7 +50,9 @@ def test_lockfile_resolution_binds_exact_bytes_and_record_without_secrets(tmp_pa
     component = result.components[0]
     assert component.version == "1.2.3"
     assert component.registry_uri == "https://private.example"
-    assert component.package_url == "pkg:npm/openai@1.2.3"
+    # The record is from another registry, so the package URL names it and is not
+    # mistaken for the public package of the same name.
+    assert component.package_url == "pkg:npm/openai@1.2.3?repository_url=https://private.example"
     assert component.source_path == "package-lock.json"
     assert component.assurance_level is AssuranceLevel.DECLARED
     assert component.trust_tier is TrustTier.UNKNOWN
@@ -136,3 +138,166 @@ def test_lock_digest_and_resolution_share_a_single_read(tmp_path, monkeypatch):
     component = RegistryScanner().scan(tmp_path).components[0]
     assert component.version == "1.2.3"
     assert component.properties["lockfile_sha256"] == "sha256:" + hashlib.sha256(raw).hexdigest()
+
+
+def npmjs(**changes):
+    entry = {
+        "version": "1.2.3",
+        "resolved": "https://registry.npmjs.org/openai/-/openai-1.2.3.tgz",
+        "integrity": "sha512-" + base64.b64encode(b"x" * 64).decode(),
+    }
+    return {**entry, **changes}
+
+
+@pytest.mark.parametrize(
+    "resolved",
+    [
+        # Python reads the host after the backslash; WHATWG parsers, which npm
+        # uses, treat it as a path separator and connect to evil.example.
+        "https://evil.example\\@registry.npmjs.org/openai/-/openai-1.2.3.tgz",
+        "https:///evil.example/openai-1.2.3.tgz",
+        "http://registry.npmjs.org/openai/-/openai-1.2.3.tgz",
+        "git+ssh://git@github.com/openai/openai-node.git",
+        "https://registry.npmjs.оrg/openai/-/openai-1.2.3.tgz",
+        "https://registry%2enpmjs.org/openai/-/openai-1.2.3.tgz",
+        "https://registry.npmjs.org/openai/-/openai-1.2.3.tgz\t",
+        7,
+    ],
+)
+def test_a_resolved_url_another_parser_could_read_differently_is_a_failure(tmp_path, resolved):
+    path = project(tmp_path)
+    path.write_bytes(lock_bytes(npmjs(resolved=resolved)))
+    result = RegistryScanner().scan(tmp_path)
+    assert result.scan_failures == [
+        "package-lock.json: selected package has an unsupported resolved URL"
+    ]
+    component = result.components[0]
+    assert component.registry_uri is None and component.package_url is None
+    assert component.version == "^1.0.0"
+    assert "lockfile_record" not in component.properties
+
+
+def test_a_consistent_registry_record_resolves_the_declared_range(tmp_path):
+    path = project(tmp_path)
+    path.write_bytes(lock_bytes(npmjs()))
+    result = RegistryScanner().scan(tmp_path)
+    assert result.scan_failures == [] and result.surfaces_excluded == []
+    component = result.components[0]
+    assert component.registry_uri == "https://registry.npmjs.org"
+    assert component.package_url == "pkg:npm/openai@1.2.3"
+    # The lockfile pins the range to one version with sha512 integrity.
+    assert component.risks == []
+
+
+@pytest.mark.parametrize(
+    ("changes", "category", "severity"),
+    [
+        ({"integrity": None}, "missing_lockfile_integrity", "medium"),
+        (
+            {"integrity": "sha1-" + base64.b64encode(b"x" * 20).decode()},
+            "weak_lockfile_integrity",
+            "medium",
+        ),
+        (
+            {"resolved": "https://registry.npmjs.org/evil/-/evil-1.2.3.tgz"},
+            "lockfile_resolution_mismatch",
+            "high",
+        ),
+        (
+            {"resolved": "https://registry.npmjs.org/openai/-/openai-9.9.9.tgz"},
+            "lockfile_resolution_mismatch",
+            "high",
+        ),
+        (
+            {"resolved": "https://npm.corp.example/api/npm/openai/-/other-1.2.3.tgz"},
+            "lockfile_resolution_mismatch",
+            "high",
+        ),
+        (
+            {"resolved": "https://npm.corp.example/openai/-/openai-1.2.3.tgz"},
+            "registry_origin",
+            "low",
+        ),
+    ],
+)
+def test_lock_record_inconsistencies_are_findings(tmp_path, changes, category, severity):
+    path = project(tmp_path)
+    entry = npmjs(**changes)
+    if entry.get("integrity") is None:
+        del entry["integrity"]
+    path.write_bytes(lock_bytes(entry))
+    result = RegistryScanner().scan(tmp_path)
+    assert result.scan_failures == []
+    component = result.components[0]
+    found = [(r.category, r.severity.value) for r in component.risks]
+    assert (category, severity) in found
+    if category == "lockfile_resolution_mismatch":
+        # The record contradicts itself, so it does not establish an identity.
+        assert component.package_url is None
+    if category != "registry_origin":
+        # The range is not resolved by a record without strong, consistent evidence.
+        assert ("version_pinning", "medium") in found
+
+
+def test_an_integrity_value_with_a_strong_hash_beside_sha1_is_strong(tmp_path):
+    path = project(tmp_path)
+    both = " ".join(
+        [
+            "sha512-" + base64.b64encode(b"x" * 64).decode(),
+            "sha1-" + base64.b64encode(b"x" * 20).decode(),
+        ]
+    )
+    path.write_bytes(lock_bytes(npmjs(integrity=both)))
+    result = RegistryScanner().scan(tmp_path)
+    assert result.scan_failures == [] and result.components[0].risks == []
+    assert result.components[0].properties["lockfile_integrity"] == both
+
+
+def test_an_exact_spec_the_lock_record_contradicts_is_a_failure(tmp_path):
+    # npm ci refuses a lockfile that does not satisfy package.json.
+    (tmp_path / "package.json").write_text('{"dependencies":{"openai":"1.0.0"}}')
+    (tmp_path / "package-lock.json").write_bytes(lock_bytes(npmjs()))
+    result = RegistryScanner().scan(tmp_path)
+    assert result.scan_failures == [
+        "package-lock.json: selected package version disagrees with package.json"
+    ]
+    component = result.components[0]
+    assert component.version == "1.0.0" and component.package_url is None
+
+
+@pytest.mark.parametrize(
+    ("spec", "category", "severity"),
+    [
+        ("github:openai/openai-node", "nonregistry_source", "high"),
+        ("git+https://github.com/openai/openai-node.git#v4.52.0", "nonregistry_source", "high"),
+        (
+            "git+https://github.com/openai/openai-node.git#" + "a" * 40,
+            "nonregistry_source",
+            "medium",
+        ),
+        ("https://h.example/openai-4.52.0.tgz", "nonregistry_source", "medium"),
+        ("http://h.example/openai-4.52.0.tgz", "nonregistry_source", "high"),
+        ("file:../openai", "nonregistry_source", "medium"),
+        ("npm:openai@4.52.0", "package_alias", "low"),
+    ],
+)
+def test_sources_that_change_identity_have_their_own_findings(tmp_path, spec, category, severity):
+    (tmp_path / "package.json").write_text(json.dumps({"dependencies": {"openai": spec}}))
+    component = RegistryScanner().scan(tmp_path).components[0]
+    assert [(r.category, r.severity.value) for r in component.risks] == [(category, severity)]
+    if category == "nonregistry_source":
+        # Not a registry package, so no npm package URL.
+        assert component.package_url is None
+
+
+def test_an_unrelated_lockfile_change_still_alerts_through_the_lockfile_digest(tmp_path):
+    # The digest of the whole lockfile is the only drift signal for the transitive
+    # dependencies the collector does not inventory, so it stays on each component.
+    path = project(tmp_path)
+    path.write_bytes(lock_bytes(npmjs()))
+    first = RegistryScanner().scan(tmp_path).components[0]
+    lock = json.loads(path.read_text())
+    lock["packages"]["node_modules/semver"] = {"version": "7.6.0"}
+    path.write_text(json.dumps(lock))
+    second = RegistryScanner().scan(tmp_path).components[0]
+    assert first.properties["lockfile_sha256"] != second.properties["lockfile_sha256"]
