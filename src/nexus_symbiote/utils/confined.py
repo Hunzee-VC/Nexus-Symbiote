@@ -6,14 +6,16 @@ This is an offline collector boundary, not a process sandbox. It requires POSIX
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import io
 import json
 import os
 import stat
-from collections.abc import Iterable, Iterator
+import unicodedata
+from collections.abc import Collection, Iterable, Iterator
 from contextlib import contextmanager
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO, cast
 
 from nexus_symbiote.core.hashing import descriptor_binding
@@ -28,6 +30,58 @@ DEFAULT_EXCLUDES = frozenset({".git", "node_modules", "__pycache__", ".venv", "v
 
 class CollectionError(ValueError):
     """A collection input exceeded the supported safe boundary."""
+
+
+class _LinkRefusedError(CollectionError):
+    """A symlink that cannot be covered through an in-root target; the reason is recorded."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+# An O_NOFOLLOW open reports a symlink as ELOOP (EMLINK on FreeBSD), and a symlinked
+# parent opened with O_DIRECTORY as ENOTDIR.
+_LINK_ERRNOS = frozenset({errno.ELOOP, errno.EMLINK, errno.ENOTDIR})
+_MAX_CASE_VARIANTS = 16
+# The format characters HFS+ ignores when it compares names.
+_IGNORED_IN_NAMES = dict.fromkeys(
+    [*range(0x200C, 0x2010), *range(0x202A, 0x202F), *range(0x206A, 0x2070), 0xFEFF]
+)
+
+
+def fold_name(name: str) -> str:
+    """A file name as case-insensitive file systems compare it.
+
+    Case and Unicode normalisation are folded, as on APFS, HFS+ and NTFS; so are the
+    format characters HFS+ ignores and the trailing dots and spaces Windows drops.
+    """
+    folded = unicodedata.normalize("NFD", unicodedata.normalize("NFD", name).casefold())
+    return folded.translate(_IGNORED_IN_NAMES).rstrip(". ")
+
+
+def _lexical_target(directory: Path, text: str) -> Path:
+    """Resolve a link's text against its directory without following anything.
+
+    ``..`` may only lead the text: the directory holds no symlink, so leading parent
+    steps resolve as the kernel resolves them, while one after a name could pass
+    through a symlink and reach a different file than this lexical answer.
+    """
+    if not text or os.path.isabs(text):
+        raise _LinkRefusedError("symlink target is absolute")
+    parts = list(directory.parts)
+    named = False
+    for part in PurePosixPath(text).parts:
+        if part == "..":
+            if named:
+                raise _LinkRefusedError("symlink target is not a plain relative path")
+            if not parts:
+                raise _LinkRefusedError("symlink target is outside the collection root")
+            parts.pop()
+        elif part != ".":
+            named = True
+            parts.append(part)
+    return Path(*parts)
 
 
 def hash_confined_file(root: Path, source_path: str | Path, algorithm: str = "sha256") -> str:
@@ -121,6 +175,8 @@ class ConfinedCollection:
         self._bytes_read = 0
         self._entry_budget = [max_entries]
         self._root_fd: int | None = None
+        self._links: dict[str, str] = {}
+        self._listings: dict[Path, list[str] | None] = {}
         self._excluded: list[Path] = []
         self._invalid_policy = False
         for value in exclude_paths:
@@ -207,7 +263,18 @@ class ConfinedCollection:
             os.close(fd)
             raise
 
-    def read_bytes(self, path: str | Path, *, missing_ok: bool = False) -> bytes | None:
+    def read_bytes(
+        self, path: str | Path, *, missing_ok: bool = False, variants_read: Collection[str] = ()
+    ) -> bytes | None:
+        """Read a confined regular file, through at most one in-root symlink.
+
+        A symlink whose lexical target is a regular file beneath the root, not
+        excluded and reached without a further symlink is read through its target
+        (``link_target`` names it); any other symlink is a recorded failure. With
+        ``missing_ok`` an absent file is not a failure, but a case or normalisation
+        variant of its name is, unless the caller reads it separately and names it
+        in ``variants_read``: case-insensitive file systems open that variant.
+        """
         relative: Path | str = str(path)
         try:
             relative = self._relative(path)
@@ -215,15 +282,7 @@ class ConfinedCollection:
                 return None
             if not relative.parts:
                 raise CollectionError("expected a regular file")
-            parent = self._open_parent(relative)
-            try:
-                fd = os.open(
-                    relative.name,
-                    os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
-                    dir_fd=parent,
-                )
-            finally:
-                os.close(parent)
+            fd, opened = self._open_file(relative)
             try:
                 before = os.fstat(fd)
                 if not stat.S_ISREG(before.st_mode):
@@ -246,8 +305,8 @@ class ConfinedCollection:
                 if length > self.max_file_bytes:
                     raise CollectionError("file byte limit exceeded")
                 after = os.fstat(fd)
-                if descriptor_binding(before) != descriptor_binding(after) or not self._resolves_to(
-                    relative, after
+                if descriptor_binding(before) != descriptor_binding(after) or not (
+                    self._resolves_to(opened, after) and self._same_link(relative, opened)
                 ):
                     raise CollectionError("file changed during collection")
                 return b"".join(chunks)
@@ -256,13 +315,19 @@ class ConfinedCollection:
         except FileNotFoundError:
             if not missing_ok:
                 self._fail(relative, "file unavailable during collection")
+            elif isinstance(relative, Path):
+                self._report_case_variants(relative, variants_read)
+        except _LinkRefusedError as exc:
+            self._fail(relative, exc.reason)
         except (OSError, CollectionError):
             # Do not echo exception payloads: malformed input may contain secrets.
             self._fail(relative, "read refused (symlink, nonregular file, limit, or I/O error)")
         return None
 
-    def read_text(self, path: str | Path, *, missing_ok: bool = False) -> str | None:
-        raw = self.read_bytes(path, missing_ok=missing_ok)
+    def read_text(
+        self, path: str | Path, *, missing_ok: bool = False, variants_read: Collection[str] = ()
+    ) -> str | None:
+        raw = self.read_bytes(path, missing_ok=missing_ok, variants_read=variants_read)
         if raw is None:
             return None
         try:
@@ -388,8 +453,10 @@ class ConfinedCollection:
             self._fail(relative, "hash refused (symlink, nonregular file, limit, or I/O error)")
             return None
 
-    def read_json(self, path: str | Path, *, missing_ok: bool = False) -> Any:
-        content = self.read_text(path, missing_ok=missing_ok)
+    def read_json(
+        self, path: str | Path, *, missing_ok: bool = False, variants_read: Collection[str] = ()
+    ) -> Any:
+        content = self.read_text(path, missing_ok=missing_ok, variants_read=variants_read)
         if content is None:
             return None
         try:
@@ -416,7 +483,14 @@ class ConfinedCollection:
             return []
 
     def iter_files(self, directory: str | Path = ".") -> Iterator[Path]:
-        """Yield root-relative file paths, never following directory symlinks."""
+        """Yield root-relative file paths, never following directory symlinks.
+
+        A ``directory`` reached through one in-root symlink is walked under its
+        target's name. Inside the walk, a symlink to a regular file beneath the root
+        is yielded under its own name and read through its target; one to a
+        directory beneath the root is skipped, because that directory is walked
+        under its own name. Every other symlink is a recorded failure.
+        """
         try:
             relative = self._relative(directory)
         except CollectionError:
@@ -424,17 +498,20 @@ class ConfinedCollection:
             return
         if self.excluded(relative) or self._root_fd is None:
             return
-        fd = os.dup(self._root_fd)
         try:
-            for part in relative.parts:
-                next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
-                os.close(fd)
-                fd = next_fd
-            yield from self._walk(fd, relative, 0, self._entry_budget)
+            fd, walked = self._open_directory(relative)
         except FileNotFoundError:
+            if relative.parts:
+                self._report_case_variants(relative, ())
             return
-        except OSError:
+        except _LinkRefusedError as exc:
+            self._fail(relative, exc.reason)
+            return
+        except (OSError, CollectionError):
             self._fail(relative, "directory unavailable or contains a symlink")
+            return
+        try:
+            yield from self._walk(fd, walked, 0, self._entry_budget)
         finally:
             os.close(fd)
 
@@ -460,7 +537,11 @@ class ConfinedCollection:
                     continue
                 metadata = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
                 if stat.S_ISLNK(metadata.st_mode):
-                    self._fail(child, "symlink excluded")
+                    try:
+                        if self._walked_link(directory_fd, child):
+                            yield child
+                    except _LinkRefusedError as exc:
+                        self._fail(child, exc.reason)
                 elif stat.S_ISDIR(metadata.st_mode):
                     child_fd = os.open(
                         name,
@@ -477,3 +558,263 @@ class ConfinedCollection:
                     self._fail(child, "nonregular file excluded")
         except OSError:
             self._fail(relative, "directory changed or could not be read")
+
+    def link_target(self, path: str | Path) -> str | None:
+        """The in-root target that a read of ``path`` followed, or ``None``."""
+        try:
+            return self._links.get(self._relative(path).as_posix())
+        except CollectionError:
+            return None
+
+    def in_root_target(self, path: str | Path) -> Path | None:
+        """The regular file ``path`` names, through at most one in-root symlink.
+
+        Returns the root-relative path that holds the bytes, which is ``path`` itself
+        when no symlink is involved, or ``None`` when no such regular file exists.
+        Nothing is recorded.
+        """
+        try:
+            relative = self._relative(path)
+            if self._root_fd is None or not relative.parts or self.excluded(relative):
+                return None
+            fd, opened = self._open_file(relative)
+        except (OSError, CollectionError):
+            return None
+        try:
+            return opened if stat.S_ISREG(os.fstat(fd).st_mode) else None
+        finally:
+            os.close(fd)
+
+    def is_directory(self, path: str | Path) -> bool:
+        """Whether ``path`` is a directory, reached through at most one in-root symlink.
+
+        Nothing is recorded: a caller that goes on to read or walk the path records
+        any refusal then.
+        """
+        try:
+            relative = self._relative(path)
+            if self._root_fd is None or not relative.parts or self.excluded(relative):
+                return False
+            fd, _ = self._open_directory(relative)
+        except (OSError, CollectionError):
+            return False
+        os.close(fd)
+        return True
+
+    def _open_no_follow(self, relative: Path) -> int:
+        parent = self._open_parent(relative)
+        try:
+            return os.open(
+                relative.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent
+            )
+        finally:
+            os.close(parent)
+
+    def _open_file(self, relative: Path) -> tuple[int, Path]:
+        """Open a file without following links, or through one in-root symlink."""
+        try:
+            return self._open_no_follow(relative), relative
+        except OSError as exc:
+            if exc.errno not in _LINK_ERRNOS:
+                raise
+            target = self._link_target(relative)
+            if target is None:
+                raise
+        try:
+            fd = self._open_no_follow(target)
+        except FileNotFoundError as exc:
+            raise _LinkRefusedError("symlink target is unavailable") from exc
+        except OSError as exc:
+            if exc.errno in _LINK_ERRNOS:
+                raise _LinkRefusedError(
+                    "symlink target is or passes through another symlink"
+                ) from exc
+            raise
+        self._links[relative.as_posix()] = target.as_posix()
+        return fd, target
+
+    def _open_directory(self, relative: Path) -> tuple[int, Path]:
+        """Open a directory without following links, or through one in-root symlink."""
+        if self._root_fd is None:
+            raise CollectionError("collection root unavailable")
+        try:
+            return self._open_directory_no_follow(relative), relative
+        except OSError as exc:
+            if exc.errno not in _LINK_ERRNOS:
+                raise
+            target = self._link_target(relative)
+            if target is None:
+                raise
+        try:
+            fd = self._open_directory_no_follow(target)
+        except FileNotFoundError as exc:
+            raise _LinkRefusedError("symlink target is unavailable") from exc
+        except OSError as exc:
+            if exc.errno in _LINK_ERRNOS:
+                raise _LinkRefusedError(
+                    "symlink target is not a directory, or is or passes through another symlink"
+                ) from exc
+            raise
+        self._links[relative.as_posix()] = target.as_posix()
+        return fd, target
+
+    def _open_directory_no_follow(self, relative: Path) -> int:
+        assert self._root_fd is not None
+        fd = os.dup(self._root_fd)
+        try:
+            for part in relative.parts:
+                next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                os.close(fd)
+                fd = next_fd
+            return fd
+        except BaseException:
+            os.close(fd)
+            raise
+
+    def _link_target(self, relative: Path) -> Path | None:
+        """Lexically resolve the first symlink on a confined path, or ``None`` if none.
+
+        Every component before the link is a directory opened without following
+        links, so the link's own directory holds no symlink. Raises ``_LinkRefusedError``
+        when the link cannot be covered through a target beneath the root.
+        """
+        if self._root_fd is None:
+            return None
+        fd = os.dup(self._root_fd)
+        try:
+            for index, part in enumerate(relative.parts):
+                info = os.stat(part, dir_fd=fd, follow_symlinks=False)
+                if stat.S_ISLNK(info.st_mode):
+                    text = os.readlink(part, dir_fd=fd)
+                    target = _lexical_target(Path(*relative.parts[:index]), text)
+                    target = target.joinpath(*relative.parts[index + 1 :])
+                    if not target.parts:
+                        raise _LinkRefusedError("symlink target is the collection root")
+                    if self.excluded(target):
+                        raise _LinkRefusedError("symlink target is excluded from collection")
+                    return target
+                if index + 1 == len(relative.parts) or not stat.S_ISDIR(info.st_mode):
+                    return None
+                next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                os.close(fd)
+                fd = next_fd
+            return None
+        except FileNotFoundError:
+            return None
+        finally:
+            os.close(fd)
+
+    def _same_link(self, relative: Path, opened: Path) -> bool:
+        """Whether a followed link still names the target that was read."""
+        return opened == relative or self._link_target(relative) == opened
+
+    def _walked_link(self, directory_fd: int, child: Path) -> bool:
+        """Whether a walked symlink is yielded (a file) or skipped (a directory).
+
+        Raises ``_LinkRefusedError`` for a symlink that is not covered through an in-root
+        regular file or directory reached without a further symlink.
+        """
+        target = _lexical_target(child.parent, os.readlink(child.name, dir_fd=directory_fd))
+        if target.parts and self.excluded(target):
+            raise _LinkRefusedError("symlink target is excluded from collection")
+        if not target.parts:
+            return False
+        try:
+            parent = self._open_parent(target)
+            try:
+                info = os.stat(target.name, dir_fd=parent, follow_symlinks=False)
+            finally:
+                os.close(parent)
+        except FileNotFoundError as exc:
+            raise _LinkRefusedError("symlink target is unavailable") from exc
+        except OSError as exc:
+            raise _LinkRefusedError("symlink target passes through another symlink") from exc
+        if stat.S_ISREG(info.st_mode):
+            return True
+        if stat.S_ISDIR(info.st_mode):
+            return False
+        if stat.S_ISLNK(info.st_mode):
+            raise _LinkRefusedError("symlink target is another symlink")
+        raise _LinkRefusedError("symlink target is not a regular file or directory")
+
+    def _names(self, fd: int, directory: Path) -> list[str] | None:
+        """Entry names of an open directory, listed once per collection and bounded."""
+        if directory in self._listings:
+            return self._listings[directory]
+        names: list[str] | None = []
+        try:
+            with os.scandir(fd) as stream:
+                for entry in stream:
+                    assert names is not None
+                    if len(names) >= self.max_entries:
+                        self._fail(directory, "directory entry limit exceeded")
+                        names = None
+                        break
+                    names.append(entry.name)
+        except OSError:
+            self._fail(directory, "directory changed or could not be read")
+            names = None
+        self._listings[directory] = names
+        return names
+
+    def case_variants(self, path: str | Path) -> list[Path]:
+        """Existing paths that differ from ``path`` only by case or normalisation.
+
+        Case-insensitive file systems, the default on macOS and Windows, open such a
+        variant when ``path`` itself is absent. Listings are descriptor-relative and
+        no symlink is followed; a symlinked directory variant is reported as found.
+        """
+        try:
+            relative = self._relative(path)
+        except CollectionError:
+            return []
+        if self._root_fd is None or not relative.parts:
+            return []
+        found: list[Path] = []
+        parts = relative.parts
+
+        def descend(fd: int, prefix: tuple[str, ...], exact: bool) -> None:
+            index = len(prefix)
+            names = self._names(fd, Path(*prefix))
+            wanted = fold_name(parts[index])
+            for name in names or ():
+                if len(found) >= _MAX_CASE_VARIANTS or fold_name(name) != wanted:
+                    continue
+                same = exact and name == parts[index]
+                if index + 1 == len(parts):
+                    if not same:
+                        found.append(Path(*prefix, name))
+                    continue
+                try:
+                    child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                except OSError:
+                    try:
+                        linked = stat.S_ISLNK(
+                            os.stat(name, dir_fd=fd, follow_symlinks=False).st_mode
+                        )
+                    except OSError:
+                        linked = False
+                    if linked and not same:
+                        found.append(Path(*prefix, name, *parts[index + 1 :]))
+                    continue
+                try:
+                    descend(child, (*prefix, name), same)
+                finally:
+                    os.close(child)
+
+        fd = os.dup(self._root_fd)
+        try:
+            descend(fd, (), True)
+        finally:
+            os.close(fd)
+        return found
+
+    def _report_case_variants(self, relative: Path, variants_read: Collection[str]) -> None:
+        for variant in self.case_variants(relative):
+            if variant.as_posix() in variants_read or self.excluded(variant):
+                continue
+            self._fail(
+                variant,
+                f"case variant of {relative.as_posix()} is the active file on "
+                "case-insensitive file systems and is not inventoried",
+            )

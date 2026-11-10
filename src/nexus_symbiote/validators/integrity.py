@@ -285,6 +285,14 @@ class IntegrityValidator:
         if not candidate.is_absolute():
             candidate = root / candidate
         try:
+            if candidate.is_symlink() and candidate.is_relative_to(root):
+                # Collectors read an in-root symlink, such as CLAUDE.md -> AGENTS.md,
+                # through its target, resolved lexically without following anything.
+                from nexus_symbiote.utils.confined import ConfinedCollection
+
+                with ConfinedCollection(root, []) as files:
+                    target = files.in_root_target(candidate.relative_to(root))
+                candidate = candidate if target is None else root / target
             if candidate.is_symlink() or not candidate.resolve().is_relative_to(root):
                 raise ValueError("Artifact path escapes the supplied project root or is a symlink")
             if not candidate.is_file():

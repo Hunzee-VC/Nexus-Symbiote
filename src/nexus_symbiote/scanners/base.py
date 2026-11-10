@@ -55,11 +55,20 @@ def sanitized_origin(value: str) -> str:
 
 
 def parse_python(source: str) -> ast.Module:
-    """Parse scanned source without printing compiler warnings, which quote its raw bytes."""
+    """Parse scanned source without printing compiler warnings, which quote its raw bytes.
+
+    A UTF-8 byte-order mark is accepted, as CPython accepts it in a source file. The
+    parser reports deeply nested source as MemoryError or RecursionError; both become
+    ValueError, so callers record a failure for the file instead of losing the whole
+    collector.
+    """
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", SyntaxWarning)
         warnings.simplefilter("ignore", DeprecationWarning)
-        return ast.parse(source)
+        try:
+            return ast.parse(source.removeprefix("﻿"))
+        except (MemoryError, RecursionError, OverflowError):
+            raise ValueError("Python source too complex to parse") from None
 
 
 @dataclass
