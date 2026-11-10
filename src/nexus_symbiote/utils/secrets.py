@@ -24,7 +24,10 @@ _ASSIGNMENT = re.compile(
     r"(?:\d{1,4})?(?:[-_.][a-z0-9]{1,32}){0,4}[\"']?\s*+[:=]\s*+)"
     r"(\"[^\"\n]{0,256}\"|'[^'\n]{0,256}'|[^\s,;]++)"
 )
-_AUTH = re.compile(r"(?i)\b(Bearer|Basic|Token|Bot|ApiKey|Api-Key)(\s++)([A-Za-z0-9_+/=.~-]{8,}+)")
+_AUTH = re.compile(r"(?i)\b(Bearer|Basic|Token|Bot|ApiKey|Api-Key)(\s++)([A-Za-z0-9_+/=.~-]{6,}+)")
+# A prose word after a scheme ("Bearer authentication") is shorter than this; a value
+# this long after Bearer, Token, Bot or ApiKey is redacted whatever its shape.
+LONG_CREDENTIAL_LENGTH = 16
 # Credential formats with a fixed prefix. The leading lookbehind starts a match
 # only at a word boundary, so a long run is scanned once, not once per position.
 TOKEN_SHAPE = re.compile(
@@ -134,8 +137,9 @@ def _credential_like(token: str, scheme: str) -> bool:
         except (binascii.Error, ValueError):
             return False
     return (
-        any(char.isdigit() for char in token)
-        or (token.lower() != token and token.upper() != token)
+        len(token) >= LONG_CREDENTIAL_LENGTH
+        or any(char.isdigit() for char in token)
+        or (any(char.isupper() for char in token[1:]) and any(char.islower() for char in token))
         or any(char in "._~+/=-" for char in token)
     )
 

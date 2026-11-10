@@ -206,3 +206,24 @@ def test_prepared_scrubber_is_linear_in_values_and_strings():
     redacted = redact_metadata(metadata, scrubber)
     assert time.monotonic() - started < 10
     assert "credential-00007" not in str(redacted)
+
+
+@pytest.mark.parametrize(
+    "text,kept",
+    [
+        ("Authorization: Bearer abcdefghijklmnopqrstuv", "Authorization: Bearer"),
+        ("Token ABCDEFGHIJKLMNOPQRST", "Token"),
+        ("ApiKey qwertyuiopasdfghjk", "ApiKey"),
+        ("Bearer abc123", "Bearer"),
+        ("Bot aBcDeFgH", "Bot"),
+    ],
+)
+def test_long_or_shaped_scheme_values_are_redacted_whatever_their_letters(text, kept):
+    assert redact_text(text) == f"{kept} {REDACTED}"
+
+
+@pytest.mark.parametrize(
+    "text", ["Send a Bearer Tokens header", "Token Validation failed", "Bearer scheme"]
+)
+def test_capitalised_prose_after_a_scheme_word_survives(text):
+    assert redact_text(text) == text
