@@ -1,0 +1,166 @@
+{
+  "$defs": {
+    "AutonomyLevel": {
+      "enum": [
+        "L0-chatbot",
+        "L1-copilot",
+        "L2-agent",
+        "L3-autonomous",
+        "L4-fully-autonomous"
+      ],
+      "title": "AutonomyLevel",
+      "type": "string"
+    },
+    "ModelDeclaration": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider"
+        },
+        "requested_ref": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requested Ref"
+        }
+      },
+      "title": "ModelDeclaration",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "autonomy_level": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AutonomyLevel"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "framework": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Framework"
+    },
+    "id": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Id"
+    },
+    "instructions": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 1024,
+      "title": "Instructions",
+      "type": "array"
+    },
+    "models": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ModelDeclaration"
+      },
+      "maxProperties": 1024,
+      "propertyNames": {
+        "minLength": 1
+      },
+      "title": "Models",
+      "type": "object"
+    },
+    "name": {
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "owner": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Owner"
+    },
+    "purpose": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Purpose"
+    },
+    "version": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Version"
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "title": "AgentDeclaration",
+  "type": "object"
+}

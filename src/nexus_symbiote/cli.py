@@ -425,7 +425,14 @@ def scan(
             scan_failures.append(f"{name}: {summary}")
             scanner_status[name] = "failed"
     try:
-        assemble_repository_agent(aibom, root)
+        # Manifest problems are recorded like collector failures; the inventory is still written.
+        assemble_repository_agent(
+            aibom,
+            root,
+            exclude_paths=policy.scan.exclude_paths,
+            failures=scan_failures,
+            exclusions=surfaces_excluded,
+        )
     except (PolicyError, ValueError, OSError) as exc:
         raise _failure(exc) from exc
     scan_failures.extend(validate_graph(aibom))
@@ -1100,8 +1107,13 @@ def blast_radius_command(aibom_path: str, component_ref: str, json_output: bool)
         )
         console.print("  Agents: " + _safe(", ".join(result["affected_agents"])), soft_wrap=True)
         console.print(
+            "  Dependents: " + _safe(", ".join(result["dependent_components"])), soft_wrap=True
+        )
+        console.print(
             "  Components: " + _safe(", ".join(result["reachable_components"])), soft_wrap=True
         )
+        for limitation in result["limitations"][1:]:
+            console.print("  Note: " + _safe(limitation), soft_wrap=True)
 
 
 @main.command()

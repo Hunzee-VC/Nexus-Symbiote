@@ -118,12 +118,30 @@ def register_supply_chain_commands(main: click.Group) -> None:
         default=".nexus-symbiote-baseline.json",
         help="Where to write the unsigned baseline (default: .nexus-symbiote-baseline.json).",
     )
+    @click.option(
+        "--no-project-policy",
+        is_flag=True,
+        help="Use built-in policy without reading configuration from the target, as scan does.",
+    )
+    @click.option(
+        "--signature-policy",
+        type=click.Path(exists=True, path_type=Path),
+        help="Explicit operator signer policy JSON, as for scan.",
+    )
     @click.pass_context
-    def baseline(ctx: click.Context, project_path: str, baseline_path: Path) -> None:
+    def baseline(
+        ctx: click.Context,
+        project_path: str,
+        baseline_path: Path,
+        no_project_policy: bool = False,
+        signature_policy: Path | None = None,
+    ) -> None:
         """Stage a static snapshot for review; publish it only after the scan gate passes.
 
         The file is unsigned. Operators must review and authenticate the baseline
-        before using it as an authority for runtime admission.
+        before using it as an authority for runtime admission. Take the baseline and
+        the snapshots compared with it under the same policy: pass --no-project-policy
+        here when the candidate scan uses it.
         """
         from nexus_symbiote.validators.risk import RiskScorer
 
@@ -152,7 +170,8 @@ def register_supply_chain_commands(main: click.Group) -> None:
                 output_format="json",
                 scanners=(),
                 report_only=False,
-                signature_policy=None,
+                signature_policy=signature_policy,
+                no_project_policy=no_project_policy,
             )
             # A project policy may select report-only mode; it cannot authorize
             # promotion of incomplete evidence into an approved baseline.

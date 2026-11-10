@@ -90,6 +90,8 @@ nexus-symbiote baseline [OPTIONS] [PROJECT_PATH]
 | Option | Description |
 |---|---|
 | `-o`, `--baseline-path` `PATH` | Where to write the unsigned baseline (default: .nexus-symbiote-baseline.json). |
+| `--no-project-policy` | Use built-in policy without reading configuration from the target, as scan does. |
+| `--signature-policy` `PATH` | Explicit operator signer policy JSON, as for scan. |
 
 ### `blast-radius`
 
