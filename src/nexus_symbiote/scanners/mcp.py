@@ -48,6 +48,8 @@ from nexus_symbiote.core.models import (
 )
 from nexus_symbiote.scanners.base import Scanner, ScanResult, parse_python, sanitized_origin
 from nexus_symbiote.scanners.mcp_launch import (
+    NPM_CONFIG_FLAGS,
+    NPM_CONFIG_VALUES,
     Launch,
     Package,
     analyze,
@@ -223,27 +225,48 @@ _NPM_REDIRECT = (
     r"|offline|prefer[-_]offline|proxy|https[-_]proxy|strict[-_]ssl|ca|cafile"
     r"|replace[-_]registry[-_]host|store[-_]dir)"
 )
+# Caches and tool directories count too: a prepared one in the checkout is used as is.
 _UV_REDIRECT = (
     r"uv_(?:index|index_url|default_index|extra_index_url|find_links|config_file"
-    r"|insecure_host|python_install_mirror|pypy_install_mirror)"
+    r"|insecure_host|python_install_mirror|pypy_install_mirror|cache_dir|tool_dir)"
 )
 _REDIRECT_ENVIRONMENT = {
     "npm": _NPM_REDIRECT,
-    "bun": rf"bun_config_registry|bun_install_cache_dir|{_NPM_REDIRECT}",
+    "bun": rf"bun_config_registry|bun_install_cache_dir|bun_install|{_NPM_REDIRECT}",
     "yarn": (
         r"yarn_(?:npm_registry_server|registry|rc_filename|cache_folder|enable_strict_ssl"
         r"|https_proxy|http_proxy|ca_file_path|global_folder|npm_scopes)"
     ),
-    "deno": rf"jsr_url|deno_cert|{_NPM_REDIRECT}",
+    "deno": rf"jsr_url|deno_cert|deno_dir|{_NPM_REDIRECT}",
     "uv-tool": _UV_REDIRECT,
     "uv-project": _UV_REDIRECT,
-    "pip": r"pip_(?:index|index_url|extra_index_url|find_links|config_file|trusted_host|proxy|cert)",
-    "go": r"goproxy|goflags|gonosumdb|gonosumcheck|gosumdb|goprivate|gonoproxy|goinsecure",
+    "pip": (
+        r"pip_(?:index|index_url|extra_index_url|find_links|config_file|trusted_host|proxy|cert"
+        r"|cache_dir)|pipx_home|pipx_shared_libs"
+    ),
+    "go": (
+        r"goproxy|goflags|gonosumdb|gonosumcheck|gosumdb|goprivate|gonoproxy|goinsecure"
+        r"|gomodcache|gopath"
+    ),
     "oci": (
         r"docker_(?:host|context|config|cert_path|tls_verify)|container_(?:host|connection)"
         r"|containers_(?:conf|registries_conf|storage_conf)|containerd_address"
     ),
 }
+_NODE_TRUST = r"node_extra_ca_certs|node_tls_reject_unauthorized"
+_PYTHON_TRUST = r"ssl_cert_file|ssl_cert_dir|requests_ca_bundle|curl_ca_bundle"
+# Environment names that add a trusted CA or disable TLS verification for a runner.
+_TRUST_ENVIRONMENT = {
+    "npm": _NODE_TRUST,
+    "bun": _NODE_TRUST,
+    "yarn": _NODE_TRUST,
+    "deno": r"deno_tls_ca_store|ssl_cert_file",
+    "uv-tool": _PYTHON_TRUST,
+    "uv-project": _PYTHON_TRUST,
+    "pip": _PYTHON_TRUST,
+    "go": r"ssl_cert_file|ssl_cert_dir",
+}
+_PROXY_ENVIRONMENT = r"https?_proxy|all_proxy"
 _LOCATOR = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s,;\"']+")
 _NPM_PURL_NAME = re.compile(r"(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*")
 _CONTEXT_HIGH = {
@@ -261,6 +284,7 @@ _CONTEXT_MEDIUM = {
     "preload_module": "a preloaded module",
     "code_loading_option": "an option that loads local code",
     "code_loading_environment": "environment that changes code loading",
+    "code_loading_setting": "a package manager setting that loads local code",
 }
 
 
@@ -404,8 +428,46 @@ _NPMRC_SOURCES = frozenset(
         "replace-registry-host",
         "prefix",
         "store-dir",
+        "cache-dir",
+        "workspace",
     }
 )
+# npm configuration that decides what npm exec runs: `call` runs a shell command and
+# `package` installs another package; either way the declared package does not
+# establish what runs (npm reads both from every configuration layer).
+_NPM_IDENTITY_SETTINGS = frozenset({"call", "package"})
+# Configuration that names local code npm, pnpm or a lifecycle script runs.
+_NPM_CODE_SETTINGS = _names(
+    "script-shell node-options shell git node-gyp editor browser viewer init-module init.module"
+    " onload-script pnpmfile global-pnpmfile npm-path"
+)
+# Settings known to change neither what runs nor where package bytes come from. npm
+# passes every other setting to lifecycle scripts, whose installers read binary
+# mirrors and hosts from them, so an unknown setting is a package source.
+_NPM_INERT_SETTINGS = (
+    (NPM_CONFIG_FLAGS | NPM_CONFIG_VALUES | {"color", "always-auth", "certfile", "keyfile"})
+    - _NPM_IDENTITY_SETTINGS
+    - _NPM_CODE_SETTINGS
+    - _NPMRC_SOURCES
+) | _names(
+    "auto-install-peers shamefully-hoist strict-peer-dependencies node-linker"
+    " link-workspace-packages prefer-workspace-packages public-hoist-pattern hoist-pattern hoist"
+    " hoist-workspace-packages enable-pre-post-scripts resolution-mode dedupe-peer-dependents"
+    " side-effects-cache side-effects-cache-readonly lockfile prefer-frozen-lockfile"
+    " frozen-lockfile use-lockfile-v6 git-checks publish-branch recursive-install"
+    " child-concurrency network-concurrency package-import-method symlink enable-modules-dir"
+    " shared-workspace-lockfile save-workspace-protocol ignore-workspace-root-check"
+    " disallow-workspace-cycles dedupe-direct-deps dedupe-injected-deps"
+    " exclude-links-from-lockfile resolve-peers-from-workspace-root peers-suffix-max-length"
+    " optimistic-repeat-install package-manager-strict package-manager-strict-version use-stderr"
+    " reporter strict-dep-builds ignore-compatibility-db deploy-all-files extend-node-path"
+    " ignore-pnpmfile ignore-dep-scripts only-built-dependencies never-built-dependencies"
+    " minimum-release-age use-node-version node-version manage-package-manager-versions"
+    " unsafe-perm"
+)
+_SCOPED_REGISTRY = re.compile(r"@[^:]+:(?:registry|npmRegistryServer)", re.DOTALL)
+_NPM_SCOPE = re.compile(r"@[a-z0-9][a-z0-9._-]{0,63}")
+_NPM_ENVIRONMENT = re.compile(r"(?:npm|pnpm)_config_(.+)", re.IGNORECASE | re.DOTALL)
 _UV_SETTINGS = (
     "index-url",
     "extra-index-url",
@@ -415,14 +477,135 @@ _UV_SETTINGS = (
     "python-install-mirror",
     "pypy-install-mirror",
 )
-_SETTING_NAME = re.compile(r"[A-Za-z0-9_.@:/-]{1,128}")
+# Yarn settings that replace or extend yarn with local code, and that redirect or
+# relax where packages come from (.yarnrc.yml for Yarn 2+, .yarnrc for Yarn 1).
+_YARN_CODE_SETTINGS = frozenset({"yarnPath", "plugins", "yarn-path"})
+_YARN_CODE_ENVIRONMENT = {"YARN_YARN_PATH": "yarnPath", "YARN_PLUGINS": "plugins"}
+_YARN_SOURCE_SETTINGS = _names(
+    "httpProxy httpsProxy caFilePath enableStrictSsl cacheFolder globalFolder networkSettings"
+    " unsafeHttpWhitelist checksumBehavior enableOfflineMode injectEnvironmentFiles"
+    " packageExtensions"
+)
 _RESOLVER_FILES = {
     "npm": (".npmrc",),
     "deno": (".npmrc",),
     "bun": (".npmrc", "bunfig.toml"),
-    "yarn": (".yarnrc.yml",),
+    "yarn": (".yarnrc.yml", ".yarnrc", ".env.yarn"),
     "uv-project": ("uv.toml", "pyproject.toml"),
 }
+# Setting names exported in clear: fixed vocabularies, never a name taken from input.
+_KNOWN_SETTINGS = (
+    _NPM_INERT_SETTINGS
+    | _NPMRC_SOURCES
+    | _NPM_IDENTITY_SETTINGS
+    | _NPM_CODE_SETTINGS
+    | _YARN_CODE_SETTINGS
+    | _YARN_SOURCE_SETTINGS
+    | frozenset(_UV_SETTINGS)
+    | {"registry", "npmRegistryServer", "offline", "prefer-offline", "strict-ssl", "environment"}
+)
+
+
+def _environment_label(variable: str) -> str:
+    """A package source label for an environment variable, never a token-shaped name."""
+    return "env:[redacted]" if TOKEN_SHAPE.search(variable) else f"env:{variable}"
+
+
+def _setting_name(key: str, launched: set[str]) -> str:
+    """A resolver setting name safe to export; a name from no vocabulary is ``[other]``.
+
+    A token pasted on its own .npmrc line is read by npm as ``<token>=true``, so
+    a key name is input and may be a secret.
+    """
+    if key in _KNOWN_SETTINGS:
+        return key
+    scope, _, rest = key.partition(":")
+    if (
+        _SCOPED_REGISTRY.fullmatch(key)
+        and _NPM_SCOPE.fullmatch(scope)
+        and not TOKEN_SHAPE.search(scope)
+    ):
+        return f"{scope}:{rest}"
+    if key.startswith("sources.") and key[8:] in launched:
+        return key
+    return "[other]"
+
+
+def _npm_key(variable: str) -> str | None:
+    """The npm configuration key an environment variable sets, as npm reads it."""
+    match = _NPM_ENVIRONMENT.fullmatch(variable)
+    if match is None:
+        return None
+    key = match.group(1)
+    return key if key.startswith("//") else (key[:1] + key[1:].replace("_", "-")).lower()
+
+
+def _npm_setting(key: str, value: str) -> str:
+    """What an npm setting does to an npm exec launch: identity, code, registry, source or inert."""
+    if key in _NPM_IDENTITY_SETTINGS:
+        return "identity"
+    if key in _NPM_CODE_SETTINGS:
+        return "code"
+    if key == "registry" or _SCOPED_REGISTRY.fullmatch(key):
+        return "registry"
+    if key in {"offline", "prefer-offline"}:
+        return "inert" if value == "false" else "source"
+    if key == "strict-ssl":
+        return "inert" if value == "true" else "source"
+    if key in _NPMRC_SOURCES:
+        return "source"
+    if key in _NPM_INERT_SETTINGS or key.startswith("//") or _NPMRC_AUTH.fullmatch(key):
+        return "inert"
+    return "source"
+
+
+_YARNRC_LINE = re.compile(r'(?:"((?:[^"\\]|\\.)*)"|([^\s"]+))\s*(.*)', re.DOTALL)
+
+
+def _yarnrc(text: str) -> tuple[tuple[str, str], ...]:
+    """Top-level ``key value`` lines of a Yarn 1 .yarnrc, keys without leading dashes."""
+    settings: dict[str, str] = {}
+    for line in re.split(r"[\r\n]+", text):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        match = _YARNRC_LINE.fullmatch(stripped)
+        if match is None:
+            continue
+        key = (match.group(1) if match.group(1) is not None else match.group(2)).lstrip("-")
+        value = match.group(3).strip()
+        if len(value) >= 2 and value[0] == value[-1] == '"':
+            value = value[1:-1]
+        settings[key] = value
+    return tuple(settings.items())
+
+
+def _file_setting(path: str, family: str, key: str, value: str, launched: set[str]) -> str:
+    """What a project resolver file setting does: identity, code, source or inert.
+
+    Registry entries are inert here; they apply per package scope.
+    """
+    if path == ".npmrc":
+        if family != "npm":
+            return "source" if _npmrc_source(key, value) else "inert"
+        kind = _npm_setting(key, value)
+        return "inert" if kind == "registry" else kind
+    if path in {".yarnrc.yml", ".yarnrc"}:
+        if key in _YARN_CODE_SETTINGS:
+            return "identity"
+        if path != ".yarnrc.yml" or key not in _YARN_SOURCE_SETTINGS:
+            return "inert"
+        relaxed = {
+            "enableStrictSsl": "true",
+            "checksumBehavior": "throw",
+            "enableOfflineMode": "false",
+        }
+        return "inert" if relaxed.get(key) == value else "source"
+    if path in {"uv.toml", "pyproject.toml"}:
+        return "source" if not key.startswith("sources.") or key[8:] in launched else "inert"
+    return "unresolved" if path == ".env.yarn" else "inert"
+
+
 # Working directories that are the scan root; any other one may hold other resolver files.
 _ROOT_DIRECTORIES = frozenset({"", ".", "./", "${workspaceFolder}", "${workspaceFolder}/"})
 
@@ -562,11 +745,23 @@ class _Resolvers:
     def _read(self, path: str) -> _ResolverFile:
         if path == ".npmrc":
             return _npmrc(self._text(path) or "")
+        if path == ".yarnrc":
+            return _ResolverFile(_yarnrc(self._text(path) or ""))
+        if path == ".env.yarn":
+            # Yarn 4 loads .env.yarn into its environment by default (injectEnvironmentFiles).
+            text = self._text(path)
+            return _ResolverFile((("environment", text),) if text is not None else ())
         if path == ".yarnrc.yml":
             settings = self._read_mapping(Path(path), self._result) or {}
             if settings:
                 self._result.surfaces_scanned.append(path)
-            return _ResolverFile(tuple(_registries(settings, "npmRegistryServer", "npmScopes")))
+            entries = _registries(settings, "npmRegistryServer", "npmScopes")
+            entries += [
+                (str(key), value if isinstance(value, str) else json.dumps(value, default=str))
+                for key, value in settings.items()
+                if key in _YARN_CODE_SETTINGS or key in _YARN_SOURCE_SETTINGS
+            ]
+            return _ResolverFile(tuple(entries))
         settings = self._toml(path)
         if path == "bunfig.toml":
             install = settings.get("install")
@@ -583,15 +778,20 @@ class _Resolvers:
 
 
 class _ResolverView:
-    """What project resolver files mean for one launcher."""
+    """What project resolver files and package manager environment mean for one launcher."""
 
-    __slots__ = ("binding", "names", "sources", "unresolved")
+    __slots__ = ("binding", "code", "environment", "identity", "names", "sources", "unresolved")
 
     def __init__(self) -> None:
         self.sources: list[tuple[str, str]] = []
         self.unresolved: list[str] = []
         self.binding: list[list[str]] = []
         self.names: list[str] = []
+        # Settings that change what runs (fixed-vocabulary reasons) or load local code.
+        self.identity: list[str] = []
+        self.code = 0
+        # The package manager's own environment settings were read here.
+        self.environment = False
 
 
 def _registry_url(value: Any) -> str | None:
@@ -854,7 +1054,9 @@ class MCPScanner(Scanner):
         relocated = launch.relocated or (
             isinstance(cwd, str) and cwd.strip() not in _ROOT_DIRECTORIES
         )
-        view = self._resolver_view(launch, relocated)
+        environment = [*env.items(), *launch.environment]
+        environment_file = "envFile" in config or launch.injected_environment
+        view = self._resolver_view(launch, relocated, environment, environment_file)
         identity = self._identity(name, config, launch, endpoint_url, env, scrubber, view)
         gaps: list[str] = []
         for gap in (identity.endpoint_gap, transport_gap):
@@ -869,7 +1071,7 @@ class MCPScanner(Scanner):
             gaps.append(
                 f"declares {count} field{'s' if count > 1 else ''} the collector does not interpret"
             )
-        identity_unknown = self._identity_unknown(launch)
+        identity_unknown = self._identity_unknown(launch) or next(iter(view.identity), None)
         if identity_unknown:
             gaps.append(f"launcher identity unknown ({identity_unknown})")
         if identity.withheld:
@@ -916,11 +1118,14 @@ class MCPScanner(Scanner):
             variable
             for variable in (*env, *(variable for variable, _ in launch.environment))
             if variable.upper() in _CODE_LOADING_ENVIRONMENT
+            or _npm_key(variable) in _NPM_CODE_SETTINGS
         ]
         if loading:
             context["code_loading_environment"] = len(loading)
         if command_fields:
             context["command_fields"] = len(command_fields)
+        if view.code:
+            context["code_loading_setting"] = view.code
 
         risks = self._server_risks(
             name,
@@ -968,7 +1173,8 @@ class MCPScanner(Scanner):
             launcher_properties["packages"] = identity.packages
         if identity.sources:
             launcher_properties["package_sources"] = identity.sources
-        resolver_names = sorted(set(view.names))
+        # Repeated "[other]" names stay, so adding an unnamed setting changes the digest.
+        resolver_names = sorted(view.names)
         if resolver_names:
             launcher_properties["resolver_settings"] = resolver_names
         if context:
@@ -1118,11 +1324,30 @@ class MCPScanner(Scanner):
     ) -> list[str]:
         """Exported sources that redirect package resolution: label and origin only."""
         found: list[tuple[str, str]] = list(launch.sources)
-        pattern = _REDIRECT_ENVIRONMENT.get(launch.family or "")
-        if pattern is not None:
-            for variable, value in (*env.items(), *launch.environment):
+        family = launch.family or ""
+        environment = [*env.items(), *launch.environment]
+        pattern = _REDIRECT_ENVIRONMENT.get(family)
+        if pattern is not None and not view.environment:
+            for variable, value in environment:
                 if re.fullmatch(pattern, variable, re.IGNORECASE):
-                    found.append((f"env:{variable}", value))
+                    found.append((_environment_label(variable), value))
+        trust_pattern = _TRUST_ENVIRONMENT.get(family)
+        if trust_pattern is not None:
+            # An added CA or disabled TLS verification lets a proxy or another
+            # host serve registry content; a proxy alone cannot.
+            trust = [
+                (variable, value)
+                for variable, value in environment
+                if re.fullmatch(trust_pattern, variable, re.IGNORECASE)
+                and (variable.upper() != "NODE_TLS_REJECT_UNAUTHORIZED" or value.strip() == "0")
+            ]
+            if trust:
+                trust += [
+                    (variable, value)
+                    for variable, value in environment
+                    if re.fullmatch(_PROXY_ENVIRONMENT, variable, re.IGNORECASE)
+                ]
+            found.extend((_environment_label(variable), value) for variable, value in trust)
         found.extend(view.sources)
         sources: set[str] = {f"{label}=[unresolved]" for label in view.unresolved}
         for label, value in found:
@@ -1133,47 +1358,102 @@ class MCPScanner(Scanner):
                 sources.add(f"{label}={location}")
         return sorted(sources)
 
-    def _resolver_view(self, launch: Launch, relocated: bool) -> _ResolverView:
-        """Project resolver settings that apply to this launcher's registry packages."""
+    def _resolver_view(
+        self,
+        launch: Launch,
+        relocated: bool,
+        environment: list[tuple[str, str]],
+        environment_file: bool,
+    ) -> _ResolverView:
+        """Project resolver settings and package manager environment for registry packages."""
         view = _ResolverView()
-        files = _RESOLVER_FILES.get(launch.family or "", ())
         packages = [package for package in launch.packages if package.registry]
-        if self._resolvers is None or not files or not packages:
+        if not packages:
+            return view
+        family = launch.family or ""
+        if environment_file:
+            # Variables from an environment file or secret store may redirect or
+            # replace what the runner fetches; their names are not visible here.
+            view.unresolved.append("environment-file")
+        launched = {str(package.name) for package in packages}
+        npm_environment: dict[str, str] = {}
+        if family == "npm":
+            view.environment = True
+            for variable, value in environment:
+                key = _npm_key(variable)
+                if key is None or value == "":
+                    continue
+                npm_environment[key] = value
+                kind = _npm_setting(key, value)
+                if kind == "identity":
+                    view.identity.append(f"npm {key} setting from the environment")
+                elif kind in {"source", "registry"}:
+                    known = _setting_name(key, launched) != "[other]"
+                    view.sources.append(
+                        (_environment_label(variable) if known else "env:npm_config_[other]", value)
+                    )
+        if family == "yarn":
+            # Yarn reads every setting from YARN_<NAME> variables, yarnPath included.
+            for variable, value in environment:
+                setting = _YARN_CODE_ENVIRONMENT.get(variable.upper())
+                if setting is not None and value:
+                    view.identity.append(f"yarn {setting} setting from the environment")
+        files = _RESOLVER_FILES.get(family, ())
+        if self._resolvers is None or not files:
             return view
         if relocated:
             # Another working directory may hold its own resolver files.
             view.unresolved.append("working-directory")
-        names = {str(package.name) for package in packages}
         for path in files:
             file = self._resolvers.entries(path)
             if file.unresolved:
                 view.unresolved.append(f"{path}:key")
+            settings = dict(file.settings)
             for key, value in file.settings:
                 view.binding.append([f"{path}:{key}", value])
-                shown = redact_text(key, identifier=True) if _SETTING_NAME.fullmatch(key) else ""
-                view.names.append(f"{path}:{shown or '[redacted]'}")
-            settings = dict(file.settings)
-            if path in {"uv.toml", "pyproject.toml"}:
-                view.sources.extend(
-                    (f"{path}:{key}", value)
-                    for key, value in file.settings
-                    if not key.startswith("sources.") or key[8:] in names
-                )
+                label = f"{path}:{_setting_name(key, launched)}"
+                view.names.append(label)
+                kind = _file_setting(path, family, key, value, launched)
+                if kind == "identity":
+                    view.identity.append(
+                        f"npm {key} setting from {path}"
+                        if path == ".npmrc"
+                        else f"{path} {key} replaces or extends yarn"
+                    )
+                elif kind == "code":
+                    view.code += 1
+                elif kind == "source":
+                    view.sources.append((label, value))
+                elif kind == "unresolved":
+                    view.unresolved.append(label)
+            if path in {"uv.toml", "pyproject.toml", ".env.yarn"}:
                 continue
-            if path == ".npmrc":
-                view.sources.extend(
-                    (f"{path}:{key}", value)
-                    for key, value in file.settings
-                    if _npmrc_source(key, value)
-                )
             default = "npmRegistryServer" if path == ".yarnrc.yml" else "registry"
+            # npm uses the registry of a configured `scope` for a package whose own
+            # scope has none, unscoped packages included (npm-registry-fetch).
+            selected_scope = (
+                npm_environment.get("scope") or settings.get("scope") if path == ".npmrc" else None
+            )
+            fallback = (
+                f"{selected_scope if selected_scope.startswith('@') else '@' + selected_scope}"
+                ":registry"
+                if selected_scope
+                else None
+            )
             for package in packages:
                 name = package.name or ""
                 scope = name.split("/", 1)[0] if name.startswith("@") else None
                 scoped = f"{scope}:{default}" if scope else None
-                selected = scoped if scoped in settings else default
+                if scoped in settings:
+                    selected = scoped
+                elif fallback in settings:
+                    selected = fallback
+                else:
+                    selected = default
                 if selected in settings:
-                    view.sources.append((f"{path}:{selected}", settings[selected]))
+                    view.sources.append(
+                        (f"{path}:{_setting_name(selected, launched)}", settings[selected])
+                    )
         return view
 
     @staticmethod

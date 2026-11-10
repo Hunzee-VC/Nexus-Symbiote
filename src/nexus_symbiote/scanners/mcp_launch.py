@@ -101,8 +101,32 @@ _INLINE_FLAGS = {
     "perl": re.compile(r"-[a-zA-Z]*[eE]"),
     "php": re.compile(r"-[rBRE]|--(?:run|process-begin|process-code|process-end)(?:=.*)?", re.S),
 }
-_SCRIPT_FILE = re.compile(r".*[\\/.].*", re.S)
 _SCRIPT_SUFFIX = re.compile(r"(?:-cli)?\.[cm]?js$|\.py$")
+# Python options that end a short-option cluster: inline code, a module, or a value.
+_PYTHON_SPECIAL = re.compile("[cmWX]")
+# TypeScript and transpiling Node runners accept node's inline code options.
+_NODE_RUNNERS = frozenset({"tsx", "esno", "babel-node"})
+_TS_NODE = frozenset(
+    {
+        "ts-node",
+        "ts-node-esm",
+        "ts-node-cwd",
+        "ts-node-script",
+        "ts-node-transpile-only",
+        "ts-script",
+    }
+)
+# ts-node options that take a value (ts-node --help); node's own are in _NODE_VALUES.
+_TS_NODE_VALUES = _set(
+    "--cwd --dir -C --compiler -O --compiler-options --compilerOptions -P --project -D"
+    " --ignore-diagnostics --ignoreDiagnostics -I --ignore --transpiler --scope-dir --scopeDir"
+    " --experimental-specifier-resolution --experimentalSpecifierResolution"
+)
+
+
+def _script_like(word: str) -> bool:
+    """A word that names a script file rather than a program option or value."""
+    return "." in word or "/" in word or "\\" in word
 
 
 @dataclass(frozen=True)
@@ -147,6 +171,8 @@ class Launch:
     environment: list[tuple[str, str]] = field(default_factory=list)
     # The launch changes the working directory, so project resolver files may differ.
     relocated: bool = False
+    # A wrapper adds variables from a file or secret store the inventory cannot read.
+    injected_environment: bool = False
 
     def mark(self, flag: str, count: int = 1) -> None:
         self.context[flag] = self.context.get(flag, 0) + count
@@ -164,6 +190,8 @@ def known_executable(name: str | None) -> bool:
         or name in _INJECTORS
         or name in _INTERPRETERS
         or name in _UNCLASSIFIED_RUNNERS
+        or name in _NODE_RUNNERS
+        or name in _TS_NODE
         or bool(re.fullmatch(r"(?:python|pypy)[0-9.]*|py|node(?:js)?", name))
     )
 
@@ -216,6 +244,13 @@ class _Options:
     flag_patterns: tuple[re.Pattern[str], ...] = ()
     combined: bool = False
     boolean_values: bool = False
+    # Letters of the single-letter options, for checking option clusters in C.
+    short_flags: frozenset[str] = frozenset()
+    short_values: frozenset[str] = frozenset()
+
+
+def _letters(options: str) -> frozenset[str]:
+    return frozenset(word[1] for word in options.split() if len(word) == 2 and word[0] == "-")
 
 
 def _table(
@@ -234,6 +269,8 @@ def _table(
         tuple(re.compile(pattern) for pattern in flag_patterns),
         combined,
         boolean_values,
+        _letters(flags),
+        _letters(values),
     )
 
 
@@ -480,7 +517,8 @@ _NPM_SOURCE = frozenset(
         "--cache-dir",
     }
 )
-_NPM_CODE_LOADING = frozenset({"--node-options", "--script-shell"})
+# npx rewrites --shell to --script-shell; npm reads --shell for an exec without a command.
+_NPM_CODE_LOADING = frozenset({"--node-options", "--script-shell", "--shell"})
 _SCOPED_REGISTRY = r"--@[a-z0-9][a-z0-9._-]*:registry"
 _NPM_EXEC = _table(
     "-y --yes --no -n --no-yes -q --quiet -s --silent --ignore-existing --prefer-online"
@@ -532,6 +570,7 @@ _UV_SOURCE = frozenset(
         "-f",
         "--allow-insecure-host",
         "--config-file",
+        "--cache-dir",
     }
 )
 _UV_LOCATION = frozenset({"--directory", "--project"})
@@ -652,40 +691,67 @@ _DENO_RUN = _table(
     ),
 )
 _SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh", "ash", "mksh", "fish"})
-_SHELL_VALUE_OPTIONS = frozenset({"-o", "+o", "-O", "+O", "--rcfile", "--init-file"})
-_SHELL_INLINE = re.compile(r"-[a-zA-Z]*c[a-zA-Z]*|--command(?:=.*)?", re.S)
+# bash long options that take the next word; other long options are flags.
+_SHELL_LONG_VALUES = frozenset({"--rcfile", "--init-file"})
+_AMBIGUOUS_SHELL = "shell options before the script are ambiguous"
+# fish reads its options with getopt "+hPilNnvc:C:p:d:f:D:o:" and unique long prefixes.
+_FISH_FLAGS = frozenset("hPilNnv")
+_FISH_FLAG_RUN = re.compile("[hPilNnv]*")
+_FISH_VALUES = frozenset("cCpdfDo")
+_FISH_LONG = {
+    "command": ("c", True),
+    "init-command": ("C", True),
+    "features": ("f", True),
+    "debug": ("d", True),
+    "debug-output": ("o", True),
+    "debug-stack-frames": ("D", True),
+    "profile": ("p", True),
+    "profile-startup": ("p", True),
+    "interactive": ("i", False),
+    "login": ("l", False),
+    "no-config": ("N", False),
+    "no-execute": ("n", False),
+    "private": ("P", False),
+    "print-rusage-self": ("", False),
+    "print-debug-categories": ("", False),
+    "help": ("h", False),
+    "version": ("v", False),
+}
 _INTERPRETERS = frozenset(
     {"cmd", "powershell", "pwsh", "wsl", "env", "exec", "nohup", "java", "ruby", "perl", "php"}
 )
 _INJECTORS = frozenset({"op", "doppler", "infisical", "dotenvx", "aws-vault", "with-secrets"})
+# Injectors that add variables the inventory cannot read (files, secret stores).
+_ENVIRONMENT_INJECTORS = frozenset({"doppler", "infisical", "dotenvx", "with-secrets"})
 _WRAPPERS = frozenset({"cmd", "powershell", "pwsh", "wsl", "env"})
 # Package runners this grammar does not classify: always unknown, or when one of
-# these subcommands (or an option) follows the name.
+# these subcommands follows the name and its options.
 _UNCLASSIFIED_RUNNERS: dict[str, frozenset[str] | None] = {
     "dnx": None,
     "jbang": None,
     "pip-run": None,
     "nix-shell": None,
+    "corepack": None,
+    "mise": None,
+    "rtx": None,
+    "pkgx": None,
+    "finch": None,
+    "dx": None,
     "dotnet": frozenset({"dnx", "tool"}),
     "gem": frozenset({"exec"}),
     "nix": frozenset({"run", "shell", "develop"}),
     "pixi": frozenset({"exec"}),
-}
-# Words after a runner name that make it a launch rather than an ordinary value.
-_RUNNER_STARTS: dict[str, frozenset[str]] = {
-    "npm": frozenset({"exec", "x", "init", "create", "install", "i", "add", "ci"}),
-    "pnpm": frozenset({"dlx", "create", "add", "install", "i"}),
-    "yarn": frozenset({"dlx", "create", "add", "install"}),
-    "bun": frozenset({"x", "create", "add", "install", "i"}),
-    "deno": frozenset({"run", "x", "eval", "serve", "repl", "install", "add"}),
-    "podman": frozenset({"run", "container"}),
-    "nerdctl": frozenset({"run", "container"}),
-    **{name: starts for name, starts in _UNCLASSIFIED_RUNNERS.items() if starts is not None},
+    "container": frozenset({"run", "create", "start", "exec", "build"}),
+    "apptainer": frozenset({"run", "exec", "shell", "instance", "build", "test"}),
+    "singularity": frozenset({"run", "exec", "shell", "instance", "build", "test"}),
 }
 _ENV_OPTIONS = _set(
     "- -- -i -u -S -C -0 -v --ignore-environment --unset --chdir --split-string --null"
     " --debug --block-signal --default-signal --ignore-signal"
 )
+# Characters env -S gives a meaning a shell reading would not (escapes, quotes,
+# expansion, comments) and whitespace other than space and tab.
+_ENV_SPLIT_SPECIAL = re.compile(r"[\\'\"$#\v\f]")
 MAX_SCAN_WORDS = 4096
 
 
@@ -693,31 +759,221 @@ class _ScanLimitError(Exception):
     """The argument scan spent its linear work budget."""
 
 
-def _spend(budget: list[int] | None) -> None:
+def _spend(budget: list[int] | None, word: str = "") -> None:
+    """Charge one step, plus one per 64 characters the step may examine."""
     if budget is not None:
-        budget[0] -= 1
+        budget[0] -= 1 + len(word) // 64
         if budget[0] < 0:
             raise _ScanLimitError
 
 
 def _interpreter_family(name: str) -> str | None:
-    if name in {"node", "nodejs"}:
+    if name in {"node", "nodejs"} or name in _NODE_RUNNERS:
         return "node"
+    if name in _TS_NODE:
+        return "ts-node"
     if re.fullmatch(r"python[0-9.]*|py|pypy[0-9.]*", name):
         return "python"
     return name if name in _INLINE_FLAGS else None
 
 
 def _program_name(word: str) -> str | None:
-    """The runner, shell, wrapper or interpreter a word names by basename, if any."""
+    """The runner, shell, wrapper or interpreter a word names by basename, if any.
+
+    A version suffix (``pnpm@9.15.0``, as corepack reads it) and an ``npm:`` or
+    ``jsr:`` prefix (as Deno reads it) do not change the program a word names.
+    """
     name = normalize_command(word)
-    for candidate in (name, _SCRIPT_SUFFIX.sub("", name)):
+    bare = name.split(":", 1)[1] if name.startswith(("npm:", "jsr:")) else name
+    unversioned = bare.partition("@")[0] if not bare.startswith("@") else bare
+    for candidate in (name, _SCRIPT_SUFFIX.sub("", name), unversioned):
         family = _interpreter_family(candidate)
         if family is not None:
             return family
         if candidate in _PROGRAM_NAMES:
             return candidate
     return None
+
+
+def _shell_script(
+    name: str, words: list[str], start: int, budget: list[int] | None = None
+) -> tuple[str | None, list[str], str | None]:
+    """The inline script a shell started with ``words[start:]`` runs.
+
+    Returns the script, the words after it and None; (None, [], None) for a script
+    file or standard input; or (None, [], reason) when the options do not establish
+    the script. Shells read every option word before the script, so ``-c -- x``,
+    ``-c -e x`` and ``-co posix x`` all run ``x``.
+    """
+    if name == "fish":
+        return _fish_script(words, start, budget)
+    index = start
+    inline = False
+    while index < len(words):
+        word = words[index]
+        _spend(budget, word)
+        if word[:1] not in {"-", "+"}:
+            break
+        index += 1
+        if word in {"-", "--"}:
+            break
+        if word == "+":
+            # zsh reads a lone "+" as the end of options, other shells as an empty option.
+            return None, [], _AMBIGUOUS_SHELL
+        if word.startswith("--"):
+            index += 1 if word in _SHELL_LONG_VALUES else 0
+            continue
+        letters = word[1:]
+        inline = inline or "c" in letters
+        valued = "oO" if name == "bash" else "o"
+        takes = sum(letters.count(letter) for letter in valued)
+        if takes:
+            # Each o takes the next word in bash and dash; zsh reads a value
+            # attached to -o instead, so only a final o reads the same everywhere.
+            if takes > 1 or letters[-1] not in valued:
+                return None, [], _AMBIGUOUS_SHELL
+            index += 1
+        if ("O" in letters and name != "bash") or (
+            name in {"ksh", "mksh"} and ("R" in letters or "T" in letters)
+        ):
+            return None, [], _AMBIGUOUS_SHELL
+        if name == "zsh" and "b" in letters:
+            break
+    if not inline:
+        return None, [], None
+    if index >= len(words):
+        return None, [], "shell -c without a script"
+    return words[index], words[index + 1 :], None
+
+
+def _fish_script(
+    words: list[str], start: int, budget: list[int] | None
+) -> tuple[str | None, list[str], str | None]:
+    """fish's -c/--command value; -C/--init-command runs code before it and is unknown."""
+    script: str | None = None
+    index = start
+    while index < len(words):
+        word = words[index]
+        _spend(budget, word)
+        if not word.startswith("-") or word == "-":
+            break
+        index += 1
+        if word == "--":
+            break
+        pairs: list[tuple[str, str]] = []
+        if word.startswith("--"):
+            given, equals, value = word[2:].partition("=")
+            matches = [option for option in _FISH_LONG if option.startswith(given)]
+            option = given if given in _FISH_LONG else (matches[0] if len(matches) == 1 else "")
+            if not option:
+                return None, [], "unrecognised fish option"
+            letter, takes = _FISH_LONG[option]
+            if takes and not equals:
+                if index >= len(words):
+                    return None, [], "unrecognised fish option"
+                value, index = words[index], index + 1
+            pairs.append((letter, value))
+        else:
+            letters = word[1:]
+            position = _FISH_FLAG_RUN.match(letters).end()  # type: ignore[union-attr]
+            if position < len(letters):
+                letter = letters[position]
+                if letter not in _FISH_VALUES:
+                    return None, [], "unrecognised fish option"
+                value = letters[position + 1 :]
+                if not value:
+                    if index >= len(words):
+                        return None, [], "unrecognised fish option"
+                    value, index = words[index], index + 1
+                pairs.append((letter, value))
+        for letter, value in pairs:
+            if letter == "C":
+                return None, [], "fish init command runs a script"
+            if letter == "c":
+                if script is not None:
+                    return None, [], "fish runs more than one command"
+                script = value
+    if script is None:
+        return None, [], None
+    return script, words[index:], None
+
+
+_CMD_SWITCHES = r"(?:/[a-z](?::\w+)?)*"
+_CMD_SWITCH = re.compile(r"/[a-z](?::\w+)?", re.IGNORECASE)
+# /C, /K and /R run the rest of the line, which may start right after the switch.
+_CMD_RUN = re.compile(rf"({_CMD_SWITCHES})/[ckr](.*)", re.IGNORECASE | re.DOTALL)
+
+
+def _cmd_runs(words: list[str], start: int) -> bool:
+    """Whether cmd started with ``words[start:]`` runs a command line."""
+    leading = True
+    for word in words[start : start + 8]:
+        found = _CMD_RUN.fullmatch(word)
+        if found is not None and (leading or not found.group(2)):
+            return True
+        leading = leading and bool(_CMD_SWITCH.fullmatch(word))
+    return False
+
+
+@dataclass(frozen=True)
+class _Starts:
+    """When a runner name followed by more words in an argument list starts code.
+
+    The runner's options before its subcommand are skipped. An option the table
+    does not know is a flag or takes the next word; both readings are checked,
+    unless the runner rejects unknown options (``strict``). ``starts`` decides
+    whether a subcommand word starts code; ``inline`` options run code by themselves.
+    """
+
+    options: _Options
+    starts: Callable[[str], bool]
+    strict: bool = False
+    inline: frozenset[str] = frozenset()
+
+
+def _subcommands(words: list[str], start: int, grammar: _Starts, budget: list[int] | None) -> bool:
+    """Whether a word a runner may read as its subcommand starts code."""
+    table = grammar.options
+    index = start
+    while index < len(words):
+        word = words[index]
+        _spend(budget, word)
+        if word == "--":
+            return index + 1 < len(words) and grammar.starts(words[index + 1])
+        if not word.startswith("-") or word == "-":
+            return grammar.starts(word)
+        name, equals, _ = word.partition("=")
+        inline = {option[1] for option in grammar.inline if len(option) == 2}
+        if name in grammar.inline or (
+            not word.startswith("--") and not inline.isdisjoint(name[1:])
+        ):
+            return True
+        if name in table.values or any(p.fullmatch(name) for p in table.value_patterns):
+            index += 1 if equals else 2
+        elif name in table.flags or any(p.fullmatch(name) for p in table.flag_patterns):
+            index += 1
+        elif not word.startswith("--") and len(word) > 2 and _letters_known(word, table):
+            index += 2 if word[-1:] and f"-{word[-1]}" in table.values else 1
+        elif grammar.strict:
+            return False
+        elif equals:
+            index += 1
+        else:
+            following = words[index + 1] if index + 1 < len(words) else ""
+            if following[:1] not in {"", "-"} and grammar.starts(following):
+                return True
+            index += 2 if following[:1] not in {"", "-"} else 1
+    return False
+
+
+def _letters_known(word: str, table: _Options) -> bool:
+    """A cluster of short options the table knows, such as ``-Dl`` for ``-D -l``."""
+    letters = word[1:]
+    return (
+        bool(letters)
+        and table.short_flags.issuperset(letters[:-1])
+        and (letters[-1] in table.short_flags or letters[-1] in table.short_values)
+    )
 
 
 def _launches(name: str, words: list[str], start: int, budget: list[int] | None = None) -> bool:
@@ -727,36 +983,23 @@ def _launches(name: str, words: list[str], start: int, budget: list[int] | None 
     first = words[start]
     option = first.partition("=")[0]
     if name in _SHELLS:
-        return _shell_inline(words, start, budget)
+        script, _, problem = _shell_script(name, words, start, budget)
+        return script is not None or problem is not None
     if name == "cmd":
-        return any(word.lower() in {"/c", "/k"} for word in words[start : start + 8])
+        return _cmd_runs(words, start)
     if name in {"powershell", "pwsh"}:
         return first[:1] in {"-", "/"} and not first.startswith("--")
     if name == "env":
         return option in _ENV_OPTIONS or first.startswith("-S") or bool(_ASSIGNMENT.match(first))
-    if name == "go":
-        return first == "run" or first.startswith("-C")
-    if name in {"docker", "uv"}:
-        table = _CONTAINER_GLOBAL["docker"] if name == "docker" else _UV_GLOBAL_TABLE
-        subcommands = {"run", "container"} if name == "docker" else {"run", "tool"}
-        return first in subcommands or option in table.flags | table.values
-    if name == "pipx":
-        return first == "run"
-    starts = _RUNNER_STARTS.get(name)
-    if starts is not None:
-        return first in starts or first.startswith("-")
+    grammar = _STARTS.get(name)
+    if grammar is not None:
+        return _subcommands(words, start, grammar, budget)
+    unclassified = _UNCLASSIFIED_RUNNERS.get(name)
+    if unclassified is not None:
+        # Their options are not tabled and may take several values (nix --option
+        # name value), so any of the next words naming a start counts.
+        return any(word in unclassified for word in words[start : start + 8])
     return True
-
-
-def _shell_inline(words: list[str], start: int, budget: list[int] | None = None) -> bool:
-    """Whether shell options starting at ``start`` reach an inline script option."""
-    index = start
-    while index < len(words) and words[index][:1] in {"-", "+"}:
-        _spend(budget)
-        if _SHELL_INLINE.fullmatch(words[index]):
-            return True
-        index += 2 if words[index] in _SHELL_VALUE_OPTIONS else 1
-    return False
 
 
 def _interpreter_reason(
@@ -769,17 +1012,17 @@ def _interpreter_reason(
     """Inline code, or a package runner run as a module, among an interpreter's options."""
     index = start
     while index < len(words):
-        _spend(budget)
         word = words[index]
+        _spend(budget, word)
         if word == "--" or not word.startswith("-"):
-            if family in _INLINE_FLAGS and not _SCRIPT_FILE.fullmatch(word):
+            if family in _INLINE_FLAGS and not _script_like(word):
                 index += 1
                 continue
             return None
         option, equals, value = word.partition("=")
         follows = words[index + 1] if index + 1 < len(words) else ""
         step = 1
-        if family == "node":
+        if family in {"node", "ts-node"}:
             target = value if equals else follows
             if option in _NODE_INLINE or (
                 option in _NODE_PRELOAD and target.lower().startswith(_INLINE_SOURCES)
@@ -787,7 +1030,8 @@ def _interpreter_reason(
                 return _inline(family, launch)
             if option in _NODE_PRELOAD and launch is not None:
                 launch.mark("preload_module")
-            step = 2 if option in _NODE_VALUES and not equals else 1
+            takes = option in _NODE_VALUES or (family == "ts-node" and option in _TS_NODE_VALUES)
+            step = 2 if takes and not equals else 1
         elif family == "python":
             if word == "-":
                 return _inline(family, launch)
@@ -795,16 +1039,17 @@ def _interpreter_reason(
                 step = 2 if word == "--check-hash-based-pycs" else 1
             else:
                 letters = word[1:]
-                for position, letter in enumerate(letters):
-                    if letter == "c":
-                        return _inline(family, launch)
-                    if letter == "m":
-                        module = letters[position + 1 :] or follows
-                        name = module.split(".")[0].replace("_", "-").casefold()
-                        return f"python -m {name}" if name in _PROGRAM_NAMES else None
-                    if letter in "WX":
-                        step = 2 if position + 1 == len(letters) else 1
-                        break
+                found = _PYTHON_SPECIAL.search(letters)
+                letter = found.group() if found is not None else ""
+                position = found.start() if found is not None else 0
+                if letter == "c":
+                    return _inline(family, launch)
+                if letter == "m":
+                    module = letters[position + 1 :] or follows
+                    name = module.split(".")[0].replace("_", "-").casefold()
+                    return f"python -m {name}" if name in _PROGRAM_NAMES else None
+                if letter in {"W", "X"}:
+                    step = 2 if position + 1 == len(letters) else 1
         elif _INLINE_FLAGS[family].fullmatch(word):
             return _inline(family, launch)
         index += step
@@ -821,23 +1066,26 @@ def _embedded_reason(words: list[str], stop: int | None = None) -> str | None:
     """A package runner, shell, wrapper or inline interpreter code that a word starts.
 
     Work is linear: every nested option scan spends from one budget proportional to
-    the number of words, and an exhausted budget is a failure, not a pass.
+    the number of words and characters, each step is charged for the characters it
+    may examine, and an exhausted budget is a failure, not a pass.
     """
     total = len(words) + sum(
         len(word.split()) for word in words if any(char.isspace() for char in word)
     )
     if total > MAX_SCAN_WORDS * 16:
         return "arguments exceed the launcher scan limit"
+    characters = sum(len(word) for word in words)
+    budget = [4 * total + characters // 16 + 256]
     try:
-        return _scan_words(words, len(words) if stop is None else stop, [4 * total + 256])
+        return _scan_words(words, len(words) if stop is None else stop, budget)
     except _ScanLimitError:
         return "arguments exceed the launcher scan limit"
 
 
 def _scan_words(words: list[str], stop: int, budget: list[int]) -> str | None:
     for index in range(min(stop, len(words))):
-        _spend(budget)
         word = words[index]
+        _spend(budget, word)
         if word.startswith("-"):
             _, equals, word = word.partition("=")
             if not equals:
@@ -851,7 +1099,7 @@ def _scan_words(words: list[str], stop: int, budget: list[int]) -> str | None:
         name = _program_name(word)
         if name is None:
             continue
-        if name in {"node", "python"} or name in _INLINE_FLAGS:
+        if name in {"node", "ts-node", "python"} or name in _INLINE_FLAGS:
             found = _interpreter_reason(name, words, budget=budget, start=index + 1)
             if found is not None:
                 return f"arguments run {found}"
@@ -980,8 +1228,14 @@ def _unwrap(tokens: list[str], launch: Launch) -> list[str] | None:
             launch.launcher = name
             launch.fail(f"{name} wrapper without '--' before the command")
             return None
+        separator = rest.index("--")
+        if name in _ENVIRONMENT_INJECTORS or any(
+            word.partition("=")[0] == "--env-file" for word in rest[:separator]
+        ):
+            # Variables from an environment file or secret store are not visible here.
+            launch.injected_environment = True
         launch.wrappers.append(name)
-        return rest[rest.index("--") + 1 :]
+        return rest[separator + 1 :]
     return None
 
 
@@ -1010,7 +1264,9 @@ def _unwrap_env(rest: list[str], launch: Launch) -> list[str] | None:
                 value, skip = word.partition("=")[2], 1
             else:
                 value, skip = word[2:], 1
-            words = _split_script(value)
+            # env -S has its own grammar: \_ separates words, \c ends the string,
+            # ${VAR} expands and # starts a comment. Such a value is not read here.
+            words = None if _ENV_SPLIT_SPECIAL.search(value) else _split_script(value)
             if words is None:
                 launch.fail("env -S value is not a simple command")
                 return None
@@ -1041,33 +1297,18 @@ def _script_words(words: list[str], launch: Launch) -> list[str] | None:
 
 
 def _unwrap_shell(name: str, rest: list[str], launch: Launch) -> list[str] | None:
-    index = 0
-    while index < len(rest):
-        word = rest[index]
-        if _SHELL_INLINE.fullmatch(word):
-            break
-        if word in _SHELL_VALUE_OPTIONS:
-            index += 2
-        elif word.startswith(("-", "+")):
-            index += 1
-        else:
-            # A script file: the shell runs local code, which the inventory does not
-            # read; _classify still checks what its arguments start.
-            launch.launcher = "local"
-            launch.executable = name
-            return None
-    else:
+    script, parameters, problem = _shell_script(name, rest, 0)
+    if script is None and problem is None:
+        # A script file or standard input: the shell runs local code, which the
+        # inventory does not read; _classify still checks what its arguments start.
         launch.launcher = "local"
         launch.executable = name
         return None
     launch.launcher = "shell"
     launch.mark("shell_wrapper")
-    if rest[index].startswith("--command="):
-        script, parameters = rest[index].partition("=")[2], rest[index + 1 :]
-    elif index + 1 < len(rest):
-        script, parameters = rest[index + 1], rest[index + 2 :]
-    else:
-        launch.fail("shell -c without a script")
+    if script is None:
+        launch.mark("inline_shell_code")
+        launch.fail(problem or "inline shell script")
         return None
     if parameters and "$" in script:
         # The script reads its positional parameters, which are argument values.
@@ -1085,19 +1326,38 @@ def _unwrap_shell(name: str, rest: list[str], launch: Launch) -> list[str] | Non
 
 
 def _unwrap_cmd(rest: list[str], launch: Launch) -> list[str] | None:
+    """cmd runs the rest of its command line after /C, /K or /R, glued or not."""
     index = 0
-    while index < len(rest) and rest[index].lower() not in {"/c", "/k"}:
-        if not re.fullmatch(r"/[a-z](?::\w+)?", rest[index].lower()):
+    found = None
+    while index < len(rest):
+        found = _CMD_RUN.fullmatch(rest[index])
+        if found is not None:
+            break
+        if not _CMD_SWITCH.fullmatch(rest[index]):
             launch.launcher = "local"
             launch.executable = "cmd"
+            if rest[index].startswith("/") or any(_CMD_RUN.fullmatch(word) for word in rest):
+                # Where cmd starts reading its command line is not established.
+                launch.fail("cmd switches are not simple")
             return None
         index += 1
+    if found is None:
+        launch.launcher = "local"
+        launch.executable = "cmd"
+        return None
     launch.launcher = "shell"
     launch.mark("shell_wrapper")
-    remainder = rest[index + 1 :]
+    glued = found.group(2)
+    remainder = [glued, *rest[index + 1 :]] if glued else rest[index + 1 :]
     if len(remainder) == 1 and any(char.isspace() for char in remainder[0]):
         words = _split_script(remainder[0], _CMD_OPERATOR)
-    elif remainder and not any(_CMD_OPERATOR.search(word) for word in remainder):
+    elif (
+        remainder
+        and not any(_CMD_OPERATOR.search(word) for word in remainder)
+        and not any(char.isspace() for char in remainder[0])
+    ):
+        # A first word with spaces among several is quoted or not by the client,
+        # so the program cmd runs is not established.
         words = remainder
     else:
         words = None
@@ -1175,7 +1435,15 @@ def _unwrap_wsl(rest: list[str], launch: Launch) -> list[str] | None:
         else:
             break
     words = rest[index:]
-    if not words or (not direct and any(_SHELL_OPERATOR.search(word) for word in words)):
+    # Without -e, wsl hands its words to a shell as one command line, so a first
+    # word with spaces may be read as several words.
+    if not words or (
+        not direct
+        and (
+            any(_SHELL_OPERATOR.search(word) for word in words)
+            or any(char.isspace() for char in words[0])
+        )
+    ):
         launch.mark("inline_shell_code")
         launch.fail("wsl command line is not a simple command")
         return None
@@ -1200,7 +1468,10 @@ def _classify(tokens: list[str], launch: Launch) -> None:
         _UNCLASSIFIED_RUNNERS[name] is None or _launches(name, tokens, 1)
     ):
         launch.launcher, launch.runner = name, True
-        launch.fail(f"{name} runs packages in a form the collector does not classify")
+        launch.fail(
+            _embedded_reason(rest)
+            or f"{name} runs packages in a form the collector does not classify"
+        )
         return
     # A local program: what it runs is local code, unless its arguments start a
     # runner, a shell or inline interpreter code that an unknown wrapper may run.
@@ -1275,6 +1546,13 @@ def _subcommand(
 _NPM_LOCAL = frozenset(
     {"run", "run-script", "rum", "urn", "start", "test", "t", "tst", "restart", "stop"}
 )
+# Package manager subcommands that fetch packages and may run their install scripts.
+_PNPM_FETCHES = _set(
+    "dlx create add install i update up upgrade install-test it rebuild rb import env"
+    " self-update approve-builds link ln fetch dedupe remove rm uninstall un"
+)
+_YARN_FETCHES = _set("dlx create add install global up upgrade set plugin import")
+_BUN_FETCHES = _set("x create c add a install i update upgrade link pm remove rm")
 
 
 def _local_subcommand(words: list[str], launch: Launch) -> None:
@@ -1317,7 +1595,7 @@ def _pnpm(name: str, rest: list[str], launch: Launch) -> None:
     if subcommand == "dlx":
         launch.launcher = "pnpm dlx"
         _package_runner(remainder, launch, _PNPM_DLX, {"--package"})
-    elif subcommand in {"create", "add", "install", "i", "update", "up"}:
+    elif subcommand in _PNPM_FETCHES:
         launch.fail("pnpm subcommand fetches or installs packages")
     else:
         launch.launcher = f"pnpm {subcommand}" if subcommand in {"exec", "run", "start"} else "pnpm"
@@ -1333,7 +1611,7 @@ def _yarn(name: str, rest: list[str], launch: Launch) -> None:
     if subcommand == "dlx":
         launch.launcher = "yarn dlx"
         _package_runner(remainder, launch, _YARN_DLX, {"-p", "--package"})
-    elif subcommand in {"create", "add", "install", "global", "up", "upgrade"}:
+    elif subcommand in _YARN_FETCHES:
         launch.fail("yarn subcommand fetches or installs packages")
     else:
         _local_subcommand([subcommand, *remainder], launch)
@@ -1352,7 +1630,7 @@ def _bun(name: str, rest: list[str], launch: Launch) -> None:
     if subcommand == "x":
         launch.launcher = "bun x"
         _package_runner(remainder, launch, _BUNX, {"-p", "--package"})
-    elif subcommand in {"create", "add", "install", "i", "update", "upgrade", "link", "pm"}:
+    elif subcommand in _BUN_FETCHES:
         launch.fail("bun subcommand fetches or installs packages")
     else:
         _local_subcommand([subcommand, *remainder], launch)
@@ -1643,10 +1921,16 @@ def _container(name: str, rest: list[str], launch: Launch) -> None:
             entrypoint = [value]
     if any(option == "--rootfs" for option, _ in options):
         # The image argument names a local root file system, not an image.
-        launch.packages.append(Package("path", run[image]))
+        package = Package("path", run[image])
     else:
-        launch.packages.append(oci_spec(run[image]))
-    _program_arguments([*entrypoint, *run[image + 1 :]], launch)
+        package = oci_spec(run[image])
+    launch.packages.append(package)
+    if entrypoint or package.name is None:
+        _program_arguments([*entrypoint, *run[image + 1 :]], launch)
+    else:
+        # Without --entrypoint, an interpreter image (node, python, deno) runs its
+        # interpreter with the arguments: node@sha256:... -e <code> is inline code.
+        _package_program(package, run[image + 1 :], launch)
 
 
 _DENO_SUBCOMMANDS = _set(
@@ -1689,20 +1973,27 @@ def _deno(name: str, rest: list[str], launch: Launch) -> None:
     if script == "-" or script.lower().startswith(_INLINE_SOURCES[:1]):
         launch.fail(_inline("deno", launch))
         return
-    if script.startswith("npm:"):
+    arguments = rest[position + 1 :]
+    if script.startswith(("npm:", "jsr:")):
         body = script[4:]
-        scoped = body.startswith("@")
         parts = body.split("/")
-        package = "/".join(parts[:2]) if scoped else parts[0]
-        launch.packages.append(npm_spec(package))
-    elif script.startswith("jsr:"):
-        launch.packages.append(jsr_spec(script[4:]))
-    elif "://" in script and not script.lower().startswith("file:"):
+        width = 2 if body.startswith("@") else 1
+        package = (npm_spec if script.startswith("npm:") else jsr_spec)("/".join(parts[:width]))
+        launch.packages.append(package)
+        # The package's own program receives the arguments: a bin path after the
+        # package, else the program named after it (npm:npm@10 exec ... runs npm).
+        program = parts[-1] if len(parts) > width else ""
+        if program:
+            _program_arguments([program, *arguments], launch)
+        else:
+            _package_program(package, arguments, launch)
+        return
+    if "://" in script and not script.lower().startswith("file:"):
         launch.packages.append(Package("url", script, origin=origin(script)))
     elif expands(script):
         launch.fail("deno script depends on the environment")
         return
-    _program_arguments(rest[position + 1 :], launch)
+    _program_arguments(arguments, launch)
 
 
 def _flags(names: str) -> str:
@@ -1780,3 +2071,191 @@ _RUNNERS: dict[str, Callable[[str, list[str], Launch], None]] = {
 _PROGRAM_NAMES = (
     frozenset(_RUNNERS) | _SHELLS | _INJECTORS | _WRAPPERS | frozenset(_UNCLASSIFIED_RUNNERS)
 )
+
+# npm 10 configuration keys (@npmcli/config definitions), by the values they take.
+NPM_CONFIG_FLAGS = _set(
+    "all allow-same-version audit bin-links commit-hooks description dev diff-ignore-all-space"
+    " diff-name-only diff-no-prefix diff-text dry-run engine-strict expect-results force"
+    " foreground-scripts format-package-lock fund git-tag-version global global-style if-present"
+    " ignore-scripts include-staged include-workspace-root install-links json legacy-bundling"
+    " legacy-peer-deps link long offline omit-lockfile-registry-resolved optional package-lock"
+    " package-lock-only parseable prefer-dedupe prefer-offline prefer-online production progress"
+    " provenance read-only rebuild-bundle save save-bundle save-dev save-exact save-optional"
+    " save-peer save-prod shrinkwrap sign-git-commit sign-git-tag strict-peer-deps strict-ssl"
+    " timing unicode update-notifier usage version versions workspaces workspaces-update yes"
+)
+NPM_CONFIG_VALUES = _set(
+    "_auth access also audit-level auth-type before ca cache cache-max cache-min cafile call cert"
+    " cidr cpu depth diff diff-dst-prefix diff-src-prefix diff-unified editor expect-result-count"
+    " fetch-retries fetch-retry-factor fetch-retry-maxtimeout fetch-retry-mintimeout fetch-timeout"
+    " git globalconfig heading https-proxy include init-author-email init-author-name"
+    " init-author-url init-license init-module init-version init.author.email init.author.name"
+    " init.author.url init.license init.module init.version install-strategy key libc"
+    " local-address location lockfile-version loglevel logs-dir logs-max maxsockets message"
+    " node-options noproxy omit only os otp package pack-destination prefix preid provenance-file"
+    " proxy registry replace-registry-host save-prefix sbom-format sbom-type scope script-shell"
+    " searchexclude searchlimit searchopts searchstaleness shell tag tag-version-prefix umask"
+    " user-agent userconfig viewer which workspace"
+)
+# Keys whose value may be a flag or a word (browser, color) are left out of both
+# tables, so both readings of the next word are checked.
+_NPM_OPTIONS = _table(
+    " ".join(f"--{key}" for key in NPM_CONFIG_FLAGS) + " -a -B -D -E -f -g -h -H -l -n -O -p -P"
+    " -q -s -S -v -y -d -dd -ddd -ws -iwr --no --quiet --silent --verbose --local --porcelain"
+    " --readonly --help",
+    " ".join(f"--{key}" for key in NPM_CONFIG_VALUES) + " -c -C -L -m -w --reg --desc --enjoy-by",
+)
+_NPM_COMMANDS = _set(
+    "access adduser audit bugs cache ci completion config dedupe deprecate diff dist-tag docs"
+    " doctor edit exec explain explore find-dupes fund get help help-search hook init install"
+    " install-ci-test install-test link ll login logout ls org outdated owner pack ping pkg"
+    " prefix profile prune publish query rebuild repo restart root run-script sbom search set"
+    " shrinkwrap star stars start stop team test token uninstall unpublish unstar update"
+    " version view whoami"
+)
+_NPM_ALIASES = {
+    **dict.fromkeys(_set("author"), "owner"),
+    **dict.fromkeys(_set("home"), "docs"),
+    **dict.fromkeys(_set("issues"), "bugs"),
+    **dict.fromkeys(_set("info show v"), "view"),
+    **dict.fromkeys(_set("find s se"), "search"),
+    **dict.fromkeys(_set("add i in ins inst insta instal isnt isnta isntal isntall"), "install"),
+    **dict.fromkeys(_set("unlink remove rm r un"), "uninstall"),
+    **dict.fromkeys(_set("rb"), "rebuild"),
+    **dict.fromkeys(_set("list"), "ls"),
+    **dict.fromkeys(_set("ln"), "link"),
+    **dict.fromkeys(_set("create innit"), "init"),
+    **dict.fromkeys(_set("it"), "install-test"),
+    **dict.fromkeys(_set("cit clean-install-test sit"), "install-ci-test"),
+    **dict.fromkeys(_set("up upgrade udpate"), "update"),
+    **dict.fromkeys(_set("c"), "config"),
+    **dict.fromkeys(_set("tst t"), "test"),
+    **dict.fromkeys(_set("ddp"), "dedupe"),
+    **dict.fromkeys(_set("run rum urn"), "run-script"),
+    **dict.fromkeys(_set("clean-install ic install-clean isntall-clean"), "ci"),
+    **dict.fromkeys(_set("x"), "exec"),
+    **dict.fromkeys(_set("why"), "explain"),
+    **dict.fromkeys(_set("la"), "ll"),
+    **dict.fromkeys(_set("verison"), "version"),
+    **dict.fromkeys(_set("hlep"), "help"),
+    **dict.fromkeys(_set("dist-tags"), "dist-tag"),
+    **dict.fromkeys(_set("ogr"), "org"),
+    **dict.fromkeys(_set("add-user"), "adduser"),
+}
+
+
+def _abbreviations(names: frozenset[str]) -> dict[str, str]:
+    """Every unambiguous prefix of each name, as npm's ``abbrev`` computes them."""
+    ordered = sorted(names)
+    found: dict[str, str] = {}
+    for position, name in enumerate(ordered):
+        shared = 0
+        for neighbour in ordered[max(position - 1, 0) : position + 2]:
+            if neighbour != name:
+                common = 0
+                while common < min(len(name), len(neighbour)) and (
+                    name[common] == neighbour[common]
+                ):
+                    common += 1
+                shared = max(shared, common)
+        for length in range(shared + 1, len(name) + 1):
+            found[name[:length]] = name
+        found[name] = name
+    return found
+
+
+_NPM_ABBREVIATIONS = _abbreviations(_NPM_COMMANDS | frozenset(_NPM_ALIASES))
+
+
+def npm_command(word: str) -> str | None:
+    """The npm command a word names as npm resolves it: alias, typo or unique prefix."""
+    word = re.sub(r"[A-Z]", lambda letter: "-" + letter.group().lower(), word)
+    if word in _NPM_COMMANDS:
+        return word
+    if word in _NPM_ALIASES:
+        return _NPM_ALIASES[word]
+    resolved = _NPM_ABBREVIATIONS.get(word)
+    while resolved in _NPM_ALIASES:
+        resolved = _NPM_ALIASES[resolved]
+    return resolved
+
+
+# npm commands that fetch and run nothing: project scripts (local code) and queries.
+_NPM_QUIET = _set(
+    "access adduser bugs cache completion config deprecate diff dist-tag docs doctor explain"
+    " find-dupes fund get help help-search hook ll login logout ls org outdated owner pack ping"
+    " pkg prefix profile publish query repo restart root run-script sbom search set shrinkwrap"
+    " star stars start stop team test token unpublish unstar version view whoami"
+)
+_SUBCOMMAND = re.compile(r"[a-z][a-z0-9-]*")
+# Container engine commands that start no image (plugins such as `docker mcp` may).
+_CONTAINER_QUIET = _set(
+    "attach commit cp diff events export history images import info inspect kill load login"
+    " logout logs pause port ps pull push rename rm rmi save search stats stop tag top unpause"
+    " update version wait network volume system context config secret node manifest trust"
+    " checkpoint scout sbom help completion mount umount generate healthcheck"
+)
+# uv and pipx have closed command sets; these commands fetch and run or build
+# packages. Their global options change between releases, so an unknown option is
+# read both ways instead of ending the check.
+_UV_STARTS = _set("run tool pip sync add remove lock export tree build publish format version")
+_PIPX_STARTS = _set(
+    "run install install-all inject upgrade upgrade-all upgrade-shared reinstall reinstall-all"
+    " runpip"
+)
+_DENO_STARTS = _set("run serve x eval repl install add init jupyter upgrade")
+
+
+def _deno_starts(word: str) -> bool:
+    """A Deno subcommand that runs code, or a script it runs from outside the project."""
+    if word in _DENO_STARTS:
+        return True
+    if word in _DENO_SUBCOMMANDS or word in {"task", "help"}:
+        return False
+    remote = ("npm:", "jsr:", "http:", "https:", "data:")
+    return word == "-" or expands(word) or word.lower().startswith(remote)
+
+
+def _named(quiet: frozenset[str]) -> Callable[[str], bool]:
+    """A subcommand-shaped word other than a quiet one, so engine plugins count."""
+    return lambda word: bool(_SUBCOMMAND.fullmatch(word)) and word not in quiet
+
+
+_STARTS: dict[str, _Starts] = {
+    "npm": _Starts(
+        _NPM_OPTIONS,
+        lambda word: (npm_command(word) or "help") not in _NPM_QUIET,
+        inline=frozenset({"-c", "--call"}),
+    ),
+    "pnpm": _Starts(
+        _table(
+            "-r --recursive -w --workspace-root -s --silent --stream --parallel"
+            " --aggregate-output --color --no-color --use-stderr",
+            "-C --dir -F --filter --filter-prod --reporter --loglevel --workspace-concurrency",
+        ),
+        _PNPM_FETCHES.__contains__,
+    ),
+    "yarn": _Starts(
+        _table("-s --silent --verbose --offline --prefer-offline", "--cwd"),
+        _YARN_FETCHES.__contains__,
+    ),
+    "bun": _Starts(
+        _table(
+            "--bun --silent --smol --hot --watch --no-install --verbose --no-clear-screen",
+            "-r --preload --cwd -c --config --env-file --tsconfig-override",
+        ),
+        _BUN_FETCHES.__contains__,
+        inline=frozenset({"-e", "--eval", "-p", "--print"}),
+    ),
+    "deno": _Starts(_DENO_RUN, _deno_starts),
+    "docker": _Starts(_CONTAINER_GLOBAL["docker"], _named(_CONTAINER_QUIET), strict=True),
+    "podman": _Starts(_CONTAINER_GLOBAL["podman"], _named(_CONTAINER_QUIET), strict=True),
+    "nerdctl": _Starts(_CONTAINER_GLOBAL["nerdctl"], _named(_CONTAINER_QUIET), strict=True),
+    "uv": _Starts(_UV_GLOBAL_TABLE, _UV_STARTS.__contains__),
+    "pipx": _Starts(
+        _table("-q --quiet -v --verbose --global --version -h --help"),
+        _PIPX_STARTS.__contains__,
+    ),
+    # go reads only -C before its command and rejects any other option.
+    "go": _Starts(_table("", "-C"), _set("run test generate tool").__contains__, strict=True),
+}

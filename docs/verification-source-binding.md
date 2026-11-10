@@ -20,7 +20,8 @@ Package sources are the registry and index options of a launcher (`--registry`,
 `--@scope:registry`, `--index-url`, `--find-links` and similar), environment
 variables that redirect resolution (`npm_config_registry`, `UV_INDEX_URL`,
 `PIP_INDEX_URL`, `UV_PYTHON_INSTALL_MIRROR`, `JSR_URL`, `DOCKER_HOST`, `GOPROXY` and
-similar), container engine options (`docker -H`, `--context`, `--config`; `podman
+similar, and cache or tool directories a prepared copy could serve from:
+`UV_CACHE_DIR`, `UV_TOOL_DIR`, `PIPX_HOME`, `DENO_DIR`, `GOMODCACHE`), container engine options (`docker -H`, `--context`, `--config`; `podman
 --url`, `--root`), `pipx --pip-args` index and trust options (matched by unique
 prefix, as pip's parser does; an unknown option is a gap) and project-root resolver
 settings that apply to the launched package: `.npmrc` for npm, pnpm, bun and Deno
@@ -30,17 +31,41 @@ entries for a launched package) for `uv run`. `.npmrc` is read as npm reads it: 
 and values are trimmed, JSON-decoded when quoted and cut at an unescaped `;` or `#`
 otherwise, lines end at a carriage return or line feed, keys after the first
 `[section]` line are ignored, and a key containing `${...}` is `[unresolved]`. Its
-registry, cache, offline, proxy, `strict-ssl=false`, CA, user and global
-configuration, prefix and store settings are sources; auth settings (`//host/:...`,
-`_auth`, `username` and similar) are ignored. They are exported as `package_sources`
-entries such as `.npmrc:@acme:registry=https://npm.acme.example`: the origin only,
-`[local]` for a path or other value and `[unresolved]` for a value with `${...}`
-expansion. A server that runs in another working directory (a `cwd` other than the
-root, `env -C`, `pwsh -WorkingDirectory`, `wsl --cd`, `uv --directory` or `--project`,
+registry (and the `@scope:registry` of a configured `scope` for a package without a
+registry of its own, as npm selects it), cache, offline, proxy, `strict-ssl=false`,
+CA, user and global configuration, prefix, workspace and store settings are sources;
+auth settings (`//host/:...`, `_auth`, `username` and similar) are ignored. For npm and
+pnpm, every setting is classified, from `.npmrc` and from `npm_config_*` or
+`pnpm_config_*` variables alike: `call` and `package` decide what `npm exec` runs, so
+they make the launcher identity unknown (a high `launcher_identity` finding and a gap);
+`script-shell`, `node-options`, `shell`, `git`, `node-gyp`, `pnpmfile` and similar load
+local code (a medium `launch_context` risk); npm's own configuration keys and common
+pnpm keys that change neither are ignored; and any other setting is a source, because
+npm passes it to lifecycle scripts, whose installers read binary mirrors from it.
+Yarn's `yarnPath` and `plugins` (`.yarnrc.yml`, or `YARN_YARN_PATH` and
+`YARN_PLUGINS`) and `yarn-path` (`.yarnrc`) run local code in place of or inside Yarn
+and make the identity unknown; proxy, CA, strict-SSL,
+cache, checksum, offline, network and environment-file settings of `.yarnrc.yml` are
+sources, and a `.env.yarn` file, which Yarn 4 loads by default, is `[unresolved]`.
+Sources are exported as `package_sources` entries such as
+`.npmrc:@acme:registry=https://npm.acme.example`: the origin only, `[local]` for a
+path or other value and `[unresolved]` for a value with `${...}` expansion. A server
+that runs in another working directory (a `cwd` other than the root, `env -C`,
+`pwsh -WorkingDirectory`, `wsl --cd`, `uv --directory` or `--project`,
 `deno --config`) may read other resolver files, so it carries
-`working-directory=[unresolved]`. A redirected package keeps its version but loses
-`launcher_package` and `package_url`, and carries a medium `package_source` risk. The names of the other `.npmrc` settings are exported as
-`resolver_settings` and digested; their values enter only the keyed binding.
+`working-directory=[unresolved]`; one whose variables come from an `envFile` or from
+`dotenvx`, `doppler`, `infisical` or `op run --env-file` carries
+`environment-file=[unresolved]`. A variable that adds a trusted CA or disables TLS
+verification (`NODE_EXTRA_CA_CERTS`, `NODE_TLS_REJECT_UNAUTHORIZED=0`,
+`SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE` and similar) is a source, and so are the
+`HTTPS_PROXY`, `HTTP_PROXY` and `ALL_PROXY` variables beside it. A redirected package
+keeps its version but loses `launcher_package` and `package_url`, and carries a medium
+`package_source` risk. Setting names are exported as `resolver_settings` and digested
+only when they come from a fixed vocabulary (npm and pnpm configuration keys, the
+Yarn, bun and uv settings above, a scoped registry with a well-formed scope, or the
+`sources` entry of a launched package); any other name is `[other]`, once per setting,
+because a token pasted on its own `.npmrc` line is read as a setting name. Values
+enter only the keyed binding.
 
 Values are bound only when the operator sets `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` to
 a secret of at least 32 characters during collection and validation. Generate it

