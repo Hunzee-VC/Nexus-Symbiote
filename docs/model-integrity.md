@@ -44,11 +44,21 @@ the root, in the component's `properties.weight_files`:
 
 An external-data location that leaves the model's directory or names a missing
 file, a shard index that lists a missing file, a file in another directory or a
-file that is not a collected model file, and an ONNX file that holds a
-`location` key the reader cannot attribute to a parsed tensor are collection
-failures. `validate --project` observes the files again and fails with
+file that is not a collected model file, and an ONNX file that may name external
+data the reader cannot attribute are collection failures. The reader counts a
+`location` key in every encoding a protobuf runtime accepts, including the
+over-long tags whose low 32 bits protobuf's C++ parser keeps; in a file it can
+parse, each such key must be an external-data entry it read or a name, and a
+file it cannot parse, or one beyond its limits, fails whenever the bytes
+`location` occur in it at all.
+
+`validate --project` observes the files again and fails with
 `weight_files_mismatch` when they differ from the BOM's record, so replacing one
-shard or one external-data file fails integrity and changes the inventory.
+shard or one external-data file fails integrity and changes the inventory. One
+validation walks each model directory once, reads a file that many models share
+once rather than once per model, verifies each policy entry once, and reads at
+most what one scan may read (5 GiB plus 32 MiB). A model it could not read
+within that budget gets the `unknown` issue `validation_budget_exhausted`.
 
 ## Configuration, tokenizer, chat templates and custom code
 
@@ -81,6 +91,12 @@ In `diff`, a change to `tokenizer_hash` or `chat_template_hash` is a high alert,
 and a change to a bound weight file, a configuration file or custom code is a
 medium `properties changed` alert.
 
+A GGUF file whose metadata exceeds the reader's bounds (65,536 keys, 16 MiB
+strings, 2,097,152 array items, 128 MiB of metadata, or the 16,000,000
+structure units one scan may spend on ONNX and GGUF files) keeps the rating
+`unknown`, records `properties.gguf_metadata` and is a coverage gap in
+`surfaces_excluded`, because its chat templates were not inspected.
+
 ## Operator signature policy
 
 A model passes integrity only when every one of its weight files (the model file
@@ -89,11 +105,22 @@ same policy to `scan`, `validate --project`, `risk --project` and `baseline`
 with `--signature-policy`, or to the GitHub Action with `signature-policy`.
 
 Keep the policy outside the checkout: the commands refuse a policy file inside
-the scanned project or one with other hard links, and they resolve the project
-path first, so a symlinked `--project` path works for every command. Every entry
-must name a file beneath the project; an entry that names neither a collected
-model weight file nor the ShadowScan report makes the `model` collector fail, so
-an entry can never look enforced while nothing checks it.
+the scanned project, also under another name for the project directory such as a
+case variant or a bind mount (compared by device and inode), or one with other
+hard links, and they resolve the project path first, so a symlinked `--project`
+path works for every command. Every entry must name a file beneath the project.
+An entry that names neither a collected model weight file nor the ShadowScan
+report makes the `model` collector fail, and `validate --project` reports it as
+the integrity error `unused_policy_entry` even when the completeness check does
+not run, so an entry can never look enforced while nothing checks it.
+
+The ShadowScan report is checked by the discovery producer check of
+`validate --project` and `risk --project`, not by `scan`, and only through a
+`sigstore-message-signature` entry for the report the collector reads, the first
+of `.shadowscan/report.json`, `shadowscan-report.json` and `shadowscan.json`
+that exists. Its `expected_sha256`, if set, must equal the report's digest. A
+`digest-pin` entry for the report, or an entry for another report location, is
+an unused entry.
 
 Version 1 policies stay valid; every entry is a Sigstore message signature:
 
@@ -159,7 +186,10 @@ digest>`, `digest-pin:<path>@sha256:<digest>`,
 `sigstore-message-signature:<path>@sha256:<digest>`,
 `bundle:<bundle path>@sha256:<bundle digest>`, `identity:<signer>` and
 `issuer:<issuer>`. `validate` does not trust these records: it verifies every
-weight file again from the policy.
+weight file again from the policy. The `policy:` reference identifies the
+policy file of the run, not the model, so project reconciliation and `diff`
+ignore it: an equivalent policy with other bytes, or one with more entries, does
+not make a verified model look mismatched or changed.
 
 ## What this does not establish
 
