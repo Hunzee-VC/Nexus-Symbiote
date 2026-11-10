@@ -2,6 +2,29 @@
 
 Notable changes to Nexus SymBiote, newest release first. Within a release, security changes come first, and changes that need action from users are marked **Breaking**.
 
+## [Unreleased]
+
+Closes detection gaps listed under 0.1.0's known limitations and makes inventories comparable across checkouts. Record baselines again after upgrading: paths, the inferred agent reference and several records change.
+
+### Security
+
+- Record Claude Code hooks, deny and ask rules and every other settings value by digest. The `ide_agents` collector adds an RFC 8785 digest of each JSON settings file (`settings_hashes`), rule counts and hook-handler counts per event, so an added hook command or a removed deny rule raises a `diff --fail-on-alert` alert; reordered keys and whitespace do not. Rules and hook commands are not recorded.
+- Score `permissions.defaultMode: bypassPermissions` as a high `permission_scope` finding. It was recorded without a finding, so a project that skipped every permission prompt scored the same as one with a single blanket grant.
+- Collect instruction files below the project root: `CLAUDE.md` and `AGENTS.md` in any subdirectory, subagent definitions under `.claude/agents`, and files under `.cursor/rules`, `.github/instructions` and `.github/prompts`, with the hidden-character checks. A nested instruction file with bidi or zero-width characters produced no component and no finding.
+- Bind a skill's bundled scripts by digest. Every file in a directory that holds a `SKILL.md` is inventoried, not only its `.md`, `.txt`, `.yaml` and `.json` files, so an edited `run.sh` is a drift alert.
+- Read MCP configuration below the project root and for more hosts: `.mcp.json`, `mcp.json`, `mcp-config.json`, `mcp_config.json`, `mcp-servers.json`, `claude_desktop_config.json` and `cline_mcp_settings.json` in any subdirectory, including `.vscode/mcp.json` and `.windsurf/mcp_config.json`. A server added there was not inventoried.
+- State which MCP values an inventory does not bind. A server whose launch arguments, environment values or endpoint path are compared only with `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` carries a low `completeness` finding naming the key, as A2A records do. Without the key a served directory widened from `./notes` to `/` passes the drift gate; that is unchanged, and now visible.
+- Strip JavaScript comments in linear time. The pattern used for the root-level SDK import hint rescanned blank runs and unterminated block comments, so one file within the 262,144-byte limit took about a minute.
+
+### Fixed
+
+- **Breaking:** record project-relative paths. `source_path`, claim locators, `config_path`, `config_paths`, `source_paths` and the coverage lists held the absolute checkout path, so the same project scanned in CI differed from a baseline recorded elsewhere on every component and failed `diff --fail-on-alert`. The repository agent inferred without an `agent.yaml` no longer takes its reference from the checkout path or its name from the directory: it is named `repository`. An inventory written by 0.1.0 no longer reconciles or compares cleanly with a fresh collection.
+- Bound MCP and A2A source collection by the text read (64 MiB) instead of by file count. A project with more than 50 Python files outside test directories, more than 50 TypeScript files, more than 10 root-level `.ts` or `.js` files, or more than 20 Python files in the root and `src` failed its gate with a collection-limit failure that no option could lift. Nested Python files that cannot name the SDK are no longer decoded, so one that is not UTF-8 is not a failure.
+- Print why a gate failed. `scan` and `risk` printed only `Scan gate failed`; they now list the gate reasons and up to 20 collection failures on stderr.
+- Recognise more agent packages in the `registry` collector: `mcp`, `fastmcp`, `langgraph`, `litellm`, `pydantic-ai`, `google-adk`, `a2a-sdk`, `claude-agent-sdk`, the Vercel `ai` package, and the `@langchain`, `@anthropic-ai`, `@openai` and `@ai-sdk` scopes, among others. A manifest of 52 common agent packages yielded 17 records.
+- Describe an MCP endpoint URL that embeds credentials as such. It was reported as "not HTTPS" even for an `https://` URL.
+- Correct the demo numbers in the README and the examples walkthrough, which described six findings and a score of 33; a test now compares them with a scan of the demo project.
+
 ## [0.1.0] - 2026-11-07
 
 First alpha of the AgentBOM toolkit under the Hunzee-VC organization. Its known detection gaps, including Claude Code settings beyond the permission mode and blanket grants, skill scripts and subagents, are listed under [known limitations](SECURITY.md#known-limitations-in-010); `diff --fail-on-alert` cannot alert on them.

@@ -18,8 +18,16 @@ from nexus_symbiote.core.models import (
     CapabilityDeclaration,
     RiskAssessment,
 )
-from nexus_symbiote.scanners.base import Scanner, ScanResult, parse_python, sanitized_origin
+from nexus_symbiote.scanners.base import (
+    MAX_SOURCE_BYTES,
+    Scanner,
+    ScanResult,
+    SourceBudget,
+    parse_python,
+    sanitized_origin,
+)
 from nexus_symbiote.scanners.mcp import _MIN_SOURCE_BINDING_KEY_LENGTH, SOURCE_BINDING_KEY_ENV
+from nexus_symbiote.utils.confined import MAX_TOTAL_BYTES
 from nexus_symbiote.utils.secrets import REDACTED, redact_text
 
 AGENT_CARD_FILES = [
@@ -454,7 +462,8 @@ class A2AScanner(Scanner):
 
     def scan(self, project_root: Path) -> ScanResult:
         result = ScanResult(scanner_name=self.name)
-        with self._collection(project_root, result) as files:
+        limits = {"max_total_bytes": MAX_TOTAL_BYTES + MAX_SOURCE_BYTES}
+        with self._collection(project_root, result, **limits) as files:
             for relative in AGENT_CARD_FILES:
                 path = files.root / relative
                 data = self._read_mapping(path, result)
@@ -711,11 +720,12 @@ class A2AScanner(Scanner):
             if path.suffix == ".py"
             and (len(path.parts) == 1 or (len(path.parts) == 2 and path.parts[0] == "src"))
         ]
-        if len(sources) > 20:
-            result.scan_failures.append("a2a code references: 20-file collection limit exceeded")
-        for path in sources[:20]:
+        budget = SourceBudget("a2a code references", result)
+        for path in sources:
+            if budget.exhausted:
+                break
             content = self._files.read_text(path)
-            if content is None:
+            if content is None or not budget.admit(len(content)):
                 continue
             result.surfaces_scanned.append(str(root / path))
             if len(content) > 262_144:

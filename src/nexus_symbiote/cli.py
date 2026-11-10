@@ -121,6 +121,22 @@ def _safe(value: object) -> str:
     return escape(_UNSAFE_TEXT.sub("\ufffd", str(value)))
 
 
+_MAX_SHOWN_FAILURES = 20
+
+
+def _print_gate_reasons(reasons: list[str], failures: list[str]) -> None:
+    """Say why a gate failed; a bare verdict leaves the reader to search the inventory."""
+    for reason in reasons:
+        err_console.print(f"  - {_safe(reason)}", soft_wrap=True)
+    for failure in failures[:_MAX_SHOWN_FAILURES]:
+        err_console.print(f"  - collection: {_safe(failure)}", soft_wrap=True)
+    if len(failures) > _MAX_SHOWN_FAILURES:
+        hidden = len(failures) - _MAX_SHOWN_FAILURES
+        err_console.print(
+            f"  - collection: {hidden} more in metadata.completeness.scan_failures", soft_wrap=True
+        )
+
+
 def _failure(exc: Exception) -> click.ClickException:
     # Policy, graph and inventory errors quote keys, file names and paths from the
     # checkout or the inventory, so they get the same neutralization as other output.
@@ -389,6 +405,7 @@ def scan(
                 raise ValueError("scanner does not support configured exclude_paths")
             failure_count = len(scan_failures)
             result = scanner.scan(root)
+            result.make_portable(root)
             if name == "shadowscan":
                 source_report_digest = result.source_report_digest
                 source_report_content_digest = result.source_report_content_digest
@@ -482,6 +499,7 @@ def scan(
         err_console.print(f"[yellow]Risk warning:[/] score {risk_report.overall_score:.1f}")
     if scan_failures or not passed:
         err_console.print("[yellow]Report only[/]" if report_mode else "[red]Scan gate failed[/]")
+        _print_gate_reasons(risk_report.gate_reasons, scan_failures)
         if not report_mode:
             raise click.exceptions.Exit(1)
 
@@ -997,6 +1015,8 @@ def risk(
     console.print(f"\nGate (threshold={threshold}): {gate}")
 
     if not passed:
+        coverage = bom.metadata.completeness
+        _print_gate_reasons(report.gate_reasons, list(coverage.scan_failures) if coverage else [])
         sys.exit(1)
 
 
