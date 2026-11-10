@@ -12,7 +12,7 @@ All paths are relative to the scan root, and the inventory records them that way
 | --- | --- |
 | npm | `package.json`: `peerDependencies`, `dependencies`, `optionalDependencies` and `devDependencies`, in that order of precedence, as npm reads them; a name declared differently in more than one section is recorded with every spec. Resolution evidence from `npm-shrinkwrap.json` when it exists, which npm installs from instead of `package-lock.json`, and otherwise from `package-lock.json` (lockfile versions 2 and 3); see [npm lockfile evidence](npm-lockfile-evidence.md) |
 | PyPI | Root `requirements*.txt` files, read by pip 26.3's rules. `pyproject.toml`: `[project]` dependencies and optional dependencies, `[dependency-groups]` (PEP 735), `[build-system]` requires, `[tool.uv]` dev-dependencies, `[tool.pdm.dev-dependencies]`, and Poetry's `dependencies`, `dev-dependencies` and `group.*.dependencies` tables translated to PEP 508 |
-| Containers | `Dockerfile`, `Dockerfile.agent` and `Containerfile`, read as BuildKit reads them. The Compose files Compose reads by default: `compose.yaml`, `compose.yml`, `docker-compose.yml` and `docker-compose.yaml`, and the override files it merges, `compose.override.yml`, `compose.override.yaml`, `docker-compose.override.yml` and `docker-compose.override.yaml`. Each is parsed as YAML: the `image` of every service, with YAML merge keys and aliases followed, the `FROM` lines of a `build.dockerfile_inline`, and the `model` of every top-level model, which Docker Model Runner pulls (recorded with `artifact_type` `model`, whatever its name) |
+| Containers | `Dockerfile`, `Dockerfile.agent` and `Containerfile`, read as BuildKit reads them. The Compose files Compose reads by default: `compose.yaml`, `compose.yml`, `docker-compose.yml` and `docker-compose.yaml`, and the override files it merges, `compose.override.yml`, `compose.override.yaml`, `docker-compose.override.yml` and `docker-compose.override.yaml`. Each is parsed as YAML: the `image` of every service, with YAML merge keys and aliases followed, the `FROM` lines of a `build.dockerfile_inline`, and the `model` of every top-level model, which Docker Model Runner pulls (recorded with `artifact_type` `model`, whatever its name). A value is read as written only when it is untagged or tagged `!!str` or with Compose's `!override`; `!reset` and null hold no value. A root `.env` is read only for a `COMPOSE_FILE` setting; nothing in it is recorded |
 
 A PyPI name is matched in its PEP 503 normal form, so `llama.index.core`, `LLAMA_INDEX_CORE` and `llama-index-core` are one package with one component. An npm dependency declared as an alias, `"app-utils": "npm:@anthropic-ai/sdk@0.30.1"`, is classified and recorded by the package it installs, with the alias in the `npm_alias` property; a lockfile record whose `name` is an AI package also brings the dependency into the inventory. The same image named in several files is one component whose `source_paths` property lists them all.
 
@@ -24,26 +24,29 @@ These make the collector partial, so `scan`, `validate` and `risk` fail by defau
 | --- | --- |
 | `package.json: dependency override not translated` | `overrides` (npm), `resolutions` (yarn) or `pnpm.overrides` names an inventoried package, or installs an AI package as an alias |
 | `package.json: workspaces not followed` | `workspaces` lists member packages, whose manifests are not read |
-| `package.json: git, URL or path dependency not classified` | A dependency outside the catalog by name comes from git, a URL or a path, and no lockfile record names the package it holds |
+| `package.json: git, URL or path dependency not classified` | A dependency outside the catalog by name, or a package that `overrides`, `resolutions` or `pnpm.overrides` replaces, comes from git, a URL or a path, and no lockfile record names the package it holds |
+| `pnpm-workspace.yaml: workspace settings not read` | A `pnpm-workspace.yaml` exists: pnpm reads workspace packages, overrides and version catalogs from it |
 | `package-lock.json: aliased package identity is unresolved` | A lockfile record names a different package than `package.json` declares |
 | `pyproject.toml: uv source not translated` | `[tool.uv.sources]` replaces an inventoried package with a git, URL, path, workspace or index source |
 | `pyproject.toml: uv override or constraint not followed` | `override-dependencies` or `constraint-dependencies` names an inventoried package |
 | `pyproject.toml: PDM override not followed` | `[tool.pdm.resolution.overrides]` names an inventoried package |
+| `pyproject.toml: uv workspace members not followed` | `[tool.uv.workspace]` lists members, whose manifests uv installs from |
 | `Pipfile: dependencies not read` | A `Pipfile` exists; pipenv installs what it declares |
-| `<compose file>: include not followed`, `extends not followed`, `build context not followed` | Compose reads another file, or builds from a Dockerfile the collector does not read |
+| `.env: COMPOSE_FILE not followed` | The root `.env` sets `COMPOSE_FILE`, or names it so that it comes from the environment: Compose then reads the files it lists instead of the default ones |
+| `<compose file>: include not followed`, `extends not followed`, `build context not followed` | Compose reads another file, or builds from a Dockerfile the collector does not read: a context or `dockerfile` other than the project root and a root `Dockerfile`, `Dockerfile.agent` or `Containerfile`, including an absolute path such as `/` or one with a backslash |
 | `<compose file>: image substitution not resolved` | An image contains `$`; Compose fills it in from the environment |
-| `<compose file>: image not parsed`, `build not followed`, `tagged image value not resolved` | An `image`, `model` or `build` value that is not text, or has a YAML tag other than Compose's `!reset` and `!override` |
+| `<compose file>: image not parsed`, `build not followed`, `tagged image value not resolved` | An empty, null or `!reset` `dockerfile_inline`, or an `image`, `model`, `build` or `dockerfile_inline` value that is not text: a YAML tag other than `!!str`, `!override` and `!reset`, such as `!!binary`, which Compose decodes from base64, `!!null` on a value, or a scalar YAML reads as another type, such as a number |
 | `<compose file>: dockerfile_inline <Dockerfile gap>` | An inline Dockerfile has one of the Dockerfile gaps the README lists |
 | `<compose file>: YAML merge key cycle not followed` | A mapping merges itself |
 | `<file>: image reference not parsed` | An image that matches the catalog is not a valid image reference |
 
-The requirements-file and Dockerfile gaps are listed in the [README](../README.md#what-it-inventories). A file that cannot be read or parsed, such as invalid TOML, JSON or YAML, a Compose file with a repeated key or a non-mapping service, or a requirement that packaging cannot parse, is a collection failure, which fails the collector.
+The requirements-file and Dockerfile gaps are listed in the [README](../README.md#what-it-inventories). A file that cannot be read or parsed, such as invalid TOML, JSON or YAML, a Compose file with a repeated key, a key tagged `!!binary` or with a tag outside YAML's own `tag:yaml.org,2002:` types, or a non-mapping service, or a requirement that packaging cannot parse, is a collection failure, which fails the collector.
 
 ## Findings
 
 | Category | Severity | Raised when |
 | --- | --- | --- |
-| `version_pinning` | medium | A package has no exact pin: no `==` pin in any PyPI declaration, or an npm range or tag that no consistent lockfile record with a strong integrity value resolves. Also two PyPI declarations that cannot both hold |
+| `version_pinning` | medium | A package has no exact pin: no `==` pin in any PyPI declaration, a PyPI range or bare name that the reported pin does not satisfy, under any marker or group, or an npm range or tag that no consistent lockfile record with a strong integrity value resolves. Also two PyPI declarations that cannot both hold |
 | `version_pinning` | low | Every PyPI pin has an environment marker, such as `; sys_platform == "linux"` |
 | `nonregistry_source` | high or medium | A package comes from a URL, VCS or path instead of a registry; high for a VCS reference without a full commit, or a plain `http://` URL |
 | `package_alias` | low | An npm dependency installs a package under another name |
@@ -51,9 +54,9 @@ The requirements-file and Dockerfile gaps are listed in the [README](../README.m
 | `lockfile_resolution_mismatch` | high | A lockfile record's tarball URL names another package or version than the record |
 | `registry_origin` | low | A lockfile record resolves from a registry other than `registry.npmjs.org` |
 | `lockfile_unread` | low | `uv.lock`, `poetry.lock`, `Pipfile.lock` or `pdm.lock` (PyPI), or `yarn.lock`, `pnpm-lock.yaml`, `bun.lock` or `bun.lockb` (npm) exists: the package manager resolves the package from a file the collector does not read. Coverage stays complete, because the declarations are read |
-| `version_pinning`, `mutable_image_tag` | high, medium | An image has no digest: high without a tag or with `latest`, medium with another tag |
+| `version_pinning`, `mutable_image_tag` | high, medium | An image has no digest Docker pulls, which is `sha256`, `sha384` or `sha512` in lower-case hex of that algorithm's length: high without a tag or with `latest`, medium with another tag |
 
-The rating of a PyPI package follows from all of its declarations, in every file, whichever is read first: an exact pin without a marker in any file leaves no `version_pinning` finding, declarations under the same markers and group that cannot both hold are a conflict, and a URL declaration anywhere is a finding.
+The rating of a PyPI package follows from all of its declarations, in every file, whichever is read first. The first exact pin without a marker is the version reported, and it resolves every range it satisfies, in any root file, under any marker or group, as a compiled `requirements.txt` resolves the ranges of `pyproject.toml`. A range it does not satisfy is a `version_pinning` finding that names its files, declarations under the same markers and group that cannot both hold are a conflict, and a URL declaration anywhere is a finding. The collector cannot tell which file is installed, so a pin in a file that never is, such as `requirements-docs.txt`, also resolves a range in `requirements.txt`; the `declarations` property lists every declaration with its file.
 
 ## Identities
 
@@ -61,7 +64,7 @@ The rating of a PyPI package follows from all of its declarations, in every file
 | --- | --- | --- | --- |
 | `bom_ref` | `registry:pypi/<normal name>` | `registry:npm/<name in package.json>` | `registry:docker/<reference as written>` |
 | `name` | PEP 503 normal name | The package npm installs: the alias target for an alias | The reference as written |
-| `package_url` | `pkg:pypi/...` only when every exact pin names the same version, nothing is a URL, untranslated or in conflict | `pkg:npm/...` from a consistent lockfile record, with `repository_url` when it resolves from another registry, or from an exact spec without a record | `pkg:oci/...` with `repository_url` and `tag` when the reference has a digest |
+| `package_url` | `pkg:pypi/...` only when every exact pin names the same version, every other declaration admits it, and nothing is a URL, untranslated or in conflict | `pkg:npm/...` from a consistent lockfile record, with `repository_url` when it resolves from another registry, or from an exact spec without a record | `pkg:oci/...` with `repository_url` and `tag` when the reference has a digest Docker pulls |
 | `registry_uri` | `https://pypi.org`; the URL origin when every declaration is a URL with that origin; none when declarations mix a URL with others, or a uv, PDM or Poetry source or override replaces the package | The lockfile record's origin | `https://docker.io`, or `https://` and the registry host |
 | `registry_type` | `pypi` | `npm` | `docker-hub` for Docker Hub, `oci` for another registry, none for a reference kept as written because of a substitution or quotes |
 
@@ -74,8 +77,10 @@ PyPI components record their hash pins as `requirement_hashes`, so a changed or 
 | Root `requirements*.txt` files | 4 MiB of text together | Collection failure |
 | Option text with a quote or backslash, on one requirement line | 16 KiB | `option line not parsed` gap |
 | `pyproject.toml` | 256 KiB | Collection failure |
-| A dotted key or table name in `pyproject.toml` | 16 dots | Collection failure |
+| A dotted key or table name in `pyproject.toml` | 16 dots, quoted parts included | Collection failure |
 | A Compose file | 20,000 YAML tokens and 100,000 merge-key steps | Collection failure |
+| npm `overrides`, `resolutions` and `pnpm.overrides` together | 10,000 entries, nested 32 deep | `dependency override not translated` gap, also for every inventoried npm package |
+| An image reference | 520 characters, docker/distribution's limit | `image reference not parsed` gap when it matches the catalog |
 
 ## AI package catalog
 
@@ -102,8 +107,9 @@ An image is inventoried when its reference, in lower case, contains one of `chro
 
 These declare or change what is installed but are not read, and leave no gap. Review changes to them by other means.
 
-- Manifests outside the project root: workspace members (a gap when `workspaces` lists them), other `package.json` files, `requirements*.txt` files in subdirectories and pip-tools `*.in` files.
+- Manifests outside the project root: workspace members (a gap when `workspaces`, a `pnpm-workspace.yaml` or `[tool.uv.workspace]` lists them), other `package.json` files, `requirements*.txt` files in subdirectories and pip-tools `*.in` files.
 - `setup.py`, `setup.cfg` and dependencies declared dynamic in `pyproject.toml`; conda `environment.yml`; `[tool.hatch.envs]` environments.
 - Index and registry choices: `--index-url`, `--extra-index-url`, `--find-links` and `--trusted-host` in requirements files, `[[tool.uv.index]]`, Poetry and PDM sources, and `.npmrc`. Packages from another index are recorded as PyPI packages unless a uv or Poetry source names them.
 - `bundleDependencies`, which npm installs from `dependencies` anyway.
 - Kubernetes manifests, Helm charts and `.devcontainer` configuration.
+- Compose provider services (`provider:`), including `type: model`; Compose files that `COMPOSE_FILE` selects when it is set in the environment Compose runs in rather than in `.env`, or that `-f` or `--env-file` select.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -133,6 +134,70 @@ def test_an_override_of_another_package_is_not_a_gap(tmp_path):
     assert result.components[0].package_url == "pkg:npm/openai@4.52.0"
 
 
+UNCLASSIFIED = ["package.json: git, URL or path dependency not classified"]
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        # npm installs the source under the overridden name, whatever package it holds.
+        {"overrides": {"helper": "github:openai/openai-node"}},
+        {"overrides": {"helper@1": "https://evil.example/openai-4.52.0.tgz"}},
+        {"overrides": {"helper": {".": "git+https://evil.example/openai.git"}}},
+        {"overrides": {"some-lib": {"helper": "file:../vendor/openai"}}},
+        {"resolutions": {"**/helper": "github:openai/openai-node"}},
+        {"pnpm": {"overrides": {"some-lib>helper": "link:../vendor/openai"}}},
+    ],
+)
+def test_an_override_to_an_unclassified_source_is_a_gap(tmp_path, fields):
+    project = _write(
+        tmp_path,
+        {"package.json": {"dependencies": {"helper": "1.0.0", "some-lib": "1.0.0"}, **fields}},
+    )
+    result = RegistryScanner().scan(project)
+    assert result.surfaces_excluded == UNCLASSIFIED and result.components == []
+
+
+def _nested(depth: int) -> dict[str, object]:
+    overrides: dict[str, object] = {"helper": "github:openai/openai-node"}
+    for _ in range(depth):
+        overrides = {"some-lib": overrides}
+    return overrides
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [{f"lib-{i}": "1.0.0" for i in range(10_001)} | {"helper": "github:x/y"}, _nested(40)],
+)
+def test_overrides_too_many_or_too_deep_to_read_are_a_gap(tmp_path, overrides):
+    # Even without an inventoried package: an unread override can install one.
+    project = _write(
+        tmp_path,
+        {"package.json": {"dependencies": {"helper": "1.0.0"}, "overrides": overrides}},
+    )
+    assert RegistryScanner().scan(project).surfaces_excluded == [
+        "package.json: dependency override not translated"
+    ]
+
+
+def test_an_override_source_a_lock_record_names_is_classified(tmp_path):
+    project = _write(
+        tmp_path,
+        {
+            "package.json": {
+                "dependencies": {"helper": "1.0.0"},
+                "overrides": {"helper": "github:acme/helper"},
+            },
+            "package-lock.json": {
+                "lockfileVersion": 3,
+                "packages": {"node_modules/helper": {"version": "1.0.1", "resolved": "x"}},
+            },
+        },
+    )
+    result = RegistryScanner().scan(project)
+    assert result.surfaces_excluded == [] and result.components == []
+
+
 def test_workspaces_are_a_coverage_gap(tmp_path):
     project = _write(
         tmp_path,
@@ -144,6 +209,73 @@ def test_workspaces_are_a_coverage_gap(tmp_path):
     assert RegistryScanner().scan(project).surfaces_excluded == [
         "package.json: workspaces not followed"
     ]
+
+
+@pytest.mark.parametrize(
+    "workspace",
+    [
+        "packages:\n  - 'packages/*'\n",
+        "overrides:\n  openai: github:evil/openai\n",
+        "catalog:\n  openai: 4.0.0\n",
+    ],
+)
+def test_a_pnpm_workspace_file_is_a_coverage_gap(tmp_path, workspace):
+    # pnpm reads workspace packages, overrides and version catalogs from it.
+    project = _write(
+        tmp_path,
+        {
+            "package.json": {"dependencies": {"openai": "4.0.0"}},
+            "pnpm-workspace.yaml": workspace,
+        },
+    )
+    assert RegistryScanner().scan(project).surfaces_excluded == [
+        "pnpm-workspace.yaml: workspace settings not read"
+    ]
+
+
+@pytest.mark.parametrize(("members", "gaps"), [('["packages/*"]', 1), ("[]", 0)])
+def test_uv_workspace_members_are_a_coverage_gap(tmp_path, members, gaps):
+    project = _write(
+        tmp_path,
+        {
+            "pyproject.toml": '[project]\nname = "a"\nversion = "1"\n'
+            'dependencies = ["openai==1.51.0"]\n'
+            f"[tool.uv.workspace]\nmembers = {members}\n",
+            "packages/agent/pyproject.toml": '[project]\nname = "agent"\nversion = "1"\n'
+            'dependencies = ["anthropic>=0.30"]\n',
+        },
+    )
+    assert RegistryScanner().scan(project).surfaces_excluded == (
+        ["pyproject.toml: uv workspace members not followed"] * gaps
+    )
+
+
+@pytest.mark.parametrize(
+    ("environment", "gap"),
+    [
+        ("COMPOSE_FILE=deploy/stack.yml\n", True),
+        ("TAG=1\r\nexport COMPOSE_FILE = compose.yaml:deploy/stack.yml\r\n", True),
+        # A name without a value takes it from the environment Compose runs in.
+        ("COMPOSE_FILE\n", True),
+        ("COMPOSE_FILE: deploy/stack.yml\n", True),
+        ("# COMPOSE_FILE=deploy/stack.yml\nOPENAI_API_KEY=sk-test\n", False),
+        ("MY_COMPOSE_FILE=a\nCOMPOSE_FILES=b\n", False),
+    ],
+)
+def test_a_compose_file_selected_in_dotenv_is_a_coverage_gap(tmp_path, environment, gap):
+    # Compose reads the files COMPOSE_FILE names instead of the default ones.
+    project = _write(
+        tmp_path,
+        {
+            ".env": environment,
+            "compose.yaml": "services:\n  llm:\n    image: ollama/ollama:0.5.7\n",
+            "deploy/stack.yml": "services:\n  llm:\n    image: evil.example/ollama:1\n",
+        },
+    )
+    result = RegistryScanner().scan(project)
+    assert result.surfaces_excluded == ([".env: COMPOSE_FILE not followed"] if gap else [])
+    assert ".env" in result.surfaces_scanned
+    assert "sk-test" not in json.dumps([c.model_dump(mode="json") for c in result.components])
 
 
 def test_peer_dependencies_are_read_with_npm_precedence(tmp_path):
@@ -536,6 +668,148 @@ def test_text_that_is_not_a_service_image_is_not_a_component(tmp_path):
 def test_compose_forms_that_are_not_followed_are_gaps(tmp_path, service, gap):
     _write(tmp_path, {"docker-compose.yml": f"services:\n  a:\n    {service}\n"})
     assert RegistryScanner().scan(tmp_path).surfaces_excluded == [gap]
+
+
+def _b64(text: str) -> str:
+    return base64.b64encode(text.encode()).decode()
+
+
+@pytest.mark.parametrize(
+    ("compose", "gap"),
+    [
+        # Compose decodes !!binary from base64, so the image it pulls is not the text.
+        (
+            f"services:\n  a:\n    image: !!binary {_b64('ollama/ollama:latest')}\n",
+            "tagged image value not resolved",
+        ),
+        (
+            "services:\n  a:\n    image: !<tag:yaml.org,2002:binary> "
+            f"{_b64('attacker.example/ollama/ollama:0.5.7')}\n",
+            "tagged image value not resolved",
+        ),
+        (
+            "services:\n  a:\n    image: !!null ollama/ollama:latest\n",
+            "tagged image value not resolved",
+        ),
+        ("services:\n  a:\n    image: !!int 7\n", "tagged image value not resolved"),
+        (
+            f"models:\n  chat:\n    model: !!binary {_b64('ai/smollm2')}\n",
+            "tagged image value not resolved",
+        ),
+        (f"models:\n  chat: !!binary {_b64('ai/smollm2')}\n", "tagged image value not resolved"),
+        (
+            "services:\n  a:\n    build:\n      dockerfile_inline: !!binary "
+            f"{_b64('FROM ollama/ollama:latest')}\n",
+            "build not followed",
+        ),
+        (f"services:\n  a:\n    build: !!binary {_b64('.')}\n", "build not followed"),
+        (
+            f"services:\n  a:\n    build:\n      context: !!binary {_b64('.')}\n",
+            "build context not followed",
+        ),
+    ],
+)
+def test_tagged_compose_values_are_gaps(tmp_path, compose, gap):
+    _write(tmp_path, {"compose.yaml": compose, "Dockerfile": "FROM node:22\n"})
+    result = RegistryScanner().scan(tmp_path)
+    assert result.components == [] and result.scan_failures == []
+    assert result.surfaces_excluded == [f"compose.yaml: {gap}"]
+
+
+@pytest.mark.parametrize(
+    ("service", "names"),
+    [
+        ("image: !!str ollama/ollama:0.5.7", ["ollama/ollama:0.5.7"]),
+        ("image: !<tag:yaml.org,2002:str> ollama/ollama:0.5.7", ["ollama/ollama:0.5.7"]),
+        ("image: !!null", []),
+        ("image: !!null null", []),
+        ("image: !reset null", []),
+        # An override file's reset removes the build; there is nothing to follow.
+        ("build: !reset null", []),
+        ("build: !reset", []),
+    ],
+)
+def test_text_and_null_tags_are_read_as_compose_reads_them(tmp_path, service, names):
+    _write(tmp_path, {"compose.override.yaml": f"services:\n  a:\n    {service}\n"})
+    result = RegistryScanner().scan(tmp_path)
+    assert result.surfaces_excluded == [] and result.scan_failures == []
+    assert [c.name for c in result.components] == names
+
+
+def test_a_tagged_compose_key_fails_the_file(tmp_path):
+    # Compose would read the key "image" from the base64 text.
+    _write(
+        tmp_path,
+        {"compose.yaml": f"services:\n  a:\n    !!binary {_b64('image')}: ollama/ollama:latest\n"},
+    )
+    assert RegistryScanner().scan(tmp_path).scan_failures == [
+        "compose.yaml: YAML mapping parse failed or unsupported"
+    ]
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        # Compose would build from the host's root, not the project's Dockerfile.
+        "build: /",
+        "build:\n      context: /",
+        "build:\n      context: //.",
+        "build:\n      context: .\n      dockerfile: /Dockerfile",
+        "build:\n      context: ./\n      dockerfile: .\\Dockerfile",
+        "build:\n      context: [.]",
+    ],
+)
+def test_builds_outside_the_project_root_are_gaps(tmp_path, build):
+    _write(
+        tmp_path,
+        {
+            "compose.yaml": f"services:\n  a:\n    {build}\n",
+            "Dockerfile": "FROM ollama/ollama:0.5.7\n",
+        },
+    )
+    result = RegistryScanner().scan(tmp_path)
+    assert result.surfaces_excluded == ["compose.yaml: build context not followed"]
+
+
+@pytest.mark.parametrize(
+    ("anchor", "services"),
+    [
+        # Every service aliases one service whose build holds the inline Dockerfile.
+        (
+            "x-agent: &agent\n  build:\n    dockerfile_inline: |\n",
+            "services: {" + ", ".join(f"s{i}: *agent" for i in range(2_000)) + "}\n",
+        ),
+        # Each service has a build of its own, and all alias one inline scalar.
+        (
+            "x-inline: &inline |\n",
+            "services:\n"
+            + "".join(f"  s{i}: {{build: {{dockerfile_inline: *inline}}}}\n" for i in range(1_000)),
+        ),
+    ],
+)
+def test_an_inline_dockerfile_shared_by_many_services_is_parsed_once(
+    tmp_path, monkeypatch, anchor, services
+):
+    # Parsing it again for each alias took tens of minutes for one Compose file.
+    parsed: list[int] = []
+    original = RegistryScanner._dockerfile_images
+
+    def counting(content: str) -> tuple[list[str], list[str]]:
+        parsed.append(len(content))
+        return original(content)
+
+    monkeypatch.setattr(RegistryScanner, "_dockerfile_images", staticmethod(counting))
+    body = "".join(f"      RUN echo {i}\n" for i in range(28_000))
+    _write(
+        tmp_path,
+        {"compose.yaml": anchor + "      FROM ollama/ollama:0.5.7\n" + body + services},
+    )
+    started = time.monotonic()
+    result = RegistryScanner().scan(tmp_path)
+    assert time.monotonic() - started < 20
+    assert result.scan_failures == [] and result.surfaces_excluded == []
+    assert [c.name for c in result.components] == ["ollama/ollama:0.5.7"]
+    assert len(parsed) == 1 and parsed[0] > 400_000
 
 
 def test_compose_include_is_a_gap_and_root_builds_are_covered(tmp_path):

@@ -317,12 +317,20 @@ class ImageReference(NamedTuple):
     def repository(self) -> str:
         return f"{self.domain}/{self.path}"
 
+    @property
+    def pinned(self) -> bool:
+        """Whether the digest is one Docker pulls and verifies: sha256, sha384 or
+        sha512 in lower-case hex of the algorithm's length. Docker refuses any other
+        digest the reference grammar admits."""
+        return self.digest is not None and _PULLED_DIGEST.fullmatch(self.digest) is not None
+
 
 _DOMAIN_COMPONENT = re.compile(r"[A-Za-z0-9]+(?:-+[A-Za-z0-9]+)*")
 _PATH_COMPONENT = re.compile(r"[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*")
 _TAG = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}")
 _DIGEST = re.compile(r"[A-Za-z][A-Za-z0-9]*(?:[-_+.][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,}")
 _IPV6 = re.compile(r"\[[0-9A-Fa-f:.]+\]")
+_PULLED_DIGEST = re.compile(r"sha256:[0-9a-f]{64}|sha384:[0-9a-f]{96}|sha512:[0-9a-f]{128}")
 # docker/distribution's limit on a repository name.
 _LONGEST_IMAGE = 255 + 1 + 128 + 1 + 135
 
@@ -371,7 +379,7 @@ def parse_image_reference(text: str) -> ImageReference | None:
         return None
     if domain == "docker.io" and len(path) == 1:
         path = ["library", *path]
-    return ImageReference(domain, "/".join(path), tag, digest.lower() if at else None)
+    return ImageReference(domain, "/".join(path), tag, digest if at else None)
 
 
 def _url_origin(url: str) -> str:
@@ -557,6 +565,16 @@ def _admits(clause: Specifier, text: str, version: Version | None) -> bool:
     return version is not None and clause.contains(version, prereleases=True)
 
 
+def _satisfies(requirement: Requirement, text: str, version: Version | None) -> bool:
+    """Whether a pin meets every clause of a requirement; a clause too long to
+    compare is taken as not met."""
+    clauses = list(requirement.specifier)
+    return all(
+        len(clause.version) <= _LONGEST_VERSION and _admits(clause, text, version)
+        for clause in clauses
+    )
+
+
 class _Declared:
     """What a package's declarations under one set of markers require together.
 
@@ -706,7 +724,7 @@ class RegistryScanner(Scanner):
         result = ScanResult(scanner_name=self.name)
         with self._collection(project_root, result) as files:
             entries = files.root_entries()
-            npm = self._scan_npm(result)
+            npm = self._scan_npm(result, entries)
             pypi = self._scan_pip(result, entries)
             self._note_unread_lockfiles(entries, npm, pypi)
             result.components.extend(npm)
@@ -769,6 +787,8 @@ class RegistryScanner(Scanner):
         "override": "package.json: dependency override not translated",
         "unclassified": "package.json: git, URL or path dependency not classified",
         "workspaces": "package.json: workspaces not followed",
+        # pnpm reads workspace packages, overrides and version catalogs from it.
+        "pnpm": "pnpm-workspace.yaml: workspace settings not read",
     }
 
     def _npm_lock(self, result: ScanResult) -> tuple[str, dict[str, Any], str] | None:
@@ -842,7 +862,9 @@ class RegistryScanner(Scanner):
             return "path", None, text
         return "registry", None, text
 
-    def _scan_npm(self, result: ScanResult) -> list[RegistryEntryComponent]:
+    def _scan_npm(self, result: ScanResult, entries: list[str]) -> list[RegistryEntryComponent]:
+        if "pnpm-workspace.yaml" in entries:
+            result.surfaces_excluded.append(self._NPM_GAPS["pnpm"])
         data = self._confined().read_json("package.json", missing_ok=True)
         if data is None:
             return []
@@ -895,9 +917,18 @@ class RegistryScanner(Scanner):
                     key, package, kind, version_range, specs, record, lock, overridden, result
                 )
             )
-        if overrides is not None and any(is_ai_package(t, "npm") for t in overrides[1]):
-            # An override that installs an AI package under another package's name.
+        if overrides is None or any(is_ai_package(t, "npm") for t in overrides[1]):
+            # Too many overrides to read, or one that installs an AI package under
+            # another package's name.
             gaps[self._NPM_GAPS["override"]] = None
+        for replaced in sorted(overrides[2]) if overrides is not None else ():
+            # As for a dependency: a git, URL or path source is installed under the
+            # name whatever package it holds, and only a lock record names that.
+            record = resolutions.get("node_modules/" + replaced)
+            if not is_ai_package(replaced, "npm") and (
+                self._installed_name(replaced, record, resolutions) is None
+            ):
+                gaps[self._NPM_GAPS["unclassified"]] = None
         result.surfaces_excluded.extend(gaps)
         return components
 
@@ -1224,35 +1255,42 @@ class RegistryScanner(Scanner):
     _OVERRIDE_ENTRIES = 10_000
 
     @classmethod
-    def _npm_overrides(cls, data: dict[str, Any]) -> tuple[set[str], set[str]] | None:
-        """The package names npm, yarn and pnpm override fields name, and the alias
-        targets they install; None when there are too many entries to read."""
+    def _npm_overrides(cls, data: dict[str, Any]) -> tuple[set[str], set[str], set[str]] | None:
+        """The package names npm, yarn and pnpm override fields name, the alias
+        targets they install, and the packages they replace with a git, URL or path
+        source; None when there are too many entries to read."""
         names: set[str] = set()
         targets: set[str] = set()
-        stack: list[tuple[Any, int]] = []
+        sources: set[str] = set()
+        stack: list[tuple[Any, int, list[str]]] = []
         for path in cls._OVERRIDE_FIELDS:
             node: Any = data
             for part in path:
                 node = node.get(part) if isinstance(node, dict) else None
             if node is not None:
-                stack.append((node, 0))
+                stack.append((node, 0, []))
         remaining = cls._OVERRIDE_ENTRIES
         while stack:
-            node, depth = stack.pop()
+            node, depth, parent = stack.pop()
             if not isinstance(node, dict):
                 continue
             for selector, value in node.items():
                 remaining -= 1
                 if remaining < 0 or depth > 32:
                     return None
-                names.update(name.lower() for name in cls._override_names(str(selector)))
+                selected = cls._override_names(str(selector))
+                names.update(name.lower() for name in selected)
                 if isinstance(value, dict):
-                    stack.append((value, depth + 1))
+                    stack.append((value, depth + 1, selected or parent))
                 elif isinstance(value, str):
                     kind, target, _ = cls._npm_spec(value)
                     if kind == "alias" and target:
                         targets.add(target)
-        return names, targets
+                    elif kind in ("git", "url", "path"):
+                        # The last name is the package replaced; "." replaces the
+                        # package of the enclosing selector.
+                        sources.update((selected or parent)[-1:])
+        return names, targets, sources
 
     @staticmethod
     def _override_names(selector: str) -> list[str]:
@@ -1358,10 +1396,13 @@ class RegistryScanner(Scanner):
         """One component from every declaration of a package, in the order read.
 
         The version, package URL and findings follow from all of them, whichever file
-        is read first: an exact pin without a marker in any declaration leaves no
-        version_pinning finding, a URL or VCS declaration anywhere is a finding and no
-        PyPI package URL, and a package URL is emitted only when every exact pin names
-        the same version and nothing conflicts or is left untranslated.
+        is read first. The first exact pin without a marker is the version reported,
+        and it resolves the ranges it satisfies in every file, as a compiled
+        requirements file resolves the ranges of pyproject.toml; a range it does not
+        satisfy, under any marker or group, is a version_pinning finding. A URL or VCS
+        declaration anywhere is a finding and no PyPI package URL. A package URL is
+        emitted only when every exact pin names the same version, every other
+        declaration admits it, and nothing conflicts or is left untranslated.
         """
         declarations = package.declarations
         name = declarations[0].name
@@ -1373,6 +1414,16 @@ class RegistryScanner(Scanner):
         exact = [d for d in others if d.pin is not None]
         unconditional = [d for d in exact if not d.marker]
         chosen = unconditional[0] if unconditional else declarations[0]
+        loose: list[_PipDeclaration] = []
+        if chosen.pin is not None and unconditional:
+            pinned = _parsed(chosen.pin)
+            loose = [
+                d
+                for d in others
+                if d.pin is None
+                and d.requirement is not None
+                and not _satisfies(d.requirement, chosen.pin, pinned)
+            ]
         risks: list[RiskAssessment] = []
         if urls:
             files = ", ".join(dict.fromkeys(d.source for d in urls))
@@ -1413,6 +1464,18 @@ class RegistryScanner(Scanner):
                         "hashes.",
                     )
                 )
+        elif loose and not package.conflict:
+            files = ", ".join(dict.fromkeys(d.source for d in loose))
+            risks.append(
+                _risk(
+                    RiskSeverity.MEDIUM,
+                    "version_pinning",
+                    f"PyPI package '{name}' has a nonexact declaration in {files} that its "
+                    "exact pin does not satisfy.",
+                    "Make every declaration admit the pinned version, pin it where it floats, "
+                    "and verify artifact hashes.",
+                )
+            )
         if package.conflict:
             risks.append(
                 _risk(
@@ -1428,6 +1491,7 @@ class RegistryScanner(Scanner):
         if (
             unconditional
             and not urls
+            and not loose
             and not package.conflict
             and all(d.untranslated is None for d in declarations)
             and len({d.pin_key for d in exact}) == 1
@@ -1924,7 +1988,11 @@ class RegistryScanner(Scanner):
     @staticmethod
     def _longest_dotted_key(text: str) -> int:
         """The most dots between two TOML structure characters outside strings and
-        comments, in one linear pass: a dotted key or table name has that many."""
+        comments, in one linear pass: a dotted key or table name has that many.
+
+        A string is skipped without ending the count, since a quoted part such as
+        "" or 'a' is still one part of a dotted key.
+        """
         longest = dots = 0
         position = 0
         while True:
@@ -1934,13 +2002,13 @@ class RegistryScanner(Scanner):
             char, position = found.group(), found.end()
             if char == ".":
                 dots += 1
-                continue
-            longest, dots = max(longest, dots), 0
-            if char == "#":
-                newline = text.find("\n", position)
-                position = len(text) if newline < 0 else newline
             elif char in "\"'":
                 position = _toml_string_end(text, position, char)
+            else:
+                longest, dots = max(longest, dots), 0
+                if char == "#":
+                    newline = text.find("\n", position)
+                    position = len(text) if newline < 0 else newline
 
     def _pyproject_declarations(self, result: ScanResult) -> list[tuple[str, str, str | None]]:
         """Each declaration with its group ("" for none) and, when it is not translated,
@@ -2025,6 +2093,7 @@ class RegistryScanner(Scanner):
     _UV_GAPS = {
         "source": "pyproject.toml: uv source not translated",
         "override": "pyproject.toml: uv override or constraint not followed",
+        "workspace": "pyproject.toml: uv workspace members not followed",
     }
 
     @classmethod
@@ -2043,6 +2112,12 @@ class RegistryScanner(Scanner):
             failures[failure] = None
             return
         strings(uv.get("dev-dependencies", []), "uv:dev", failure)
+        workspace = uv.get("workspace", {})
+        if not isinstance(workspace, dict):
+            failures[failure] = None
+        elif workspace.get("members"):
+            # uv sync installs what each member's pyproject.toml declares.
+            gaps[cls._UV_GAPS["workspace"]] = None
         sources = uv.get("sources", {})
         if not isinstance(sources, dict):
             failures[failure] = None
@@ -2194,6 +2269,12 @@ class RegistryScanner(Scanner):
 
     # Containerfile is the name Podman and Buildah read by default.
     _DOCKERFILES = ("Dockerfile", "Dockerfile.agent", "Containerfile")
+    # A COMPOSE_FILE assignment, or a bare name that takes it from the environment,
+    # as Compose's dotenv parser reads a line of .env.
+    _COMPOSE_FILE_SETTING = re.compile(
+        rb"^(?:\xef\xbb\xbf)?[ \t\r\f\v]*(?:export[ \t\r\f\v]+)?COMPOSE_FILE[ \t\r\f\v]*(?:[=:]|$)",
+        re.MULTILINE,
+    )
     # Compose reads the first of the four base names that exists and merges the
     # first override file; every one of them is read, so none can hide an image.
     _COMPOSE_FILES = (
@@ -2208,6 +2289,14 @@ class RegistryScanner(Scanner):
     )
 
     def _scan_docker(self, result: ScanResult) -> list[RegistryEntryComponent]:
+        environment = self._confined().read_bytes(".env", missing_ok=True)
+        if environment is not None:
+            # Read as bytes, so that no encoding fails the collector; nothing in it
+            # is recorded.
+            result.surfaces_scanned.append(".env")
+            if self._COMPOSE_FILE_SETTING.search(environment):
+                # Compose reads the files it names instead of the default ones.
+                result.surfaces_excluded.append(".env: COMPOSE_FILE not followed")
         # One component per image, with every file that names it.
         found: dict[str, list[str]] = {}
         unresolved: set[str] = set()
@@ -2283,7 +2372,7 @@ class RegistryScanner(Scanner):
         if unresolved:
             # Kept as written, with the gap that says why it is not the image pulled.
             name = redact_text(raw)
-            has_digest = bool(re.search(r"@sha256:[0-9a-fA-F]{64}$", raw))
+            has_digest = "@" in raw and _PULLED_DIGEST.fullmatch(raw.rpartition("@")[2]) is not None
             has_tag = ":" in raw.rsplit("/", 1)[-1] and not raw.endswith(":latest")
         else:
             reference = parse_image_reference(raw)
@@ -2292,12 +2381,12 @@ class RegistryScanner(Scanner):
             # A valid reference holds no credential, so it is recorded exactly: a
             # redacted one could give two tags the same name.
             name = raw
-            has_digest = reference.digest is not None
+            has_digest = reference.pinned
             has_tag = reference.tag not in (None, "latest")
             registry_type = "docker-hub" if reference.domain == "docker.io" else "oci"
             registry_uri = f"https://{reference.domain}"
             properties["image_repository"] = reference.repository
-            if reference.digest is not None:
+            if reference.digest is not None and has_digest:
                 qualifiers = {"repository_url": reference.repository}
                 if reference.tag is not None:
                     qualifiers["tag"] = reference.tag
@@ -2600,19 +2689,35 @@ class _ComposeWalk:
     A mapping's keys are its own keys, then those of the mappings its merge keys
     name, earlier ones first, as YAML's merge key type defines. Each mapping's keys
     are worked out once; a mapping that merges itself, directly or through
-    others, is a gap rather than a loop.
+    others, is a gap rather than a loop. An alias is the node it names, so each
+    image, model, build and inline Dockerfile node is read once, however many
+    services share it.
     """
+
+    _STR = "tag:yaml.org,2002:str"
+    _NULL = "tag:yaml.org,2002:null"
+    # The scalars YAML 1.1 and 1.2 both read as null.
+    _NULL_TEXT = frozenset({"", "~", "null", "Null", "NULL"})
 
     def __init__(self, budget: int) -> None:
         self.budget = budget
         self.gaps: dict[str, None] = {}
         self._keys: dict[int, dict[str, Any]] = {}
         self._open: set[int] = set()
+        self._read: set[tuple[str, int]] = set()
 
     def _spend(self, steps: int = 1) -> None:
         self.budget -= steps
         if self.budget < 0:
             raise ValueError("compose walk budget exhausted")
+
+    def _first(self, role: str, node: Any) -> bool:
+        """Whether a node is read in this role for the first time."""
+        read = (role, id(node))
+        if read in self._read:
+            return False
+        self._read.add(read)
+        return True
 
     def keys(self, node: Any) -> dict[str, Any]:
         import yaml
@@ -2633,6 +2738,12 @@ class _ComposeWalk:
             if key.tag == "tag:yaml.org,2002:merge":
                 merged.extend(value.value if isinstance(value, yaml.SequenceNode) else [value])
             elif isinstance(key, yaml.ScalarNode):
+                if key.tag == "tag:yaml.org,2002:binary" or not key.tag.startswith(
+                    "tag:yaml.org,2002:"
+                ):
+                    # Compose would read another key than the text, such as the
+                    # base64-decoded name of a !!binary key.
+                    raise ValueError("tagged key")
                 if key.value in own:
                     # Compose refuses a mapping with a repeated key.
                     raise ValueError("duplicate key")
@@ -2664,7 +2775,7 @@ class _ComposeWalk:
                 reference = (
                     model if isinstance(model, yaml.ScalarNode) else self.keys(model).get("model")
                 )
-                if reference is not None:
+                if reference is not None and self._first("model", reference):
                     models.extend(self._image(reference))
         services = top.get("services")
         if services is None or self._empty(services):
@@ -2672,23 +2783,37 @@ class _ComposeWalk:
         for service in self.keys(services).values():
             fields = self.keys(service)
             image = fields.get("image")
-            if image is not None:
+            if image is not None and self._first("image", image):
                 images.extend(self._image(image))
             build = fields.get("build")
-            if build is not None:
+            if build is not None and self._first("build", build):
                 images.extend(self._build(build))
             extends = fields.get("extends")
             if isinstance(extends, yaml.MappingNode) and "file" in self.keys(extends):
                 self.gaps["extends not followed"] = None
         return images, models, list(self.gaps)
 
-    @staticmethod
-    def _empty(node: Any) -> bool:
+    def _empty(self, node: Any) -> bool:
         import yaml
 
         return isinstance(node, yaml.ScalarNode) and (
-            not node.value or node.tag == "tag:yaml.org,2002:null"
+            node.value in self._NULL_TEXT and node.tag in (self._NULL, self._STR, "!reset")
         )
+
+    def _text(self, node: Any, gap: str) -> str | None:
+        """The text Compose reads from a scalar: "" when it holds none, None after
+        recording the gap.
+
+        An untagged or !!str scalar, or one with Compose's !override, is read as
+        written, and !reset or null hold no value. Any other tag can make Compose
+        read other text, such as base64-decoded !!binary, or nothing at all.
+        """
+        if node.tag == "!reset" or (node.tag == self._NULL and node.value in self._NULL_TEXT):
+            return ""
+        if node.tag not in (self._STR, "!override"):
+            self.gaps[gap] = None
+            return None
+        return str(node.value)
 
     def _image(self, node: Any) -> list[str]:
         import yaml
@@ -2696,14 +2821,9 @@ class _ComposeWalk:
         if not isinstance(node, yaml.ScalarNode):
             self.gaps["image not parsed"] = None
             return []
-        if node.tag == "!reset":
-            # An override file's reset removes the image; there is none to record.
-            return []
-        if node.tag != "!override" and not node.tag.startswith("tag:yaml.org,2002:"):
-            self.gaps["tagged image value not resolved"] = None
-            return []
-        value = str(node.value).strip()
-        if node.tag == "tag:yaml.org,2002:null" or not value:
+        value = (self._text(node, "tagged image value not resolved") or "").strip()
+        if not value:
+            # No image, such as an override file's !reset, or a gap recorded.
             return []
         if "$" in value:
             # Compose fills ${NAME} from the environment and .env.
@@ -2715,33 +2835,70 @@ class _ComposeWalk:
         the collector reads; otherwise a gap."""
         import yaml
 
-        context, dockerfile, inline = ".", "Dockerfile", None
+        unread = "build context not followed"
         if isinstance(node, yaml.ScalarNode):
-            context = str(node.value)
+            context = self._text(node, "build not followed")
+            dockerfile: str | None = "Dockerfile"
+            if not context:
+                # No build, such as an override file's !reset, or a gap recorded.
+                return []
         elif isinstance(node, yaml.MappingNode):
             fields = self.keys(node)
-            values = {
-                name: str(value.value)
-                for name, value in fields.items()
-                if isinstance(value, yaml.ScalarNode) and value.value
-            }
-            context = values.get("context", ".")
-            dockerfile = values.get("dockerfile", "Dockerfile")
-            inline = values.get("dockerfile_inline")
-            if "dockerfile_inline" in fields and inline is None:
-                self.gaps["build not followed"] = None
-                return []
+            if "dockerfile_inline" in fields:
+                return self._inline(fields["dockerfile_inline"])
+            context = self._setting(fields.get("context"), ".", unread)
+            dockerfile = self._setting(fields.get("dockerfile"), "Dockerfile", unread)
         else:
             self.gaps["build not followed"] = None
             return []
-        if inline is not None:
-            images, gaps = RegistryScanner._dockerfile_images(inline)
-            for gap in gaps:
-                self.gaps[f"dockerfile_inline {gap}"] = None
-            return images
-        root = RegistryScanner._normalised(context.split("/")) == []
-        local = RegistryScanner._normalised(dockerfile.split("/"))
-        if not (root and local in (["Dockerfile"], ["Dockerfile.agent"], ["Containerfile"])):
+        if context is None or dockerfile is None:
+            return []
+        local = self._local(dockerfile)
+        if not (
+            self._local(context) == []
+            and local is not None
+            and len(local) == 1
+            and local[0] in RegistryScanner._DOCKERFILES
+        ):
             # The Dockerfile it builds from is not one the collector reads.
-            self.gaps["build context not followed"] = None
+            self.gaps[unread] = None
         return []
+
+    def _setting(self, node: Any, default: str, gap: str) -> str | None:
+        """A build path setting as text, its default when unset, or None after a gap."""
+        import yaml
+
+        if node is None:
+            return default
+        if not isinstance(node, yaml.ScalarNode):
+            self.gaps[gap] = None
+            return None
+        text = self._text(node, gap)
+        return default if text == "" else text
+
+    @staticmethod
+    def _local(path: str) -> list[str] | None:
+        """A relative path's parts as Compose resolves it, None for any other path.
+
+        An absolute path, such as "/" for the root of the host, is not the project
+        root; a backslash separates paths on Windows.
+        """
+        if path.startswith("/") or "\\" in path:
+            return None
+        return RegistryScanner._normalised(path.split("/"))
+
+    def _inline(self, node: Any) -> list[str]:
+        """The FROM images of an inline Dockerfile, parsed once however many builds
+        share it."""
+        import yaml
+
+        text = self._text(node, "build not followed") if isinstance(node, yaml.ScalarNode) else None
+        if not text:
+            self.gaps["build not followed"] = None
+            return []
+        if not self._first("dockerfile_inline", node):
+            return []
+        images, gaps = RegistryScanner._dockerfile_images(text)
+        for gap in gaps:
+            self.gaps[f"dockerfile_inline {gap}"] = None
+        return images

@@ -362,11 +362,13 @@ def test_a_pyproject_comment_is_not_compared(tmp_path):
     assert component.risks == []
 
 
-def test_ranges_with_pins_in_a_lock_file_leave_the_default_gate_as_on_main(tmp_path):
-    # Main read only requirements.txt here: seven ranges, 7 x 4 = 28. Reading the
-    # lock file must record its pins without adding a finding per package. The
-    # rating now follows every declaration, whichever file is read first, so the
-    # pins resolve the ranges they satisfy, as they do for ranges in pyproject.toml.
+def test_pins_in_a_lock_file_resolve_the_ranges_they_satisfy(tmp_path):
+    # Main read only requirements.txt here and rated each of its seven ranges medium
+    # (7 x 4 = 28), but rated the same ranges in pyproject.toml as resolved by these
+    # pins. The rating now follows every declaration whichever file is read first:
+    # an exact pin resolves the ranges it satisfies in any root file, so the gate
+    # score is 0 and each pin is the package URL. docs/registry-collector.md states
+    # that a pin in any file counts, including one in a file that is never installed.
     project = tmp_path / "project"
     project.mkdir()
     (project / "AGENTS.md").write_text("Keep receipts.")

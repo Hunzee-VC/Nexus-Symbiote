@@ -105,6 +105,61 @@ def test_the_rating_does_not_depend_on_which_file_is_read_first(tmp_path, files)
     assert component.package_url == "pkg:pypi/openai@1.51.0"
 
 
+PYPROJECT = '[project]\nname = "a"\nversion = "1"\n'
+
+
+@pytest.mark.parametrize(
+    ("files", "unsatisfied"),
+    [
+        # An extra or a marker keeps a declaration from being compared with the pin,
+        # but pip installs it there all the same.
+        (
+            {
+                "requirements.txt": "openai==1.40.0\n",
+                "pyproject.toml": PYPROJECT
+                + '[project.optional-dependencies]\nfast = ["openai>=1.50"]\n',
+            },
+            "pyproject.toml",
+        ),
+        (
+            {
+                "requirements.txt": "openai==1.40.0\n",
+                "requirements-gpu.txt": 'openai>=1.50 ; python_version >= "3"\n',
+            },
+            "requirements-gpu.txt",
+        ),
+        # A clause too long to compare is not taken as satisfied.
+        (
+            {
+                "requirements.txt": "openai==1.40.0\n",
+                "requirements-dev.txt": "openai>=" + "1." * 70 + "0\n",
+            },
+            "requirements-dev.txt",
+        ),
+        # A pin resolves the ranges it satisfies, in any file or group.
+        (
+            {
+                "requirements.txt": "openai==1.51.0\n",
+                "pyproject.toml": PYPROJECT
+                + '[project.optional-dependencies]\nfast = ["openai>=1.50"]\n',
+            },
+            None,
+        ),
+    ],
+)
+def test_a_range_the_pin_does_not_satisfy_is_a_finding_in_any_group(tmp_path, files, unsatisfied):
+    (component,) = _scan(tmp_path, files).values()
+    if unsatisfied is None:
+        assert component.risks == []
+        assert component.package_url == "pkg:pypi/openai@1.51.0"
+        return
+    assert component.version == "==1.40.0" and component.package_url is None
+    assert [(r.category, r.severity.value) for r in component.risks] == [
+        ("version_pinning", "medium")
+    ]
+    assert f"in {unsatisfied} that its exact pin does not satisfy" in component.risks[0].detail
+
+
 def test_pins_that_disagree_give_no_package_url(tmp_path):
     (component,) = _scan(
         tmp_path,
@@ -192,6 +247,41 @@ def test_a_digest_pinned_image_has_an_oci_package_url_that_exports(tmp_path):
     document = CycloneDXGenerator().generate(AIBOM(components=[component]))
     assert validate_cyclonedx(document) == []
     assert document["components"][0]["purl"] == component.package_url
+
+
+@pytest.mark.parametrize(
+    ("digest", "pinned"),
+    [
+        ("sha256:" + "a" * 64, True),
+        ("sha384:" + "a" * 96, True),
+        ("sha512:" + "a" * 128, True),
+        # Docker refuses these, though the reference grammar admits them.
+        ("sha256:" + "a" * 32, False),
+        ("sha256:" + "a" * 65, False),
+        ("md5:" + "a" * 32, False),
+        ("sha256:" + "A" * 64, False),
+    ],
+)
+@pytest.mark.parametrize("prefix", ["", "${REGISTRY}/"])
+def test_only_a_digest_docker_pulls_pins_an_image(tmp_path, digest, pinned, prefix):
+    (component,) = _scan(
+        tmp_path, {"Dockerfile": f"ARG REGISTRY\nFROM {prefix}ollama/ollama:0.5.7@{digest}\n"}
+    ).values()
+    if pinned:
+        assert component.risks == []
+        assert prefix or component.package_url.startswith(f"pkg:oci/ollama@{digest}?")
+    else:
+        assert [r.category for r in component.risks] == ["mutable_image_tag"]
+        assert component.package_url is None
+
+
+def test_an_oci_identity_needs_a_digest_docker_pulls():
+    digest = "md5:" + "a" * 32
+    component = _component(
+        name=f"ghcr.io/org/vllm-server@{digest}",
+        package_url=f"pkg:oci/vllm-server@{digest}?repository_url=ghcr.io/org/vllm-server",
+    )
+    assert package_identifier(component).status == "unavailable-invalid"
 
 
 def _component(**changes) -> RegistryEntryComponent:

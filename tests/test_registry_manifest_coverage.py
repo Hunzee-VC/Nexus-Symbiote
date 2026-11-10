@@ -985,6 +985,42 @@ def test_a_long_dotted_key_cannot_hide_behind_a_string_end(tmp_path, hidden):
     ]
 
 
+TOO_LONG = ["pyproject.toml: dotted key exceeds the length limit: not read"]
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        # A quoted part, even an empty one, is one part of the key.
+        "k" + '.""' * 20 + " = 1",
+        "k" + ".'a'" * 20 + " = 1",
+        "k" + '."a"' * 20 + " = 1",
+        "k" + ' . "a\\"b"' * 20 + " = 1",
+        "x = {k" + ".'''a'''" * 20 + " = 1}",
+        "[tool" + '."b"' * 20 + "]",
+        "[[tool" + ".'b'" * 20 + "]]",
+    ],
+)
+def test_quoted_parts_count_toward_the_dotted_key_bound(tmp_path, key):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "agent"\ndependencies = ["openai==1.0.0"]\n' + key + "\n"
+    )
+    assert RegistryScanner().scan(tmp_path).scan_failures == TOO_LONG
+
+
+def test_a_long_key_of_quoted_parts_is_refused_before_parsing(tmp_path):
+    # tomllib keeps every prefix of a dotted key: 7.5 s and 2.3 GB for this one.
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "agent"\ndependencies = ["openai==1.0.0"]\n[tool.x]\nk'
+        + '.""' * 20_000
+        + " = 1\n"
+    )
+    started = time.monotonic()
+    result = RegistryScanner().scan(tmp_path)
+    assert time.monotonic() - started < 5
+    assert result.scan_failures == TOO_LONG
+
+
 def test_a_large_pyproject_is_not_parsed(tmp_path):
     (tmp_path / "pyproject.toml").write_text("x = 1\n" * 50_000)
     assert RegistryScanner().scan(tmp_path).scan_failures == [

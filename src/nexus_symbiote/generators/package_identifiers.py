@@ -150,7 +150,7 @@ def _oci_agrees(
     if component.registry_type not in {"oci", "docker-hub"} or package.namespace:
         return False
     reference = parse_image_reference(component.name)
-    if reference is None or reference.digest is None:
+    if reference is None or reference.digest is None or not reference.pinned:
         return False
     return (
         package.name == reference.path.rsplit("/", 1)[-1]
