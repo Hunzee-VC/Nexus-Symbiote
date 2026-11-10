@@ -7,8 +7,10 @@ import hashlib
 import re
 import unicodedata
 from collections import deque
+from collections.abc import Collection
 from pathlib import Path, PurePosixPath
 
+from nexus_symbiote import limits
 from nexus_symbiote.core.enums import RiskSeverity, TrustTier
 from nexus_symbiote.core.hashing import hash_bytes
 from nexus_symbiote.core.models import PromptComponent, RiskAssessment, SkillPackageComponent
@@ -361,10 +363,15 @@ _MARKUP_SUFFIXES = frozenset({".md", ".mdc", ".markdown"})
 _IMPORTING_NAMES = frozenset({"CLAUDE.md", "CLAUDE.local.md", "GEMINI.md"})
 _MAX_IMPORT_DEPTH = 5
 _MAX_IMPORTS = 1000
-# Distinct import targets looked up in one collection. Each lookup of a missing file
-# lists the directories on its path for case variants, so file content must not be
-# able to ask for an unbounded number of them.
+# Distinct import targets looked up, and files whose imports are followed, in one
+# collection. Each lookup of a missing file lists the directories on its path for case
+# variants, and each file followed resolves up to _MAX_IMPORTS references, so file
+# content must not be able to ask for an unbounded number of either.
 _MAX_IMPORT_LOOKUPS = 5000
+# Path characters that the `imports` and `imported_by` lists of one collection hold
+# together. One reference can name a 4 KiB path, so a count of references alone would
+# not bound the inventory.
+_MAX_LISTED_IMPORT_CHARACTERS = 256 * 1024
 _IMPORT = re.compile(r"(?<!\S)@(\S+)")
 _FENCE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})")
 _CODE_SPAN = re.compile(r"`[^`\n]*`")
@@ -442,6 +449,77 @@ def _import_tokens(text: str) -> list[str]:
     return tokens
 
 
+class _ImportListing:
+    """The @path import references one collection lists on the files it records.
+
+    A file's ``imports``, and the ``imported_by`` of a file that others import, are
+    listed in full while all lists together hold at most
+    ``_MAX_LISTED_IMPORT_CHARACTERS`` characters of paths. A list that does not fit is
+    replaced by its count, and ``imports`` also by a digest of the paths, so a change to
+    it is still drift; one failure says how many references are counted but not listed.
+    """
+
+    def __init__(self) -> None:
+        self._remaining = _MAX_LISTED_IMPORT_CHARACTERS
+        self._importers: dict[str, list[str]] = {}
+        self._counts: dict[str, int] = {}
+        self._overflowed: dict[str, None] = {}
+        self._leaves: dict[str, bytes] = {}
+        self._first: str | None = None
+        self._unlisted = 0
+
+    def add(self, importer: str, targets: Collection[str], component: PromptComponent) -> None:
+        """Record that ``importer`` imports ``targets``, given in the order it names them."""
+        if self._take(sum(map(len, targets))):
+            component.properties["imports"] = sorted(targets)
+        else:
+            self._note(importer)
+            self._unlisted += len(targets)
+            component.properties["imports_count"] = len(targets)
+            component.properties["imports_digest"] = self._digest(targets)
+        for target in targets:
+            self._counts[target] = self._counts.get(target, 0) + 1
+            if target in self._overflowed:
+                continue
+            if self._take(len(importer)):
+                self._importers.setdefault(target, []).append(importer)
+            else:
+                self._importers.pop(target, None)
+                self._overflowed[target] = None
+                self._note(target)
+
+    def finish(self, recorded: dict[str, PromptComponent], failures: list[str]) -> None:
+        for target, importers in self._importers.items():
+            recorded[target].properties["imported_by"] = sorted(importers)
+        for target in self._overflowed:
+            recorded[target].properties["imported_by_count"] = self._counts[target]
+            self._unlisted += self._counts[target]
+        if self._first is not None:
+            failures.append(
+                f"{self._first}: @path import references exceed the inventory's recording "
+                f"limit of {_MAX_LISTED_IMPORT_CHARACTERS} path characters; "
+                f"{self._unlisted} are counted but not listed"
+            )
+
+    def _take(self, characters: int) -> bool:
+        if characters > self._remaining:
+            return False
+        self._remaining -= characters
+        return True
+
+    def _note(self, path: str) -> None:
+        if self._first is None:
+            self._first = path
+
+    def _digest(self, targets: Collection[str]) -> str:
+        """SHA-256 over the sorted SHA-256 digests of the paths; each path is hashed once."""
+        leaves = self._leaves
+        for target in targets:
+            if target not in leaves:
+                leaves[target] = hashlib.sha256(target.encode()).digest()
+        return hash_bytes(b"".join(sorted(leaves[target] for target in targets)))
+
+
 class PromptScanner(Scanner):
     name = "prompt"
 
@@ -467,7 +545,8 @@ class PromptScanner(Scanner):
                         importers.append(rel_path)
 
             # Memory files below the root, found by name; a name takes precedence over
-            # the directory that holds the file.
+            # the directory that holds the file. A host that loads a nested CLAUDE.md, as
+            # it does in a session started in that directory, expands its imports too.
             for path in sorted(files.iter_files()):
                 relative = path.as_posix()
                 nested_type = NESTED_INSTRUCTION_NAMES.get(path.name)
@@ -485,6 +564,8 @@ class PromptScanner(Scanner):
                 if component is not None:
                     recorded[relative] = component
                     texts[relative] = content.decode("utf-8")
+                    if path.name in _IMPORTING_NAMES:
+                        importers.append(relative)
 
             for directory, prompt_type in INSTRUCTION_DIRECTORIES.items():
                 if directory in INSTRUCTION_FILES and not files.is_directory(directory):
@@ -543,22 +624,44 @@ class PromptScanner(Scanner):
         """Inventory in-root files that memory files import with @path, to five hops.
 
         A host expands the imports of every file it loads this way, including a file
-        the collector records under its own name, such as an imported AGENTS.md.
+        the collector records under its own name, such as an imported AGENTS.md or a
+        nested CLAUDE.md. Each target looked up, and each file whose imports are
+        followed, counts against ``_MAX_IMPORT_LOOKUPS``, so at most that many times
+        ``_MAX_IMPORTS`` references are resolved.
         """
         pending = deque((path, 0) for path in importers)
         followed = set(importers)
         looked_up: set[str] = set()
-        imported_by: dict[str, set[str]] = {}
-        exhausted = False
-        while pending and not exhausted:
+        # Each path is one object that every reference to it shares.
+        paths = {path: path for path in recorded}
+        listing = _ImportListing()
+        spent = 0
+
+        def spend(importer: str) -> bool:
+            nonlocal spent
+            if spent >= _MAX_IMPORT_LOOKUPS:
+                result.scan_failures.append(
+                    f"{importer}: more than {_MAX_IMPORT_LOOKUPS} distinct @path imports "
+                    "in the project; the rest are not inventoried"
+                )
+                return False
+            spent += 1
+            return True
+
+        while pending:
             importer, depth = pending.popleft()
             tokens = _import_tokens(texts[importer])
+            if not tokens:
+                continue
             if len(set(tokens)) > _MAX_IMPORTS:
                 result.scan_failures.append(f"{importer}: too many @path imports to inventory")
                 continue
-            imports: set[str] = set()
+            # A file found by a lookup was counted when it was looked up.
+            if importer not in looked_up and not spend(importer):
+                break
+            imports: dict[str, None] = {}
             targets: list[str] = []
-            outside = too_long = False
+            outside = too_long = exhausted = False
             directory = PurePosixPath(importer).parent.parts
             for token in dict.fromkeys(token.rstrip(_TRAILING) for token in tokens):
                 named, leaves, long = _resolve_import(directory, token)
@@ -566,19 +669,16 @@ class PromptScanner(Scanner):
                 outside |= leaves
                 too_long |= long
             for target in dict.fromkeys(targets):
-                if target in recorded:
-                    imports.add(target)
-                    if target not in followed and depth + 1 <= _MAX_IMPORT_DEPTH:
-                        followed.add(target)
-                        pending.append((target, depth + 1))
+                known = paths.get(target)
+                if known is not None:
+                    imports[known] = None
+                    if known not in followed and depth + 1 <= _MAX_IMPORT_DEPTH:
+                        followed.add(known)
+                        pending.append((known, depth + 1))
                     continue
                 if target in looked_up:
                     continue
-                if len(looked_up) >= _MAX_IMPORT_LOOKUPS:
-                    result.scan_failures.append(
-                        f"{importer}: more than {_MAX_IMPORT_LOOKUPS} distinct @path imports "
-                        "in the project; the rest are not inventoried"
-                    )
+                if not spend(importer):
                     exhausted = True
                     break
                 looked_up.add(target)
@@ -596,8 +696,9 @@ class PromptScanner(Scanner):
                     continue
                 component.bom_ref = f"prompt:import:{target}"
                 recorded[target] = component
+                paths[target] = target
                 texts[target] = content.decode("utf-8")
-                imports.add(target)
+                imports[target] = None
                 followed.add(target)
                 pending.append((target, depth + 1))
             if exhausted:
@@ -612,11 +713,8 @@ class PromptScanner(Scanner):
                     f"name longer than {_MAX_NAME_BYTES} bytes, which is not inventoried"
                 )
             if imports and importer in recorded:
-                recorded[importer].properties["imports"] = sorted(imports)
-                for target in imports:
-                    imported_by.setdefault(target, set()).add(importer)
-        for target, sources in imported_by.items():
-            recorded[target].properties["imported_by"] = sorted(sources)
+                listing.add(importer, imports, recorded[importer])
+        listing.finish(recorded, result.scan_failures)
 
     @staticmethod
     def _read_import(
@@ -705,7 +803,7 @@ class PromptScanner(Scanner):
         digest = hashlib.sha256()
         text = _HiddenCharacterStream()
         try:
-            with files.open_regular(target, max_bytes=files.max_total_bytes) as stream:
+            with files.open_regular(target, max_bytes=limits.bound("total-bytes")) as stream:
                 while chunk := stream.read(65536):
                     digest.update(chunk)
                     text.feed(chunk)

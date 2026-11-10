@@ -497,7 +497,7 @@ def test_padded_imports_that_leave_the_root_are_gaps(tmp_path, token):
 # The bound tells the linear bookkeeping from the quadratic one; coverage tracing alone
 # nearly reaches it, so the coverage job runs this test untraced.
 @pytest.mark.no_cover
-def test_imported_by_lists_every_importer_once_with_large_fan_in(tmp_path):
+def test_import_bookkeeping_counts_every_importer_once_with_large_fan_in(tmp_path):
     names = [f"{index:03d}" for index in range(1000)]
     _write(tmp_path, "CLAUDE.md", " ".join(f"@d/{name}" for name in names))
     for name in names:
@@ -506,10 +506,28 @@ def test_imported_by_lists_every_importer_once_with_large_fan_in(tmp_path):
     result = PromptScanner().scan(tmp_path)
     assert time.perf_counter() - start < 10
     components = _components(result)
-    assert components["prompt:import:d/000"].properties["imported_by"] == [
-        "CLAUDE.md",
-        *(f"d/{name}" for name in names),
-    ]
+    # Past the inventory's recording limit references are counted, not listed;
+    # tests/test_prompt_imports.py covers the lists below it.
+    for name in ("000", "999"):
+        imported = components[f"prompt:import:d/{name}"].properties
+        assert len(imported.get("imports", ())) + imported.get("imports_count", 0) == 1000
+        assert imported["imported_by_count"] == 1001
+        assert "imported_by" not in imported
+    assert components["prompt:import:d/999"].properties["imports_count"] == 1000
+    unlisted = 2 * 1_001_000 - _listed_references(result)
+    [failure] = result.scan_failures
+    assert failure.endswith(
+        "@path import references exceed the inventory's recording limit of 262144 path "
+        f"characters; {unlisted} are counted but not listed"
+    )
+
+
+def _listed_references(result) -> int:
+    return sum(
+        len(component.properties.get(key, ()))
+        for component in result.components
+        for key in ("imports", "imported_by")
+    )
 
 
 def test_import_below_the_depth_limit_is_a_gap(tmp_path):
