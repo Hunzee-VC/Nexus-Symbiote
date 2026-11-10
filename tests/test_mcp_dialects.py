@@ -277,6 +277,67 @@ def test_command_with_endpoint_keeps_the_local_process_finding(tmp_path):
     assert {("medium", "local_process"), ("low", "transport_ambiguity")} <= categories
 
 
+TRUE = "/usr/bin/true"
+
+
+@pytest.mark.parametrize(
+    "path,server,transport",
+    [
+        (".mcp.json", {"command": TRUE, "type": "http"}, "streamable-http"),
+        (".mcp.json", {"command": TRUE, "type": "sse", "url": "https://x.test/sse"}, "sse"),
+        (".mcp.json", {"command": "node", "args": ["s.js"], "type": "ws"}, "websocket"),
+        (".vscode/mcp.json", {"command": TRUE, "type": "http"}, "streamable-http"),
+        ("claude_desktop_config.json", {"command": TRUE, "type": "http"}, "streamable-http"),
+        (".cursor/mcp.json", {"command": TRUE, "type": "sse"}, "sse"),
+        (".cline/mcp.json", {"command": TRUE, "transportType": "sse"}, "sse"),
+        # Gemini CLI picks the transport from command, url and httpUrl: a command is stdio.
+        (".gemini/settings.json", {"command": TRUE, "type": "sse"}, "stdio"),
+        (
+            ".gemini/settings.json",
+            {"command": "npx", "args": ["-y", "e@latest"], "type": "http"},
+            "stdio",
+        ),
+    ],
+)
+def test_a_launch_command_keeps_the_local_process_finding_whatever_type_it_declares(
+    tmp_path, path, server, transport
+):
+    key = "servers" if path == ".vscode/mcp.json" else "mcpServers"
+    result = scan(tmp_path, {path: json.dumps({key: {"s": server}})})
+    assert not result.scan_failures and not result.surfaces_excluded
+    record = servers(result)["s"]
+    assert record.transport == transport and record.command is not None
+    categories = {(r.severity.value, r.category) for r in record.risks}
+    assert {("medium", "local_process"), ("low", "transport_ambiguity")} <= categories
+
+
+def test_codex_command_with_a_remote_type_keeps_the_local_process_finding(tmp_path):
+    result = scan(
+        tmp_path, {".codex/config.toml": f'[mcp_servers.s]\ncommand = "{TRUE}"\ntype = "http"\n'}
+    )
+    record = servers(result)["s"]
+    assert record.transport == "streamable-http"
+    categories = {r.category for r in record.risks}
+    assert {"local_process", "transport_ambiguity"} <= categories
+
+
+@pytest.mark.parametrize(
+    "server",
+    [
+        {"type": "http", "url": "https://x.test/mcp"},
+        {"type": "sse", "url": "https://x.test/sse"},
+        {"type": "stdio", "command": "node", "args": ["s.js"]},
+        {"type": "local", "command": "node", "args": ["s.js"]},
+        {"command": "node", "args": ["s.js"]},
+    ],
+)
+def test_one_transport_without_the_other_is_not_ambiguous(tmp_path, server):
+    record, gaps = single(tmp_path, server)
+    assert not gaps
+    assert not any(r.category == "transport_ambiguity" for r in record.risks)
+    assert any(r.category == "local_process" for r in record.risks) is ("command" in server)
+
+
 def test_unrecognised_transport_type_is_a_gap(tmp_path):
     _, gaps = single(tmp_path, {"type": "carrier-pigeon", "url": "https://x.test/mcp"})
     assert gaps == [".mcp.json: MCP server 's' declares an unrecognised transport type"]

@@ -1,8 +1,11 @@
 """Compare approved inventory with descriptors served by operator-pinned stdio launchers.
 
-verify-live starts only pinned stdio launchers. A server reached over HTTP is
-reported as not verifiable here, without making the stdio verification fail;
-observe it with ``discover-mcp --record`` and compare the inventories with ``diff``.
+verify-live starts only pinned stdio launchers. A server reached over HTTP, one with
+a remote transport label, no recorded launch command and no launch policy entry, is
+reported as not verifiable here, without making the stdio verification fail; observe
+it with ``discover-mcp --record`` and compare the inventories with ``diff``. A remote
+label never overrides the operator's pin: a server the policy names is verified
+through its launcher, and one that records a launch command but has no entry fails.
 """
 
 from __future__ import annotations
@@ -68,6 +71,10 @@ REASONS: dict[str, str] = {
     "remote-transport": (
         "Remote MCP server: verify-live starts only pinned stdio launchers. Observe it with "
         "discover-mcp --record and compare the inventories with diff."
+    ),
+    "ambiguous-transport": (
+        "The inventory labels this server with a remote transport but records a launch "
+        "command, which a client may start, and no operator launch policy entry names it."
     ),
     "unsupported-transport": (
         "The inventory names a transport that is neither stdio nor a remote MCP transport "
@@ -305,6 +312,7 @@ def verify_mcp_servers(
             )
         )
         return report
+    launchers = trusted_launchers or {}
     for server in bom.components:
         if not isinstance(server, MCPServerComponent):
             continue
@@ -312,19 +320,25 @@ def verify_mcp_servers(
             server_name=server.name, server_ref=server.bom_ref, transport=server.transport
         )
         report.results.append(result)
-        if server.transport in REMOTE_TRANSPORTS:
+        remote = server.transport in REMOTE_TRANSPORTS
+        # The label comes from the checkout; the operator's pin and a recorded command do not.
+        pinned = server.bom_ref in launchers
+        if remote and not server.command and not pinned:
             result.status, result.reason = "not-verifiable", "remote-transport"
             result.error = REASONS["remote-transport"]
             report.servers_skipped += 1
             continue
         report.servers_checked += 1
-        if server.transport not in ("stdio", None):
+        if remote and not pinned:
+            result.reason = "ambiguous-transport"
+        elif not remote and server.transport not in ("stdio", None):
             result.reason = "unsupported-transport"
+        if result.reason is not None:
             result.error = REASONS[result.reason]
             continue
         deadline = time.monotonic() + stdio.DEADLINE_SECONDS
         try:
-            observation = fetch_observation((trusted_launchers or {}).get(server.bom_ref))
+            observation = fetch_observation(launchers.get(server.bom_ref))
             result.launcher_sha256 = observation.launcher_sha256
             declared = _declaration(observation)
             checked: dict[str, CheckedDescriptor] = {}
