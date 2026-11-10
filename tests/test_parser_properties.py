@@ -80,7 +80,7 @@ def decorated(draw: st.DrawFn, requirement: str) -> str:
         line = f"{head} \\\n{tail}"
     ending = draw(st.sampled_from(["\n", "\r\n", ""]))
     header = draw(
-        st.sampled_from(["", "# generated\n", "﻿", "--index-url https://pypi.org/simple\n"])
+        st.sampled_from(["", "# generated\n", "\ufeff", "--index-url https://pypi.org/simple\n"])
     )
     return header + line + ending
 
@@ -152,7 +152,7 @@ def test_a_requirement_split_across_files_and_pyproject_is_one_component(data):
 GARBAGE = st.text(
     st.characters(
         exclude_categories=("Cs",),
-        include_characters=" \t ﻿\\#@;[]=<>!~*,$\"'{}()/:%\x00\x1b‮",
+        include_characters=" \t\u00a0\ufeff\\#@;[]=<>!~*,$\"'{}()/:%\x00\x1b\u202e",
     ),
     min_size=1,
     max_size=40,
