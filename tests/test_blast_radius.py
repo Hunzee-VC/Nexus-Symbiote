@@ -162,6 +162,14 @@ def test_graph_issues_are_bounded_and_identifiers_shortened():
     assert max(len(issue) for issue in issues) < 1000
 
 
+def test_a_long_target_reference_is_shortened_in_graph_issues():
+    agent = AgentComponent(bom_ref="a", name="a", tool_refs=["m" * 100_000, "n" * 100_000])
+    issues = validate_graph(AIBOM(components=[agent]))
+    assert len(issues) == 2
+    assert all("mmmmmmmmmm" in issue or "nnnnnnnnnn" in issue for issue in issues)
+    assert max(len(issue) for issue in issues) < 1000
+
+
 def test_repeated_graph_issues_cannot_crowd_out_distinct_ones():
     repeated = ["missing-0"] * 500
     agent = AgentComponent(

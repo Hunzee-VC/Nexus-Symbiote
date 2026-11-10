@@ -87,8 +87,9 @@ def test_report_only_prints_the_same_reasons_and_passes(tmp_path):
         main, ["scan", str(tmp_path), "--no-project-policy", "--report-only", "--check"]
     )
     assert result.exit_code == 0
-    assert "Scan gate failed (report only: exit status 0)" in _lines(result.stderr)
-    assert any(line.startswith("  - ") for line in _lines(result.stderr))
+    lines = _lines(result.stderr)
+    assert "Scan gate failed (report only: exit status 0)" in lines
+    assert "  - no agent manifest or supported local inventory evidence was found" in lines
 
 
 def test_check_writes_nothing_and_refuses_an_output(tmp_path):
