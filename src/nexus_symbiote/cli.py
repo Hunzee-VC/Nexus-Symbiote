@@ -1029,6 +1029,8 @@ def diff(old_path: str, new_path: str, json_output: bool, fail_on_alert: bool = 
     else:
         if not result.has_changes:
             console.print("[green]No changes detected.[/]")
+            for note in result.notes:
+                console.print(f"  \\[NOTE] {_safe(note['detail'])}", soft_wrap=True)
             return
 
         console.print(f"[bold]{result.total_changes} changes detected[/]")
@@ -1042,10 +1044,12 @@ def diff(old_path: str, new_path: str, json_output: bool, fail_on_alert: bool = 
                 )
 
         notes = [change for change in result.metadata_changes if change["severity"] == "info"]
-        if notes:
+        if notes or result.notes:
             console.print("\n[bold]Notes:[/]")
             for change in notes:
                 console.print(f"  \\[INFO] {_safe(change['detail'])}", soft_wrap=True)
+            for note in result.notes:
+                console.print(f"  \\[NOTE] {_safe(note['detail'])}", soft_wrap=True)
 
         if result.components_added:
             console.print(f"\n[green]+{len(result.components_added)} added[/]")
@@ -1059,6 +1063,18 @@ def diff(old_path: str, new_path: str, json_output: bool, fail_on_alert: bool = 
             console.print(f"\n[yellow]~{len(result.components_modified)} modified[/]")
             for c in result.components_modified:
                 console.print(f"  ~ {_safe(c.name)}: {_safe('; '.join(c.details))}", soft_wrap=True)
+        for sign, label, edges in (
+            ("+", "relationships added", result.dependencies_added),
+            ("-", "relationships removed", result.dependencies_removed),
+        ):
+            if edges:
+                console.print(f"\n[bold]{sign}{len(edges)} {label}[/]")
+            for d in edges:
+                console.print(
+                    f"  {sign} \\[{_safe(d.severity.upper())}] {_safe(d.source_ref)} "
+                    f"{_safe(d.relationship)} {_safe(d.target_ref)}",
+                    soft_wrap=True,
+                )
 
     if fail_on_alert and result.security_alerts:
         raise click.exceptions.Exit(1)
