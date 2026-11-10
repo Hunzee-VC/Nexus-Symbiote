@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import codecs
+import hashlib
 import re
 import unicodedata
 from collections import deque
@@ -11,7 +13,7 @@ from nexus_symbiote.core.enums import RiskSeverity, TrustTier
 from nexus_symbiote.core.hashing import hash_bytes
 from nexus_symbiote.core.models import PromptComponent, RiskAssessment, SkillPackageComponent
 from nexus_symbiote.scanners.base import Scanner, ScanResult
-from nexus_symbiote.utils.confined import ConfinedCollection
+from nexus_symbiote.utils.confined import CollectionError, ConfinedCollection
 from nexus_symbiote.utils.terminal import neutralize
 
 INVISIBLE_CHARS: dict[str, str] = {
@@ -62,6 +64,8 @@ _FLAG_SEQUENCE = re.compile(
     "|\U000e0073\U000e0063\U000e0074|\U000e0077\U000e006c\U000e0073)\U000e007f"
 )
 _MARKDOWN_COMMENT = re.compile(r"^[ \t]{0,3}\[(?://|comment|#)\]:[ \t]*(?:#|<>)", re.M)
+# Characters of a large text file counted at once when no newline ends a segment sooner.
+_MAX_SEGMENT = 1 << 20
 
 
 def _pictographic(char: str) -> bool:
@@ -117,28 +121,81 @@ def detect_invisible_characters(content: str, source_name: str) -> list[RiskAsse
     presentation selector after a pictograph, a byte-order mark that starts the text
     and the England, Scotland and Wales flag sequences are ordinary text.
     """
-    risks: list[RiskAssessment] = []
-    shown = neutralize(source_name)
-    if content.isascii():
-        return risks
-    flags_removed = _FLAG_SEQUENCE.sub("", content)
+    counts, tags = _hidden_counts(content, at_start=True)
+    return _hidden_character_risks(counts, tags, source_name)
+
+
+def _hidden_counts(content: str, *, at_start: bool) -> tuple[dict[str, int], int]:
+    """Count the hidden characters of ``content``, and its tag characters outside a flag.
+
+    ``at_start`` says whether ``content`` begins the text, where a byte-order mark is
+    ordinary.
+    """
     counts: dict[str, int] = {}
+    if content.isascii():
+        return counts, 0
     for match in _HIDDEN.finditer(content):
         char = match.group()
         if (char == _ZWJ or char in _PRESENTATION_SELECTORS) and _emoji_context(
             content, match.start()
         ):
             continue
-        if char == "﻿" and match.start() == 0:
+        if char == "\ufeff" and at_start and match.start() == 0:
             continue
         counts[char] = counts.get(char, 0) + 1
     for char in set(content) - set(counts):
         if not char.isascii() and unicodedata.category(char) == "Cf" and not _HIDDEN.match(char):
             counts[char] = content.count(char)
-    tags = len(TAG_CHAR_RANGE.findall(flags_removed))
+    tags = len(TAG_CHAR_RANGE.findall(_FLAG_SEQUENCE.sub("", content)))
     for char in [char for char in counts if TAG_CHAR_RANGE.match(char)]:
         del counts[char]
+    return counts, tags
 
+
+class _HiddenCharacterStream:
+    """The hidden-character counts of UTF-8 text read in chunks.
+
+    The text is counted in segments that end after a newline, which no emoji or flag
+    sequence crosses, so the counts equal those of the whole text. A segment that
+    reaches ``_MAX_SEGMENT`` characters without one is cut there; a cut can only add
+    findings, never hide one.
+    """
+
+    def __init__(self) -> None:
+        self._decoder = codecs.getincrementaldecoder("utf-8")()
+        self._pending = ""
+        self._at_start = True
+        self.counts: dict[str, int] = {}
+        self.tags = 0
+        self.is_text = True
+
+    def feed(self, chunk: bytes, *, final: bool = False) -> None:
+        if not self.is_text:
+            return
+        try:
+            decoded = self._decoder.decode(chunk, final)
+        except UnicodeDecodeError:
+            self.is_text = False
+            return
+        text = self._pending + decoded
+        end = len(text) if final else text.rfind("\n", len(self._pending)) + 1
+        if not end and len(text) >= _MAX_SEGMENT:
+            end = len(text)
+        if not end:
+            self._pending = text
+            return
+        counts, tags = _hidden_counts(text[:end], at_start=self._at_start)
+        self._pending, self._at_start = text[end:], False
+        for char, count in counts.items():
+            self.counts[char] = self.counts.get(char, 0) + count
+        self.tags += tags
+
+
+def _hidden_character_risks(
+    counts: dict[str, int], tags: int, source_name: str
+) -> list[RiskAssessment]:
+    risks: list[RiskAssessment] = []
+    shown = neutralize(source_name)
     invisible = [
         f"{INVISIBLE_CHARS.get(char) or _character_name(char)} (U+{ord(char):04X}) x{count}"
         for char, count in sorted(counts.items(), key=lambda item: ord(item[0]))
@@ -307,7 +364,8 @@ _CODE_SPAN = re.compile(r"`[^`\n]*`")
 _DRIVE = re.compile(r"[A-Za-z]:[\\/]")
 # Sentence punctuation after a reference; the file is inventoried without it.
 _TRAILING = ".,;:!?)]}\"'"
-# File systems in common use refuse longer names and paths, so no host opens them.
+# Common file systems refuse longer names and paths, but a host on another one may open
+# them, so a resolved import beyond these limits is a coverage gap, not a lookup.
 _MAX_NAME_BYTES = 255
 _MAX_PATH_BYTES = 4096
 
@@ -317,33 +375,45 @@ def _markup(path: str) -> bool:
     return suffix in _MARKUP_SUFFIXES or not suffix
 
 
-def _resolve_import(importer: str, token: str) -> tuple[str | None, bool]:
-    """The in-root path an @path import names, and whether it names one outside the root.
+def _resolve_import(directory: tuple[str, ...], token: str) -> tuple[list[str], bool, bool]:
+    """The in-root paths an @path import in ``directory`` names, whether it leaves the
+    root, and whether it names a path too long to look up.
 
+    A token is resolved as hosts resolve it, collapsing ``.``, ``..`` and repeated
+    separators, before any limit applies. A Windows host reads a backslash as a
+    separator and a POSIX host as part of a name, so a token with one names both forms.
     Home-relative, absolute and drive paths, and paths that climb above the root, leave
-    it, also when a Windows host reads backslashes as separators. A token that no host
-    can open, such as one with a NUL character or an over-long name, is no import.
+    it. A token with a NUL character names no file any host can open.
     """
-    if "\x00" in token or len(token.encode()) > _MAX_PATH_BYTES or not token.strip("/\\"):
-        return None, False
+    if "\x00" in token or not token.strip("/\\"):
+        return [], False, False
     forms = [token, token.replace("\\", "/")] if "\\" in token else [token]
-    resolved: list[list[str]] = []
+    targets: list[str] = []
+    outside = too_long = False
     for form in forms:
         if form.startswith(("~", "/")) or _DRIVE.match(form):
-            return None, True
-        parts = list(PurePosixPath(importer).parent.parts)
-        for part in PurePosixPath(form).parts:
+            outside = True
+            continue
+        parts = list(directory)
+        for part in form.split("/"):
+            if part in ("", "."):
+                continue
             if part == "..":
                 if not parts:
-                    return None, True
+                    outside = True
+                    break
                 parts.pop()
-            elif part != ".":
+            else:
                 parts.append(part)
-        resolved.append(parts)
-    parts = resolved[0]
-    if not parts or any(len(part.encode()) > _MAX_NAME_BYTES for part in parts):
-        return None, False
-    return "/".join(parts), False
+        else:
+            path = "/".join(parts)
+            if len(path.encode()) > _MAX_PATH_BYTES or any(
+                len(part.encode()) > _MAX_NAME_BYTES for part in parts
+            ):
+                too_long = True
+            elif parts and path not in targets:
+                targets.append(path)
+    return targets, outside, too_long
 
 
 def _import_tokens(text: str) -> list[str]:
@@ -451,19 +521,24 @@ class PromptScanner(Scanner):
         pending = deque((path, 0) for path in importers)
         followed = set(importers)
         looked_up: set[str] = set()
-        while pending:
+        imported_by: dict[str, set[str]] = {}
+        exhausted = False
+        while pending and not exhausted:
             importer, depth = pending.popleft()
             tokens = _import_tokens(texts[importer])
             if len(set(tokens)) > _MAX_IMPORTS:
                 result.scan_failures.append(f"{importer}: too many @path imports to inventory")
                 continue
             imports: set[str] = set()
-            outside = False
+            targets: list[str] = []
+            outside = too_long = False
+            directory = PurePosixPath(importer).parent.parts
             for token in dict.fromkeys(token.rstrip(_TRAILING) for token in tokens):
-                target, leaves = _resolve_import(importer, token)
+                named, leaves, long = _resolve_import(directory, token)
+                targets.extend(named)
                 outside |= leaves
-                if target is None:
-                    continue
+                too_long |= long
+            for target in dict.fromkeys(targets):
                 if target in recorded:
                     imports.add(target)
                     if target not in followed and depth + 1 <= _MAX_IMPORT_DEPTH:
@@ -477,7 +552,8 @@ class PromptScanner(Scanner):
                         f"{importer}: more than {_MAX_IMPORT_LOOKUPS} distinct @path imports "
                         "in the project; the rest are not inventoried"
                     )
-                    return
+                    exhausted = True
+                    break
                 looked_up.add(target)
                 content = self._read_import(importer, target, files, result)
                 if content is None:
@@ -497,17 +573,23 @@ class PromptScanner(Scanner):
                 imports.add(target)
                 followed.add(target)
                 pending.append((target, depth + 1))
+            if exhausted:
+                break
             if outside:
                 result.surfaces_excluded.append(
                     f"{importer}: imports a file outside the project root, which is not inventoried"
                 )
+            if too_long:
+                result.surfaces_excluded.append(
+                    f"{importer}: imports a path longer than {_MAX_PATH_BYTES} bytes or with a "
+                    f"name longer than {_MAX_NAME_BYTES} bytes, which is not inventoried"
+                )
             if imports and importer in recorded:
                 recorded[importer].properties["imports"] = sorted(imports)
                 for target in imports:
-                    importer_list = recorded[target].properties.setdefault("imported_by", [])
-                    if importer not in importer_list:
-                        importer_list.append(importer)
-                        importer_list.sort()
+                    imported_by.setdefault(target, set()).add(importer)
+        for target, sources in imported_by.items():
+            recorded[target].properties["imported_by"] = sorted(sources)
 
     @staticmethod
     def _read_import(
@@ -568,10 +650,10 @@ class PromptScanner(Scanner):
         text_file = path.suffix.lower() in _TEXT_SUFFIXES
         found = files.regular_file(path)
         if found is not None and found[1] > files.max_file_bytes and not text_file:
-            # A large asset, such as a sample PDF, is streamed into a digest within the
-            # collection's byte budget instead of being read whole.
-            digest = files.hash_file(found[0], max_bytes=files.max_total_bytes)
-            return None if digest is None else (digest, [])
+            # A large asset, such as a sample PDF, is streamed within the collection's
+            # byte budget instead of being read whole: digested, and checked for hidden
+            # characters when it is UTF-8 text, such as instructions SKILL.md points to.
+            return PromptScanner._stream_skill_file(found[0], relative, files)
         content = files.read_bytes(path)
         if content is None:
             return None
@@ -586,6 +668,23 @@ class PromptScanner(Scanner):
         if path.suffix.lower() in _MARKUP_SUFFIXES:
             risks.extend(detect_hidden_markup(text, relative))
         return hash_bytes(content), risks
+
+    @staticmethod
+    def _stream_skill_file(
+        target: Path, relative: str, files: ConfinedCollection
+    ) -> tuple[str, list[RiskAssessment]] | None:
+        digest = hashlib.sha256()
+        text = _HiddenCharacterStream()
+        try:
+            with files.open_regular(target, max_bytes=files.max_total_bytes) as stream:
+                while chunk := stream.read(65536):
+                    digest.update(chunk)
+                    text.feed(chunk)
+        except (OSError, CollectionError):
+            return None
+        text.feed(b"", final=True)
+        risks = _hidden_character_risks(text.counts, text.tags, relative) if text.is_text else []
+        return f"sha256:{digest.hexdigest()}", risks
 
     def _scan_instruction_file(
         self, path: Path, rel_path: str, prompt_type: str, raw: bytes, text: str

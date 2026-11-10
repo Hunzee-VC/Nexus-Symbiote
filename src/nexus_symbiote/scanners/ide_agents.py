@@ -27,7 +27,7 @@ from nexus_symbiote.core.models import IDEAgentComponent, RiskAssessment, Verifi
 from nexus_symbiote.scanners.base import Scanner, ScanResult
 from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
 from nexus_symbiote.scanners.source_binding import BindingError, value_binding
-from nexus_symbiote.utils.confined import ConfinedCollection
+from nexus_symbiote.utils.confined import ConfinedCollection, fold_name
 from nexus_symbiote.utils.secrets import redact_text
 
 IDE_AGENT_CONFIGS: dict[str, dict[str, Any]] = {
@@ -111,6 +111,9 @@ IDE_AGENT_CONFIGS: dict[str, dict[str, Any]] = {
 }
 _CODEX_SPELLINGS = frozenset({"codex.md", "CODEX.md"})
 CLAUDE_SETTINGS = [".claude/settings.json", ".claude/settings.local.json"]
+_FOLDED_SETTINGS_NAMES = {
+    fold_name(name): name for name in ("settings.json", "settings.local.json")
+}
 # A Claude Code plugin repository's own manifests; its root hooks/hooks.json is the
 # plugin's hook configuration only when one of them is present.
 CLAUDE_PLUGIN_MANIFESTS = [".claude-plugin/plugin.json", ".claude-plugin/marketplace.json"]
@@ -319,16 +322,22 @@ class IDEAgentScanner(Scanner):
                         self._agent(files, result, ide_type, found, config["mcp_config"])
                     )
             # A host started in a subdirectory, such as one package of a monorepo, reads
-            # that directory's .claude settings as its project settings.
+            # that directory's .claude settings as its project settings, and on a
+            # case-insensitive file system those of another spelling of either name.
             nested: dict[str, list[str]] = {}
-            for path in files.iter_files():
-                if (
-                    len(path.parts) > 2
-                    and path.parts[-2] == ".claude"
-                    and path.as_posix() not in CLAUDE_SETTINGS
-                    and path.name in {"settings.json", "settings.local.json"}
-                ):
-                    nested.setdefault(Path(*path.parts[:-2]).as_posix(), []).append(path.as_posix())
+            links: list[Path] = []
+            for path in files.iter_files(directory_links=links):
+                if len(path.parts) <= 2 or fold_name(path.parts[-2]) != ".claude":
+                    continue
+                name = _FOLDED_SETTINGS_NAMES.get(fold_name(path.name))
+                if name is None:
+                    continue
+                if path.parts[-2] != ".claude" or path.name != name:
+                    files.report_case_variant(path, Path(*path.parts[:-2], ".claude", name))
+                    continue
+                nested.setdefault(Path(*path.parts[:-2]).as_posix(), []).append(path.as_posix())
+            for link in links:
+                self._linked_settings(files, link, nested)
             for base, paths in sorted(nested.items()):
                 result.surfaces_scanned.extend(sorted(paths))
                 result.components.append(
@@ -456,6 +465,27 @@ class IDEAgentScanner(Scanner):
                 **properties,
             },
         )
+
+    @staticmethod
+    def _linked_settings(
+        files: ConfinedCollection, link: Path, nested: dict[str, list[str]]
+    ) -> None:
+        """Nested settings below a ``.claude`` directory symlink, which the walk skips.
+
+        The walk covers the target under its own name, where the settings files are not
+        recognised, so they are looked up through the link as a host started there would.
+        """
+        if len(link.parts) < 2 or fold_name(link.name) != ".claude":
+            return
+        for name in _FOLDED_SETTINGS_NAMES.values():
+            path = link / name
+            if files.regular_file(path) is None:
+                # Records a refused link, or another spelling below the link.
+                files.read_bytes(path, missing_ok=True)
+            elif link.name != ".claude":
+                files.report_case_variant(path, link.with_name(".claude") / name)
+            else:
+                nested.setdefault(link.parent.as_posix(), []).append(path.as_posix())
 
     @staticmethod
     def _marker(files: ConfinedCollection, marker: str) -> str | None:

@@ -143,6 +143,10 @@ class _SourceError(ValueError):
     """A RAG source declaration this collector cannot record; the text names the field."""
 
 
+class _TooManyURLsError(_SourceError):
+    """A configuration file declares more endpoint URLs than one file may describe."""
+
+
 def _identifier(value: Any, field: str) -> str | None:
     if value is None:
         return None
@@ -193,12 +197,20 @@ def _control(value: Any) -> str:
     return "unrecognized"
 
 
+def _unread_control(value: Any) -> Any:
+    """The part of a control declaration that ``_control`` does not read."""
+    if isinstance(value, dict):
+        return {k: v for k, v in value.items() if not (k == "enabled" and isinstance(v, bool))}
+    return value
+
+
 def _describe(value: Any, urls: list[str], depth: int = 0) -> tuple[Any, bool]:
     """A nested value as the unkeyed digest covers it, and whether it leaves values unbound.
 
     Names, booleans and nulls are kept, and URLs by their exported origin and their
-    shape, which ``urls`` collects for the transport check. Other text and numbers are
-    kept only as their type, since the record does not export them.
+    shape. ``urls`` collects the URLs of the whole file for the transport check, at most
+    ``_MAX_ENTRIES``, since each may become a finding. Other text and numbers are kept
+    only as their type, since the record does not export them.
     """
     if depth > _MAX_DEPTH:
         raise _SourceError("RAG configuration nested too deeply")
@@ -220,6 +232,10 @@ def _describe(value: Any, urls: list[str], depth: int = 0) -> tuple[Any, bool]:
     if isinstance(value, str) and _scheme(value) is not None:
         if len(value) > _MAX_URI:
             raise _SourceError(f"RAG configuration URL exceeds {_MAX_URI} characters")
+        if len(urls) >= _MAX_ENTRIES:
+            raise _TooManyURLsError(
+                f"RAG configuration declares more than {_MAX_ENTRIES} endpoint URLs"
+            )
         urls.append(value)
         exported, unbound = _exported_uri(value)
         return {"url": exported, "shape": url_shape(value.strip(), ORIGIN_PATHS)}, unbound
@@ -440,7 +456,8 @@ class RAGScanner(Scanner):
         if not isinstance(data, dict):
             result.scan_failures.append(f"{relative}: expected a RAG configuration object")
             return []
-        configuration_urls: list[str] = []
+        # Every URL described in the file; the sources' own follow the shared fields' ones.
+        urls: list[str] = []
         try:
             # Both list names are read, so neither can hide entries behind the other.
             if set(_LIST_KEYS) & set(data):
@@ -451,7 +468,7 @@ class RAGScanner(Scanner):
                     sources, configuration = [configuration], {}
             else:
                 sources, configuration = [data], {}
-            described, configuration_unbound = _describe(configuration, configuration_urls)
+            described, configuration_unbound = _describe(configuration, urls)
             # Digested and bound once, so each source carries a fixed-size result.
             shared = (
                 (
@@ -470,6 +487,9 @@ class RAGScanner(Scanner):
         if len(sources) > _MAX_ENTRIES:
             result.scan_failures.append(f"{relative}: invalid or oversized RAG source list")
             return []
+        configuration_urls = list(urls)
+        # Computed once: every source of the file carries a copy.
+        configuration_origins = sorted({_exported_uri(url)[0] for url in configuration_urls})
         components: list[RAGSourceComponent] = []
         target = files.link_target(path)
         for index, source in enumerate(sources):
@@ -477,16 +497,19 @@ class RAGScanner(Scanner):
                 result.scan_failures.append(f"{relative}: RAG source must be an object")
                 continue
             try:
-                component = self._source(relative, index, source, shared)
+                component = self._source(relative, index, source, shared, urls)
                 if target is not None:
                     component.properties["symlink_target"] = target
-                if configuration_urls:
-                    component.properties["configuration_endpoint_origins"] = sorted(
-                        {_exported_uri(url)[0] for url in configuration_urls}
+                if configuration_origins:
+                    component.properties["configuration_endpoint_origins"] = list(
+                        configuration_origins
                     )
                 components.append(component)
             except BindingError as exc:
                 result.scan_failures.append(f"{relative}: {exc}")
+            except _TooManyURLsError as exc:
+                result.scan_failures.append(f"{relative}: {exc}")
+                return []
             except _SourceError as exc:
                 result.scan_failures.append(f"{relative}: {exc}")
             except (TypeError, ValueError, RecursionError):
@@ -507,11 +530,12 @@ class RAGScanner(Scanner):
         index: int,
         source: dict[str, Any],
         shared: tuple[str, dict[str, str]] | None,
+        file_urls: list[str],
     ) -> RAGSourceComponent:
         """One source's record.
 
         ``shared`` is the digest and binding of the fields beside the source lists, which
-        apply to every source.
+        apply to every source. ``file_urls`` collects the URLs described in the file.
         """
         declared_name = source.get("name")
         if declared_name is None:
@@ -561,19 +585,20 @@ class RAGScanner(Scanner):
             raise _SourceError("invalid RAG source documents")
         documents_hash = hash_canonical({"documents": documents}) if documents is not None else None
         controls = {control: _control(source.get(control)) for control in _CONTROLS}
-        urls: list[str] = []
+        first_url = len(file_urls)
         values, values_unbound = _describe(
             {
                 "fields": {k: v for k, v in source.items() if k not in _READ_FIELDS},
                 "embeddings": {k: v for k, v in (embeddings or {}).items() if k != "model"},
                 "controls": {
-                    control: {k: v for k, v in source[control].items() if k != "enabled"}
+                    control: _unread_control(source[control])
                     for control in _CONTROLS
-                    if isinstance(source.get(control), dict)
+                    if source.get(control) is not None and not isinstance(source[control], bool)
                 },
             },
-            urls,
+            file_urls,
         )
+        urls = file_urls[first_url:]
         structure_hash = hash_canonical(
             {
                 "profile": SOURCE_STRUCTURE_PROFILE,

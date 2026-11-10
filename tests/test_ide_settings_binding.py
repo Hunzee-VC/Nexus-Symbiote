@@ -301,6 +301,59 @@ def test_nested_project_settings_are_separate_records(tmp_path):
     assert _agent(result).permission_mode is None
 
 
+_RISKY = {
+    "permissions": {"defaultMode": "bypassPermissions"},
+    "hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "sh x"}]}]},
+}
+
+
+@pytest.mark.parametrize(
+    ("variant", "canonical"),
+    [
+        ("pkg/.claude/Settings.json", "pkg/.claude/settings.json"),
+        ("pkg/.Claude/settings.json", "pkg/.claude/settings.json"),
+        ("pkg/.claude/Settings.Local.json", "pkg/.claude/settings.local.json"),
+        ("a/b/.CLAUDE./settings.json", "a/b/.claude/settings.json"),
+    ],
+)
+def test_nested_settings_spelled_another_way_are_failures(tmp_path, variant, canonical):
+    _write(tmp_path, variant, _RISKY)
+    result = IDEAgentScanner().scan(tmp_path)
+    assert result.scan_failures == [
+        f"{variant}: case variant of {canonical} is the active file on case-insensitive "
+        "file systems and is not inventoried"
+    ]
+    assert all("@" not in component.bom_ref for component in result.components)
+
+
+def test_nested_settings_behind_a_directory_link_are_recorded(tmp_path):
+    _write(tmp_path, "shared/claude/settings.json", _RISKY)
+    _write(tmp_path, "other/claude/Settings.local.json", _RISKY)
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / ".claude").symlink_to("../shared/claude", target_is_directory=True)
+    (tmp_path / "web").mkdir()
+    (tmp_path / "web" / ".Claude").symlink_to("../shared/claude", target_is_directory=True)
+    (tmp_path / "api").mkdir()
+    (tmp_path / "api" / ".claude").symlink_to("../other/claude", target_is_directory=True)
+    (tmp_path / "top").mkdir()
+    (tmp_path / "top" / ".claude").symlink_to("..", target_is_directory=True)
+    result = IDEAgentScanner().scan(tmp_path)
+    nested = next(c for c in result.components if c.bom_ref == "ide-agent:claude-code@pkg")
+    assert nested.permission_mode == "bypassPermissions"
+    assert {r.category for r in nested.risks} >= {"permission_mode", "hook_commands"}
+    assert nested.properties["symlink_targets"] == {
+        "pkg/.claude/settings.json": "shared/claude/settings.json"
+    }
+    assert sorted(result.scan_failures) == [
+        "api/.claude/Settings.local.json: case variant of api/.claude/settings.local.json is "
+        "the active file on case-insensitive file systems and is not inventoried",
+        "top/.claude/settings.json: symlink target is the collection root",
+        "top/.claude/settings.local.json: symlink target is the collection root",
+        "web/.Claude/settings.json: case variant of web/.claude/settings.json is the active "
+        "file on case-insensitive file systems and is not inventoried",
+    ]
+
+
 def test_plugin_repository_manifests_and_hooks_are_bound(tmp_path):
     hooks = {"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "./a.sh"}]}]}}
     _write(tmp_path / "a", ".claude-plugin/plugin.json", {"name": "helper", "version": "1.0.0"})

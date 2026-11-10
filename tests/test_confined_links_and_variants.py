@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import time
@@ -254,3 +255,127 @@ def test_symlink_to_a_target_beyond_the_depth_limit_is_refused(tmp_path):
         list(files.iter_files("."))
     assert "link.md: symlink target is too deep" in failures
     assert "linkdir/f.md: symlink target is too deep" in failures
+
+
+@pytest.mark.parametrize("text", [".", "./"])
+def test_names_below_a_link_to_the_root_are_refused_not_searched_in_the_root(tmp_path, text):
+    (tmp_path / "Settings.json").write_text('{"permissions": {"defaultMode": "bypassPermissions"}}')
+    (tmp_path / "Rules").mkdir()
+    (tmp_path / "Rules" / "evil.md").write_text("x")
+    (tmp_path / "Copilot-Instructions.md").write_text("x")
+    (tmp_path / ".claude").symlink_to(text, target_is_directory=True)
+    (tmp_path / ".github").symlink_to(text, target_is_directory=True)
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / ".cursor").symlink_to("..", target_is_directory=True)
+    failures: list[str] = []
+    with ConfinedCollection(tmp_path, failures) as files:
+        assert files.read_json(".claude/settings.json", missing_ok=True) is None
+        assert list(files.iter_files(".claude/rules")) == []
+        assert files.read_text(".github/copilot-instructions.md", missing_ok=True) is None
+        assert files.read_json("pkg/.cursor/hooks.json", missing_ok=True) is None
+    assert failures == [
+        ".claude/settings.json: symlink target is the collection root",
+        ".claude/rules: symlink target is the collection root",
+        ".github/copilot-instructions.md: symlink target is the collection root",
+        "pkg/.cursor/hooks.json: symlink target is the collection root",
+    ]
+
+
+def _same_folding_names(count: int, base: str = "a") -> list[str]:
+    """Names that fold to ``base`` (case, trailing dots and spaces), without ``base``."""
+    names: list[str] = []
+    length = 0
+    while len(names) < count:
+        for suffix in itertools.product(". ", repeat=length):
+            for first in (base, base.upper()):
+                name = first + "".join(suffix)
+                if name != base and len(names) < count:
+                    names.append(name)
+        length += 1
+    return names
+
+
+def test_lookups_beside_thousands_of_same_folding_directories_stay_fast(tmp_path):
+    for name in _same_folding_names(2000):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "keep").write_text("")
+    failures: list[str] = []
+    start = time.perf_counter()
+    with ConfinedCollection(tmp_path, failures) as files:
+        for index in range(2000):
+            assert files.read_bytes(f"a/m{index}.md", missing_ok=True) is None
+    assert time.perf_counter() - start < 10
+    assert failures == [
+        "a: more than 16 names in its directory differ from it only by case or "
+        "normalisation and are not checked"
+    ]
+
+
+def test_a_spent_variant_budget_is_one_failure_and_ends_every_later_search(tmp_path):
+    for top in _same_folding_names(16):
+        for below in _same_folding_names(16, "b"):
+            (tmp_path / top / below).mkdir(parents=True)
+    failures: list[str] = []
+    start = time.perf_counter()
+    with ConfinedCollection(tmp_path, failures, max_entries=1000) as files:
+        for index in range(2000):
+            assert files.read_bytes(f"a/b/x{index}.md", missing_ok=True) is None
+        assert files.case_variants("a/b") == []
+    assert time.perf_counter() - start < 10
+    assert len(failures) == 1 and failures[0].endswith(": directory entry limit exceeded")
+
+
+def test_failures_recorded_once_beside_those_the_caller_appends(tmp_path):
+    failures = ["x.md: file unavailable during collection"]
+    with ConfinedCollection(tmp_path, failures) as files:
+        files.read_bytes("x.md")
+        failures.append("y.md: file unavailable during collection")
+        files.read_bytes("y.md")
+        files.read_bytes("z.md")
+        files.read_bytes("z.md")
+    assert failures == [
+        "x.md: file unavailable during collection",
+        "y.md: file unavailable during collection",
+        "z.md: file unavailable during collection",
+    ]
+
+
+def test_directory_walk_follows_a_link_out_of_it_once_under_the_target_name(tmp_path):
+    (tmp_path / "vendor" / "pdf").mkdir(parents=True)
+    (tmp_path / "vendor" / "pdf" / "SKILL.md").write_text("x")
+    skills = tmp_path / ".claude" / "skills"
+    (skills / "own").mkdir(parents=True)
+    (skills / "own" / "SKILL.md").write_text("x")
+    (skills / "pdf").symlink_to("../../vendor/pdf", target_is_directory=True)
+    (skills / "pdf-again").symlink_to("../../vendor/pdf", target_is_directory=True)
+    (skills / "mine").symlink_to("own", target_is_directory=True)
+    (skills / "vendor").symlink_to("../../vendor", target_is_directory=True)
+    failures: list[str] = []
+    links: list[Path] = []
+    with ConfinedCollection(tmp_path, failures) as files:
+        walked = [
+            path.as_posix() for path in files.iter_files(".claude/skills", directory_links=links)
+        ]
+        whole = [path.as_posix() for path in files.iter_files()]
+    assert failures == []
+    assert walked == [".claude/skills/own/SKILL.md", "vendor/pdf/SKILL.md"]
+    assert [link.name for link in links] == ["mine", "pdf", "pdf-again", "vendor"]
+    assert whole == [".claude/skills/own/SKILL.md", "vendor/pdf/SKILL.md"]
+
+
+def test_directory_walk_refuses_a_link_to_the_root_or_to_a_directory_holding_it(tmp_path):
+    skills = tmp_path / ".claude" / "skills"
+    skills.mkdir(parents=True)
+    (skills / "SKILL.md").write_text("x")
+    (skills / "all").symlink_to("../..", target_is_directory=True)
+    (skills / "up").symlink_to("..", target_is_directory=True)
+    failures: list[str] = []
+    with ConfinedCollection(tmp_path, failures) as files:
+        assert [path.as_posix() for path in files.iter_files(".claude/skills")] == [
+            ".claude/skills/SKILL.md"
+        ]
+        assert [path.as_posix() for path in files.iter_files()] == [".claude/skills/SKILL.md"]
+    assert failures == [
+        ".claude/skills/all: symlink target is the collection root",
+        ".claude/skills/up: symlink target holds the walked directory",
+    ]

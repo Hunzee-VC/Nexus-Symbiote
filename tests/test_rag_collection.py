@@ -4,6 +4,7 @@ treat Python sources as a best-effort heuristic."""
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -449,3 +450,75 @@ def test_uri_shown_in_findings_is_neutralised(tmp_path):
         tmp_path, {**BASE, "source_uris": ["http://moc.elpmaxe\u202e.evil.example/x"]}
     )
     assert all("\u202e" not in r.detail for r in component.risks)
+
+
+def test_shared_endpoint_origins_are_derived_once_per_file(tmp_path):
+    endpoints = [f"https://h{index}.example" for index in range(1000)]
+    config = {"endpoints": endpoints, "sources": [{} for _ in range(1000)]}
+    start = time.perf_counter()
+    components = _scan_config(tmp_path, config)
+    assert time.perf_counter() - start < 5
+    assert len(components) == 1000
+    origins = sorted(endpoints)
+    assert all(c.properties["configuration_endpoint_origins"] == origins for c in components)
+    shared = [c.properties["configuration_endpoint_origins"] for c in components[:2]]
+    assert shared[0] is not shared[1]
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        {
+            "endpoints": [f"s3://b{index}" for index in range(600)],
+            "mirrors": [f"s3://m{index}" for index in range(600)],
+            "sources": [{}, {}],
+        },
+        {
+            "sources": [
+                {"name": "a", "mirrors": [f"s3://a{index}" for index in range(600)]},
+                {"name": "b", "mirrors": [f"s3://b{index}" for index in range(600)]},
+            ]
+        },
+    ],
+)
+def test_more_endpoint_urls_than_one_file_may_describe_is_a_failure(tmp_path, config):
+    (tmp_path / "rag_config.json").write_text(json.dumps(config))
+    result = RAGScanner().scan(tmp_path)
+    assert result.scan_failures == [
+        "rag_config.json: RAG configuration declares more than 1000 endpoint URLs"
+    ]
+    assert not [c for c in result.components if isinstance(c, RAGSourceComponent)]
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [("strict", "off"), (1, 0), ({"enabled": "yes"}, {"enabled": "no"})],
+)
+def test_control_values_that_state_no_flag_are_unbound_without_a_key(
+    tmp_path, monkeypatch, before, after
+):
+    source = {**BASE, "content_filter": True}
+    first = _source(tmp_path / "a", {**source, "sanitization": before})
+    assert first.properties["declared_controls"]["sanitization"] == "unrecognized"
+    (gap,) = [r for r in first.risks if r.category == "completeness"]
+    assert "field values that the record does not export" in gap.detail
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    keyed = _source(tmp_path / "c", {**source, "sanitization": before})
+    rekeyed = _source(tmp_path / "d", {**source, "sanitization": after})
+    binding = "static_value_binding"
+    assert keyed.properties[binding] != rekeyed.properties[binding]
+    assert not any(r.category == "completeness" for r in keyed.risks)
+
+
+def test_control_value_urls_are_digested_exported_and_checked(tmp_path):
+    first = _source(tmp_path / "a", {**BASE, "content_filter": ["https://filter.corp.example/v1"]})
+    second = _source(tmp_path / "b", {**BASE, "content_filter": ["https://evil.example/v1"]})
+    assert first.properties["static_config_hash"] != second.properties["static_config_hash"]
+    component = _source(tmp_path / "c", {**BASE, "content_filter": ["http://filter.example/v1"]})
+    assert component.properties["endpoint_origins"] == ["http://filter.example"]
+    assert [r.detail for r in component.risks if r.severity.value == "high"] == [
+        "RAG source 'kb' declares an unencrypted endpoint: http://filter.example"
+    ]
+    text = _source(tmp_path / "t", {**BASE, "content_filter": "strict"})
+    (gap,) = [r for r in text.risks if r.category == "completeness"]
+    assert "field values that the record does not export" in gap.detail

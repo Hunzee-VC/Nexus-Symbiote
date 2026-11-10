@@ -207,22 +207,23 @@ of its inline `documents`, the state of its `sanitization` and `content_filter`
 controls (`enabled` only for `true` or an object whose `enabled` is `true`;
 `disabled`, `absent` or `unrecognized` otherwise), and a description of every other
 value: of other fields such as `vector_store`, of the members of `embeddings` other
-than `model` and of a control object other than `enabled`, and, beside a `sources`
-or `knowledge_bases` list, of the fields that every source of the file shares. The
-description keeps names, booleans and nulls, and each URL as its exported origin and
-shape; other text and numbers enter it only as their type. Those URL origins are
-exported as `endpoint_origins` and `configuration_endpoint_origins` and checked for
-encrypted transport like `source_uris`; a finding about the shared fields is recorded
-once, on the file's first source. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` set,
-`static_value_binding` is an HMAC-SHA256 (profile
+than `model`, of a control other than a boolean or a boolean `enabled` member, and,
+beside a `sources` or `knowledge_bases` list, of the fields that every source of the
+file shares. The description keeps names, booleans and nulls, and each URL as its
+exported origin and shape; other text and numbers enter it only as their type. Those
+URL origins are exported as `endpoint_origins` and `configuration_endpoint_origins`
+and checked for encrypted transport like `source_uris`; a finding about the shared
+fields is recorded once, on the file's first source. A file that declares more than
+1,000 such URLs is a collection failure. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`
+set, `static_value_binding` is an HMAC-SHA256 (profile
 `nexus-symbiote/rag-source-values/v1`) over the source object and an HMAC of the
-shared fields. Without the key, a source whose URIs go beyond their exported
-origins, or whose values the record exports only as redaction markers or not at
-all, carries a low `completeness` risk naming the key, and so does the first source
-for shared values. URLs are exported as origins; connection strings,
-`user:secret@host` forms and token-shaped values as redaction markers; inline
-documents only as `document_count` and `properties.inline_documents_hash`. A file
-whose source list is empty but which declares other fields is read as one source.
+shared fields. Without the key, a source whose URIs go beyond their exported origins,
+or whose values the record exports only as redaction markers or not at all, carries a
+low `completeness` risk naming the key, and so does the first source for shared
+values. URLs are exported as origins; connection strings, `user:secret@host` forms
+and token-shaped values as redaction markers; inline documents only as
+`document_count` and `properties.inline_documents_hash`. A file whose source list is
+empty but which declares other fields is read as one source.
 
 ## Claude Code settings
 

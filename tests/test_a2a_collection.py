@@ -372,3 +372,22 @@ def test_yaml_number_overflow_in_a_client_configuration_is_a_failure(tmp_path):
     _write(tmp_path, "a2a.yaml", "x: " + ":".join(["1"] * 200) + ".0\n")
     result = A2AScanner().scan(tmp_path)
     assert result.scan_failures == ["a2a.yaml: YAML mapping parse failed or unsupported"]
+
+
+def test_card_below_a_well_known_directory_link_is_recorded(tmp_path):
+    _write(tmp_path, "public/wk/agent-card.json", CARD)
+    (tmp_path / "public" / ".well-known").symlink_to("wk", target_is_directory=True)
+    _write(tmp_path, "site/cards/Agent.json", {**CARD, "name": "Other"})
+    (tmp_path / "site" / ".well-known").symlink_to("cards", target_is_directory=True)
+    (tmp_path / "web").mkdir()
+    (tmp_path / "web" / ".well-known").symlink_to("..", target_is_directory=True)
+    result = A2AScanner().scan(tmp_path)
+    (server,) = _servers(result)
+    assert server.agent_card_path == "public/.well-known/agent-card.json"
+    assert server.properties["symlink_target"] == "public/wk/agent-card.json"
+    assert sorted(result.scan_failures) == [
+        "site/.well-known/Agent.json: case variant of site/.well-known/agent.json is the active "
+        "file on case-insensitive file systems and is not inventoried",
+        "web/.well-known/agent-card.json: symlink target is the collection root",
+        "web/.well-known/agent.json: symlink target is the collection root",
+    ]

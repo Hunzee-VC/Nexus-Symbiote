@@ -611,20 +611,27 @@ class A2AScanner(Scanner):
         with self._collection(project_root, result) as files:
             cards: list[str] = []
             sources: list[Path] = []
-            for path in files.iter_files():
+            links: list[Path] = []
+            for path in files.iter_files(directory_links=links):
                 location = _card_location(path)
                 if location is None:
                     if path.suffix == ".py":
                         sources.append(path)
                     continue
-                canonical, exact = location
-                if exact:
-                    cards.append(canonical)
-                elif self._is_card(path, canonical, files):
-                    result.scan_failures.append(
-                        f"{path.as_posix()}: case variant of {canonical} is the active "
-                        "file on case-insensitive file systems and is not inventoried"
-                    )
+                self._found_card(path, location, cards, files, result)
+            # The walk covers a linked directory under its target's name, where card
+            # names are not recognised, so they are looked up through the link.
+            for link in links:
+                for name in AGENT_CARD_NAMES:
+                    path = link / name
+                    location = _card_location(path)
+                    if location is None:
+                        continue
+                    if files.regular_file(path) is None:
+                        # Records a refused link, or another spelling below the link.
+                        files.read_bytes(path, missing_ok=True)
+                    else:
+                        self._found_card(path, location, cards, files, result)
             parsed: list[tuple[str, dict[str, Any]]] = []
             for relative in sorted(cards, key=_card_preference):
                 if relative in _GENERIC_CARD_PATHS:
@@ -655,6 +662,23 @@ class A2AScanner(Scanner):
         if not result.components and not result.scan_failures and not result.surfaces_excluded:
             result.surfaces_scanned.append("a2a (no A2A configurations found)")
         return result
+
+    def _found_card(
+        self,
+        path: Path,
+        location: tuple[str, bool],
+        cards: list[str],
+        files: ConfinedCollection,
+        result: ScanResult,
+    ) -> None:
+        canonical, exact = location
+        if exact:
+            cards.append(canonical)
+        elif self._is_card(path, canonical, files):
+            result.scan_failures.append(
+                f"{path.as_posix()}: case variant of {canonical} is the active "
+                "file on case-insensitive file systems and is not inventoried"
+            )
 
     @staticmethod
     def _is_card(path: Path, canonical: str, files: ConfinedCollection) -> bool:
