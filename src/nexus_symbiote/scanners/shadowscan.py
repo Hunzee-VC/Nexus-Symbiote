@@ -32,7 +32,7 @@ from nexus_symbiote.utils.confined import ConfinedCollection
 MAX_REPORT_BYTES = 16 * 1024 * 1024
 MAX_FINDINGS = 10_000
 MAX_DEPENDENCIES = 10_000
-PROJECTION_PROFILE = "nexus-symbiote/shadowscan-projection/v3"
+PROJECTION_PROFILE = "nexus-symbiote/shadowscan-projection/v4"
 CONTENT_PROFILE = "nexus-symbiote/shadowscan-content/v1"
 # The fields that only record when a collection run happened. The list is closed:
 # any other field, including one a later ShadowScan release adds, stays content,
@@ -49,6 +49,9 @@ REPORT_PATHS = (".shadowscan/report.json", "shadowscan-report.json", "shadowscan
 _ALLOWED_SURFACES = frozenset(
     {"code", "identity", "gateway", "lowcode", "saas", "cloud", "endpoint", "network", "runtime"}
 )
+_PROJECTED_KINDS = frozenset({"agent", "mcp-server", "local-model", "model"})
+_RISK_LEVELS = frozenset(level.value for level in RiskSeverity)
+UNRECOGNIZED_VALUES_GAP = "ShadowScan report contains values the projection does not recognize"
 
 
 @dataclass
@@ -62,6 +65,7 @@ class ImportedReport:
     unmapped_count: int = 0
     unmapped_indexes: list[int] = field(default_factory=list)
     limitations: list[str] = field(default_factory=list)
+    unrecognized: Counter[str] = field(default_factory=Counter)
 
     def to_native_bom(self) -> AIBOM:
         """Reproduce a direct native import without promoting source assertions."""
@@ -133,6 +137,22 @@ def finding_content(finding: dict[str, Any]) -> dict[str, Any]:
     return _without(finding, _FINDING_RUN_EVENT_FIELDS)
 
 
+def _unrecognized(
+    level: Any, shadow: Any, surface: Any, *, malformed_risk: bool = False
+) -> list[str]:
+    """Present values the projection cannot represent; dropping them silently would read as clean."""
+    found = []
+    if malformed_risk or (
+        level is not None and not (isinstance(level, str) and level in _RISK_LEVELS)
+    ):
+        found.append("a risk level")
+    if shadow is not None and not isinstance(shadow, bool):
+        found.append("a shadow flag")
+    if surface is not None and surface not in _ALLOWED_SURFACES:
+        found.append("a surface")
+    return found
+
+
 def _risks(level: Any, shadow: Any) -> list[RiskAssessment]:
     findings: list[RiskAssessment] = []
     levels = {x.value: x for x in RiskSeverity}
@@ -177,6 +197,11 @@ def _make_component(
     # Conflicting claims are not projected as either kind.
     if resource_type == "mcp-tool" and (kind != "mcp-server" or cdx_model):
         return None
+    # A CycloneDX type or group contradicting the ShadowScan kind is not resolved by precedence.
+    if (cdx_model and (cdx_mcp or kind not in {"", "local-model", "model"})) or (
+        cdx_mcp and kind not in {"", "mcp-server"}
+    ):
+        return None
     is_mcp_tool = kind == "mcp-server" and resource_type == "mcp-tool"
     identity_hash = _short_hash(source_id)
     ref = "shadowscan:" + identity_hash
@@ -190,18 +215,12 @@ def _make_component(
     }
     if surface in _ALLOWED_SURFACES:
         props["shadowscan:surface"] = surface
-    if kind in {"agent", "mcp-server", "local-model", "model"}:
+    if kind in _PROJECTED_KINDS:
         props["shadowscan:kind"] = kind
     if isinstance(shadow, bool):
         props["shadowscan:inventory-unmatched"] = shadow
     risks = _risks(level, shadow)
-    safe_kind = (
-        "mcp-tool"
-        if is_mcp_tool
-        else kind
-        if kind in {"agent", "mcp-server", "local-model", "model"}
-        else "component"
-    )
+    safe_kind = "mcp-tool" if is_mcp_tool else kind if kind in _PROJECTED_KINDS else "component"
     common: dict[str, Any] = {
         "bom_ref": ref,
         "name": "ShadowScan " + safe_kind + " " + identity_hash[:12],
@@ -235,7 +254,20 @@ class ShadowScanImporter(Scanner):
             max_file_bytes=MAX_REPORT_BYTES,
             max_total_bytes=MAX_REPORT_BYTES,
         ) as files:
+            present: dict[tuple[int, int], str] = {}
             for relative in REPORT_PATHS:
+                identity = files.path_identity(relative)
+                if identity is not None:
+                    present.setdefault(identity, relative)
+            if len(present) > 1:
+                # A file committed at a higher-precedence name must not silently replace
+                # the report a pipeline generated: import neither.
+                result.scan_failures.append(
+                    "ShadowScan reports found at more than one supported path ("
+                    + ", ".join(sorted(present.values()))
+                    + "); keep exactly one"
+                )
+            for relative in REPORT_PATHS if len(present) <= 1 else ():
                 raw = files.read_bytes(relative, missing_ok=True)
                 if raw is None:
                     continue
@@ -254,10 +286,12 @@ class ShadowScanImporter(Scanner):
                 result.source_report_status = imported.source_status
                 result.source_unmapped_count = imported.unmapped_count
                 result.source_unmapped_indexes = imported.unmapped_indexes
-                result.surfaces_scanned.append("shadowscan:report")
+                result.surfaces_scanned.extend(("shadowscan:report", relative))
                 result.source_projection_limitations = list(imported.limitations)
                 if imported.unmapped_count:
                     result.surfaces_excluded.append("ShadowScan report contains unmapped entries")
+                if imported.unrecognized:
+                    result.surfaces_excluded.append(UNRECOGNIZED_VALUES_GAP)
                 if imported.source_format == "shadowscan-cyclonedx":
                     result.surfaces_excluded.append(
                         "ShadowScan CycloneDX source is a lossy projection"
@@ -297,7 +331,9 @@ class ShadowScanImporter(Scanner):
         return self._import_bytes(text.encode("utf-8") if isinstance(text, str) else text)
 
     def _import_bytes(self, raw: bytes) -> ImportedReport:
-        data = parse_json_strict(raw, max_bytes=MAX_REPORT_BYTES)
+        # json.loads would also detect UTF-16 and UTF-32, which verify-discovery cannot read.
+        text = raw.decode("utf-8")
+        data = parse_json_strict(text.removeprefix("\ufeff"), max_bytes=MAX_REPORT_BYTES)
         if not isinstance(data, dict):
             raise ValueError("expected a ShadowScan report object")
         digest = "sha256:" + hashlib.sha256(raw).hexdigest()
@@ -316,6 +352,11 @@ class ShadowScanImporter(Scanner):
         if result.unmapped_count:
             result.limitations.append(
                 f"{result.unmapped_count} source entries were not mapped into BOM components"
+            )
+        for value, count in sorted(result.unrecognized.items()):
+            result.limitations.append(
+                f"{count} source entries carry {value} the projection does not recognize; "
+                "it is not represented"
             )
         return result
 
@@ -371,6 +412,14 @@ class ShadowScanImporter(Scanner):
                 raise ValueError("invalid ShadowScan finding kind or surface")
             risk = finding.get("risk")
             level = risk.get("level") if isinstance(risk, dict) else None
+            result.unrecognized.update(
+                _unrecognized(
+                    level,
+                    finding.get("shadow"),
+                    surface,
+                    malformed_risk=risk is not None and not isinstance(risk, dict),
+                )
+            )
             comp = _make_component(
                 kind,
                 source_id,
@@ -390,16 +439,31 @@ class ShadowScanImporter(Scanner):
 
     @staticmethod
     def _check_native_breakdowns(summary: dict[str, Any], findings: list[Any]) -> None:
-        for key, field_name in (("by_surface", "surface"), ("by_kind", "kind")):
+        levels = Counter(
+            finding["risk"]["level"]
+            for finding in findings
+            if isinstance(finding.get("risk"), dict)
+            and isinstance(finding["risk"].get("level"), str)
+        )
+        for key, expected in (
+            ("by_surface", Counter(finding["surface"] for finding in findings)),
+            ("by_kind", Counter(finding["kind"] for finding in findings)),
+            ("by_risk_level", levels),
+        ):
             if key not in summary:
                 continue
             counts = summary[key]
             if (
                 not isinstance(counts, dict)
                 or any(type(count) is not int for count in counts.values())
-                or counts != dict(Counter(finding[field_name] for finding in findings))
+                or {name: count for name, count in counts.items() if count} != dict(expected)
             ):
                 raise ValueError(f"ShadowScan summary {key} disagrees with findings")
+        if "shadow" in summary and (
+            type(summary["shadow"]) is not int
+            or summary["shadow"] != sum(finding.get("shadow") is True for finding in findings)
+        ):
+            raise ValueError("ShadowScan summary shadow count disagrees with findings")
 
     def _from_native(self, data: dict[str, Any], digest: str) -> ImportedReport:
         findings, stats, summary = data.get("findings"), data.get("stats"), data.get("summary")
@@ -531,7 +595,13 @@ class ShadowScanImporter(Scanner):
             ids.add(ref)
             p = _properties(entry.get("properties", []))
             kind = p.get("shadowscan:kind", "")
-            shadow = {"true": True, "false": False}.get(p.get("shadowscan:shadow", ""))
+            shadow_text = p.get("shadowscan:shadow")
+            shadow = {"true": True, "false": False}.get(shadow_text or "", shadow_text)
+            result.unrecognized.update(
+                _unrecognized(
+                    p.get("shadowscan:heuristic-risk"), shadow, p.get("shadowscan:surface")
+                )
+            )
             comp = _make_component(
                 kind,
                 ref,

@@ -177,6 +177,23 @@ def coverage_aggregate(claim: CompletenessClaim | None) -> Literal["incomplete",
     return "incomplete" if narrowed else "unknown"
 
 
+OMITTED_IMPORTED_FINDINGS = "nexus-symbiote:omittedImportedFindings"
+
+
+def imported_discovery_component(component: AnyComponent) -> bool:
+    """A finding-only export (SARIF, VEX) cannot carry imported coverage and provenance.
+
+    Imported ShadowScan heuristics must not appear there as this tool's own findings,
+    so those exports omit them and state how many were omitted.
+    """
+    return (
+        component.properties.get("collection_mode") == "imported-unverified-report"
+        or component.bom_ref.startswith("shadowscan:")
+        or "discovery_report_entry" in component.claims
+        or any(key.startswith("shadowscan:") for key in component.properties)
+    )
+
+
 def imports_discovery(claim: CompletenessClaim) -> bool:
     """Any imported-report marker counts, even without the digest the CLI always sets.
 

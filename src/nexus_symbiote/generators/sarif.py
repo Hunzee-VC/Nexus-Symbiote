@@ -10,7 +10,12 @@ from urllib.parse import quote
 from nexus_symbiote import __version__
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import RiskSeverity
-from nexus_symbiote.generators._common import content_digest, prepare
+from nexus_symbiote.generators._common import (
+    OMITTED_IMPORTED_FINDINGS,
+    content_digest,
+    imported_discovery_component,
+    prepare,
+)
 from nexus_symbiote.generators.base import Generator
 
 SEVERITY_TO_SARIF = {
@@ -52,8 +57,12 @@ class SARIFGenerator(Generator):
         prepare(bom)
         rules: dict[str, dict[str, Any]] = {}
         results: list[dict[str, Any]] = []
+        omitted = 0
 
         for comp in sorted(bom.components, key=lambda c: c.bom_ref):
+            if imported_discovery_component(comp):
+                omitted += len(comp.risks)
+                continue
             for risk in sorted(comp.risks, key=lambda r: (r.category, r.detail)):
                 rule_id = f"nexus_symbiote/{risk.category}"
                 if rule_id not in rules:
@@ -108,11 +117,13 @@ class SARIFGenerator(Generator):
 
                 results.append(result)
 
+        run_properties = {OMITTED_IMPORTED_FINDINGS: omitted} if omitted else {}
         return {
             "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
             "version": "2.1.0",
             "runs": [
                 {
+                    **({"properties": run_properties} if run_properties else {}),
                     "tool": {
                         "driver": {
                             "name": "nexus-symbiote",
