@@ -1,15 +1,19 @@
 """Opt-in, bounded HTTP MCP descriptor discovery; never invokes tools.
 
-Implements the 2025-06-18 initialize/initialized/tools-list lifecycle for JSON
-and bounded SSE responses. This is a point-in-time observation, not authorization
-or a claim about server safety. Discovery itself sends authenticated requests to
-an explicitly allowed service. stdio, redirects, proxying, roots, sampling,
-elicitation, tool calls, resource retrieval and automatic retries are unsupported.
+Implements the initialize/initialized/tools-list lifecycle over the Streamable
+HTTP transport for JSON and bounded SSE responses, negotiating one of
+``SUPPORTED_PROTOCOL_VERSIONS``. When the server declares them, prompts/list and
+resources/templates/list are observed as well. This is a point-in-time
+observation, not authorization or a claim about server safety. Discovery itself
+sends authenticated requests to an explicitly allowed service. stdio, redirects,
+proxying, roots, sampling, elicitation, tool calls, prompts/get, resources/list,
+resource retrieval, stream resumption and automatic retries are unsupported.
 
 Protocol sources:
 https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle
 https://modelcontextprotocol.io/specification/2025-06-18/basic/transports
 https://modelcontextprotocol.io/specification/2025-06-18/server/tools
+https://html.spec.whatwg.org/multipage/server-sent-events.html#event-stream-interpretation
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ import io
 import ipaddress
 import json
 import queue
+import re
 import socket
 import ssl
 import threading
@@ -32,13 +37,82 @@ from typing import Any, Protocol, cast
 from urllib.parse import urlsplit
 
 from jsonschema import Draft202012Validator
-from jsonschema.exceptions import SchemaError
 
-from nexus_symbiote.core.hashing import hash_canonical
-from nexus_symbiote.utils.secrets import redact_descriptor, redact_text
+from nexus_symbiote import __version__
+from nexus_symbiote.core.hashing import (
+    TOOL_DEFINITION_HASH_VERSION,
+    hash_canonical,
+    hash_tool_definition,
+    tool_definition_extensions,
+)
+from nexus_symbiote.runtime_validation import MAX_SCHEMA_BYTES, check_json_budget
+from nexus_symbiote.utils.secrets import redact_descriptor, redact_metadata, redact_text
 
-PROTOCOL_VERSION = "2025-06-18"
+# Revisions whose initialize, tools/list, prompts/list and resources/templates/list
+# exchanges this client implements. The first is requested; a server may answer
+# with any other entry. A server that negotiates anything else is refused.
+SUPPORTED_PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
+PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[0]
+DEFAULT_CLIENT_NAME = "nexus-symbiote-discovery"
+DEFAULT_CLIENT_VERSION = __version__
+# Descriptor members that hash_tool_definition binds; any other member is bound
+# only through the server declaration digest.
+FINGERPRINT_FIELDS = frozenset(
+    {"name", "title", "description", "inputSchema", "outputSchema", "annotations", "_meta"}
+)
+DECLARATION_PROFILE = "nexus-symbiote/mcp-server-declaration/v1"
+OBSERVED_DIGEST_PROFILE = "nexus_symbiote.observed-mcp-tool/2025-06-18/full-v1"
 _RESOLVER_SLOTS = threading.BoundedSemaphore(2)
+# Only headers the client reads must be unambiguous; repeated Set-Cookie or Via
+# lines from an intermediary carry nothing this client uses.
+_CONSUMED_HEADERS = frozenset(
+    {
+        "content-length",
+        "transfer-encoding",
+        "content-type",
+        "content-encoding",
+        "mcp-session-id",
+        "location",
+    }
+)
+# jsonschema's uniqueItems compares unsortable array items pairwise, and the
+# 2020-12 metaschema checks "type" and "dependencies" arrays inside anyOf, which
+# evaluates every branch. Longer unsortable arrays are refused before checking.
+_UNIQUE_ITEMS_PAIRWISE_LIMIT = 64
+_NONPUBLIC_NETWORKS = tuple(
+    ipaddress.ip_network(network)
+    for network in (
+        "0.0.0.0/8",
+        "10.0.0.0/8",
+        "100.64.0.0/10",
+        "127.0.0.0/8",
+        "169.254.0.0/16",
+        "172.16.0.0/12",
+        "192.0.0.0/24",
+        "192.0.2.0/24",
+        "192.88.99.0/24",
+        "192.168.0.0/16",
+        "198.18.0.0/15",
+        "198.51.100.0/24",
+        "203.0.113.0/24",
+        "224.0.0.0/4",
+        "240.0.0.0/4",
+        "::/96",
+        "::ffff:0:0:0/96",
+        "64:ff9b::/96",
+        "64:ff9b:1::/48",
+        "100::/64",
+        "2001::/23",
+        "2001:db8::/32",
+        "2002::/16",
+        "3fff::/20",
+        "5f00::/16",
+        "fc00::/7",
+        "fe80::/10",
+        "fec0::/10",
+        "ff00::/8",
+    )
+)
 
 
 class DiscoveryError(ValueError):
@@ -88,38 +162,89 @@ class DiscoveryTransport(Protocol):
         """Send one bounded request and return the complete reply."""
 
 
+@dataclass(frozen=True)
+class CheckedDescriptor:
+    """A served tool descriptor that passed bounded intake checks."""
+
+    name: str
+    fingerprint: str
+    observed_hash: str
+    display: dict[str, Any]
+    unprofiled_fields: tuple[str, ...]
+    unprofiled_hash: str | None
+    display_differs: bool
+
+
 @dataclass
 class ObservedTool:
     name: str
     descriptor: dict[str, Any]
     definition_hash: str
     lints: list[str] = field(default_factory=list)
-    digest_profile: str = "nexus_symbiote.observed-mcp-tool/2025-06-18/full-v1"
+    digest_profile: str = OBSERVED_DIGEST_PROFILE
+    fingerprint: str | None = None
+    fingerprint_profile: str = TOOL_DEFINITION_HASH_VERSION
+    display_differs: bool = False
+    unprofiled_fields: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ObservedItem:
+    """One prompts/list or resources/templates/list entry: redacted view and full digest."""
+
+    identity: str
+    descriptor: dict[str, Any]
+    digest: str
 
 
 @dataclass
 class DiscoveryResult:
     endpoint: str = "[invalid-endpoint]"
-    protocol_version: str = PROTOCOL_VERSION
+    protocol_version: str | None = None
+    requested_protocol_version: str = PROTOCOL_VERSION
     collector_id: str = "nexus-symbiote-live-mcp"
     collection_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     observed_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     completed_at: str | None = None
+    client_info: dict[str, str] = field(
+        default_factory=lambda: {"name": DEFAULT_CLIENT_NAME, "version": DEFAULT_CLIENT_VERSION}
+    )
+    user_agent: str | None = None
     session_established: bool = False
     session_digest: str | None = None
+    server_info: dict[str, Any] | None = None
+    server_capabilities: dict[str, Any] | None = None
+    instructions: str | None = None
+    instructions_hash: str | None = None
+    declaration_hash: str | None = None
+    declaration_profile: str = DECLARATION_PROFILE
     tools: list[ObservedTool] = field(default_factory=list)
+    prompts: list[ObservedItem] | None = None
+    resource_templates: list[ObservedItem] | None = None
     failures: list[str] = field(default_factory=list)
     complete: bool = False
     pages_observed: int = 0
     bytes_observed: int = 0
     coverage: dict[str, Any] = field(
         default_factory=lambda: {
-            "scope": "tools/list responses in one bounded discovery session",
+            "scope": (
+                "initialize result and tools/list responses, plus prompts/list and "
+                "resources/templates/list when the server declares them, in one bounded "
+                "discovery session"
+            ),
             "assurance": "observed-server-declarations",
             "tool_implementation_observed": False,
             "tool_execution_performed": False,
             "authorization_verified": False,
             "continuous_monitoring": False,
+            "unobserved": [
+                "tool implementation and backend behavior",
+                "resources/list entries and resource contents",
+                "prompt messages (prompts/get)",
+                "authorization metadata",
+                "notifications and list changes after this session",
+                "responses the server gives to clients that identify differently",
+            ],
         }
     )
 
@@ -169,16 +294,14 @@ def _public_ip(value: str) -> bool:
     if mapped is not None:
         address = mapped
     # Embedded-IPv4 forms can reach the IPv4 address they carry, and none of
-    # them names a legitimate public service: refuse them outright. ::/96 is the
-    # deprecated IPv4-compatible range and ::ffff:0:0:0/96 is SIIT translation.
+    # them names a legitimate public service: refuse them outright. The explicit
+    # special-purpose list keeps the answer independent of the interpreter's
+    # ipaddress tables, which have changed between patch releases.
     if isinstance(address, ipaddress.IPv6Address) and (
-        address.sixtofour is not None
-        or address.teredo is not None
-        or address in ipaddress.ip_network("64:ff9b::/96")
-        or address in ipaddress.ip_network("64:ff9b:1::/48")
-        or address in ipaddress.ip_network("::/96")
-        or address in ipaddress.ip_network("::ffff:0:0:0/96")
+        address.sixtofour is not None or address.teredo is not None or address.is_site_local
     ):
+        return False
+    if any(address in network for network in _NONPUBLIC_NETWORKS):
         return False
     return bool(address.is_global and not address.is_multicast and not address.is_unspecified)
 
@@ -277,12 +400,19 @@ class _DeadlineSocket:
             self.stream.close()
 
 
+def _client_context() -> ssl.SSLContext:
+    context = ssl.create_default_context()
+    # create_default_context() honours SSLKEYLOGFILE; this client never writes
+    # session secrets that would let a packet capture recover the bearer token.
+    context.keylog_filename = None  # type: ignore[assignment]
+    # Explicit: a system OpenSSL policy must not lower the floor below TLS 1.2.
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    return context
+
+
 class _PinnedHTTPSConnection(http.client.HTTPSConnection):
     def __init__(self, host: str, port: int, family: int, address: str, timeout: float) -> None:
-        context = ssl.create_default_context()
-        # Explicit: a system OpenSSL policy must not lower the floor below TLS 1.2.
-        context.minimum_version = ssl.TLSVersion.TLSv1_2
-        self._tls_context = context
+        self._tls_context = _client_context()
         super().__init__(host, port, timeout=timeout, context=self._tls_context)
         self._family = family
         self._address = address
@@ -312,7 +442,8 @@ class PinnedHTTPTransport:
     A new instance is used per discovery, retaining the resolved public peer for
     that session. Environment HTTP proxies are not used: a proxy that resolves
     the hostname itself would invalidate this transport's destination check.
-    Deployment egress policy must independently restrict permitted services.
+    SSLKEYLOGFILE is ignored. Deployment egress policy must independently
+    restrict permitted services.
     """
 
     def __init__(self, *, max_sse_events: int = 100) -> None:
@@ -345,7 +476,9 @@ class PinnedHTTPTransport:
             for name, value in raw_headers:
                 name = name.lower()
                 if name in normalized:
-                    raise DiscoveryError("duplicate HTTP header refused")
+                    if name in _CONSUMED_HEADERS:
+                        raise DiscoveryError("duplicate HTTP header refused")
+                    continue
                 normalized[name] = value
             if 300 <= response.status < 400:
                 raise DiscoveryError("HTTP redirect refused")
@@ -368,30 +501,25 @@ class PinnedHTTPTransport:
             connection.close()
 
     def _read_sse(self, response: http.client.HTTPResponse, body: bytes, maximum: int) -> bytes:
+        """Read event lines until the requested response arrives.
+
+        HTTPResponse.readline decodes chunked transfer coding. A single line may
+        use the whole response byte limit, since SDK servers put an entire result
+        on one data line.
+        """
         request_id = _json(body).get("id")
+        decoder = _SSEDecoder(self._max_sse_events)
         payload = bytearray()
-        event = bytearray()
-        events = 0
-        while len(payload) <= maximum:
-            if response.fp is None:
-                break
-            line = response.fp.readline(min(65_537, maximum + 1 - len(payload)))
+        while True:
+            line = response.readline(maximum + 1 - len(payload))
             if not line:
                 break
             payload.extend(line)
-            if len(line) > 65_536 or len(payload) > maximum:
-                raise DiscoveryError("SSE response byte or line limit exceeded")
-            event.extend(line)
-            if line in (b"\n", b"\r\n"):
-                events += 1
-                if events > self._max_sse_events:
-                    raise DiscoveryError("SSE event limit exceeded")
-                for message in _sse(bytes(event), self._max_sse_events):
-                    if message.get("id") == request_id and (
-                        "result" in message or "error" in message
-                    ):
-                        return bytes(payload)
-                event.clear()
+            if len(payload) > maximum:
+                raise DiscoveryError("SSE response byte limit exceeded")
+            for message in decoder.feed(line):
+                if message.get("id") == request_id and ("result" in message or "error" in message):
+                    return bytes(payload)
         raise DiscoveryError("SSE ended without matching response")
 
 
@@ -417,29 +545,73 @@ def _json(raw: bytes) -> dict[str, Any]:
     return cast(dict[str, Any], value)
 
 
-def _sse(raw: bytes, maximum: int) -> list[dict[str, Any]]:
-    try:
-        lines = raw.decode("utf-8").splitlines()
-    except UnicodeError as exc:
-        raise DiscoveryError("invalid SSE UTF-8") from exc
-    messages = []
-    data: list[str] = []
-    events = 0
-    for line in [*lines, ""]:
+class _SSEDecoder:
+    """Decode an event stream into JSON-RPC messages, following the WHATWG rules.
+
+    Lines end in CRLF, LF or CR only, so U+2028, U+2029 and U+0085 stay inside
+    JSON strings. Comments, ``id``, ``retry`` and unknown fields carry no message.
+    An event without data, such as a resumption priming event, and an event of
+    a type other than ``message`` are skipped. An unterminated final event is
+    discarded at the end of the stream.
+    """
+
+    def __init__(self, maximum_events: int) -> None:
+        self._maximum = maximum_events
+        self._events = 0
+        self._partial = bytearray()
+        self._pending_cr = False
+        self._started = False
+        self._data: list[str] = []
+        self._event_type = ""
+
+    def feed(self, chunk: bytes) -> list[dict[str, Any]]:
+        if self._pending_cr and chunk.startswith(b"\n"):
+            chunk = chunk[1:]
+        self._pending_cr = chunk.endswith(b"\r")
+        self._partial.extend(chunk)
+        *lines, rest = re.split(rb"\r\n|\r|\n", bytes(self._partial))
+        self._partial = bytearray(rest)
+        messages = []
+        for line in lines:
+            message = self._line(line)
+            if message is not None:
+                messages.append(message)
+        return messages
+
+    def _line(self, raw: bytes) -> dict[str, Any] | None:
+        try:
+            line = raw.decode("utf-8")
+        except UnicodeError as exc:
+            raise DiscoveryError("invalid SSE UTF-8") from exc
+        if not self._started:
+            self._started = True
+            line = line.removeprefix("﻿")
         if not line:
-            if data:
-                events += 1
-                if events > maximum:
-                    raise DiscoveryError("SSE event limit exceeded")
-                messages.append(_json("\n".join(data).encode("utf-8")))
-                data.clear()
-        elif line.startswith("data:"):
-            data.append(line[5:].removeprefix(" "))
-        elif line.startswith((":", "event:", "id:", "retry:")):
-            continue
-        else:
-            raise DiscoveryError("unsupported SSE field")
-    return messages
+            return self._dispatch()
+        if line.startswith(":"):
+            return None
+        name, colon, value = line.partition(":")
+        if colon:
+            value = value.removeprefix(" ")
+        if name == "data":
+            self._data.append(value)
+        elif name == "event":
+            self._event_type = value
+        return None
+
+    def _dispatch(self) -> dict[str, Any] | None:
+        data, event_type = "\n".join(self._data), self._event_type
+        self._data, self._event_type = [], ""
+        if not data or event_type not in ("", "message"):
+            return None
+        self._events += 1
+        if self._events > self._maximum:
+            raise DiscoveryError("SSE event limit exceeded")
+        return _json(data.encode("utf-8"))
+
+
+def _sse(raw: bytes, maximum: int) -> list[dict[str, Any]]:
+    return _SSEDecoder(maximum).feed(raw)
 
 
 def _response(reply: HTTPReply, identifier: int, limits: DiscoveryLimits) -> dict[str, Any]:
@@ -471,23 +643,62 @@ def _response(reply: HTTPReply, identifier: int, limits: DiscoveryLimits) -> dic
     return cast(dict[str, Any], matching[0])
 
 
-def _tool(raw: Any, secrets: list[str]) -> ObservedTool:
+def _bounded_unique_items(schema: dict[str, Any]) -> None:
+    pending: list[Any] = [schema]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, dict):
+            arrays = [item.get("type")]
+            dependencies = item.get("dependencies")
+            if isinstance(dependencies, dict):
+                arrays.extend(dependencies.values())
+            for array in arrays:
+                if (
+                    isinstance(array, list)
+                    and len(array) > _UNIQUE_ITEMS_PAIRWISE_LIMIT
+                    and not all(isinstance(element, str) for element in array)
+                ):
+                    raise DiscoveryError("MCP tool schema exceeds the validation budget")
+            pending.extend(item.values())
+        elif isinstance(item, list):
+            pending.extend(item)
+
+
+def _check_schema(schema: Any) -> None:
+    if not isinstance(schema, dict) or schema.get("type") != "object":
+        raise DiscoveryError("tool schemas must declare object type")
+    _bounded_unique_items(schema)
+    try:
+        Draft202012Validator.check_schema(schema)
+    except Exception as exc:
+        # The regex format check runs re.compile, which raises OverflowError and
+        # RecursionError besides re.error; any failure means an invalid schema.
+        raise DiscoveryError("invalid MCP tool JSON Schema") from exc
+
+
+def check_served_tool(raw: Any, secrets: Iterable[str] = ()) -> CheckedDescriptor:
+    """Validate one served tool descriptor within a fixed budget and fingerprint it.
+
+    The descriptor must fit the runtime gateway's JSON budget (256 KiB, 32 levels,
+    20,000 nodes) before any JSON Schema work starts. ``fingerprint`` follows
+    ``hash_tool_definition``; members outside ``FINGERPRINT_FIELDS`` are reported
+    and digested separately for the server declaration.
+    """
     if not isinstance(raw, dict) or not isinstance(raw.get("name"), str) or not raw["name"]:
         raise DiscoveryError("invalid MCP tool identity")
-    if len(raw["name"]) > 256 or any(ord(c) < 32 for c in raw["name"]):
+    name = raw["name"]
+    if len(name) > 256 or not name.isprintable():
         raise DiscoveryError("invalid MCP tool name")
+    try:
+        check_json_budget(raw, maximum=MAX_SCHEMA_BYTES)
+    except ValueError as exc:
+        raise DiscoveryError("MCP tool descriptor exceeds the validation budget") from exc
     for key in ("title", "description"):
         if key in raw and not isinstance(raw[key], str):
             raise DiscoveryError("invalid MCP tool text field")
     for key in ("inputSchema", "outputSchema"):
-        schema = raw.get(key)
         if key == "inputSchema" or key in raw:
-            if not isinstance(schema, dict) or schema.get("type") != "object":
-                raise DiscoveryError("tool schemas must declare object type")
-            try:
-                Draft202012Validator.check_schema(schema)
-            except (SchemaError, RecursionError) as exc:
-                raise DiscoveryError("invalid MCP tool JSON Schema") from exc
+            _check_schema(raw.get(key))
     annotations = raw.get("annotations", {})
     if not isinstance(annotations, dict):
         raise DiscoveryError("invalid MCP tool annotations")
@@ -498,31 +709,149 @@ def _tool(raw: Any, secrets: list[str]) -> ObservedTool:
     for hint in ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"):
         if hint in annotations and type(annotations[hint]) is not bool:
             raise DiscoveryError("invalid MCP annotation hint")
+    unprofiled = tuple(sorted(set(raw) - FINGERPRINT_FIELDS))
+    try:
+        fingerprint = hash_tool_definition(
+            name,
+            raw.get("description", ""),
+            raw["inputSchema"],
+            annotations,
+            **tool_definition_extensions(raw),
+        )
+        observed = hash_canonical(raw)
+        unprofiled_hash = (
+            hash_canonical({key: raw[key] for key in unprofiled}) if unprofiled else None
+        )
+        display = redact_descriptor(raw, secrets)
+    except (ValueError, TypeError, RecursionError) as exc:
+        raise DiscoveryError("MCP tool descriptor cannot be canonicalized") from exc
+    return CheckedDescriptor(
+        name=name,
+        fingerprint=fingerprint,
+        observed_hash=observed,
+        display=display,
+        unprofiled_fields=unprofiled,
+        unprofiled_hash=unprofiled_hash,
+        display_differs=display != raw,
+    )
+
+
+def check_listed_item(raw: Any, identity: str, secrets: Iterable[str] = ()) -> ObservedItem:
+    """Validate one prompts/list or resources/templates/list entry and digest it whole."""
+    value = raw.get(identity) if isinstance(raw, dict) else None
+    if not isinstance(value, str) or not value or len(value) > 2048 or not value.isprintable():
+        raise DiscoveryError("invalid MCP list entry identity")
+    try:
+        check_json_budget(raw, maximum=MAX_SCHEMA_BYTES)
+        digest = hash_canonical(raw)
+        display = redact_metadata(raw, secrets)
+    except (ValueError, TypeError, RecursionError) as exc:
+        raise DiscoveryError("MCP list entry exceeds the validation budget") from exc
+    return ObservedItem(identity=value, descriptor=display, digest=digest)
+
+
+def declaration_hash(
+    *,
+    instructions: str | None,
+    tool_extensions: dict[str, str],
+    prompts: dict[str, str] | None,
+    resource_templates: dict[str, str] | None,
+) -> str:
+    """Digest the model-visible server declarations other than tool fingerprints.
+
+    ``tool_extensions`` maps tool names to digests of descriptor members outside
+    the tool fingerprint profile. ``None`` lists were not offered by the server.
+    """
+    return hash_canonical(
+        {
+            "profile": DECLARATION_PROFILE,
+            "instructions": instructions,
+            "toolExtensions": tool_extensions,
+            "prompts": prompts,
+            "resourceTemplates": resource_templates,
+        }
+    )
+
+
+def check_server_hello(
+    hello: dict[str, Any], secrets: Iterable[str] = ()
+) -> tuple[str, dict[str, Any], dict[str, Any], str | None]:
+    """Validate an initialize result: (negotiated version, server info, capabilities, instructions).
+
+    Server info and capabilities are returned as redacted display values;
+    instructions are returned raw for digesting.
+    """
+    negotiated = hello.get("protocolVersion")
+    if negotiated not in SUPPORTED_PROTOCOL_VERSIONS:
+        raise DiscoveryError("unsupported negotiated MCP protocol version")
+    capabilities, server_info = hello.get("capabilities"), hello.get("serverInfo")
+    if not isinstance(capabilities, dict) or not isinstance(capabilities.get("tools"), dict):
+        raise DiscoveryError("MCP server did not negotiate tool listing")
+    if any(
+        key in capabilities and not isinstance(capabilities[key], dict)
+        for key in ("prompts", "resources")
+    ):
+        raise DiscoveryError("invalid MCP server capabilities")
+    if not isinstance(server_info, dict) or not all(
+        isinstance(server_info.get(k), str) for k in ("name", "version")
+    ):
+        raise DiscoveryError("invalid MCP server implementation identity")
+    instructions = hello.get("instructions")
+    if instructions is not None and not isinstance(instructions, str):
+        raise DiscoveryError("invalid MCP server instructions")
+    try:
+        check_json_budget(capabilities, maximum=MAX_SCHEMA_BYTES)
+        shown_info = redact_metadata(
+            {key: server_info[key] for key in ("name", "title", "version") if key in server_info},
+            secrets,
+        )
+        shown_capabilities = redact_metadata(capabilities, secrets)
+    except (ValueError, TypeError, RecursionError) as exc:
+        raise DiscoveryError("MCP server capabilities exceed the validation budget") from exc
+    if not all(isinstance(value, str) for value in shown_info.values()):
+        raise DiscoveryError("invalid MCP server implementation identity")
+    return negotiated, shown_info, shown_capabilities, instructions
+
+
+def _tool(raw: Any, secrets: list[str]) -> ObservedTool:
+    return _observed_tool(check_served_tool(raw, secrets))
+
+
+def _observed_tool(checked: CheckedDescriptor) -> ObservedTool:
     lints = [
         "Server metadata and annotations are unverified declarations; no capability was authorized."
     ]
-    unsupported = set(raw) - {
-        "name",
-        "title",
-        "description",
-        "inputSchema",
-        "outputSchema",
-        "annotations",
-        "_meta",
-    }
-    if unsupported:
+    if checked.unprofiled_fields:
         lints.append(
-            "Unsupported descriptor extension fields retained in full digest; not admission-compatible."
+            "Descriptor members outside the tool fingerprint profile are bound by the full "
+            "digest and the server declaration digest."
         )
-    if "title" in raw or "outputSchema" in raw or "_meta" in raw:
+    if checked.display_differs:
         lints.append(
-            "Full observed-descriptor digest includes fields outside the static four-field profile."
+            "The displayed descriptor omits or reduces content that the digests cover; "
+            "review the original descriptor before approving it."
         )
-    # Full raw descriptor is the digest subject. Shown metadata is redacted and
-    # cannot be used to recompute this digest without obtaining original evidence.
-    digest = hash_canonical(raw)
-    safe = redact_descriptor(raw, secrets)
-    return ObservedTool(safe["name"], safe, digest, lints)
+    return ObservedTool(
+        checked.display["name"],
+        checked.display,
+        checked.observed_hash,
+        lints,
+        fingerprint=checked.fingerprint,
+        display_differs=checked.display_differs,
+        unprofiled_fields=list(checked.unprofiled_fields),
+    )
+
+
+def _client_field(value: str | None, *, optional: bool = False) -> str | None:
+    if value is None and optional:
+        return None
+    if (
+        not isinstance(value, str)
+        or not 1 <= len(value) <= 256
+        or any(not 0x20 <= ord(c) <= 0x7E for c in value)
+    ):
+        raise DiscoveryError("invalid client identity")
+    return value
 
 
 def discover_tools(
@@ -533,12 +862,18 @@ def discover_tools(
     transport: DiscoveryTransport | None = None,
     limits: DiscoveryLimits | None = None,
     collector_id: str = "nexus-symbiote-live-mcp",
+    client_name: str = DEFAULT_CLIENT_NAME,
+    client_version: str = DEFAULT_CLIENT_VERSION,
+    user_agent: str | None = None,
 ) -> DiscoveryResult:
     """Observe one explicitly authorized HTTP MCP endpoint without calling tools.
 
     Caller-supplied transport is trusted code and can bypass network destination
     checks; it exists for local fixtures or an independently controlled transport.
     It must never be selected from a repository/configuration being scanned.
+    ``client_name``, ``client_version`` and ``user_agent`` let an operator present
+    the identity of the production host, since a server can serve a different
+    tool list to a client it recognizes as an observer.
     """
     result = DiscoveryResult()
     session: str | None = None
@@ -566,9 +901,18 @@ def discover_tools(
             or any(ord(c) <= 32 or ord(c) >= 127 for c in bearer_token)
         ):
             raise DiscoveryError("invalid bearer credential encoding")
+        client = {
+            "name": _client_field(client_name) or DEFAULT_CLIENT_NAME,
+            "version": _client_field(client_version) or DEFAULT_CLIENT_VERSION,
+        }
+        agent = _client_field(user_agent, optional=True)
+        if any(bearer_token and bearer_token in value for value in (*client.values(), agent or "")):
+            raise DiscoveryError("bearer credential in client identity refused")
+        result.client_info, result.user_agent = client, agent
         transport = transport or PinnedHTTPTransport(max_sse_events=limits.max_sse_events)
         deadline = time.monotonic() + limits.total_timeout_seconds
         identifier = 0
+        negotiated: str | None = None
 
         def request(
             method: str, params: dict[str, Any] | None = None, *, notification: bool = False
@@ -585,8 +929,10 @@ def discover_tools(
                 "Accept": "application/json, text/event-stream",
                 "Accept-Encoding": "identity",
             }
-            if method != "initialize":
-                headers["MCP-Protocol-Version"] = PROTOCOL_VERSION
+            if negotiated is not None:
+                headers["MCP-Protocol-Version"] = negotiated
+            if agent is not None:
+                headers["User-Agent"] = agent
             if bearer_token:
                 headers["Authorization"] = "Bearer " + bearer_token
             if session:
@@ -627,67 +973,97 @@ def discover_tools(
                 return {}, reply
             return _response(reply, identifier, limits), reply
 
-        initialized, reply = request(
+        def listing(method: str, key: str) -> list[dict[str, Any]]:
+            """Follow bounded pagination; a null or absent cursor ends the list."""
+            cursor: str | None = None
+            cursors: set[str] = set()
+            items: list[dict[str, Any]] = []
+            for _ in range(limits.max_pages):
+                page, _ = request(method, {"cursor": cursor} if cursor is not None else {})
+                values = page.get(key)
+                if not isinstance(values, list) or len(values) + len(items) > limits.max_tools:
+                    raise DiscoveryError("invalid list or item-count limit exceeded")
+                items.extend(values)
+                result.pages_observed += 1
+                cursor = page.get("nextCursor")
+                if cursor is None:
+                    return items
+                if (
+                    not isinstance(cursor, str)
+                    or not 1 <= len(cursor.encode()) <= limits.max_cursor_bytes
+                    or cursor in cursors
+                ):
+                    raise DiscoveryError("invalid or repeated list cursor")
+                cursors.add(cursor)
+            raise DiscoveryError("list page limit exceeded")
+
+        def check_deadline() -> None:
+            if time.monotonic() > deadline:
+                raise DiscoveryError("discovery session deadline exceeded")
+
+        hello, reply = request(
             "initialize",
-            {
-                "protocolVersion": PROTOCOL_VERSION,
-                "capabilities": {},
-                "clientInfo": {"name": "nexus-symbiote-discovery", "version": "0.1.0"},
-            },
+            {"protocolVersion": PROTOCOL_VERSION, "capabilities": {}, "clientInfo": client},
         )
-        if initialized.get("protocolVersion") != PROTOCOL_VERSION:
-            raise DiscoveryError("unsupported negotiated MCP protocol version")
-        capabilities, server_info = initialized.get("capabilities"), initialized.get("serverInfo")
-        if not isinstance(capabilities, dict) or not isinstance(capabilities.get("tools"), dict):
-            raise DiscoveryError("MCP server did not negotiate tool listing")
-        if not isinstance(server_info, dict) or not all(
-            isinstance(server_info.get(k), str) for k in ("name", "version")
-        ):
-            raise DiscoveryError("invalid MCP server implementation identity")
         session = reply.headers.get("mcp-session-id")
         if session is not None:
             if not 1 <= len(session) <= limits.max_session_id_bytes or any(
                 not 0x21 <= ord(c) <= 0x7E for c in session
             ):
                 raise DiscoveryError("invalid MCP session identifier")
+        secrets = [value for value in (bearer_token, session) if value]
+        negotiated, server_info, capabilities, instructions = check_server_hello(hello, secrets)
+        result.protocol_version = negotiated
+        result.server_info, result.server_capabilities = server_info, capabilities
+        if instructions is not None:
+            result.instructions = redact_text(instructions, secrets)
+            result.instructions_hash = hash_canonical({"instructions": instructions})
+        if session is not None:
             result.session_established = True
             result.session_digest = "sha256:" + hashlib.sha256(session.encode()).hexdigest()
         request("notifications/initialized", notification=True)
-        cursor: str | None = None
-        cursors: set[str] = set()
         names: set[str] = set()
-        secrets = [value for value in (bearer_token, session) if value]
-        for _ in range(limits.max_pages):
-            page, _ = request("tools/list", {"cursor": cursor} if cursor is not None else {})
-            tools = page.get("tools")
-            if not isinstance(tools, list) or len(tools) + len(result.tools) > limits.max_tools:
-                raise DiscoveryError("invalid tool list or tool-count limit exceeded")
-            observed = []
-            for raw_tool in tools:
-                if time.monotonic() > deadline:
-                    raise DiscoveryError("discovery session deadline exceeded")
-                observed.append(_tool(raw_tool, secrets))
-            if time.monotonic() > deadline:
-                raise DiscoveryError("discovery session deadline exceeded")
-            for tool in observed:
-                if tool.name in names:
-                    raise DiscoveryError("duplicate tool identity across discovery pages")
-                names.add(tool.name)
-            result.tools.extend(observed)
-            result.pages_observed += 1
-            cursor = page.get("nextCursor")
-            if cursor is None:
-                result.complete = True
-                break
-            if (
-                not isinstance(cursor, str)
-                or not 1 <= len(cursor.encode()) <= limits.max_cursor_bytes
-                or cursor in cursors
-            ):
-                raise DiscoveryError("invalid or repeated tool-list cursor")
-            cursors.add(cursor)
-        if not result.complete:
-            raise DiscoveryError("tool-list page limit exceeded")
+        extensions: dict[str, str] = {}
+        for raw_tool in listing("tools/list", "tools"):
+            check_deadline()
+            checked = check_served_tool(raw_tool, secrets)
+            if checked.name in names:
+                raise DiscoveryError("duplicate tool identity across discovery pages")
+            names.add(checked.name)
+            if checked.unprofiled_hash is not None:
+                extensions[checked.name] = checked.unprofiled_hash
+            result.tools.append(_observed_tool(checked))
+        check_deadline()
+
+        def surface(
+            method: str, key: str, identity: str
+        ) -> tuple[list[ObservedItem], dict[str, str]]:
+            observed: list[ObservedItem] = []
+            digests: dict[str, str] = {}
+            for raw_item in listing(method, key):
+                check_deadline()
+                item = check_listed_item(raw_item, identity, secrets)
+                if item.identity in digests:
+                    raise DiscoveryError("duplicate list entry identity")
+                digests[item.identity] = item.digest
+                item.identity = redact_text(item.identity, secrets)
+                observed.append(item)
+            return observed, digests
+
+        prompts = templates = None
+        if "prompts" in hello["capabilities"]:
+            result.prompts, prompts = surface("prompts/list", "prompts", "name")
+        if "resources" in hello["capabilities"]:
+            result.resource_templates, templates = surface(
+                "resources/templates/list", "resourceTemplates", "uriTemplate"
+            )
+        result.declaration_hash = declaration_hash(
+            instructions=instructions,
+            tool_extensions=extensions,
+            prompts=prompts,
+            resource_templates=templates,
+        )
+        result.complete = True
     except DiscoveryError as exc:
         # DiscoveryError messages are fixed local diagnostics without payloads.
         result.failures.append(redact_text(str(exc), [*protected, *([session] if session else [])]))
@@ -704,6 +1080,11 @@ def discover_tools(
         # credential-bearing diagnostics; report the failed operation generically.
         result.failures.append(
             "Live MCP discovery refused or incomplete; check endpoint policy, protocol and configured limits."
+        )
+        result.complete = False
+    except Exception:
+        result.failures.append(
+            "Live MCP discovery stopped on an unexpected internal error; the observation is incomplete."
         )
         result.complete = False
     finally:

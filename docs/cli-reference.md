@@ -129,6 +129,11 @@ nexus-symbiote discover-mcp [OPTIONS] ENDPOINT
 | `--allowed-origin` `TEXT` | Exact HTTPS origin explicitly approved by the operator (required, repeatable) |
 | `--token-env` `TEXT` | Environment variable holding a bearer token; the token is never written to evidence |
 | `-o`, `--output` `PATH` | Write the observation to this file instead of standard output. |
+| `--record` | Write a native AgentBOM inventory of a complete observation, for `diff`, instead of the observation report; an incomplete observation writes nothing. |
+| `--server-ref` `TEXT` | Component reference of the observed server in the inventory (default: derived from the endpoint). |
+| `--client-name` `TEXT` | `clientInfo` name sent in `initialize` (default: `nexus-symbiote-discovery`); use your production host's so the server cannot single out the observer. |
+| `--client-version` `TEXT` | `clientInfo` version sent in `initialize` (default: the tool version). |
+| `--user-agent` `TEXT` | `User-Agent` header to send; none is sent by default. |
 
 ### `import-shadowscan`
 
@@ -296,10 +301,17 @@ nexus-symbiote verify-live [OPTIONS] AIBOM_PATH
 
 | Option | Description |
 |---|---|
-| `--project` `PATH` | Untrusted project root (default: current directory); the launch policy must be outside it. |
+| `--project` `DIRECTORY` | Untrusted project root (required); the launch policy must be outside it and outside the repository that holds the project or the inventory. |
 | `--launch-policy` `FILE` | Operator-owned JSON outside the project: exact server references to absolute commands and SHA-256 pins. (required) |
 | `--json-output` | Output the verification report as JSON. |
-| `--record` | Print an unsigned candidate BOM with the observed descriptors instead of a report. |
+| `--record` | Print an unsigned candidate BOM with the observed descriptors instead of a report; exits 1 when served tools or declarations drifted, unless `--accept-drift`. |
+| `--accept-drift` | With `--record`, exit 0 although changed or new tools or declarations were recorded. |
+
+Servers reached over HTTP are reported as not verifiable by `verify-live` (reason
+`remote-transport`) and do not make the run incomplete; observe them with
+`discover-mcp --record` and compare the inventories with `diff`. The launch policy is a
+JSON object that maps each stdio server's `bom_ref` in the inventory to exactly
+`{"command": "/absolute/path", "sha256": "sha256:<64 hex>"}`.
 
 ### `vex`
 

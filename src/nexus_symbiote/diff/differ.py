@@ -322,6 +322,23 @@ class AIBOMDiffer:
                             "severity": "critical",
                         }
                     )
+            # Observed digests: the served tool set, and the instructions, prompts,
+            # resource templates and other descriptor members a live observation binds.
+            for label, before, after in (
+                ("served tool set", old.schema_hash, new.schema_hash),
+                (
+                    "served instructions, prompts or resource templates",
+                    old.properties.get("observed_declaration_hash"),
+                    new.properties.get("observed_declaration_hash"),
+                ),
+            ):
+                if before and after and before != after:
+                    modifications.append(
+                        {
+                            "detail": f"MCP server {label} changed. Review before execution.",
+                            "severity": "critical",
+                        }
+                    )
             binding = (
                 "static_config_hash",
                 "static_config_hash_profile",

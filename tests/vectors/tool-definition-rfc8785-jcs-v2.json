@@ -1,0 +1,290 @@
+{
+  "profile": "rfc8785-jcs-v2",
+  "subject": "nexus_symbiote.core.hashing.hash_tool_definition",
+  "note": "Changing any expected value changes stored fingerprints; that requires a new profile version (TOOL_DEFINITION_HASH_VERSION), not an edit here.",
+  "vectors": [
+    {
+      "id": "minimal-no-schema",
+      "name": "get_weather",
+      "description": "Read the weather",
+      "canonical": "{\"annotations\":{},\"description\":\"Read the weather\",\"name\":\"get_weather\"}",
+      "digest": "sha256:2f43920647b2a0adfec9e57790fd6df58249e39ac95fde9007541c776ccafed5"
+    },
+    {
+      "id": "input-schema",
+      "name": "get_weather",
+      "description": "Read the weather",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "city": {
+            "type": "string",
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "city"
+        ]
+      },
+      "canonical": "{\"annotations\":{},\"description\":\"Read the weather\",\"inputSchema\":{\"properties\":{\"city\":{\"maxLength\":64,\"type\":\"string\"}},\"required\":[\"city\"],\"type\":\"object\"},\"name\":\"get_weather\"}",
+      "digest": "sha256:16913b8a8c4e74db9907ec1d40f559b33696d0ff353c0e84e0109328143a7db2"
+    },
+    {
+      "id": "empty-input-schema",
+      "name": "get_weather",
+      "description": "Read the weather",
+      "inputSchema": {},
+      "canonical": "{\"annotations\":{},\"description\":\"Read the weather\",\"inputSchema\":{},\"name\":\"get_weather\"}",
+      "digest": "sha256:34ae339aaed719a9e11042790a4fbe51c715f9dd7536eeef67c84a9fae3cdbfb"
+    },
+    {
+      "id": "empty-description",
+      "name": "ping",
+      "description": "",
+      "canonical": "{\"annotations\":{},\"description\":\"\",\"name\":\"ping\"}",
+      "digest": "sha256:74826001f7c904198ce7c24e311c8bd5427c97459452b807b4466b68cf848346"
+    },
+    {
+      "id": "empty-annotations-equal-absent",
+      "name": "get_weather",
+      "description": "Read the weather",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "city": {
+            "type": "string",
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "city"
+        ]
+      },
+      "annotations": {},
+      "canonical": "{\"annotations\":{},\"description\":\"Read the weather\",\"inputSchema\":{\"properties\":{\"city\":{\"maxLength\":64,\"type\":\"string\"}},\"required\":[\"city\"],\"type\":\"object\"},\"name\":\"get_weather\"}",
+      "digest": "sha256:16913b8a8c4e74db9907ec1d40f559b33696d0ff353c0e84e0109328143a7db2"
+    },
+    {
+      "id": "nested-annotations",
+      "name": "delete_issue",
+      "description": "Delete an issue",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "annotations": {
+        "title": "Delete",
+        "destructiveHint": true,
+        "readOnlyHint": false,
+        "x-vendor": {
+          "tier": [
+            1,
+            2.5,
+            null,
+            "a"
+          ]
+        }
+      },
+      "canonical": "{\"annotations\":{\"destructiveHint\":true,\"readOnlyHint\":false,\"title\":\"Delete\",\"x-vendor\":{\"tier\":[1,2.5,null,\"a\"]}},\"description\":\"Delete an issue\",\"inputSchema\":{\"properties\":{\"id\":{\"minimum\":1,\"type\":\"integer\"}},\"type\":\"object\"},\"name\":\"delete_issue\"}",
+      "digest": "sha256:4f9e34ec5f10ad7476436991eca1f3f8f436c2c8d53fd66c3a764a055fda1cda"
+    },
+    {
+      "id": "floats",
+      "name": "scale",
+      "description": "Scale a value",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "factor": {
+            "type": "number",
+            "minimum": 0.5,
+            "maximum": 1e+21,
+            "multipleOf": 0.001
+          }
+        }
+      },
+      "canonical": "{\"annotations\":{},\"description\":\"Scale a value\",\"inputSchema\":{\"properties\":{\"factor\":{\"maximum\":1e+21,\"minimum\":0.5,\"multipleOf\":0.001,\"type\":\"number\"}},\"type\":\"object\"},\"name\":\"scale\"}",
+      "digest": "sha256:e1884a3fa3d14e8e8368fe9c50472365b6a5a8642846f98b65c6eab6fabd2e7f"
+    },
+    {
+      "id": "non-bmp-keys",
+      "name": "emoji_\u00e9",
+      "description": "Unicode \u2028 separator and \ud83d\ude00",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "\ue000": {
+            "type": "string"
+          },
+          "\ud83d\ude00": {
+            "type": "string"
+          },
+          "\u00e9": {
+            "type": "string"
+          },
+          "z": {
+            "type": "string"
+          }
+        }
+      },
+      "canonical": "{\"annotations\":{},\"description\":\"Unicode \u2028 separator and \ud83d\ude00\",\"inputSchema\":{\"properties\":{\"z\":{\"type\":\"string\"},\"\u00e9\":{\"type\":\"string\"},\"\ud83d\ude00\":{\"type\":\"string\"},\"\ue000\":{\"type\":\"string\"}},\"type\":\"object\"},\"name\":\"emoji_\u00e9\"}",
+      "digest": "sha256:d84caea8275b728f7f9c9cd9b6669c764e603350f54c3cc89ca60222e6eb5d7f"
+    },
+    {
+      "id": "title",
+      "name": "get_weather",
+      "description": "Read the weather",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "city": {
+            "type": "string",
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "city"
+        ]
+      },
+      "title": "Weather lookup",
+      "canonical": "{\"annotations\":{},\"description\":\"Read the weather\",\"inputSchema\":{\"properties\":{\"city\":{\"maxLength\":64,\"type\":\"string\"}},\"required\":[\"city\"],\"type\":\"object\"},\"name\":\"get_weather\",\"title\":\"Weather lookup\"}",
+      "digest": "sha256:da8842b3ba284c03dcba7d6af582e49c95ff16ee49991c79d24c1da23121ab69"
+    },
+    {
+      "id": "empty-title-differs-from-absent",
+      "name": "get_weather",
+      "description": "Read the weather",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "city": {
+            "type": "string",
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "city"
+        ]
+      },
+      "title": "",
+      "canonical": "{\"annotations\":{},\"description\":\"Read the weather\",\"inputSchema\":{\"properties\":{\"city\":{\"maxLength\":64,\"type\":\"string\"}},\"required\":[\"city\"],\"type\":\"object\"},\"name\":\"get_weather\",\"title\":\"\"}",
+      "digest": "sha256:8836eb2a5888858a52d29070b9b1dbd6003ee1a3efbf972e3dc8015d8a87e4d8"
+    },
+    {
+      "id": "output-schema",
+      "name": "get_weather",
+      "description": "Read the weather",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "city": {
+            "type": "string",
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "city"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "celsius": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "celsius"
+        ]
+      },
+      "canonical": "{\"annotations\":{},\"description\":\"Read the weather\",\"inputSchema\":{\"properties\":{\"city\":{\"maxLength\":64,\"type\":\"string\"}},\"required\":[\"city\"],\"type\":\"object\"},\"name\":\"get_weather\",\"outputSchema\":{\"properties\":{\"celsius\":{\"type\":\"number\"}},\"required\":[\"celsius\"],\"type\":\"object\"}}",
+      "digest": "sha256:9c8a37c7a9380a067b81d2bec79679b9e7d97c0a9b93ed0b4553d3e5c95f19ca"
+    },
+    {
+      "id": "meta",
+      "name": "get_weather",
+      "description": "Read the weather",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "city": {
+            "type": "string",
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "city"
+        ]
+      },
+      "_meta": {
+        "io.example/owner": "team-a",
+        "rank": 0.25
+      },
+      "canonical": "{\"_meta\":{\"io.example/owner\":\"team-a\",\"rank\":0.25},\"annotations\":{},\"description\":\"Read the weather\",\"inputSchema\":{\"properties\":{\"city\":{\"maxLength\":64,\"type\":\"string\"}},\"required\":[\"city\"],\"type\":\"object\"},\"name\":\"get_weather\"}",
+      "digest": "sha256:f608ccb7486f5500df18c512efc6dc9b692d704c850a27e5dc9a80567e8ad670"
+    },
+    {
+      "id": "empty-meta-differs-from-absent",
+      "name": "get_weather",
+      "description": "Read the weather",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "city": {
+            "type": "string",
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "city"
+        ]
+      },
+      "_meta": {},
+      "canonical": "{\"_meta\":{},\"annotations\":{},\"description\":\"Read the weather\",\"inputSchema\":{\"properties\":{\"city\":{\"maxLength\":64,\"type\":\"string\"}},\"required\":[\"city\"],\"type\":\"object\"},\"name\":\"get_weather\"}",
+      "digest": "sha256:0426adb6de9210e79ff40959df68b5d77b418fa71d309dcf3d38fa1099b498bb"
+    },
+    {
+      "id": "all-optional-fields",
+      "name": "get_weather",
+      "description": "Read the weather",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "city": {
+            "type": "string",
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "city"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "title": "Weather"
+      },
+      "title": "Weather lookup",
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "celsius": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "celsius"
+        ]
+      },
+      "_meta": {
+        "io.example/owner": "team-a"
+      },
+      "canonical": "{\"_meta\":{\"io.example/owner\":\"team-a\"},\"annotations\":{\"readOnlyHint\":true,\"title\":\"Weather\"},\"description\":\"Read the weather\",\"inputSchema\":{\"properties\":{\"city\":{\"maxLength\":64,\"type\":\"string\"}},\"required\":[\"city\"],\"type\":\"object\"},\"name\":\"get_weather\",\"outputSchema\":{\"properties\":{\"celsius\":{\"type\":\"number\"}},\"required\":[\"celsius\"],\"type\":\"object\"},\"title\":\"Weather lookup\"}",
+      "digest": "sha256:3ee34f67887889ea964ffcc8b5b4341c8802a405dd5567719c0838011a442e9d"
+    }
+  ]
+}

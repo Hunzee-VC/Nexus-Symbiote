@@ -5,14 +5,20 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import stat
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
 
 from nexus_symbiote import modes
 from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote.live_cli import review_notice
 from nexus_symbiote.utils.terminal import neutralize, output_failure, write_cli_output
+
+if TYPE_CHECKING:
+    from nexus_symbiote.live.verify import LiveVerifyReport
 
 
 def _load_inventory(path: Path) -> AIBOM:
@@ -38,14 +44,83 @@ def _refuse_source_overwrite(output: Path | None, source: Path) -> None:
         raise click.BadParameter("output must not overwrite the source inventory")
 
 
+def _repository_root(path: Path) -> Path | None:
+    """The nearest directory at or above ``path`` that holds a ``.git`` entry."""
+    for candidate in (path, *path.parents):
+        if os.path.lexists(candidate / ".git"):
+            return candidate
+    return None
+
+
+def _check_launch_policy(policy: Path, project: Path, inventory: Path) -> None:
+    """Refuse a launch policy that the change under review could have written.
+
+    The policy must lie outside the project, outside the repositories that hold the
+    project and the inventory, be a single-link regular file owned by the caller or
+    root that only its owner can write, in a directory others cannot write unless it
+    is sticky. This catches misplacement; it does not authenticate the policy.
+    """
+    resolved = policy.resolve()
+    untrusted = [project.resolve()]
+    for start in (project.resolve(), inventory.resolve().parent):
+        root = _repository_root(start)
+        if root is not None:
+            untrusted.append(root)
+    if any(resolved.is_relative_to(root) for root in untrusted):
+        raise click.UsageError(
+            "launch policy must be provisioned outside the untrusted project and outside "
+            "the repository that holds the project or the inventory"
+        )
+    if os.name != "posix":
+        return
+    try:
+        info = resolved.lstat()
+        parent = resolved.parent.stat()
+    except OSError as exc:
+        raise click.UsageError("launch policy cannot be inspected") from exc
+    owners = {0, os.geteuid()}
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or info.st_nlink != 1
+        or info.st_uid not in owners
+        or info.st_mode & 0o022
+        or parent.st_uid not in owners
+        or (parent.st_mode & 0o022 and not parent.st_mode & stat.S_ISVTX)
+    ):
+        raise click.UsageError(
+            "launch policy must be a single-link regular file owned by you or root and "
+            "writable only by its owner, in a directory that others cannot write"
+        )
+
+
+def _drift_summary(report: LiveVerifyReport) -> None:
+    """Print each drifted server and tool to standard error; names are neutralized."""
+    for result in report.results:
+        changes = [
+            f"{finding.status} tool {neutralize(finding.name)}"
+            for finding in result.tool_findings
+            if finding.status != "match"
+        ]
+        if result.declaration_status in {"changed", "new"}:
+            changes.append(f"{result.declaration_status} server declarations")
+        if changes:
+            click.echo(
+                f"Drift in server {neutralize(result.server_ref)}: " + "; ".join(changes),
+                err=True,
+            )
+
+
 def register_supply_chain_commands(main: click.Group) -> None:
     @main.command("verify-live")
-    @click.argument("aibom_path", type=click.Path(exists=True))
+    @click.argument("aibom_path", type=click.Path(exists=True, dir_okay=False))
     @click.option(
         "--project",
-        type=click.Path(exists=True),
-        default=".",
-        help="Untrusted project root (default: current directory); the launch policy must be outside it.",
+        type=click.Path(exists=True, file_okay=False),
+        required=True,
+        help=(
+            "Untrusted project root; the launch policy must be outside it and outside "
+            "the repository that holds the project or the inventory."
+        ),
     )
     @click.option(
         "--launch-policy",
@@ -57,10 +132,23 @@ def register_supply_chain_commands(main: click.Group) -> None:
     @click.option(
         "--record",
         is_flag=True,
-        help="Print an unsigned candidate BOM with the observed descriptors instead of a report.",
+        help=(
+            "Print an unsigned candidate BOM with the observed descriptors instead of a "
+            "report; exits 1 when served tools or declarations drifted, unless --accept-drift."
+        ),
+    )
+    @click.option(
+        "--accept-drift",
+        is_flag=True,
+        help="With --record, exit 0 although changed or new tools or declarations were recorded.",
     )
     def verify_live(
-        aibom_path: str, project: str, launch_policy: Path, json_output: bool, record: bool
+        aibom_path: str,
+        project: str,
+        launch_policy: Path,
+        json_output: bool,
+        record: bool,
+        accept_drift: bool,
     ) -> None:
         """Live: observe independently pinned stdio launchers; optionally emit an unsigned candidate.
 
@@ -68,44 +156,74 @@ def register_supply_chain_commands(main: click.Group) -> None:
         cover launcher bytes; use an externally isolated worker to restrict its
         host dependencies, filesystem, identity and egress. Project settings do
         not supply launch authority. Descriptor matches do not establish safety.
+        Remote MCP servers in the inventory are reported as not verifiable here;
+        observe them with discover-mcp --record.
         """
         modes.require_live("verify-live")
-        from nexus_symbiote.core.hashing import open_regular_file, parse_json_strict
+        from nexus_symbiote.core.hashing import hash_bytes, open_regular_file, parse_json_strict
         from nexus_symbiote.live.verify import record_candidate, verify_mcp_servers
 
-        if launch_policy.resolve().is_relative_to(Path(project).resolve()):
-            raise click.UsageError(
-                "launch policy must be provisioned outside the untrusted project"
-            )
         if record and json_output:
             raise click.UsageError("choose a candidate BOM or a JSON verification report")
+        if accept_drift and not record:
+            raise click.UsageError("--accept-drift applies only to --record")
+        _check_launch_policy(launch_policy, Path(project), Path(aibom_path))
         try:
             with open_regular_file(launch_policy) as stream:
-                policy = parse_json_strict(stream.read(4 * 1024 * 1024 + 1))
+                if os.fstat(stream.fileno()).st_nlink != 1:
+                    raise ValueError("launch policy has more than one link")
+                policy_bytes = stream.read(4 * 1024 * 1024 + 1)
+            policy = parse_json_strict(policy_bytes)
             if not isinstance(policy, dict):
                 raise ValueError("launch policy must be an object")
             with open_regular_file(Path(aibom_path)) as stream:
-                document = parse_json_strict(
-                    stream.read(16 * 1024 * 1024 + 1), max_bytes=16 * 1024 * 1024
-                )
+                inventory_bytes = stream.read(16 * 1024 * 1024 + 1)
+            document = parse_json_strict(inventory_bytes, max_bytes=16 * 1024 * 1024)
             bom = AIBOM.model_validate(document)
         except (OSError, ValueError, TypeError, RecursionError):
             raise click.ClickException("invalid BOM or operator launch policy") from None
         report = verify_mcp_servers(bom, trusted_launchers=policy)
+        report.inputs = {
+            "inventory_sha256": hash_bytes(inventory_bytes),
+            "launch_policy_sha256": hash_bytes(policy_bytes),
+        }
         if record:
             try:
                 record_candidate(bom, report)
             except ValueError:
                 raise click.ClickException("incomplete inventory; candidate not emitted") from None
             click.echo(bom.to_json())
+            _drift_summary(report)
+            review_notice(
+                [
+                    finding.name
+                    for result in report.results
+                    for finding in result.tool_findings
+                    if finding.display_differs
+                ]
+            )
+            if report.has_drift and not accept_drift:
+                click.echo(
+                    "Candidate differs from the inventory; review it, then rerun with "
+                    "--accept-drift to record it with exit status 0.",
+                    err=True,
+                )
+                raise click.exceptions.Exit(1)
             return
         if json_output:
             click.echo(json.dumps(report.to_dict(), indent=2))
         else:
             click.echo(
                 f"Live descriptor observation: {report.servers_reachable}/{report.servers_checked} servers; "
+                f"{report.servers_skipped} remote not verifiable here; "
                 f"complete={report.complete}; drift={report.has_drift}"
             )
+            for result in report.results:
+                if result.reason is not None:
+                    click.echo(
+                        f"Server {neutralize(result.server_ref)}: {result.reason}: {result.error}",
+                        err=True,
+                    )
         if not report.complete or report.has_drift:
             raise click.exceptions.Exit(1)
 
@@ -166,29 +284,6 @@ def register_supply_chain_commands(main: click.Group) -> None:
             with contextlib.suppress(OSError):
                 staged.unlink(missing_ok=True)
         click.echo(f"Unsigned baseline staged for review: {target}")
-
-    @main.command()
-    @click.argument("aibom_path", type=click.Path(exists=True, path_type=Path))
-    @click.option(
-        "-o",
-        "--output",
-        type=click.Path(path_type=Path),
-        help="Write the VEX document to this file instead of standard output.",
-    )
-    def vex(aibom_path: Path, output: Path | None) -> None:
-        """Export schema-validated findings in triage, without asserting exploitability."""
-        from nexus_symbiote.generators.vex import VEXGenerator
-
-        _refuse_source_overwrite(output, aibom_path)
-        bom = _load_inventory(aibom_path)
-        try:
-            text = VEXGenerator().generate_json(bom)
-        except (OSError, ValueError, RecursionError) as exc:
-            raise click.ClickException(neutralize(exc)) from exc
-        if output:
-            write_cli_output(output, text)
-        else:
-            click.echo(text)
 
     @main.command()
     @click.argument("aibom_path", type=click.Path(exists=True, path_type=Path))

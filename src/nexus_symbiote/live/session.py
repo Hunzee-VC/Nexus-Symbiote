@@ -2,6 +2,11 @@
 
 The launcher must be independently approved by the operator. This module does
 not sandbox the process, authenticate the workload, or prove backend behavior.
+
+Once ``tools/call`` has been written, a failure is never reported as an
+authorization denial: a JSON-RPC error reply raises ``ToolCallError`` and any
+other failure raises ``ExecutionOutcomeUnknown``, because the tool may have run
+and the one-use approval has been spent.
 """
 
 from __future__ import annotations
@@ -28,8 +33,21 @@ from nexus_symbiote.runtime import (
     ToolCall,
     canonical_bytes,
 )
+from nexus_symbiote.scanners.live_mcp import SUPPORTED_PROTOCOL_VERSIONS
 
 T = TypeVar("T")
+
+
+class ExecutionOutcomeUnknown(Exception):  # noqa: N818 - the name states the outcome, not a fault
+    """``tools/call`` was sent but no valid reply arrived; the tool may have run."""
+
+
+class ToolCallError(Exception):
+    """The server answered ``tools/call`` with a JSON-RPC error object."""
+
+    def __init__(self, code: int | None) -> None:
+        super().__init__("MCP server answered tools/call with a JSON-RPC error")
+        self.code = code
 
 
 class PinnedStdioSession:
@@ -37,14 +55,24 @@ class PinnedStdioSession:
 
     The pin covers launcher bytes only. Interpreter, shared libraries, mutable
     files, network and server behavior remain in the operator's trust boundary.
+    The handshake and listing share one deadline; ``tools/call`` gets its own
+    ``call_deadline_seconds``, counted from when the call is sent.
     """
 
-    def __init__(self, *, command: str, sha256: str, server_id: str) -> None:
+    def __init__(
+        self,
+        *,
+        command: str,
+        sha256: str,
+        server_id: str,
+        call_deadline_seconds: float = DEADLINE_SECONDS,
+    ) -> None:
         if (
             os.name != "posix"
             or not Path(command).is_absolute()
             or not re.fullmatch(r"sha256:[0-9a-f]{64}", sha256)
             or not server_id
+            or not 0 < call_deadline_seconds <= 3600
         ):
             raise AuthorizationError("absolute POSIX launcher, SHA-256 pin and server ID required")
         self.command = command
@@ -54,6 +82,7 @@ class PinnedStdioSession:
         self._directory: tempfile.TemporaryDirectory[str] | None = None
         self._process: subprocess.Popen[bytes] | None = None
         self._deadline = 0.0
+        self._call_deadline_seconds = call_deadline_seconds
         self._next_id = 1
         self._lookup_attempted = False
         self._described: str | None = None
@@ -96,7 +125,7 @@ class PinnedStdioSession:
             os.set_blocking(self._process.stdin.fileno(), False)
             os.set_blocking(self._process.stdout.fileno(), False)
             self._deadline = time.monotonic() + DEADLINE_SECONDS
-            self._inbound = _frames(self._process.stdout.fileno(), self._deadline)
+            self._inbound = _frames(self._process.stdout.fileno(), lambda: self._deadline)
             hello = self._request(
                 "initialize",
                 {
@@ -106,7 +135,7 @@ class PinnedStdioSession:
                 },
             )
             if (
-                hello.get("protocolVersion") != PROTOCOL
+                hello.get("protocolVersion") not in SUPPORTED_PROTOCOL_VERSIONS
                 or not isinstance(hello.get("capabilities"), dict)
                 or not isinstance(hello["capabilities"].get("tools"), dict)
                 or not isinstance(hello.get("serverInfo"), dict)
@@ -145,15 +174,29 @@ class PinnedStdioSession:
         request_id = self._next_id
         self._next_id += 1
         self._send({"id": request_id, "method": method, "params": params})
-        msg = next(self._inbound)
-        if (
-            set(msg) != {"jsonrpc", "id", "result"}
-            or type(msg.get("id")) is not int
-            or msg["id"] != request_id
-            or not isinstance(msg.get("result"), dict)
-        ):
-            raise AuthorizationError("unexpected MCP response or notification")
-        return msg["result"]  # type: ignore[no-any-return]
+        # Log and progress notifications may precede the reply; _frames bounds
+        # how many frames and bytes they can take.
+        for msg in self._inbound:
+            if "id" not in msg and isinstance(msg.get("method"), str):
+                continue
+            if (
+                method == "tools/call"
+                and set(msg) == {"jsonrpc", "id", "error"}
+                and type(msg.get("id")) is int
+                and msg["id"] == request_id
+            ):
+                error = msg["error"]
+                code = error.get("code") if isinstance(error, dict) else None
+                raise ToolCallError(code if type(code) is int else None)
+            if (
+                set(msg) != {"jsonrpc", "id", "result"}
+                or type(msg.get("id")) is not int
+                or msg["id"] != request_id
+                or not isinstance(msg.get("result"), dict)
+            ):
+                raise AuthorizationError("unexpected MCP response")
+            return msg["result"]  # type: ignore[no-any-return]
+        raise AuthorizationError("missing MCP response")
 
     def describe(self, server_id: str, tool_name: str) -> ServedTool:
         if server_id != self.server_id or self._lookup_attempted:
@@ -208,7 +251,17 @@ class PinnedStdioSession:
         ):
             raise AuthorizationError("call does not match the described session")
         self._called = True
-        return self._request("tools/call", {"name": call.tool_name, "arguments": call.arguments})
+        self._deadline = time.monotonic() + self._call_deadline_seconds
+        try:
+            return self._request(
+                "tools/call", {"name": call.tool_name, "arguments": call.arguments}
+            )
+        except ToolCallError:
+            raise
+        except Exception as exc:
+            raise ExecutionOutcomeUnknown(
+                "tools/call was sent but no valid result arrived; the tool may have run"
+            ) from exc
 
     def __exit__(self, *_: object) -> None:
         proc = self._process
@@ -243,9 +296,21 @@ def invoke_pinned_stdio(
     trust: Envelope,
     bom: Mapping[str, Any],
     approval: Envelope | None = None,
+    call_deadline_seconds: float = DEADLINE_SECONDS,
 ) -> dict[str, Any]:
-    """Authorize and execute via the same pinned launcher process, never reconnecting."""
-    with PinnedStdioSession(command=command, sha256=sha256, server_id=call.server_id) as session:
+    """Authorize and execute via the same pinned launcher process, never reconnecting.
+
+    Raises ``AuthorizationError`` only before ``tools/call`` is sent. After that,
+    ``ToolCallError`` reports a JSON-RPC error reply and ``ExecutionOutcomeUnknown``
+    any other failure. Neither is a denial: the approval has been spent, and an
+    unknown outcome means the tool may have run.
+    """
+    with PinnedStdioSession(
+        command=command,
+        sha256=sha256,
+        server_id=call.server_id,
+        call_deadline_seconds=call_deadline_seconds,
+    ) as session:
         bound: ReferenceGateway[dict[str, Any]] = ReferenceGateway(
             snapshot_keys=gateway.snapshot_keys,
             approval_keys=gateway.approval_keys,

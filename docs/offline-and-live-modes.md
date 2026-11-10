@@ -29,9 +29,9 @@ The three live commands, and what each one contacts:
 
 | Command | What it reaches | Safeguards (in addition to live mode) |
 |---|---|---|
-| `discover-mcp` | The HTTPS MCP endpoint you name | Exact `--allowed-origin` match; HTTPS only; destination pinned to one public IP address (private, loopback, link-local, NAT64, 6to4 and Teredo addresses are refused); no proxies or redirects; bounded size and time; never calls a tool; the bearer token is read from `--token-env` and never written to evidence |
+| `discover-mcp` | The HTTPS MCP endpoint you name | Exact `--allowed-origin` match; HTTPS only; destination pinned to one public IP address (private, loopback, link-local, site-local, NAT64, 6to4, Teredo, documentation and other special-purpose addresses are refused by an explicit list, whatever the Python version's address tables say); no proxies or redirects; `SSLKEYLOGFILE` is ignored, so no TLS session secrets are written; bounded size and time; never calls a tool; the bearer token is read from `--token-env` and never written to evidence |
 | `advisories` | `https://api.osv.dev/v1/query` | Same pinned HTTPS transport; exact `pkg:pypi`/`pkg:npm` package URLs only; at most 500 components and a 60-second total budget; no response text copied into the report |
-| `verify-live` | The operator-pinned stdio launchers in `--launch-policy` | The policy file must live outside the project; each launcher is an absolute path with a SHA-256 pin; a private copy is executed with an empty environment (only `PATH`), no project arguments and no project working directory; 20-second deadline; never calls a tool |
+| `verify-live` | The operator-pinned stdio launchers in `--launch-policy` | The policy file must live outside the project and outside the repository that holds the project or the inventory, be a single-link file owned by you or root that only its owner can write; each launcher is an absolute path with a SHA-256 pin; a private copy is executed with an empty environment (only `PATH`), no project arguments and no project working directory; 20-second deadline; never calls a tool; servers reached over HTTP are reported as not verifiable here |
 
 **Mode selection.** A `--offline` or `--live` flag (placed before the command) wins;
 otherwise `NEXUS_SYMBIOTE_MODE` decides; otherwise the mode is offline. An
@@ -68,6 +68,97 @@ over HTTPS. Commands run offline by default. Re-run with --live before the comma
 
 The GitHub Action and the pre-commit hooks run `scan`, `validate` and `risk`, which
 are always offline, so they need no configuration.
+
+### Detect drift on a remote MCP server
+
+A remote server can change its tools without any change to your repository, so a
+static scan cannot see it. `discover-mcp --record` turns one complete observation
+into a native AgentBOM inventory, and `diff` compares two of them:
+
+```bash
+# Once: record a baseline, review it, and keep it where the change under review cannot edit it.
+nexus-symbiote --live discover-mcp https://mcp.example.com/mcp \
+  --allowed-origin https://mcp.example.com --token-env MCP_TOKEN \
+  --record -o tickets.baseline.json
+
+# On a schedule: observe again and fail on drift.
+nexus-symbiote --live discover-mcp https://mcp.example.com/mcp \
+  --allowed-origin https://mcp.example.com --token-env MCP_TOKEN \
+  --record -o tickets.today.json
+nexus-symbiote diff tickets.baseline.json tickets.today.json --fail-on-alert
+```
+
+The inventory holds one `mcp-server` component for the endpoint (its `bom_ref` is
+derived from the endpoint, or set with `--server-ref`) and one `tool` component per
+served tool, all with `observed` assurance. The server records the negotiated
+protocol version, the server's name and version, its declared capabilities, its
+`instructions` (redacted for display) and a digest of them, and, when the server
+declares them, its prompts and resource templates. Each tool carries the same
+`rfc8785-jcs-v2` fingerprint that static collection uses, which covers `title`,
+`outputSchema` and `_meta` when the server sends them.
+
+`diff` raises a **critical** alert when a tool definition changes, when the served
+tool set changes, and when the instructions, a prompt, a resource template or a
+descriptor member outside the fingerprint profile (such as `icons`) changes. A new
+server version, protocol version or capability set is a medium alert, which still
+fails `--fail-on-alert`. An incomplete observation writes no inventory and exits 1,
+so a scheduled job cannot record a partial result as a baseline. When a tool's
+displayed descriptor omits schema literals or reduces URLs that the fingerprint
+covers, the command names the tool on standard error: inspect the server's original
+descriptor before you approve that baseline. A scheduled GitHub Actions job is a
+`schedule:` workflow that runs the two commands above against a baseline committed
+after review, with the token in a repository secret.
+
+### Verify pinned stdio servers
+
+`verify-live` starts each stdio server that the inventory names, but only through
+an operator launch policy: a JSON object that maps the server's `bom_ref` in the
+inventory to an absolute launcher path and its SHA-256 pin.
+
+```json
+{"mcp-server:3f6c...": {"command": "/opt/mcp/weather-server", "sha256": "sha256:9b1e..."}}
+```
+
+Find the references with
+`jq '.components[] | select(.component_type == "mcp-server") | {bom_ref, name, transport}' agentbom.json`.
+`--project` names the untrusted checkout and is required. Servers reached over HTTP
+are listed as `not-verifiable` with reason `remote-transport` and do not make the
+run fail; use `discover-mcp --record` for them. A run with no stdio server verifies
+nothing and exits 1. Each failed server carries a reason: `missing-launch-policy`,
+`invalid-launch-policy`, `launcher-unavailable`, `launcher-digest-mismatch`,
+`launcher-start-failed`, `deadline`, `unsupported-protocol-version`, `protocol`,
+`invalid-descriptor`, `ambiguous-approved-tools` or `internal-error`. The JSON
+report also records the SHA-256 of the inventory and of the launch policy, and each
+launcher's pin.
+
+The server's instructions, prompts, resource templates and descriptor members
+outside the fingerprint profile are compared with the digest that a previous
+`--record` stored on the server (`observed_declaration_hash`); when the inventory
+has no such digest and the server serves any of them, they are reported as `new`
+drift, like an unapproved tool. `--record` prints an unsigned candidate inventory
+with the observed descriptors. When tools or declarations changed or are new, it
+names them on standard error, stores each replaced fingerprint as
+`previous_definition_hash`, and exits 1 unless you pass `--accept-drift`, so a
+scripted baseline refresh cannot silently absorb a rug pull.
+
+### What a live observation does not cover
+
+An observation is a point-in-time declaration by the server, not proof of what the
+tools do. Neither live command observes tool implementations or backend behavior,
+`resources/list` entries or resource contents, prompt messages (`prompts/get`),
+authorization metadata, or changes after the session. A server can tell an observer
+apart and answer it differently: `discover-mcp` sends no `User-Agent` and the
+`clientInfo` name `nexus-symbiote-discovery` unless you set `--client-name`,
+`--client-version` and `--user-agent` to match your production host, and
+`verify-live` starts launchers with an empty environment, no arguments and a private
+working directory. Both negotiate MCP 2025-11-25, 2025-06-18, 2025-03-26 or
+2024-11-05 through `initialize`; a server that offers none of them, or only a
+revision without `initialize`, is reported as refused. Server-sent event replies may
+use chunked transfer coding; one event line may use the whole 1 MiB response limit.
+Streams that the server closes before the reply (SSE resumption) are not resumed and
+end the observation as incomplete. A served descriptor must fit a 256 KiB, 32-level,
+20,000-node budget before its JSON Schema is checked, and schemas that would make the
+check compare long arrays pairwise are refused.
 
 ### How offline mode is enforced
 

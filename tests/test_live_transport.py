@@ -148,6 +148,9 @@ class Reply:
     def read(self, size):
         return self.body[:size]
 
+    def readline(self, limit=-1):
+        return self.fp.readline(limit)
+
     def close(self):
         self.fp.close()
 

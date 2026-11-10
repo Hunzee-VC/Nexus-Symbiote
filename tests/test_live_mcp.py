@@ -13,6 +13,8 @@ from typing import Any
 import pytest
 
 from nexus_symbiote.scanners.live_mcp import (
+    PROTOCOL_VERSION,
+    SUPPORTED_PROTOCOL_VERSIONS,
     DiscoveryLimits,
     HTTPReply,
     discover_tools,
@@ -122,7 +124,9 @@ def test_initialization_notification_and_paginated_tools_are_in_protocol_order()
         "tools/list",
         "tools/list",
     ]
-    assert messages[0]["params"]["protocolVersion"] == PROTOCOL
+    # The latest supported revision is requested; the server's answer is negotiated.
+    assert messages[0]["params"]["protocolVersion"] == PROTOCOL_VERSION
+    assert result.requested_protocol_version == PROTOCOL_VERSION
     assert messages[0]["params"]["capabilities"] == {}
     assert messages[0]["params"]["clientInfo"]["name"]
     assert "id" not in messages[1]
@@ -287,11 +291,29 @@ def test_invalid_tool_schema_cannot_be_reported_as_complete_inventory(bad_tool):
     assert result.failures
 
 
-def test_wrong_protocol_version_stops_before_initialized_or_tools_request():
-    result, transport = scan([initialization(protocol="2024-11-05")])
+@pytest.mark.parametrize("protocol", ["2099-01-01", "2025-06-18 ", "", "1"])
+def test_wrong_protocol_version_stops_before_initialized_or_tools_request(protocol):
+    result, transport = scan([initialization(protocol=protocol)])
     assert not result.complete
-    assert result.failures
+    assert result.failures == ["unsupported negotiated MCP protocol version"]
+    assert result.protocol_version is None
     assert len(transport.calls) == 1
+
+
+@pytest.mark.parametrize("protocol", SUPPORTED_PROTOCOL_VERSIONS)
+def test_every_supported_revision_is_negotiated_recorded_and_sent_back(protocol):
+    result, transport = scan(
+        [
+            initialization(protocol=protocol),
+            notification_accepted(),
+            rpc_result(2, {"tools": [tool()]}),
+        ]
+    )
+    assert result.complete, result.failures
+    assert result.protocol_version == protocol
+    assert transport.calls[0]["body"]["params"]["protocolVersion"] == PROTOCOL_VERSION
+    assert header(transport.calls[0], "MCP-Protocol-Version") is None
+    assert all(header(call, "MCP-Protocol-Version") == protocol for call in transport.calls[1:])
 
 
 def test_jsonrpc_response_id_must_match_current_request():
