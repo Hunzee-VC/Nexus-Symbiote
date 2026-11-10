@@ -1,13 +1,14 @@
 """Static TypeScript source evidence stays confined and does not imply descriptors."""
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+from nexus_symbiote import limits
 from nexus_symbiote.core.enums import AssuranceLevel
 from nexus_symbiote.core.models import MCPServerComponent, ToolComponent
 from nexus_symbiote.scanners.mcp import MCPScanner
-from nexus_symbiote.scanners.ts_tools import MAX_SOURCE_BYTES
 
 IMPORT = 'import { McpServer as Server } from "@modelcontextprotocol/sdk/server/mcp.js";\n'
 SERVER = "const server = new Server({name: 'demo', version: '1'});\n"
@@ -143,11 +144,11 @@ def test_configured_source_exclusion_is_observed(tmp_path):
     assert any("excluded by collection policy" in x for x in result.surfaces_excluded)
 
 
-def test_source_byte_and_ast_limits_fail_without_partial_tools(tmp_path, monkeypatch):
-    result = _scan(tmp_path, IMPORT + SERVER + " " * MAX_SOURCE_BYTES)
+def test_source_byte_and_ast_limits_fail_without_partial_tools(tmp_path):
+    result = _scan(tmp_path, IMPORT + SERVER + " " * limits.DEFAULTS.syntax_bytes)
     assert not _tools(result) and result.scan_failures
-    monkeypatch.setattr("nexus_symbiote.scanners.ts_tools.MAX_AST_NODES", 10)
-    result = _scan(tmp_path, IMPORT + SERVER + 'server.tool("read", {}, handler);')
+    with limits.applied(replace(limits.DEFAULTS, ts_nodes=10)):
+        result = _scan(tmp_path, IMPORT + SERVER + 'server.tool("read", {}, handler);')
     assert not _tools(result) and result.scan_failures
 
 

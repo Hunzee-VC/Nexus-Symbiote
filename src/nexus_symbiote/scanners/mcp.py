@@ -13,7 +13,6 @@ and detects unpinned versions, missing transport security, and rug-pull risk.
 
 from __future__ import annotations
 
-import ast
 import hmac
 import ipaddress
 import os
@@ -46,7 +45,7 @@ from nexus_symbiote.core.models import (
     RiskAssessment,
     ToolComponent,
 )
-from nexus_symbiote.scanners.base import Scanner, ScanResult, parse_python, sanitized_origin
+from nexus_symbiote.scanners.base import Scanner, ScanResult, sanitized_origin
 from nexus_symbiote.utils.secrets import REDACTED, redact_descriptor, redact_text
 
 MCP_CONFIG_FILES = [
@@ -582,86 +581,9 @@ class MCPScanner(Scanner):
     def _scan_code_mcp_clients(self, root: Path, result: ScanResult) -> None:
         if self._files is None:
             raise RuntimeError("_scan_code_mcp_clients called outside a _collection context")
-        sources = list(self._files.iter_files())
-        from nexus_symbiote.scanners.python_tools import collect_python_tools
-        from nexus_symbiote.scanners.ts_tools import collect_typescript
+        from nexus_symbiote.scanners.mcp_sources import collect_source_references
 
-        collect_typescript(self._files, result, sources)
-        detected: list[str] = []
-        for suffix in (".py", ".ts", ".js"):
-            paths = [
-                path
-                for path in sources
-                if path.suffix == suffix
-                and (
-                    len(path.parts) == 1
-                    or suffix == ".py"
-                    and not {"tests", "test", "dist", "build"}.intersection(path.parts)
-                )
-            ]
-            if suffix == ".py":
-                paths.sort(key=lambda path: len(path.parts) > 1)
-            limit = 50 if suffix == ".py" else 10
-            if len(paths) > limit:
-                result.scan_failures.append(
-                    f"MCP {suffix} references: {limit}-file collection limit exceeded"
-                )
-            for path in paths[:limit]:
-                content = self._files.read_text(path)
-                if content is None:
-                    continue
-                if suffix == ".py" and len(path.parts) > 1 and "mcp" not in content:
-                    continue
-                result.surfaces_scanned.append(str(root / path))
-                if len(content.encode("utf-8")) > 262_144:
-                    result.scan_failures.append(f"{path}: syntax collection size limit exceeded")
-                    continue
-                if suffix == ".py":
-                    try:
-                        tree = parse_python(content)
-                    except (SyntaxError, ValueError, RecursionError):
-                        result.scan_failures.append(f"{path}: invalid Python syntax")
-                        continue
-                    collect_python_tools(tree, content, path, result)
-                    found = any(
-                        isinstance(node, ast.ImportFrom)
-                        and node.module is not None
-                        and node.module.split(".")[0] == "mcp"
-                        and any("Client" in alias.name for alias in node.names)
-                        for node in ast.walk(tree)
-                    ) or any(
-                        isinstance(node, ast.Call)
-                        and isinstance(node.func, ast.Name)
-                        and node.func.id == "MCPClient"
-                        for node in ast.walk(tree)
-                    )
-                else:
-                    # A bounded syntax hint, never a claim that an SDK is installed
-                    # or deployed. Strip comments and require the SDK import path.
-                    content = re.sub(r"/\*.*?\*/|(?m:^\s*//[^\n]*$)", "", content, flags=re.S)
-                    found = bool(
-                        re.search(
-                            r"(?:\bfrom\s*[\"']@modelcontextprotocol/sdk(?:/[^\"']*)?[\"']|"
-                            r"\brequire\s*\(\s*[\"']@modelcontextprotocol/sdk(?:/[^\"']*)?[\"'])",
-                            content,
-                        )
-                    )
-                if found:
-                    detected.append(str(root / path))
-        if detected:
-            result.components.append(
-                MCPClientComponent(
-                    bom_ref="mcp-client:sdk",
-                    name="MCP SDK client (code-detected)",
-                    host_application="sdk",
-                    source_path=detected[0],
-                    trust_tier=TrustTier.INTERNAL_UNVERIFIED,
-                    properties={
-                        "collection_mode": "static-source-reference",
-                        "source_paths": detected,
-                    },
-                )
-            )
+        collect_source_references(self._files, result)
 
     def _classify_side_effects(
         self, annotations: dict[str, Any], tool_name: str
