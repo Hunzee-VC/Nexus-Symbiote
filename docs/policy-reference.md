@@ -1,0 +1,152 @@
+# Policy reference
+
+A project policy selects collectors and sets the thresholds of the `scan`, `validate` and `risk` gates. It lives in the checkout it governs, so treat it as input from whoever can change that checkout.
+
+- [Where the policy comes from](#where-the-policy-comes-from)
+- [File format](#file-format)
+- [Settings](#settings)
+- [Suppressions](#suppressions)
+- [What `policy_weakened` reports](#what-policy_weakened-reports)
+- [Where the governing policy is recorded](#where-the-governing-policy-is-recorded)
+- [Not supported](#not-supported)
+- [Common errors](#common-errors)
+
+## Where the policy comes from
+
+| Command | Policy read from | Ignored with |
+| --- | --- | --- |
+| `scan PATH` | `PATH/.nexus-symbiote.yaml` or `PATH/.nexus-symbiote.yml` | `--no-project-policy` |
+| `validate`, `risk` | the directory named with `--project`; without `--project`, the built-in policy | `--no-project-policy` |
+| `baseline` | the scanned directory for collection, but the staged inventory is re-gated with the built-in risk policy | |
+
+A policy file in a parent directory, or beside an inventory file, is never applied; `validate` and `risk` name such a file on stderr when they did not apply it. When both `.nexus-symbiote.yaml` and `.nexus-symbiote.yml` exist, a command that reads the project policy refuses to run until one is removed, because either could silently shadow the other; `init` refuses too, and `init --force` overwrites the one file that exists. A symbolic link, a non-regular file or a file over 1 MiB is refused.
+
+The built-in policy is what you get with no file, or with `--no-project-policy`. Use `--no-project-policy` whenever the checkout must not choose your gates, for example for a pull request from an untrusted fork. The GitHub Action always passes it.
+
+## File format
+
+`nexus-symbiote init` writes the built-in policy with comments. Loading is strict and fails closed:
+
+- Unknown keys, duplicate keys and values of the wrong type are refused, and the error names the setting, for example `invalid or unsupported settings: risk (warn_threshold cannot exceed fail_threshold)`.
+- Booleans must be YAML booleans (`true`, `false`); the string `"false"` is refused.
+- `version` must be the string `"1.0"`. An unquoted `1.0` is a number and is refused.
+
+```yaml
+version: "1.0"
+scan:
+  scanners: ["mcp", "model", "prompt", "rag", "registry", "shadowscan", "a2a", "ide_agents"]
+  exclude_paths: ["node_modules", ".git", "__pycache__", ".venv"]
+  failure_mode: "error"
+risk:
+  fail_threshold: 50.0
+  warn_threshold: 25.0
+  fail_on_severity: "critical"
+  ignore_categories: []
+  suppressions: []
+validate:
+  require_completeness: true
+  require_integrity: true
+  minimum_assurance_level: "declared"
+  require_discovery_signature: false
+output:
+  default_format: "json"
+```
+
+## Settings
+
+| Key | Default | Effect |
+| --- | --- | --- |
+| `version` | `"1.0"` | Policy format version. Only `"1.0"` exists. |
+| `scan.scanners` | all eight collectors | Collectors `scan` runs. A collector left out is recorded as `unknown`, which leaves coverage partial, so the scan and risk gates fail; a subset is reported as weakened. `--scanner` overrides it for one run. |
+| `scan.exclude_paths` | `node_modules`, `.git`, `__pycache__`, `.venv` | Root-relative paths not collected. Directories named `.git`, `node_modules`, `__pycache__`, `.venv` or `venv` are always skipped whatever this list says, so the defaults change nothing. Any other entry that matches a file is recorded under `surfaces_excluded`: coverage becomes partial and the scan, validate and risk gates fail. Extra entries are reported as weakened. Absolute paths and `..` are refused. |
+| `scan.failure_mode` | `error` | `report-only` makes `scan` exit 0 whatever its gate says, like `--report-only`. Reported as weakened. |
+| `risk.fail_threshold` | `50.0` | The risk gate fails when the aggregate score (critical 10, high 7, medium 4, low 1, uncapped) reaches it. Must be positive. A higher value is reported as weakened. `risk --threshold` overrides it. |
+| `risk.warn_threshold` | `25.0`, or `fail_threshold` when that is lower | At or above it, `risk_level` is `high` instead of `moderate`, `warning_threshold_exceeded` is true and `scan` prints a risk warning. It never fails a gate. It may not exceed `fail_threshold`. A higher value is reported as weakened. |
+| `risk.fail_on_severity` | `critical` | The risk gate fails on any finding at or above this severity: `critical`, `high`, `medium`, `low` or `info`. `none` disables the severity check and is reported as weakened. `risk --fail-on-severity` overrides it. |
+| `risk.ignore_categories` | `[]` | Every finding of these exact category names, on every component, is left out of the score and the gates, and counted as `ignored_findings`. Prefer a [suppression](#suppressions). Reported as weakened. |
+| `risk.suppressions` | `[]` | Accept one finding category on one component; see [Suppressions](#suppressions). Each entry is reported as weakened. |
+| `validate.require_completeness` | `true` | `false` skips the completeness check, including reconciliation with `--project`, in `validate`. `risk --project` reconciles regardless. Reported as weakened. |
+| `validate.require_integrity` | `true` | `false` skips the integrity check in `validate`. Reported as weakened. |
+| `validate.minimum_assurance_level` | `declared` | `observed` makes `validate` fail unless every component is observed composition: its identity was measured from bytes (a weight, instruction, skill or static tool-descriptor digest), or a named collector observed it in the repository. Components that rest only on a supplier's or a discovery report's declaration, such as hosted-model aliases from `agent.yaml`, fail it; imported discovery claims that reconciliation bound to the local report are exempt. `verified` always fails, because offline validation cannot establish it. |
+| `validate.require_discovery_signature` | `false` | With `--project`, `validate` and `risk` require the operator signature policy (`--signature-policy`) to verify the ShadowScan report the inventory records, and fail when an inventory omits a report the project contains. Ignored, like the rest of the file, under `--no-project-policy`; pass `--require-discovery-signature` to require it from the command line instead. |
+| `output.default_format` | `json` | Output format of `scan` when `--format` is not given: `json`, `cyclonedx`, `spdx` or `sarif`. |
+
+### Category names
+
+`ignore_categories` and suppressions match category names exactly. Read them from the `category` field of `risk --json-output` findings. This version emits:
+
+`attestation`, `authentication`, `bidi_override`, `capability_scope`, `code_execution`, `completeness`, `data_integrity`, `detection_method`, `instruction_layering`, `invalid_safetensors`, `invisible_characters`, `mutable_image_tag`, `permission_scope`, `prompt_size`, `rag_discovery`, `serialization_format`, `serialization_format_unknown`, `shadowscan-heuristic`, `shadowscan-inventory-unmatched`, `signing_status`, `tag_characters`, `transport_security` and `version_pinning`.
+
+A name that matches no finding is accepted and has no effect.
+
+## Suppressions
+
+A suppression accepts one known false positive without switching off a whole category or gate:
+
+```yaml
+risk:
+  suppressions:
+    - component_ref: "model:fixtures/firmware.bin"
+      category: "serialization_format"
+      reason: "Test fixture, never loaded by the agent"
+      owner: "security@example.com"
+      expires: 2027-01-31
+```
+
+| Field | Rule |
+| --- | --- |
+| `component_ref` | The finding's exact `component_ref`, as `risk --json-output` prints it. No wildcards: `*` is refused. |
+| `category` | The finding's exact category. |
+| `reason` | Why the finding is acceptable. Required. |
+| `owner` | Who is accountable for the acceptance. Required. |
+| `expires` | A calendar date, `YYYY-MM-DD`, quoted or not. Required: there are no permanent suppressions. |
+
+Each component and category pair may appear once. A malformed entry makes the policy invalid, so every command fails and names the setting.
+
+How a suppression applies:
+
+- A finding whose component reference and category both match an entry that has not expired is left out of the score, the severity counts and every gate, including `fail_on_severity`. It is listed under `suppressed_findings` in `risk --json-output` with its severity, reason, owner and expiry, and human-readable `risk` prints how many findings were suppressed.
+- The same category on any other component still counts.
+- An entry expires at the end of its `expires` date (UTC). An expired entry suppresses nothing and fails the risk gate with the reason `suppression of CATEGORY on REF expired on DATE` until it is renewed or removed; it is listed under `suppressions_expired`.
+- An entry that matched no finding is listed under `suppressions_unused`.
+- `--no-project-policy` ignores all suppressions, and `baseline` re-gates with the built-in policy, so a suppression cannot promote a baseline.
+
+## What `policy_weakened` reports
+
+`policy_weakened` lists every setting that gates less strictly than the built-in policy or changes reported results:
+
+| Entry | Reported when |
+| --- | --- |
+| `validate.require_completeness=false`, `validate.require_integrity=false` | the check is switched off |
+| `risk.fail_on_severity=none` | the severity check is switched off |
+| `risk.fail_threshold=VALUE`, `risk.warn_threshold=VALUE` | raised above the built-in value |
+| `risk.ignore_categories=NAMES` | any category is ignored |
+| `risk.suppressions: CATEGORY on REF until DATE (owner OWNER)` | once per suppression |
+| `scan.failure_mode=report-only` | collection failures never fail `scan` |
+| `scan.scanners=NAMES` | fewer collectors than the built-in set |
+| `scan.exclude_paths=PATHS` | paths beyond the four defaults |
+
+Stricter values, such as a lower threshold or `fail_on_severity: high`, are not listed. Human-readable `scan`, `validate` and `risk` print the list on stderr as a warning.
+
+## Where the governing policy is recorded
+
+- `scan` writes `policy_source` (`built-in`, or `project:.nexus-symbiote.yaml`) and `policy_weakened` into the inventory's `metadata`, so the artifact itself shows a weakened gate.
+- `risk --json-output` reports `policy_source`, `policy_weakened` and a `gate` object with the effective `fail_threshold`, `warn_threshold`, `fail_on_severity`, `ignore_categories` and number of suppressions, each with its source: `cli`, `project policy` or `built-in`.
+- `validate` prints `Policy:` with the source.
+
+## Not supported
+
+- **Allow and deny rules.** A policy cannot list permitted MCP hosts, registries, transports or model providers, or deny a component. Gate on those with an external policy engine over the native inventory and `risk --json-output`.
+- **Wildcards and path globs** in suppressions or `ignore_categories`.
+- **An operator-owned policy file.** Use `--no-project-policy` with the caller-side options `--threshold`, `--fail-on-severity`, `--signature-policy` and `--require-discovery-signature`.
+- **Accepting an exclusion.** An excluded path is always a coverage gap.
+
+## Common errors
+
+| Message | Cause |
+| --- | --- |
+| `invalid or unsupported settings: risk (warn_threshold cannot exceed fail_threshold)` | Both thresholds are set and the warning threshold is the higher one. |
+| `invalid or unsupported settings: version` | `version: 1.0` without quotes. |
+| `invalid or unsupported settings: risk.suppressions.0.expires` | A date that is not `YYYY-MM-DD`, or a date with a time. |
+| `both .nexus-symbiote.yaml and .nexus-symbiote.yml exist` | Remove one of the two files. |
+| `Scan gate failed` after adding `exclude_paths` | Any matched exclusion beyond the defaults is a coverage gap. |

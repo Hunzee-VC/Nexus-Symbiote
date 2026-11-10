@@ -32,8 +32,11 @@ Configured tool entries retain their configuration source path and static
 collection mode. Validation compares their descriptor digest, fingerprint
 version and server reference with a fresh collection. Recomputing the digest of
 an edited supplied descriptor establishes only self-consistency and cannot make
-it match a different local declaration. An asserted live-observation claim does
-not substitute for the static configuration evidence.
+it match a different local declaration, so integrity counts a tool descriptor as
+verified only when it matches the tool collected from the project's MCP
+configuration; a descriptor that agrees only with its own recorded digest is
+reported as unknown. An asserted live-observation claim does not substitute for
+the static configuration evidence.
 
 ## A2A agent cards and client entries
 
