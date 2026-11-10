@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import ast
+import codecs
+import encodings
 import json
 import re
 import shutil
@@ -15,9 +18,11 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from nexus_symbiote import limits
-from nexus_symbiote.core.models import MCPClientComponent
+from nexus_symbiote.core.hashing import hash_bytes
+from nexus_symbiote.core.models import MCPClientComponent, ToolComponent
 from nexus_symbiote.scanners.mcp import MCPScanner
 from nexus_symbiote.scanners.mcp_sources import strip_js_comments
+from nexus_symbiote.utils.confined import MAX_LISTED_FAILURES
 
 REPOSITORY = Path(__file__).resolve().parents[1]
 CLIENT_PY = "from mcp import ClientSession\n"
@@ -305,6 +310,131 @@ def test_a_byte_order_mark_does_not_make_python_source_invalid(tmp_path):
     result = MCPScanner().scan(tmp_path)
     assert result.scan_failures == []
     assert _client(result) is not None
+
+
+def _utf16(text: str, codec: str) -> bytes:
+    marks = {"utf-16-le": codecs.BOM_UTF16_LE, "utf-16-be": codecs.BOM_UTF16_BE}
+    return marks[codec] + text.encode(codec, "surrogatepass")
+
+
+def _python_x_imports(source: bytes) -> list[str | None]:
+    """What `python -x` imports: it skips through the first line feed, then reads on."""
+    tree = ast.parse(source[source.index(b"\n") :])
+    return [node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)]
+
+
+SCRIPTS = {
+    "client.ts": 'import { Client } from "@modelcontextprotocol/sdk/client/index.js";\n'
+    'const client = new Client({ name: "agent", version: "1.0.0" });\n',
+    "agent.js": CLIENT_JS,
+    "server.ts": SERVER_TS,
+    "src/server.ts": SERVER_TS,
+}
+
+
+@pytest.mark.parametrize("codec", ["utf-16-le", "utf-16-be"])
+@pytest.mark.parametrize("location", SCRIPTS)
+def test_scripts_are_searched_as_tsc_decodes_them(tmp_path, location, codec):
+    # tsc decodes a file that starts with a UTF-16 byte order mark as UTF-16, and bun
+    # runs the little-endian form; a byte search saw no reference in these files.
+    plain, wide = tmp_path / "plain", tmp_path / "wide"
+    _write(plain, location, SCRIPTS[location])
+    _write(wide, location, _utf16(SCRIPTS[location], codec))
+    expected, result = MCPScanner().scan(plain), MCPScanner().scan(wide)
+    assert result.scan_failures == []
+    assert result.surfaces_excluded == []
+    assert result.surfaces_scanned == expected.surfaces_scanned
+
+    def described(scan):
+        return [
+            (c.bom_ref, c.name, {k: v for k, v in c.properties.items() if k != "source_sha256"})
+            for c in scan.components
+        ]
+
+    assert described(result) == described(expected) != []
+    for tool in (c for c in result.components if isinstance(c, ToolComponent)):
+        assert tool.properties["source_sha256"] == hash_bytes((wide / location).read_bytes())
+
+
+def test_a_script_is_held_to_the_encoding_it_is_read_in(tmp_path):
+    latin = "export const name = 'café';\n".encode("latin-1")
+    _write(tmp_path, "util.ts", latin)
+    _write(tmp_path, "util.js", latin)
+    # Nested sources are searched by bytes only, as earlier releases did.
+    _write(tmp_path, "src/util.ts", latin)
+    _write(tmp_path, "wide.ts", _utf16("export const x = 1;\n", "utf-16-le"))
+    _write(tmp_path, "wide.js", _utf16("module.exports = '\ud800';\n", "utf-16-be"))
+    _write(tmp_path, "lone.js", _utf16("// \ud800\n" + CLIENT_JS, "utf-16-le"))
+    _write(tmp_path, "server.ts", SERVER_TS.encode() + b"// caf\xe9\n")
+    result = MCPScanner().scan(tmp_path)
+    assert sorted(result.scan_failures) == [
+        "lone.js: invalid UTF-16",
+        "server.ts: invalid UTF-8",
+        "util.js: invalid UTF-8",
+        "util.ts: invalid UTF-8",
+    ]
+    assert result.components == []
+
+
+def test_a_declaration_python_x_reads_after_a_line_of_code_is_a_failure(tmp_path):
+    payload = b"from +AG0AYwBw-.client import Client\n"
+    fullwidth = "".join(chr(ord(letter) + 0xFEE0) for letter in "mcp")
+    hidden = {
+        "agent.py": b"import sys\n# coding: utf-7\n" + payload,
+        # -x skips through the first line feed, whatever the line endings before it.
+        "pkg/carriage.py": b"x = 1\r# coding: latin-1\ry = 2\n# coding: utf-7\n" + payload,
+        # Declared latin-1 on line 1; -x reads the rest as UTF-8.
+        "pkg/wide.py": b"# coding: latin-1\n" + f"from {fullwidth}.client import Client\n".encode(),
+    }
+    unchanged = {
+        "pkg/third.py": b"x = 1\n#\n# coding: utf-7\n" + payload,
+        "pkg/same.py": b"import os\n# -*- coding: utf-8 -*-\nname = 'caf\xc3\xa9'\n",
+        "pkg/legacy.py": b"# coding: latin-1\nname = 'caf\xe9'\n",
+        "pkg/ascii.py": b"import os\n# coding: latin-1\nname = 'plain'\n",
+    }
+    for location, source in {**hidden, **unchanged}.items():
+        _write(tmp_path, location, source)
+    assert all(_python_x_imports(source) == ["mcp.client"] for source in hidden.values())
+    result = MCPScanner().scan(tmp_path)
+    assert sorted(result.scan_failures) == [
+        f"{location}: unsupported source encoding declaration" for location in sorted(hidden)
+    ]
+    assert result.components == []
+
+
+def test_a_name_too_long_for_any_codec_is_refused_without_a_lookup(tmp_path):
+    # The codec registry spends time per character on a name and keeps every name
+    # it failed to find; 63 such 4 MiB names left 252 MiB behind after a scan.
+    for index in range(3):
+        name = f"n{index}" + "x" * limits.MIB
+        _write(tmp_path, f"long{index}.py", b"# coding: " + name.encode() + b"\n")
+    _write(tmp_path, "pkg/second.py", b"#!/usr/bin/env python\n# coding: " + b"y" * 65 + b"\n")
+    _write(tmp_path, "pkg/skipped.py", b"x = 1\n# coding: " + b"z" * 65 + b"\n")
+    _write(tmp_path, "pkg/utf8.py", b"# coding: utf-8-" + b"u" * limits.MIB + b"\nVALUE = 1\n")
+    cache = getattr(encodings, "_cache", {})
+    before = sum(len(key) for key in cache)
+    started = time.monotonic()
+    failures = MCPScanner().scan(tmp_path).scan_failures
+    assert time.monotonic() - started < 5
+    assert sum(len(key) for key in cache) - before < 1_000
+    assert sorted(failures) == [
+        "long0.py: unsupported source encoding declaration",
+        "long1.py: unsupported source encoding declaration",
+        "long2.py: unsupported source encoding declaration",
+        "pkg/second.py: unsupported source encoding declaration",
+        "pkg/skipped.py: unsupported source encoding declaration",
+    ]
+
+
+def test_failures_of_the_source_search_are_listed_within_the_listing_bounds(tmp_path):
+    for index in range(MAX_LISTED_FAILURES + 50):
+        _write(tmp_path, f"pkg/m{index:04d}.py", b"# coding: utf-7\n")
+    failures = MCPScanner().scan(tmp_path).scan_failures
+    assert len(failures) == MAX_LISTED_FAILURES + 1
+    assert failures[-1] == (
+        f"pkg/m{MAX_LISTED_FAILURES:04d}.py: unsupported source encoding declaration "
+        "(and 49 more not listed)"
+    )
 
 
 def test_the_repository_itself_passes_the_mcp_collector():

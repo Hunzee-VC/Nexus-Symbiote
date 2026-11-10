@@ -13,7 +13,14 @@ models/llama/model.gguf: model-bytes limit of 64 GiB exceeded; raise it with --l
 ```
 
 The failures are recorded under `metadata.completeness.scan_failures` in the
-native inventory, and `validate` prints them.
+native inventory, and `validate` prints them. A walk, or the mcp collector's
+source search, can fail once for every entry, so each collector lists such
+failures only up to a [fixed bound](#fixed-bounds) and then adds one line for each
+reason, naming the first path it did not list:
+
+```text
+vendor/links/l01000: symlink excluded (and 93999 more not listed)
+```
 
 Raising a limit moves the point where collection stops. It never turns a reported
 stop into a silent one and never relaxes a gate, and lowering one can only add
@@ -86,30 +93,56 @@ Which source files the mcp collector searches is unchanged: Python files outside
 directories named `tests`, `test`, `dist` and `build`; TypeScript files outside
 `tests`, `test`, `__tests__`, `dist` and `build`, other than `.d.ts`, `.spec.ts`
 and `.test.ts` files; and `.ts` and `.js` files at the project root. Each is read
-as a stream, and only candidates are parsed:
+as a stream, in the text the language's own tools read, and only candidates are
+parsed:
 
 - A Python file is a candidate when it contains `mcp` or `MCPClient` as Python
   reads it: decoded as its encoding declaration says, with identifiers in the NFKC
   form Python compares them in, so fullwidth or other compatibility letters count.
 - A TypeScript server file is a candidate when it contains both
   `@modelcontextprotocol/` and `McpServer`, and a root-level client reference when
-  it contains `@modelcontextprotocol/sdk`.
+  it contains `@modelcontextprotocol/sdk`. A TypeScript or JavaScript file that
+  starts with a UTF-16 byte order mark is searched and parsed as UTF-16, as tsc
+  and web browsers read it (bun reads only the little-endian form); any other is
+  read as UTF-8, as tsc, Node.js and bun read it. That includes UTF-16 without a
+  byte order mark, which a web server or page can declare but static reading
+  cannot see.
 
 These are failures rather than silent skips:
 
 - A Python file whose encoding declaration names a codec that does not read ASCII
   as ASCII, such as `utf-7`, `unicode_escape`, UTF-16, ISO-2022 or an unknown
-  codec. Such a file can spell a reference in a form that static reading cannot
-  follow, and Python decodes it differently when it is run as a script and when it
-  is imported. Single-byte code pages such as `latin-1` and `cp1252`, and the
-  stateless multibyte codecs such as `shift_jis` and `gbk`, are followed.
+  codec, or a name longer than 64 characters, which no codec has. Such a file can
+  spell a reference in a form that static reading cannot follow, and Python
+  decodes it differently when it is run as a script and when it is imported.
+  Single-byte code pages such as `latin-1` and `cp1252`, and the stateless
+  multibyte codecs such as `shift_jis` and `gbk`, are followed.
+- A Python file that `python -x` reads in another way. That option skips the
+  first line through its line feed, so the line after it can declare a codec even
+  when the first line is code. A declaration there that is not followed, or a
+  different codec under which the rest of the file is valid and names the SDK,
+  is the failure `unsupported source encoding declaration`.
 - A Python file that is not valid in its encoding (`invalid UTF-8` when it
   declares none).
+- A root-level `.ts` or `.js` file without a UTF-16 byte order mark that is not
+  valid UTF-8, as in earlier releases (`invalid UTF-8`), and a candidate that is
+  not valid in its encoding (`invalid UTF-8` or `invalid UTF-16`). tsc would read
+  such a file with replacement characters, but another runtime could decode it
+  differently. A TypeScript file below the root that is not a candidate is not
+  checked for valid UTF-8, as before.
 - A candidate larger than `syntax-bytes`, which is not parsed.
 - A source file larger than `file-bytes` that is a candidate, or that is a Python
   file that is not plain ASCII, because its NFKC form cannot be searched without
-  holding it. Plain ASCII sources of any size, such as generated protocol buffer
-  modules or bundles, are searched as a stream and pass.
+  holding it.
+- A plain ASCII Python file larger than `file-bytes` whose codec is unknown,
+  because a line that can declare it starts as a comment and does not end in
+  time: the first line, or the second after a blank or comment first line, within
+  the first `file-bytes` of the file, or the line after the first line feed, which
+  `python -x` reads, within `file-bytes` of that line feed. For example, a first
+  line of `# ` and 5 MiB of text fails with the default limits.
+
+Other plain ASCII sources of any size, such as generated protocol buffer modules
+or bundles, are searched as a stream and pass.
 
 An import of the Python MCP server SDK spelled only with compatibility characters
 is recorded as a gap, because its servers and tools are not collected. Only files
@@ -143,12 +176,15 @@ the [README](../README.md) recommends.
 
 ## Fixed bounds
 
-These bounds protect a format rather than size a project, so they are not
-operator settings. Reaching one is also a scan failure or a refusal that names
-the file.
+These bounds protect a format or the inventory rather than size a project, so
+they are not operator settings. Reaching one is also a scan failure or a refusal
+that names the file, except the listing bound in the first row, which only
+shortens a list of failures that are recorded anyway.
 
 | Bound | Value |
 |---|---|
+| Failures one collector lists from its walks, and from the mcp collector's source search, before one line for each reason sums up the rest | 1,000 lines or 65,536 characters |
+| Codec name in a Python encoding declaration | 64 characters |
 | MCP tool registrations in one TypeScript file | 1,000 |
 | TypeScript native parse time per file | 250 ms, in proportion to `syntax-bytes` above its default |
 | TypeScript analysis time per file | 2 s, in proportion to `ts-nodes` above its default |

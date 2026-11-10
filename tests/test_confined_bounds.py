@@ -20,7 +20,11 @@ from nexus_symbiote.scanners.mcp import MCPScanner
 from nexus_symbiote.scanners.model import ModelScanner
 from nexus_symbiote.scanners.prompt import PromptScanner
 from nexus_symbiote.scanners.rag import RAGScanner
-from nexus_symbiote.utils.confined import ConfinedCollection
+from nexus_symbiote.utils.confined import (
+    MAX_LISTED_FAILURE_CHARACTERS,
+    MAX_LISTED_FAILURES,
+    ConfinedCollection,
+)
 
 
 def _undecodable(directory: Path, raw: bytes, content: bytes = b"x = 1\n") -> Path:
@@ -191,13 +195,95 @@ def test_a_walk_records_tens_of_thousands_of_messages_in_linear_time(tmp_path):
     with ConfinedCollection(tmp_path, failures) as files:
         assert list(files.iter_files()) == [Path("target")]
     assert time.monotonic() - started < 8
-    assert len(failures) == count
+    assert len(failures) == MAX_LISTED_FAILURES + 1
+    assert failures[-1] == f"l01000: symlink excluded (and {count - 1_001} more not listed)"
     exclusions: list[str] = []
     started = time.monotonic()
     with ConfinedCollection(tmp_path, [], exclusions, exclude_paths=names) as files:
         assert list(files.iter_files()) == [Path("target")]
     assert time.monotonic() - started < 8
+    # Each exclusion names a path of the operator's policy, so their text is bounded already.
     assert len(exclusions) == count
+
+
+def test_failures_past_the_listing_bounds_are_summarized_by_reason(tmp_path):
+    (tmp_path / "target").write_text("x")
+    for index in range(MAX_LISTED_FAILURES + 20):
+        os.symlink("target", tmp_path / f"l{index:05d}")
+    os.mkfifo(tmp_path / "pipe")
+    failures: list[str] = []
+    with ConfinedCollection(tmp_path, failures) as files:
+        list(files.iter_files())
+        with files.bounded_failures():
+            assert files.read_bytes("missing.json") is None
+            assert files.read_bytes("other.json") is None
+        assert files.read_bytes("outside.json") is None
+    assert failures[: MAX_LISTED_FAILURES + 1] == [
+        *(f"l{index:05d}: symlink excluded" for index in range(MAX_LISTED_FAILURES)),
+        f"l{MAX_LISTED_FAILURES:05d}: symlink excluded (and 19 more not listed)",
+    ]
+    # Every reason is still recorded, and failures outside a bounded block are listed.
+    assert failures[MAX_LISTED_FAILURES + 1 :] == [
+        "pipe: nonregular file excluded",
+        "missing.json: file unavailable during collection (and 1 more not listed)",
+        "outside.json: file unavailable during collection",
+    ]
+
+
+def test_long_paths_are_listed_only_up_to_the_character_bound(tmp_path):
+    (tmp_path / "target").write_text("x")
+    for index in range(2_000):
+        os.symlink("target", tmp_path / (f"l{index:04d}" + "x" * 240))
+    failures: list[str] = []
+    with ConfinedCollection(tmp_path, failures) as files:
+        list(files.iter_files())
+    assert sum(len(failure) for failure in failures[:-1]) <= MAX_LISTED_FAILURE_CHARACTERS
+    assert len(failures) < 300
+    assert failures[-1].endswith("more not listed)")
+
+
+def test_every_walk_that_meets_a_failure_still_adds_one(tmp_path):
+    # Collectors compare the failure count before and after a walk to learn whether
+    # the listing they got is complete; that must hold past the listing bound.
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    (tmp_path / "a" / "target").write_text("x")
+    (tmp_path / "b" / "target").write_text("x")
+    for index in range(MAX_LISTED_FAILURES + 5):
+        os.symlink("target", tmp_path / "a" / f"l{index:05d}")
+    os.symlink("target", tmp_path / "b" / "link")
+    failures: list[str] = []
+    with ConfinedCollection(tmp_path, failures) as files:
+        assert list(files.iter_files("a")) == [Path("a/target")]
+        before = len(failures)
+        assert list(files.iter_files("b")) == [Path("b/target")]
+        assert len(failures) == before + 1
+    assert failures[-2:] == [
+        f"a/l{MAX_LISTED_FAILURES:05d}: symlink excluded (and 4 more not listed)",
+        "b/link: symlink excluded",
+    ]
+
+
+def test_a_tree_of_failing_entries_still_yields_an_inventory_that_loads(tmp_path):
+    # Every walking collector failed once per symlink: 20,000 long names made a 23 MB
+    # inventory that validate, risk and diff refused to read.
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "target").write_text("x")
+    for index in range(20_000):
+        os.symlink("target", project / (f"l{index:05d}" + "x" * 195))
+    output = tmp_path / "out.json"
+    runner = CliRunner()
+    scan = ["scan", str(project), "--no-project-policy", "--report-only", "-o", str(output)]
+    assert runner.invoke(main, scan).exit_code == 0
+    assert output.stat().st_size < 2 * limits.MIB
+    claim = AIBOM.load(output).metadata.completeness
+    assert claim is not None
+    summaries = [failure for failure in claim.scan_failures if "more not listed" in failure]
+    assert summaries
+    assert all(": symlink excluded (and " in failure for failure in summaries)
+    result = runner.invoke(main, ["validate", str(output)])
+    assert "not a valid native AIBOM file" not in result.output
 
 
 def test_messages_are_recorded_once_even_when_the_caller_appends_too(tmp_path):

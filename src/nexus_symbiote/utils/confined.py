@@ -30,6 +30,11 @@ MAX_DEPTH = limits.DEFAULTS.depth
 MAX_TOTAL_BYTES = limits.DEFAULTS.total_bytes
 MAX_HASH_BYTES = limits.DEFAULTS.model_bytes
 DEFAULT_EXCLUDES = frozenset({".git", "node_modules", "__pycache__", ".venv", "venv"})
+# A walk, or a search of every source file, can fail once per entry. Past these
+# bounds one collection lists further such failures as one line per reason, so a
+# tree that reaches its limits still yields an inventory that loads and names them.
+MAX_LISTED_FAILURES = 1_000
+MAX_LISTED_FAILURE_CHARACTERS = 64 * 1024
 _MAX_CHUNK_BYTES = 4 * 1024 * 1024
 
 
@@ -87,15 +92,43 @@ class _MessageLog:
         self._seen = set(messages)
         self._synced = len(messages)
 
-    def add(self, message: str) -> None:
+    def _sync(self) -> None:
         if len(self.messages) < self._synced:
             self._seen = set(self.messages)
         else:
             self._seen.update(self.messages[self._synced :])
-        if message not in self._seen:
-            self._seen.add(message)
-            self.messages.append(message)
         self._synced = len(self.messages)
+
+    def __contains__(self, message: str) -> bool:
+        self._sync()
+        return message in self._seen
+
+    def add(self, message: str) -> bool:
+        """Append ``message`` unless it is already listed; say whether it was appended."""
+        self._sync()
+        if message in self._seen:
+            return False
+        self._seen.add(message)
+        self.messages.append(message)
+        self._synced = len(self.messages)
+        return True
+
+
+class _Unlisted:
+    """Failures past the listing bounds: per reason, the first path and how many there were."""
+
+    def __init__(self) -> None:
+        self._first: dict[str, str] = {}
+        self._count: dict[str, int] = {}
+
+    def add(self, path: str, reason: str) -> None:
+        self._first.setdefault(reason, path)
+        self._count[reason] = self._count.get(reason, 0) + 1
+
+    def lines(self) -> Iterator[str]:
+        for reason, first in self._first.items():
+            more = self._count[reason] - 1
+            yield f"{first}: {reason}" + (f" (and {more} more not listed)" if more else "")
 
 
 def _undecodable(name: str) -> bool:
@@ -229,6 +262,9 @@ class ConfinedCollection:
         self.exclusions = exclusions if exclusions is not None else []
         self._failure_log = _MessageLog(self.failures)
         self._exclusion_log = _MessageLog(self.exclusions)
+        self._listed = 0
+        self._listed_characters = 0
+        self._unlisted: _Unlisted | None = None
         self._file_bound = _bound(max_file_bytes, "file-bytes")
         self._entry_bound = _bound(max_entries, "entries")
         self._depth_bound = _bound(max_depth, "depth")
@@ -283,7 +319,46 @@ class ConfinedCollection:
             self._root_fd = None
 
     def _fail(self, path: str | Path, reason: str) -> None:
-        self._failure_log.add(f"{path!s}: {reason}")
+        self._record(path, reason, self._unlisted)
+
+    def _record(self, path: str | Path, reason: str, unlisted: _Unlisted | None) -> None:
+        """List a failure once; with ``unlisted``, only within the collection's listing bounds."""
+        message = f"{path!s}: {reason}"
+        if unlisted is None:
+            self._failure_log.add(message)
+        elif (
+            self._listed < MAX_LISTED_FAILURES
+            and self._listed_characters + len(message) <= MAX_LISTED_FAILURE_CHARACTERS
+        ):
+            if self._failure_log.add(message):
+                self._listed += 1
+                self._listed_characters += len(message)
+        elif message not in self._failure_log:
+            unlisted.add(str(path), reason)
+
+    def _summarize(self, unlisted: _Unlisted) -> None:
+        for line in unlisted.lines():
+            self._failure_log.add(line)
+
+    @contextmanager
+    def bounded_failures(self) -> Iterator[None]:
+        """List the failures recorded in the block only within the listing bounds.
+
+        For work that can fail once per file, such as searching every source file.
+        Once the collection has listed ``MAX_LISTED_FAILURES`` such failures or
+        ``MAX_LISTED_FAILURE_CHARACTERS`` of them, later ones are counted by reason,
+        and the block ends with one line per reason that names the first path not
+        listed and how many more there were. Every reason is still recorded.
+        """
+        if self._unlisted is not None:
+            yield
+            return
+        unlisted = self._unlisted = _Unlisted()
+        try:
+            yield
+        finally:
+            self._unlisted = None
+            self._summarize(unlisted)
 
     def _relative(self, path: str | Path) -> Path:
         candidate = Path(path)
@@ -587,25 +662,34 @@ class ConfinedCollection:
             return
         if self.excluded(relative) or self._root_fd is None:
             return
+        # Each walk ends with its own summary lines, so a caller comparing the failure
+        # count before and after a walk sees every walk that met a failure.
+        unlisted = _Unlisted()
         fd = os.dup(self._root_fd)
         try:
             for part in relative.parts:
                 next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
                 os.close(fd)
                 fd = next_fd
-            yield from self._walk(fd, relative, 0, self._entry_budget)
+            yield from self._walk(fd, relative, 0, self._entry_budget, unlisted)
         except FileNotFoundError:
             return
         except OSError:
             self._fail(relative, "directory unavailable or contains a symlink")
         finally:
             os.close(fd)
+            self._summarize(unlisted)
 
     def _walk(
-        self, directory_fd: int, relative: Path, depth: int, budget: list[int]
+        self,
+        directory_fd: int,
+        relative: Path,
+        depth: int,
+        budget: list[int],
+        unlisted: _Unlisted,
     ) -> Iterator[Path]:
         if depth > self.max_depth:
-            self._fail(relative, self._depth_bound.exceeded())
+            self._record(relative, self._depth_bound.exceeded(), unlisted)
             return
         if self._entries_exhausted:
             return
@@ -622,14 +706,18 @@ class ConfinedCollection:
                 if _undecodable(name):
                     # A surrogate-escaped name cannot be written to, or read back from,
                     # an inventory; the entry and anything beneath it are a gap.
-                    self._fail(relative / _escaped(name), "name is not valid UTF-8; not collected")
+                    self._record(
+                        relative / _escaped(name),
+                        "name is not valid UTF-8; not collected",
+                        unlisted,
+                    )
                     continue
                 child = relative / name
                 if self.excluded(child):
                     continue
                 metadata = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
                 if stat.S_ISLNK(metadata.st_mode):
-                    self._fail(child, "symlink excluded")
+                    self._record(child, "symlink excluded", unlisted)
                 elif stat.S_ISDIR(metadata.st_mode):
                     child_fd = os.open(
                         name,
@@ -637,12 +725,12 @@ class ConfinedCollection:
                         dir_fd=directory_fd,
                     )
                     try:
-                        yield from self._walk(child_fd, child, depth + 1, budget)
+                        yield from self._walk(child_fd, child, depth + 1, budget, unlisted)
                     finally:
                         os.close(child_fd)
                 elif stat.S_ISREG(metadata.st_mode):
                     yield child
                 else:
-                    self._fail(child, "nonregular file excluded")
+                    self._record(child, "nonregular file excluded", unlisted)
         except OSError:
-            self._fail(relative, "directory changed or could not be read")
+            self._record(relative, "directory changed or could not be read", unlisted)

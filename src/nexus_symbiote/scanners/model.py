@@ -288,7 +288,8 @@ class ModelScanner(Scanner):
 
     def __init__(self, signature_policies: Sequence[SigstoreArtifactPolicy] = ()) -> None:
         self._signature_policies = {p.artifact_path.resolve(): p for p in signature_policies}
-        self._discovered_paths: tuple[Path, ...] = ()
+        self._discovered_paths: frozenset[Path] = frozenset()
+        self._model_files: dict[Path, list[Path]] = {}
         if len(self._signature_policies) != len(signature_policies):
             raise ValueError("Duplicate artifact signature policies")
 
@@ -299,10 +300,15 @@ class ModelScanner(Scanner):
         with self._collection(
             project_root, result, max_total_bytes=limits.bound("model-total-bytes")
         ) as files:
-            self._discovered_paths = tuple(files.root / path for path in files.iter_files())
-            model_dirs = sorted(
-                {path.parent for path in self._discovered_paths if model_format(path) is not None}
-            )
+            # Index the walk once: a scan of every entry for each model directory and
+            # each sibling name made the collector quadratic in the entries limit.
+            discovered = [files.root / path for path in files.iter_files()]
+            self._discovered_paths = frozenset(discovered)
+            self._model_files = {}
+            for path in discovered:
+                if model_format(path) is not None:
+                    self._model_files.setdefault(path.parent, []).append(path)
+            model_dirs = sorted(self._model_files)
             if not model_dirs and not result.scan_failures and not result.surfaces_excluded:
                 result.surfaces_scanned.append("model-weights (no model files found)")
             for model_dir in model_dirs:
@@ -320,9 +326,7 @@ class ModelScanner(Scanner):
 
         if self._files is None:
             raise RuntimeError("_scan_model_directory called outside a _collection context")
-        for path in self._discovered_paths:
-            if path.parent != model_dir:
-                continue
+        for path in self._model_files.get(model_dir, []):
             detected = model_format(path)
             if detected is None:
                 continue

@@ -11,6 +11,7 @@ analysis deadline. They are not isolated in a separate process.
 
 from __future__ import annotations
 
+import codecs
 import re
 import time
 import warnings
@@ -32,6 +33,9 @@ from nexus_symbiote.scanners.base import ScanResult
 _MODULES = {"@modelcontextprotocol/server", "@modelcontextprotocol/sdk/server/mcp.js"}
 _IGNORED = {"dist", "build", "__tests__", "tests", "test"}
 SERVER_MARKERS = (b"@modelcontextprotocol/", b"McpServer")
+# tsc and web browsers decode a source file that starts with a UTF-16 byte order
+# mark as UTF-16 (bun only the little-endian form), and any other file as UTF-8.
+UTF16_BYTE_ORDER_MARKS = {codecs.BOM_UTF16_LE: "utf-16-le", codecs.BOM_UTF16_BE: "utf-16-be"}
 MAX_REGISTRATIONS = 1_000
 # Time bounds for the default size limits; they grow in proportion when an
 # operator raises syntax-bytes or ts-nodes, so a larger file is not refused for time.
@@ -50,6 +54,15 @@ def is_server_source(path: Path) -> bool:
         and not _IGNORED.intersection(path.parts)
         and not path.name.endswith((".d.ts", ".spec.ts", ".test.ts"))
     )
+
+
+def source_text(content: bytes) -> str:
+    """The text tsc reads from one complete source file; a ValueError says why there is none."""
+    encoding = UTF16_BYTE_ORDER_MARKS.get(content[:2])
+    try:
+        return content.decode("utf-8") if encoding is None else content[2:].decode(encoding)
+    except UnicodeDecodeError:
+        raise _RefusedError("invalid UTF-8" if encoding is None else "invalid UTF-16") from None
 
 
 def _value(node: Node | None) -> str:
@@ -298,7 +311,9 @@ def _parser(seconds: float) -> Parser:
 
 
 def _collect_source(content: bytes, path: Path, result: ScanResult) -> None:
-    content.decode("utf-8")
+    text = source_text(content)
+    # The parser reads UTF-8; the file digest stays that of the bytes as stored.
+    source = content if content[:2] not in UTF16_BYTE_ORDER_MARKS else text.encode("utf-8")
     settings = limits.current()
     nodes = limits.bound("ts-nodes")
     parse_seconds = MAX_PARSE_SECONDS * max(
@@ -307,7 +322,7 @@ def _collect_source(content: bytes, path: Path, result: ScanResult) -> None:
     analysis_seconds = MAX_ANALYSIS_SECONDS * max(1.0, nodes.value / limits.DEFAULTS.ts_nodes)
     deadline = time.monotonic() + parse_seconds
     parser = _parser(parse_seconds)
-    tree = parser.parse(content)
+    tree = parser.parse(source)
     if tree is None or time.monotonic() >= deadline:
         raise _RefusedError("TypeScript parsing exceeded its time limit")
     root = tree.root_node

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -93,3 +94,21 @@ def test_agent_manifest_models_follow_the_model_limit(tmp_path):
     assemble()
     with limits.applied(replace(limits.DEFAULTS, model_bytes=256)), pytest.raises(PolicyError):
         assemble()
+
+
+def test_many_model_directories_are_scanned_in_linear_time(tmp_path):
+    # Each model directory scanned every entry of the walk, several times: with the
+    # entries default of 100,000 a crafted tree held the collector for 15 minutes.
+    for index in range(1_000):
+        directory = tmp_path / "models" / f"m{index:04d}"
+        directory.mkdir(parents=True)
+        (directory / "model.onnx").write_bytes(b"")
+    filler = tmp_path / "filler"
+    filler.mkdir()
+    for index in range(10_000):
+        (filler / f"f{index:05d}.txt").write_bytes(b"")
+    started = time.monotonic()
+    result = ModelScanner().scan(tmp_path)
+    assert time.monotonic() - started < 15
+    assert len(result.components) == 1_000
+    assert result.components[0].name == "m0000/model.onnx"

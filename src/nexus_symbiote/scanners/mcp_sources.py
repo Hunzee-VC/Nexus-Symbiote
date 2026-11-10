@@ -3,11 +3,12 @@
 Only files that contain an MCP SDK marker are parsed. Finding them is a streaming
 search under its own byte budget, so unrelated source files, however large, count
 toward no limit and appear nowhere in the inventory. Python source is searched as
-CPython reads it: decoded as its encoding declaration says, with identifiers
-compared in NFKC form. A declaration whose decoding static reading cannot follow
-is a failure. A file is listed as a scanned surface only when it produced a
-component, a gap or a failure. Every limit that stops collection is a scan failure
-naming the limit and the path.
+CPython reads it: decoded as its encoding declaration says, also as ``python -x``
+reads it, with identifiers compared in NFKC form. A declaration whose decoding
+static reading cannot follow is a failure. TypeScript and JavaScript are searched
+as tsc reads them: UTF-16 after a UTF-16 byte order mark, otherwise UTF-8. A file is
+listed as a scanned surface only when it produced a component, a gap or a failure.
+Every limit that stops collection is a scan failure naming the limit and the path.
 """
 
 from __future__ import annotations
@@ -32,8 +33,10 @@ from nexus_symbiote.scanners.base import ScanResult, parse_python
 from nexus_symbiote.scanners.python_tools import collect_python_tools
 from nexus_symbiote.scanners.ts_tools import (
     SERVER_MARKERS,
+    UTF16_BYTE_ORDER_MARKS,
     collect_typescript_source,
     is_server_source,
+    source_text,
 )
 from nexus_symbiote.utils.confined import CollectionError, ConfinedCollection
 
@@ -43,6 +46,9 @@ _PYTHON_NEEDLES = frozenset(marker.encode() for marker in _PYTHON_MARKERS)
 _CLIENT_MARKER = b"@modelcontextprotocol/sdk"
 _NEEDLES = (*_PYTHON_NEEDLES, *SERVER_MARKERS, _CLIENT_MARKER)
 _OVERLAP = max(len(needle) for needle in _NEEDLES) - 1
+_SCRIPT_SUFFIXES = frozenset({".ts", ".js"})
+_SCRIPT_MARKERS = {needle.decode(): needle for needle in (*SERVER_MARKERS, _CLIENT_MARKER)}
+_TEXT_OVERLAP = max(len(marker) for marker in _SCRIPT_MARKERS) - 1
 _CHUNK_BYTES = 1024 * 1024
 _SDK_IMPORT = re.compile(
     r"(?:\bfrom\s*[\"']@modelcontextprotocol/sdk(?:/[^\"']*)?[\"']|"
@@ -52,6 +58,13 @@ _NEXT = re.compile(r"/\*|\n")
 _SPACE = re.compile(r"\s*")
 _LINE = re.compile(rb"([^\r\n]*)(\r\n|\r|\n)?")
 _MAY_DECLARE = re.compile(rb"[ \t\f]*(?:#|\Z)")
+_LINE_END = re.compile(rb"[\r\n]")
+# tokenize's declaration expression; bytes patterns match ASCII names only, as CPython does.
+_COOKIE = re.compile(rb"[ \t\f]*#.*?coding[:=][ \t]*([-\w.]+)")
+_LATIN_1 = ("latin-1", "iso-8859-1", "iso-latin-1")
+# Longer than any codec name or alias. A lookup costs time per character, and the
+# codec registry keeps every name it failed to find for the life of the process.
+_MAX_CODEC_NAME = 64
 _FOLD_SLICE = 4096
 _FOLD_TAIL = max(len(marker) for marker in _PYTHON_MARKERS) - 1
 # A codec that decodes each probe to its ASCII reading has no shift state (UTF-7,
@@ -86,7 +99,7 @@ def _keeps_ascii(codec: str) -> bool:
             return False
 
 
-def _declaration_lines(head: bytes, *, complete: bool) -> bytes:
+def _declaration_lines(head: bytes, *, complete: bool) -> list[bytes]:
     """The lines CPython searches for an encoding declaration, split by universal newlines.
 
     CPython reads a second line only after a blank or comment first line. When
@@ -109,38 +122,111 @@ def _declaration_lines(head: bytes, *, complete: bool) -> bytes:
         position = match.end()
         if not may_declare:
             break
-    return b"".join(lines)
+    return lines
 
 
-def _source_encoding(head: bytes, *, complete: bool) -> str:
-    """The codec CPython decodes a Python source with, when static reading can follow it.
+@dataclass(frozen=True)
+class _Skipped:
+    """The line ``python -x`` searches for a declaration, and whether all of it was read.
 
-    Only codecs that read ASCII as ASCII are followed. A script run directly and a
-    module imported then decode the file alike, so the text searched and parsed
-    here is the text CPython runs; any other declaration is refused.
+    The option skips through the first line feed, whatever the file's line endings,
+    and reads what follows as a second line, so that line can declare a codec even
+    after a first line of code.
+    """
+
+    line: bytes
+    whole: bool
+
+
+def _skipped_line(content: bytes) -> _Skipped | None:
+    """The ``python -x`` declaration line of a complete file; None when -x skips all of it."""
+    start = content.find(b"\n") + 1
+    if not start:
+        return None
+    match = _LINE.match(content, start)
+    return _Skipped(b"" if match is None else match.group(1), True)
+
+
+def _declared_codec(line: bytes) -> str | None:
+    """The codec name one line declares, normalized as CPython normalizes it, or None."""
+    match = _COOKIE.match(line)
+    if match is None:
+        return None
+    name = match.group(1).decode("ascii")
+    folded = name[:12].lower().replace("_", "-")
+    if folded == "utf-8" or folded.startswith("utf-8-"):
+        return "utf-8"
+    if folded in _LATIN_1 or folded.startswith(tuple(f"{prefix}-" for prefix in _LATIN_1)):
+        return "iso-8859-1"
+    if len(name) > _MAX_CODEC_NAME:
+        raise _UnreadableError(_UNSUPPORTED_ENCODING)
+    return name
+
+
+def _followed(encoding: str) -> str:
+    """The codec's canonical name when static reading follows it; any other is refused."""
+    try:
+        name = codecs.lookup(encoding).name
+    except LookupError:
+        raise _UnreadableError(_UNSUPPORTED_ENCODING) from None
+    if not _keeps_ascii(name):
+        raise _UnreadableError(_UNSUPPORTED_ENCODING)
+    return "utf-8" if name == "utf-8-sig" else name
+
+
+def _source_encoding(
+    head: bytes, *, complete: bool, skipped: _Skipped | None
+) -> tuple[str, str | None]:
+    """The codecs CPython decodes a Python source with, when static reading can follow them.
+
+    The first decodes the file when it is imported or run; the second, a canonical
+    name, decodes what ``python -x`` runs, and is None when that option leaves
+    nothing. Only codecs that read ASCII as ASCII are followed. A script run
+    directly and a module imported then decode the file alike, so the text searched
+    and parsed here is the text CPython runs; any other declaration is refused.
     """
     lines = _declaration_lines(head, complete=complete)
+    if skipped is not None and not skipped.whole and _MAY_DECLARE.match(skipped.line):
+        raise _UnreadableError(limits.bound("file-bytes").exceeded())
+    # Refuse a name too long to be a codec before anything looks it up.
+    for index, line in enumerate(lines):
+        _declared_codec(line.removeprefix(codecs.BOM_UTF8) if index == 0 else line)
     try:
-        encoding, _ = tokenize.detect_encoding(io.BytesIO(lines).readline)
+        encoding, _ = tokenize.detect_encoding(io.BytesIO(b"".join(lines)).readline)
     except SyntaxError:
         try:
-            lines.decode("utf-8")
+            b"".join(lines).decode("utf-8")
         except UnicodeDecodeError:
             raise _UnreadableError(_INVALID_UTF8) from None
         raise _UnreadableError(_UNSUPPORTED_ENCODING) from None
-    if not _keeps_ascii(codecs.lookup(encoding).name):
-        raise _UnreadableError(_UNSUPPORTED_ENCODING)
-    return encoding
+    _followed(encoding)
+    if skipped is None:
+        return encoding, None
+    return encoding, _followed(_declared_codec(skipped.line) or "utf-8")
 
 
 def _python_text(content: bytes) -> str:
     """The text CPython compiles from one complete Python source file."""
-    encoding = _source_encoding(content, complete=True)
+    encoding, skipped = _source_encoding(content, complete=True, skipped=_skipped_line(content))
     try:
-        return content.decode(encoding)
+        text = content.decode(encoding)
     except UnicodeDecodeError:
         utf8 = encoding in {"utf-8", "utf-8-sig"}
         raise _UnreadableError(_INVALID_UTF8 if utf8 else _INVALID_DECLARED) from None
+    if skipped is None or skipped == _followed(encoding):
+        return text
+    rest = content[content.index(b"\n") :]
+    if rest.isascii():
+        return text
+    # python -x decodes the rest in another codec. A second reading that names the
+    # SDK could declare servers and tools this text does not show.
+    try:
+        other = rest.decode(skipped)
+    except UnicodeDecodeError:
+        return text
+    if _names_sdk(other):
+        raise _UnreadableError(_UNSUPPORTED_ENCODING)
+    return text
 
 
 def _names_sdk(text: str) -> bool:
@@ -249,35 +335,137 @@ def _server_import(tree: ast.Module) -> bool:
 
 @dataclass(frozen=True)
 class _Source:
-    """What one streaming search found: the file's first bytes, its size and its markers."""
+    """What one streaming search found: the file's first bytes, its size and its markers.
+
+    ``error`` says why a root-level script that is not a candidate still fails.
+    """
 
     head: bytes
     size: int
     found: frozenset[bytes]
     ascii: bool
+    skipped: _Skipped | None = None
+    error: str | None = None
 
     @property
     def complete(self) -> bool:
         return len(self.head) == self.size
 
 
+class _Markers:
+    """The SDK markers in one source stream, searched in the text its tools read.
+
+    Python is searched by bytes, and the line ``python -x`` would search for a
+    declaration is kept, up to ``keep`` bytes. A script that starts with a UTF-16
+    byte order mark is searched in its decoded text, as tsc reads it: a lone
+    surrogate stays and a trailing odd byte is ignored. Any other root-level script
+    is checked to be valid UTF-8, as earlier releases required.
+    """
+
+    def __init__(self, path: Path, keep: int) -> None:
+        script = path.suffix in _SCRIPT_SUFFIXES
+        self.found: set[bytes] = set()
+        self.ascii = True
+        self.utf8 = True
+        self._keep = keep
+        self._python = path.suffix == ".py"
+        self._start: bytes | None = b"" if script else None
+        self._tail = b""
+        self._text: codecs.IncrementalDecoder | None = None
+        self._text_tail = ""
+        root_script = script and len(path.parts) == 1
+        self._utf8 = codecs.getincrementaldecoder("utf-8")() if root_script else None
+        self._after_line_feed = False
+        self._skipped = bytearray()
+        self._skipped_end = False
+        self._skipped_whole = True
+
+    def feed(self, chunk: bytes) -> None:
+        self.ascii = self.ascii and chunk.isascii()
+        if self._python:
+            self._skip(chunk)
+        if self._start is not None:
+            # The first two bytes decide how the whole script is read.
+            self._start += chunk
+            if len(self._start) < 2:
+                return
+            chunk, self._start = self._start, None
+            encoding = UTF16_BYTE_ORDER_MARKS.get(chunk[:2])
+            if encoding is not None:
+                self._text = codecs.getincrementaldecoder(encoding)("surrogatepass")
+                self._utf8 = None
+                chunk = chunk[2:]
+        if self._text is not None:
+            text = self._text_tail + self._text.decode(chunk)
+            self.found.update(
+                needle for marker, needle in _SCRIPT_MARKERS.items() if marker in text
+            )
+            self._text_tail = text[-_TEXT_OVERLAP:]
+            return
+        window = self._tail + chunk
+        self.found.update(needle for needle in _NEEDLES if needle in window)
+        self._tail = window[-_OVERLAP:]
+        if self._utf8 is not None:
+            try:
+                self._utf8.decode(chunk)
+            except UnicodeDecodeError:
+                self.utf8 = False
+                self._utf8 = None
+
+    def close(self) -> None:
+        if self._start:
+            # Too short to hold a byte order mark.
+            start, self._start = self._start, None
+            self.feed(start)
+        if self._utf8 is not None:
+            try:
+                self._utf8.decode(b"", final=True)
+            except UnicodeDecodeError:
+                self.utf8 = False
+
+    def skipped(self) -> _Skipped | None:
+        if not self._after_line_feed:
+            return None
+        return _Skipped(bytes(self._skipped), self._skipped_whole)
+
+    def _skip(self, chunk: bytes) -> None:
+        if self._skipped_end:
+            return
+        if not self._after_line_feed:
+            index = chunk.find(b"\n")
+            if index < 0:
+                return
+            self._after_line_feed = True
+            chunk = chunk[index + 1 :]
+        end = _LINE_END.search(chunk)
+        piece = chunk if end is None else chunk[: end.start()]
+        room = self._keep - len(self._skipped)
+        self._skipped += piece[:room]
+        if end is not None or len(piece) > room:
+            self._skipped_end = True
+            self._skipped_whole = len(piece) <= room
+
+
 def _search(files: ConfinedCollection, path: Path, keep: int, bound: Bound) -> _Source:
     """Read a file in chunks, keeping its first ``keep`` bytes and noting each marker."""
     head = bytearray()
-    found: set[bytes] = set()
-    tail = b""
     size = 0
-    plain = True
+    markers = _Markers(path, keep)
     with files.open_regular(path, max_bytes=bound) as stream:
         while chunk := stream.read(_CHUNK_BYTES):
             size += len(chunk)
             if len(head) < keep:
                 head += chunk[: keep - len(head)]
-            window = tail + chunk
-            found.update(needle for needle in _NEEDLES if needle in window)
-            plain = plain and chunk.isascii()
-            tail = window[-_OVERLAP:]
-    return _Source(bytes(head), size, frozenset(found), plain)
+            markers.feed(chunk)
+    markers.close()
+    return _Source(
+        bytes(head),
+        size,
+        frozenset(markers.found),
+        markers.ascii,
+        markers.skipped(),
+        None if markers.utf8 else _INVALID_UTF8,
+    )
 
 
 def _python_candidate(source: _Source) -> bool:
@@ -285,7 +473,7 @@ def _python_candidate(source: _Source) -> bool:
         return True
     if source.ascii:
         # ASCII reads as itself in every codec followed, so the byte search was exact.
-        _source_encoding(source.head, complete=source.complete)
+        _source_encoding(source.head, complete=source.complete, skipped=source.skipped)
         return False
     if not source.complete:
         raise _UnreadableError(limits.bound("file-bytes").exceeded())
@@ -339,9 +527,14 @@ def collect_source_references(files: ConfinedCollection, result: ScanResult) -> 
     def fail(path: Path, reason: str) -> None:
         if path not in failed:
             failed.add(path)
-            result.scan_failures.append(f"{path.as_posix()}: {reason}")
+            files._fail(path.as_posix(), reason)
 
-    with files.separate_budget(limits.bound("source-scan-bytes")) as budget:
+    # Every eligible file can fail, so past the listing bound the failures of the
+    # search are summarized by reason instead of growing the inventory without end.
+    with (
+        files.separate_budget(limits.bound("source-scan-bytes")) as budget,
+        files.bounded_failures(),
+    ):
         for position, path in enumerate(sources):
             try:
                 source = _search(files, path, settings.file_bytes, budget.bound)
@@ -356,6 +549,7 @@ def collect_source_references(files: ConfinedCollection, result: ScanResult) -> 
                 if budget.exhausted:
                     break
                 continue
+            candidate = False
             for kind in kinds:
                 if not kind.eligible(path):
                     continue
@@ -365,6 +559,7 @@ def collect_source_references(files: ConfinedCollection, result: ScanResult) -> 
                 except _UnreadableError as exc:
                     fail(path, str(exc))
                     continue
+                candidate = True
                 if source.size > settings.syntax_bytes:
                     fail(path, limits.bound("syntax-bytes").exceeded())
                 elif not source.complete:
@@ -373,6 +568,10 @@ def collect_source_references(files: ConfinedCollection, result: ScanResult) -> 
                     kind.selected.append((path, source.head))
                 else:
                     kind.unparsed.append(path)
+            if not candidate and source.error is not None:
+                # tsc would read the file, replacing what is not UTF-8, but another
+                # runtime could decode it differently; earlier releases failed it too.
+                fail(path, source.error)
     for kind in kinds:
         if kind.unparsed:
             result.scan_failures.append(
@@ -416,9 +615,9 @@ def collect_source_references(files: ConfinedCollection, result: ScanResult) -> 
             surfaces.append(location)
     for path, content in (*typescript.selected, *javascript.selected):
         try:
-            text = content.decode("utf-8")
-        except UnicodeDecodeError:
-            fail(path, _INVALID_UTF8)
+            text = source_text(content)
+        except ValueError as exc:
+            fail(path, str(exc))
             continue
         if _client_reference(text):
             detected.append(path.as_posix())
