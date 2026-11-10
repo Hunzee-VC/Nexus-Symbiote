@@ -285,3 +285,33 @@ def test_npm_lockfiles_reject_workspace_links_and_competing_lockfiles(tmp_path):
     both = RegistryScanner().scan(tmp_path)
     assert any("multiple npm lockfiles" in gap for gap in both.surfaces_excluded)
     assert both.components[0].package_url is None
+
+
+def test_pnpm_lockfile_of_an_ordinary_application_is_resolved(tmp_path):
+    # 2,000 packages is about 80,000 YAML tokens; a 50,000-token bound refused every
+    # lockfile past roughly 1,250 packages and failed the project's gate.
+    (tmp_path / "package.json").write_text('{"dependencies":{"openai":"^4.0.0"}}')
+    integrity = "sha512-" + base64.b64encode(b"z" * 64).decode()
+    entries = "".join(
+        f"  pkg-{index}@1.0.{index}:\n"
+        f"    resolution: {{integrity: {integrity}}}\n"
+        "    engines: {node: '>=18'}\n"
+        "    dependencies:\n"
+        f"      dep-{index}: 2.0.{index}\n"
+        for index in range(2_000)
+    )
+    (tmp_path / "pnpm-lock.yaml").write_text(
+        "lockfileVersion: '9.0'\n"
+        "importers:\n"
+        "  .:\n"
+        "    dependencies:\n"
+        "      openai:\n"
+        "        specifier: ^4.0.0\n"
+        "        version: 4.0.1\n"
+        "packages:\n"
+        f"  openai@4.0.1:\n    resolution: {{integrity: {integrity}}}\n" + entries
+    )
+    result = RegistryScanner().scan(tmp_path)
+    assert not result.scan_failures and not result.surfaces_excluded
+    assert result.components[0].version == "4.0.1"
+    assert result.components[0].claims["package_resolution"].method == "pnpm-lockfile"

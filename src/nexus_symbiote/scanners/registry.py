@@ -106,6 +106,10 @@ AI_PACKAGE_SCOPES = frozenset(
     }
 )
 
+# A pnpm lockfile holds about 40 YAML tokens per package, so a lockfile at the 4 MiB
+# read limit is about 650,000. The bound refuses denser input before it is parsed.
+_MAX_PNPM_LOCK_TOKENS = 1_000_000
+
 _EXACT_SEMVER_RE = re.compile(
     r"\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
 )
@@ -492,7 +496,7 @@ class RegistryScanner(Scanner):
 
             text = lock_bytes.decode("utf-8")
             for index, token in enumerate(yaml.scan(text)):
-                if index >= 50_000 or isinstance(
+                if index >= _MAX_PNPM_LOCK_TOKENS or isinstance(
                     token, (yaml.AliasToken, yaml.AnchorToken, yaml.TagToken)
                 ):
                     raise ValueError("unsupported YAML graph")
