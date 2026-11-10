@@ -155,3 +155,63 @@ def test_format_1_1_records_only_root_relative_locations(tmp_path):
         for name, evidence in component.get("claims", {}).items():
             if evidence.get("locator"):
                 assert relative(evidence["locator"]), (component["bom_ref"], name)
+
+
+_COLLECTION_EVENT = frozenset({"serial_number", "timestamp", "observed_at"})
+
+
+def _without_collection_event(value: object) -> object:
+    if isinstance(value, dict):
+        return {
+            key: _without_collection_event(item)
+            for key, item in value.items()
+            if key not in _COLLECTION_EVENT
+        }
+    if isinstance(value, list):
+        return [_without_collection_event(item) for item in value]
+    return value
+
+
+def test_every_collector_records_the_same_inventory_at_two_locations(tmp_path):
+    """Apart from when it was collected, an inventory depends only on the checkout's content."""
+    first = tmp_path / "laptop" / "agent"
+    second = tmp_path / "ci" / "runner" / "renamed-clone"
+    _every_collector_project(first)
+    _every_collector_project(second)
+    left = _scan(first, tmp_path / "first.json")
+    right = _scan(second, tmp_path / "second.json")
+    assert _without_collection_event(left) == _without_collection_event(right)
+    for output in (tmp_path / "first.json", tmp_path / "second.json"):
+        text = output.read_text()
+        assert "laptop" not in text and "renamed-clone" not in text
+
+
+def test_unrelated_source_files_leave_the_inventory_unchanged(tmp_path):
+    """Adding code that declares nothing an agent uses must not change any record or gap."""
+    project = tmp_path / "agent"
+    _every_collector_project(project)
+    before = _scan(project, tmp_path / "before.json")
+    (project / "helpers").mkdir()
+    (project / "helpers" / "strings.py").write_text("def shout(text):\n    return text.upper()\n")
+    (project / "helpers" / "format.ts").write_text("export const greet = (n: string) => n;\n")
+    (project / "notes.js").write_text("module.exports = { greeting: 'hello' };\n")
+    after = _scan(project, tmp_path / "after.json")
+    assert _without_collection_event(before) == _without_collection_event(after)
+
+
+def test_risk_reconciles_an_inventory_collected_in_another_checkout(tmp_path):
+    first, other = _checkouts(tmp_path, "renamed")
+    _scan(first, tmp_path / "supplied.json")
+    result = CliRunner().invoke(
+        main,
+        [
+            "risk",
+            str(tmp_path / "supplied.json"),
+            "--project",
+            str(other),
+            "--no-project-policy",
+            "--json-output",
+        ],
+    )
+    report = json.loads(result.stdout)
+    assert report["assessment_basis"] == "project-reconciled", report
