@@ -246,7 +246,43 @@ With `validate: 'true'`, integrity passes only when at least one artifact hash o
 
 The Action refuses a policy inside the workspace, a path that passes through a symlink (including a symlinked `RUNNER_TEMP`), or a hard link, passes one snapshot of it to collection and validation, and reports its SHA-256, as `sha256:<hex>`, in the `signature-policy-digest` output. It verifies signatures offline against the Sigstore trust root shipped in its hash-locked `sigstore` package, never a cache on the runner.
 
-The Action installs its own hash-locked runtime, including Sigstore verification, ignores policy in the scanned checkout, and fails on collection errors. Keep a job timeout like the one above: hostile input can keep a scan running until the job times out. Run the Action once per workflow run, because its artifact name and SARIF category are fixed ([known limitations](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/SECURITY.md#known-limitations-in-010)). Set `sarif-upload: 'true'` and add `security-events: write` for SARIF upload. Inputs and outputs are in [action.yml](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/action.yml). The repository also ships [pre-commit hooks](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/.pre-commit-hooks.yaml) (`nexus-symbiote-scan` and `nexus-symbiote-risk`).
+The Action installs its own hash-locked runtime, including Sigstore verification, in a private virtual environment that it keeps off the job's `PATH`, without changing the job's default Python. It ignores policy in the scanned checkout and fails on collection errors. Keep a job timeout like the one above: hostile input can keep a scan running until the job times out. Text from the checkout reaches the job log only inside a `stop-commands` block, neutralized, so it cannot set outputs or create annotations.
+
+Every gate states its result, and every gate an input switches off is printed as a warning. The `result` output is `passed` or `failed`, and `gates` is a JSON object with the state of each gate (`collection`, `completeness`, `integrity`, `risk`, `drift`): `passed`, `failed`, `skipped` (switched off by an input) or `not-run`. `risk-threshold: '0'` removes only the aggregate score threshold; critical findings, incomplete coverage and missing evidence still fail the risk gate. `validate-integrity: 'false'` checks completeness without integrity, for a repository whose models cannot be signed yet. `reviewed-baseline` adds a drift gate: the absolute path of a reviewed AgentBOM outside the workspace (written from a trusted source, like the signer policy), which the Action compares with `diff --fail-on-alert`. `limits` raises collection limits. Give each Action step in one workflow run its own `artifact-name` and `sarif-category`. Set `sarif-upload: 'true'` and add `security-events: write` for SARIF upload; it is skipped, with a warning, for an inventory that merges imported ShadowScan discovery. Inputs and outputs are in [action.yml](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/action.yml).
+
+**Protect the gate.** On `pull_request`, GitHub runs the workflow file of the pull request's merge commit, so the pull request under review can change these inputs, switch a gate off or delete the step, and pass. Make the gate one the pull request cannot edit. In an organization, require the workflow through an organization ruleset (*Require workflows to pass before merging*), which pins it to a file and ref the pull request cannot change. Otherwise, run it on `pull_request_target`, which takes the workflow from the base branch, with read-only permissions, no secrets and the pull request's head checked out as data:
+
+```yaml
+name: Agent inventory gate
+on: pull_request_target
+permissions:
+  contents: read
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Stage the reviewed baseline from the base branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: >-
+          gh api -H 'Accept: application/vnd.github.raw'
+          "repos/$GITHUB_REPOSITORY/contents/agentbom.reviewed.json?ref=$BASE_SHA"
+          > "$RUNNER_TEMP/reviewed.json"
+      - uses: Hunzee-VC/Nexus-Symbiote@<reviewed-40-character-commit-sha>
+        with:
+          scan-path: .
+          reviewed-baseline: ${{ runner.temp }}/reviewed.json
+```
+
+This is safe only because no step runs code from the checkout: the Action reads it as data. Add no build, install or test step and no secret to such a job, and require code-owner review for `.github/`.
+
+The repository also ships [pre-commit hooks](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/cli-reference.md#pre-commit-hooks) (`nexus-symbiote-scan` and `nexus-symbiote-risk`), which apply the scan gate with the built-in policy and write nothing into the tree; pre-commit installs their dependencies from PyPI without hashes, so pin `rev` to a reviewed commit.
 
 Every command is offline by default. Only `discover-mcp`, `advisories` and `verify-live` reach the network, and only in live mode (`--live` or `NEXUS_SYMBIOTE_MODE=live`). Use `nexus-symbiote init` to generate a `.nexus-symbiote.yaml` policy file for a trusted project (it is read only from the project you scan or name with `--project`, never from a parent directory or from where an inventory file is saved), or pass `--no-project-policy` when the checkout is not yours. Details are in [offline and live modes](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/offline-and-live-modes.md).
 

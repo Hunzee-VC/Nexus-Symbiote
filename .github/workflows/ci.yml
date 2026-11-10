@@ -234,10 +234,205 @@ jobs:
             ${{ runner.temp }}/codeql-policy.json
           if-no-files-found: error
           retention-days: 14
+  action:
+    name: Composite Action end to end (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Record the job's interpreter before the Action runs
+        id: before
+        run: |
+          echo "python3=$(command -v python3)" >> "$GITHUB_OUTPUT"
+          echo "prefix=$(python3 -c 'import sys; print(sys.prefix)')" >> "$GITHUB_OUTPUT"
+      - name: Create passing, failing and hostile fixtures in the workspace
+        run: |
+          set -euo pipefail
+          fixtures=action-fixtures
+          mkdir -p "$fixtures/passing" "$fixtures/failing/models" "$fixtures/hostile/models"
+          for fixture in passing failing hostile; do
+            printf 'Use the configured tools.\n' > "$fixtures/$fixture/CLAUDE.md"
+            printf 'name: Demo\ninstructions: [CLAUDE.md]\n' > "$fixtures/$fixture/agent.yaml"
+          done
+          printf 'unsafe-format-fixture' > "$fixtures/failing/models/classifier.pkl"
+          # Workflow commands in names the inventory prints: a legacy set-output aimed
+          # at the upload paths and annotations carrying a marker the next job looks for.
+          printf '%s\n' 'name: Demo' 'instructions: [CLAUDE.md]' 'models:' '  m:' \
+            '    provider: example' \
+            '    requested_ref: "x ##[set-output name=sarif_path]/etc/hostname%0A ::set-output name=aibom_path::/etc/hostname"' \
+            > "$fixtures/hostile/agent.yaml"
+          printf 'unsafe' > "$fixtures/hostile/models/##[warning]symbiote-injected-annotation.pkl"
+          printf 'unsafe' > "$fixtures/hostile/models/::warning::symbiote-injected-annotation.pkl"
+      - name: Passing fixture
+        id: passing
+        uses: ./
+        with:
+          scan-path: action-fixtures/passing
+          output-file: action-out/passing.json
+          python-version: ${{ matrix.python }}
+          artifact-name: action-e2e-passing-${{ matrix.python }}
+      - name: Failing fixture
+        id: failing
+        continue-on-error: true
+        uses: ./
+        with:
+          scan-path: action-fixtures/failing
+          output-file: action-out/failing.json
+          python-version: ${{ matrix.python }}
+          artifact-name: action-e2e-failing-${{ matrix.python }}
+      - name: Threshold 0 still fails a critical finding
+        id: threshold
+        continue-on-error: true
+        uses: ./
+        with:
+          scan-path: action-fixtures/failing
+          output-file: action-out/threshold.json
+          validate: "false"
+          risk-threshold: "0"
+          upload-artifact: "false"
+          python-version: ${{ matrix.python }}
+      - name: Hostile fixture
+        id: hostile
+        continue-on-error: true
+        uses: ./
+        with:
+          scan-path: action-fixtures/hostile
+          output-file: action-out/hostile.json
+          python-version: ${{ matrix.python }}
+          artifact-name: action-e2e-hostile-${{ matrix.python }}
+      - name: Assert outcomes, outputs and the caller's interpreter
+        env:
+          BEFORE_PYTHON: ${{ steps.before.outputs.python3 }}
+          BEFORE_PREFIX: ${{ steps.before.outputs.prefix }}
+          PASSING_OUTCOME: ${{ steps.passing.outcome }}
+          PASSING_RESULT: ${{ steps.passing.outputs.result }}
+          PASSING_GATES: ${{ steps.passing.outputs.gates }}
+          PASSING_VALIDATION: ${{ steps.passing.outputs.validation-passed }}
+          PASSING_RISK: ${{ steps.passing.outputs.risk-passed }}
+          PASSING_PATH: ${{ steps.passing.outputs.aibom-path }}
+          FAILING_OUTCOME: ${{ steps.failing.outcome }}
+          FAILING_RESULT: ${{ steps.failing.outputs.result }}
+          FAILING_GATES: ${{ steps.failing.outputs.gates }}
+          FAILING_VALIDATION: ${{ steps.failing.outputs.validation-passed }}
+          FAILING_RISK: ${{ steps.failing.outputs.risk-passed }}
+          FAILING_PATH: ${{ steps.failing.outputs.aibom-path }}
+          THRESHOLD_OUTCOME: ${{ steps.threshold.outcome }}
+          THRESHOLD_RESULT: ${{ steps.threshold.outputs.result }}
+          THRESHOLD_GATES: ${{ steps.threshold.outputs.gates }}
+          THRESHOLD_VALIDATION: ${{ steps.threshold.outputs.validation-passed }}
+          THRESHOLD_RISK: ${{ steps.threshold.outputs.risk-passed }}
+          THRESHOLD_PATH: ${{ steps.threshold.outputs.aibom-path }}
+          HOSTILE_OUTCOME: ${{ steps.hostile.outcome }}
+          HOSTILE_RESULT: ${{ steps.hostile.outputs.result }}
+          HOSTILE_GATES: ${{ steps.hostile.outputs.gates }}
+          HOSTILE_VALIDATION: ${{ steps.hostile.outputs.validation-passed }}
+          HOSTILE_RISK: ${{ steps.hostile.outputs.risk-passed }}
+          HOSTILE_PATH: ${{ steps.hostile.outputs.aibom-path }}
+        run: |
+          python3 -I - <<'PY'
+          import json
+          import os
+          import shutil
+          import sys
+
+          workspace = os.environ["GITHUB_WORKSPACE"]
+          gates = ("collection", "completeness", "integrity", "risk", "drift")
+          expected = {
+              "PASSING": ("success", "passed", "passed passed passed passed skipped", "true", "true"),
+              "FAILING": ("failure", "failed", "passed passed failed failed skipped", "false", "false"),
+              "THRESHOLD": ("failure", "failed", "passed skipped skipped failed skipped", "skipped", "false"),
+              "HOSTILE": ("failure", "failed", "passed passed failed failed skipped", "false", "false"),
+          }
+          failures = []
+          for name, (outcome, result, states, validation, risk) in expected.items():
+              def check(field, wanted):
+                  actual = os.environ[f"{name}_{field}"]
+                  if actual != wanted:
+                      failures.append(f"{name.lower()} {field.lower()}: {actual!r}, expected {wanted!r}")
+              check("OUTCOME", outcome)
+              check("RESULT", result)
+              check("VALIDATION", validation)
+              check("RISK", risk)
+              check("PATH", os.path.join(workspace, "action-out", name.lower() + ".json"))
+              try:
+                  recorded = json.loads(os.environ[f"{name}_GATES"])
+              except ValueError:
+                  recorded = None
+              if recorded != dict(zip(gates, states.split(), strict=True)):
+                  failures.append(f"{name.lower()} gates: {recorded!r}, expected {states}")
+          # The Action keeps its interpreter and virtual environment to itself.
+          if shutil.which("python3") != os.environ["BEFORE_PYTHON"]:
+              failures.append("python3 on PATH changed after the Action")
+          if sys.prefix != os.environ["BEFORE_PREFIX"]:
+              failures.append("the job's default Python changed after the Action")
+          if shutil.which("nexus-symbiote") or "pythonLocation" in os.environ:
+              failures.append("the Action's Python or virtual environment leaked into the job")
+          for failure in failures:
+              print(failure)
+          sys.exit(bool(failures))
+          PY
+      - name: Download the hostile fixture's evidence
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: action-e2e-hostile-${{ matrix.python }}
+          path: ${{ runner.temp }}/hostile-evidence
+          digest-mismatch: error
+      - name: The evidence holds only the requested export
+        env:
+          EVIDENCE: ${{ runner.temp }}/hostile-evidence
+        run: |
+          set -euo pipefail
+          find "$EVIDENCE" -type f -print
+          test "$(find "$EVIDENCE" -type f | wc -l)" -eq 1
+          test -f "$EVIDENCE/hostile.json"
+  action-annotations:
+    name: Composite Action injection created no annotation
+    needs: action
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      checks: read
+    steps:
+      - name: Reject any annotation that carries the injected marker
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api --paginate \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs" \
+            --jq '.jobs[] | select(.name | startswith("Composite Action end to end")) | .check_run_url' \
+            > "$RUNNER_TEMP/check-runs"
+          test "$(wc -l < "$RUNNER_TEMP/check-runs")" -eq 4
+          while read -r url; do
+            gh api --paginate "${url#https://api.github.com/}/annotations" \
+              --jq '.[] | (.title // "") + " " + (.message // "")'
+          done < "$RUNNER_TEMP/check-runs" > "$RUNNER_TEMP/annotations"
+          cat "$RUNNER_TEMP/annotations"
+          if grep -F 'symbiote-injected-annotation' "$RUNNER_TEMP/annotations"; then
+            echo "A workflow command from the scanned checkout created an annotation"
+            exit 1
+          fi
   verified:
     name: Verified CI
     if: always()
-    needs: [test, coverage, quality, distribution, security-regressions, dependency-audit, codeql]
+    needs:
+      - test
+      - coverage
+      - quality
+      - distribution
+      - security-regressions
+      - dependency-audit
+      - codeql
+      - action
+      - action-annotations
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -250,7 +445,7 @@ jobs:
           import os
           import sys
           results = json.loads(os.environ["CI_RESULTS"])
-          expected = {"test", "coverage", "quality", "distribution", "security-regressions", "dependency-audit", "codeql"}
+          expected = {"test", "coverage", "quality", "distribution", "security-regressions", "dependency-audit", "codeql", "action", "action-annotations"}
           if not isinstance(results, dict) or set(results) != expected:
               print("Verification metadata does not contain exactly the required jobs")
               sys.exit(1)

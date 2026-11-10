@@ -46,6 +46,21 @@ def test_every_command_and_option_is_documented():
     assert not missing, f"undocumented in {REFERENCE.name}: {missing}"
 
 
+def test_every_environment_variable_the_package_reads_is_documented():
+    source = Path(__file__).resolve().parents[1] / "src" / "nexus_symbiote"
+    names: set[str] = set()
+    for path in source.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        names.update(re.findall(r"\b(NEXUS_SYMBIOTE_[A-Z_]+)", text))
+        names.update(re.findall(r"environ(?:\.get\(|\[)[\"']([A-Z][A-Z0-9_]*)[\"']", text))
+        names.update(re.findall(r"getenv\([\"']([A-Z][A-Z0-9_]*)[\"']", text))
+    section = REFERENCE.read_text(encoding="utf-8").split("## Environment variables", 1)[1]
+    section = section.split("\n## ", 1)[0]
+    missing = sorted(name for name in names if name not in section)
+    assert {"NEXUS_SYMBIOTE_MODE", "NEXUS_SYMBIOTE_SOURCE_BINDING_KEY", "NO_COLOR"} <= names
+    assert not missing, f"environment variables missing from {REFERENCE.name}: {missing}"
+
+
 def test_command_table_marks_exactly_the_live_commands():
     rows = re.findall(
         r"^\| \[`([^`]+)`\]\(#[^)]+\) \| (\*\*live\*\*|offline) \|", REFERENCE.read_text(), re.M

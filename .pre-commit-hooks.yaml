@@ -1,14 +1,18 @@
 - id: nexus-symbiote-scan
-  name: Nexus SymBiote AgentBOM collection
-  description: Collect a local inventory for review; this is not an execution approval
-  entry: nexus-symbiote scan . --format json -o .nexus-symbiote-aibom.json
+  name: Nexus SymBiote AgentBOM gate
+  description: >-
+    Collect the local inventory and apply the scan gate with the built-in policy, writing
+    nothing into the working tree. A convenience for your own tree, not an execution approval
+  entry: nexus-symbiote scan . --no-project-policy --check
   language: python
   always_run: true
   pass_filenames: false
 - id: nexus-symbiote-risk
   name: Nexus SymBiote risk gate
-  description: Evaluate the inventory produced by the preceding nexus-symbiote-scan hook
-  entry: nexus-symbiote risk .nexus-symbiote-aibom.json --project .
+  description: >-
+    The same gate as nexus-symbiote-scan, whose scan gate includes the risk gate; kept so that
+    existing configurations keep working. Configure one of the two
+  entry: nexus-symbiote scan . --no-project-policy --check
   language: python
   always_run: true
   pass_filenames: false

@@ -5,7 +5,9 @@ branding:
   color: blue
 inputs:
   scan-path:
-    description: Project directory within the checked-out workspace
+    description: >-
+      Project directory within the checked-out workspace. A path that passes through a
+      symbolic link inside the workspace is refused, because the checkout chooses the links
     default: "."
   format:
     description: "Output format: json, cyclonedx, spdx, sarif"
@@ -19,17 +21,46 @@ inputs:
   validate:
     description: >-
       Fail the action when completeness or integrity validation fails. A model passes integrity
-      only as a SafeTensors file whose artifact-bound signature verifies under signature-policy
+      only as a SafeTensors file whose artifact-bound signature verifies under signature-policy.
+      'false' skips both checks and prints a warning
+    default: "true"
+  validate-integrity:
+    description: >-
+      'false' keeps the completeness check but skips integrity (validate --skip-integrity), for a
+      repository whose models cannot be signed yet; the skip is printed as a warning and reported
+      in the gates output
     default: "true"
   risk-check:
-    description: Apply the risk policy gate
+    description: Apply the risk policy gate; 'false' skips it and prints a warning
     default: "true"
   risk-threshold:
-    description: Risk gate threshold from 0 to 100; 0 explicitly disables this gate
+    description: >-
+      Aggregate score from 0 to 100 at which the risk gate fails. 0 removes only this score
+      threshold: findings at or above critical, unverified SafeTensors, incomplete coverage and
+      missing evidence still fail the gate. To skip the risk gate, set risk-check to 'false'
     default: "50"
+  reviewed-baseline:
+    description: >-
+      Absolute path to a reviewed native AgentBOM outside GITHUB_WORKSPACE, such as a file an
+      earlier step of a trusted workflow writes under RUNNER_TEMP from the base branch or an
+      artifact; never a file from the checked-out code. When set, the Action runs
+      `diff <baseline> <inventory> --fail-on-alert` and fails on any drift alert. The same path
+      rules as signature-policy apply. Empty means no drift gate
+    default: ""
   sarif-upload:
-    description: Generate SARIF and upload it with security-events write permission
+    description: >-
+      Generate SARIF and upload it with security-events write permission. Skipped, with a
+      warning, for an inventory that merges imported ShadowScan discovery
     default: "false"
+  sarif-category:
+    description: Code scanning category for the SARIF upload
+    default: nexus_symbiote
+  upload-artifact:
+    description: Upload the export (and SARIF) as a workflow artifact; 'false' keeps it on the runner
+    default: "true"
+  artifact-name:
+    description: Name of the evidence artifact; give each Action step in one workflow run its own
+    default: nexus-symbiote-aibom
   signature-policy:
     description: >-
       Absolute path to a caller-owned operator signer policy JSON outside GITHUB_WORKSPACE,
@@ -41,19 +72,49 @@ inputs:
       Sigstore trust root shipped in the Action's hash-locked sigstore package, never a runner
       cache. Empty means no signer policy
     default: ""
+  limits:
+    description: >-
+      Raised collection limits as NAME=VALUE pairs separated by commas, passed to the CLI as
+      NEXUS_SYMBIOTE_LIMITS, which validates them. The job environment's NEXUS_SYMBIOTE_LIMITS is
+      ignored. Empty means the built-in limits
+    default: ""
   python-version:
-    description: Python version for the scanner
+    description: >-
+      Python version for the Action's private virtual environment. setup-python installs it
+      without changing the job's default Python, PATH or library paths
     default: "3.12"
 outputs:
   aibom-path:
-    description: Path to the requested export
+    description: Path to the requested export; empty when collection did not produce one
     value: ${{ steps.scan.outputs.aibom_path }}
+  result:
+    description: >-
+      passed when collection and every enabled gate passed, otherwise failed (the step also
+      fails). Empty only when the inputs were invalid and nothing ran
+    value: ${{ steps.scan.outputs.result }}
+  gates:
+    description: >-
+      JSON object with the state of each gate (collection, completeness, integrity, risk,
+      drift): passed, failed, skipped (disabled by an input) or not-run (not reached because
+      collection failed). Read it with fromJSON
+    value: ${{ steps.scan.outputs.gates }}
+  validation-passed:
+    description: Whether validation passed; true, false, skipped (validate is 'false') or not-run
+    value: ${{ steps.scan.outputs.validation_passed }}
   risk-score:
     description: Numeric score, empty when the gate produced no valid report
     value: ${{ steps.scan.outputs.risk_score }}
   risk-passed:
-    description: Whether the risk gate passed; true, false, or skipped
+    description: Whether the risk gate passed; true, false, skipped (risk-check is 'false') or not-run
     value: ${{ steps.scan.outputs.passed }}
+  drift-passed:
+    description: >-
+      Whether the inventory has no drift alert against reviewed-baseline; true, false, skipped
+      (no reviewed-baseline) or not-run
+    value: ${{ steps.scan.outputs.drift_passed }}
+  drift-alerts:
+    description: Number of drift alerts against reviewed-baseline; empty when no comparison ran
+    value: ${{ steps.scan.outputs.drift_alerts }}
   signature-policy-digest:
     description: SHA-256 of the signer policy bytes used for collection and validation, as sha256:<hex>; empty without a policy
     value: ${{ steps.scan.outputs.signature_policy_digest }}
@@ -61,45 +122,54 @@ runs:
   using: composite
   steps:
     - name: Set up Python
+      id: python
       uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
       with:
         python-version: ${{ inputs.python-version }}
+        update-environment: false
     - name: Install reviewed Action source
+      id: install
       shell: bash
       env:
         SYMBIOTE_ACTION_PATH: ${{ github.action_path }}
+        SYMBIOTE_BASE_PYTHON: ${{ steps.python.outputs.python-path }}
       run: |
         action_venv="$(mktemp -d "$RUNNER_TEMP/nexus-symbiote-action-XXXXXX")"
-        python -I -m venv "$action_venv"
+        "$SYMBIOTE_BASE_PYTHON" -I -m venv "$action_venv"
         "$action_venv/bin/python" -I -m pip install --require-hashes --only-binary=:all: -r "$SYMBIOTE_ACTION_PATH/requirements-action.lock"
         "$action_venv/bin/python" -I -m pip install --no-deps --no-build-isolation -- "$SYMBIOTE_ACTION_PATH"
-        echo "$action_venv/bin" >> "$GITHUB_PATH"
+        echo "python=$action_venv/bin/python" >> "$GITHUB_OUTPUT"
     - name: Collect once and apply validation gates
       id: scan
       shell: bash
       env:
         SYMBIOTE_ACTION_PATH: ${{ github.action_path }}
+        SYMBIOTE_ACTION_PYTHON: ${{ steps.install.outputs.python }}
         SYMBIOTE_SCAN_PATH: ${{ inputs.scan-path }}
         SYMBIOTE_FORMAT: ${{ inputs.format }}
         SYMBIOTE_OUTPUT_FILE: ${{ inputs.output-file }}
         SYMBIOTE_SCANNERS: ${{ inputs.scanners }}
         SYMBIOTE_VALIDATE: ${{ inputs.validate }}
+        SYMBIOTE_VALIDATE_INTEGRITY: ${{ inputs.validate-integrity }}
         SYMBIOTE_RISK_CHECK: ${{ inputs.risk-check }}
         SYMBIOTE_RISK_THRESHOLD: ${{ inputs.risk-threshold }}
+        SYMBIOTE_REVIEWED_BASELINE: ${{ inputs.reviewed-baseline }}
         SYMBIOTE_SARIF: ${{ inputs.sarif-upload }}
+        SYMBIOTE_UPLOAD_ARTIFACT: ${{ inputs.upload-artifact }}
         SYMBIOTE_SIGNATURE_POLICY: ${{ inputs.signature-policy }}
-      run: python -I "$SYMBIOTE_ACTION_PATH/scripts/run_action.py"
+        SYMBIOTE_LIMITS: ${{ inputs.limits }}
+      run: '"$SYMBIOTE_ACTION_PYTHON" -I "$SYMBIOTE_ACTION_PATH/scripts/run_action.py"'
     - name: Upload SARIF
-      if: inputs.sarif-upload == 'true' && always() && steps.scan.outputs.sarif_path != ''
+      if: always() && inputs.sarif-upload == 'true' && steps.scan.outputs.sarif_path != ''
       uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4
       with:
         sarif_file: ${{ steps.scan.outputs.sarif_path }}
-        category: nexus_symbiote
+        category: ${{ inputs.sarif-category }}
     - name: Upload evidence artifacts
-      if: always() && steps.scan.outputs.aibom_path != ''
+      if: always() && inputs.upload-artifact == 'true' && steps.scan.outputs.aibom_path != ''
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
-        name: nexus-symbiote-aibom
+        name: ${{ inputs.artifact-name }}
         path: |
           ${{ steps.scan.outputs.aibom_path }}
           ${{ steps.scan.outputs.sarif_path }}

@@ -12,7 +12,10 @@ import click
 
 from nexus_symbiote import modes
 from nexus_symbiote.core.aibom import AIBOM, NativeFormatError
-from nexus_symbiote.utils.terminal import neutralize, output_failure, write_cli_output
+from nexus_symbiote.utils.terminal import json_text, neutralize, output_failure, write_cli_output
+
+# Set while `baseline` runs `scan` into a staged inventory that it discards on failure.
+STAGED_INVENTORY = "nexus_symbiote.staged-inventory"
 
 
 def _load_inventory(path: Path) -> AIBOM:
@@ -110,7 +113,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
             raise click.exceptions.Exit(1)
 
     @main.command()
-    @click.argument("project_path", type=click.Path(exists=True), default=".")
+    @click.argument("project_path", type=click.Path(exists=True, file_okay=False), default=".")
     @click.option(
         "-o",
         "--baseline-path",
@@ -162,6 +165,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
             raise output_failure(exc) from exc
         os.close(fd)
         staged = Path(temporary)
+        ctx.meta[STAGED_INVENTORY] = True
         try:
             ctx.invoke(
                 scan,
@@ -179,11 +183,22 @@ def register_supply_chain_commands(main: click.Group) -> None:
                 staged_bom = AIBOM.load(staged)
             except NativeFormatError as exc:
                 raise click.ClickException(f"Baseline was not written. {exc}") from exc
-            passed, _ = RiskScorer().passes_gate(staged_bom)
+            scorer = RiskScorer()
+            passed, report = scorer.passes_gate(staged_bom)
             if not passed:
+                from nexus_symbiote.reporting import gate_reason_lines, print_lines
+
+                document = {
+                    **report.to_dict(),
+                    "fail_on_severity": scorer.fail_on_severity,
+                    "score_threshold": scorer.fail_threshold,
+                }
+                heading = "Built-in scan gate failed; a project policy cannot relax it here:"
+                print_lines([(heading, "red"), *gate_reason_lines(document)], err=True)
                 raise click.ClickException("Baseline was not written: static scan gate failed")
             write_cli_output(target, staged.read_text(encoding="utf-8"))
         finally:
+            ctx.meta.pop(STAGED_INVENTORY, None)
             # A directory that forbids removal keeps the staged copy; that must not
             # replace the command's result.
             with contextlib.suppress(OSError):
@@ -211,7 +226,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
         if output:
             write_cli_output(output, text)
         else:
-            click.echo(text)
+            click.echo(json_text(text))
 
     @main.command()
     @click.argument("aibom_path", type=click.Path(exists=True, path_type=Path))
