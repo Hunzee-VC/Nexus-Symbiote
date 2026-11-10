@@ -1112,6 +1112,43 @@ def test_a_shared_signed_weight_file_is_verified_once(tmp_path, project, monkeyp
     assert len(calls) == 2
 
 
+def test_validation_rereads_shard_indexes_and_bound_files(project, monkeypatch):
+    model = project / "llm"
+    write_safetensors(model / "model-00001-of-00002.safetensors", b"aa")
+    write_safetensors(model / "model-00002-of-00002.safetensors", b"bb")
+    shards = {"a": "model-00001-of-00002.safetensors", "b": "model-00002-of-00002.safetensors"}
+    index = model / "model.safetensors.index.json"
+    index.write_text(json.dumps({"weight_map": shards}))
+    bom = AIBOM(components=ModelScanner().scan(project).components)
+    opened = _calls(monkeypatch, "open_regular")
+    clean = IntegrityValidator(require_model_signatures=False).validate(bom, project)
+    assert not [i for i in clean.issues if i.category.startswith("weight_files")]
+    # Both shards bind the index; the validation reads it once.
+    assert opened.count(Path("llm/model.safetensors.index.json")) == 1
+    index.write_text(json.dumps({"weight_map": shards, "metadata": {"total_size": 4}}))
+    changed = IntegrityValidator(require_model_signatures=False).validate(bom, project)
+    assert {i.component_ref for i in changed.issues if i.category == "weight_files_mismatch"} == {
+        "model:llm/model-00001-of-00002.safetensors",
+        "model:llm/model-00002-of-00002.safetensors",
+    }
+    index.unlink()
+    index.symlink_to(model / "model-00001-of-00002.safetensors")
+    unreadable = IntegrityValidator(require_model_signatures=False).validate(bom, project)
+    assert any(i.category == "weight_files_unverified" for i in unreadable.issues)
+
+
+def test_a_bound_file_that_cannot_be_read_leaves_the_model_unverified(project):
+    graph = project / "model.onnx"
+    graph.write_bytes(onnx_model(onnx_tensor("w", "model.onnx_data")))
+    (project / "model.onnx_data").write_bytes(b"weights")
+    bom = AIBOM(components=ModelScanner().scan(project).components)
+    (project / "model.onnx_data").unlink()
+    (project / "model.onnx_data").mkdir()
+    report = IntegrityValidator(require_model_signatures=False).validate(bom, project)
+    categories = {issue.category for issue in report.issues}
+    assert {"weight_files_unverified", "weight_files_mismatch"} <= categories
+
+
 # Report entries, policy digests and the policy location --------------------------------
 
 REPORT = Path(__file__).parent / "fixtures" / "shadowscan" / "code-report-0.1.4.json"
