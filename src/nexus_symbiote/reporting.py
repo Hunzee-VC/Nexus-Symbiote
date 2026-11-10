@@ -21,7 +21,7 @@ ReportLine = tuple[str, str | None]
 
 LISTED = 10
 """How many findings, excluded surfaces or coverage gaps a gate failure lists."""
-SHOWN_FAILURES = 20
+MAX_SHOWN_FAILURES = 20
 """How many collection failures a gate failure lists; the rest are counted."""
 TOP_FINDINGS = 15
 SEVERITY_ORDER = ("critical", "high", "medium", "low", "info")
@@ -130,11 +130,13 @@ def gate_reason_lines(
             (safe_line("  - not collected: ", names, " (coverage needs every collector)"), None)
         )
     lines.extend(
-        (safe_line("  - collection: ", failure), None) for failure in failures[:SHOWN_FAILURES]
+        (safe_line("  - collection: ", failure), None) for failure in failures[:MAX_SHOWN_FAILURES]
     )
-    if len(failures) > SHOWN_FAILURES:
+    if len(failures) > MAX_SHOWN_FAILURES:
         lines.append(
-            _more(len(failures) - SHOWN_FAILURES, "collection", "scan_failures", recorded=recorded)
+            _more(
+                len(failures) - MAX_SHOWN_FAILURES, "collection", "scan_failures", recorded=recorded
+            )
         )
     lines.extend((safe_line("  - excluded: ", surface), None) for surface in excluded[:LISTED])
     if len(excluded) > LISTED:
