@@ -155,10 +155,18 @@ jobs:
 ```
 
 The Action installs its own reviewed source and ignores policy files supplied
-by the scanned checkout, so a hostile PR cannot pick the gates it is reviewed
-under. SARIF upload needs `security-events: write` added to the job and the
-repository's code-scanning entitlement; fork pull requests may have restricted
-tokens, in which case the retained evidence is the fallback.
+by the scanned checkout, so a `.nexus-symbiote.yaml` in a pull request cannot
+relax its gates. The workflow file can: on `pull_request`, GitHub runs the
+workflow from the pull request's merge commit, so a hostile pull request can
+change the inputs above, switch a gate off or delete the step, and pass. The
+Action prints every gate an input switches off as a warning and reports each
+gate in its `gates` output, but to make the check one a pull request cannot
+edit, require the workflow through a ruleset or run it on `pull_request_target`
+with read-only permissions and the pull request checked out as data, as the
+[README](../../README.md#github-action) shows. SARIF upload needs
+`security-events: write` added to the job and the repository's code-scanning
+entitlement; fork pull requests may have restricted tokens, in which case the
+retained evidence is the fallback.
 
 ## 8. What you have, and what you don't
 
