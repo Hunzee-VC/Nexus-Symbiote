@@ -78,6 +78,16 @@ nexus-symbiote advisories [OPTIONS] AIBOM_PATH
 | Option | Description |
 |---|---|
 | `-o`, `--output` `PATH` | Write the advisory report to this file instead of standard output. |
+| `--fail-on-advisory` / `--no-fail-on-advisory` | Exit with status 1 when an advisory is found (default: fail). |
+| `--exclude` `NAME` | Never send this package name to OSV; a trailing `*` matches a prefix (repeatable). |
+| `--exclude-private-origins` | Never send packages whose recorded registry origin is not the public PyPI or npm registry. |
+| `--dry-run` | List the package identities that would be sent, without contacting OSV (works offline). |
+
+The command sends each package's ecosystem, normalized name and exact version to
+`https://api.osv.dev/v1/querybatch`, including packages resolved from a private
+registry unless you exclude them. It exits 1 when an advisory is found, or when not
+every package in scope was looked up (`coverage` is `partial` or `none`, including
+an inventory with no exact PyPI or npm package).
 
 ### `baseline`
 

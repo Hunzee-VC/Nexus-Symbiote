@@ -291,17 +291,90 @@ def register_supply_chain_commands(main: click.Group) -> None:
         "-o",
         "--output",
         type=click.Path(path_type=Path),
-        help="Write the advisory report to this file instead of standard output.",
+        help="Write the VEX document to this file instead of standard output.",
     )
-    def advisories(aibom_path: Path, output: Path | None) -> None:
-        """Live: query OSV for exact PyPI/npm package URLs in the inventory."""
-        modes.require_live("advisories")
-        from nexus_symbiote.advisories import fetch_advisories
+    def vex(aibom_path: Path, output: Path | None) -> None:
+        """Export schema-validated findings in triage, without asserting exploitability."""
+        from nexus_symbiote.generators.vex import VEXGenerator
 
         _refuse_source_overwrite(output, aibom_path)
         bom = _load_inventory(aibom_path)
         try:
-            report = fetch_advisories(bom)
+            text = VEXGenerator().generate_json(bom)
+        except (OSError, ValueError, RecursionError) as exc:
+            raise click.ClickException(neutralize(exc)) from exc
+        if output:
+            write_cli_output(output, text)
+        else:
+            click.echo(text)
+
+    @main.command()
+    @click.argument("aibom_path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+    @click.option(
+        "-o",
+        "--output",
+        type=click.Path(path_type=Path),
+        help="Write the advisory report to this file instead of standard output.",
+    )
+    @click.option(
+        "--fail-on-advisory/--no-fail-on-advisory",
+        default=True,
+        show_default=True,
+        help="Exit with status 1 when an advisory is found.",
+    )
+    @click.option(
+        "--exclude",
+        multiple=True,
+        metavar="NAME",
+        help="Never send this package name to OSV; a trailing * matches a prefix (repeatable).",
+    )
+    @click.option(
+        "--exclude-private-origins",
+        is_flag=True,
+        help="Never send packages whose recorded registry origin is not the public PyPI or npm registry.",
+    )
+    @click.option(
+        "--dry-run",
+        is_flag=True,
+        help="List the package identities that would be sent, without contacting OSV (works offline).",
+    )
+    def advisories(
+        aibom_path: Path,
+        output: Path | None,
+        fail_on_advisory: bool,
+        exclude: tuple[str, ...],
+        exclude_private_origins: bool,
+        dry_run: bool,
+    ) -> None:
+        """Live: query OSV for exact PyPI/npm package URLs in the inventory.
+
+        Sends each package's ecosystem, normalized name and exact version to
+        api.osv.dev, including packages from private registries unless excluded.
+        Exits 1 when an advisory is found (unless --no-fail-on-advisory) or when
+        not every package in scope was looked up, including when none was.
+        """
+        if not dry_run:
+            modes.require_live("advisories")
+        from nexus_symbiote.advisories import fetch_advisories
+        from nexus_symbiote.core.hashing import hash_bytes, open_regular_file, parse_json_strict
+
+        _refuse_source_overwrite(output, aibom_path)
+        try:
+            with open_regular_file(aibom_path) as stream:
+                data = stream.read(16 * 1024 * 1024 + 1)
+            bom = AIBOM.model_validate(parse_json_strict(data, max_bytes=16 * 1024 * 1024))
+        except (OSError, ValueError, TypeError, RecursionError) as exc:
+            raise click.ClickException(
+                f"{neutralize(aibom_path)} is not a valid native AIBOM file."
+            ) from exc
+        try:
+            report = fetch_advisories(
+                bom,
+                exclude=exclude,
+                exclude_private_origins=exclude_private_origins,
+                dry_run=dry_run,
+                inventory_sha256=hash_bytes(data),
+            )
         except (OSError, ValueError) as exc:
             raise click.ClickException(neutralize(exc)) from exc
         text = json.dumps(report.to_dict(), indent=2)
@@ -309,5 +382,9 @@ def register_supply_chain_commands(main: click.Group) -> None:
             write_cli_output(output, text)
         else:
             click.echo(text)
-        if report.errors:
+        if dry_run:
+            if report.errors:
+                raise click.exceptions.Exit(1)
+            return
+        if not report.complete or (fail_on_advisory and report.advisories):
             raise click.exceptions.Exit(1)

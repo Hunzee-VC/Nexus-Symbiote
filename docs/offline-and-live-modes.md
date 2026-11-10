@@ -30,7 +30,7 @@ The three live commands, and what each one contacts:
 | Command | What it reaches | Safeguards (in addition to live mode) |
 |---|---|---|
 | `discover-mcp` | The HTTPS MCP endpoint you name | Exact `--allowed-origin` match; HTTPS only; destination pinned to one public IP address (private, loopback, link-local, site-local, NAT64, 6to4, Teredo, documentation and other special-purpose addresses are refused by an explicit list, whatever the Python version's address tables say); no proxies or redirects; `SSLKEYLOGFILE` is ignored, so no TLS session secrets are written; bounded size and time; never calls a tool; the bearer token is read from `--token-env` and never written to evidence |
-| `advisories` | `https://api.osv.dev/v1/query` | Same pinned HTTPS transport; exact `pkg:pypi`/`pkg:npm` package URLs only; at most 500 components and a 60-second total budget; no response text copied into the report |
+| `advisories` | `https://api.osv.dev/v1/querybatch` | Same pinned HTTPS transport; exact `pkg:pypi`/`pkg:npm` package URLs only; sends each package's ecosystem, normalized name and exact version and nothing else, including packages resolved from a private registry unless you exclude them (`--exclude`, `--exclude-private-origins`, `--dry-run` to preview); at most 500 packages and a 120-second total budget; no response text copied into the report |
 | `verify-live` | The operator-pinned stdio launchers in `--launch-policy` | The policy file must live outside the project and outside the repository that holds the project or the inventory, be a single-link file owned by you or root that only its owner can write; each launcher is an absolute path with a SHA-256 pin; a private copy is executed with an empty environment (only `PATH`), no project arguments and no project working directory; 20-second deadline; never calls a tool; servers reached over HTTP are reported as not verifiable here |
 
 **Mode selection.** A `--offline` or `--live` flag (placed before the command) wins;
@@ -55,6 +55,9 @@ nexus-symbiote --live discover-mcp https://mcp.example.com/mcp \
 export NEXUS_SYMBIOTE_MODE=live                    # for a CI job that runs live steps
 nexus-symbiote advisories agentbom.json -o advisories.json
 ```
+
+`advisories --dry-run` lists the package identities it would send and contacts
+nothing, so it also runs offline.
 
 Mode flags go **before** the command. Running a live command offline exits with
 status 2 and tells you how to enable live mode:

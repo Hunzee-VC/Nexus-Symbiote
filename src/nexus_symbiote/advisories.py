@@ -1,42 +1,94 @@
-"""Explicit, bounded OSV queries for exact declared PyPI/npm package identities."""
+"""Explicit, bounded OSV queries for exact declared PyPI/npm package identities.
+
+What leaves the machine: for each component in scope, the ecosystem (``PyPI`` or
+``npm``), the normalized package name and the exact version, posted to
+``https://api.osv.dev/v1/querybatch``. Packages resolved from a private registry
+are included unless the operator excludes them. Nothing else from the inventory
+is sent. Batch ordering and per-query pagination:
+https://google.github.io/osv.dev/post-v1-querybatch/
+"""
 
 from __future__ import annotations
 
+import http.client
+import json
 import re
 import time
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import unquote
 
+from nexus_symbiote import __version__
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.hashing import extract_version_pin, parse_json_strict
-from nexus_symbiote.core.models import RegistryEntryComponent
+from nexus_symbiote.core.models import MCPServerComponent, RegistryEntryComponent
 from nexus_symbiote.scanners.live_mcp import DiscoveryTransport, PinnedHTTPTransport
 
-OSV_QUERY_URL = "https://api.osv.dev/v1/query"
-MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+OSV_QUERY_URL = "https://api.osv.dev/v1/querybatch"
+MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 MAX_COMPONENTS = 500
-TOTAL_TIMEOUT_SECONDS = 60.0
+BATCH_SIZE = 100
+MAX_PAGES = 10
+TOTAL_TIMEOUT_SECONDS = 120.0
+PUBLIC_REGISTRY_ORIGINS = {
+    "pypi": frozenset({"https://pypi.org", "https://files.pythonhosted.org"}),
+    "npm": frozenset({"https://registry.npmjs.org", "https://registry.yarnpkg.com"}),
+}
+SCOPE = (
+    "exact pkg:pypi and pkg:npm package URLs on registry entries and MCP servers; the "
+    "registry collector records only AI-related packages, so ordinary dependencies are "
+    "not in a scanned inventory; other ecosystems are skipped; operator exclusions are "
+    "not queried; installed artifacts are unverified and OSV knowledge is incomplete"
+)
+
+
+class _BatchLookupError(Exception):
+    """A fixed, nonsecret reason why lookups of one batch stopped."""
 
 
 @dataclass
 class AdvisoryReport:
     components_checked: int = 0
     components_skipped: int = 0
+    components_excluded: int = 0
     errors: list[str] = field(default_factory=list)
     advisories: list[dict[str, Any]] = field(default_factory=list)
+    skipped: list[dict[str, str]] = field(default_factory=list)
+    excluded: list[dict[str, str]] = field(default_factory=list)
+    queries: list[dict[str, str]] = field(default_factory=list)
+    checked_at: str | None = None
+    tool_version: str = __version__
+    inventory_sha256: str | None = None
+    dry_run: bool = False
+
+    @property
+    def coverage(self) -> str:
+        """``complete`` only when every component in scope was looked up without error."""
+        if self.dry_run or not self.components_checked:
+            return "none"
+        return "partial" if self.errors else "complete"
+
+    @property
+    def complete(self) -> bool:
+        return self.coverage == "complete"
 
     def to_dict(self) -> dict[str, Any]:
         return {
             **asdict(self),
-            "complete": not self.errors,
-            "scope": "exact declared PyPI/npm package URLs; installed artifacts unverified",
+            "coverage": self.coverage,
+            "complete": self.complete,
+            "scope": SCOPE,
+            "sent_to_osv": (
+                "nothing (dry run)"
+                if self.dry_run
+                else "ecosystem, normalized package name and exact version of each query"
+            ),
         }
 
 
-def package_identity(component: RegistryEntryComponent) -> tuple[str, str, str]:
-    """Accept a narrow purl subset and reconcile it with the inventory declaration."""
-    purl = component.package_url
+def _purl_identity(purl: Any) -> tuple[str, str, str]:
     if not isinstance(purl, str) or len(purl) > 2048 or "?" in purl or "#" in purl:
         raise ValueError("exact package_url is required, without qualifiers or subpath")
     match = re.fullmatch(r"pkg:(pypi|npm)/(.+)@([^@/]+)", purl)
@@ -58,11 +110,16 @@ def package_identity(component: RegistryEntryComponent) -> tuple[str, str, str]:
     )
     if valid_name is None or len(version) > 200 or version_pin != version:
         raise ValueError("package URL name or exact version is invalid")
-    normalize = (
-        (lambda value: re.sub(r"[-_.]+", "-", value).lower())
-        if kind == "pypi"
-        else (lambda value: value)
-    )
+    return kind, name, version
+
+
+def _normalize(kind: str, name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower() if kind == "pypi" else name
+
+
+def package_identity(component: RegistryEntryComponent) -> tuple[str, str, str]:
+    """Accept a narrow purl subset and reconcile it with the inventory declaration."""
+    kind, name, version = _purl_identity(component.package_url)
     declared_version = component.version or ""
     if kind == "pypi":
         declared_version = (
@@ -76,76 +133,233 @@ def package_identity(component: RegistryEntryComponent) -> tuple[str, str, str]:
         )
     if (
         component.registry_type != kind
-        or normalize(component.name) != normalize(name)
+        or _normalize(kind, component.name) != _normalize(kind, name)
         or declared_version != version
     ):
         raise ValueError("package URL disagrees with registry, name or version")
-    return ("PyPI" if kind == "pypi" else "npm"), normalize(name), version
+    return ("PyPI" if kind == "pypi" else "npm"), _normalize(kind, name), version
+
+
+def mcp_package_identity(server: MCPServerComponent) -> tuple[str, str, str]:
+    """Reconcile an MCP server's package URL with its launcher package and pinned version."""
+    kind, name, version = _purl_identity(getattr(server, "package_url", None))
+    launcher_kind, _, launcher_name = (server.launcher_package or "").partition(":")
+    if (
+        launcher_kind != kind
+        or _normalize(kind, launcher_name) != _normalize(kind, name)
+        or server.version != version
+    ):
+        raise ValueError("package URL disagrees with the launcher package or version")
+    return ("PyPI" if kind == "pypi" else "npm"), _normalize(kind, name), version
+
+
+def _excluded(kind: str, name: str, patterns: Iterable[str]) -> bool:
+    for pattern in patterns:
+        if pattern.endswith("*"):
+            if _normalize(kind, name).startswith(_normalize(kind, pattern[:-1])):
+                return True
+        elif _normalize(kind, name) == _normalize(kind, pattern):
+            return True
+    return False
+
+
+def _in_scope(component: Any) -> str | None:
+    """``pypi`` or ``npm`` for a queried package, "" for a package in another ecosystem.
+
+    None means the component is not a package: a registry entry always is, and an
+    MCP server is one when it carries a package URL.
+    """
+    if isinstance(component, RegistryEntryComponent):
+        return component.registry_type if component.registry_type in {"pypi", "npm"} else ""
+    if isinstance(component, MCPServerComponent):
+        purl = getattr(component, "package_url", None)
+        if purl is None:
+            return None
+        match = re.match(r"pkg:(pypi|npm)/", purl) if isinstance(purl, str) else None
+        return match.group(1) if match else ""
+    return None
 
 
 def fetch_advisories(
-    bom: AIBOM, timeout: float = 15.0, *, transport: DiscoveryTransport | None = None
+    bom: AIBOM,
+    timeout: float = 15.0,
+    *,
+    transport: DiscoveryTransport | None = None,
+    exclude: Iterable[str] = (),
+    exclude_private_origins: bool = False,
+    dry_run: bool = False,
+    inventory_sha256: str | None = None,
 ) -> AdvisoryReport:
-    """Query only OSV over pinned HTTPS; report missing identity and lookup failures."""
-    import json
+    """Query only OSV over pinned HTTPS; report missing identity and lookup failures.
 
+    One malformed or failed reply stops only its batch: earlier results are kept
+    and every unfinished component in that batch gets an error.
+    """
     if not 0 < timeout <= 30:
         raise ValueError("timeout must be in (0, 30] seconds")
-    report = AdvisoryReport()
-    client = transport or PinnedHTTPTransport()
-    deadline = time.monotonic() + TOTAL_TIMEOUT_SECONDS
-    components = [c for c in bom.components if isinstance(c, RegistryEntryComponent)]
-    if len(components) > MAX_COMPONENTS:
-        report.errors.append("registry component limit exceeded; no lookups performed")
-        return report
-    for comp in components:
-        if comp.registry_type not in {"pypi", "npm"}:
+    patterns = list(exclude)
+    if any(not isinstance(p, str) or not p or len(p) > 256 for p in patterns):
+        raise ValueError("exclusion patterns must be 1 to 256 characters")
+    report = AdvisoryReport(
+        checked_at=datetime.now(UTC).isoformat(),
+        inventory_sha256=inventory_sha256,
+        dry_run=dry_run,
+    )
+    scoped = [(c, kind) for c in bom.components if (kind := _in_scope(c)) is not None]
+    queries: list[dict[str, Any]] = []
+    for component, kind in scoped:
+        if not kind:
             report.components_skipped += 1
+            report.skipped.append(
+                {"component_ref": component.bom_ref, "reason": "ecosystem is not queried"}
+            )
             continue
         try:
-            ecosystem, name, version = package_identity(comp)
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise ValueError("total OSV lookup deadline exceeded")
-            report.components_checked += 1
+            if isinstance(component, RegistryEntryComponent):
+                ecosystem, name, version = package_identity(component)
+            elif isinstance(component, MCPServerComponent):
+                ecosystem, name, version = mcp_package_identity(component)
+            else:
+                continue
+        except (ValueError, TypeError, UnicodeError):
+            report.errors.append(f"{component.bom_ref}: exact package identity unavailable")
+            continue
+        origin = getattr(component, "registry_uri", None)
+        reason = None
+        if _excluded(kind, name, patterns):
+            reason = "excluded by the operator"
+        elif (
+            exclude_private_origins
+            and origin is not None
+            and origin.rstrip("/") not in PUBLIC_REGISTRY_ORIGINS[kind]
+        ):
+            reason = "resolved from a non-public registry origin"
+        if reason is not None:
+            report.components_excluded += 1
+            report.excluded.append({"component_ref": component.bom_ref, "reason": reason})
+            continue
+        queries.append(
+            {
+                "component": component,
+                "query": {"package": {"name": name, "ecosystem": ecosystem}, "version": version},
+                "token": None,
+                "seen": set(),
+                "done": False,
+            }
+        )
+        report.queries.append(
+            {
+                "component_ref": component.bom_ref,
+                "ecosystem": ecosystem,
+                "name": name,
+                "version": version,
+            }
+        )
+    if len(queries) > MAX_COMPONENTS:
+        report.errors.append("package component limit exceeded; no lookups performed")
+        return report
+    if dry_run or not queries:
+        return report
+    client = transport or PinnedHTTPTransport()
+    deadline = time.monotonic() + TOTAL_TIMEOUT_SECONDS
+    for start in range(0, len(queries), BATCH_SIZE):
+        batch = queries[start : start + BATCH_SIZE]
+        try:
+            _query_batch(client, batch, report, timeout=timeout, deadline=deadline)
+            failure = None
+        except _BatchLookupError as exc:
+            failure = str(exc)
+        except Exception:
+            failure = "OSV lookup stopped on an unexpected internal error"
+        for state in batch:
+            if state["done"]:
+                report.components_checked += 1
+            else:
+                report.errors.append(
+                    f"{state['component'].bom_ref}: {failure or 'OSV lookup incomplete'}"
+                )
+    return report
+
+
+def _query_batch(
+    client: DiscoveryTransport,
+    batch: list[dict[str, Any]],
+    report: AdvisoryReport,
+    *,
+    timeout: float,
+    deadline: float,
+) -> None:
+    pending = list(batch)
+    for _ in range(MAX_PAGES):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise _BatchLookupError("OSV lookup deadline exceeded")
+        body = json.dumps(
+            {
+                "queries": [
+                    {**state["query"], **({"page_token": state["token"]} if state["token"] else {})}
+                    for state in pending
+                ]
+            }
+        ).encode()
+        try:
             reply = client.request(
                 OSV_QUERY_URL,
-                json.dumps(
-                    {"package": {"name": name, "ecosystem": ecosystem}, "version": version}
-                ).encode(),
+                body,
                 {"Content-Type": "application/json", "Accept": "application/json"},
                 timeout=min(timeout, remaining),
                 max_bytes=MAX_RESPONSE_BYTES,
             )
-            if reply.status != 200 or len(reply.body) > MAX_RESPONSE_BYTES:
-                raise ValueError("OSV returned a non-success or oversized response")
-            body = parse_json_strict(reply.body, max_bytes=MAX_RESPONSE_BYTES)
-            if not isinstance(body, dict) or body.get("next_page_token"):
-                raise ValueError("invalid or incomplete OSV response")
-            vulns = body.get("vulns", [])
+        except (OSError, ValueError, http.client.HTTPException) as exc:
+            # Transport text can contain server data; keep it out of reports.
+            raise _BatchLookupError("OSV request failed or exceeded its limits") from exc
+        if reply.status != 200 or len(reply.body) > MAX_RESPONSE_BYTES:
+            raise _BatchLookupError("OSV returned a non-success or oversized response")
+        try:
+            parsed = parse_json_strict(reply.body, max_bytes=MAX_RESPONSE_BYTES)
+        except (ValueError, RecursionError, UnicodeError) as exc:
+            raise _BatchLookupError("OSV reply was malformed") from exc
+        if not isinstance(parsed, dict) or set(parsed) != {"results"}:
+            raise _BatchLookupError("OSV reply was malformed or reported an error")
+        results = parsed["results"]
+        if not isinstance(results, list) or len(results) != len(pending):
+            raise _BatchLookupError("OSV reply was malformed or reported an error")
+        following = []
+        for state, result in zip(pending, results, strict=True):
+            if not isinstance(result, dict) or result.keys() - {"vulns", "next_page_token"}:
+                raise _BatchLookupError("OSV reply was malformed or reported an error")
+            vulns = result.get("vulns", [])
             if not isinstance(vulns, list) or len(vulns) > 10_000:
-                raise ValueError("invalid or over-limit OSV vulnerability list")
-            pending: list[dict[str, Any]] = []
+                raise _BatchLookupError("OSV reply was malformed or reported an error")
+            query = state["query"]
             for vuln in vulns:
+                advisory = vuln.get("id") if isinstance(vuln, dict) else None
                 if (
-                    not isinstance(vuln, dict)
-                    or not isinstance(vuln.get("id"), str)
-                    or re.fullmatch(r"[A-Za-z0-9_.:-]{1,200}", vuln["id"]) is None
+                    not isinstance(advisory, str)
+                    or re.fullmatch(r"[A-Za-z0-9_.:-]{1,200}", advisory) is None
                 ):
-                    raise ValueError("invalid OSV vulnerability record")
+                    raise _BatchLookupError("OSV reply was malformed or reported an error")
                 # No uncontrolled nested API data is propagated as verified local evidence.
-                pending.append(
-                    {
-                        "component_ref": comp.bom_ref,
-                        "package_url": comp.package_url,
-                        "advisory_id": vuln["id"],
-                        "ecosystem": ecosystem,
-                        "version": version,
-                        "url": "https://osv.dev/vulnerability/" + vuln["id"],
-                    }
-                )
-            report.advisories.extend(pending)
-        except (OSError, ValueError, TypeError, RecursionError):
-            # Transport exception text can contain server data; keep it out of reports.
-            report.errors.append(f"{comp.bom_ref}: OSV lookup incomplete or identity unverified")
-    return report
+                record = {
+                    "component_ref": state["component"].bom_ref,
+                    "package_url": getattr(state["component"], "package_url", None),
+                    "advisory_id": advisory,
+                    "ecosystem": query["package"]["ecosystem"],
+                    "version": query["version"],
+                    "url": "https://osv.dev/vulnerability/" + advisory,
+                }
+                if record not in report.advisories:
+                    report.advisories.append(record)
+            token = result.get("next_page_token", "")
+            if not isinstance(token, str) or len(token) > 2048 or token in state["seen"]:
+                raise _BatchLookupError("OSV pagination is malformed or repeats a page")
+            if token:
+                state["token"] = token
+                state["seen"].add(token)
+                following.append(state)
+            else:
+                state["done"] = True
+        pending = following
+        if not pending:
+            return
+    raise _BatchLookupError("OSV result pages exceed the per-package limit")
