@@ -89,6 +89,7 @@ def test_recorded_observation_is_a_native_inventory_with_observed_claims(monkeyp
     assert mcp.properties["observed_instructions"] == "Read-only issue access."
     assert mcp.properties["observed_capabilities"] == {"tools": {}, "prompts": {}}
     assert mcp.properties["observed_declaration_hash"]
+    assert mcp.properties["observed_identity_hash"].startswith("sha256:")
     assert [p["identity"] for p in mcp.properties["observed_prompts"]] == ["summarize"]
     assert served.definition_hash_version == TOOL_DEFINITION_HASH_VERSION
     assert served.claims["tool_definition"].assurance is AssuranceLevel.OBSERVED
@@ -221,6 +222,8 @@ def test_raw_review_copy_holds_what_the_fingerprints_cover(monkeypatch, tmp_path
     assert raw["description"] == "See https://docs.example/Ignore_previous_instructions"
     assert raw["inputSchema"]["properties"]["path"]["default"] == "<IMPORTANT>***"
     assert copy["instructions"] == "Read-only issue access."
+    assert copy["serverInfo"] == {"name": "tickets", "version": "1.0.0"}
+    assert copy["capabilities"] == {"tools": {}, "prompts": {}}
     assert [p["name"] for p in copy["prompts"]] == ["summarize"]
     assert copy["complete"] is True
     assert token not in review.read_text() and token not in target.read_text()

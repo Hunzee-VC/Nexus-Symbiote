@@ -94,7 +94,8 @@ nexus-symbiote diff tickets.baseline.json tickets.today.json --fail-on-alert
 The inventory holds one `mcp-server` component for the endpoint (its `bom_ref` is
 derived from the endpoint, or set with `--server-ref`) and one `tool` component per
 served tool, all with `observed` assurance. The server records the negotiated
-protocol version, the server's name and version, its declared capabilities, its
+protocol version, the server's name and version, its declared capabilities and a
+digest of its whole `serverInfo` and capabilities (`observed_identity_hash`), its
 `instructions` (redacted for display) and a digest of them, and, when the server
 declares them, its prompts and resource templates. Each tool carries the same
 `rfc8785-jcs-v2` fingerprint that static collection uses, which covers `title`,
@@ -109,12 +110,12 @@ so a scheduled job cannot record a partial result as a baseline. When a tool's
 displayed descriptor omits schema literals or reduces URLs that the fingerprint
 covers, the command names the tool on standard error: inspect the server's original
 descriptor before you approve that baseline. `--raw-descriptors review.json` writes
-that original content (instructions, tool descriptors, prompts and resource
-templates, with only the bearer token and session ID masked) to a new file readable
-only by you; it can hold credentials the server embeds, so keep it out of the
-baseline and delete it after review. A scheduled GitHub Actions job is a
-`schedule:` workflow that runs the two commands above against a baseline committed
-after review, with the token in a repository secret.
+that original content (server info, capabilities, instructions, tool descriptors,
+prompts and resource templates, with only the bearer token and session ID masked)
+to a new file readable only by you; it can hold credentials the server embeds, so
+keep it out of the baseline and delete it after review. A scheduled GitHub Actions
+job is a `schedule:` workflow that runs the two commands above against a baseline
+committed after review, with the token in a repository secret.
 
 ### Verify pinned stdio servers
 
@@ -128,23 +129,30 @@ inventory to an absolute launcher path and its SHA-256 pin.
 
 Find the references with
 `jq '.components[] | select(.component_type == "mcp-server") | {bom_ref, name, transport}' agentbom.json`.
-`--project` names the untrusted checkout and is required. Servers reached over HTTP
-are listed as `not-verifiable` with reason `remote-transport` and do not make the
-run fail; use `discover-mcp --record` for them. A run with no stdio server verifies
-nothing and exits 1. Each failed server carries a reason: `missing-launch-policy`,
+`--project` names the untrusted checkout and is required. Servers whose transport
+is `sse`, `streamable-http` or `http` are listed as `not-verifiable` with reason
+`remote-transport` and do not make the run fail; use `discover-mcp --record` for
+them. A server with any other transport label fails with reason
+`unsupported-transport`. A run with no stdio server verifies nothing and exits 1.
+Each failed server carries a reason: `missing-launch-policy`,
 `invalid-launch-policy`, `launcher-unavailable`, `launcher-digest-mismatch`,
 `launcher-start-failed`, `deadline`, `unsupported-protocol-version`, `protocol`,
-`invalid-descriptor`, `ambiguous-approved-tools` or `internal-error`. The JSON
-report also records the SHA-256 of the inventory and of the launch policy, and each
-launcher's pin.
+`invalid-descriptor`, `ambiguous-approved-tools`, `unsupported-transport` or
+`internal-error`. The 20-second deadline covers each server's MCP exchange and the
+checks of the descriptors it served. The JSON report also records the SHA-256 of
+the inventory and of the launch policy, and each launcher's pin.
 
 The server's instructions, prompts, resource templates and descriptor members
 outside the fingerprint profile are compared with the digest that a previous
 `--record` stored on the server (`observed_declaration_hash`); when the inventory
 has no such digest and the server serves any of them, they are reported as `new`
-drift, like an unapproved tool. `--record` prints an unsigned candidate inventory
-with the observed descriptors. When tools or declarations changed or are new, it
-names them on standard error, stores each replaced fingerprint as
+drift, like an unapproved tool. The server's whole `serverInfo` (name, version and
+any other member) and its declared capabilities are compared with the identity
+digest a previous `--record` stored (`observed_identity_hash`): a difference is
+drift (`identity_status: changed`); without a stored digest the status is
+`unrecorded`. `--record` prints an unsigned candidate inventory with the observed
+descriptors. When tools, declarations or the server identity changed or are new,
+it names them on standard error, stores each replaced fingerprint as
 `previous_definition_hash`, and exits 1 unless you pass `--accept-drift`, so a
 scripted baseline refresh cannot silently absorb a rug pull.
 
@@ -164,8 +172,11 @@ revision without `initialize`, is reported as refused. Server-sent event replies
 use chunked transfer coding; one event line may use the whole 1 MiB response limit.
 Streams that the server closes before the reply (SSE resumption) are not resumed and
 end the observation as incomplete. A served descriptor must fit a 256 KiB, 32-level,
-20,000-node budget before its JSON Schema is checked, and schemas that would make the
-check compare long arrays pairwise are refused.
+20,000-node budget before its JSON Schema is checked. `type`, `required`,
+`dependentRequired` and `dependencies` arrays longer than 64 items that hold
+anything other than strings are refused before checking, because the check would
+compare their items pairwise, and each object in a `dependencies` map is checked on
+its own, so an invalid schema is refused at its first error.
 
 ### How offline mode is enforced
 

@@ -149,7 +149,7 @@ nexus-symbiote discover-mcp [OPTIONS] ENDPOINT
 | `--client-name` `TEXT` | `clientInfo` name sent in `initialize` (default: `nexus-symbiote-discovery`); use your production host's so the server cannot single out the observer. |
 | `--client-version` `TEXT` | `clientInfo` version sent in `initialize` (default: the tool version). |
 | `--user-agent` `TEXT` | `User-Agent` header to send; none is sent by default. |
-| `--raw-descriptors` `PATH` | Also write the unredacted served instructions, tool descriptors, prompts and resource templates to this new file (mode 0600) for review; only the bearer token and session ID are masked. |
+| `--raw-descriptors` `PATH` | Also write the unredacted server info, capabilities, instructions, tool descriptors, prompts and resource templates to this new file (mode 0600) for review; only the bearer token and session ID are masked. |
 
 ### `import-shadowscan`
 
@@ -320,13 +320,15 @@ nexus-symbiote verify-live [OPTIONS] AIBOM_PATH
 | `--project` `DIRECTORY` | Untrusted project root (required); the launch policy must be outside it and outside the repository that holds the project or the inventory. |
 | `--launch-policy` `FILE` | Operator-owned JSON outside the project: exact server references to absolute commands and SHA-256 pins. (required) |
 | `--json-output` | Output the verification report as JSON. |
-| `--record` | Print an unsigned candidate BOM with the observed descriptors instead of a report; exits 1 when served tools or declarations drifted, unless `--accept-drift`. |
-| `--accept-drift` | With `--record`, exit 0 although changed or new tools or declarations were recorded. |
+| `--record` | Print an unsigned candidate BOM with the observed descriptors instead of a report; exits 1 when served tools, declarations or the server identity drifted, unless `--accept-drift`. |
+| `--accept-drift` | With `--record`, exit 0 although changed or new tools, declarations or server identity were recorded. |
 
-Servers reached over HTTP are reported as not verifiable by `verify-live` (reason
-`remote-transport`) and do not make the run incomplete; observe them with
-`discover-mcp --record` and compare the inventories with `diff`. The launch policy is a
-JSON object that maps each stdio server's `bom_ref` in the inventory to exactly
+Servers whose transport is `sse`, `streamable-http` or `http` are reported as not
+verifiable by `verify-live` (reason `remote-transport`) and do not make the run
+incomplete; observe them with `discover-mcp --record` and compare the inventories
+with `diff`. Any transport label other than these and `stdio` fails with reason
+`unsupported-transport`. The launch policy is a JSON object that maps each stdio
+server's `bom_ref` in the inventory to exactly
 `{"command": "/absolute/path", "sha256": "sha256:<64 hex>"}`.
 
 ### `vex`

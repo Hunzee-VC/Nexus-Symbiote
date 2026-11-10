@@ -7,6 +7,7 @@ observe it with ``discover-mcp --record`` and compare the inventories with ``dif
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -19,6 +20,7 @@ from nexus_symbiote.core.hashing import (
 )
 from nexus_symbiote.core.models import MCPServerComponent, ToolComponent
 from nexus_symbiote.graph import validate_graph
+from nexus_symbiote.live import stdio
 from nexus_symbiote.live.stdio import (
     LaunchPolicyError,
     PinnedObservation,
@@ -28,6 +30,7 @@ from nexus_symbiote.live.stdio import (
 )
 from nexus_symbiote.scanners.live_mcp import (
     DECLARATION_PROFILE,
+    IDENTITY_PROFILE,
     CheckedDescriptor,
     DiscoveryError,
     check_listed_item,
@@ -48,7 +51,10 @@ REASONS: dict[str, str] = {
     ),
     "launcher-digest-mismatch": "The launcher bytes differ from the SHA-256 pin in the policy.",
     "launcher-start-failed": "The pinned launcher could not be started.",
-    "deadline": "The pinned server did not finish the bounded MCP exchange before the deadline.",
+    "deadline": (
+        "The pinned server's bounded MCP exchange and the checks of its descriptors did "
+        "not finish before the deadline."
+    ),
     "unsupported-protocol-version": (
         "The pinned server negotiated an MCP protocol version this client does not speak."
     ),
@@ -63,8 +69,16 @@ REASONS: dict[str, str] = {
         "Remote MCP server: verify-live starts only pinned stdio launchers. Observe it with "
         "discover-mcp --record and compare the inventories with diff."
     ),
+    "unsupported-transport": (
+        "The inventory names a transport that is neither stdio nor a remote MCP transport "
+        "(sse, streamable-http, http), so the server cannot be verified."
+    ),
     "internal-error": "The pinned observation stopped on an unexpected internal error.",
 }
+
+
+# Transport labels of servers reached over the network; discover-mcp observes them.
+REMOTE_TRANSPORTS = frozenset({"sse", "streamable-http", "http"})
 
 
 class _RefusedError(Exception):
@@ -102,11 +116,15 @@ class ServerVerifyResult:
     declaration_hash: str | None = None
     declaration_status: str | None = None  # "match" | "changed" | "new"
     declaration: dict[str, Any] | None = field(default=None, repr=False)
+    identity_hash: str | None = None
+    identity_status: str | None = None  # "match" | "changed" | "unrecorded"
 
     @property
     def rug_pull_detected(self) -> bool:
-        return any(f.status != "match" for f in self.tool_findings) or (
-            self.declaration_status in {"changed", "new"}
+        return (
+            any(f.status != "match" for f in self.tool_findings)
+            or self.declaration_status in {"changed", "new"}
+            or self.identity_status == "changed"
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -124,6 +142,8 @@ class ServerVerifyResult:
             "live_schema_hash": self.live_schema_hash,
             "declaration_hash": self.declaration_hash,
             "declaration_status": self.declaration_status,
+            "identity_hash": self.identity_hash,
+            "identity_status": self.identity_status,
             "tools": [
                 {
                     "name": f.name,
@@ -221,12 +241,15 @@ class _Declaration:
     shown: dict[str, Any]
     instructions: str | None
     lists: dict[str, dict[str, str] | None]
+    identity: str
 
 
 def _declaration(observation: PinnedObservation) -> _Declaration:
     """Validate the session's server declarations and prepare their redacted display."""
     try:
-        version, server_info, capabilities, instructions = check_server_hello(observation.hello)
+        version, server_info, capabilities, instructions, identity = check_server_hello(
+            observation.hello
+        )
     except DiscoveryError as exc:
         raise _RefusedError("protocol") from exc
     declaration = _Declaration(
@@ -234,6 +257,7 @@ def _declaration(observation: PinnedObservation) -> _Declaration:
         {"protocol_version": version, "server_info": server_info, "capabilities": capabilities},
         instructions,
         {},
+        identity,
     )
     if instructions is not None:
         declaration.shown["instructions"] = redact_text(instructions)
@@ -288,18 +312,25 @@ def verify_mcp_servers(
             server_name=server.name, server_ref=server.bom_ref, transport=server.transport
         )
         report.results.append(result)
-        if server.transport not in ("stdio", None):
+        if server.transport in REMOTE_TRANSPORTS:
             result.status, result.reason = "not-verifiable", "remote-transport"
             result.error = REASONS["remote-transport"]
             report.servers_skipped += 1
             continue
         report.servers_checked += 1
+        if server.transport not in ("stdio", None):
+            result.reason = "unsupported-transport"
+            result.error = REASONS[result.reason]
+            continue
+        deadline = time.monotonic() + stdio.DEADLINE_SECONDS
         try:
             observation = fetch_observation((trusted_launchers or {}).get(server.bom_ref))
             result.launcher_sha256 = observation.launcher_sha256
             declared = _declaration(observation)
             checked: dict[str, CheckedDescriptor] = {}
             for tool in observation.tools:
+                if time.monotonic() > deadline:
+                    raise SessionDeadlineError("descriptor checks exceeded the deadline")
                 descriptor = check_served_tool(tool)
                 checked[descriptor.name] = descriptor
             approved = [
@@ -351,6 +382,14 @@ def verify_mcp_servers(
             result.declaration_status = "new"
         else:
             result.declaration_status = "match"
+        result.identity_hash = declared.identity
+        recorded_identity = server.properties.get("observed_identity_hash")
+        if recorded_identity is None:
+            result.identity_status = "unrecorded"
+        else:
+            result.identity_status = (
+                "match" if recorded_identity == declared.identity else "changed"
+            )
         for name, item in checked.items():
             old = by_name.get(name)
             previous = None
@@ -481,7 +520,9 @@ def record_candidate(bom: AIBOM, report: LiveVerifyReport) -> None:
             ]
             server.tool_count = len(server.tool_refs)
             server.properties.update(
-                observed_server_properties(result.declaration or {}, result.declaration_hash)
+                observed_server_properties(
+                    result.declaration or {}, result.declaration_hash, result.identity_hash
+                )
             )
 
 
@@ -518,11 +559,15 @@ def observed_tool_properties(
     return shown
 
 
-def observed_server_properties(shown: dict[str, Any], digest: str | None) -> dict[str, Any]:
-    """Record the server declaration digest and its redacted display."""
+def observed_server_properties(
+    shown: dict[str, Any], digest: str | None, identity: str | None
+) -> dict[str, Any]:
+    """Record the server declaration and identity digests and their redacted display."""
     properties: dict[str, Any] = {
         "observed_declaration_hash": digest,
         "observed_declaration_hash_profile": DECLARATION_PROFILE,
+        "observed_identity_hash": identity,
+        "observed_identity_hash_profile": IDENTITY_PROFILE,
     }
     for key in (
         "protocol_version",

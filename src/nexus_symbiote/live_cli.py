@@ -88,9 +88,9 @@ def review_notice(names: list[str]) -> None:
     "--raw-descriptors",
     type=click.Path(path_type=Path),
     help=(
-        "Also write the unredacted served instructions, tool descriptors, prompts and "
-        "resource templates to this new file (mode 0600) for review; only the bearer "
-        "token and session ID are masked."
+        "Also write the unredacted server info, capabilities, instructions, tool "
+        "descriptors, prompts and resource templates to this new file (mode 0600) for "
+        "review; only the bearer token and session ID are masked."
     ),
 )
 def discover_mcp(

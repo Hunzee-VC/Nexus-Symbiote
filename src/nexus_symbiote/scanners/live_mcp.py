@@ -33,7 +33,7 @@ import uuid
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Protocol, cast
+from typing import Any, NamedTuple, Protocol, cast
 from urllib.parse import urlsplit
 
 from jsonschema import Draft202012Validator
@@ -61,6 +61,7 @@ FINGERPRINT_FIELDS = frozenset(
     {"name", "title", "description", "inputSchema", "outputSchema", "annotations", "_meta"}
 )
 DECLARATION_PROFILE = "nexus-symbiote/mcp-server-declaration/v1"
+IDENTITY_PROFILE = "nexus-symbiote/mcp-server-identity/v1"
 METHOD_NOT_FOUND = -32601
 OBSERVED_DIGEST_PROFILE = "nexus_symbiote.observed-mcp-tool/2025-06-18/full-v1"
 _RESOLVER_SLOTS = threading.BoundedSemaphore(2)
@@ -76,10 +77,33 @@ _CONSUMED_HEADERS = frozenset(
         "location",
     }
 )
-# jsonschema's uniqueItems compares unsortable array items pairwise, and the
-# 2020-12 metaschema checks "type" and "dependencies" arrays inside anyOf, which
-# evaluates every branch. Longer unsortable arrays are refused before checking.
+# jsonschema's uniqueItems compares unsortable array items pairwise. The 2020-12
+# metaschema requires unique "type", "required", "dependentRequired" and
+# "dependencies" arrays, and its anyOf for "type" and "dependencies" evaluates a
+# whole branch, required lists included, before it reports the first error.
+# Longer unsortable arrays under those keywords are refused before checking.
 _UNIQUE_ITEMS_PAIRWISE_LIMIT = 64
+# Keywords whose values the 2020-12 metaschema checks as subschemas. It checks
+# "dependencies" values through anyOf instead; see _checked_dependency_schemas.
+_SUBSCHEMA_KEYWORDS = frozenset(
+    {
+        "additionalProperties",
+        "contains",
+        "contentSchema",
+        "else",
+        "if",
+        "items",
+        "not",
+        "propertyNames",
+        "then",
+        "unevaluatedItems",
+        "unevaluatedProperties",
+    }
+)
+_SUBSCHEMA_LISTS = frozenset({"allOf", "anyOf", "oneOf", "prefixItems"})
+_SUBSCHEMA_MAPS = frozenset(
+    {"$defs", "definitions", "dependentSchemas", "patternProperties", "properties"}
+)
 _NONPUBLIC_NETWORKS = tuple(
     ipaddress.ip_network(network)
     for network in (
@@ -234,6 +258,8 @@ class DiscoveryResult:
     instructions_hash: str | None = None
     declaration_hash: str | None = None
     declaration_profile: str = DECLARATION_PROFILE
+    identity_hash: str | None = None
+    identity_profile: str = IDENTITY_PROFILE
     tools: list[ObservedTool] = field(default_factory=list)
     prompts: list[ObservedItem] | None = None
     resource_templates: list[ObservedItem] | None = None
@@ -668,10 +694,11 @@ def _bounded_unique_items(schema: dict[str, Any]) -> None:
     while pending:
         item = pending.pop()
         if isinstance(item, dict):
-            arrays = [item.get("type")]
-            dependencies = item.get("dependencies")
-            if isinstance(dependencies, dict):
-                arrays.extend(dependencies.values())
+            arrays = [item.get("type"), item.get("required")]
+            for key in ("dependentRequired", "dependencies"):
+                mapping = item.get(key)
+                if isinstance(mapping, dict):
+                    arrays.extend(mapping.values())
             for array in arrays:
                 if (
                     isinstance(array, list)
@@ -684,12 +711,43 @@ def _bounded_unique_items(schema: dict[str, Any]) -> None:
             pending.extend(item)
 
 
+def _checked_dependency_schemas(node: Any) -> Any:
+    """Check each object in a "dependencies" map on its own, then stand in ``true``.
+
+    The metaschema reaches those objects through anyOf, which evaluates a whole
+    object before it reports the first error; checked alone, the check stops at
+    the first error. Validity is unchanged: such an object must be a valid schema,
+    and ``true`` is one. Each node is checked once, within its nearest such object.
+    """
+    if not isinstance(node, dict):
+        return node
+    copy = dict(node)
+    for key, value in node.items():
+        if key in _SUBSCHEMA_KEYWORDS:
+            copy[key] = _checked_dependency_schemas(value)
+        elif key in _SUBSCHEMA_LISTS and isinstance(value, list):
+            copy[key] = [_checked_dependency_schemas(item) for item in value]
+        elif key in _SUBSCHEMA_MAPS and isinstance(value, dict):
+            copy[key] = {name: _checked_dependency_schemas(item) for name, item in value.items()}
+        elif key == "dependencies" and isinstance(value, dict):
+            copy[key] = {
+                name: _standalone_schema(item) if isinstance(item, dict) else item
+                for name, item in value.items()
+            }
+    return copy
+
+
+def _standalone_schema(schema: dict[str, Any]) -> bool:
+    Draft202012Validator.check_schema(_checked_dependency_schemas(schema))
+    return True
+
+
 def _check_schema(schema: Any) -> None:
     if not isinstance(schema, dict) or schema.get("type") != "object":
         raise DiscoveryError("tool schemas must declare object type")
     _bounded_unique_items(schema)
     try:
-        Draft202012Validator.check_schema(schema)
+        Draft202012Validator.check_schema(_checked_dependency_schemas(schema))
     except Exception as exc:
         # The regex format check runs re.compile, which raises OverflowError and
         # RecursionError besides re.error; any failure means an invalid schema.
@@ -793,14 +851,23 @@ def declaration_hash(
     )
 
 
-def check_server_hello(
-    hello: dict[str, Any], secrets: Iterable[str] = ()
-) -> tuple[str, dict[str, Any], dict[str, Any], str | None]:
-    """Validate an initialize result: (negotiated version, server info, capabilities, instructions).
+class ServerHello(NamedTuple):
+    """A validated initialize result.
 
-    Server info and capabilities are returned as redacted display values;
-    instructions are returned raw for digesting.
+    ``server_info`` and ``capabilities`` are redacted display values;
+    ``instructions`` is raw, for digesting. ``identity_hash`` binds every
+    ``serverInfo`` member and the capabilities exactly as served.
     """
+
+    version: str
+    server_info: dict[str, Any]
+    capabilities: dict[str, Any]
+    instructions: str | None
+    identity_hash: str
+
+
+def check_server_hello(hello: dict[str, Any], secrets: Iterable[str] = ()) -> ServerHello:
+    """Validate an initialize result within the descriptor budget."""
     negotiated = hello.get("protocolVersion")
     if negotiated not in SUPPORTED_PROTOCOL_VERSIONS:
         raise DiscoveryError("unsupported negotiated MCP protocol version")
@@ -821,16 +888,22 @@ def check_server_hello(
         raise DiscoveryError("invalid MCP server instructions")
     try:
         check_json_budget(capabilities, maximum=MAX_SCHEMA_BYTES)
+        check_json_budget(server_info, maximum=MAX_SCHEMA_BYTES)
+        identity = hash_canonical(
+            {"profile": IDENTITY_PROFILE, "serverInfo": server_info, "capabilities": capabilities}
+        )
         shown_info = redact_metadata(
             {key: server_info[key] for key in ("name", "title", "version") if key in server_info},
             secrets,
         )
         shown_capabilities = redact_metadata(capabilities, secrets)
     except (ValueError, TypeError, RecursionError) as exc:
-        raise DiscoveryError("MCP server capabilities exceed the validation budget") from exc
+        raise DiscoveryError(
+            "MCP server identity or capabilities exceed the validation budget"
+        ) from exc
     if not all(isinstance(value, str) for value in shown_info.values()):
         raise DiscoveryError("invalid MCP server implementation identity")
-    return negotiated, shown_info, shown_capabilities, instructions
+    return ServerHello(negotiated, shown_info, shown_capabilities, instructions, identity)
 
 
 def _tool(raw: Any, secrets: list[str]) -> ObservedTool:
@@ -908,12 +981,22 @@ def discover_tools(
     ``client_name``, ``client_version`` and ``user_agent`` let an operator present
     the identity of the production host, since a server can serve a different
     tool list to a client it recognizes as an observer. A ``raw_sink`` receives the
-    unredacted instructions, tool descriptors, prompts and resource templates that
-    passed intake, with only the bearer token and session ID masked, for review.
+    unredacted server info, capabilities, instructions, tool descriptors, prompts
+    and resource templates that passed intake, with only the bearer token and
+    session ID masked, for review.
     """
     result = DiscoveryResult()
     raw: dict[str, Any] = raw_sink if raw_sink is not None else {}
-    raw.update({"instructions": None, "tools": [], "prompts": None, "resourceTemplates": None})
+    raw.update(
+        {
+            "serverInfo": None,
+            "capabilities": None,
+            "instructions": None,
+            "tools": [],
+            "prompts": None,
+            "resourceTemplates": None,
+        }
+    )
     session: str | None = None
     protected = [bearer_token] if isinstance(bearer_token, str) else []
     try:
@@ -1058,9 +1141,13 @@ def discover_tools(
             ):
                 raise DiscoveryError("invalid MCP session identifier")
         secrets = [value for value in (bearer_token, session) if value]
-        negotiated, server_info, capabilities, instructions = check_server_hello(hello, secrets)
-        result.protocol_version = negotiated
+        negotiated, server_info, capabilities, instructions, identity = check_server_hello(
+            hello, secrets
+        )
+        result.protocol_version, result.identity_hash = negotiated, identity
         result.server_info, result.server_capabilities = server_info, capabilities
+        raw["serverInfo"] = _mask_exact(hello["serverInfo"], secrets)
+        raw["capabilities"] = _mask_exact(hello["capabilities"], secrets)
         if instructions is not None:
             result.instructions = redact_text(instructions, secrets)
             result.instructions_hash = hash_canonical({"instructions": instructions})

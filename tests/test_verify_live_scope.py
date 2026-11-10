@@ -17,7 +17,7 @@ from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.hashing import TOOL_DEFINITION_HASH_VERSION, hash_tool_definition
 from nexus_symbiote.core.models import MCPServerComponent, ToolComponent
-from nexus_symbiote.live import stdio
+from nexus_symbiote.live import stdio, verify
 from nexus_symbiote.live.verify import record_candidate, verify_mcp_servers
 
 TOOL = {"name": "weather", "description": "Read weather", "inputSchema": {"type": "object"}}
@@ -305,7 +305,10 @@ def test_failures_carry_distinct_reasons(tmp_path, monkeypatch):
     [
         {"type": "object", "properties": {"q": {"type": "string", "pattern": "a{4294967296}"}}},
         {"type": "object", "properties": {"x": {"type": ["a", *range(9_000)]}}},
+        {"type": "object", "dependencies": {"x": {"required": ["a", *range(9_000)]}}},
+        {"type": "object", "dependencies": {"x": {"prefixItems": list(range(10_000))}}},
     ],
+    ids=["regex-repetition", "type-array", "nested-required", "nested-prefix-items"],
 )
 def test_hostile_served_schemas_are_recorded_failures_not_crashes(tmp_path, schema):
     policy = launcher(tmp_path, tools=[{**TOOL, "inputSchema": schema}])
@@ -417,3 +420,62 @@ def test_declared_but_unimplemented_templates_do_not_fail_verification(tmp_path)
         inventory(), trusted_launchers=launcher(tmp_path, hello=hello, lists=broken, name="b")
     )
     assert failed.results[0].reason == "protocol"
+
+
+def test_unknown_transport_labels_fail_closed_and_http_is_remote(tmp_path):
+    bom = inventory()
+    bom.add_component(MCPServerComponent(bom_ref="mcp:odd", name="odd", transport="websocket"))
+    bom.add_component(
+        MCPServerComponent(
+            bom_ref="mcp:web", name="web", transport="http", endpoint_url="https://mcp.example.com"
+        )
+    )
+    report = verify_mcp_servers(bom, trusted_launchers=launcher(tmp_path))
+    assert not report.complete
+    assert (report.servers_checked, report.servers_reachable, report.servers_skipped) == (2, 1, 1)
+    reasons = {r.server_ref: (r.status, r.reason) for r in report.results}
+    assert reasons["mcp:odd"] == ("failed", "unsupported-transport")
+    assert reasons["mcp:web"] == ("not-verifiable", "remote-transport")
+
+
+def test_server_identity_and_capabilities_are_compared_after_recording(tmp_path):
+    first = launcher(tmp_path)
+    report = verify_mcp_servers(inventory(), trusted_launchers=first)
+    assert report.results[0].identity_status == "unrecorded" and not report.has_drift
+    candidate = inventory()
+    record_candidate(candidate, report)
+    server = candidate.get_component("mcp:weather")
+    assert isinstance(server, MCPServerComponent)
+    assert server.properties["observed_identity_hash"] == report.results[0].identity_hash
+    again = verify_mcp_servers(candidate, trusted_launchers=first)
+    assert again.results[0].identity_status == "match" and not again.has_drift
+    for name, hello in (
+        ("renamed", {**HELLO, "serverInfo": {"name": "weather-pro", "version": "1"}}),
+        ("upgraded", {**HELLO, "serverInfo": {"name": "fixture", "version": "2"}}),
+        ("list-changed", {**HELLO, "capabilities": {"tools": {"listChanged": True}}}),
+    ):
+        changed = launcher(tmp_path, hello=hello, name=name)
+        policy = {"mcp:weather": changed["mcp:weather"]}
+        drifted = verify_mcp_servers(candidate, trusted_launchers=policy)
+        assert drifted.complete and drifted.has_drift, name
+        assert drifted.results[0].identity_status == "changed"
+        assert drifted.results[0].declaration_status == "match"
+        assert [f.status for f in drifted.results[0].tool_findings] == ["match"]
+    result, _, _ = invoke(tmp_path, candidate, policy, "--record")
+    assert result.exit_code == 1
+    assert "Drift in server mcp:weather: changed server identity or capabilities" in result.stderr
+
+
+def test_descriptor_checks_share_the_session_deadline(tmp_path, monkeypatch):
+    monkeypatch.setattr(stdio, "DEADLINE_SECONDS", 2.0)
+    real = verify.check_served_tool
+
+    def slow(raw, secrets=()):
+        time.sleep(0.5)
+        return real(raw, secrets)
+
+    monkeypatch.setattr(verify, "check_served_tool", slow)
+    tools = [{**TOOL, "name": f"weather{index}"} for index in range(8)]
+    started = time.monotonic()
+    assert _reason(tmp_path, launcher(tmp_path, tools=tools)) == "deadline"
+    assert time.monotonic() - started < 4

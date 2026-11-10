@@ -146,7 +146,7 @@ def observation_inventory(result: DiscoveryResult, *, server_ref: str | None = N
         properties={
             "collection_mode": "live-observation",
             "observed_endpoint_hash": hash_canonical({"observed_endpoint": result.endpoint}),
-            **observed_server_properties(shown, result.declaration_hash),
+            **observed_server_properties(shown, result.declaration_hash, result.identity_hash),
         },
     )
     bom.add_component(server)

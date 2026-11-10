@@ -10,6 +10,9 @@ import time
 from typing import Any
 
 import pytest
+from hypothesis import HealthCheck, example, given, settings
+from hypothesis import strategies as st
+from jsonschema import Draft202012Validator
 
 from nexus_symbiote.scanners import live_mcp
 from nexus_symbiote.scanners.live_mcp import HTTPReply, discover_tools
@@ -91,6 +94,27 @@ def test_instructions_change_alone_changes_only_the_declaration_digest():
     assert [t.fingerprint for t in first.tools] == [t.fingerprint for t in second.tools]
     assert first.declaration_hash != second.declaration_hash
     assert first.instructions_hash != second.instructions_hash
+    assert first.identity_hash == second.identity_hash
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"serverInfo": {"name": "fixture-server", "version": "1.0.1"}},
+        {"serverInfo": {"name": "other-server", "version": "1.0.0"}},
+        {"serverInfo": {"name": "fixture-server", "version": "1.0.0", "websiteUrl": "x"}},
+        {"capabilities": {"tools": {"listChanged": True}}},
+        {"capabilities": {"tools": {}, "experimental": {"x": {}}}},
+    ],
+)
+def test_server_identity_and_capabilities_are_bound_by_the_identity_digest(change):
+    first, _ = observe(hello(), notification_accepted(), rpc_result(2, {"tools": [tool()]}))
+    second, _ = observe(
+        hello(**change), notification_accepted(), rpc_result(2, {"tools": [tool()]})
+    )
+    assert first.complete and second.complete, second.failures
+    assert first.identity_hash and first.identity_hash != second.identity_hash
+    assert first.declaration_hash == second.declaration_hash
 
 
 def test_declared_prompts_and_resource_templates_are_listed_and_digested():
@@ -206,14 +230,103 @@ def test_quadratic_unique_items_schemas_are_refused_before_checking():
     for schema in (
         {"type": "object", "properties": {"x": {"type": ["a", *range(9_000)]}}},
         {"type": "object", "dependencies": {"a": ["a", *range(9_000)]}},
+        {"type": "object", "dependencies": {"x": {"required": ["a", *range(9_000)]}}},
+        {
+            "type": "object",
+            "dependencies": {"x": {"dependentRequired": {"y": ["a", *range(9_000)]}}},
+        },
     ):
         result, _ = observe(
             hello(), notification_accepted(), rpc_result(2, {"tools": [schema_tool(schema)]})
         )
         assert not result.complete
         assert result.failures == ["MCP tool schema exceeds the validation budget"]
-    # Both fit the JSON budget; unguarded, each costs about 4e7 pairwise comparisons.
+    # All fit the JSON budget; unguarded, each costs about 4e7 pairwise comparisons.
     assert time.monotonic() - started < 5
+
+
+@pytest.mark.parametrize(
+    "inner",
+    [
+        {"prefixItems": list(range(10_000))},
+        {"allOf": list(range(10_000))},
+        {"properties": {f"p{index}": index for index in range(7_500)}},
+        {"dependencies": {"y": {"prefixItems": [{"type": 5}] * 7_000}}},
+    ],
+    ids=["prefix-items", "all-of", "properties", "nested-dependencies"],
+)
+def test_invalid_dependency_subschemas_are_refused_at_their_first_error(inner):
+    schema = {"type": "object", "dependencies": {"x": inner}}
+    started = time.monotonic()
+    result, _ = observe(
+        hello(), notification_accepted(), rpc_result(2, {"tools": [schema_tool(schema)]})
+    )
+    assert result.failures == ["invalid MCP tool JSON Schema"]
+    # The metaschema's anyOf listed every error of such a subschema: seconds each.
+    assert time.monotonic() - started < 2
+
+
+SCHEMA_LEAVES = st.booleans() | st.fixed_dictionaries(
+    {},
+    optional={
+        "type": st.sampled_from(["string", "object", 5, ["string", "string"], ["string", 1]]),
+        "required": st.sampled_from([["a"], ["a", "a"], [1], "a"]),
+        "minimum": st.sampled_from([1, "x"]),
+        "pattern": st.sampled_from(["^a$", "("]),
+        "enum": st.sampled_from([[1, 1], "x"]),
+    },
+)
+SCHEMAS = st.recursive(
+    SCHEMA_LEAVES,
+    lambda children: st.fixed_dictionaries(
+        {},
+        optional={
+            "properties": st.dictionaries(
+                st.sampled_from(["a", "dependencies", "properties", "default"]),
+                children,
+                max_size=2,
+            ),
+            "dependencies": st.dictionaries(
+                st.sampled_from(["a", "b"]),
+                children | st.sampled_from([["a"], ["a", "a"], [1], "x", 5]),
+                max_size=2,
+            ),
+            "dependentRequired": st.dictionaries(
+                st.just("a"), st.sampled_from([["b"], ["b", "b"], [1]]), max_size=1
+            ),
+            "items": children,
+            "allOf": st.lists(children, max_size=2),
+            "not": children,
+            "$defs": st.dictionaries(st.just("d"), children, max_size=1),
+            "default": children,
+            "x-extension": children,
+        },
+    ),
+    max_leaves=10,
+)
+
+
+@settings(max_examples=200, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@given(SCHEMAS)
+@example({"properties": {"dependencies": {"properties": {"a": {"type": "string"}}}}})
+@example({"default": {"dependencies": {"a": {"type": 5}}}})
+@example({"x-extension": {"dependencies": {"a": {"minimum": "x"}}}})
+@example({"dependencies": {"a": {"dependencies": {"b": {"minimum": "x"}}}}})
+@example({"dependencies": {"a": True, "b": False, "c": ["d"]}})
+@example({"$defs": {"d": {"dependencies": {"a": {"pattern": "("}}}}})
+def test_schema_checks_accept_exactly_what_the_metaschema_accepts(schema):
+    root = {"type": "object", "allOf": [schema], "dependencies": {"r": schema}}
+    try:
+        Draft202012Validator.check_schema(root)
+        expected = True
+    except Exception:
+        expected = False
+    try:
+        live_mcp._check_schema(root)
+        actual = True
+    except live_mcp.DiscoveryError:
+        actual = False
+    assert actual == expected
 
 
 def test_descriptor_outside_the_json_budget_is_refused():

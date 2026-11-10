@@ -103,6 +103,8 @@ def _drift_summary(report: LiveVerifyReport) -> None:
         ]
         if result.declaration_status in {"changed", "new"}:
             changes.append(f"{result.declaration_status} server declarations")
+        if result.identity_status == "changed":
+            changes.append("changed server identity or capabilities")
         if changes:
             click.echo(
                 f"Drift in server {neutralize(result.server_ref)}: " + "; ".join(changes),
@@ -134,13 +136,17 @@ def register_supply_chain_commands(main: click.Group) -> None:
         is_flag=True,
         help=(
             "Print an unsigned candidate BOM with the observed descriptors instead of a "
-            "report; exits 1 when served tools or declarations drifted, unless --accept-drift."
+            "report; exits 1 when served tools, declarations or the server identity "
+            "drifted, unless --accept-drift."
         ),
     )
     @click.option(
         "--accept-drift",
         is_flag=True,
-        help="With --record, exit 0 although changed or new tools or declarations were recorded.",
+        help=(
+            "With --record, exit 0 although changed or new tools, declarations or server "
+            "identity were recorded."
+        ),
     )
     def verify_live(
         aibom_path: str,
