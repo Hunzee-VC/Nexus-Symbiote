@@ -28,7 +28,7 @@ from nexus_symbiote.reporting import (
     validation_report_lines,
 )
 from nexus_symbiote.runtime_cli import register_runtime_commands
-from nexus_symbiote.supply_chain_cli import register_supply_chain_commands
+from nexus_symbiote.supply_chain_cli import STAGED_INVENTORY, register_supply_chain_commands
 from nexus_symbiote.utils.files import write_output_file
 from nexus_symbiote.utils.terminal import (
     echo_line,
@@ -50,6 +50,11 @@ BUILTIN_SCANNERS = "mcp, model, prompt, rag, registry, a2a, ide_agents, shadowsc
 def _debug_enabled() -> bool:
     ctx = click.get_current_context(silent=True)
     return bool(ctx is not None and ctx.meta.get(DEBUG_KEY))
+
+
+def _staged_inventory() -> bool:
+    ctx = click.get_current_context(silent=True)
+    return bool(ctx is not None and ctx.meta.get(STAGED_INVENTORY))
 
 
 def _print_traceback(exc: BaseException) -> None:
@@ -284,6 +289,21 @@ def _neutralized(exc: click.ClickException) -> click.ClickException:
     return click.ClickException(message)
 
 
+def _declared_text_only(exc: click.ClickException) -> bool:
+    """Click's own missing-parameter error, worded only from the parameter's declaration.
+
+    Its lines (such as one per allowed choice) come from this program, never from input,
+    so they keep Click's layout instead of being joined into one neutralized line.
+    """
+    return (
+        type(exc) is click.MissingParameter
+        and not exc.message
+        and exc.param is not None
+        and exc.param_hint is None
+        and exc.param_type is None
+    )
+
+
 class _RootGroup(click.Group):
     """Root group: clear mode refusals, neutralized error text and no tracebacks."""
 
@@ -316,7 +336,7 @@ class _RootGroup(click.Group):
                 "command never needs the network or a subprocess; please report this as a defect."
             ) from None
         except click.ClickException as exc:
-            if isinstance(exc, _HELP_ERRORS):
+            if isinstance(exc, _HELP_ERRORS) or _declared_text_only(exc):
                 raise
             raise _neutralized(exc) from None
         except (click.exceptions.Exit, click.Abort):
@@ -630,6 +650,7 @@ def scan(
         fail_on_severity=policy.risk.fail_on_severity,
     ).passes_gate(aibom)
     report_mode = report_only or policy.scan.failure_mode == "report-only"
+    staged = _staged_inventory()
 
     if not check_only:
         if source_report_digest and output_format == "sarif":
@@ -650,7 +671,8 @@ def scan(
             ) from exc
         if output:
             write_cli_output(Path(output), out_data)
-            echo_line("Saved ", output, err=True)
+            if not staged:
+                echo_line("Saved ", output, err=True)
         else:
             click.echo(json_text(out_data))
 
@@ -666,7 +688,9 @@ def scan(
         "score_threshold": policy.risk.fail_threshold,
     }
     not_collected = sorted(set(all_scanners) - set(selected))
-    gate = scan_gate_lines(document, failures_by, excluded_by, not_collected)
+    gate = scan_gate_lines(
+        document, failures_by, excluded_by, not_collected, recorded=not (check_only or staged)
+    )
     print_lines([(heading, "yellow" if report_mode else "red"), *gate], err=True)
     if not report_mode:
         raise click.exceptions.Exit(1)

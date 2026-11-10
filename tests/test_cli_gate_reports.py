@@ -107,10 +107,48 @@ def test_a_repeated_collector_is_refused(tmp_path):
     assert "each collector may be selected only once" in result.output
 
 
-def test_a_project_path_that_is_a_file_is_a_usage_error(tmp_path):
+@pytest.mark.parametrize("command", ["scan", "baseline"])
+def test_a_project_path_that_is_a_file_is_a_usage_error(tmp_path, command):
     target = tmp_path / "file.txt"
     target.write_text("x")
-    assert CliRunner().invoke(main, ["scan", str(target)]).exit_code == 2
+    output = tmp_path / "out.json"
+    result = CliRunner().invoke(main, [command, str(target), "-o", str(output)])
+    assert result.exit_code == 2 and not output.exists()
+
+
+def _linked(root: Path, count: int) -> Path:
+    (root / "target").mkdir(parents=True)
+    for index in range(count):
+        (root / f"link{index}").symlink_to(root / "target", target_is_directory=True)
+    return root
+
+
+def _more(output: str) -> str:
+    (line,) = [line for line in _lines(output) if line.startswith("  ... and ")]
+    return line
+
+
+def test_a_gate_that_lists_some_gaps_says_where_the_rest_are(tmp_path):
+    project = _linked(tmp_path / "p", 11)
+    runner = CliRunner()
+    output = tmp_path / "bom.json"
+    written = runner.invoke(main, ["scan", str(project), "--no-project-policy", "-o", str(output)])
+    assert written.exit_code == 1
+    assert _more(written.stderr).endswith("recorded under metadata.completeness in the inventory")
+    failures = AIBOM.load(output).metadata.completeness.scan_failures
+    assert all(any(f"link{index}:" in failure for failure in failures) for index in range(11))
+    # --check (the pre-commit hooks) and baseline keep no inventory to look in.
+    checked = runner.invoke(main, ["scan", str(project), "--no-project-policy", "--check"])
+    target = tmp_path / "baseline.json"
+    staged = runner.invoke(main, ["baseline", str(project), "-o", str(target)])
+    for result in (checked, staged):
+        assert result.exit_code == 1
+        assert "this run keeps no inventory: scan with -o FILE records them all" in _more(
+            result.stderr
+        )
+        assert "in the inventory" not in result.stderr
+    assert not any(line.startswith("Saved ") for line in _lines(staged.stderr))
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["bom.json", "p"]
 
 
 def _risky_bom(tmp_path: Path, *, complete: bool = True) -> Path:
@@ -494,6 +532,20 @@ def test_reports_show_coverage_gaps_suppressions_and_omitted_issues():
         )
     ]
     assert "  ... and 3 more issues, counted in --json-output" in validation
+
+
+def test_a_missing_choice_option_lists_its_choices_on_their_own_lines(tmp_path):
+    envelope, key = tmp_path / "envelope.json", tmp_path / "key.pem"
+    envelope.write_text("{}")
+    key.write_text("")
+    result = CliRunner().invoke(
+        main, ["runtime", "verify", str(envelope), "--public-key", str(key)]
+    )
+    assert result.exit_code == 2
+    assert "\ufffd" not in result.output
+    lines = _lines(result.output)
+    assert "Error: Missing option '--kind'. Choose from:" in lines
+    assert {"\tsnapshot,", "\tapproval,", "\ttrust,", "\tmodel"} <= set(lines)
 
 
 def test_a_command_group_without_arguments_still_prints_its_help():

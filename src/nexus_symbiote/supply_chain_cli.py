@@ -14,6 +14,9 @@ from nexus_symbiote import modes
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.utils.terminal import json_text, neutralize, output_failure, write_cli_output
 
+# Set while `baseline` runs `scan` into a staged inventory that it discards on failure.
+STAGED_INVENTORY = "nexus_symbiote.staged-inventory"
+
 
 def _load_inventory(path: Path) -> AIBOM:
     # Parser and validation messages can quote attacker-controlled input; keep them out.
@@ -110,7 +113,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
             raise click.exceptions.Exit(1)
 
     @main.command()
-    @click.argument("project_path", type=click.Path(exists=True), default=".")
+    @click.argument("project_path", type=click.Path(exists=True, file_okay=False), default=".")
     @click.option(
         "-o",
         "--baseline-path",
@@ -144,6 +147,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
             raise output_failure(exc) from exc
         os.close(fd)
         staged = Path(temporary)
+        ctx.meta[STAGED_INVENTORY] = True
         try:
             ctx.invoke(
                 scan,
@@ -171,6 +175,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
                 raise click.ClickException("Baseline was not written: static scan gate failed")
             write_cli_output(target, staged.read_text(encoding="utf-8"))
         finally:
+            ctx.meta.pop(STAGED_INVENTORY, None)
             # A directory that forbids removal keeps the staged copy; that must not
             # replace the command's result.
             with contextlib.suppress(OSError):

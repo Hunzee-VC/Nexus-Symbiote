@@ -8,12 +8,13 @@ import time
 import unicodedata
 from pathlib import Path
 
+import click
 import pytest
 from click.testing import CliRunner
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from nexus_symbiote.cli import main
+from nexus_symbiote.cli import _RootGroup, main
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.models import (
     CompletenessClaim,
@@ -167,6 +168,35 @@ def test_invalid_policy_keys_cannot_forge_output_lines(tmp_path):
         assert "invalid policy" in result.stderr and "�" in result.stderr
         assert not _injected_lines(result.output)
         assert "\x1b" not in result.output and "\r" not in result.output
+
+
+def _kind() -> click.Option:
+    return click.Option(["--kind"], type=click.Choice(["snapshot", "model"]), required=True)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        lambda: click.MissingParameter("x\n::warning::forged", param=_kind()),
+        lambda: click.MissingParameter(param=_kind(), param_hint="x\n::warning::forged"),
+        lambda: click.MissingParameter(param=_kind(), param_type="x\n::warning::forged"),
+        lambda: click.BadParameter("x\n::warning::forged ##[error]y", param=_kind()),
+    ],
+    ids=["message", "hint", "type-name", "bad-parameter"],
+)
+def test_click_errors_worded_by_code_or_input_stay_one_neutralized_line(error):
+    # Only Click's own missing-parameter text keeps its line breaks; any error that
+    # carries a message, hint or type name, which code may build from input, does not.
+    group = _RootGroup()
+
+    @group.command()
+    def hostile() -> None:
+        raise error()
+
+    result = CliRunner().invoke(group, ["hostile"])
+    assert result.exit_code == 2
+    assert "forged" in result.output
+    assert not _injected_lines(result.output)
 
 
 def test_every_format_control_and_line_break_character_is_neutralized():

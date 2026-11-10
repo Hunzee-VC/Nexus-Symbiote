@@ -87,7 +87,7 @@ Colors are used only on a terminal, and `NO_COLOR` turns them off.
 |---|---|
 | `0` | The command completed and every requested gate passed. |
 | `1` | A gate or check failed (risk gate, integrity, digest or signature mismatch, `diff --fail-on-alert`, incomplete collection or observation), the input could not be read or parsed, `import-shadowscan` ran without `--report-only`, or an unexpected internal error occurred. |
-| `2` | Usage error: an unknown command or option, a missing argument or file, a `PROJECT_PATH` or `--project` that is a file, an invalid value (including a malformed `verify-artifact --sha256` and an incomplete `--bundle`, `--signer-identity` and `--issuer` set), a relative project path that a symbolic link leads outside the working directory, an invalid `NEXUS_SYMBIOTE_MODE`, a `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` shorter than 32 characters, or a live command run without live mode. |
+| `2` | Usage error: an unknown command or option, a missing argument or file, a `PROJECT_PATH` of `scan` or `baseline` or a `--project` of `validate`, `risk` or `verify-artifact` that is a file, an invalid value (including a malformed `verify-artifact --sha256` and an incomplete `--bundle`, `--signer-identity` and `--issuer` set), a relative project path that a symbolic link leads outside the working directory, an invalid `NEXUS_SYMBIOTE_MODE`, a `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` shorter than 32 characters, or a live command run without live mode. |
 
 What exit status 1 means for each gate:
 
@@ -384,9 +384,10 @@ complete, its status. It ends with `Scan gate passed` or `Scan gate failed`, fol
 by why: each gate reason, the findings at or above the severity cutoff, the score
 and threshold, the collectors that were not run, and the first ten collection
 failures and excluded surfaces, each with its collector. The inventory records them
-all under `metadata.completeness`. An export that fails its schema or consistency
-checks ends the command with an error that names the format; rerun with `--debug`
-for details.
+all under `metadata.completeness`; `--check` and `baseline` keep no inventory, so
+their gate says to run `scan -o FILE` to see the rest. An export that fails its
+schema or consistency checks ends the command with an error that names the format;
+rerun with `--debug` for details.
 
 ### `summary`
 

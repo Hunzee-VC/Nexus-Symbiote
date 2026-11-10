@@ -300,7 +300,10 @@ def scan_gate_lines(
     failures: Mapping[str, Sequence[str]],
     excluded: Mapping[str, Sequence[str]],
     not_collected: Sequence[str],
+    *,
+    recorded: bool,
 ) -> list[ReportLine]:
+    """The scan gate's reasons; `recorded` says whether this run keeps an inventory."""
     lines = gate_reason_lines(document)
     if not_collected:
         names = ", ".join(not_collected)
@@ -316,10 +319,16 @@ def scan_gate_lines(
     for kind, name, message in gaps[:LISTED]:
         lines.append((safe_line(f"  {kind} (", name, "): ", message), None))
     if len(gaps) > LISTED:
+        where = (
+            ", recorded under metadata.completeness in the inventory"
+            if recorded
+            else "; this run keeps no inventory: scan with -o FILE records them all under "
+            "metadata.completeness"
+        )
         lines.append(
             (
-                f"  ... and {len(gaps) - LISTED} more collection failures or excluded surfaces, "
-                "recorded under metadata.completeness in the inventory",
+                f"  ... and {len(gaps) - LISTED} more collection failures or excluded "
+                f"surfaces{where}",
                 None,
             )
         )
