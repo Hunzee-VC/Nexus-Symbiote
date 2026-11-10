@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import hmac
 import json
+import unicodedata
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
+from urllib.parse import urlsplit
 
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.collection import (
@@ -18,18 +20,22 @@ from nexus_symbiote.core.collection import (
 )
 from nexus_symbiote.core.coverage import assess_coverage
 from nexus_symbiote.core.enums import AssuranceLevel, ComponentType, TrustTier
+from nexus_symbiote.core.evidence import ClaimState, VerificationStatus
 from nexus_symbiote.core.hashing import canonical_json
 from nexus_symbiote.core.models import (
     AgentComponent,
     AnyComponent,
     ClaimEvidence,
+    CompletenessClaim,
     MCPServerComponent,
     ModelComponent,
     RegistryEntryComponent,
+    RiskAssessment,
     ToolComponent,
+    VerifiedExtensionComponent,
 )
 from nexus_symbiote.scanner_catalog import BUILTIN_SCANNER_NAMES
-from nexus_symbiote.utils.confined import ConfinedCollection
+from nexus_symbiote.utils.confined import DEFAULT_EXCLUDES, ConfinedCollection
 from nexus_symbiote.utils.crypto import (
     SIGNING_EVIDENCE_CLAIM,
     VERIFIED_SIGNING_STATUSES,
@@ -44,6 +50,17 @@ REQUIRED_SCANNERS = BUILTIN_SCANNER_NAMES
 MAX_REPORTED_ISSUES = 1000
 MAX_REPORTED_SUPPLIER_CLAIMS = 1000
 LOCAL_CLAIM_SCOPES = frozenset({"repository", "source-declaration", "dependency-resolution"})
+UNOBSERVED_SURFACES = frozenset(
+    {"runtime", "effective-identity", "effective-authorization", "live-tools", "network"}
+)
+"""Surfaces static collection never observes; every coverage claim it makes lists them."""
+COVERAGE_CLAIM = "metadata.completeness"
+REMOTE_SOURCE_SCHEMES = frozenset({"http", "https", "ws", "wss", "ssh", "git", "hf", "s3", "gs"})
+"""Schemes of the remote locations collectors record: web and MCP endpoints, git and ssh
+package sources, model hub and object-store retrieval sources. A ``source_path`` is outside
+the checkout only as ``scheme://host`` with one of them; anything else names a local file."""
+SIGNING_FINDING = "signing_status"
+"""The model collector's finding for weights without a verified artifact-bound signature."""
 AGENT_REFERENCE_FIELDS = (
     "model_refs",
     "tool_refs",
@@ -92,7 +109,7 @@ class SupplierClaim:
     """Supplied content that reconciliation accepted without local evidence for it."""
 
     subject: str
-    kind: Literal["component", "field", "claim", "property", "relationship"]
+    kind: Literal["component", "field", "claim", "property", "relationship", "risk"]
     detail: str
 
 
@@ -169,12 +186,59 @@ def _edge_label(key: str) -> str:
     return f"{data['source_ref']} -[{data['relationship']}]-> {data['target_ref']}"
 
 
+def _normalized(value: str | None) -> str | None:
+    return None if value is None else unicodedata.normalize("NFKC", value).strip().casefold()
+
+
+def _verified_fields(component: AnyComponent) -> set[str]:
+    """Fields whose value asserts a verification that offline collection never performs."""
+    fields: set[str] = set()
+    if component.assurance_level is AssuranceLevel.VERIFIED:
+        fields.add("assurance_level")
+    if component.trust_tier is TrustTier.INTERNAL_VERIFIED:
+        fields.add("trust_tier")
+    if isinstance(component, AgentComponent) and component.deployment_profile is not None:
+        if any(
+            authority.state == ClaimState.VERIFIED
+            or any(e.verification_status == VerificationStatus.VERIFIED for e in authority.evidence)
+            for authority in component.deployment_profile.authority
+        ):
+            fields.add("deployment_profile")
+    if isinstance(component, RegistryEntryComponent | VerifiedExtensionComponent):
+        if component.publisher_verified is True:
+            fields.add("publisher_verified")
+        if _normalized(component.attestation_status) == "verified":
+            fields.add("attestation_status")
+    if (
+        isinstance(component, ModelComponent)
+        and _normalized(component.signing_status) in VERIFIED_SIGNING_STATUSES
+    ):
+        fields.add("signing_status")
+    return fields
+
+
 def _asserts_unestablished_trust(component: AnyComponent) -> bool:
-    return (
-        component.assurance_level is AssuranceLevel.VERIFIED
-        or component.trust_tier is TrustTier.INTERNAL_VERIFIED
-        or any(claim.assurance is AssuranceLevel.VERIFIED for claim in component.claims.values())
+    return bool(_verified_fields(component)) or any(
+        claim.assurance is AssuranceLevel.VERIFIED for claim in component.claims.values()
     )
+
+
+def _remote_source(source_path: str) -> bool:
+    try:
+        parsed = urlsplit(source_path)
+    except ValueError:
+        return False
+    # urlsplit strips leading blanks and drops tabs and newlines; the text itself must
+    # start with the scheme and "://".
+    return (
+        parsed.scheme in REMOTE_SOURCE_SCHEMES
+        and bool(parsed.hostname)
+        and source_path[: len(parsed.scheme) + 3].lower() == f"{parsed.scheme}://"
+    )
+
+
+def _finding_key(risk: RiskAssessment) -> str:
+    return canonical_json(risk.model_dump(mode="json"))
 
 
 def _unestablished_trust(ref: str) -> str:
@@ -247,9 +311,11 @@ class CompletenessValidator:
         Supplied statuses, exclusions, and paths cannot select or disable a collector.
         Only the local built-in collectors run. None executes project code or uses
         remote discovery. Components, the repository agent and the relationships among
-        local components must equal the recollection; anything else the supplier added
-        is either refused or listed as a supplier claim, never presented as reconciled.
-        Integrity and signer policy are checked separately.
+        local components must equal the recollection, and the coverage claim must state
+        the local scope, at most observed assurance and the surfaces static collection
+        cannot observe; anything else the supplier added is either refused or listed as
+        a supplier claim, never presented as reconciled. The report's coverage is the
+        local collection's. Integrity and signer policy are checked separately.
         """
         from nexus_symbiote.graph import assemble_repository_agent
         from nexus_symbiote.scanners import ALL_SCANNERS, ModelScanner
@@ -259,6 +325,10 @@ class CompletenessValidator:
         root = project_root.absolute()
         collected: dict[str, AnyComponent] = {}
         incomplete = report.add_issue
+        surfaces: list[str] = []
+        excluded: list[str] = []
+        status: dict[str, str] = {}
+        report_digest: str | None = None
 
         for scanner_type in ALL_SCANNERS:
             scanner = (
@@ -273,26 +343,42 @@ class CompletenessValidator:
                 incomplete(
                     scanner.name, "Local collector failed; inventory could not be reconciled."
                 )
+                status[scanner.name] = "failed"
                 continue
             local.make_portable(root)
             for reason in (*local.scan_failures, *local.surfaces_excluded):
                 incomplete(scanner.name, f"Local collection incomplete: {reason}")
             if scanner.name == "shadowscan":
+                report_digest = local.source_report_digest
                 problems = self._discovery_mismatches(bom, local)
                 for reason in problems:
                     incomplete(scanner.name, reason)
                 if not problems:
                     report.bound_imports = frozenset(c.bom_ref for c in local.components)
+            failed = bool(local.scan_failures)
             for component in local.components:
                 if merge_collected(collected, component, scanner.name, None) == "conflict":
                     incomplete(scanner.name, f"Conflicting local reference: {component.bom_ref}")
+                    failed = True
+            surfaces.extend(local.surfaces_scanned)
+            excluded.extend(local.surfaces_excluded)
+            status[scanner.name] = (
+                "failed" if failed else "partial" if local.surfaces_excluded else "complete"
+            )
 
         expected = AIBOM(components=list(collected.values()))
         agent: AgentComponent | None = None
         try:
-            agent = assemble_repository_agent(expected, root, exclude_paths=exclude_paths)
+            agent = assemble_repository_agent(
+                expected, root, exclude_paths=exclude_paths, surfaces=surfaces
+            )
         except (OSError, ValueError, RecursionError):
             incomplete("agent.yaml", "Local agent manifest could not be reconciled.")
+        coverage = self._local_coverage(report_digest, surfaces, excluded, status, exclude_paths)
+        report.assurance_level = coverage.assurance_level
+        report.surfaces_covered = coverage.surfaces_scanned
+        report.surfaces_missing = coverage.surfaces_excluded
+        self._reconcile_coverage(bom.metadata.completeness, coverage, root, report)
 
         # An agent inferred without a manifest is evidence of nothing in the checkout.
         inferred_agent = (
@@ -343,13 +429,11 @@ class CompletenessValidator:
                     f"Missing or mismatched local component from {source_kind}: {actual.bom_ref}",
                 )
             elif not is_imported(actual):
-                if any(
-                    declared.claims[name].assurance is AssuranceLevel.VERIFIED
-                    for name in self._added_claims(declared, actual)
-                ):
+                additions = self._supplier_only(declared, actual)
+                if self._asserts_verification(declared, additions):
                     incomplete(actual.bom_ref, _unestablished_trust(actual.bom_ref))
                 else:
-                    for claim in self._supplier_only(declared, actual):
+                    for claim in (*additions, *self._supplier_findings(declared, actual)):
                         report.add_supplier_claim(claim)
         if mismatched and bom.metadata.spec_version.startswith("1.0."):
             incomplete(
@@ -365,7 +449,7 @@ class CompletenessValidator:
                 continue  # _discovery_mismatches binds every imported claim to the report.
             # Supplementary runtime observations have their own provenance. Missing
             # repository subjects cannot be explained by an unrelated observation.
-            local_path = extra.source_path is not None and "://" not in extra.source_path
+            local_path = extra.source_path is not None and not _remote_source(extra.source_path)
             local_claim = any(claim.scope in LOCAL_CLAIM_SCOPES for claim in extra.claims.values())
             if local_path or local_claim or not extra.claims:
                 incomplete(
@@ -384,6 +468,83 @@ class CompletenessValidator:
             report.basis = "project-reconciliation-failed"
         report.bound_issues()
         return report
+
+    @staticmethod
+    def _local_coverage(
+        report_digest: str | None,
+        surfaces: list[str],
+        excluded: list[str],
+        status: dict[str, str],
+        exclude_paths: Sequence[str],
+    ) -> CompletenessClaim:
+        """The coverage claim ``scan`` records for what the local collectors did."""
+        completed = [name for name, state in status.items() if state != "failed"]
+        return CompletenessClaim(
+            scope="repository+shadowscan" if report_digest else "repository",
+            surfaces_scanned=sorted(set(surfaces)),
+            surfaces_excluded=sorted(set(excluded)),
+            assurance_level=AssuranceLevel.OBSERVED if completed else AssuranceLevel.DECLARED,
+            scanner_status=status,
+            collectors_requested=list(status),
+            collectors_completed=completed,
+            exclusions=sorted(
+                {*map(str, exclude_paths), *(f"**/{name}" for name in DEFAULT_EXCLUDES)}
+            ),
+            unobserved_surfaces=sorted(UNOBSERVED_SURFACES),
+        )
+
+    @staticmethod
+    def _reconcile_coverage(
+        claim: CompletenessClaim | None,
+        local: CompletenessClaim,
+        root: Path,
+        report: CompletenessReport,
+    ) -> None:
+        """Refuse coverage the local run contradicts; list coverage it cannot confirm.
+
+        A scope other than the local one, verified assurance, or a runtime surface
+        recorded as observed misrepresents static collection. Surfaces, exclusions and
+        collector records are supplier claims where they state more than the local run:
+        a surface or collector it did not record, or a path it excluded that the claim
+        does not. Recording less claims less coverage, which the local run already shows.
+        """
+        from nexus_symbiote.scanners.base import project_relative
+
+        if claim is None:
+            return  # assess_coverage already reports the missing claim.
+        if claim.scope != local.scope:
+            report.add_issue(
+                COVERAGE_CLAIM,
+                f"Coverage claim scope differs from the local collection ({local.scope}).",
+            )
+        if claim.assurance_level is AssuranceLevel.VERIFIED:
+            report.add_issue(
+                COVERAGE_CLAIM,
+                "Coverage claim asserts verified assurance; offline collection cannot "
+                "establish it.",
+            )
+        missing = sorted(UNOBSERVED_SURFACES.difference(claim.unobserved_surfaces))
+        if missing:
+            report.add_issue(
+                COVERAGE_CLAIM,
+                "Coverage claim leaves out of unobserved_surfaces what static collection "
+                "cannot observe: " + ", ".join(missing),
+            )
+        relative = project_relative(root)
+        scanned = {relative(surface) for surface in claim.surfaces_scanned}
+        beyond_local = {
+            "surfaces_scanned": scanned - set(local.surfaces_scanned),
+            # A default name is excluded at every level, whichever list names it.
+            "exclusions": set(local.exclusions) - DEFAULT_EXCLUDES - set(claim.exclusions),
+            "collectors_requested": set(claim.collectors_requested)
+            - set(local.collectors_requested),
+            "collectors_completed": set(claim.collectors_completed)
+            - set(local.collectors_completed),
+            "scanner_status": claim.scanner_status.items() - local.scanner_status.items(),
+        }
+        for name, stated in beyond_local.items():
+            if stated:
+                report.add_supplier_claim(SupplierClaim(COVERAGE_CLAIM, "field", name))
 
     @staticmethod
     def _reconcile_relationships(
@@ -466,6 +627,56 @@ class CompletenessValidator:
             SupplierClaim(supplied.bom_ref, "claim", name)
             for name in CompletenessValidator._added_claims(supplied, local)
         )
+        return claims
+
+    @staticmethod
+    def _asserts_verification(supplied: AnyComponent, additions: list[SupplierClaim]) -> bool:
+        """A field or claim only the supplier records asserts what collection never verifies."""
+        fields = {claim.detail for claim in additions if claim.kind == "field"}
+        claims = {claim.detail for claim in additions if claim.kind == "claim"}
+        return bool(fields & _verified_fields(supplied)) or any(
+            supplied.claims[name].assurance is AssuranceLevel.VERIFIED for name in claims
+        )
+
+    @staticmethod
+    def _supplier_findings(supplied: AnyComponent, local: AnyComponent) -> list[SupplierClaim]:
+        """Supplied findings with no exactly equal local finding, remediation text included.
+
+        ``_retains_local_evidence`` keeps every local severity, category and detail, so a
+        finding left over was added or had its recommendation or references rewritten.
+        Where an operator policy verified a model the supplier left unsigned, the
+        supplier's signing finding is the one that policy resolved.
+        """
+        resolved = CompletenessValidator._signing_corroborated(supplied, local)
+        remaining: Counter[str] = Counter()
+        identities: dict[str, tuple[str, str, str]] = {}
+        for risk in local.risks:
+            key = _finding_key(risk)
+            remaining[key] += 1
+            identities[key] = (risk.severity.value, risk.category, risk.detail)
+        unmatched: list[RiskAssessment] = []
+        for risk in supplied.risks:
+            key = _finding_key(risk)
+            if remaining[key] > 0:
+                remaining[key] -= 1
+            elif not (resolved and risk.category == SIGNING_FINDING):
+                unmatched.append(risk)
+        revised: Counter[tuple[str, str, str]] = Counter()
+        for key, count in remaining.items():
+            revised[identities[key]] += count
+        claims: list[SupplierClaim] = []
+        for risk in unmatched:
+            identity = (risk.severity.value, risk.category, risk.detail)
+            if revised[identity] > 0:
+                revised[identity] -= 1
+                change = "remediation differs from the local finding"
+            else:
+                change = "not in the local collection"
+            claims.append(
+                SupplierClaim(
+                    supplied.bom_ref, "risk", f"{risk.severity.value} {risk.category}: {change}"
+                )
+            )
         return claims
 
     @staticmethod
@@ -561,7 +772,8 @@ class CompletenessValidator:
             claim = supplied.claims.get(name)
             if claim is None or comparable_claim(evidence) != comparable_claim(claim):
                 return False
-        # Preserve multiplicity. Independent findings and revised remediation text may be added.
+        # Preserve multiplicity. Added findings and revised remediation text are supplier
+        # claims, listed by _supplier_findings.
         return Counter((r.severity, r.category, r.detail) for r in local.risks) <= Counter(
             (r.severity, r.category, r.detail) for r in supplied.risks
         )
@@ -593,13 +805,7 @@ class CompletenessValidator:
             if local.source_report_digest and (
                 claim.assurance_level != AssuranceLevel.OBSERVED
                 or "shadowscan:report" not in claim.surfaces_scanned
-                or not {
-                    "runtime",
-                    "effective-identity",
-                    "effective-authorization",
-                    "live-tools",
-                    "network",
-                }.issubset(claim.unobserved_surfaces)
+                or not UNOBSERVED_SURFACES.issubset(claim.unobserved_surfaces)
             ):
                 problems.append("Static discovery coverage or assurance is misrepresented.")
 
