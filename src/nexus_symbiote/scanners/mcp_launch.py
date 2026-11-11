@@ -17,6 +17,8 @@ makes the launcher unknown, because an unrecognised wrapper (``nice``, ``sudo``,
 
 from __future__ import annotations
 
+import fnmatch
+import functools
 import re
 import shlex
 from collections.abc import Callable
@@ -47,7 +49,7 @@ MAX_SPEC_CHARS = 2048
 
 _EXECUTABLE_SUFFIXES = (".exe", ".cmd", ".bat", ".ps1", ".com")
 # Shell parameters ($1, $@, $#, ...) count as expansion: their values come from the caller.
-_EXPANSION = re.compile(r"\$[{(\w@*#?$!-]|%[A-Za-z_][A-Za-z0-9_]*%|`")
+_EXPANSION = re.compile(r"\$[{(\w@*#?$!-]|%[A-Za-z_][A-Za-z0-9_]*(?::[^%\s]*)?%|`")
 _SHELL_OPERATOR = re.compile(r"[;&|<>()`\n\r]|\$\(")
 _CMD_OPERATOR = re.compile(r"[&|<>^()\n\r]")
 _POWERSHELL_OPERATOR = re.compile(r"[;&|<>(){}\[\]$`\n\r]|(?:^|\s)@")
@@ -225,15 +227,63 @@ def origin(url: str) -> str | None:
     return None if exported == "[redacted]" else exported
 
 
-def _split_script(script: str, operators: re.Pattern[str] = _SHELL_OPERATOR) -> list[str] | None:
-    """Words of a simple command; None for anything a shell would do more with."""
+# Characters a POSIX shell rewrites in a word: brace and pattern expansion, tilde,
+# comments, history and zsh's ^ and =cmd forms, parameter and command expansion. Quoting
+# is not among them: shlex removes it as a POSIX shell does.
+_POSIX_REWRITE = re.compile(r"[{}*?\[\]~#!^$`]|[^\x00-\x7f]")
+# Quoting, for a reader that does not remove it as shlex does (env -S, wsl, eval's second
+# reading, PowerShell).
+_QUOTING = re.compile(r"['\"\\]")
+_LITERAL_WORD = re.compile(r"[A-Za-z0-9_@%+=:,./-]+")
+
+
+def _split_script(
+    script: str, operators: re.Pattern[str] = _SHELL_OPERATOR, *, literal: bool = False
+) -> list[str] | None:
+    """Words of a simple command; None for anything a shell would do more with.
+
+    Every word must read as written: no character a shell rewrites, no whitespace or
+    other character inside a word, and, with ``literal``, no quoting at all. A command
+    word that is itself an expansion is returned, so that it is reported as depending
+    on the environment.
+    """
     if len(script) > MAX_SCRIPT_CHARS or operators.search(script):
+        return None
+    if literal and _QUOTING.search(script):
         return None
     try:
         words = shlex.split(script, posix=True)
     except ValueError:
         return None
-    return words if 0 < len(words) <= MAX_SCRIPT_TOKENS else None
+    if not 0 < len(words) <= MAX_SCRIPT_TOKENS:
+        return None
+    head = next((word for word in words if not _ASSIGNMENT.match(word) and word != "exec"), None)
+    if head is not None and expands(head):
+        return words
+    if _POSIX_REWRITE.search(script) or not all(
+        _LITERAL_WORD.fullmatch(word) and not word.startswith("=") for word in words
+    ):
+        return None
+    return words
+
+
+def _basename_text(token: str) -> str:
+    """The text after the last path separator outside any ${...}, as written."""
+    depth = 0
+    start = 0
+    index = 0
+    while index < len(token):
+        if token.startswith("${", index):
+            depth += 1
+            index += 2
+            continue
+        char = token[index]
+        if char == "}" and depth:
+            depth -= 1
+        elif char in "/\\" and not depth:
+            start = index + 1
+        index += 1
+    return token[start:]
 
 
 @dataclass(frozen=True)
@@ -934,16 +984,19 @@ class _Starts:
 def _subcommands(words: list[str], start: int, grammar: _Starts, budget: list[int] | None) -> bool:
     """Whether a word a runner may read as its subcommand starts code."""
     table = grammar.options
+    inline = {option[1] for option in grammar.inline if len(option) == 2}
     index = start
     while index < len(words):
         word = words[index]
         _spend(budget, word)
         if word == "--":
-            return index + 1 < len(words) and grammar.starts(words[index + 1])
+            if index + 1 >= len(words):
+                return False
+            _spend(budget, words[index + 1])
+            return grammar.starts(words[index + 1])
         if not word.startswith("-") or word == "-":
             return grammar.starts(word)
         name, equals, _ = word.partition("=")
-        inline = {option[1] for option in grammar.inline if len(option) == 2}
         if name in grammar.inline or (
             not word.startswith("--") and not inline.isdisjoint(name[1:])
         ):
@@ -960,6 +1013,7 @@ def _subcommands(words: list[str], start: int, grammar: _Starts, budget: list[in
             index += 1
         else:
             following = words[index + 1] if index + 1 < len(words) else ""
+            _spend(budget, following)
             if following[:1] not in {"", "-"} and grammar.starts(following):
                 return True
             index += 2 if following[:1] not in {"", "-"} else 1
@@ -1090,22 +1144,261 @@ def _scan_words(words: list[str], stop: int, budget: list[int]) -> str | None:
             _, equals, word = word.partition("=")
             if not equals:
                 continue
+        if _OPAQUE.search(word):
+            return "arguments contain shell syntax that can start a program"
         if any(char.isspace() for char in word):
-            parts = word.split()
-            reason = _scan_words(parts, len(parts), budget)
+            # A command line a shell reads again: as written, and with its quoting removed.
+            for parts in _command_line_readings(word):
+                reason = _scan_words(parts, len(parts), budget)
+                if reason is not None:
+                    return reason
+            continue
+        readings = _rewritten(word, budget) if _REWRITABLE.search(word) else [[word]]
+        if readings is None:
+            return "arguments contain an expansion too large to read"
+        for reading in readings:
+            if len(reading) == 1:
+                reason = _starts_code(reading[0], words, index + 1, budget)
+            else:
+                # Brace expansion made several words; the copy is charged, so many such
+                # readings exhaust the budget instead of costing the square of the input.
+                budget[0] -= len(words) - index
+                if budget[0] < 0:
+                    raise _ScanLimitError
+                reason = _starts_code(reading[0], [*reading, *words[index + 1 :]], 1, budget)
             if reason is not None:
                 return reason
-            continue
-        name = _program_name(word)
-        if name is None:
-            continue
+    return None
+
+
+def _command_line_readings(text: str) -> list[list[str]]:
+    readings = [text.split()]
+    if _QUOTING.search(text):
+        try:
+            unquoted = shlex.split(text, posix=True)
+        except ValueError:
+            unquoted = text.replace("'", " ").replace('"', " ").replace("\\", "").split()
+        if unquoted != readings[0]:
+            readings.append(unquoted)
+    return readings
+
+
+def _starts_code(word: str, words: list[str], start: int, budget: list[int]) -> str | None:
+    """What ``word`` followed by ``words[start:]`` starts, if it names a program that may."""
+    for name in _program_names(word):
         if name in {"node", "ts-node", "python"} or name in _INLINE_FLAGS:
-            found = _interpreter_reason(name, words, budget=budget, start=index + 1)
+            found = _interpreter_reason(name, words, budget=budget, start=start)
             if found is not None:
                 return f"arguments run {found}"
-        elif _launches(name, words, index + 1, budget):
+        elif _launches(name, words, start, budget):
             return f"arguments start {name}"
     return None
+
+
+def _program_names(word: str) -> list[str]:
+    """Programs a word names exactly, or that a pattern or open expansion in it may name."""
+    exact = _program_name(word)
+    if exact is not None or not any(char in word for char in "*?\x00"):
+        return [exact] if exact is not None else []
+    base = normalize_command(word.replace("\x00", "*"))
+    base = base.split("@", 1)[0] if not base.startswith("@") else base
+    for suffix in _EXECUTABLE_SUFFIXES:
+        base = base.removesuffix(suffix)
+    if not any(char.isalnum() for char in base):
+        # A bare pattern such as * or ** names files, not a program the pattern spells.
+        return []
+    pattern = _pattern(base)
+    found: list[str] = []
+    for name in _VOCABULARY:
+        if pattern.fullmatch(name):
+            program = _program_name(name)
+            if program is not None and program not in found:
+                found.append(program)
+    return found
+
+
+@functools.lru_cache(maxsize=1024)
+def _pattern(text: str) -> re.Pattern[str]:
+    return re.compile(fnmatch.translate(text))
+
+
+# A word holding one of these is read the ways a shell or cmd may read it.
+_REWRITABLE = re.compile(r"[{}*?\[\]'\"\\$%!^@;,=]")
+# Shell syntax whose result cannot be read: command substitution and $'...' or $"..." strings.
+_OPAQUE = re.compile(r"\$\(|`|\$'|\$\"")
+_BRACKET = re.compile(r"\[!?\^?\]?(?:\[:[a-z]+:\]|[^\]])*\]")
+_CMD_VARIABLE = re.compile(r"%[^%\s]*%|![^!\s]*!")
+_PLAIN_VARIABLE = re.compile(r"\$[A-Za-z_][A-Za-z0-9_]*")
+_SEQUENCE = re.compile(r"(-?\d{1,3}|[A-Za-z])\.\.(-?\d{1,3}|[A-Za-z])")
+MAX_READINGS = 64
+
+
+def _rewritten(word: str, budget: list[int]) -> list[list[str]] | None:
+    """The word sequences a shell or cmd may make of ``word``, the word itself first.
+
+    Quoting is removed; cmd's leading @ ; , = and ^ escapes are dropped; %VAR% and
+    !VAR! are empty or anything; a parameter expansion is empty, anything, or its
+    default operand; brace lists and sequences become separate words; a pattern stays a
+    pattern, which the program vocabulary is matched against. None when the readings
+    would exceed MAX_READINGS.
+    """
+    readings = [word]
+    for variant in (
+        re.sub(r"['\"\\]", "", word),
+        re.sub(r"\^", "", word.lstrip("@;,=")).replace("'", "").replace('"', ""),
+    ):
+        if variant not in readings:
+            readings.append(variant)
+    expanded: list[str] = []
+    for reading in readings:
+        _spend(budget, reading)
+        for variant in _variables(reading):
+            if variant not in expanded:
+                expanded.append(variant)
+        if len(expanded) > MAX_READINGS:
+            return None
+    sequences: list[list[str]] = []
+    for reading in expanded:
+        _spend(budget, reading)
+        words = _braces(_BRACKET.sub("?", reading))
+        if words is None:
+            return None
+        if words not in sequences:
+            sequences.append(words)
+        if len(sequences) > MAX_READINGS:
+            return None
+    return sequences
+
+
+def _variables(text: str) -> list[str]:
+    """``text`` with each expansion empty, as anything (NUL) and as its default operand."""
+    results = [text]
+    for pattern in (_CMD_VARIABLE, _PLAIN_VARIABLE):
+        results = [
+            variant
+            for result in results
+            for variant in (pattern.sub("", result), pattern.sub("\x00", result))
+        ]
+    final: list[str] = []
+    for result in results:
+        for variant in _parameters(result):
+            if variant not in final:
+                final.append(variant)
+            if len(final) > MAX_READINGS:
+                return final
+    return final
+
+
+def _parameters(text: str) -> list[str]:
+    """``text`` with each ${...} empty, as anything (NUL) or as its default operand."""
+    start = text.find("${")
+    if start < 0:
+        return [text]
+    depth = 0
+    end = -1
+    for index in range(start, len(text)):
+        if text.startswith("${", index):
+            depth += 1
+        elif text[index] == "}":
+            depth -= 1
+            if depth == 0:
+                end = index
+                break
+    if end < 0:
+        return [text]
+    inner = text[start + 2 : end]
+    found = re.match(r"[A-Za-z_][A-Za-z0-9_]*(:?[-=+?])(.*)", inner, re.DOTALL)
+    replaced = re.match(r"[A-Za-z_][A-Za-z0-9_]*/[/#%]?[^/]*/(.*)", inner, re.DOTALL)
+    choices = ["", "\x00"]
+    if found is not None and found.group(1)[-1] in "-=+":
+        choices.extend(_parameters(found.group(2))[:4])
+    elif replaced is not None:
+        # ${NAME/pattern/text} may become text, or a value holding it.
+        choices.extend(_parameters(replaced.group(1))[:4])
+    head, tail = text[:start], text[end + 1 :]
+    results: list[str] = []
+    for choice in choices:
+        for rest in _parameters(tail):
+            results.append(head + choice + rest)
+            if len(results) > MAX_READINGS:
+                return results
+    return results
+
+
+def _braces(text: str) -> list[str] | None:
+    """The words bash brace expansion makes of ``text``; None past MAX_READINGS."""
+    words = [text]
+    for _ in range(MAX_READINGS):
+        changed: list[str] = []
+        expanded = False
+        for word in words:
+            group = _brace_group(word)
+            if group is None:
+                changed.append(word)
+                continue
+            expanded = True
+            start, end, items = group
+            changed.extend(word[:start] + item + word[end + 1 :] for item in items)
+            if len(changed) > MAX_READINGS:
+                return None
+        words = changed
+        if not expanded:
+            return words
+    return None
+
+
+def _brace_group(word: str) -> tuple[int, int, list[str]] | None:
+    """The first {a,b} or {x..y} group of a word, with its items."""
+    start = word.find("{")
+    while start >= 0:
+        depth = 0
+        for index in range(start, len(word)):
+            if word[index] == "{":
+                depth += 1
+            elif word[index] == "}":
+                depth -= 1
+                if depth == 0:
+                    inner = word[start + 1 : index]
+                    items = _brace_items(inner)
+                    if items is not None:
+                        return start, index, items
+                    break
+        start = word.find("{", start + 1)
+    return None
+
+
+def _brace_items(inner: str) -> list[str] | None:
+    sequence = _SEQUENCE.fullmatch(inner)
+    if sequence is not None:
+        first, last = sequence.groups()
+        if first.lstrip("-").isdigit() and last.lstrip("-").isdigit():
+            low, high = int(first), int(last)
+            step = 1 if high >= low else -1
+            if abs(high - low) >= MAX_READINGS:
+                return [str(low), str(high)] * MAX_READINGS
+            return [str(value) for value in range(low, high + step, step)]
+        if first.isalpha() and last.isalpha():
+            low, high = ord(first), ord(last)
+            step = 1 if high >= low else -1
+            return [chr(value) for value in range(low, high + step, step)]
+        return None
+    items: list[str] = []
+    depth = 0
+    current = ""
+    for char in inner:
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+        if char == "," and depth == 0:
+            items.append(current)
+            current = ""
+        else:
+            current += char
+    if not items:
+        return None
+    items.append(current)
+    return items
 
 
 def _program_reason(name: str, rest: list[str], launch: Launch) -> str | None:
@@ -1223,6 +1516,17 @@ def _unwrap(tokens: list[str], launch: Launch) -> list[str] | None:
     if name in {"exec", "nohup"} and rest:
         launch.wrappers.append(name)
         return rest
+    if name == "eval":
+        # Behind a reader that keeps quoting (wsl, env -S), what eval reads is not established.
+        reread = not any(wrapper in {"wsl", "env"} for wrapper in launch.wrappers)
+        words = _split_script(" ".join(rest), literal=True) if rest and reread else None
+        if words is None:
+            launch.launcher = "shell"
+            launch.mark("inline_shell_code")
+            launch.fail("eval script is not a simple command")
+            return None
+        launch.wrappers.append("eval")
+        return words
     if name in _INJECTORS:
         if "--" not in rest or rest.index("--") + 1 >= len(rest):
             launch.launcher = name
@@ -1266,7 +1570,7 @@ def _unwrap_env(rest: list[str], launch: Launch) -> list[str] | None:
                 value, skip = word[2:], 1
             # env -S has its own grammar: \_ separates words, \c ends the string,
             # ${VAR} expands and # starts a comment. Such a value is not read here.
-            words = None if _ENV_SPLIT_SPECIAL.search(value) else _split_script(value)
+            words = None if _ENV_SPLIT_SPECIAL.search(value) else _split_script(value, literal=True)
             if words is None:
                 launch.fail("env -S value is not a simple command")
                 return None
@@ -1315,7 +1619,7 @@ def _unwrap_shell(name: str, rest: list[str], launch: Launch) -> list[str] | Non
         launch.mark("inline_shell_code")
         launch.fail("inline shell script uses positional parameters")
         return None
-    words = _split_script(script)
+    words = _split_script(script, literal=name == "fish")
     words = _script_words(words, launch) if words is not None else None
     if words is None:
         launch.mark("inline_shell_code")
@@ -1323,6 +1627,12 @@ def _unwrap_shell(name: str, rest: list[str], launch: Launch) -> list[str] | Non
         return None
     launch.wrappers.append(f"{name} -c")
     return words
+
+
+# cmd drops leading @ ; , = from its command word, reads ^ as an escape, expands
+# %VAR% (with :~ substrings) and !VAR!, and treats other whitespace as separators.
+_CMD_REWRITE = re.compile(r"[%!\"^]|[^\S \t]|[^\x00-\x7f]")
+_CMD_PROGRAM = re.compile(r"[A-Za-z0-9_.:\\/-]+")
 
 
 def _unwrap_cmd(rest: list[str], launch: Launch) -> list[str] | None:
@@ -1361,7 +1671,11 @@ def _unwrap_cmd(rest: list[str], launch: Launch) -> list[str] | None:
         words = remainder
     else:
         words = None
-    if not words:
+    if (
+        not words
+        or not _CMD_PROGRAM.fullmatch(words[0])
+        or any(_CMD_REWRITE.search(word) for word in [*remainder, *words])
+    ):
         launch.mark("inline_shell_code")
         launch.fail("cmd /c command line is not a simple command")
         return None
@@ -1403,7 +1717,7 @@ def _unwrap_powershell(rest: list[str], launch: Launch) -> list[str] | None:
     launch.launcher = "shell"
     launch.mark("shell_wrapper")
     script = " ".join(rest[index + 1 :])
-    words = _split_script(script, _POWERSHELL_OPERATOR) if script else None
+    words = _split_script(script, _POWERSHELL_OPERATOR, literal=True) if script else None
     if words is None:
         launch.mark("inline_shell_code")
         launch.fail("PowerShell command is not a simple command")
@@ -1435,15 +1749,13 @@ def _unwrap_wsl(rest: list[str], launch: Launch) -> list[str] | None:
         else:
             break
     words = rest[index:]
-    # Without -e, wsl hands its words to a shell as one command line, so a first
-    # word with spaces may be read as several words.
-    if not words or (
-        not direct
-        and (
-            any(_SHELL_OPERATOR.search(word) for word in words)
-            or any(char.isspace() for char in words[0])
-        )
-    ):
+    # Without -e, wsl hands its words to a shell as one command line, which reads
+    # quoting and expansions again, so every word must read as written.
+    if words and not direct:
+        # A first word with spaces among several is quoted or not by the client.
+        spaced = any(char.isspace() for char in words[0])
+        words = [] if spaced else _split_script(" ".join(words), literal=True) or []
+    if not words:
         launch.mark("inline_shell_code")
         launch.fail("wsl command line is not a simple command")
         return None
@@ -1455,7 +1767,7 @@ def _classify(tokens: list[str], launch: Launch) -> None:
     name = normalize_command(tokens[0])
     rest = tokens[1:]
     launch.executable = name
-    if expands(name) or not name:
+    if expands(name) or expands(_basename_text(tokens[0])) or not name:
         launch.launcher = "unknown"
         launch.fail("command depends on the environment")
         return
@@ -2167,9 +2479,16 @@ def _abbreviations(names: frozenset[str]) -> dict[str, str]:
 _NPM_ABBREVIATIONS = _abbreviations(_NPM_COMMANDS | frozenset(_NPM_ALIASES))
 
 
+_NPM_LONGEST = max(len(name) for name in _NPM_ABBREVIATIONS)
+
+
 def npm_command(word: str) -> str | None:
     """The npm command a word names as npm resolves it: alias, typo or unique prefix."""
-    word = re.sub(r"[A-Z]", lambda letter: "-" + letter.group().lower(), word)
+    if len(word) > _NPM_LONGEST:
+        # Converting camelCase only lengthens a word, so no command is that long.
+        return None
+    if not word.islower():
+        word = re.sub(r"[A-Z]", lambda letter: "-" + letter.group().lower(), word)
     if word in _NPM_COMMANDS:
         return word
     if word in _NPM_ALIASES:
@@ -2221,6 +2540,8 @@ def _named(quiet: frozenset[str]) -> Callable[[str], bool]:
     return lambda word: bool(_SUBCOMMAND.fullmatch(word)) and word not in quiet
 
 
+_VOCABULARY: tuple[str, ...] = ()
+
 _STARTS: dict[str, _Starts] = {
     "npm": _Starts(
         _NPM_OPTIONS,
@@ -2259,3 +2580,21 @@ _STARTS: dict[str, _Starts] = {
     # go reads only -C before its command and rejects any other option.
     "go": _Starts(_table("", "-C"), _set("run test generate tool").__contains__, strict=True),
 }
+
+
+_VOCABULARY = tuple(
+    sorted(
+        {
+            *_PROGRAM_NAMES,
+            *_INLINE_FLAGS,
+            *_NODE_RUNNERS,
+            *_TS_NODE,
+            "node",
+            "nodejs",
+            "python",
+            "python3",
+            "py",
+            "pypy3",
+        }
+    )
+)
