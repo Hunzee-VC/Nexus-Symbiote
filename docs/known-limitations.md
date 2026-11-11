@@ -84,14 +84,43 @@ A way around a limit that its entry does not describe is worth a
 - **Unclassified runners are gaps.** `dnx`, `jbang`, `pip-run`, `nix run`,
   `dotnet tool`, `gem exec`, `pixi exec`, `corepack`, `mise`, `pkgx`, `finch`,
   Apple `container` and `apptainer` are a high `launcher_identity` finding and a
-  gap, and so is a package from git without a full commit, from a URL or from a
-  local path.
+  gap, and so are package installs (`pip install`, `python -m pip install`,
+  `gem install`, `cargo install`, `conda` or `mamba install`), `uv run` of a URL or
+  of standard input, and a package from git without a full commit, from a URL or
+  from a local path.
 - **Inline code and nested launches are gaps.** Inline interpreter code such as
-  `node -e` or `python -c`, an inline shell script, and arguments that start a
-  runner, shell or wrapper, such as `sudo npx ...`, are a high `launcher_identity`
-  finding and a gap. The argument check is a heuristic: it can miss a launch
-  written in a form it does not know, and a prose argument that only reads like a
-  launch is a gap too.
+  `node -e` or `python -c`, and arguments that start a runner, shell or wrapper,
+  such as `sudo npx ...`, are a high `launcher_identity` finding and a gap. The
+  argument check is a heuristic: it reads each argument as written and as a shell
+  or `cmd` may rewrite it (quoting removed, `@` prefixes dropped, expansions empty
+  or at their default, brace lists expanded, patterns matched against runner
+  names), but it can miss a launch in a form it does not know, and a prose
+  argument that only reads like a launch is a gap too.
+- **Text a shell reads again must read as written.** An `sh -c`, `bash -c`,
+  `zsh -c` or `fish -c` script, a command line, `env -S`, `wsl` without `-e`,
+  `eval` and `pwsh -Command` are classified only when no word holds a character the
+  reader rewrites: braces, patterns, `~`, `#`, `!`, `^`, `$`, backquotes,
+  non-ASCII text or, except for a POSIX shell, quoting. `cmd /c` needs a plain
+  program word and no `%`, `!`, `"`, `^` or unusual whitespace. Anything else is an
+  inline shell script: a gap. So `sh -c "npx -y pkg@1.2.3 $HOME/data"` is a gap;
+  pass such values as separate arguments or through `env`.
+- **A runner named by a path is classified by its name.** `./tools/npx`,
+  `${workspaceFolder}/tools/npx` or a `PATH` entry in the project can run checkout
+  code that the record attributes to the registry package. On Windows, an
+  `npx.cmd` or `npx.exe` committed at the launch directory is found before the
+  installed one. Review runner commands that are not bare names or absolute
+  system paths.
+- **Some ordinary forms are gaps.** `uvx -w` and `uv run -w` (aliases of `--with`)
+  and a bare `pwsh server.ps1` are not read and fail the gates; spell `--with` and
+  `-File`.
+- **Environment that moves a runner's configuration is a gap.** A server's `env`
+  that may point `HOME`, `XDG_CONFIG_HOME`, `PREFIX`, `DESTDIR`, `GOENV`,
+  `ZDOTDIR` or a relative `PATH` entry into the project, or that replaces the
+  package (`UV_OVERRIDE`, `UV_CONSTRAINT`, `PIP_CONSTRAINT`), makes the identity
+  unknown. Other locations and the runner's own namespace (`UV_*`, `PIP_*`,
+  `YARN_*`, `BUN_*`, `DOCKER_*` and similar) are a medium `package_source`
+  finding, and the package URL is withheld. Configuration names that look like
+  tokens are exported as `[redacted]`.
 - **Changed values need the binding key.** Launch arguments, environment and header
   values are exported only as redacted positions and names, and endpoint and
   package index URLs as origins. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, `diff`

@@ -22,6 +22,12 @@ Closes detection gaps listed under 0.1.0's known limitations and others found in
 - In live mode, refuse special-purpose addresses, bound server schemas and OSV replies, and ignore `SSLKEYLOGFILE`; `verify-live` also binds server instructions, prompts and identity.
 - In the runtime gateway, retire superseded snapshots, count approvers rather than keys, and deny every call when the state store is missing.
 - Publish to PyPI only from a signed tag after 24 hours on `main`, unless an urgent fix states why, and check dependencies against OSV daily.
+- Classify MCP launch text that a shell or `cmd` reads again only when every word reads as written: brace, pattern and parameter expansion, `$'...'`, `eval`, `cmd`'s `@ ; , =` prefixes and `%VAR:~%` substrings are a coverage gap, and arguments are also read as a shell may rewrite them ([known limitations](docs/known-limitations.md#mcp-servers-and-tools)).
+- Treat `uv run` of a URL or standard input, Windows names with trailing dots such as `npx.cmd.`, and package installs (`pip`, `gem`, `cargo`, `conda`) as unknown launchers, and withhold an MCP package identity when the server's environment moves or replaces the runner's configuration.
+- Withhold token-shaped MCP field, header and environment names from inventories and exports.
+- Follow the `@path` imports of nested `CLAUDE.md` files, and treat an A2A card module that is too large to parse or spelled with compatibility characters as a coverage gap.
+- In the runtime gateway with `canonical_arguments=True`, validate and resolve the scope of the arguments the executor receives, and deny schemas that use keywords only drafts before draft-04 define.
+- Measure the PyPI soak from the first trusted CI run when a commit has no push run, treat an unreported ruleset bypass as unknown, and reject workflow gate steps that never run.
 
 ### Changed
 
@@ -34,12 +40,16 @@ Closes detection gaps listed under 0.1.0's known limitations and others found in
 - **Breaking:** `validate`, `risk`, `diff`, `summary` and `blast-radius` print results on standard output, and `advisories` exits 1 when it finds an advisory.
 - **Breaking:** every command refuses a signer policy inside the scanned project, and `verify-live` requires `--project` and a launch policy outside the repository.
 - **Breaking:** the MCP stdio note moves from category `transport_security` to `local_process`.
-- **Breaking:** dependency floors rise to click 8.2.1, pydantic 2.12, packaging 24.2 and jsonschema 4.25; the `yaml` extra is gone, and `dev` is now a dependency group.
+- **Breaking:** dependency floors rise to click 8.2.1, pydantic 2.12, packaging 24.2 and jsonschema 4.25; the `yaml` extra is gone, `dev` is now a dependency group, and the unused `rich` dependency is dropped.
 - Raise default limits to 100,000 directory entries and 64 GiB per model file ([collection limits](docs/collection-limits.md)).
 - Export CycloneDX and SPDX through projection 2, which makes the repository agent CycloneDX `metadata.component` and mints SPDX `urn:uuid` identifiers; 0.1.0 exports still recover ([standard exports](docs/standard-exports.md)).
 
 ### Fixed
 
+- Bound every collection failure and gap listing, report a case variant once per file however many links reach it, and refuse symbolic links whose target is not valid UTF-8, so a hostile tree of links no longer takes gigabytes or writes an unloadable inventory.
+- Read each pnpm lockfile key once, and read YAML base-60 numbers such as `1:30` as text, removing two parsers whose time was quadratic in a hostile file.
+- `validate --project` no longer reports `project-reconciled` when a project policy skips the completeness check, reconciliation also compares the supplied coverage claim, and `diff` rates a changed digest kept in a component's properties high.
+- `baseline` prints its output path through the same neutralization as every other command.
 - Bound MCP, A2A and RAG source reading by bytes (`source-scan-bytes`, 64 MiB) instead of file counts, so projects with many source files no longer fail on a limit no option could lift.
 - Print why a gate failed in `scan`, `risk`, `baseline` and the Action: the reasons, the findings at or above the cutoff, the score and up to 20 collection failures.
 - Collect in-root symlinks such as `CLAUDE.md -> AGENTS.md`, `.clinerules` directories and commented `.vscode/extensions.json` files instead of failing.
