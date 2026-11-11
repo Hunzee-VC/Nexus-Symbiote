@@ -139,18 +139,23 @@ def test_a_reviewed_waiver_accepts_exactly_one_advisory_and_is_recorded(tmp_path
 @pytest.mark.parametrize(
     "changes",
     [
-        {"expires": (date.today() - timedelta(days=1)).isoformat()},
-        {"expires": (date.today() + timedelta(days=91)).isoformat()},
+        {"expires": -1},
+        {"expires": 91},
         {"reason": "accepted"},
         {"version": None},
         {"extra": "field"},
     ],
 )
 def test_an_expired_open_ended_or_unexplained_waiver_is_rejected(tmp_path, changes):
+    # Expiry offsets are applied to the same day the check uses, so the case does not
+    # change meaning when collection and the test run fall on either side of midnight.
+    today = date.today()
+    if isinstance(changes.get("expires"), int):
+        changes = {**changes, "expires": (today + timedelta(days=changes["expires"])).isoformat()}
     path = tmp_path / "waivers.json"
     path.write_text(json.dumps({"waivers": [waiver(**changes)]}))
     with pytest.raises((ValueError, TypeError)):
-        advisories.load_waivers(path, date.today())
+        advisories.load_waivers(path, today)
 
 
 def test_an_unused_waiver_fails_so_stale_exceptions_are_removed():

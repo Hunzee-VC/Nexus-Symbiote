@@ -201,6 +201,22 @@ def digest(value: Any) -> str:
     return "sha256:" + hashlib.sha256(canonical_bytes(value)).hexdigest()
 
 
+MAX_STRICT_JSON_DEPTH = 256
+
+
+def _deeper_than(value: Any, limit: int) -> bool:
+    """Whether arrays and objects nest more than ``limit`` levels, checked without recursion."""
+    pending: list[tuple[Any, int]] = [(value, 1)]
+    while pending:
+        item, depth = pending.pop()
+        if isinstance(item, dict | list):
+            if depth > limit:
+                return True
+            children = item.values() if isinstance(item, dict) else item
+            pending.extend((child, depth + 1) for child in children)
+    return False
+
+
 def strict_json(raw: str | bytes) -> Any:
     def pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
         out: dict[str, Any] = {}
@@ -219,6 +235,10 @@ def strict_json(raw: str | bytes) -> Any:
         raise
     except (ValueError, RecursionError) as exc:
         raise AuthorizationError("input is not strict JSON", reason="json-invalid") from exc
+    # Interpreters differ in how deep json.loads recurses before it fails (3.14 parses
+    # 100,000 levels), so the bound is explicit rather than the interpreter's.
+    if _deeper_than(value, MAX_STRICT_JSON_DEPTH):
+        raise AuthorizationError("input nests too deeply", reason="json-invalid")
     canonical_bytes(value)
     return value
 
