@@ -200,7 +200,8 @@ def known_executable(name: str | None) -> bool:
 
 def normalize_command(value: str) -> str:
     """Basename for POSIX and Windows paths, without a Windows suffix, casefolded."""
-    base = re.split(r"[\\/]", value.strip().strip("\"'"))[-1].casefold()
+    # Win32 drops trailing dots and spaces from a path's last component (npx.cmd. is npx.cmd).
+    base = re.split(r"[\\/]", value.strip().strip("\"'"))[-1].casefold().rstrip(". ")
     for suffix in _EXECUTABLE_SUFFIXES:
         if base.endswith(suffix) and len(base) > len(suffix):
             return base[: -len(suffix)]
@@ -788,7 +789,14 @@ _UNCLASSIFIED_RUNNERS: dict[str, frozenset[str] | None] = {
     "finch": None,
     "dx": None,
     "dotnet": frozenset({"dnx", "tool"}),
-    "gem": frozenset({"exec"}),
+    "gem": frozenset({"exec", "install", "update"}),
+    # Installers fetch an attacker-chosen package and run its build code.
+    "pip": frozenset({"install", "download", "wheel"}),
+    "pip3": frozenset({"install", "download", "wheel"}),
+    "cargo": frozenset({"install"}),
+    "conda": frozenset({"install", "create", "update", "env"}),
+    "mamba": frozenset({"install", "create", "update", "env"}),
+    "micromamba": frozenset({"install", "create", "update", "env"}),
     "nix": frozenset({"run", "shell", "develop"}),
     "pixi": frozenset({"exec"}),
     "container": frozenset({"run", "create", "start", "exec", "build"}),
@@ -2002,7 +2010,12 @@ def _python_runner(
             launch.packages.insert(0, package)
             _package_program(package, rest[position + 1 :], launch)
     elif position < len(rest):
-        _start(rest[position:], launch)
+        program = rest[position]
+        if "://" in program or program == "-":
+            # uv run downloads and runs a script named by URL, or reads one from stdin.
+            launch.packages.insert(0, Package("url", program, origin=origin(program)))
+        else:
+            _start(rest[position:], launch)
     launch.packages.extend(python_spec(spec) for spec in with_specs)
     return options
 
