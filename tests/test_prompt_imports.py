@@ -32,8 +32,29 @@ DEEP = "/".join([".claude/rules", *(letter * 200 for letter in "abcdefghijklmno"
 
 def _write(root: Path, relative: str, text: str) -> None:
     path = root / relative
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    if len(os.fspath(path)) < 900:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        return
+    # macOS kernels enforce PATH_MAX = 1024 on single pathname syscalls, whereas
+    # ConfinedCollection traverses via dir_fd without a total-pathname cap.
+    root.mkdir(parents=True, exist_ok=True)
+    parts = [part for part in relative.split("/") if part and part != "."]
+    dir_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in parts[:-1]:
+            try:
+                os.mkdir(part, dir_fd=dir_fd)
+            except FileExistsError:
+                pass
+            next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY, dir_fd=dir_fd)
+            os.close(dir_fd)
+            dir_fd = next_fd
+        file_fd = os.open(parts[-1], os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644, dir_fd=dir_fd)
+        with os.fdopen(file_fd, "w", encoding="utf-8") as stream:
+            stream.write(text)
+    finally:
+        os.close(dir_fd)
 
 
 def _components(result):

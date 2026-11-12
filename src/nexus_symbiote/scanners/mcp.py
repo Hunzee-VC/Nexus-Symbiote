@@ -699,12 +699,17 @@ _YARN_SOURCE_SETTINGS = _names(
     " unsafeHttpWhitelist checksumBehavior enableOfflineMode injectEnvironmentFiles"
     " packageExtensions"
 )
+_BUN_IDENTITY_SETTINGS = frozenset({"preload", "run.preload"})
+_BUN_CODE_SETTINGS = frozenset({"run.shell"})
+_BUN_SOURCE_SETTINGS = frozenset({"install.ca", "install.cafile"})
+_DENO_SOURCE_SETTINGS = frozenset({"importMap", "imports", "scopes"})
 _RESOLVER_FILES = {
     "npm": (".npmrc",),
-    "deno": (".npmrc",),
+    "deno": (".npmrc", "deno.json", "deno.jsonc"),
     "bun": (".npmrc", "bunfig.toml"),
     "yarn": (".yarnrc.yml", ".yarnrc", ".env.yarn"),
     "uv-project": ("uv.toml", "pyproject.toml"),
+    "uv-tool": ("uv.toml", "pyproject.toml"),
 }
 # Setting names exported in clear: fixed vocabularies, never a name taken from input.
 _KNOWN_SETTINGS = (
@@ -714,6 +719,10 @@ _KNOWN_SETTINGS = (
     | _NPM_CODE_SETTINGS
     | _YARN_CODE_SETTINGS
     | _YARN_SOURCE_SETTINGS
+    | _BUN_IDENTITY_SETTINGS
+    | _BUN_CODE_SETTINGS
+    | _BUN_SOURCE_SETTINGS
+    | _DENO_SOURCE_SETTINGS
     | frozenset(_UV_SETTINGS)
     | {"registry", "npmRegistryServer", "offline", "prefer-offline", "strict-ssl", "environment"}
 )
@@ -891,6 +900,14 @@ def _file_setting(path: str, family: str, key: str, value: str, launched: set[st
             "enableOfflineMode": "false",
         }
         return "inert" if relaxed.get(key) == value else "source"
+    if path == "bunfig.toml":
+        if key in _BUN_IDENTITY_SETTINGS:
+            return "identity"
+        if key in _BUN_CODE_SETTINGS:
+            return "code"
+        return "source" if key in _BUN_SOURCE_SETTINGS else "inert"
+    if path in {"deno.json", "deno.jsonc"}:
+        return "source" if key in _DENO_SOURCE_SETTINGS else "inert"
     if path in {"uv.toml", "pyproject.toml"}:
         return "source" if not key.startswith("sources.") or key[8:] in launched else "inert"
     return "unresolved" if path == ".env.yarn" else "inert"
@@ -1052,14 +1069,67 @@ class _Resolvers:
                 if key in _YARN_CODE_SETTINGS or key in _YARN_SOURCE_SETTINGS
             ]
             return _ResolverFile(tuple(entries))
+        if path in {"deno.json", "deno.jsonc"}:
+            text = self._text(path)
+            if text is None:
+                return _ResolverFile()
+            try:
+                data = _load_jsonc(text)
+            except (ValueError, RecursionError):
+                self._result.scan_failures.append(f"{path}: invalid JSON or duplicate keys")
+                return _ResolverFile()
+            if not isinstance(data, dict):
+                return _ResolverFile()
+            deno_entries: list[tuple[str, str]] = []
+            import_map = data.get("importMap")
+            if isinstance(import_map, str) and import_map:
+                deno_entries.append(("importMap", import_map))
+            imports = data.get("imports")
+            if isinstance(imports, dict):
+                for target in imports.values():
+                    if isinstance(target, str):
+                        deno_entries.append(("imports", target))
+            scopes = data.get("scopes")
+            if isinstance(scopes, dict) and scopes:
+                deno_entries.append(("scopes", json.dumps(scopes, sort_keys=True, default=str)))
+            return _ResolverFile(tuple(deno_entries))
         settings = self._toml(path)
         if path == "bunfig.toml":
             install = settings.get("install")
-            return _ResolverFile(
-                tuple(
-                    _registries(install if isinstance(install, dict) else {}, "registry", "scopes")
+            install_map = install if isinstance(install, dict) else {}
+            bun_entries = _registries(install_map, "registry", "scopes")
+            for ca_key in ("ca", "cafile"):
+                if ca_key in install_map and install_map[ca_key]:
+                    bun_entries.append(
+                        (
+                            f"install.{ca_key}",
+                            install_map[ca_key]
+                            if isinstance(install_map[ca_key], str)
+                            else json.dumps(install_map[ca_key], default=str),
+                        )
+                    )
+            if settings.get("preload"):
+                bun_entries.append(
+                    (
+                        "preload",
+                        settings["preload"]
+                        if isinstance(settings["preload"], str)
+                        else json.dumps(settings["preload"], default=str),
+                    )
                 )
-            )
+            run_cfg = settings.get("run")
+            if isinstance(run_cfg, dict):
+                for run_key in ("preload", "shell"):
+                    if run_cfg.get(run_key):
+                        bun_entries.append(
+                            (
+                                f"run.{run_key}",
+                                run_cfg[run_key]
+                                if isinstance(run_cfg[run_key], str)
+                                else json.dumps(run_cfg[run_key], default=str),
+                            )
+                        )
+            return _ResolverFile(tuple(bun_entries))
         if path == "pyproject.toml":
             tool = settings.get("tool")
             uv = tool.get("uv") if isinstance(tool, dict) else None
@@ -1734,18 +1804,19 @@ class MCPScanner(Scanner):
                 view.names.append(label)
                 kind = _file_setting(path, family, key, value, launched)
                 if kind == "identity":
-                    view.identity.append(
-                        f"npm {key} setting from {path}"
-                        if path == ".npmrc"
-                        else f"{path} {key} replaces or extends yarn"
-                    )
+                    if path == ".npmrc":
+                        view.identity.append(f"npm {key} setting from {path}")
+                    elif path == "bunfig.toml":
+                        view.identity.append(f"{path} {key} preloads local code")
+                    else:
+                        view.identity.append(f"{path} {key} replaces or extends yarn")
                 elif kind == "code":
                     view.code += 1
                 elif kind == "source":
                     view.sources.append((label, value))
                 elif kind == "unresolved":
                     view.unresolved.append(label)
-            if path in {"uv.toml", "pyproject.toml", ".env.yarn"}:
+            if path in {"uv.toml", "pyproject.toml", ".env.yarn", "deno.json", "deno.jsonc"}:
                 continue
             default = "npmRegistryServer" if path == ".yarnrc.yml" else "registry"
             # npm uses the registry of a configured `scope` for a package whose own

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import fnmatch
 import functools
+import posixpath
 import re
 import shlex
 from collections.abc import Callable
@@ -1419,11 +1420,16 @@ def _program_reason(name: str, rest: list[str], launch: Launch) -> str | None:
     return _embedded_reason(rest)
 
 
-def _start(words: list[str], launch: Launch) -> None:
+def _start(words: list[str], launch: Launch, *, package_entry: bool = False) -> None:
     """A program a runner starts by name: record it and check what it starts in turn."""
     launch.executable = normalize_command(words[0])
     family = _interpreter_family(launch.executable)
     reason = _interpreter_reason(family, words[1:], launch) if family else None
+    if reason is None and package_entry:
+        if re.search(r"[\\/]", words[0]) or words[0].startswith("."):
+            reason = "runner command is a path, not a package entry point"
+        elif family is not None:
+            reason = f"runner starts {family} instead of a package entry point"
     reason = reason or _embedded_reason(words)
     if reason is not None:
         launch.fail(reason)
@@ -1843,7 +1849,7 @@ def _package_runner(
         launch.packages.append(package)
         return
     if position < len(rest):
-        _start(rest[position:], launch)
+        _start(rest[position:], launch, package_entry=True)
     launch.packages.extend(npm_spec(spec) for spec in specs)
 
 
@@ -1894,6 +1900,15 @@ def _npm(name: str, rest: list[str], launch: Launch) -> None:
         return
     if subcommand in {"exec", "x"}:
         launch.launcher = "npm exec"
+        scanned = _scan(remainder, _NPM_EXEC)
+        if scanned is not None:
+            _, pos = scanned
+            if pos < len(remainder) and (pos == 0 or remainder[pos - 1] != "--"):
+                after = remainder[pos + 1 :]
+                unquoted = after[: after.index("--")] if "--" in after else after
+                if any(word.startswith("-") and word != "-" for word in unquoted):
+                    launch.fail("npm exec options after the package without '--'")
+                    return
         _package_runner(remainder, launch, _NPM_EXEC, {"-p", "--package"}, options)
     elif subcommand in _NPM_LOCAL:
         launch.launcher = f"npm {subcommand}"
@@ -2004,7 +2019,7 @@ def _python_runner(
         if declared is not None:
             launch.packages.insert(0, python_spec(declared))
             if position < len(rest):
-                _start(rest[position:], launch)
+                _start(rest[position:], launch, package_entry=True)
         else:
             package = python_spec(rest[position], shorthand=shorthand)
             launch.packages.insert(0, package)
@@ -2154,12 +2169,18 @@ def _host_source(spec: str, *, mount: bool) -> str | None:
         if fields.get("type", "volume") != "bind":
             return None
         return fields.get("source") or fields.get("src") or None
+    if ":" not in spec:
+        return None
     source = spec.split(":", 1)[0]
     if re.match(r"[A-Za-z]:[\\/]", spec):
+        if ":" not in spec[2:]:
+            return None
         source = spec[:2] + spec[2:].split(":", 1)[0]
     return (
         source
-        if source.startswith(("/", "~", "$", "%", "\\")) or re.match(r"[A-Za-z]:", source)
+        if source in {".", ".."}
+        or source.startswith(("/", "./", "../", ".\\", "..\\", "~", "$", "%", "\\"))
+        or re.match(r"[A-Za-z]:", source)
         else None
     )
 
@@ -2187,12 +2208,22 @@ def _container_context(options: list[tuple[str, str | None]], launch: Launch) ->
             if source is None:
                 continue
             launch.mark("host_mounts")
-            normalized = source.rstrip("/\\") or "/"
-            if normalized in {"/", "\\"} or re.fullmatch(r"[A-Za-z]:[\\/]?", source):
+            normalized = source.rstrip("/\\") or ("/" if source.startswith("/") else "\\")
+            canonical = (
+                posixpath.normpath(normalized)
+                if normalized.startswith("/") and "\\" not in normalized
+                else normalized
+            )
+            if canonical in {"/", "\\"} or re.fullmatch(r"[A-Za-z]:[\\/]?", canonical):
                 launch.mark("host_root_mount")
-            elif source.lower().endswith(_SOCKETS):
+            elif canonical.lower().endswith(_SOCKETS):
                 launch.mark("runtime_socket_mount")
-            elif _BROAD.fullmatch(source):
+            elif (
+                _BROAD.fullmatch(canonical)
+                or canonical == ".."
+                or canonical.startswith(("../", "..\\"))
+                or posixpath.normpath(normalized.replace("\\", "/")).startswith("..")
+            ):
                 launch.mark("broad_host_mount")
         elif option == "--entrypoint":
             launch.mark("entrypoint_override")
