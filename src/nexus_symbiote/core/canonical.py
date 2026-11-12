@@ -22,4 +22,6 @@ def json_text(value: Any) -> str:
 
 
 def content_digest(value: Any) -> str:
-    return "sha256:" + hashlib.sha256(json_text(value).encode("utf-8")).hexdigest()
+    # Checkout text can carry a lone surrogate, which has no UTF-8 form; surrogatepass
+    # still gives each string its own bytes, so the digest stays defined and distinct.
+    return "sha256:" + hashlib.sha256(json_text(value).encode("utf-8", "surrogatepass")).hexdigest()
