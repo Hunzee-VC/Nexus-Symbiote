@@ -211,7 +211,7 @@ catch a misplaced policy; they do not authenticate it.
 | Command | Document |
 |---|---|
 | `validate --json-output` | `passed`; `assessment_basis` (`supplied-bom`, `project-reconciled`, `project-reconciled-with-supplier-claims` or `project-reconciliation-failed`); `policy_source` and `policy_weakened`; `completeness` and `integrity`, each with a `status` (`pass`, `fail`, `unknown` for integrity, or `skipped` with `skipped_by`) and the validator's report (its own `assessment_basis`, issues, `issues_omitted`; for completeness `supplier_claims` and `supplier_claims_omitted`; for integrity `bytes_charged`); `discovery_producer` (`null` without discovery evidence or a producer check, otherwise a `status` of `verified`, `failed`, `not-applicable` or `not-verified`, with `problems`); `minimum_assurance_level`, `assurance_errors` and `graph_issues`. |
-| `risk --json-output` | `passed`; `overall_score` (`null` when `--project` reconciliation failed); `risk_level`; `coverage_status` and `coverage_gaps`; `gate_reasons`; `gate` (the effective thresholds, cutoff, ignored categories and suppression count, each with a `*_source` of `cli`, `project policy` or `built-in`); `findings`; `severity_counts`; `category_scores`; `ignored_findings`; `suppressed_findings`, `suppressions_expired` and `suppressions_unused`; `total_components` and `components_with_risks`; `warning_threshold_exceeded`; `assessment_basis` (`supplied-bom`, `project-reconciled`, `project-reconciled-with-supplier-claims` or `project-reconciliation-failed`); `supplier_claims` and `supplier_claims_omitted`; `discovery_producer` (`verified`, `failed`, `not-verified` or `not-applicable`); `score_threshold` (`null` with `--no-score-threshold`); `fail_on_severity`; `policy_source` and `policy_weakened`. A failed reconciliation has the same keys, with empty findings. |
+| `risk --json-output` | `passed`; `overall_score` (`null` when `--project` reconciliation failed); `risk_level`; `coverage_status` and `coverage_gaps`; `gate_reasons`; `gate` (the effective thresholds, cutoff, ignored categories and suppression count, each with a `*_source` of `cli`, `project policy` or `built-in`); `findings`, each with its `fingerprint`; `severity_counts`; `category_scores`; `ignored_findings`; `suppressed_findings`, `suppressions_expired`, `suppressions_unused` and `suppressions_stale`; `total_components` and `components_with_risks`; `warning_threshold_exceeded`; `assessment_basis` (`supplied-bom`, `project-reconciled`, `project-reconciled-with-supplier-claims` or `project-reconciliation-failed`); `supplier_claims` and `supplier_claims_omitted`; `discovery_producer` (`verified`, `failed`, `not-verified` or `not-applicable`); `score_threshold` (`null` with `--no-score-threshold`); `fail_on_severity`; `policy_source` and `policy_weakened`. A failed reconciliation has the same keys, with empty findings. |
 | `diff --json-output` | `has_changes`, `total_changes`, `components_added`, `components_removed`, `components_modified`, `dependencies_added`, `dependencies_removed` (each with its `severity` and `conditions`), `security_alerts`, `metadata_changes` and `notes`. |
 | `summary --json-output` | `total_components`, `component_types`, `total_dependencies`, `total_risks`, `risk_breakdown` and the inventory's `completeness` claim. |
 | `blast-radius --json-output` | `subject`, `affected_agents`, `dependent_components`, `reachable_components`, `declared_principals`, `scope`, `effective_authority`, `linked` and `limitations`. |
@@ -402,13 +402,14 @@ nexus-symbiote risk [OPTIONS] AIBOM_PATH
 | `--allow-unsigned-discovery` | Accept unverified discovery evidence explicitly (still warns); required in CI |
 
 The report gives the score, the assessment basis, coverage, the severity counts and
-the top 15 findings (`--json-output` lists all). Under `Gate: PASSED` or
+the top 15 findings, each followed by its `fingerprint:` line (`--json-output` lists all). Under `Gate: PASSED` or
 `Gate: FAILED` it lists, one `  - ` line each, every reason, such as
 `finding at or above critical` or `collection coverage is unknown or incomplete`, the
 findings that tripped the severity cutoff, the score with the threshold it was compared
 with, the first 20 of the inventory's collection failures (and how many more
 `metadata.completeness.scan_failures` holds), its other coverage gaps, and how many
-findings the project policy suppressed. When unsigned ShadowScan evidence was accepted,
+findings the project policy suppressed, and each suppression that no longer matches
+its changed finding. When unsigned ShadowScan evidence was accepted,
 the report says `Discovery producer: not verified (unsigned evidence accepted)`.
 ### `runtime keygen`
 
