@@ -6,10 +6,13 @@ under the collector's source budget, so unrelated source files, however large or
 many, never fail the collector and appear nowhere in the inventory. Python source is
 searched as CPython reads it: decoded as its encoding declaration says, also as
 ``python -x`` reads it, with identifiers compared in NFKC form. A declaration whose
-decoding static reading cannot follow is a failure. TypeScript and JavaScript are
-searched as tsc reads them: UTF-16 after a UTF-16 byte order mark, otherwise UTF-8.
-A file is listed as a scanned surface only when it produced a component, a gap or a
-failure. Every limit that stops collection is a scan failure naming the limit.
+decoding static reading cannot follow is a failure. TypeScript and JavaScript, in
+every suffix tsc reads, are searched as tsc reads them: UTF-16 after a UTF-16 byte
+order mark, otherwise UTF-8. A Python module of the MCP SDK that a dynamic import
+names in literals, and an MCP server that application code starts or connects to,
+are gaps: the server is not inventoried. A file is listed as a scanned surface only
+when it produced a component, a gap or a failure. Every limit that stops collection
+is a scan failure naming the limit.
 """
 
 from __future__ import annotations
@@ -35,12 +38,18 @@ from nexus_symbiote.scanners.python_tools import (
     _AGENT_FACTORIES,
     _DECORATOR_IMPORTS,
     PYTHON_TOOL_HINTS,
+    _annotation_names,
     collect_python_tools,
 )
 from nexus_symbiote.scanners.ts_tools import (
-    SERVER_MARKERS,
+    LAUNCHED,
+    NOT_SOURCE_NAMES,
+    REACHED,
+    SCRIPT_SUFFIXES,
+    SOURCE_MARKERS,
     UTF16_BYTE_ORDER_MARKS,
     collect_typescript_source,
+    is_analysis_candidate,
     is_server_source,
     source_text,
 )
@@ -51,16 +60,18 @@ from nexus_symbiote.utils.confined import CollectionError, ConfinedCollection
 _EXCLUDED_DIRECTORIES = frozenset(
     {"tests", "test", "dist", "build", "docs", "benchmarks", "examples"}
 )
-_TEST_SCRIPTS = (".d.ts", ".spec.ts", ".test.ts", ".spec.js", ".test.js")
 _PYTHON_MARKERS = (*PYTHON_TOOL_HINTS, "MCPClient")
 # Imports the tool collector reads from the syntax tree once a marker is present.
 _FRAMEWORK_IMPORTS = frozenset({*_DECORATOR_IMPORTS, *_AGENT_FACTORIES})
 _PYTHON_NEEDLES = frozenset(marker.encode() for marker in _PYTHON_MARKERS)
 _CLIENT_MARKER = b"@modelcontextprotocol/sdk"
-_NEEDLES = (*_PYTHON_NEEDLES, *SERVER_MARKERS, _CLIENT_MARKER)
+_NEEDLES = (*_PYTHON_NEEDLES, *SOURCE_MARKERS, _CLIENT_MARKER)
 _OVERLAP = max(len(needle) for needle in _NEEDLES) - 1
-_SCRIPT_SUFFIXES = frozenset({".ts", ".js"})
-_SCRIPT_MARKERS = {needle.decode(): needle for needle in (*SERVER_MARKERS, _CLIENT_MARKER)}
+# Earlier releases read only these, and hold a root-level one to valid UTF-8.
+_CHECKED_SUFFIXES = frozenset({".ts", ".js"})
+# Client references are listed by suffix, .ts and .js first as before.
+_CLIENT_SUFFIXES = (".ts", ".js", *sorted(SCRIPT_SUFFIXES - {".ts", ".js"}))
+_SCRIPT_MARKERS = {needle.decode(): needle for needle in (*SOURCE_MARKERS, _CLIENT_MARKER)}
 _TEXT_OVERLAP = max(len(marker) for marker in _SCRIPT_MARKERS) - 1
 _CHUNK_BYTES = 1024 * 1024
 _LINE = re.compile(rb"([^\r\n]*)(\r\n|\r|\n)?")
@@ -90,6 +101,28 @@ _ASCII_PROBES = (
 _INVALID_UTF8 = "invalid UTF-8"
 _INVALID_DECLARED = "invalid text for its declared source encoding"
 _UNSUPPORTED_ENCODING = "unsupported source encoding declaration"
+_LAUNCHED_OR_REACHED = "MCP servers launched or reached from application code; not inventoried"
+_SERVER_LOADED = "MCP server module loaded dynamically; tools not inventoried"
+_CLIENT_LOADED = "MCP client module loaded dynamically; launched servers not inventoried"
+# Python classes and functions that start an MCP server process or connect to one,
+# with the packages that export them: the MCP SDK, the OpenAI Agents SDK, PydanticAI
+# and LangChain's MCP adapters.
+_PYTHON_LAUNCHERS = {
+    "StdioServerParameters": (frozenset({"mcp"}), LAUNCHED),
+    "sse_client": (frozenset({"mcp"}), REACHED),
+    "streamablehttp_client": (frozenset({"mcp"}), REACHED),
+    "websocket_client": (frozenset({"mcp"}), REACHED),
+    "MCPServerStdio": (frozenset({"agents", "pydantic_ai"}), LAUNCHED),
+    "MCPServerSse": (frozenset({"agents"}), REACHED),
+    "MCPServerStreamableHttp": (frozenset({"agents"}), REACHED),
+    "MCPServerSSE": (frozenset({"pydantic_ai"}), REACHED),
+    "MCPServerHTTP": (frozenset({"pydantic_ai"}), REACHED),
+    "MCPServerStreamableHTTP": (frozenset({"pydantic_ai"}), REACHED),
+    "MultiServerMCPClient": (frozenset({"langchain_mcp_adapters"}), _LAUNCHED_OR_REACHED),
+}
+_CLIENT_MODULES = ("mcp.client", "agents.mcp", "pydantic_ai.mcp", "langchain_mcp_adapters")
+_LOADERS = frozenset({"import_module", "__import__", "resolve_name"})
+_LOADER_MODULES = frozenset({"importlib", "builtins", "pkgutil"})
 
 
 class _UnreadableError(ValueError):
@@ -316,7 +349,7 @@ class _Markers:
     """
 
     def __init__(self, path: Path, keep: int) -> None:
-        script = path.suffix in _SCRIPT_SUFFIXES
+        script = path.suffix in SCRIPT_SUFFIXES
         self.found: set[bytes] = set()
         self.ascii = True
         self.utf8 = True
@@ -326,7 +359,7 @@ class _Markers:
         self._tail = b""
         self._text: codecs.IncrementalDecoder | None = None
         self._text_tail = ""
-        root_script = script and len(path.parts) == 1
+        root_script = path.suffix in _CHECKED_SUFFIXES and len(path.parts) == 1
         self._utf8 = codecs.getincrementaldecoder("utf-8")() if root_script else None
         self._after_line_feed = False
         self._skipped = bytearray()
@@ -463,7 +496,7 @@ def _python_candidate(path: Path, source: _Source) -> bool:
 
 
 def _server_candidate(path: Path, source: _Source) -> bool:
-    return all(marker in source.found for marker in SERVER_MARKERS)
+    return is_analysis_candidate(source.found)
 
 
 def _client_candidate(path: Path, source: _Source) -> bool:
@@ -488,7 +521,7 @@ def _script_source(suffix: str) -> Callable[[Path], bool]:
         return (
             path.suffix == suffix
             and not _EXCLUDED_DIRECTORIES.intersection(path.parts)
-            and not path.name.endswith(_TEST_SCRIPTS)
+            and not path.name.endswith(NOT_SOURCE_NAMES)
         )
 
     return eligible
@@ -537,6 +570,125 @@ def _hidden_import(text: str, tree: ast.Module) -> str | None:
     return None
 
 
+def _loaded_module(name: str) -> str | None:
+    """The gap a dynamic import of ``name`` leaves when it loads an MCP server or client."""
+    if name == "mcp" or _server_module(name):
+        return _SERVER_LOADED
+    if any(name == module or name.startswith(f"{module}.") for module in _CLIENT_MODULES):
+        return _CLIENT_LOADED
+    return None
+
+
+def _loader(function: ast.expr, loaders: set[str]) -> bool:
+    return (isinstance(function, ast.Name) and function.id in loaders) or (
+        isinstance(function, ast.Attribute) and function.attr in _LOADERS
+    )
+
+
+def _literal(node: ast.expr | None) -> str | None:
+    """A string Python builds without running code: a constant, or an f-string of constants."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.JoinedStr):
+        parts = [_literal(part) for part in node.values]
+        return None if None in parts else "".join(part or "" for part in parts)
+    return None
+
+
+def _absolute(name: str, package: str | None, level: int = 0) -> str | None:
+    """A module name as ``importlib`` resolves it ``level`` packages up from ``package``.
+
+    Leading dots add to ``level``. None when the name cannot resolve: no package, or
+    more levels than the package has, which also bounds the work by its length.
+    """
+    rest = name.lstrip(".")
+    level += len(name) - len(rest)
+    if not level:
+        return name
+    if not package or level > package.count(".") + 1:
+        return None
+    base = package.rsplit(".", level - 1)[0]
+    return f"{base}.{rest}" if rest else base
+
+
+def _globals_package(node: ast.expr | None) -> str | None:
+    """The package ``__import__`` resolves a relative name against, from a literal globals dict."""
+    if not isinstance(node, ast.Dict):
+        return None
+    entries = {_literal(key): value for key, value in zip(node.keys, node.values, strict=True)}
+    package = _literal(entries.get("__package__"))
+    if package is not None:
+        return package
+    name = _literal(entries.get("__name__"))
+    if name is None or "__path__" in entries:
+        return name
+    return name.rpartition(".")[0]
+
+
+def _loaded_names(call: ast.Call) -> set[str]:
+    """Every module name a dynamic import call can load, as its literal arguments say.
+
+    The callee may be ``import_module(name, package)``, ``__import__(name, globals,
+    locals, fromlist, level)`` or ``pkgutil.resolve_name("module:attribute")``, so each
+    reading applies; a relative name counts once resolved against a literal package.
+    """
+    keywords = {keyword.arg: keyword.value for keyword in call.keywords if keyword.arg}
+
+    def argument(position: int, keyword: str) -> ast.expr | None:
+        return call.args[position] if position < len(call.args) else keywords.get(keyword)
+
+    texts = [_literal(value) for value in (*call.args, *keywords.values())]
+    name = _literal(argument(0, "name"))
+    if name is not None:
+        texts.append(_absolute(name, _literal(argument(1, "package"))))
+        level = argument(4, "level")
+        if isinstance(level, ast.Constant) and type(level.value) is int and level.value > 0:
+            texts.append(_absolute(name, _globals_package(argument(1, "globals")), level.value))
+    return {text.partition(":")[0] for text in texts if text}
+
+
+def _python_launches(tree: ast.Module) -> list[str]:
+    """Gaps for MCP servers a file starts or reaches, or loads through a dynamic import.
+
+    A launcher class or function counts wherever it is used outside an annotation, by
+    its imported name, by a star import or as an attribute of its package; ``ast`` has
+    already folded identifiers to NFKC, as Python does. A dynamic import counts when a
+    literal argument names an MCP server or client module; a computed name is not
+    followed.
+    """
+    nodes = list(ast.walk(tree))
+    packages: set[str] = set()
+    names: dict[str, str] = {}
+    loaders = set(_LOADERS)
+    for node in nodes:
+        if isinstance(node, ast.Import):
+            packages.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            package = node.module.split(".")[0]
+            packages.add(package)
+            for alias in node.names:
+                if node.module in _LOADER_MODULES and alias.name in _LOADERS:
+                    loaders.add(alias.asname or alias.name)
+                for launcher, (owners, reason) in _PYTHON_LAUNCHERS.items():
+                    if package in owners and alias.name in {launcher, "*"}:
+                        names[alias.asname or launcher] = reason
+    annotations = _annotation_names(nodes)
+    gaps: set[str] = set()
+    for node in nodes:
+        if isinstance(node, ast.Call) and _loader(node.func, loaders):
+            loaded = (_loaded_module(name) for name in _loaded_names(node))
+            gaps.update(gap for gap in loaded if gap is not None)
+        elif node in annotations or not isinstance(getattr(node, "ctx", None), ast.Load):
+            continue
+        elif isinstance(node, ast.Name) and node.id in names:
+            gaps.add(names[node.id])
+        elif isinstance(node, ast.Attribute) and node.attr in _PYTHON_LAUNCHERS:
+            owners, reason = _PYTHON_LAUNCHERS[node.attr]
+            if owners & packages:
+                gaps.add(reason)
+    return sorted(gaps)
+
+
 def _outcome(result: ScanResult) -> tuple[int, int, int]:
     return len(result.components), len(result.surfaces_excluded), len(result.scan_failures)
 
@@ -553,9 +705,8 @@ def collect_source_references(
     settings = limits.current()
     servers = _Kind(is_server_source, _server_candidate)
     python = _Kind(_python_source, _python_candidate)
-    typescript = _Kind(_script_source(".ts"), _client_candidate)
-    javascript = _Kind(_script_source(".js"), _client_candidate)
-    kinds = (servers, python, typescript, javascript)
+    clients = [_Kind(_script_source(suffix), _client_candidate) for suffix in _CLIENT_SUFFIXES]
+    kinds = (servers, python, *clients)
     eligible = [path for path in sources if any(kind.eligible(path) for kind in kinds)]
     # Root files first, as before, so what a lowered budget reads stays predictable.
     eligible.sort(key=lambda path: len(path.parts) > 1)
@@ -630,9 +781,10 @@ def collect_source_references(
             gap = _hidden_import(text, tree)
             if gap is not None:
                 result.surfaces_excluded.append(f"{location}: {gap}")
+            result.surfaces_excluded.extend(f"{location}: {gap}" for gap in _python_launches(tree))
         if _outcome(result) != before or client:
             surfaces.append(location)
-    for path, content in (*typescript.selected, *javascript.selected):
+    for path, content in (selected for kind in clients for selected in kind.selected):
         try:
             text = source_text(content)
         except ValueError as exc:

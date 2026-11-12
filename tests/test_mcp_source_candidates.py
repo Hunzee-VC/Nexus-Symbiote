@@ -85,10 +85,14 @@ def test_sdk_references_are_found_wherever_the_files_are(tmp_path):
         "cli.js",
     ]
     assert client.source_path == "agents/deep/client.py"
+    # A client module loaded by require is opaque to the analysis, so it is a gap too.
+    assert result.surfaces_excluded == [
+        "cli.js:1 (MCP client SDK loaded by require or dynamic import; servers it starts or "
+        "reaches not inventoried)"
+    ]
     assert sorted(result.surfaces_scanned) == [
         "agents/deep/client.py",
         "cli.js",
-        "mcp-config (no config files found)",
         "server/src/index.ts",
     ]
     assert [c.name for c in result.components if c.component_type == "tool"] == ["read"]
@@ -373,7 +377,9 @@ def test_scripts_are_searched_as_tsc_decodes_them(tmp_path, location, codec):
     _write(wide, location, _utf16(SCRIPTS[location], codec))
     expected, result = MCPScanner().scan(plain), MCPScanner().scan(wide)
     assert result.scan_failures == []
-    assert result.surfaces_excluded == []
+    # Only agent.js, which loads the client SDK by require, is a gap.
+    assert result.surfaces_excluded == expected.surfaces_excluded
+    assert bool(expected.surfaces_excluded) is (location == "agent.js")
     assert result.surfaces_scanned == expected.surfaces_scanned
 
     def described(scan):

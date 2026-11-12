@@ -162,10 +162,20 @@ A way around a limit that its entry does not describe is worth a
   `node_modules`, which the collector does not read. A committed
   `node_modules/<name>` that claims the pinned version runs under the pinned
   identity.
-- **Servers declared in code are not recorded.** Servers that application code
-  starts, such as `StdioServerParameters(command=...)` or
-  `MCPServerStdio(params=...)`, leave no component and no gap. User-level client
-  settings in your home directory are not read either.
+- **Servers started from code are gaps, not records.** Application code that starts
+  or reaches a server leaves no component for it, only a gap that fails the default
+  gates: in Python, `StdioServerParameters`, `sse_client`, `streamablehttp_client` and
+  `websocket_client` of the MCP SDK, `MCPServerStdio`, `MCPServerSse` and
+  `MCPServerStreamableHttp` of the OpenAI Agents SDK, `MCPServerStdio`,
+  `MCPServerSSE`, `MCPServerHTTP` and `MCPServerStreamableHTTP` of PydanticAI, and
+  LangChain's `MultiServerMCPClient`, used outside an annotation; in TypeScript and
+  JavaScript, the SDK's `StdioClientTransport`, `SSEClientTransport`,
+  `StreamableHTTPClientTransport` and `WebSocketClientTransport`. The command, its
+  package and pin are not inventoried even when they are literal; declare such a
+  server in a client file to have it inventoried. A launcher reached only through
+  `getattr`, `globals()` or code in a string, and the clients of other frameworks,
+  leave no gap; the collector records some of those only as a code-detected client.
+  User-level client settings in your home directory are not read either.
 - **Some client files are only detected.** Zed `context_servers`, opencode `mcp`,
   `.continue/mcpServers/` and `.junie/mcp/mcp.json` are gaps; their servers are not
   parsed.
@@ -180,8 +190,15 @@ A way around a limit that its entry does not describe is worth a
   server passed to a helper, an aliased or subclassed factory,
   `FastMCP.from_openapi`, decorators on a server imported from another module, a
   qualified, module-alias or star import, and an import spelled only with
-  compatibility characters. A server built through a dynamic import, such as
-  `importlib.import_module`, is not recognized and leaves no gap.
+  compatibility characters. A dynamic import (`importlib.import_module`,
+  `__import__` or `pkgutil.resolve_name`) whose literal arguments name `mcp`,
+  `mcp.server` or `fastmcp`, or a submodule of the last two, is a gap, and so is one
+  that names a client module: `mcp.client`, `agents.mcp`, `pydantic_ai.mcp`,
+  `langchain_mcp_adapters` or a submodule. A literal is a string or an f-string
+  without placeholders, and a relative name counts once resolved against a literal
+  package or `__import__` globals. A module name computed at run time, and other
+  import machinery such as `importlib.util.find_spec` or `runpy`, are not followed
+  and leave no gap.
 - **Python files without a reference are not examined.** A file that names neither
   `mcp` nor a supported agent framework is not parsed.
 - **Unusual source encodings fail.** A Python file whose encoding declaration names
@@ -190,16 +207,27 @@ A way around a limit that its entry does not describe is worth a
   they start with a UTF-16 byte order mark, as tsc reads them, so a server written
   in UTF-16 without one is not found and leaves no gap.
   See [source files the mcp collector searches](collection-limits.md#source-files-the-mcp-collector-searches).
-- **TypeScript and JavaScript server forms.** Only `.ts` files with a named
-  `McpServer` import are collected; see
-  [TypeScript inventory](typescript-inventory.md). Servers in `.js`, `.mjs`,
-  `.cjs`, `.mts`, `.cts` or `.tsx` files, and servers built through a namespace
-  import (`import * as sdk`) or `require`, are not collected and leave no gap. A
-  `.ts` or `.js` file that names `@modelcontextprotocol/sdk` is recorded only as a
-  code-detected client.
+- **TypeScript and JavaScript server forms.** Servers in `.ts`, `.mts`, `.cts`,
+  `.tsx`, `.js`, `.mjs`, `.cjs` and `.jsx` files are collected when `McpServer` is
+  imported from a known SDK module by name or through a namespace import; see
+  [TypeScript inventory](typescript-inventory.md). In a parsed file, these uses of
+  the SDK are gaps: `require`, a dynamic import, also of a module name the analysis
+  cannot read, a re-export, another module path or specifier form (`npm:`, a URL, a
+  version, a path into `node_modules`), a default import, the low-level `Server`
+  and a use of the class other than constructing it. A JavaScript file the
+  TypeScript grammar cannot parse is a gap, not a failure. These leave no gap: the
+  SDK reached through an alias resolved outside the file,
+  such as a `#` subpath import, tsconfig `paths` or an import map; a file that spells
+  the SDK only with escape sequences or percent-encoding; a module loader reached
+  through an alias or `Reflect.apply`; uses of a collected server other than a
+  literal `tool` or `registerTool` call, such as `server.server`, a wrapped
+  `registerTool` or the server passed to code in a file that does not name the SDK,
+  which can register tools the inventory does not show; and servers built with
+  other frameworks.
 - **Some directories are skipped.** Server source under directories named `build`,
   `dist`, `test`, `tests`, `docs`, `benchmarks` or `examples`, and `__tests__` for
-  TypeScript, is skipped without a gap.
+  TypeScript and JavaScript, is skipped without a gap, and so are TypeScript
+  declaration files and scripts named like `server.test.mjs` or `server.spec.ts`.
 - **Framework tools are collected by decorator only.** Module-level functions
   decorated with `@tool` (LangChain, CrewAI, smolagents), `@function_tool` (OpenAI
   Agents SDK) or PydanticAI's `@agent.tool` are collected by name; the descriptor is
