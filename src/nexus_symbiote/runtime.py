@@ -914,7 +914,7 @@ def _json_copy(value: Any) -> Any:
 
 def _check_arguments(arguments: dict[str, Any]) -> None:
     try:
-        check_json_budget(arguments, maximum=MAX_ARGUMENT_BYTES)
+        check_json_budget(arguments, maximum=MAX_ARGUMENT_BYTES, strict_integral_floats=True)
     except ValidationBudgetError as exc:
         if exc.reason == "json-number-out-of-range":
             raise AuthorizationError(
@@ -1133,11 +1133,23 @@ class StateStore:
             ) from exc
         return cls(path)
 
+    def _verify_store_id(self, db: sqlite3.Connection) -> None:
+        expected = getattr(self, "store_id", None)
+        if expected is None:
+            return
+        row = db.execute("SELECT value FROM meta WHERE key='store_id'").fetchone()
+        if row is None or row[0] != expected:
+            raise AuthorizationError(
+                "state database identity changed; open the replacement store explicitly",
+                reason="state-invalid",
+            )
+
     @contextmanager
     def _transaction(self) -> Iterator[sqlite3.Connection]:
         try:
             with closing(_connect(self.path)) as db, db:
                 db.execute("BEGIN IMMEDIATE")
+                self._verify_store_id(db)
                 yield db
         except sqlite3.Error as exc:
             raise AuthorizationError(
@@ -1147,6 +1159,7 @@ class StateStore:
     def _head(self, scope: str) -> tuple[Any, ...] | None:
         try:
             with closing(_connect(self.path)) as db:
+                self._verify_store_id(db)
                 row = db.execute(
                     "SELECT serial, digest, revoked_signers FROM heads WHERE scope=?", (scope,)
                 ).fetchone()
@@ -1175,13 +1188,15 @@ class StateStore:
                 )
 
     def accept_trust_status(
-        self, status: TrustStatus, verified_signers: set[str]
+        self, status: TrustStatus, verified_signers: set[str], *, threshold: int = 1
     ) -> tuple[str, int, str]:
         """Atomically authenticate a transition against the preceding tenant trust state."""
+        _validate_threshold(threshold)
         scope = "trust:" + status.tenant
         head = (scope, status.serial, digest(status.model_dump(mode="json")))
         revoked = json.dumps(status.revoked_signers)
-        if not verified_signers or verified_signers.intersection(status.revoked_signers):
+        eligible = verified_signers - set(status.revoked_signers)
+        if len(eligible) < threshold:
             raise AuthorizationError(
                 "trust status requires unrevoked signers", reason="trust-signer-revoked"
             )
@@ -1210,7 +1225,7 @@ class StateStore:
                             "restore the recorded trust status before advancing",
                             reason="trust-restore-required",
                         )
-                elif verified_signers.intersection(json.loads(old[2])):
+                elif len(eligible - set(json.loads(old[2]))) < threshold:
                     raise AuthorizationError(
                         "previously revoked trust-status signer", reason="trust-signer-revoked"
                     )
@@ -1342,7 +1357,7 @@ class ReferenceGateway(Generic[T]):
         signer_scopes: Mapping[str, SignerScope] | None = None,
         allow_shared_keys: bool = False,
         on_decision: Callable[[Decision], None] | None = None,
-        canonical_arguments: bool = False,
+        canonical_arguments: bool = True,
     ) -> None:
         for threshold, keys in (
             (snapshot_threshold, snapshot_keys),
@@ -1530,8 +1545,17 @@ class ReferenceGateway(Generic[T]):
         _window(statuses, timestamp, MAX_LIFETIMES["trust"], "trust")
         if statuses.tenant != tenant:
             raise AuthorizationError("trust status tenant mismatch", reason="trust-tenant-mismatch")
-        self._scoped(signers, self.trust_threshold, timestamp, tenant=tenant)
-        return statuses, signers, self.state.accept_trust_status(statuses, signers)
+        unrevoked = signers - set(statuses.revoked_signers)
+        if len(unrevoked) < self.trust_threshold:
+            raise AuthorizationError(
+                "trust status requires unrevoked signers", reason="trust-signer-revoked"
+            )
+        scoped = self._scoped(unrevoked, self.trust_threshold, timestamp, tenant=tenant)
+        return (
+            statuses,
+            scoped,
+            self.state.accept_trust_status(statuses, scoped, threshold=self.trust_threshold),
+        )
 
     def _verify_snapshot(
         self, snapshot: Envelope, timestamp: datetime
@@ -1553,10 +1577,16 @@ class ReferenceGateway(Generic[T]):
         snapshot_digest = digest(approved.model_dump(mode="json"))
         if snapshot_digest in statuses.revoked_snapshots:
             raise AuthorizationError("snapshot is revoked", reason="snapshot-revoked")
-        if (signers | trust_signers) & set(statuses.revoked_signers):
+        revoked = set(statuses.revoked_signers)
+        unrevoked_trust = trust_signers - revoked
+        unrevoked_snapshot = signers - revoked
+        if (
+            len(unrevoked_trust) < self.trust_threshold
+            or len(unrevoked_snapshot) < self.snapshot_threshold
+        ):
             raise AuthorizationError("signer is revoked", reason="signer-revoked")
         self._scoped(
-            signers,
+            unrevoked_snapshot,
             self.snapshot_threshold,
             timestamp,
             tenant=approved.tenant,
@@ -1732,10 +1762,11 @@ class ReferenceGateway(Generic[T]):
             approval_signers=tuple(sorted(signers)),
         )
         _window(consent, timestamp, MAX_LIFETIMES["approval"], "approval")
-        if signers & set(statuses.revoked_signers):
+        unrevoked = signers - set(statuses.revoked_signers)
+        if len(unrevoked) < self.approval_threshold:
             raise AuthorizationError("approver is revoked", reason="approver-revoked")
-        signers = self._scoped(
-            signers,
+        scoped = self._scoped(
+            unrevoked,
             self.approval_threshold,
             timestamp,
             tenant=context.tenant,
@@ -1745,8 +1776,13 @@ class ReferenceGateway(Generic[T]):
         )
         # The quorum counts people, not keys: two keys enrolled for one approver
         # are one approval, and the named actor must be one of the signers.
-        actors = {self.approval_actors.get(signer) for signer in signers}
-        if None in actors or consent.actor not in actors:
+        bound = {
+            signer: self.approval_actors[signer]
+            for signer in scoped
+            if self.approval_actors.get(signer) is not None
+        }
+        actors = set(bound.values())
+        if len(bound) < self.approval_threshold or consent.actor not in actors:
             raise AuthorizationError(
                 "approval actor is not bound to its authorized signing key",
                 reason="approval-actor-unbound",
@@ -1755,6 +1791,7 @@ class ReferenceGateway(Generic[T]):
             raise AuthorizationError(
                 "approval quorum requires distinct approvers", reason="approval-quorum-not-met"
             )
+        facts["approval_signers"] = tuple(sorted(bound))
         if consent.snapshot_digest != snapshot_digest:
             raise AuthorizationError(
                 "approval does not cover this operation: it names another snapshot",

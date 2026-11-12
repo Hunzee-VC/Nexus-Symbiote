@@ -150,6 +150,8 @@ def resolve(*, offline: bool, live: bool, environ: Mapping[str, str]) -> Resolve
 
 _lock = threading.Lock()
 _active: Mode | None = None
+_depth = 0
+_patches: list[tuple[Any, str, Any]] = []
 
 
 def _audit(event: str, args: tuple[Any, ...]) -> None:
@@ -272,26 +274,27 @@ def _guard() -> list[tuple[Any, str, Any]]:
 @contextmanager
 def enforce(mode: Mode) -> Iterator[None]:
     """Enforce ``mode`` for the duration of the block; offline installs the guard."""
-    global _active
+    global _active, _depth, _patches
     with _lock:
-        if _active is not None:
+        if _depth > 0:
             if _active is not mode:
                 raise RuntimeError("another operating mode is already enforced")
-            nested = True
+            _depth += 1
         else:
-            nested = False
-            patches = []
+            patches: list[tuple[Any, str, Any]] = []
             if mode is Mode.OFFLINE:
                 _run_import_time_probes()
                 _install_audit_hook()
                 patches = _guard()
+            _patches = patches
             _active = mode
-    if nested:
-        yield
-        return
+            _depth = 1
     try:
         yield
     finally:
         with _lock:
-            _restore(patches)
-            _active = None
+            _depth -= 1
+            if _depth == 0:
+                to_restore, _patches = _patches, []
+                _restore(to_restore)
+                _active = None
