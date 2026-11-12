@@ -159,16 +159,35 @@ def find_policy_path(project_root: Path) -> Path | None:
     belongs to whoever controls that directory, not to the project. Both file names
     at once are refused: either could silently shadow the other.
     """
+    from nexus_symbiote.utils.confined import fold_name
+
     current = project_root.resolve()
     if current.is_file():
         current = current.parent
+    try:
+        entries = sorted(os.listdir(current))
+    except OSError:
+        return None
+    folded_targets = {fold_name(name): name for name in POLICY_FILE_NAMES}
     found: list[Path] = []
-    for name in POLICY_FILE_NAMES:
-        candidate = current / name
+    variants: list[tuple[str, str]] = []
+    for entry in entries:
+        canonical = folded_targets.get(fold_name(entry))
+        if canonical is None:
+            continue
+        candidate = current / entry
         if candidate.is_symlink():
             raise PolicyError(f"policy must not be a symlink: {candidate}")
-        if candidate.exists():
-            found.append(candidate)
+        if entry in POLICY_FILE_NAMES:
+            if candidate.exists():
+                found.append(candidate)
+        else:
+            variants.append((entry, canonical))
+    if variants:
+        variant_name, canonical = variants[0]
+        raise PolicyError(
+            f"case-variant policy file {variant_name} in {current}; rename it to {canonical}"
+        )
     if len(found) > 1:
         raise PolicyError(
             f"both {POLICY_FILE_NAMES[0]} and {POLICY_FILE_NAMES[1]} exist in {current}; "

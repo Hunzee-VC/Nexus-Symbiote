@@ -452,9 +452,11 @@ def gguf_metadata(read: Read, budget: InspectionBudget | None = None) -> GGUFMet
 # Jinja sandbox escapes reach Python internals through dunder attributes: by name,
 # by a string that a subscript, the attr filter or an attribute argument looks up,
 # or through the attr filter. Ordinary chat templates do none of these. Jinja skips
-# Unicode whitespace between tokens, so the pattern matches text, not bytes.
+# Unicode whitespace between tokens, so the pattern matches text, not bytes. A dunder
+# name joined from two string literals is matched by either half.
 _TEMPLATE_ESCAPE = re.compile(
     r"\.\s*__[A-Za-z0-9_]+__|['\"]__[A-Za-z0-9_]+__['\"]|(?<![A-Za-z0-9_])attr\s*\("
+    r"|['\"]__[A-Za-z0-9_]*['\"]\s*[~+]|[~+]\s*['\"][A-Za-z0-9_]*__['\"]"
 )
 # The escapes Jinja decodes in a string literal, with an escaped backslash first so
 # that it is consumed whole; every other backslash is kept as written. Jinja turns
