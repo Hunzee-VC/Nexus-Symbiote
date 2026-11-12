@@ -75,7 +75,7 @@ def parse_python(source: str) -> ast.Module:
         warnings.simplefilter("ignore", SyntaxWarning)
         warnings.simplefilter("ignore", DeprecationWarning)
         try:
-            return ast.parse(source.removeprefix("﻿"))
+            return ast.parse(source.removeprefix("\ufeff"))
         except (MemoryError, RecursionError, OverflowError):
             raise ValueError("Python source too complex to parse") from None
 

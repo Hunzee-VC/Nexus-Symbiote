@@ -285,7 +285,7 @@ def _apply_worker_limits() -> None:
 
 
 # ECMA-262 WhiteSpace and LineTerminator code points, which "\s" matches there.
-_ECMA_SPACE = r"\t\n\x0b\x0c\r \xa0  -     　﻿"
+_ECMA_SPACE = r"\t\n\x0b\x0c\r \xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
 _CLASS_ESCAPES = {"d": "0-9", "w": "A-Za-z0-9_", "s": _ECMA_SPACE}
 _ESCAPES = {
     "d": "[0-9]",
@@ -295,7 +295,7 @@ _ESCAPES = {
     "s": f"[{_ECMA_SPACE}]",
     "S": f"[^{_ECMA_SPACE}]",
 }
-_ANY = r"[^\n\r  ]"
+_ANY = r"[^\n\r\u2028\u2029]"
 _GROUPS = ("(?:", "(?=", "(?!", "(?<=", "(?<!")
 _LOOKAROUNDS = frozenset(_GROUPS[1:])
 _LOOKBEHINDS = frozenset(_GROUPS[3:])

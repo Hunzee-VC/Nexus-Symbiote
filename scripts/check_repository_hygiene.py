@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import tomllib
+import unicodedata
 from collections import Counter
 from collections.abc import Iterator
 from datetime import date
@@ -35,6 +36,10 @@ PROJECT_URL = re.compile(r"https://github\.com/([A-Za-z0-9._-]+)/([A-Za-z0-9._-]
 # PyPI URL ends in /p/<name>, and GitHub URLs are matched by PROJECT_URL.
 OWNER_SLUG = "(?<![A-Za-z0-9._/-])([A-Za-z0-9._-]+)/{0}(?![A-Za-z0-9._-])"
 OWNER_TEXT_SUFFIXES = frozenset({".md", ".yml", ".yaml", ".cff"})
+# Tests and benchmark fixtures hold the characters the collectors must detect.
+HIDDEN_EXEMPT_PREFIXES = (Path("tests"), Path("benchmarks"))
+HIDDEN_SUFFIXES = frozenset({".py", ".md", ".toml", ".yml", ".yaml", ".cff", ".cfg", ".txt"})
+_BLANK = frozenset({0x034F, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x2800, 0x3164, 0xFFA0})
 # Dated audits record what was inspected under the owner live at the time.
 # Rewriting their links would falsify the record rather than fix a stale one.
 OWNER_EXEMPT_PREFIXES = (Path("docs/audits"),)
@@ -140,6 +145,46 @@ def source_issues(root: Path, files: list[Path]) -> list[str]:
                     errors.append(f"{relative}: missing or escaping inline local link: {link}")
                     continue
                 errors.extend(_anchor_issue(root, relative, target, parsed.fragment, link, anchors))
+    return errors
+
+
+def _hidden(character: str) -> bool:
+    """Whether a reader cannot see this character: format, separator, selector or blank filler."""
+    point = ord(character)
+    return (
+        unicodedata.category(character) in {"Cf", "Zl", "Zp"}
+        or point in _BLANK
+        or 0x180B <= point <= 0x180F
+        or 0xFE00 <= point <= 0xFE0F
+        or 0xE0100 <= point <= 0xE01EF
+    )
+
+
+def hidden_character_issues(root: Path, files: list[Path]) -> list[str]:
+    """Reject invisible characters in tracked source and documentation.
+
+    Bidirectional controls, zero-width characters and their kind make text read
+    differently from how it is processed, in a review as in an instruction file. Code
+    that needs one writes it as an escape such as ``\\u202e``.
+    """
+    errors = []
+    for relative in files:
+        if relative.suffix not in HIDDEN_SUFFIXES or VENDOR in relative.parents:
+            continue
+        if any(prefix in relative.parents for prefix in HIDDEN_EXEMPT_PREFIXES):
+            continue
+        try:
+            text = read_file(root, relative).decode("utf-8")
+        except (OSError, ValueError, UnicodeError):
+            continue
+        # Not splitlines: it would consume the separators this check reports.
+        for number, line in enumerate(text.split("\n"), 1):
+            found = sorted({f"U+{ord(character):04X}" for character in line if _hidden(character)})
+            if found:
+                errors.append(
+                    f"{relative}:{number}: invisible character {', '.join(found)}; "
+                    "write it as an escape"
+                )
     return errors
 
 
@@ -336,6 +381,7 @@ def main() -> int:
         files = [Path(value) for value in result.stdout.decode().split("\0") if value]
         errors = [
             *source_issues(root, files),
+            *hidden_character_issues(root, files),
             *owner_issues(root, files),
             *self_link_issues(root, files),
             *readme_link_issues(root),

@@ -233,6 +233,35 @@ def test_unparseable_homepage_fails_closed(tmp_path):
     ]
 
 
+def test_invisible_characters_in_source_and_documentation_are_reported(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src/module.py").write_text('NAME = "safe\u202eedoc"\nBOM = "\ufeff"\n', "utf-8")
+    (tmp_path / "guide.md").write_text("ordinary\nzero\u200bwidth\nline\u2028separator\n", "utf-8")
+    issues = hygiene.hidden_character_issues(tmp_path, [Path("src/module.py"), Path("guide.md")])
+    assert issues == [
+        "src/module.py:1: invisible character U+202E; write it as an escape",
+        "src/module.py:2: invisible character U+FEFF; write it as an escape",
+        "guide.md:2: invisible character U+200B; write it as an escape",
+        "guide.md:3: invisible character U+2028; write it as an escape",
+    ]
+
+
+def test_escaped_invisible_characters_and_detection_fixtures_are_accepted(tmp_path):
+    for directory in ("src", "tests", "benchmarks/fixtures/case"):
+        (tmp_path / directory).mkdir(parents=True)
+    (tmp_path / "src/module.py").write_text(
+        'RLO = "\\u202e"\nTEXT = "caf\u00e9 \u00a0 \u2014"\n', "utf-8"
+    )
+    (tmp_path / "tests/test_hidden.py").write_text('SAMPLE = "\u202e"\n', "utf-8")
+    (tmp_path / "benchmarks/fixtures/case/CLAUDE.md").write_text("hidden\u200b\n", "utf-8")
+    files = [
+        Path("src/module.py"),
+        Path("tests/test_hidden.py"),
+        Path("benchmarks/fixtures/case/CLAUDE.md"),
+    ]
+    assert hygiene.hidden_character_issues(tmp_path, files) == []
+
+
 def test_tracked_repository_passes_its_own_owner_check():
     root = Path(__file__).parents[1]
     if not (root / ".git").exists():
@@ -245,3 +274,4 @@ def test_tracked_repository_passes_its_own_owner_check():
     )
     files = [Path(value) for value in listing.stdout.decode().split("\0") if value]
     assert hygiene.owner_issues(root, files) == []
+    assert hygiene.hidden_character_issues(root, files) == []
