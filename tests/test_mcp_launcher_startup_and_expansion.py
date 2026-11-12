@@ -1,15 +1,19 @@
 """Shell startup files, exported functions and expansion cost cannot keep a pinned identity.
 
-An interactive bash sources --rcfile/--init-file before its -c script, and bash imports a
-BASH_FUNC_<name>%% variable as a function; either replaces the npx the script names. The
-brace, bracket and ${...} readers ran in time quadratic in a word's length while the scan
-budget was charged linearly, so a few kilobytes of launch text stalled a scan.
+bash sources --rcfile/--init-file (also spelled -rcfile) before its -c script when it is
+interactive or its standard input is a socket, an interactive POSIX shell sources $ENV,
+and bash imports exported functions from the environment; each replaces the npx the
+script names. The brace, bracket, pattern and ${...} readers ran in time or memory far
+beyond the scan budget they were charged, so a few kilobytes of launch text stalled a scan.
 """
 
 import json
+import os
 import shutil
+import socket
 import subprocess
 import time
+import tracemalloc
 from pathlib import Path
 
 import pytest
@@ -44,25 +48,45 @@ def assert_unknown(project: Path, server: dict, reason: str) -> None:
         ["--rcfile", "./evil.sh", "-i", "-c", PINNED],
         ["--init-file", "./evil.sh", "-ci", PINNED],
         ["--init-file", "./evil.sh", "-xic", PINNED],
+        # Not interactive: bash still sources the file when standard input is a socket.
+        ["--rcfile", "./evil.sh", "-c", PINNED],
+        ["--rcfile=./evil.sh", "-c", PINNED],
+        # bash reads its long options after a single dash too.
+        ["-rcfile", "-x", "-ic", PINNED],
+        ["-init-file", "./evil.sh", "-c", PINNED],
     ],
 )
-def test_an_interactive_shell_with_a_startup_file_leaves_the_identity_unknown(tmp_path, args):
+def test_a_startup_file_leaves_the_identity_unknown(tmp_path, args):
     assert_unknown(tmp_path, {"command": "bash", "args": args}, "startup file")
 
 
-def test_a_startup_file_of_a_non_interactive_shell_is_never_read(tmp_path):
-    record, gaps = scan(tmp_path, {"command": "bash", "args": ["--rcfile", "x", "-c", PINNED]})
-    assert not gaps and record.package_url == "pkg:npm/pkg@1.2.3"
+@pytest.mark.parametrize("option", ["-login", "-norc", "-debug", "-restricted"])
+def test_a_single_dash_long_option_is_ambiguous(tmp_path, option):
+    assert_unknown(tmp_path, {"command": "bash", "args": [option, "-c", PINNED]}, "ambiguous")
 
 
 def test_a_startup_file_before_a_script_file_is_unknown_too():
     assert analyze("bash", ["--rcfile", "./evil.sh", "-i", "run.sh"]).unknown is not None
 
 
-@pytest.mark.parametrize("variable", ["BASH_FUNC_npx%%", "BASH_FUNC_npx()", "bash_func_node%%"])
+@pytest.mark.parametrize(
+    "variable", ["BASH_FUNC_npx%%", "BASH_FUNC_npx()", "bash_func_node%%", "__BASH_FUNC<npx>()"]
+)
 def test_an_exported_shell_function_leaves_the_identity_unknown(tmp_path, variable):
     server = {"command": "bash", "args": ["-c", PINNED], "env": {variable: "() { :; }"}}
     assert_unknown(tmp_path, server, "shell function")
+
+
+def test_a_function_definition_in_any_variable_is_unknown(tmp_path):
+    # bash before 2014 imported any variable whose value starts with "() {".
+    server = {"command": "bash", "args": ["-c", PINNED], "env": {"npx": "() { :; }"}}
+    assert_unknown(tmp_path, server, "shell function")
+
+
+def test_trace_options_and_prompts_count_as_code_loading_environment(tmp_path):
+    env = {"SHELLOPTS": "xtrace", "PS4": "$(./evil.sh)", "BASHOPTS": "extdebug"}
+    record, _ = scan(tmp_path, {"command": "bash", "args": ["-c", PINNED], "env": env})
+    assert record.properties["launch_context"]["code_loading_environment"] == 3
 
 
 def test_an_exported_function_beside_a_direct_runner_is_unknown(tmp_path):
@@ -76,24 +100,37 @@ def test_an_exported_function_counts_as_code_loading_environment(tmp_path):
     assert record.properties["launch_context"]["code_loading_environment"] == 1
 
 
-def _bash(tmp_path: Path, args: list[str], env: dict[str, str]) -> str:
-    bash = shutil.which("bash")
-    if bash is None:
-        pytest.skip("bash is not installed")
+def _bash(
+    tmp_path: Path,
+    args: list[str],
+    env: dict[str, str],
+    *,
+    interpreter: str = "bash",
+    socket_stdin: bool = False,
+) -> str:
+    program = shutil.which(interpreter)
+    if program is None:
+        pytest.skip(f"{interpreter} is not installed")
     empty = tmp_path / "bin"
-    empty.mkdir()
+    empty.mkdir(exist_ok=True)
     # An empty PATH: an npx that is not replaced cannot be found, let alone run.
     environ = {"PATH": str(empty), "HOME": str(tmp_path), "TERM": "dumb", **env}
-    done = subprocess.run(  # noqa: S603 - resolved bash and fixed arguments
-        [bash, *args],
-        cwd=tmp_path,
-        env=environ,
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
-    )
+    ours, theirs = socket.socketpair() if socket_stdin else (None, None)
+    try:
+        done = subprocess.run(  # noqa: S603 - resolved shell and fixed arguments
+            [program, *args],
+            cwd=tmp_path,
+            env=environ,
+            stdin=theirs if theirs is not None else subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    finally:
+        for end in (ours, theirs):
+            if end is not None:
+                end.close()
     return done.stdout
 
 
@@ -102,6 +139,22 @@ def test_bash_runs_what_the_startup_file_defines_instead_of_npx(tmp_path):
     ran = _bash(tmp_path, ["--rcfile", "./evil.sh", "-ic", PINNED], {})
     assert "REPLACED -y pkg@1.2.3" in ran
     assert analyze("bash", ["--rcfile", "./evil.sh", "-ic", PINNED]).unknown is not None
+
+
+def test_bash_reads_a_startup_file_without_i_when_stdin_is_a_socket(tmp_path):
+    # Node's child_process, which MCP clients use, gives a server a socketpair for stdin;
+    # bash then reads the startup file as it would for rshd.
+    (tmp_path / "evil.sh").write_text('npx() { echo "REPLACED $*"; }\n')
+    args = ["--rcfile", "./evil.sh", "-c", PINNED]
+    assert "REPLACED -y pkg@1.2.3" in _bash(tmp_path, args, {}, socket_stdin=True)
+    assert analyze("bash", args).unknown is not None
+
+
+def test_bash_reads_a_single_dash_long_option(tmp_path):
+    (tmp_path / "evil.sh").write_text('npx() { echo "REPLACED $*"; }\n')
+    args = ["-rcfile", "./evil.sh", "-ic", PINNED]
+    assert "REPLACED -y pkg@1.2.3" in _bash(tmp_path, args, {})
+    assert analyze("bash", args).unknown is not None
 
 
 def test_bash_runs_an_exported_function_instead_of_npx(tmp_path):
@@ -171,7 +224,18 @@ def test_shallow_default_operands_still_name_the_program():
     )
 
 
-@pytest.mark.parametrize("value", ["./evil.sh", "evil.sh", "${workspaceFolder}/evil.sh", ""])
+@pytest.mark.parametrize(
+    "value",
+    [
+        "./evil.sh",
+        "evil.sh",
+        "${workspaceFolder}/evil.sh",
+        "",
+        "/proc/self/cwd/evil.sh",
+        "//proc/thread-self/cwd/evil.sh",
+        "/./proc/1/cwd/evil.sh",
+    ],
+)
 def test_a_startup_file_from_the_environment_that_may_be_in_the_project_is_unknown(tmp_path, value):
     server = {"command": "bash", "args": ["-c", PINNED], "env": {"BASH_ENV": value}}
     assert_unknown(tmp_path, server, "startup file")
@@ -187,3 +251,97 @@ def test_an_absolute_startup_file_and_env_keep_the_pin_with_a_finding(tmp_path):
 def test_bash_sources_bash_env_before_its_script(tmp_path):
     (tmp_path / "evil.sh").write_text('npx() { echo "REPLACED $*"; }\n')
     assert "REPLACED -y pkg@1.2.3" in _bash(tmp_path, ["-c", PINNED], {"BASH_ENV": "./evil.sh"})
+
+
+def test_an_interactive_posix_shell_reads_env_from_the_project(tmp_path):
+    server = {"command": "sh", "args": ["-ic", PINNED], "env": {"ENV": "./evil.sh"}}
+    assert_unknown(tmp_path, server, "startup file")
+    # Not interactive: ENV is never read, and production is not a file anyway.
+    record, gaps = scan(tmp_path, {"command": "sh", "args": ["-c", PINNED], "env": server["env"]})
+    assert not gaps and record.package_url == "pkg:npm/pkg@1.2.3"
+
+
+def test_sh_sources_env_when_interactive(tmp_path):
+    (tmp_path / "evil.sh").write_text('npx() { echo "REPLACED $*"; }\n')
+    ran = _bash(tmp_path, ["-ic", PINNED], {"ENV": "./evil.sh"}, interpreter="sh")
+    assert "REPLACED -y pkg@1.2.3" in ran
+
+
+def test_a_path_through_proc_may_search_the_project(tmp_path):
+    env = {"PATH": "/proc/self/cwd/bin:/usr/bin"}
+    assert_unknown(tmp_path, {"command": "npx", "args": ["-y", "pkg@1.2.3"], "env": env}, "PATH")
+
+
+@pytest.mark.skipif(not os.path.isdir("/proc/self/cwd"), reason="no /proc/self/cwd")
+def test_bash_sources_bash_env_through_proc(tmp_path):
+    (tmp_path / "evil.sh").write_text('npx() { echo "REPLACED $*"; }\n')
+    env = {"BASH_ENV": "/proc/self/cwd/evil.sh"}
+    assert "REPLACED -y pkg@1.2.3" in _bash(tmp_path, ["-c", PINNED], env)
+
+
+def peak_bytes(function, *args) -> int:
+    tracemalloc.start()
+    try:
+        function(*args)
+        return tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+
+
+@pytest.mark.no_cover
+def test_a_long_brace_list_is_not_copied_once_per_item():
+    # Each of 64,000 items copied the 64,000-character tail: 3.9 GB for a 128 KB word.
+    word = "{" + "," * 64_000 + "}" + "x" * 64_000
+    assert peak_bytes(analyze, "npx", ["-y", "pkg@1.2.3", word]) < 32 * 2**20
+    assert cpu(analyze, "npx", ["-y", "pkg@1.2.3", word]) < 2
+
+
+@pytest.mark.no_cover
+def test_a_pattern_longer_than_any_program_is_not_compiled():
+    # fnmatch compiled the whole word: 30 s and 1.9 GB for 4 MB of "*a".
+    word = "*a" * 500_000
+    assert peak_bytes(analyze, "npx", ["-y", "pkg@1.2.3", word]) < 32 * 2**20
+    assert cpu(analyze, "npx", ["-y", "pkg@1.2.3", word]) < 2
+
+
+def test_a_pattern_as_long_as_a_program_name_still_names_it():
+    assert analyze("node", ["server.js", "n*p*x", "-y", "x@1"]).unknown == "arguments start npx"
+    # A bracket reads as any one character, so ??x names npx, dnx and the like.
+    reason = analyze("node", ["server.js", "[nN][!a]x", "-y", "x@1"]).unknown
+    assert reason is not None and reason.startswith("arguments start ")
+
+
+@pytest.mark.no_cover
+def test_a_word_with_many_long_readings_is_charged_before_it_is_copied():
+    # Six expansions make 64 readings, each a copy of a 4 MB word.
+    word = "${A}" * 6 + "x" * 4_000_000
+    assert peak_bytes(analyze, "npx", ["-y", "pkg@1.2.3", word]) < 160 * 2**20
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def _config(servers: int, keys: int) -> dict:
+    values = {f"key{index}": f"value-{index}" for index in range(keys)}
+    return {"servers": {f"s{index}": dict(values) for index in range(servers)}}
+
+
+def _inline_configs() -> list[str]:
+    configs = json.loads((FIXTURES / "mcp-inline-json-arguments.json").read_text())
+    # Both failed on the budget once each brace search cost a step: the spaced one as 120
+    # words of a command line, the compact one as a brace expansion.
+    found = [
+        json.dumps(configs["spaced"]),
+        json.dumps(configs["compact"], separators=(",", ":")),
+    ]
+    for servers, keys in [(1, 60), (20, 3), (8, 8), (30, 2)]:
+        found.append(json.dumps(_config(servers, keys), separators=(",", ":")))
+    return found
+
+
+@pytest.mark.parametrize("config", _inline_configs())
+def test_inline_json_arguments_keep_the_pin(config):
+    argument = "--config=" + config
+    launch = analyze("npx", ["-y", "@scope/server@1.2.3", argument])
+    assert launch.unknown is None, (len(argument), launch.unknown)
+    assert [package.spec for package in launch.packages] == ["@scope/server@1.2.3"]
