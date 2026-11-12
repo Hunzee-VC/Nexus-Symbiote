@@ -125,7 +125,11 @@ def test_missing_directory_reports_its_case_variants(tmp_path):
 
 def test_exact_name_is_read_without_a_variant_report(tmp_path):
     (tmp_path / "CLAUDE.md").write_text("upper")
-    (tmp_path / "claude.md").write_text("lower")
+    lower = tmp_path / "claude.md"
+    if not lower.exists():
+        lower.write_text("lower")
+    else:
+        (tmp_path / "CLAUDE.md.").write_text("lower")
     failures: list[str] = []
     with ConfinedCollection(tmp_path, failures) as files:
         assert files.read_text("CLAUDE.md", missing_ok=True) == "upper"
@@ -291,12 +295,12 @@ def _same_folding_names(count: int, base: str = "a") -> list[str]:
     """Names that fold to ``base`` (case, trailing dots and spaces), without ``base``."""
     names: list[str] = []
     length = 0
+    upper = base.upper()
     while len(names) < count:
         for suffix in itertools.product(". ", repeat=length):
-            for first in (base, base.upper()):
-                name = first + "".join(suffix)
-                if name != base and len(names) < count:
-                    names.append(name)
+            name = upper + "".join(suffix)
+            if name != base and len(names) < count:
+                names.append(name)
         length += 1
     return names
 
@@ -435,7 +439,10 @@ def test_a_link_to_a_name_that_is_not_utf8_is_refused_wherever_it_is_met(tmp_pat
 def test_a_case_variant_is_reported_once_however_many_paths_lead_to_it(tmp_path):
     (tmp_path / "t").mkdir()
     (tmp_path / "t" / "Settings.json").write_text("{}")
-    (tmp_path / "t" / "SETTINGS.JSON").write_text("{}")
+    second = (
+        "SETTINGS.JSON" if not (tmp_path / "t" / "SETTINGS.JSON").exists() else "Settings.json."
+    )
+    (tmp_path / "t" / second).write_text("{}")
     for index in range(3):
         (tmp_path / f"p{index}").mkdir()
         (tmp_path / f"p{index}" / ".claude").symlink_to("../t", target_is_directory=True)
@@ -444,15 +451,19 @@ def test_a_case_variant_is_reported_once_however_many_paths_lead_to_it(tmp_path)
         for index in range(3):
             path = f"p{index}/.claude/settings.json"
             assert files.read_bytes(path, missing_ok=True) is None
-            assert sorted(files.case_variants(path)) == [
-                Path(f"p{index}/.claude/SETTINGS.JSON"),
-                Path(f"p{index}/.claude/Settings.json"),
-            ]
+            assert sorted(files.case_variants(path)) == sorted(
+                [
+                    Path(f"p{index}/.claude/{second}"),
+                    Path(f"p{index}/.claude/Settings.json"),
+                ]
+            )
         files.report_case_variant("t/Settings.json", "t/settings.json")
         files.report_case_variant("q/.claude/Settings.json", "q/.claude/settings.json")
     variant = "is the active file on case-insensitive file systems and is not inventoried"
-    assert sorted(failures) == [
-        f"p0/.claude/SETTINGS.JSON: case variant of p0/.claude/settings.json {variant}",
-        f"p0/.claude/Settings.json: case variant of p0/.claude/settings.json {variant}",
-        f"q/.claude/Settings.json: case variant of q/.claude/settings.json {variant}",
-    ]
+    assert sorted(failures) == sorted(
+        [
+            f"p0/.claude/{second}: case variant of p0/.claude/settings.json {variant}",
+            f"p0/.claude/Settings.json: case variant of p0/.claude/settings.json {variant}",
+            f"q/.claude/Settings.json: case variant of q/.claude/settings.json {variant}",
+        ]
+    )

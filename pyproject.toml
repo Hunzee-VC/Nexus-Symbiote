@@ -4,10 +4,10 @@ build-backend = "hatchling.build"
 
 [project]
 name = "nexus-symbiote"
-version = "0.1.0"
+version = "0.2.0"
 description = "Agent Bill of Materials (AgentBOM) — generate, validate, and manage AIBOMs for production AI agent systems"
 readme = "README.md"
-license = "MIT AND Apache-2.0 AND Community-Spec-1.0"
+license = "MIT AND Apache-2.0 AND Community-Spec-1.0 AND CC-BY-3.0"
 license-files = [
     "LICENSE",
     "src/nexus_symbiote/generators/schemas/vendor/LICENSE-APACHE-2.0.txt",
@@ -129,6 +129,10 @@ ignore = ["S101", "UP042", "E501", "SIM102", "SIM105"]
 python_version = "3.11"
 strict = true
 plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["sigstore_models.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

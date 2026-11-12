@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 
-_JSONC_EVENT = re.compile(r'"|//|/\*|[,\]}]')
+_JSONC_EVENT = re.compile(r'"|//|/\*|[,\]}\[{:]')
 _JSON_STRING = re.compile(r'"(?:[^"\\]|\\.)*"', re.DOTALL)
 
 
@@ -24,10 +24,12 @@ def strip_jsonc(text: str) -> str:
     parts: list[str] = []
     position = 0
     comma = -1
+    can_trail = False
     while (event := _JSONC_EVENT.search(text, position)) is not None:
         start = event.start()
         if text[position:start].strip():
             comma = -1
+            can_trail = True
         parts.append(text[position:start])
         mark = event.group()
         if mark == '"':
@@ -35,7 +37,7 @@ def strip_jsonc(text: str) -> str:
             if string is None:
                 raise ValueError("unterminated string")
             parts.append(string.group())
-            comma, position = -1, string.end()
+            comma, can_trail, position = -1, True, string.end()
         elif mark == "//":
             newline = text.find("\n", start)
             position = len(text) if newline < 0 else newline
@@ -47,13 +49,18 @@ def strip_jsonc(text: str) -> str:
                 raise ValueError("unterminated comment")
             parts.append(" ")
             position = close + 2
+        elif mark in "[{:":
+            parts.append(mark)
+            comma, can_trail, position = -1, False, start + 1
         elif mark == ",":
             parts.append(",")
-            comma, position = len(parts) - 1, start + 1
+            comma = len(parts) - 1 if can_trail else -1
+            can_trail = False
+            position = start + 1
         else:
             if comma >= 0:
                 parts[comma] = ""
             parts.append(mark)
-            comma, position = -1, start + 1
+            comma, can_trail, position = -1, True, start + 1
     parts.append(text[position:])
     return "".join(parts)

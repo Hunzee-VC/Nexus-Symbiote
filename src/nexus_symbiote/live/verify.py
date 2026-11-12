@@ -20,6 +20,7 @@ from nexus_symbiote.core.hashing import (
     hash_canonical,
     hash_tool_definition,
     normalize_digest,
+    tool_definition_extensions,
 )
 from nexus_symbiote.core.models import MCPServerComponent, ToolComponent
 from nexus_symbiote.graph import validate_graph
@@ -499,7 +500,11 @@ def record_candidate(bom: AIBOM, report: LiveVerifyReport) -> None:
             tool.input_schema = descriptor["inputSchema"]
             tool.annotations = descriptor.get("annotations") or {}
             display_hash = hash_tool_definition(
-                tool.name, tool.description_text or "", tool.input_schema, tool.annotations
+                tool.name,
+                tool.description_text or "",
+                tool.input_schema,
+                tool.annotations,
+                **tool_definition_extensions(descriptor),
             )
             tool.redacted_definition_hash = (
                 display_hash if display_hash != finding.definition_hash else None

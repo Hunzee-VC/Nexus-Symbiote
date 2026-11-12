@@ -208,14 +208,14 @@ compared with the snapshot, never signed:
 `arguments` object. `action` and `resource` are labels the caller claims; the
 gateway admits a call only when the scope resolver derives the same pair from the
 arguments. Arguments are bounded to 1 MiB, 32 levels and 20,000 values, and must
-stay in the I-JSON domain: pass a larger integer, such as a 64-bit ID, as a
-string. The executor receives the arguments as the caller sent them, in their key
-order and number spelling; the request digest covers their RFC 8785 form, so the
-caller chooses an order and spelling that no approver saw. A gateway constructed
-with `canonical_arguments=True` gives the executor the RFC 8785 form itself: keys
-in RFC 8785 order and integral numbers below 10^21 as integers. Use it, or reject
-non-canonical arguments in the scope resolver, when a backend depends on key
-order or number type.
+stay in the I-JSON domain (both integers and integral floats must lie between
+-(2^53 - 1) and 2^53 - 1; pass a larger integer, such as a 64-bit ID, as a
+string). By default (`canonical_arguments=True`), `resolve_scope` and `execute`
+receive the exact RFC 8785 canonical form that the request digest binds: keys
+in RFC 8785 order and integral floats in `[-(2^53 - 1), 2^53 - 1]` converted to
+integers. Constructing the gateway with `canonical_arguments=False` forwards the
+caller's original key order and float-vs-integer Python distinction while still
+enforcing the I-JSON safe-integer bounds.
 
 `ServedTool` is what the description adapter returns: `endpoint_identity`, the
 authenticated identity of the endpoint that served the tool, and `definition`,
@@ -509,7 +509,7 @@ or written safely, and `runtime-contract-error` for any other failure.
 | `authenticate`, `describe`, `resolve_scope`, `execute` | The integrator's adapters, below |
 | `clock` | Returns the current time as an aware `datetime` (default: system UTC time) |
 | `on_decision` | Called with a `Decision` for every admitted or denied call |
-| `canonical_arguments` | Give the executor the RFC 8785 form of the arguments that the approval binds instead of the form the caller sent (default `False`) |
+| `canonical_arguments` | Give `resolve_scope` and `execute` the RFC 8785 canonical form of the arguments that the approval binds instead of the caller's non-canonical form (default `True`) |
 
 An approval quorum counts people, not keys: the signers' `approval_actors` must
 include at least `approval_threshold` distinct names, and the approval's `actor`

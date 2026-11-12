@@ -417,6 +417,8 @@ def test_the_exact_requirements_txt_is_kept_ahead_of_its_case_variants(tmp_path)
     # On a case-sensitive system pip and main read requirements.txt itself, so its
     # declaration is the component; a variant is recorded beside it.
     (tmp_path / "Requirements.txt").write_text("torch>=2\n")
+    if (tmp_path / "requirements.txt").exists():
+        pytest.skip("file system rejects distinct case spellings")
     (tmp_path / "requirements.txt").write_text("torch==2.3.0\n")
     try:
         (tmp_path / "requirement\u017f.txt").write_text("openai==1.30.1\n")

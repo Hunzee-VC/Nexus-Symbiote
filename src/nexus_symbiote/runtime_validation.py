@@ -79,12 +79,14 @@ def check_json_budget(
     maximum: int,
     max_depth: int = MAX_JSON_DEPTH,
     max_nodes: int = MAX_JSON_NODES,
+    strict_integral_floats: bool = False,
 ) -> None:
     """Check size and complexity iteratively before recursive serialization.
 
     Count escaped JSON string sizes as well as values. A cyclic or repeatedly
     aliased container exhausts the same depth/node budget as expanded JSON.
-    Integers must lie in the I-JSON range of +/-(2**53 - 1); floats must be finite.
+    Integers must lie in the I-JSON range of +/-(2**53 - 1); floats must be finite,
+    and when ``strict_integral_floats`` is set, integral floats must also lie in I-JSON.
     """
     pending = [(value, 0)]
     nodes = 0
@@ -133,6 +135,14 @@ def check_json_budget(
                 )
             size += 24
         elif isinstance(item, float) and math.isfinite(item):
+            if (
+                strict_integral_floats
+                and item.is_integer()
+                and not -MAX_SAFE_INTEGER <= item <= MAX_SAFE_INTEGER
+            ):
+                raise ValidationBudgetError(
+                    "integral float outside the I-JSON range", reason="json-number-out-of-range"
+                )
             size += 24
         else:
             raise ValidationBudgetError("value is outside the JSON domain", reason="json-invalid")
