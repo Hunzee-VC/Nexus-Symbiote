@@ -411,19 +411,21 @@ A way around a limit that its entry does not describe is worth a
   `~/Library/Caches/sigstore-python` on macOS. Before trusting it, the CLI checks that every
   directory from the TUF targets directory up to the sigstore-python cache directory is owned
   by the current user and is not group/world-writable or a symlink, and that `trusted_root.json`
-  itself, when present, is owned by the current user, is not a symlink, and is not
+  itself is owned by the current user, is not a symlink, and is not
   group/world-writable where anyone else can reach it (a file sigstore-python wrote under a
   group-writable umask is accepted only inside a private directory); a missing cache is created
-  mode 0700, and any check failure fails verification closed with the offending path named. Pass
+  mode 0700 and seeded mode 0600 with the root embedded in sigstore-python, and any check
+  failure fails verification closed with the offending path named. Pass
   an explicit trust root instead with `--trust-root` on `verify-artifact`/`verify-discovery`, or
   `NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT` for any verification path, verified against a pinned
   SHA-256 when `--trust-root-sha256` or `NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT_SHA256` is supplied.
   A successful verification prints the trust-root path it used. On shared or persistent machines,
   such as self-hosted runners, set `XDG_CACHE_HOME` to an empty directory you own;
   on macOS, setting `HOME` alone is not enough when `XDG_CACHE_HOME` is set.
-  An explicit trust root is read once and verified from those bytes. The cached root is
-  checked and then loaded again by sigstore-python, so a process running as the same user
-  could replace it between the two reads; an explicit, pinned trust root closes that gap.
+  The cached or explicit trust root is opened once without following symlinks, checked on
+  that descriptor, and verification uses exactly the bytes read. The unpinned cache is still
+  trusted because it is private: a process running as your user can write a root there
+  before verification starts, which only an explicit, pinned trust root rules out.
 - **The Action's trust root ages.** The Action gives its scans an empty private
   cache, so it uses the root embedded in its hash-locked `sigstore` package. A
   bundle that relies on a key Sigstore introduced later fails until you update the
