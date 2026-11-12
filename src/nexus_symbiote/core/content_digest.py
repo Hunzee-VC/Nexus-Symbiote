@@ -16,7 +16,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from nexus_symbiote.core.aibom import AIBOM, parse_native_bytes
 from nexus_symbiote.core.hashing import hash_bytes, hash_canonical
 
 INVENTORY_CONTENT_PROFILE = "nexus-symbiote/inventory-content/v1"
@@ -152,6 +151,8 @@ def inventory_digests(raw: bytes) -> InventoryDigests:
     Raises ``NativeFormatError`` when the bytes are not a native inventory this build
     reads.
     """
+    # Imported here: core.aibom imports this module to derive serial numbers.
+    from nexus_symbiote.core.aibom import AIBOM, parse_native_bytes
     from nexus_symbiote.runtime import AuthorizationError, bom_digest
 
     document = parse_native_bytes(raw)

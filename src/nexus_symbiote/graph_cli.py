@@ -12,6 +12,7 @@ from pathlib import Path
 
 import click
 
+from nexus_symbiote.core.aibom import AIBOM, NativeFormatError
 from nexus_symbiote.supply_chain_cli import _refuse_source_overwrite
 from nexus_symbiote.utils.terminal import echo_line, json_text, neutralize, write_cli_output
 
@@ -65,7 +66,6 @@ def register_graph_commands(main: click.Group) -> None:
         or a high or critical finding. Edges are static repository associations; runtime
         use and effective authority are not observed.
         """
-        from nexus_symbiote.cli import _load_bom
         from nexus_symbiote.graph_view import (
             GraphViewError,
             TooManyComponentsError,
@@ -77,7 +77,7 @@ def register_graph_commands(main: click.Group) -> None:
         if output_format == "html" and output is None:
             raise click.UsageError("the HTML view is written to a file: pass -o/--output")
         _refuse_source_overwrite(output, inventory)
-        bom = _load_bom(inventory)
+        bom = _load_inventory(inventory)
         try:
             view = build_view(bom, max_nodes=max_nodes, focus=focus)
         except TooManyComponentsError as exc:
@@ -102,3 +102,13 @@ def register_graph_commands(main: click.Group) -> None:
             f"{len(view.paths)} exposure paths; coverage {view.coverage.status}",
             err=True,
         )
+
+
+def _load_inventory(path: str | Path) -> AIBOM:
+    # The error names the class of problem; it never quotes the document.
+    try:
+        return AIBOM.load(Path(path))
+    except NativeFormatError as exc:
+        raise click.ClickException(
+            f"{neutralize(path)} is not a valid native AIBOM file. {neutralize(exc)}"
+        ) from exc
