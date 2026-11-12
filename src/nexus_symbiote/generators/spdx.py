@@ -119,13 +119,19 @@ def _document_namespace(spdx_id: str) -> str | None:
 
 
 def _without_created(value: Any) -> Any:
-    """Recursively drop SPDX ``CreationInfo.created`` values for comparison.
+    """Recursively drop ``created`` from SPDX ``CreationInfo`` elements only.
 
-    ``created`` is render-time metadata, not inventory content, so it is
-    the one field allowed to differ between an export and its recovery.
+    When the embedded native document has no timestamp, ``CreationInfo.created``
+    is render-time metadata, so it is the one value allowed to differ between an
+    export and its recovery. A ``created`` key on any other element is content.
     """
     if isinstance(value, dict):
-        return {key: _without_created(item) for key, item in value.items() if key != "created"}
+        creation_info = value.get("type") == "CreationInfo"
+        return {
+            key: _without_created(item)
+            for key, item in value.items()
+            if not (creation_info and key == "created")
+        }
     if isinstance(value, list):
         return [_without_created(item) for item in value]
     return value
@@ -438,13 +444,13 @@ class SPDXGenerator(Generator):
             expected = _legacy.spdx_projection(recovered, namespace, native)
         else:
             raise ValueError("unsupported SPDX projection version")
-        # CreationInfo.created is render-time metadata: the native BOM
-        # carries no wall-clock timestamp, so a re-projection at recovery
-        # time legitimately differs only there. The embedded native document
-        # remains the source of truth for the comparison.
-        if unordered_projection(_without_created(_public_view(document))) != unordered_projection(
-            _without_created(_public_view(expected))
-        ):
+        # Without a native timestamp, CreationInfo.created is render-time
+        # metadata and a re-projection at recovery time legitimately differs
+        # only there. With one, the export must carry exactly that timestamp.
+        actual, wanted = _public_view(document), _public_view(expected)
+        if recovered.metadata.timestamp is None:
+            actual, wanted = _without_created(actual), _without_created(wanted)
+        if unordered_projection(actual) != unordered_projection(wanted):
             raise ValueError("SPDX projection conflicts with the embedded native document")
         return recovered
 

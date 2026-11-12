@@ -107,7 +107,7 @@ Colors are used only on a terminal, and `NO_COLOR` turns them off.
 | Exit | Meaning |
 |---|---|
 | `0` | The command completed and every requested gate passed. |
-| `1` | A gate or check failed (risk gate, integrity, digest or signature mismatch, `diff --fail-on-alert`, incomplete collection or observation), the input could not be read or parsed, `import-shadowscan` ran without `--report-only`, or an unexpected internal error occurred. |
+| `1` | A gate or check failed (risk gate, integrity, digest or signature mismatch, `diff --fail-on-alert`, incomplete collection or observation), the input could not be read or parsed, `import-shadowscan` ran without `--report-only`, unverified ShadowScan discovery evidence was imported, validated or scored in CI without `--allow-unsigned-discovery`, or an unexpected internal error occurred. |
 | `2` | Usage error: an unknown command or option, a missing argument or file, a `PROJECT_PATH` of `scan` or `baseline` or a `--project` of `validate`, `risk`, `verify-artifact` or `verify-live` that is a file, a `verify-live` launch policy kept where the [launch policy](#launch-policy) rules forbid, an invalid value (including a malformed `verify-artifact --sha256` and an incomplete `--bundle`, `--signer-identity` and `--issuer` set), a relative project path that a symbolic link leads outside the working directory, an invalid `NEXUS_SYMBIOTE_MODE` or collection limit, a `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` shorter than 32 characters, or a live command run without live mode (`advisories --dry-run` contacts nothing and runs in either mode). |
 
 What exit status 1 means for each gate:
@@ -115,8 +115,8 @@ What exit status 1 means for each gate:
 | Command | Exits 1 when |
 |---|---|
 | `scan` | A collector failed or the scan gate failed, unless `--report-only` or a report-only project policy applies. |
-| `validate` | Completeness, integrity (including integrity that is only unknown), the discovery producer check, the minimum assurance level or the dependency graph failed. |
-| `risk` | The risk gate failed, or `--project` reconciliation failed. |
+| `validate` | Completeness, integrity (including integrity that is only unknown), the discovery producer check, the minimum assurance level or the dependency graph failed, or unverified discovery evidence was gated (see below). |
+| `risk` | The risk gate failed, `--project` reconciliation failed, or unverified discovery evidence was gated (see below). |
 | `diff` | `--fail-on-alert` was given and the diff reports a security alert. |
 | `baseline` | The scan gate failed, under the project policy or the built-in one. |
 | `verify-artifact`, `verify-discovery` | The digest, signature or projection does not match. |
@@ -128,6 +128,12 @@ What exit status 1 means for each gate:
 findings without turning them into exit status 1, as a project policy with
 `failure_mode: report-only` does for `scan`. It is for exploration, not approval:
 `baseline` applies the built-in gate whatever the project policy says.
+
+Unverified ShadowScan discovery evidence is gated separately. `import-shadowscan`
+(including `--report-only`), `validate` and `risk` exit 1 on it when a CI variable is
+set (see [environment variables](#environment-variables)) or `--fail-on-unsigned-discovery`
+is given, unless `--allow-unsigned-discovery` is given. Only a producer check made in
+the same run counts as verification; the outcome recorded in the BOM is not trusted.
 
 ## Environment variables
 
@@ -354,7 +360,7 @@ nexus-symbiote import-shadowscan [OPTIONS] REPORT_PATH
 |---|---|
 | `-o`, `--output` `PATH` | Output AIBOM path (required) |
 | `-f`, `--format` `json\|cyclonedx\|spdx\|sarif` | Output format (default: json). sarif is refused: it cannot carry imported coverage. |
-| `--report-only` | Emit imported claims without a CI gate failure |
+| `--report-only` | Emit imported claims without failing on incomplete coverage. Unverified discovery evidence still fails in CI unless `--allow-unsigned-discovery` is given. |
 | `--bundle` `FILE` | Verify the report producer's Sigstore bundle over the exact report bytes; requires `--signer-identity` and `--issuer`, and records the evidence as verified in the BOM |
 | `--signer-identity` `TEXT` | Expected report signer, with `--bundle` and `--issuer` |
 | `--issuer` `TEXT` | Expected OIDC issuer, with `--bundle` and `--signer-identity` |

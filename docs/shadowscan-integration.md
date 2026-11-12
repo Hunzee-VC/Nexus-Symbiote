@@ -30,7 +30,8 @@ nexus-symbiote validate merged.json --project /path/to/repository --no-project-p
 
 The output path must not exist. An incomplete source produces a partial BOM and
 nonzero exit; a malformed or unsupported report is rejected. With `--report-only`
-the exit status is 0 either way; read `metadata.completeness.source_report_status`
+the exit status is 0 either way, except that unverified discovery evidence fails in CI
+unless `--bundle` verifies the producer or `--allow-unsigned-discovery` accepts it; read `metadata.completeness.source_report_status`
 (`complete`, `incomplete` or `unknown`) in the written BOM to tell them apart. A locally generated
 report digest binds the imported bytes, not the identity of their producer or the
 truth of their contents. Verification of signatures, sources and artifacts is a
@@ -299,6 +300,15 @@ discovery workflow its own signer identity, and bind the commit separately
 where you need that. Unsigned evidence warns loudly on `import-shadowscan`,
 `validate` and `risk`, and fails in CI (or with `--fail-on-unsigned-discovery`)
 unless the operator explicitly passes `--allow-unsigned-discovery`.
+
+The GitHub Action runs in CI, so a checkout with a ShadowScan report fails its
+completeness and risk gates by default: the `gates` output records both as
+`failed`, `risk-score` stays empty and the job log and step summary give the
+reason. With `validate: 'true'` the Action passes its `signature-policy` snapshot
+to both `validate --project` and `risk --project`, so a policy entry that names the report and
+verifies its producer passes the check. To accept unsigned evidence instead, set
+the `allow-unsigned-discovery` input to `'true'`, which passes
+`--allow-unsigned-discovery` to `validate` and `risk` and prints a warning.
 
 To accept only one report, write a
 version 2 entry (`"kind": "sigstore-message-signature"`) with `expected_sha256`

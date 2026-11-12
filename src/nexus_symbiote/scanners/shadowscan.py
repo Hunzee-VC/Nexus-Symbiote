@@ -70,7 +70,9 @@ class ImportedReport:
     # Signature-verification outcome for this report, recorded in the BOM.
     # ``None`` only for reports built without going through the importer.
     discovery_verification: DiscoveryVerification | None = None
-    # Path the report was read from, as supplied; ``None`` for parsed bytes.
+    # Repo-relative POSIX path of the report, or its bare file name when it was
+    # read from outside a project root; ``None`` for parsed bytes. Never an
+    # absolute local path: that would leak the operator's filesystem layout.
     source_path: str | None = None
 
     def with_verification(self, verification: DiscoveryVerification) -> ImportedReport:
@@ -115,6 +117,15 @@ class ImportedReport:
             unobserved_surfaces=["runtime", "effective-identity", "effective-authorization"],
         )
         return aibom
+
+
+def _recorded_report_path(report_path: Path, root: Path | None) -> str:
+    if root is not None:
+        try:
+            return report_path.resolve().relative_to(root.resolve()).as_posix()
+        except (OSError, RuntimeError, ValueError):
+            pass
+    return report_path.name
 
 
 def _short_hash(value: str) -> str:
@@ -409,11 +420,12 @@ class ShadowScanImporter(Scanner):
             result.surfaces_scanned.append("shadowscan-report (no report found)")
         return result
 
-    def import_report(self, report_path: Path) -> ImportedReport:
+    def import_report(self, report_path: Path, root: Path | None = None) -> ImportedReport:
         """Import components together with mandatory coverage and provenance."""
-        return self.read_report(report_path)
+        return self.read_report(report_path, root)
 
-    def read_report(self, report_path: Path) -> ImportedReport:
+    def read_report(self, report_path: Path, root: Path | None = None) -> ImportedReport:
+        """Read a report; its recorded location is relative to ``root`` or a bare name."""
         failures: list[str] = []
         with ConfinedCollection(
             report_path.parent,
@@ -425,7 +437,7 @@ class ShadowScanImporter(Scanner):
         if raw is None or failures:
             raise ValueError("ShadowScan report unavailable or outside safe read limits")
         imported = self._import_bytes(raw)
-        imported.source_path = str(report_path)
+        imported.source_path = _recorded_report_path(report_path, root)
         return imported
 
     def parse_report(self, text: str | bytes) -> ImportedReport:

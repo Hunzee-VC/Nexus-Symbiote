@@ -16,14 +16,18 @@ from typing import TYPE_CHECKING, Any
 from nexus_symbiote.core.hashing import (
     descriptor_binding,
     normalize_digest,
+    open_directory_nofollow,
     open_regular_file,
     pathname_identity,
 )
 
 if TYPE_CHECKING:
+    from sigstore.models import TrustedRoot
+
     from nexus_symbiote.core.models import ClaimEvidence
 
 MAX_BUNDLE_BYTES = 4 * 1024 * 1024
+MAX_TRUST_ROOT_BYTES = 4 * 1024 * 1024
 MAX_SIGNED_ARTIFACT_BYTES = 5 * 1024 * 1024 * 1024
 # A fixed message, so callers can report it instead of a generic signature failure.
 SIGSTORE_MISSING = "sigstore package not installed; install nexus-symbiote[sigstore]"
@@ -190,6 +194,10 @@ def _private_dir_error(path: Path, *, what: str) -> str | None:
         info = os.lstat(path)
     except OSError:
         return f"{what} {path} cannot be inspected"
+    return _private_dir_info_error(info, path, what=what)
+
+
+def _private_dir_info_error(info: os.stat_result, path: Path, *, what: str) -> str | None:
     if stat.S_ISLNK(info.st_mode):
         return f"{what} {path} must not be a symlink"
     if not stat.S_ISDIR(info.st_mode):
@@ -222,14 +230,23 @@ def _private_file_error(path: Path, *, what: str) -> str | None:
         return f"{what} {path} must not be a symlink"
     if not stat.S_ISREG(info.st_mode):
         return f"{what} {path} is not a regular file"
-    if (error := _owner_error(info, path, what=what)) is not None:
-        return error
+    parent_mode: int | None = None
     if info.st_mode & 0o022:
         try:
             parent_mode = os.lstat(path.parent).st_mode
         except OSError:
-            return f"{what} {path} cannot be inspected"
-        if parent_mode & 0o011:
+            if _owner_error(info, path, what=what) is None:
+                return f"{what} {path} cannot be inspected"
+    return _private_file_info_error(info, parent_mode, path, what=what)
+
+
+def _private_file_info_error(
+    info: os.stat_result, parent_mode: int | None, path: Path, *, what: str
+) -> str | None:
+    if (error := _owner_error(info, path, what=what)) is not None:
+        return error
+    if info.st_mode & 0o022:
+        if parent_mode is None or parent_mode & 0o011:
             return (
                 f"{what} {path} is group/world-writable and its directory lets "
                 "others reach it; make the file private, make its directory "
@@ -314,15 +331,29 @@ def _prepare_sigstore_cache() -> tuple[Path | None, str | None]:
 def _resolve_explicit_trust_root(
     trust_root: str | Path | None, expected_sha256: str | None
 ) -> tuple[Path | None, str | None, str | None]:
-    """Resolve an explicit trust root from a flag value or the environment.
+    """Resolve and check an explicit trust root; see ``_read_explicit_trust_root``.
+
+    Returns (path, source, error); source is "flag" or "environment".
+    """
+    path, _content, source, error = _read_explicit_trust_root(trust_root, expected_sha256)
+    return path, source, error
+
+
+def _read_explicit_trust_root(
+    trust_root: str | Path | None, expected_sha256: str | None
+) -> tuple[Path | None, bytes | None, str | None, str | None]:
+    """Resolve an explicit trust root from a flag value or the environment and read it once.
 
     A flag value wins over ``NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT``. The path
     names a ``trusted_root.json`` file, or a directory holding one. With a
     pinned SHA-256 (flag or ``NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT_SHA256``)
-    the file bytes must match it, checked without following symlinks; without
-    one, the file and its parent directory must be user-owned and private.
+    the file bytes must match it; without one, the file and its parent
+    directory must be user-owned and private. The file is opened once without
+    following symlinks, the checks run against that descriptor, and the bytes
+    returned are exactly the bytes checked, so the caller must load the trust
+    root from them and never re-open the path.
 
-    Returns (path, source, error); source is "flag" or "environment".
+    Returns (path, content, source, error); source is "flag" or "environment".
     """
     raw = trust_root
     source = "flag"
@@ -337,13 +368,15 @@ def _resolve_explicit_trust_root(
             return (
                 None,
                 None,
+                None,
                 "A pinned Sigstore trust-root SHA-256 was supplied without a trust root; "
                 f"set {TRUST_ROOT_ENV} or pass --trust-root",
             )
-        return None, None, None
+        return None, None, None, None
     path = Path(raw)
     if path.is_dir():
         path = path / "trusted_root.json"
+    expected: str | None = None
     if digest is not None:
         try:
             _algorithm, expected = normalize_digest(digest, "sha256")
@@ -351,19 +384,82 @@ def _resolve_explicit_trust_root(
             return (
                 None,
                 None,
+                None,
                 "Pinned Sigstore trust-root SHA-256 must be sha256:<64 lowercase hex characters>",
             )
-        check = verify_file_hash(path, f"sha256:{expected}")
-        if not check.verified:
-            return None, None, "Explicit Sigstore trust root does not match the pinned SHA-256"
-        return path, source, None
-    error = _private_file_error(path, what="Explicit Sigstore trust root")
-    if error is not None:
-        return None, None, error
-    parent_error = _private_dir_error(path.parent, what="Explicit Sigstore trust-root directory")
-    if parent_error is not None:
-        return None, None, parent_error
-    return path, source, None
+    content, error = _read_checked_trust_root(path, private=expected is None)
+    if expected is not None:
+        if content is None or not hmac.compare_digest(
+            hashlib.sha256(content).hexdigest(), expected
+        ):
+            return (
+                None,
+                None,
+                None,
+                "Explicit Sigstore trust root does not match the pinned SHA-256",
+            )
+        return path, content, source, None
+    if content is None:
+        return None, None, None, error
+    return path, content, source, None
+
+
+def _read_checked_trust_root(path: Path, *, private: bool) -> tuple[bytes | None, str | None]:
+    """Read a trust-root file once through a no-follow descriptor, bounded.
+
+    With ``private``, the file and its parent directory must be user-owned and
+    private, judged by fstat on the very descriptors the bytes come from.
+    """
+    what = "Explicit Sigstore trust root"
+    dir_what = "Explicit Sigstore trust-root directory"
+    try:
+        dir_fd = open_directory_nofollow(path.parent)
+    except OSError:
+        fallback = _private_dir_error(path.parent, what=dir_what) if private else None
+        return None, fallback or f"{what} {path} cannot be inspected"
+    try:
+        try:
+            linked = os.stat(path.name, dir_fd=dir_fd, follow_symlinks=False)
+        except OSError:
+            return None, f"{what} {path} cannot be inspected"
+        if stat.S_ISLNK(linked.st_mode):
+            return None, f"{what} {path} must not be a symlink"
+        if not stat.S_ISREG(linked.st_mode):
+            return None, f"{what} {path} is not a regular file"
+        flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0)
+        try:
+            fd = os.open(path.name, flags, dir_fd=dir_fd)
+        except OSError:
+            return None, f"{what} {path} cannot be inspected"
+        with os.fdopen(fd, "rb") as stream:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode):
+                return None, f"{what} {path} is not a regular file"
+            if private:
+                dir_info = os.fstat(dir_fd)
+                error = _private_file_info_error(info, dir_info.st_mode, path, what=what)
+                if error is None:
+                    error = _private_dir_info_error(dir_info, path.parent, what=dir_what)
+                if error is not None:
+                    return None, error
+            if info.st_size > MAX_TRUST_ROOT_BYTES:
+                return None, f"{what} {path} exceeds the {MAX_TRUST_ROOT_BYTES}-byte limit"
+            content = stream.read(MAX_TRUST_ROOT_BYTES + 1)
+            if len(content) > MAX_TRUST_ROOT_BYTES:
+                return None, f"{what} {path} exceeds the {MAX_TRUST_ROOT_BYTES}-byte limit"
+            return content, None
+    except OSError:
+        return None, f"{what} {path} cannot be inspected"
+    finally:
+        os.close(dir_fd)
+
+
+def _trusted_root_from_bytes(content: bytes) -> TrustedRoot:
+    """Build a sigstore TrustedRoot from bytes already read, as ``from_file`` does by path."""
+    from sigstore.models import TrustedRoot
+    from sigstore_models.trustroot import v1 as trustroot_v1
+
+    return TrustedRoot(trustroot_v1.TrustedRoot.from_json(content))
 
 
 def verify_file_hash(
@@ -431,7 +527,7 @@ def verify_sigstore_digest(
         return VerificationResult(
             False, error="Expected signer identity and OIDC issuer are both required"
         )
-    override_path, override_source, override_error = _resolve_explicit_trust_root(
+    override_path, override_content, override_source, override_error = _read_explicit_trust_root(
         trust_root, trust_root_sha256
     )
     if override_error is not None:
@@ -450,12 +546,10 @@ def verify_sigstore_digest(
 
         bundle = Bundle.from_json(bundle_json)
         policy = Identity(identity=expected_identity, issuer=expected_issuer)
-        if override_path is not None:
-            from sigstore.models import TrustedRoot
-
+        if override_path is not None and override_content is not None:
             trust_root_path = override_path
             trust_root_source = override_source or "explicit"
-            verifier = Verifier(trusted_root=TrustedRoot.from_file(str(override_path)))
+            verifier = Verifier(trusted_root=_trusted_root_from_bytes(override_content))
         else:
             cached_path, cache_error = _prepare_sigstore_cache()
             if cache_error is not None or cached_path is None:

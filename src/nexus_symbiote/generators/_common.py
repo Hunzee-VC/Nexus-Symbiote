@@ -60,13 +60,19 @@ def content_digest(value: Any) -> str:
     return "sha256:" + hashlib.sha256(json_text(value).encode("utf-8")).hexdigest()
 
 
+_SERIAL_EXCLUDED_CLAIM_FIELDS = frozenset({"timestamp", "source_report_path"})
+
+
 def prepare(bom: AIBOM) -> AIBOM:
     """Fill missing export metadata once; never reset an existing observation timestamp.
 
     The serial number is a uuid5 over the inventory content only: the
     observation timestamps (``metadata.timestamp`` and the completeness
-    claim's ``timestamp``) are excluded from the digest, so re-exporting
-    the same inventory at a different time keeps the same serial. No
+    claim's ``timestamp``) and the location an imported report was read
+    from (``source_report_path``) are excluded from the digest, so
+    re-exporting the same inventory at a different time or from a
+    different checkout keeps the same serial. Two documents that differ
+    only in those fields therefore share a serial by design. No
     wall-clock timestamp is stamped here, so two exports of the same
     inventory are byte-identical; a timestamp set explicitly by a caller
     is preserved. Formats whose schema requires a timestamp (SPDX
@@ -82,7 +88,9 @@ def prepare(bom: AIBOM) -> AIBOM:
         completeness = metadata.get("completeness")
         if isinstance(completeness, dict):
             metadata["completeness"] = {
-                key: value for key, value in completeness.items() if key != "timestamp"
+                key: value
+                for key, value in completeness.items()
+                if key not in _SERIAL_EXCLUDED_CLAIM_FIELDS
             }
         body["metadata"] = metadata
         bom.metadata.serial_number = "urn:uuid:" + str(uuid.uuid5(NAMESPACE, content_digest(body)))

@@ -549,10 +549,11 @@ class DiscoveryVerification(InventoryModel):
     repository/commit/time the report itself carries. The current ShadowScan
     report format carries no repository or commit, so both read ``"unknown"``
     there — never a fabricated value — and ``report_time`` is the report's own
-    ``finished_at`` (else ``started_at``), or ``"unknown"``. Import time is the
-    BOM's ``metadata.timestamp``. A ``verified`` record names the signer
-    identity and issuer whose Sigstore bundle was checked over the exact
-    report bytes; ``unverified`` means no such check ran at import.
+    ``finished_at`` (else ``started_at``), or ``"unknown"``. Import time is not
+    recorded: ``metadata.timestamp`` is set only when a caller supplies one. A
+    ``verified`` record names the signer identity and issuer whose Sigstore
+    bundle was checked over the exact report bytes; ``unverified`` means no such
+    check ran at import.
     """
 
     status: Literal["verified", "unverified", "not-applicable"] = "unverified"
@@ -625,7 +626,10 @@ class CompletenessClaim(InventoryModel):
     source_unmapped_indexes: list[Annotated[StrictInt, Field(ge=0)]] = Field(default_factory=list)
     source_report_path: str | None = Field(
         default=None,
-        description="Path of the imported report as supplied at import, or repo-relative under scan",
+        description=(
+            "POSIX path of the imported report relative to the scan root, or only its file "
+            "name when imported from outside a root; never an absolute local path"
+        ),
     )
     discovery_verification: DiscoveryVerification | None = Field(
         default=None,

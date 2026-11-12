@@ -138,7 +138,7 @@ def test_unsigned_import_records_unverified_with_digest_and_binding(tmp_path, mo
     assert record["repository"] == "unknown"
     assert record["commit"] == "unknown"
     assert record["report_time"] == "2026-11-02T00:09:37+00:00"
-    assert _claim(out)["source_report_path"] == str(REPORT)
+    assert _claim(out)["source_report_path"] == REPORT.name
 
 
 def test_report_binding_uses_fields_the_report_carries(tmp_path):
@@ -310,14 +310,70 @@ def test_signed_import_records_verified_identity_and_issuer(tmp_path, monkeypatc
         "sha256:09ee8e976318815bf9beaac994af0457d8c75574a0122610223bbe0cbc16ad48"
     )
 
-    # A verified record passes the unsigned gate silently, even in CI: the
-    # run below still exits 1, but on the pre-existing incomplete-coverage
-    # gate for import BOMs, not on unsigned evidence.
+    # The recorded outcome is unsigned text in the BOM, so a later run does not
+    # trust it: without a producer check in that run, CI still fails closed.
     monkeypatch.setenv("CI", "true")
     scored = CliRunner().invoke(main, ["risk", str(out), "--threshold", "100", "--json-output"])
     assert scored.exit_code == 1, scored.output
-    assert "UNVERIFIED" not in scored.output
-    assert json.loads(scored.stdout)["assessment_basis"] == "supplied-bom"
+    assert json.loads(scored.stdout)["assessment_basis"] == "unsigned-discovery-evidence"
+    accepted = CliRunner().invoke(
+        main,
+        ["risk", str(out), "--threshold", "100", "--json-output", "--allow-unsigned-discovery"],
+    )
+    assert json.loads(accepted.stdout)["assessment_basis"] == "supplied-bom"
+
+
+@pytest.mark.parametrize("status", ["verified", "not-applicable"])
+@pytest.mark.parametrize("command", ["risk", "validate"])
+def test_a_recorded_outcome_the_bom_declares_about_itself_does_not_pass(
+    tmp_path, monkeypatch, status, command
+):
+    _clear_ci(monkeypatch)
+    out = tmp_path / "bom.json"
+    imported = CliRunner().invoke(
+        main, ["import-shadowscan", str(REPORT), "-o", str(out), "--report-only"]
+    )
+    assert imported.exit_code == 0, imported.output
+    document = json.loads(out.read_text())
+    record = document["metadata"]["completeness"]["discovery_verification"]
+    record.update(status=status, method="sigstore", signer_identity="attacker", issuer="attacker")
+    out.write_text(json.dumps(document))
+    monkeypatch.setenv("CI", "true")
+    result = CliRunner().invoke(main, [command, str(out), "--json-output"])
+    assert result.exit_code == 1, result.output
+    report = json.loads(result.stdout)
+    assert report["passed"] is False
+    reason = report["unsigned_discovery"] if command == "validate" else report["gate_reasons"][0]
+    assert "Unsigned ShadowScan discovery evidence" in reason
+
+
+def test_unsigned_risk_failure_has_the_scored_report_keys(tmp_path, monkeypatch):
+    _clear_ci(monkeypatch)
+    out = tmp_path / "bom.json"
+    CliRunner().invoke(main, ["import-shadowscan", str(REPORT), "-o", str(out), "--report-only"])
+    accepted = CliRunner().invoke(
+        main, ["risk", str(out), "--json-output", "--allow-unsigned-discovery"]
+    )
+    monkeypatch.setenv("CI", "true")
+    refused = CliRunner().invoke(main, ["risk", str(out), "--json-output"])
+    assert refused.exit_code == 1
+    assert set(json.loads(refused.stdout)) == set(json.loads(accepted.stdout))
+
+
+def test_contradictory_unsigned_discovery_flags_are_a_usage_error(tmp_path):
+    out = tmp_path / "bom.json"
+    result = CliRunner().invoke(
+        main,
+        [
+            "import-shadowscan",
+            str(REPORT),
+            "-o",
+            str(out),
+            "--fail-on-unsigned-discovery",
+            "--allow-unsigned-discovery",
+        ],
+    )
+    assert result.exit_code == 2 and not out.exists()
 
 
 def test_signed_import_projection_still_verifies(tmp_path, monkeypatch):

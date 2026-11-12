@@ -16,6 +16,7 @@ import pytest
 from click.testing import CliRunner
 
 from nexus_symbiote.cli import main
+from nexus_symbiote.utils import crypto
 from nexus_symbiote.utils.crypto import (
     TRUST_ROOT_ENV,
     TRUST_ROOT_SHA256_ENV,
@@ -181,7 +182,7 @@ def test_explicit_trust_root_flag_is_honoured(
     private_cache: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     pytest.importorskip("sigstore")
-    from sigstore.models import Bundle, TrustedRoot
+    from sigstore.models import Bundle
     from sigstore.verify import Verifier
 
     root = tmp_path / "trusted_root.json"
@@ -198,7 +199,11 @@ def test_explicit_trust_root_flag_is_honoured(
             calls.append("verified")
 
     monkeypatch.setattr(Bundle, "from_json", classmethod(lambda cls, raw: object()))
-    monkeypatch.setattr(TrustedRoot, "from_file", classmethod(lambda cls, path: sentinel))
+    monkeypatch.setattr(
+        crypto,
+        "_trusted_root_from_bytes",
+        lambda content: sentinel if content == root.read_bytes() else None,
+    )
     monkeypatch.setattr(Verifier, "__init__", FakeVerifier.__init__)
     monkeypatch.setattr(Verifier, "verify_artifact", FakeVerifier.verify_artifact)
     result = verify_sigstore_digest("0" * 64, b"{}", IDENTITY, ISSUER, trust_root=str(root))
@@ -411,7 +416,7 @@ def test_cli_verify_artifact_trust_root_flag(
     private_cache: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     pytest.importorskip("sigstore")
-    from sigstore.models import Bundle, TrustedRoot
+    from sigstore.models import Bundle
     from sigstore.verify import Verifier
 
     project = tmp_path / "project"
@@ -436,7 +441,11 @@ def test_cli_verify_artifact_trust_root_flag(
             calls.append("verified")
 
     monkeypatch.setattr(Bundle, "from_json", classmethod(lambda cls, raw: object()))
-    monkeypatch.setattr(TrustedRoot, "from_file", classmethod(lambda cls, path: sentinel))
+    monkeypatch.setattr(
+        crypto,
+        "_trusted_root_from_bytes",
+        lambda content: sentinel if content == root.read_bytes() else None,
+    )
     monkeypatch.setattr(Verifier, "__init__", FakeVerifier.__init__)
     monkeypatch.setattr(Verifier, "verify_artifact", FakeVerifier.verify_artifact)
     result = CliRunner().invoke(
@@ -463,3 +472,29 @@ def test_cli_verify_artifact_trust_root_flag(
     assert result.exit_code == 0, result.output
     assert f"Trust root: {root}" in result.output
     assert calls == [sentinel, "verified"]
+
+
+def test_explicit_trust_root_symlinked_directory_is_rejected(tmp_path: Path) -> None:
+    real = tmp_path / "real"
+    real.mkdir()
+    real.chmod(0o700)
+    (real / "trusted_root.json").write_bytes(b"operator trust root")
+    (real / "trusted_root.json").chmod(0o600)
+    link = tmp_path / "linked"
+    link.symlink_to(real, target_is_directory=True)
+    path, _source, error = _resolve_explicit_trust_root(str(link / "trusted_root.json"), None)
+    assert path is None
+    assert error is not None
+    assert "symlink" in error
+
+
+def test_explicit_trust_root_pinned_symlink_is_rejected(tmp_path: Path) -> None:
+    content = b"operator trust root"
+    real = tmp_path / "real.json"
+    real.write_bytes(content)
+    link = tmp_path / "trusted_root.json"
+    link.symlink_to(real)
+    digest = hashlib.sha256(content).hexdigest()
+    path, _source, error = _resolve_explicit_trust_root(str(link), f"sha256:{digest}")
+    assert path is None
+    assert error == "Explicit Sigstore trust root does not match the pinned SHA-256"

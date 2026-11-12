@@ -280,6 +280,13 @@ def _running_in_ci() -> bool:
     )
 
 
+def _unsigned_discovery_flags(fail_on_unsigned_discovery: bool, allow: bool) -> None:
+    if fail_on_unsigned_discovery and allow:
+        raise click.UsageError(
+            "--fail-on-unsigned-discovery and --allow-unsigned-discovery contradict each other"
+        )
+
+
 def _unsigned_discovery_failure_reason(
     bom: AIBOM,
     *,
@@ -289,33 +296,34 @@ def _unsigned_discovery_failure_reason(
 ) -> str | None:
     """Warn loudly about unverified ShadowScan evidence; return a failure reason when it must not pass.
 
-    The BOM's ``discovery_verification`` record is the import-time outcome:
-    ``verified`` (with signer identity and issuer) passes silently, and
-    ``not-applicable`` passes because the BOM carries no discovery evidence.
-    ``unverified`` — or a BOM that carries discovery evidence but predates the
-    record — always warns. It fails the run when the operator asked for it with
-    ``--fail-on-unsigned-discovery``, or when the run looks like CI and the
-    operator did not explicitly accept unsigned evidence with
-    ``--allow-unsigned-discovery``. Interactive runs warn only. A producer
-    check that just passed at validate/risk time (``already_verified``) counts
-    as verification for this run.
+    Only a producer check made in this run counts as verification
+    (``already_verified``: ``import-shadowscan --bundle``, or
+    ``--project --signature-policy`` at validate and risk time). The BOM's own
+    ``discovery_verification`` record is unsigned text that anyone who can
+    write the BOM can set, so a recorded ``verified`` or ``not-applicable``
+    is reported, never trusted. A BOM that carries no discovery evidence
+    passes. Otherwise the run warns, and fails when the operator asked for it
+    with ``--fail-on-unsigned-discovery``, or when the run looks like CI and
+    the operator did not explicitly accept unsigned evidence with
+    ``--allow-unsigned-discovery``. Interactive runs warn only.
     """
     from nexus_symbiote.validators.completeness import _carries_discovery
 
-    if already_verified:
+    if already_verified or not _carries_discovery(bom):
         return None
     claim = bom.metadata.completeness
     record = claim.discovery_verification if claim is not None else None
     if record is not None:
-        if record.status in {"verified", "not-applicable"}:
-            return None
         detail = (
             f"report {record.report_digest}, report time {record.report_time}, "
             f"repository {record.repository}, commit {record.commit}"
         )
+        if record.status != "unverified":
+            detail += (
+                f"; the BOM records {record.status!s} at import, but that record is unsigned "
+                "and is not checked again here"
+            )
     else:
-        if not _carries_discovery(bom):
-            return None
         detail = "no verification outcome was recorded at import (BOM predates the record)"
     echo_line(
         "WARNING: ShadowScan discovery evidence is UNVERIFIED. ",
@@ -877,7 +885,14 @@ def scan(
     default="json",
     help="Output format (default: json). sarif is refused: it cannot carry imported coverage.",
 )
-@click.option("--report-only", is_flag=True, help="Emit imported claims without a CI gate failure")
+@click.option(
+    "--report-only",
+    is_flag=True,
+    help=(
+        "Emit imported claims without failing on incomplete coverage. Unverified discovery "
+        "evidence still fails in CI unless --allow-unsigned-discovery is given."
+    ),
+)
 @click.option(
     "--bundle",
     type=click.Path(exists=True, dir_okay=False),
@@ -919,6 +934,8 @@ def import_shadowscan(
     from nexus_symbiote.scanners.base import read_regular_text
     from nexus_symbiote.scanners.shadowscan import ShadowScanImporter, verify_discovery_report
     from nexus_symbiote.utils.crypto import SIGSTORE_MISSING
+
+    _unsigned_discovery_flags(fail_on_unsigned_discovery, allow_unsigned_discovery)
 
     if any(x is not None for x in (bundle, signer_identity, issuer)) and not all(
         (bundle, signer_identity, issuer)
@@ -987,6 +1004,7 @@ def import_shadowscan(
         aibom,
         fail_on_unsigned_discovery=fail_on_unsigned_discovery,
         allow_unsigned_discovery=allow_unsigned_discovery,
+        already_verified=bool(bundle),
     )
     if report_only:
         if unsigned_reason is not None:
@@ -1171,10 +1189,15 @@ def verify_discovery(
             if not isinstance(doc["metadata"].pop("serial_number", None), str):
                 raise ValueError("missing generated metadata")
             doc["metadata"].pop("timestamp", None)
+            stored = doc.get("metadata", {}).get("completeness")
+            recorded = isinstance(stored, dict) and "discovery_verification" in stored
             for document in (projected, doc):
                 completeness = document.get("metadata", {}).get("completeness")
                 if isinstance(completeness, dict):
                     completeness.pop("source_report_path", None)
+                    if not recorded:
+                        # A BOM imported before the record existed has none to compare.
+                        completeness.pop("discovery_verification", None)
                     if bundle:
                         # A bundle check re-verifies the producer now, so the
                         # import-time outcome is not part of the projection
@@ -1288,6 +1311,7 @@ def validate(
     and its self-consistency. With --project the inventory is compared with a fresh
     local collection of that project, unless the policy skips the completeness check.
     """
+    _unsigned_discovery_flags(fail_on_unsigned_discovery, allow_unsigned_discovery)
     bom = _load_bom(aibom_path)
 
     from nexus_symbiote.validators.completeness import (
@@ -1382,6 +1406,7 @@ def validate(
         "completeness": completeness,
         "integrity": integrity,
         "discovery_producer": discovery,
+        "unsigned_discovery": unsigned_reason,
         "minimum_assurance_level": minimum,
         "assurance_errors": assurance_errors,
         "graph_issues": graph_issues,
@@ -1467,6 +1492,7 @@ def risk(
     require_discovery_signature: bool = False,
 ) -> None:
     """Score supply-chain risks in an AIBOM."""
+    _unsigned_discovery_flags(fail_on_unsigned_discovery, allow_unsigned_discovery)
     bom = _load_bom(aibom_path)
 
     from nexus_symbiote.validators.completeness import carries_discovery_evidence
@@ -1565,23 +1591,25 @@ def risk(
         already_verified=producer_verified,
     )
     if unsigned_reason is not None:
+        # The same keys as a scored report, so consumers need not special-case it.
+        unsigned = {
+            **RiskReport().to_dict(),
+            "passed": False,
+            "assessment_basis": "unsigned-discovery-evidence",
+            "overall_score": None,
+            "risk_level": "unknown",
+            "coverage_status": "unreconciled",
+            "gate_reasons": [unsigned_reason],
+            "total_components": len(bom.components),
+            "supplier_claims": supplier_claims,
+            "supplier_claims_omitted": supplier_claims_omitted,
+            "discovery_producer": producer,
+            **context,
+        }
         if json_output:
-            click.echo(
-                json.dumps(
-                    {
-                        "assessment_basis": "unsigned-discovery-evidence",
-                        "overall_score": None,
-                        "risk_level": "unknown",
-                        "coverage_status": "unreconciled",
-                        "gate_reasons": [unsigned_reason],
-                        "policy_source": policy_source,
-                        "policy_weakened": policy_weakened,
-                    },
-                    indent=2,
-                )
-            )
+            click.echo(json_text(json.dumps(unsigned, indent=2)))
         else:
-            click.echo(f"Risk unknown. {unsigned_reason}", err=True)
+            print_lines(risk_report_lines(unsigned))
         raise click.exceptions.Exit(1)
     scorer = RiskScorer.from_policy(
         policy.risk,

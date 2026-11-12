@@ -418,6 +418,9 @@ A way around a limit that its entry does not describe is worth a
   A successful verification prints the trust-root path it used. On shared or persistent machines,
   such as self-hosted runners, set `XDG_CACHE_HOME` to an empty directory you own;
   on macOS, setting `HOME` alone is not enough when `XDG_CACHE_HOME` is set.
+  An explicit trust root is read once and verified from those bytes. The cached root is
+  checked and then loaded again by sigstore-python, so a process running as the same user
+  could replace it between the two reads; an explicit, pinned trust root closes that gap.
 - **The Action's trust root ages.** The Action gives its scans an empty private
   cache, so it uses the root embedded in its hash-locked `sigstore` package. A
   bundle that relies on a key Sigstore introduced later fails until you update the
@@ -445,6 +448,11 @@ A way around a limit that its entry does not describe is worth a
   PyPI or npm URL with a qualifier other than a `repository_url` that names the
   component's own registry. Regenerate them from the native inventory; see
   [standard projection versions](fingerprint-migration.md#standard-projection-versions).
+- **A caller-set timestamp does not change the serial.** The content-derived serial
+  number excludes `metadata.timestamp`, the completeness claim's `timestamp` and its
+  `source_report_path`, so two documents that differ only in those fields share a
+  serial. This is deliberate: the serial names the inventory, not the moment or the
+  checkout it was observed from. Compare timestamps directly when they matter.
 - **Malformed input stops some exports.** A JSON-escaped lone surrogate, such as
   `\ud800`, in a field that a record carries, such as an A2A skill name or version or
   a `package.json` dependency version, makes CycloneDX, SPDX and SARIF export exit 1

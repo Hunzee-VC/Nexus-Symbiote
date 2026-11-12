@@ -1094,51 +1094,18 @@ class AIBOMDiffer:
                 f"{_listing((before_limits - after_limits).elements())}.",
             )
 
-        before_verification = (
-            old.discovery_verification.model_dump(mode="json")
-            if old.discovery_verification is not None
-            else None
-        )
-        after_verification = (
-            new.discovery_verification.model_dump(mode="json")
-            if new.discovery_verification is not None
-            else None
-        )
-        for verification in (before_verification, after_verification):
-            if isinstance(verification, dict):
-                # The exact report digest and the report's own run time change
-                # on every rerun; the content digest above is the drift signal,
-                # and the digest stays authenticated by verify-discovery. The
-                # verification status itself still compares: unverified becoming
-                # verified is a change in what the evidence establishes.
-                verification.pop("report_digest", None)
-                verification.pop("report_time", None)
-        if before_verification != after_verification:
-            if (
-                isinstance(before_verification, dict)
-                and isinstance(after_verification, dict)
-                and before_verification.get("status") == "unverified"
-                and after_verification.get("status") == "verified"
-            ):
-                improvement(
-                    "discovery_verification",
-                    "ShadowScan discovery evidence is now signature-verified.",
-                )
-            elif (
-                isinstance(before_verification, dict)
-                and isinstance(after_verification, dict)
-                and before_verification.get("status") == "verified"
-                and after_verification.get("status") == "unverified"
-            ):
-                regression(
-                    "discovery_verification",
-                    "ShadowScan discovery evidence is no longer signature-verified.",
-                )
-            else:
-                regression(
-                    "discovery_verification",
-                    "ShadowScan discovery verification record changed.",
-                )
+        AIBOMDiffer._diff_discovery_verification(old, new, regression, improvement)
+
+        if None not in (old.source_report_path, new.source_report_path) and (
+            old.source_report_path != new.source_report_path
+        ):
+            # The location is where the import read the report, not its content, which the
+            # report digests bind; a moved report is information, not drift.
+            improvement(
+                "source_report_path",
+                f"ShadowScan report location changed from {old.source_report_path} to "
+                f"{new.source_report_path}.",
+            )
         return {
             "source_report_digest",
             "source_report_content_digest",
@@ -1149,7 +1116,46 @@ class AIBOMDiffer:
             "source_unmapped_indexes",
             "source_projection_limitations",
             "discovery_verification",
+            "source_report_path",
         }
+
+    @staticmethod
+    def _diff_discovery_verification(
+        old: CompletenessClaim,
+        new: CompletenessClaim,
+        regression: Callable[[str, str], None],
+        improvement: Callable[[str, str], None],
+    ) -> None:
+        """Alert when signature verification is gained, lost or re-attributed.
+
+        A baseline written before the record existed carries none: that reads as
+        not-applicable, not as a change. Report digests and run times change on
+        every rerun and the content digest is already compared above, so only the
+        status and, for verified evidence, the signer binding are compared here.
+        """
+        before, after = old.discovery_verification, new.discovery_verification
+        before_status = before.status if before is not None else "not-applicable"
+        after_status = after.status if after is not None else "not-applicable"
+        if before_status == "verified" and after_status != "verified":
+            regression(
+                "discovery_verification",
+                "ShadowScan discovery evidence is no longer signature-verified.",
+            )
+        elif before_status != "verified" and after_status == "verified":
+            improvement(
+                "discovery_verification",
+                "ShadowScan discovery evidence is now signature-verified.",
+            )
+        elif (
+            before is not None
+            and after is not None
+            and before_status == "verified"
+            and (before.signer_identity, before.issuer) != (after.signer_identity, after.issuer)
+        ):
+            regression(
+                "discovery_verification",
+                "ShadowScan discovery evidence is now signed by a different identity or issuer.",
+            )
 
     @staticmethod
     def _note_shared_gaps(
