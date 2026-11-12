@@ -18,7 +18,6 @@ makes the launcher unknown, because an unrecognised wrapper (``nice``, ``sudo``,
 from __future__ import annotations
 
 import fnmatch
-import functools
 import re
 import shlex
 from collections.abc import Callable, Iterator
@@ -177,6 +176,8 @@ class Launch:
     injected_environment: bool = False
     # A shell in the launch runs interactively (-i), so it also reads $ENV.
     interactive: bool = False
+    # A shell in the launch traces its commands (-x), expanding $PS4 before each one.
+    xtrace: bool = False
 
     def mark(self, flag: str, count: int = 1) -> None:
         self.context[flag] = self.context.get(flag, 0) + count
@@ -844,6 +845,13 @@ def _spend(budget: list[int] | None, word: str = "") -> None:
     _charge(budget, 1 + len(word) // 64)
 
 
+def _draw(budget: list[int], allowance: list[int], units: int) -> None:
+    """Charge ``units`` to a word's own allowance first, then to the shared budget."""
+    taken = min(allowance[0], units)
+    allowance[0] -= taken
+    _charge(budget, units - taken)
+
+
 def _interpreter_family(name: str) -> str | None:
     if name in {"node", "nodejs"} or name in _NODE_RUNNERS:
         return "node"
@@ -891,6 +899,7 @@ def _shell_script(
     index = start
     inline = False
     interactive = False
+    xtrace = False
     while index < len(words):
         word = words[index]
         _spend(budget, word)
@@ -913,6 +922,7 @@ def _shell_script(
         letters = word[1:]
         inline = inline or "c" in letters
         interactive = interactive or (word[0] == "-" and "i" in letters)
+        xtrace = xtrace or (word[0] == "-" and "x" in letters)
         valued = "oO" if name == "bash" else "o"
         takes = sum(letters.count(letter) for letter in valued)
         if takes:
@@ -920,6 +930,11 @@ def _shell_script(
             # attached to -o instead, so only a final o reads the same everywhere.
             if takes > 1 or letters[-1] not in valued:
                 return None, [], _AMBIGUOUS_SHELL
+            if word[0] == "-" and letters[-1] == "o" and index < len(words):
+                # dash, ksh and mksh take -o interactive; any shell -o xtrace.
+                setting = words[index].lower()
+                interactive = interactive or _names_option(setting, "interactive")
+                xtrace = xtrace or _names_option(setting, "xtrace")
             index += 1
         if ("O" in letters and name != "bash") or (
             name in {"ksh", "mksh"} and ("R" in letters or "T" in letters)
@@ -927,13 +942,19 @@ def _shell_script(
             return None, [], _AMBIGUOUS_SHELL
         if name == "zsh" and "b" in letters:
             break
-    if interactive and launch is not None:
-        launch.interactive = True
+    if launch is not None:
+        launch.interactive = launch.interactive or interactive
+        launch.xtrace = launch.xtrace or xtrace
     if not inline:
         return None, [], None
     if index >= len(words):
         return None, [], "shell -c without a script"
     return words[index], words[index + 1 :], None
+
+
+def _names_option(setting: str, option: str) -> bool:
+    """Whether an -o value names ``option``, allowing the abbreviations ksh accepts."""
+    return len(setting) >= 3 and option.startswith(setting)
 
 
 def _fish_script(
@@ -1169,12 +1190,7 @@ def _embedded_reason(words: list[str], stop: int | None = None) -> str | None:
     if total > MAX_SCAN_WORDS * 16:
         return "arguments exceed the launcher scan limit"
     characters = sum(len(word) for word in words)
-    # Each item of a brace list is searched and expanded in each reading of its word, so
-    # the commas of a word with braces add to the budget, up to the items a word can hold.
-    items = sum(
-        min(word.count(","), MAX_READINGS + 1) for word in words if "{" in word and "}" in word
-    )
-    budget = [4 * total + characters // 16 + 256 + 4 * items]
+    budget = [4 * total + characters // 16 + 256]
     try:
         return _scan_words(words, len(words) if stop is None else stop, budget)
     except _ScanLimitError:
@@ -1230,7 +1246,7 @@ def _command_line_readings(text: str) -> list[list[str]]:
 
 def _starts_code(word: str, words: list[str], start: int, budget: list[int]) -> str | None:
     """What ``word`` followed by ``words[start:]`` starts, if it names a program that may."""
-    for name in _program_names(word):
+    for name in _program_names(word, budget):
         if name in {"node", "ts-node", "python"} or name in _INLINE_FLAGS:
             found = _interpreter_reason(name, words, budget=budget, start=start)
             if found is not None:
@@ -1240,7 +1256,7 @@ def _starts_code(word: str, words: list[str], start: int, budget: list[int]) -> 
     return None
 
 
-def _program_names(word: str) -> list[str]:
+def _program_names(word: str, budget: list[int] | None = None) -> list[str]:
     """Programs a word names exactly, or that a pattern or open expansion in it may name."""
     exact = _program_name(word)
     if exact is not None or not any(char in word for char in "*?\x00"):
@@ -1252,13 +1268,31 @@ def _program_names(word: str) -> list[str]:
     if not any(char.isalnum() for char in base):
         # A bare pattern such as * or ** names files, not a program the pattern spells.
         return []
-    if _pattern_width(base, _LONGEST_PROGRAM) > _LONGEST_PROGRAM:
+    base = _STARS.sub("*", base)
+    width = _pattern_width(base, _LONGEST_PROGRAM)
+    if width > _LONGEST_PROGRAM:
         # Every character but * matches one, so no program name is long enough; compiling
         # a pattern from the whole word cost seconds and gigabytes for a few megabytes.
         return []
-    pattern = _pattern(base)
+    _charge(budget, 1)
+    # The literal text before the first and after the last wildcard bounds the names a
+    # pattern can match, so most patterns are settled without compiling one.
+    first = _WILDCARD.search(base)
+    head = base if first is None else base[: first.start()]
+    tail = base[max(base.rfind(char) for char in "*?[]") + 1 :]
+    starred = "*" in base
+    candidates = [
+        name
+        for name in _VOCABULARY
+        if (len(name) >= width if starred else len(name) == width)
+        and name.startswith(head)
+        and name.endswith(tail)
+    ]
+    if not candidates:
+        return []
+    pattern = _pattern(base, budget)
     found: list[str] = []
-    for name in _VOCABULARY:
+    for name in candidates:
         if pattern.fullmatch(name):
             program = _program_name(name)
             if program is not None and program not in found:
@@ -1266,9 +1300,24 @@ def _program_names(word: str) -> list[str]:
     return found
 
 
-@functools.lru_cache(maxsize=1024)
-def _pattern(text: str) -> re.Pattern[str]:
-    return re.compile(fnmatch.translate(text))
+_STARS = re.compile(r"\*+")
+_WILDCARD = re.compile(r"[*?\[\]]")
+_PATTERNS: dict[str, re.Pattern[str]] = {}
+_PATTERN_CACHE = 1024
+
+
+def _pattern(text: str, budget: list[int] | None) -> re.Pattern[str]:
+    """The compiled pattern, charged when it is compiled; short patterns are kept."""
+    found = _PATTERNS.get(text)
+    if found is None:
+        # Compiling costs about what reading 2 KB of words does.
+        _charge(budget, 32 + len(text) // 16)
+        found = re.compile(fnmatch.translate(text))
+        if len(text) <= 2 * _LONGEST_PROGRAM + 2:
+            if len(_PATTERNS) >= _PATTERN_CACHE:
+                _PATTERNS.clear()
+            _PATTERNS[text] = found
+    return found
 
 
 _NOT_STAR = re.compile(r"[^*]")
@@ -1333,14 +1382,19 @@ def _rewritten(word: str, budget: list[int]) -> list[list[str]] | None:
     ):
         if variant not in readings:
             readings.append(variant)
+    # A brace list's items are searched and expanded in each reading, so the commas inside
+    # a word's braces pay for that word's own reading, and for no other word's.
+    first_open, last_close = word.find("{"), word.rfind("}")
+    commas = word.count(",", first_open, last_close) if 0 <= first_open < last_close else 0
+    allowance = [4 * min(commas, MAX_READINGS + 1)]
     expanded: dict[str, None] = {}
     for reading in readings:
-        _spend(budget, reading)
-        if not _variables(reading, budget, expanded):
+        _draw(budget, allowance, 1 + len(reading) // 64)
+        if not _variables(reading, budget, expanded, allowance):
             return None
     sequences: dict[tuple[str, ...], None] = {}
     for reading in expanded:
-        words = _braces(_brackets(reading), budget)
+        words = _braces(_brackets(reading), budget, allowance)
         if words is None:
             return None
         sequences[tuple(words)] = None
@@ -1360,7 +1414,7 @@ def _brackets(text: str) -> str:
     return _BRACKET.sub("?", text[:end]) + text[end:]
 
 
-def _variables(text: str, budget: list[int], kept: dict[str, None]) -> bool:
+def _variables(text: str, budget: list[int], kept: dict[str, None], allowance: list[int]) -> bool:
     """Keep each reading of ``text`` with its expansions empty, anything (NUL) or default.
 
     Each new reading is charged for its characters as it is kept, and readings are made
@@ -1381,7 +1435,7 @@ def _variables(text: str, budget: list[int], kept: dict[str, None]) -> bool:
             return False
         for reading in _readings(*parsed, MAX_READINGS + 1):
             if reading not in kept:
-                _spend(budget, reading)
+                _draw(budget, allowance, 1 + len(reading) // 64)
                 kept[reading] = None
                 if len(kept) > MAX_READINGS:
                     return False
@@ -1480,7 +1534,7 @@ def _expansion_end(text: str, start: int) -> int:
     return -1
 
 
-def _braces(text: str, budget: list[int]) -> list[str] | None:
+def _braces(text: str, budget: list[int], allowance: list[int]) -> list[str] | None:
     """The words bash brace expansion makes of ``text``; None past MAX_READINGS.
 
     A round searches only the words the previous round made. Each search is charged
@@ -1497,7 +1551,7 @@ def _braces(text: str, budget: list[int]) -> list[str] | None:
                 changed.append((word, True))
                 continue
             try:
-                group = _brace_group(word, budget)
+                group = _brace_group(word, budget, allowance)
             except _UnreadableExpansionError:
                 return None
             if group is None:
@@ -1508,7 +1562,7 @@ def _braces(text: str, budget: list[int]) -> list[str] | None:
             if len(changed) + len(items) > MAX_READINGS:
                 return None
             outside = len(word) - (end + 1 - start)
-            _charge(budget, (len(items) * outside + sum(map(len, items))) // 64)
+            _draw(budget, allowance, (len(items) * outside + sum(map(len, items))) // 64)
             prefix, suffix = word[:start], word[end + 1 :]
             changed.extend((prefix + item + suffix, False) for item in items)
         words = changed
@@ -1517,7 +1571,9 @@ def _braces(text: str, budget: list[int]) -> list[str] | None:
     return None
 
 
-def _brace_group(word: str, budget: list[int]) -> tuple[int, int, list[str]] | None:
+def _brace_group(
+    word: str, budget: list[int], allowance: list[int]
+) -> tuple[int, int, list[str]] | None:
     """The first {a,b} or {x..y} group of a word, with its items, in one pass.
 
     Each { is paired with the } that closes it; a pair is a group when a comma sits
@@ -1556,7 +1612,7 @@ def _brace_group(word: str, budget: list[int]) -> tuple[int, int, list[str]] | N
                 and _brace_items(word[start + 1 : index]) is not None
             ):
                 first = (start, index)
-    _charge(budget, 1 + read // 64)
+    _draw(budget, allowance, 1 + read // 64)
     if first is None:
         return None
     start, end = first

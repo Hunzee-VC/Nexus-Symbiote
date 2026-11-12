@@ -487,15 +487,21 @@ _REPLACED = "environment replaces or constrains the launched package"
 # __BASH_FUNC<name>() in Apple's bash) as a function that replaces the program <name> in
 # every bash the launch starts, the package runner included. bash from before 2014 did
 # so for any variable whose value starts with "() {".
-_EXPORTED_FUNCTION = "BASH_FUNC"
+_EXPORTED_FUNCTION = re.compile(r"(?:__)?BASH_FUNC[_<]", re.IGNORECASE)
 _FUNCTION_REPLACED = "environment defines a shell function that can replace the launched program"
 # A non-interactive bash sources BASH_ENV before its script, and an interactive POSIX
 # shell sources ENV; a file that may lie in the project can replace the runner.
 _STARTUP_ENVIRONMENT = "BASH_ENV"
 _INTERACTIVE_STARTUP_ENVIRONMENT = "ENV"
 _STARTUP_IN_PROJECT = "environment names a shell startup file that may lie in the project"
-# /proc/self/cwd and its kin resolve to the working directory: the project.
-_PROC = re.compile(r"/+proc(?:/|$)")
+# A shell tracing its commands expands PS4 before each one; an arithmetic or command
+# expansion there can set PATH or run project code before the runner starts.
+_TRACE_PROMPT = "environment sets a trace prompt the shell expands before the runner starts"
+_TRACE_EXPANSION = re.compile(r"[$`]")
+# /proc/self/cwd and its kin resolve to the working directory, the project; /dev/fd is a
+# link into /proc, and a .. after any link can lead there too.
+_PROC = re.compile(r"/+(?:proc|dev/+fd)(?:/|$)")
+_PARENT = re.compile(r"(?:^|/)\.\.(?:/|$)")
 _WINDOWS_ROOT = re.compile(r"[A-Za-z]:[\\/]|[\\/]")
 _LOCATOR = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s,;\"']+")
 _NPM_PURL_NAME = re.compile(r"(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*")
@@ -748,12 +754,16 @@ def _absolute(value: str, *, windows: bool = False) -> bool:
         return False
     if windows:
         return bool(_WINDOWS_ROOT.match(value))
-    return value.startswith("/") and _PROC.match(posixpath.normpath(value)) is None
+    return (
+        value.startswith("/")
+        and _PARENT.search(value) is None
+        and _PROC.match(posixpath.normpath(value)) is None
+    )
 
 
 def _exported_function(variable: str, value: object) -> bool:
     """Whether bash imports the variable as a function that replaces a program."""
-    return _EXPORTED_FUNCTION in variable.upper() or (
+    return _EXPORTED_FUNCTION.match(variable) is not None or (
         isinstance(value, str) and value.startswith("() {")
     )
 
@@ -771,7 +781,11 @@ def _absolute_list(value: str) -> bool:
 
 
 def _runner_environment(
-    family: str, environment: list[tuple[str, str]], *, interactive: bool = False
+    family: str,
+    environment: list[tuple[str, str]],
+    *,
+    interactive: bool = False,
+    xtrace: bool = False,
 ) -> tuple[list[tuple[str, str]], list[str]]:
     """Package sources a runner's environment adds, and why it leaves the identity unknown.
 
@@ -784,6 +798,11 @@ def _runner_environment(
     sources: list[tuple[str, str]] = []
     reasons: list[str] = []
     explicit = _REDIRECT_ENVIRONMENT.get(family)
+    # bash also turns tracing on from SHELLOPTS in the environment.
+    traced = xtrace or any(
+        variable.upper() == "SHELLOPTS" and isinstance(value, str) and "xtrace" in value.lower()
+        for variable, value in environment
+    )
     for variable, value in environment if family else ():
         name = variable.upper()
         windows = name in _WINDOWS_LOCATION_ENVIRONMENT
@@ -794,6 +813,9 @@ def _runner_environment(
         ):
             if not _absolute(value):
                 reasons.append(_STARTUP_IN_PROJECT)
+        elif name == "PS4":
+            if traced and isinstance(value, str) and _TRACE_EXPANSION.search(value):
+                reasons.append(_TRACE_PROMPT)
         elif name == "PATH":
             if not _absolute_list(value):
                 sources.append((_environment_label(variable), value))
@@ -1394,7 +1416,10 @@ class MCPScanner(Scanner):
         )
         environment = [*env.items(), *launch.environment]
         runner_sources, runner_reasons = _runner_environment(
-            launch.family or "", environment, interactive=launch.interactive
+            launch.family or "",
+            environment,
+            interactive=launch.interactive,
+            xtrace=launch.xtrace,
         )
         environment_file = "envFile" in config or launch.injected_environment
         view = self._resolver_view(launch, relocated, environment, environment_file)

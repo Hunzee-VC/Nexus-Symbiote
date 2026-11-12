@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from nexus_symbiote.core.models import MCPServerComponent
+from nexus_symbiote.scanners import mcp_launch
 from nexus_symbiote.scanners.mcp import MCPScanner
 from nexus_symbiote.scanners.mcp_launch import analyze
 
@@ -84,9 +85,35 @@ def test_a_function_definition_in_any_variable_is_unknown(tmp_path):
 
 
 def test_trace_options_and_prompts_count_as_code_loading_environment(tmp_path):
-    env = {"SHELLOPTS": "xtrace", "PS4": "$(./evil.sh)", "BASHOPTS": "extdebug"}
-    record, _ = scan(tmp_path, {"command": "bash", "args": ["-c", PINNED], "env": env})
+    env = {"SHELLOPTS": "errexit", "PS4": "$(./evil.sh)", "BASHOPTS": "extdebug"}
+    record, gaps = scan(tmp_path, {"command": "bash", "args": ["-c", PINNED], "env": env})
+    # Without tracing the prompt is never expanded: the pin stays, with a finding.
+    assert not gaps and record.package_url == "pkg:npm/pkg@1.2.3"
     assert record.properties["launch_context"]["code_loading_environment"] == 3
+
+
+@pytest.mark.parametrize(
+    "command,args,env",
+    [
+        ("sh", ["-xc", PINNED], {"PS4": "$((PATH=5))"}),
+        ("sh", ["-o", "xtrace", "-c", PINNED], {"PS4": "$(./evil.sh)"}),
+        ("bash", ["-c", PINNED], {"SHELLOPTS": "braceexpand:xtrace", "PS4": "`./evil.sh`"}),
+    ],
+)
+def test_a_trace_prompt_with_tracing_on_is_unknown(tmp_path, command, args, env):
+    assert_unknown(tmp_path, {"command": command, "args": args, "env": env}, "trace prompt")
+
+
+def test_a_trace_prompt_without_an_expansion_keeps_the_pin(tmp_path):
+    server = {"command": "sh", "args": ["-xc", PINNED], "env": {"PS4": "+ "}}
+    record, gaps = scan(tmp_path, server)
+    assert not gaps and record.package_url == "pkg:npm/pkg@1.2.3"
+
+
+def test_a_name_that_only_mentions_bash_func_keeps_the_pin(tmp_path):
+    server = {"command": "npx", "args": ["-y", "pkg@1.2.3"], "env": {"MY_BASH_FUNCTIONS": "/x"}}
+    record, gaps = scan(tmp_path, server)
+    assert not gaps and record.package_url == "pkg:npm/pkg@1.2.3"
 
 
 def test_an_exported_function_beside_a_direct_runner_is_unknown(tmp_path):
@@ -234,6 +261,10 @@ def test_shallow_default_operands_still_name_the_program():
         "/proc/self/cwd/evil.sh",
         "//proc/thread-self/cwd/evil.sh",
         "/./proc/1/cwd/evil.sh",
+        # /dev/fd links to /proc/self/fd, and a .. after any link can lead into /proc.
+        "/dev/fd/../cwd/evil.sh",
+        "/var/run/../proc/self/cwd/evil.sh",
+        "/dev/fd/3",
     ],
 )
 def test_a_startup_file_from_the_environment_that_may_be_in_the_project_is_unknown(tmp_path, value):
@@ -345,3 +376,74 @@ def test_inline_json_arguments_keep_the_pin(config):
     launch = analyze("npx", ["-y", "@scope/server@1.2.3", argument])
     assert launch.unknown is None, (len(argument), launch.unknown)
     assert [package.spec for package in launch.packages] == ["@scope/server@1.2.3"]
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["-o", "interactive", "-c", PINNED],
+        ["-c", "-o", "interactive", PINNED],
+        ["-xo", "interactive", "-c", PINNED],
+        ["-o", "inter", "-c", PINNED],
+    ],
+)
+def test_an_interactive_option_makes_the_shell_read_env(tmp_path, args):
+    server = {"command": "sh", "args": args, "env": {"ENV": "./evil.sh"}}
+    assert_unknown(tmp_path, server, "startup file")
+
+
+def test_dash_reads_env_with_the_interactive_option(tmp_path):
+    (tmp_path / "evil.sh").write_text('npx() { echo "REPLACED $*"; }\n')
+    args = ["-o", "interactive", "-c", PINNED]
+    assert "REPLACED -y pkg@1.2.3" in _bash(
+        tmp_path, args, {"ENV": "./evil.sh"}, interpreter="dash"
+    )
+
+
+def test_dash_runs_the_project_runner_through_a_trace_prompt(tmp_path):
+    runner = tmp_path / "5" / "npx"
+    runner.parent.mkdir()
+    runner.write_text('#!/bin/sh\necho "PROJECT $*"\n')
+    runner.chmod(0o755)
+    ran = _bash(tmp_path, ["-xc", PINNED], {"PS4": "$((PATH=5))"}, interpreter="dash")
+    assert "PROJECT -y pkg@1.2.3" in ran
+
+
+@pytest.mark.skipif(not os.path.isdir("/dev/fd/../cwd"), reason="no /dev/fd link into /proc")
+def test_bash_sources_bash_env_through_dev_fd(tmp_path):
+    (tmp_path / "evil.sh").write_text('npx() { echo "REPLACED $*"; }\n')
+    env = {"BASH_ENV": "/dev/fd/../cwd/evil.sh"}
+    assert "REPLACED -y pkg@1.2.3" in _bash(tmp_path, ["-c", PINNED], env)
+
+
+def test_a_path_through_dev_fd_may_search_the_project(tmp_path):
+    env = {"PATH": "/dev/fd/../cwd/bin:/usr/bin"}
+    assert_unknown(tmp_path, {"command": "npx", "args": ["-y", "pkg@1.2.3"], "env": env}, "PATH")
+
+
+def _pattern_words(count: int) -> list[str]:
+    letters = "abcdefghijklmnopqrstuvwxyz"
+    words = []
+    for index in range(count):
+        tag = "".join(letters[(index // 26**place) % 26] for place in range(4))
+        words.append("".join(tag[step % 4] + "${A}" for step in range(6)) + "?*" * 14)
+    return words
+
+
+@pytest.mark.no_cover
+def test_pattern_readings_are_charged_and_not_compiled_for_each():
+    # 64 readings of each word, each a different pattern: compiling every one cost about
+    # 40 seconds for 1,000 small servers.
+    args = ["-y", "pkg@1.2.3", *_pattern_words(300)]
+    assert cpu(analyze, "npx", args) < 1
+    assert max(map(len, mcp_launch._PATTERNS), default=0) <= 2 * mcp_launch._LONGEST_PROGRAM + 2
+
+
+@pytest.mark.no_cover
+def test_commas_in_one_word_do_not_pay_for_other_words():
+    expensive = [word.replace("?*", "") for word in _pattern_words(750)]
+    donors = ["{}" + "," * 65] * 248
+    alone = cpu(analyze, "npx", ["-y", "pkg@1.2.3", *expensive])
+    funded = cpu(analyze, "npx", ["-y", "pkg@1.2.3", *expensive, *donors])
+    # Commas anywhere in a braced word once raised the whole budget: 113 s for 1 MB.
+    assert funded < 4 * alone + 0.2, (alone, funded)
