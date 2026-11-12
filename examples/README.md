@@ -127,6 +127,20 @@ add `--dry-run` to list it without contacting OSV. The demo's other components
 declare no exact PyPI or npm package URL. Point it at your own inventory to query
 OSV. See [offline and live modes](../docs/offline-and-live-modes.md).
 
+### 7. Compare with runtime traces
+
+[`traces/demo-agent.otlp.json`](traces/demo-agent.otlp.json) is a synthetic
+OpenTelemetry trace of one run of the demo agent. `trace-diff` compares the runtime use
+that it reports with the inventory, offline:
+
+```bash
+nexus-symbiote trace-diff demo.aibom.json examples/traces/demo-agent.otlp.json
+```
+
+It exits 1: the trace reports the agent's name, its hosted model and a `search_tickets`
+call that the inventory does not declare; the call's endpoint matches the declared
+`tickets` server. See [trace evidence](../docs/trace-evidence.md).
+
 ## Collector demo
 
 From a reviewed checkout of the repository:

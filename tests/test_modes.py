@@ -336,6 +336,7 @@ def test_every_static_command_runs_under_the_offline_guard(tmp_path):
     run("validate", str(native), "--project", str(project), "--no-project-policy", expect=(0, 1))
     run("risk", str(native), "--no-project-policy", expect=(0, 1))
     run("summary", str(native))
+    run("digest", str(native), "--json-output")
     run("diff", str(native), str(native), "--fail-on-alert")
     agent = next(
         c["bom_ref"]
@@ -344,6 +345,9 @@ def test_every_static_command_runs_under_the_offline_guard(tmp_path):
     )
     run("blast-radius", str(native), agent, "--json-output")
     run("vex", str(native), "-o", str(tmp_path / "vex.json"))
+    run("graph", str(native), "-o", str(tmp_path / "graph.html"))
+    run("crosswalk", str(native), "--format", "markdown", "-o", str(tmp_path / "crosswalk.md"))
+    run("minimum-elements", str(native), "-o", str(tmp_path / "minimum-elements.txt"))
     run("baseline", str(project), "-o", str(tmp_path / "baseline.json"), expect=(0, 1))
     run("verify-artifact", "system_prompt.md", "--project", str(project), "--sha256", digest)
     run(
@@ -355,6 +359,23 @@ def test_every_static_command_runs_under_the_offline_guard(tmp_path):
         str(imported),
     )
     run("verify-discovery", str(imported), str(SHADOWSCAN_REPORT), "--projection")
+    trace = tmp_path / "trace.json"
+    chat = {"key": "gen_ai.operation.name", "value": {"stringValue": "chat"}}
+    trace.write_text(
+        json.dumps({"resourceSpans": [{"scopeSpans": [{"spans": [{"attributes": [chat]}]}]}]})
+    )
+    run("trace-diff", str(native), str(trace), "--sarif", str(tmp_path / "trace.sarif"))
+    run(
+        "export-inventory",
+        str(native),
+        "--format",
+        "shadowscan-simple",
+        "--resource-prefix",
+        "github:acme/project",
+        "--include-unnamed",
+        "-o",
+        str(tmp_path / "approved.json"),
+    )
     run("runtime", "keygen", "--private-key", str(private), "--public-key", str(public))
     signed = tmp_path / "signed.json"
     run(
@@ -370,6 +391,28 @@ def test_every_static_command_runs_under_the_offline_guard(tmp_path):
     )
     verified = run("runtime", "verify", str(signed), "--kind", "trust", "--public-key", str(public))
     assert json.loads(verified)["contract_verified"] is True
+    attested = tmp_path / "bom.att.json"
+    run(
+        "attest",
+        str(native),
+        "--key",
+        str(private),
+        "--purpose",
+        "reviewed",
+        "--out",
+        str(attested),
+    )
+    checked = run(
+        "verify-attestation",
+        str(native),
+        str(attested),
+        "--trusted-key",
+        str(public),
+        "--purpose",
+        "reviewed",
+        "--json-output",
+    )
+    assert json.loads(checked)["attestation_verified"] is True
 
 
 def test_documented_offline_demo_collects_every_surface(tmp_path):

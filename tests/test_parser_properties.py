@@ -31,7 +31,7 @@ from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
 from nexus_symbiote.cli import main
-from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote.core.aibom import AIBOM, NO_CONTENT_SERIAL
 from nexus_symbiote.diff.differ import AIBOMDiffer
 from nexus_symbiote.scanners.base import sanitized_origin
 from nexus_symbiote.scanners.registry import RegistryScanner
@@ -465,9 +465,9 @@ INTERNAL_ERROR = "internal error ("
 EXPORT_REFUSED = "cannot be exported as"
 
 
-def documented_export_failure(fmt: str, content: bytes) -> bool:
-    """Only this export is refused ("Malformed input" in docs/known-limitations.md)."""
-    return fmt != "json" and LONE_SURROGATE_ESCAPE.search(content) is not None
+def documented_export_failure(content: bytes) -> bool:
+    """Only this inventory is refused ("Malformed input" in docs/known-limitations.md)."""
+    return LONE_SURROGATE_ESCAPE.search(content) is not None
 
 
 def assert_no_crash(result) -> None:
@@ -495,8 +495,10 @@ def test_any_content_in_a_collected_file_yields_an_inventory_not_a_crash(name, d
             main, ["scan", str(root / "project"), "--report-only", "-f", fmt, "-o", str(output)]
         )
         assert_no_crash(result)
-        if EXPORT_REFUSED in result.output:
-            assert documented_export_failure(fmt, content), (fmt, result.output)
+        assert EXPORT_REFUSED not in result.output, (fmt, result.output)
+        if NO_CONTENT_SERIAL in " ".join(result.output.split()):
+            assert documented_export_failure(content), (fmt, result.output)
+            assert not output.exists()
         if result.exit_code != 0:
             return
         document = json.loads(output.read_text())
@@ -504,12 +506,8 @@ def test_any_content_in_a_collected_file_yields_an_inventory_not_a_crash(name, d
         if fmt != "json":
             return
         assert isinstance(document.get("components"), list)
-        try:
-            inventory = AIBOM.load(output)
-        except ValueError:
-            # Documented too: native JSON holding a lone surrogate is refused on reading.
-            assert LONE_SURROGATE_ESCAPE.search(content) is not None
-            return
+        # An inventory without a content digest is never written, so what is written reads.
+        inventory = AIBOM.load(output)
         report = AIBOMDiffer().diff(inventory, AIBOM.load(output))
         assert not report.has_changes and report.total_changes == 0
         assert report.security_alerts == []

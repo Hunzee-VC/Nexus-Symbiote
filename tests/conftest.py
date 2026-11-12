@@ -38,6 +38,7 @@ ISOLATED_NAMES = frozenset(
         "CLICOLOR_FORCE",
         "TTY_COMPATIBLE",
         "TTY_INTERACTIVE",
+        "SOURCE_DATE_EPOCH",
         # The unsigned-discovery gate fails closed when these say the run is automated;
         # a test that needs that sets one itself.
         "CI",

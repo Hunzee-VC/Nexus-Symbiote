@@ -272,14 +272,22 @@ class _Unlisted:
 
 class _WalkScope:
     """One ``iter_files`` walk: its top directory, the directories it walks through
-    symlinks, the list that collects the directory symlinks it met, and the failures
-    it met past the collection's listing bounds."""
+    symlinks, the lists that collect the directory symlinks it met and the entries it
+    skipped by a default-excluded name, and the failures it met past the collection's
+    listing bounds."""
 
-    def __init__(self, top: Path, links: list[Path] | None, unlisted: _Unlisted) -> None:
+    def __init__(
+        self,
+        top: Path,
+        links: list[Path] | None,
+        unlisted: _Unlisted,
+        skipped: list[Path] | None = None,
+    ) -> None:
         self.top = top
         self.walked = {top}
         self.links = links
         self.unlisted = unlisted
+        self.skipped = skipped
 
     def covers(self, target: Path) -> bool:
         """Whether the walk reaches ``target`` already, under its own name."""
@@ -892,7 +900,11 @@ class ConfinedCollection:
         self._entries_exhausted = True
 
     def iter_files(
-        self, directory: str | Path = ".", *, directory_links: list[Path] | None = None
+        self,
+        directory: str | Path = ".",
+        *,
+        directory_links: list[Path] | None = None,
+        skipped: list[Path] | None = None,
     ) -> Iterator[Path]:
         """Yield root-relative file paths, never through more than one symlink.
 
@@ -903,9 +915,11 @@ class ConfinedCollection:
         under its own name; one to a directory elsewhere beneath the root is walked
         once under its target's name, as a host reading the walked directory would
         read it, and one to the root or to a directory that holds the walked one is a
-        failure. ``directory_links`` collects the directory symlinks the walk met.
-        Every other symlink is a recorded failure. Past the collection's listing
-        bounds, the walk's per-entry failures end it as one line per reason.
+        failure. ``directory_links`` collects the directory symlinks the walk met, and
+        ``skipped`` the entries it neither entered nor yielded because their name is
+        one of ``DEFAULT_EXCLUDES``, which nothing records otherwise. Every other
+        symlink is a recorded failure. Past the collection's listing bounds, the
+        walk's per-entry failures end it as one line per reason.
         """
         try:
             relative = self._relative(directory)
@@ -928,7 +942,7 @@ class ConfinedCollection:
             return
         # Each walk ends with its own summary lines, so a caller comparing the failure
         # count before and after a walk sees every walk that met a failure.
-        scope = _WalkScope(walked, directory_links, _Unlisted())
+        scope = _WalkScope(walked, directory_links, _Unlisted(), skipped)
         try:
             yield from self._walk(fd, walked, 0, self._entry_budget, scope)
         finally:
@@ -964,6 +978,8 @@ class ConfinedCollection:
                     continue
                 child = relative / name
                 if self.excluded(child):
+                    if scope.skipped is not None and name in DEFAULT_EXCLUDES:
+                        scope.skipped.append(child)
                     continue
                 metadata = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
                 if stat.S_ISLNK(metadata.st_mode):

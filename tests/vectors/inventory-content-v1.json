@@ -1,0 +1,139 @@
+{
+  "profile": "nexus-symbiote/inventory-content/v1",
+  "subject": "nexus_symbiote.core.content_digest.inventory_content_digest",
+  "note": "Changing any expected value changes every recorded inventory content digest; that requires a new profile version (INVENTORY_CONTENT_PROFILE), not an edit here. content is the exact RFC 8785 preimage of digest.",
+  "vectors": [
+    {
+      "id": "native-1.1.0",
+      "note": "A native 1.1.0 document. Left out: the URN UUID serial number, both RFC 3339 timestamps, the observed_at of every claim, null or not, and the completeness claim's source_report_path. The same names inside properties stay.",
+      "document": {
+        "metadata": {
+          "spec_version": "1.1.0",
+          "serial_number": "urn:uuid:3e4f1c2a-9b7d-4e21-8f0a-5c6d7e8f9a0b",
+          "version": 1,
+          "timestamp": "2026-11-12T10:00:00Z",
+          "tool_name": "nexus-symbiote",
+          "tool_version": "0.1.0",
+          "authors": [],
+          "completeness": {
+            "scope": "repository",
+            "surfaces_scanned": [
+              "mcp:.mcp.json"
+            ],
+            "surfaces_excluded": [],
+            "scan_failures": [],
+            "timestamp": "2026-11-12T10:00:00.123456Z",
+            "assurance_level": "observed",
+            "collectors_requested": [
+              "mcp"
+            ],
+            "collectors_completed": [
+              "mcp"
+            ],
+            "scanner_status": {
+              "mcp": "complete"
+            },
+            "source_report_path": "reports/shadowscan.json"
+          },
+          "policy_source": "built-in",
+          "policy_weakened": []
+        },
+        "components": [
+          {
+            "bom_ref": "mcp-server:docs",
+            "component_type": "mcp-server",
+            "name": "docs",
+            "version": "1.2.3",
+            "assurance_level": "observed",
+            "source_path": ".mcp.json",
+            "properties": {
+              "note": "Café ☕",
+              "observed_at": "2026-11-12T10:00:00Z",
+              "serial_number": "urn:uuid:3e4f1c2a-9b7d-4e21-8f0a-5c6d7e8f9a0b",
+              "source_report_path": "reports/shadowscan.json",
+              "timestamp": "2026-11-12T10:00:00Z"
+            },
+            "claims": {
+              "repository_presence": {
+                "assurance": "observed",
+                "method": "filesystem-inventory",
+                "scope": "repository",
+                "collector": "mcp",
+                "locator": ".mcp.json",
+                "observed_at": "2026-11-12T12:00:00+02:00",
+                "evidence_refs": []
+              },
+              "operator_review": {
+                "assurance": "declared",
+                "method": "manual-review",
+                "scope": "repository",
+                "observed_at": null,
+                "evidence_refs": [
+                  "ticket:42"
+                ]
+              }
+            }
+          },
+          {
+            "bom_ref": "tool:docs/search",
+            "component_type": "tool",
+            "name": "search",
+            "description": "Search the documentation",
+            "source_path": ".mcp.json",
+            "claims": {
+              "repository_presence": {
+                "assurance": "observed",
+                "method": "filesystem-inventory",
+                "scope": "repository",
+                "collector": "mcp",
+                "locator": ".mcp.json",
+                "observed_at": "2026-11-12T10:00:00Z",
+                "evidence_refs": []
+              }
+            }
+          }
+        ],
+        "dependencies": [
+          {
+            "source_ref": "mcp-server:docs",
+            "target_ref": "tool:docs/search",
+            "relationship": "provides-tool"
+          }
+        ]
+      },
+      "content": "{\"components\":[{\"assurance_level\":\"observed\",\"bom_ref\":\"mcp-server:docs\",\"claims\":{\"operator_review\":{\"assurance\":\"declared\",\"evidence_refs\":[\"ticket:42\"],\"method\":\"manual-review\",\"scope\":\"repository\"},\"repository_presence\":{\"assurance\":\"observed\",\"collector\":\"mcp\",\"evidence_refs\":[],\"locator\":\".mcp.json\",\"method\":\"filesystem-inventory\",\"scope\":\"repository\"}},\"component_type\":\"mcp-server\",\"name\":\"docs\",\"properties\":{\"note\":\"Café ☕\",\"observed_at\":\"2026-11-12T10:00:00Z\",\"serial_number\":\"urn:uuid:3e4f1c2a-9b7d-4e21-8f0a-5c6d7e8f9a0b\",\"source_report_path\":\"reports/shadowscan.json\",\"timestamp\":\"2026-11-12T10:00:00Z\"},\"source_path\":\".mcp.json\",\"version\":\"1.2.3\"},{\"bom_ref\":\"tool:docs/search\",\"claims\":{\"repository_presence\":{\"assurance\":\"observed\",\"collector\":\"mcp\",\"evidence_refs\":[],\"locator\":\".mcp.json\",\"method\":\"filesystem-inventory\",\"scope\":\"repository\"}},\"component_type\":\"tool\",\"description\":\"Search the documentation\",\"name\":\"search\",\"source_path\":\".mcp.json\"}],\"dependencies\":[{\"relationship\":\"provides-tool\",\"source_ref\":\"mcp-server:docs\",\"target_ref\":\"tool:docs/search\"}],\"metadata\":{\"authors\":[],\"completeness\":{\"assurance_level\":\"observed\",\"collectors_completed\":[\"mcp\"],\"collectors_requested\":[\"mcp\"],\"scan_failures\":[],\"scanner_status\":{\"mcp\":\"complete\"},\"scope\":\"repository\",\"surfaces_excluded\":[],\"surfaces_scanned\":[\"mcp:.mcp.json\"]},\"policy_source\":\"built-in\",\"policy_weakened\":[],\"spec_version\":\"1.1.0\",\"tool_name\":\"nexus-symbiote\",\"tool_version\":\"0.1.0\",\"version\":1}}",
+      "digest": "sha256:38122f15e46c354b05c1edf082058bb515ccdbb7b54df0d4259d630e75dbdd8f"
+    },
+    {
+      "id": "undeclared-1.0.0",
+      "note": "A document that declares no format version, read as 1.0.0. Its null serial number is left out.",
+      "document": {
+        "metadata": {
+          "serial_number": null,
+          "tool_name": "nexus-symbiote",
+          "version": 1
+        },
+        "components": [],
+        "dependencies": []
+      },
+      "content": "{\"components\":[],\"dependencies\":[],\"metadata\":{\"tool_name\":\"nexus-symbiote\",\"version\":1}}",
+      "digest": "sha256:774794b539236e2a9797566c5ffa1879df218a0cf4cf9ce3309b0c4f566d75a9"
+    },
+    {
+      "id": "shapes-stay-content",
+      "note": "Values the profile does not recognize as collection events stay content: a serial number in upper-case hexadecimal and a timestamp without a time of day.",
+      "document": {
+        "metadata": {
+          "spec_version": "1.1.0",
+          "serial_number": "urn:uuid:3E4F1C2A-9B7D-4E21-8F0A-5C6D7E8F9A0B",
+          "timestamp": "2026-11-12",
+          "tool_name": "nexus-symbiote"
+        },
+        "components": [],
+        "dependencies": []
+      },
+      "content": "{\"components\":[],\"dependencies\":[],\"metadata\":{\"serial_number\":\"urn:uuid:3E4F1C2A-9B7D-4E21-8F0A-5C6D7E8F9A0B\",\"spec_version\":\"1.1.0\",\"timestamp\":\"2026-11-12\",\"tool_name\":\"nexus-symbiote\"}}",
+      "digest": "sha256:715371f48ad0b1683cf6304ac299781518995e0a14814b4b30c6be500e71f398"
+    }
+  ]
+}

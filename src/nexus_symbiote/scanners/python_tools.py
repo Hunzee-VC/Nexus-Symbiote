@@ -5,8 +5,8 @@ from __future__ import annotations
 import ast
 import re
 from collections import Counter
-from itertools import islice
 from pathlib import Path
+from typing import NamedTuple
 from urllib.parse import quote
 
 from nexus_symbiote.core.hashing import hash_bytes
@@ -516,44 +516,66 @@ def _record_decorated_tools(
         _record_decorator(node, stmt.name, servers[receiver], path, source_digest, result)
 
 
-def _parameter_is_benign(function: ast.FunctionDef | ast.AsyncFunctionDef, name: str) -> bool:
-    """Whether a helper uses a server parameter only through run, app and settings attributes."""
-    parents = {child: node for node in ast.walk(function) for child in ast.iter_child_nodes(node)}
-    for node in ast.walk(function):
-        if isinstance(node, ast.Name) and node.id == name:
-            parent = parents.get(node)
-            if not (
-                isinstance(node.ctx, ast.Load)
-                and isinstance(parent, ast.Attribute)
-                and parent.attr in _SERVER_ATTRIBUTES
-            ):
-                return False
-    return True
+class _Helper(NamedTuple):
+    """How a call binds a top-level function's parameters, and the names it uses unsafely:
+    any use other than reading a run, app or settings attribute of the name."""
+
+    positional: tuple[str, ...]
+    named: frozenset[str]
+    unsafe: frozenset[str]
+
+
+def _helper(function: ast.FunctionDef | ast.AsyncFunctionDef) -> _Helper:
+    positional = tuple(arg.arg for arg in (*function.args.posonlyargs, *function.args.args))
+    nodes = list(ast.walk(function))
+    safe = {
+        node.value
+        for node in nodes
+        if isinstance(node, ast.Attribute) and node.attr in _SERVER_ATTRIBUTES
+    }
+    return _Helper(
+        positional,
+        frozenset({*positional, *(arg.arg for arg in function.args.kwonlyargs)}),
+        frozenset(
+            node.id
+            for node in nodes
+            if isinstance(node, ast.Name) and not (isinstance(node.ctx, ast.Load) and node in safe)
+        ),
+    )
 
 
 def _benign_helper_arguments(
     tree: ast.Module, nodes: list[ast.AST], servers: dict[str, MCPServerComponent]
 ) -> set[ast.AST]:
-    """Servers passed to a helper of this file that registers nothing on them."""
-    helpers = {
+    """Servers passed to a helper of this file that registers nothing on them.
+
+    Each helper is read once, however many calls pass it a server, so the work stays
+    linear in the size of the file.
+    """
+    functions = {
         stmt.name: stmt
         for stmt in tree.body
         if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
+    helpers: dict[str, _Helper] = {}
     benign: set[ast.AST] = set()
     for node in nodes:
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
             continue
-        helper = helpers.get(node.func.id)
-        if helper is None:
+        function = functions.get(node.func.id)
+        if function is None or not any(
+            isinstance(value, ast.Name) and value.id in servers
+            for value in (*node.args, *(keyword.value for keyword in node.keywords))
+        ):
             continue
-        positional = [arg.arg for arg in (*helper.args.posonlyargs, *helper.args.args)]
-        named = {*positional, *(arg.arg for arg in helper.args.kwonlyargs)}
+        helper = helpers.get(function.name)
+        if helper is None:
+            helper = helpers[function.name] = _helper(function)
         passed = [
-            (positional[index] if index < len(positional) else None, value)
+            (helper.positional[index] if index < len(helper.positional) else None, value)
             for index, value in enumerate(node.args)
         ] + [
-            (keyword.arg if keyword.arg in named else None, keyword.value)
+            (keyword.arg if keyword.arg in helper.named else None, keyword.value)
             for keyword in node.keywords
         ]
         for parameter, value in passed:
@@ -561,7 +583,7 @@ def _benign_helper_arguments(
                 isinstance(value, ast.Name)
                 and value.id in servers
                 and parameter is not None
-                and _parameter_is_benign(helper, parameter)
+                and parameter not in helper.unsafe
             ):
                 benign.add(value)
     return benign
@@ -642,13 +664,38 @@ def _report_imported_receivers(tree: ast.Module, path: Path, result: ScanResult)
         )
 
 
-def collect_python_tools(tree: ast.Module, source: str, path: Path, result: ScanResult) -> None:
-    """Support direct SDK imports, module constructors and top-level decorators."""
-    if not any(hint in source for hint in PYTHON_TOOL_HINTS):
+def _report_unused_factories(
+    nodes: list[ast.AST], factories: dict[str, ast.ImportFrom], path: Path, result: ScanResult
+) -> None:
+    """A server class imported and not used outside an annotation is passed on.
+
+    Another module can import it from this one and build servers the collector does
+    not see there, because that import does not name the SDK.
+    """
+    if not factories:
         return
-    nodes = list(islice(ast.walk(tree), 20_001))
-    if len(nodes) > 20_000:
-        result.surfaces_excluded.append(f"{path.as_posix()}: Python MCP AST limit exceeded")
+    annotations = _annotation_names(nodes)
+    used = {
+        node.id
+        for node in nodes
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node not in annotations
+    }
+    if set(factories) - used:
+        result.surfaces_excluded.append(
+            f"{path.as_posix()}: MCP server class imported without a use here; servers built "
+            "from it elsewhere not inventoried"
+        )
+
+
+def collect_python_tools(
+    tree: ast.Module, nodes: list[ast.AST], source: str, path: Path, result: ScanResult
+) -> None:
+    """Support direct SDK imports, module constructors and top-level decorators.
+
+    ``nodes`` holds every node of ``tree``; the caller holds their number to the
+    ``python-nodes`` limit, and the work here is linear in it.
+    """
+    if not any(hint in source for hint in PYTHON_TOOL_HINTS):
         return
     imports = [node for node in nodes if isinstance(node, ast.ImportFrom) and not node.level]
     factories = {
@@ -670,6 +717,7 @@ def collect_python_tools(tree: ast.Module, source: str, path: Path, result: Scan
         if stmt.module is not None and (stmt.module, a.name) in _AGENT_FACTORIES
     }
     _report_import_scope(imports, nodes, path, result)
+    _report_unused_factories(nodes, factories, path, result)
     if not factories and not decorators and not agent_factories:
         _report_imported_receivers(tree, path, result)
         return

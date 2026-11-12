@@ -1,0 +1,19 @@
+{
+  "agents": [
+    {
+      "discriminators": [
+        "project"
+      ],
+      "id": "agent:unnamed:59153bc238b0ab3dd8f507f1",
+      "names": [
+        "unnamed repository agent; id from inventory content digest sha256:59153bc238b0ab3dd8f507f16b2ea44a634a33129eda2a72ed66c2bf604d3f7e"
+      ],
+      "resources": [
+        "github:acme/support-triager"
+      ],
+      "surfaces": [
+        "code"
+      ]
+    }
+  ]
+}

@@ -384,9 +384,9 @@ def register_supply_chain_commands(main: click.Group) -> None:
         is_flag=True,
         help=(
             "Send only packages whose lockfile resolution records the public PyPI or npm "
-            "registry. Requirements files and pyproject.toml record no index, so Python "
-            "packages that no uv.lock or poetry.lock resolves are withheld; withhold private "
-            "names with --exclude instead to keep public ones checked."
+            "registry. A Python package that no uv.lock or poetry.lock resolves has no "
+            "recorded origin, so it is withheld; withhold private names with --exclude "
+            "instead to keep public ones checked."
         ),
     )
     @click.option(

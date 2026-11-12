@@ -107,7 +107,13 @@ SPECS: dict[str, LimitSpec] = {
             "ts-nodes",
             "count",
             10_000_000,
-            "Syntax nodes in one TypeScript MCP server file.",
+            "Syntax nodes in one TypeScript or JavaScript file the mcp collector parses.",
+        ),
+        LimitSpec(
+            "python-nodes",
+            "count",
+            10_000_000,
+            "Syntax nodes in one Python file the mcp collector parses.",
         ),
         LimitSpec(
             "import-lookups",
@@ -133,6 +139,7 @@ class CollectionLimits:
     source_scan_bytes: int = 64 * MIB
     syntax_bytes: int = 256 * KIB
     ts_nodes: int = 20_000
+    python_nodes: int = 200_000
     import_lookups: int = 5_000
 
     def value(self, name: str) -> int:

@@ -28,14 +28,14 @@ def clone_corpus(tmp_path):
 # The digest of the committed manifest, labels and fixtures. The gate compares results
 # only with the manifest they were produced from, so a label flipped in the same change as
 # the detector would pass it; changing any case must also change this line, visibly.
-CORPUS_DIGEST = "81143e881262c5cf1b890c18afe3a02cba5357a5716dc13f6f8dfb824d386e1e"
+CORPUS_DIGEST = "49c5c3bd73140f0b37f7137d08c533d8e221d77fab002b6d301b5e0a1e139dcd"
 
 
 def test_committed_inputs_have_exact_hashes_and_explicit_labels():
     manifest, digest = benchmark.load_manifest(benchmark.DEFAULT_MANIFEST)
     assert digest == CORPUS_DIGEST
-    assert len(manifest["cases"]) == 18
-    assert sum(c["task"] == "detection" for c in manifest["cases"]) == 16
+    assert len(manifest["cases"]) == 22
+    assert sum(c["task"] == "detection" for c in manifest["cases"]) == 20
     assert any(c["truth"] is True for c in manifest["cases"])
     assert any(c["truth"] is False for c in manifest["cases"])
     assert any(c["truth"] is None for c in manifest["cases"])
@@ -112,8 +112,8 @@ def test_predictions_do_not_read_labels_and_use_real_scanner():
 
 def test_actual_corpus_run_records_evidence_and_unknown_coverage():
     report = benchmark.run_benchmark()
-    assert report["corpus"]["cases"] == 18
-    assert report["metrics"]["detection_cases"] == 16
+    assert report["corpus"]["cases"] == 22
+    assert report["metrics"]["detection_cases"] == 20
     assert report["measurement"]["elapsed_seconds"] > 0
     assert report["measurement"]["python_traced_peak_bytes"] > 0
     assert len(report["tool"]["source_digest"]) == 64
@@ -148,3 +148,9 @@ def test_benchmark_revision_comes_from_the_workflow_or_a_tracked_checkout(tmp_pa
     monkeypatch.setattr(benchmark, "nexus_symbiote", installed)
     identity = benchmark._source_identity()
     assert identity["git_sha"] is None and identity["revision_source"] is None
+
+
+def test_the_roadmap_states_the_current_security_case_count():
+    manifest, _digest = benchmark.load_manifest(benchmark.DEFAULT_MANIFEST)
+    roadmap = (Path(__file__).parents[1] / "ROADMAP.md").read_text(encoding="utf-8")
+    assert f"and {len(manifest['cases'])} security cases now" in roadmap

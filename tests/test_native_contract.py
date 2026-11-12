@@ -349,3 +349,28 @@ def test_native_documents_are_read_only_through_the_shared_reader():
         if "AIBOM.model_validate(" in path.read_text(encoding="utf-8")
     ]
     assert callers == []
+
+
+@pytest.mark.parametrize("document", [{"components": []}, {"metadata": {}, "components": []}, {}])
+def test_the_digest_readers_read_a_versionless_document_alike(document):
+    # digest, attest, trace-diff and export-inventory read through the same helpers: a
+    # document without metadata has the format and the content digest of one with an
+    # empty metadata object, and one without components has no content digest either way.
+    from datetime import UTC, datetime
+
+    from nexus_symbiote.attestation import build_statement
+    from nexus_symbiote.core.content_digest import inventory_content_digest
+    from nexus_symbiote.core.inventory_digests import inventory_digests
+
+    raw = json.dumps(document).encode()
+    digests = inventory_digests(raw)
+    assert digests.spec_version == "1.0.0"
+    stated = {"metadata": {}, **document}
+    expected = inventory_content_digest(stated) if "components" in document else None
+    assert digests.content_digest == expected
+    signed_at = datetime(2026, 1, 1, tzinfo=UTC)
+    predicate = build_statement(raw, name="s", purpose="generated", signed_at=signed_at)[
+        "predicate"
+    ]
+    assert predicate.get("content_digest") == expected
+    assert predicate.get("spec_version") == (None if expected is None else "1.0.0")

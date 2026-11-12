@@ -355,3 +355,22 @@ The offline signature regression uses a public release bundle from
 [sigstore-python at 19b8aec](https://github.com/sigstore/sigstore-python/blob/19b8aec7063e62c718efd327f5a45582472c3b3c/test/assets/bundle_v3_github.whl.sigstore).
 Its Apache-2.0 license accompanies the fixture. Production report verification
 requires your own producer identity, issuer and report bundle.
+
+## Approve in SymBiote, reconcile in ShadowScan
+
+ShadowScan's `--inventory` does not read the native AgentBOM; it refuses it. To
+make an agent you approved in SymBiote review an approved agent in ShadowScan's
+reconciliation, export the reviewed inventory and give the file to ShadowScan:
+
+```sh
+nexus-symbiote export-inventory reviewed.json --format shadowscan-simple \
+  --resource-prefix github:acme/support-triager -o approved.json
+```
+
+The file approves only the project that ShadowScan's code connectors report for
+the repository at that resource, registered under the agent's reference, which the
+`id` in `agent.yaml` determines. Keep it where the change under review cannot
+write, sign it with `attest`, and check the signature with `verify-attestation`
+before ShadowScan reads it, because ShadowScan checks none. See
+[Approve agents for ShadowScan reconciliation](shadowscan-inventory-export.md) for
+the binding rules, the prefix to use and what the file does not establish.
