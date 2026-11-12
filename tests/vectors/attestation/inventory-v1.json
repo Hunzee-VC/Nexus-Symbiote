@@ -1,0 +1,86 @@
+{
+  "description": "Known-answer vectors for inventory attestations. The Ed25519 key is the published test key derived from seed_hex, the one tests/vectors/runtime/contracts.json uses; never trust it. Ed25519 signatures are deterministic, so each envelope is reproducible byte for byte. A change to any value here changes the wire format or a digest preimage and requires a new predicate type or content profile version.",
+  "key": {
+    "seed_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAA6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=\n-----END PUBLIC KEY-----\n",
+    "key_id": "a050837d85070582ccf7394b0988847cc312cb88259b894899f6f239cf1791a5"
+  },
+  "predicate_type": "https://github.com/Hunzee-VC/Nexus-Symbiote/attestation/inventory/v1",
+  "attestations": [
+    {
+      "name": "native-inventory-reviewed",
+      "subject_name": "reviewed.json",
+      "subject_text": "{\n  \"metadata\": {\n    \"spec_version\": \"1.1.0\",\n    \"serial_number\": \"urn:uuid:00000000-0000-4000-8000-000000000001\",\n    \"version\": 1,\n    \"timestamp\": \"2026-11-12T09:00:00Z\",\n    \"tool_name\": \"nexus-symbiote\",\n    \"tool_version\": \"0.1.0\"\n  },\n  \"components\": [\n    {\n      \"bom_ref\": \"prompt:system_prompt.md\",\n      \"component_type\": \"prompt-template\",\n      \"name\": \"system_prompt.md\",\n      \"trust_tier\": \"internal-unverified\",\n      \"assurance_level\": \"observed\",\n      \"source_path\": \"system_prompt.md\",\n      \"claims\": {\n        \"repository_presence\": {\n          \"assurance\": \"observed\",\n          \"method\": \"filesystem-inventory\",\n          \"scope\": \"repository\",\n          \"collector\": \"prompt\",\n          \"locator\": \"system_prompt.md\",\n          \"observed_at\": \"2026-11-12T09:00:00Z\",\n          \"evidence_refs\": []\n        }\n      },\n      \"prompt_type\": \"system-prompt\",\n      \"content_hash\": \"sha256:4242424242424242424242424242424242424242424242424242424242424242\"\n    }\n  ],\n  \"dependencies\": []\n}\n",
+      "purpose": "reviewed",
+      "signed_at": "2026-11-12T10:00:00Z",
+      "source_revision": "0123456789abcdef0123456789abcdef01234567",
+      "statement": {
+        "_type": "https://in-toto.io/Statement/v1",
+        "subject": [
+          {
+            "name": "reviewed.json",
+            "digest": {
+              "sha256": "0dabb1608fb8dbf7cea7e765b4791f875234dfd73ba5ef4b0b07e0e966ccbd84"
+            }
+          }
+        ],
+        "predicateType": "https://github.com/Hunzee-VC/Nexus-Symbiote/attestation/inventory/v1",
+        "predicate": {
+          "version": "1",
+          "purpose": "reviewed",
+          "signed_at": "2026-11-12T10:00:00Z",
+          "subject_format": "nexus-symbiote-aibom",
+          "spec_version": "1.1.0",
+          "content_digest": "sha256:59c6c9e29b4d7af59e771ccb217d4fef8e1ae3ddff40ea4bd009b43fa9d782a3",
+          "content_profile": "nexus-symbiote/inventory-content/v1",
+          "source_revision": "0123456789abcdef0123456789abcdef01234567"
+        }
+      },
+      "envelope": {
+        "payloadType": "application/vnd.in-toto+json",
+        "payload": "eyJfdHlwZSI6Imh0dHBzOi8vaW4tdG90by5pby9TdGF0ZW1lbnQvdjEiLCJwcmVkaWNhdGUiOnsiY29udGVudF9kaWdlc3QiOiJzaGEyNTY6NTljNmM5ZTI5YjRkN2FmNTllNzcxY2NiMjE3ZDRmZWY4ZTFhZTNkZGZmNDBlYTRiZDAwOWI0M2ZhOWQ3ODJhMyIsImNvbnRlbnRfcHJvZmlsZSI6Im5leHVzLXN5bWJpb3RlL2ludmVudG9yeS1jb250ZW50L3YxIiwicHVycG9zZSI6InJldmlld2VkIiwic2lnbmVkX2F0IjoiMjAyNi0xMS0xMlQxMDowMDowMFoiLCJzb3VyY2VfcmV2aXNpb24iOiIwMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3Iiwic3BlY192ZXJzaW9uIjoiMS4xLjAiLCJzdWJqZWN0X2Zvcm1hdCI6Im5leHVzLXN5bWJpb3RlLWFpYm9tIiwidmVyc2lvbiI6IjEifSwicHJlZGljYXRlVHlwZSI6Imh0dHBzOi8vZ2l0aHViLmNvbS9IdW56ZWUtVkMvTmV4dXMtU3ltYmlvdGUvYXR0ZXN0YXRpb24vaW52ZW50b3J5L3YxIiwic3ViamVjdCI6W3siZGlnZXN0Ijp7InNoYTI1NiI6IjBkYWJiMTYwOGZiOGRiZjdjZWE3ZTc2NWI0NzkxZjg3NTIzNGRmZDczYmE1ZWY0YjBiMDdlMGU5NjZjY2JkODQifSwibmFtZSI6InJldmlld2VkLmpzb24ifV19",
+        "signatures": [
+          {
+            "keyid": "a050837d85070582ccf7394b0988847cc312cb88259b894899f6f239cf1791a5",
+            "sig": "QxXMhonYNuic/XbUVxPYyj83Lpn7Ym2zYbYAeMZqf2s8Q0ZymzrfqTQNFSSJiLoYwO/ZBV65gQupVElRNuPvBg=="
+          }
+        ]
+      }
+    },
+    {
+      "name": "other-file-generated",
+      "subject_name": "agentbom.cdx.json",
+      "subject_text": "{\"bomFormat\": \"CycloneDX\", \"specVersion\": \"1.7\", \"version\": 1}\n",
+      "purpose": "generated",
+      "signed_at": "2026-11-12T10:00:00Z",
+      "statement": {
+        "_type": "https://in-toto.io/Statement/v1",
+        "subject": [
+          {
+            "name": "agentbom.cdx.json",
+            "digest": {
+              "sha256": "acfb9569939b3f30c7ae51b8c850ef089fde3a1ae65acdae94cd0248ab20e05d"
+            }
+          }
+        ],
+        "predicateType": "https://github.com/Hunzee-VC/Nexus-Symbiote/attestation/inventory/v1",
+        "predicate": {
+          "version": "1",
+          "purpose": "generated",
+          "signed_at": "2026-11-12T10:00:00Z",
+          "subject_format": "other"
+        }
+      },
+      "envelope": {
+        "payloadType": "application/vnd.in-toto+json",
+        "payload": "eyJfdHlwZSI6Imh0dHBzOi8vaW4tdG90by5pby9TdGF0ZW1lbnQvdjEiLCJwcmVkaWNhdGUiOnsicHVycG9zZSI6ImdlbmVyYXRlZCIsInNpZ25lZF9hdCI6IjIwMjYtMTEtMTJUMTA6MDA6MDBaIiwic3ViamVjdF9mb3JtYXQiOiJvdGhlciIsInZlcnNpb24iOiIxIn0sInByZWRpY2F0ZVR5cGUiOiJodHRwczovL2dpdGh1Yi5jb20vSHVuemVlLVZDL05leHVzLVN5bWJpb3RlL2F0dGVzdGF0aW9uL2ludmVudG9yeS92MSIsInN1YmplY3QiOlt7ImRpZ2VzdCI6eyJzaGEyNTYiOiJhY2ZiOTU2OTkzOWIzZjMwYzdhZTUxYjhjODUwZWYwODlmZGUzYTFhZTY1YWNkYWU5NGNkMDI0OGFiMjBlMDVkIn0sIm5hbWUiOiJhZ2VudGJvbS5jZHguanNvbiJ9XX0=",
+        "signatures": [
+          {
+            "keyid": "a050837d85070582ccf7394b0988847cc312cb88259b894899f6f239cf1791a5",
+            "sig": "3F7W1gdZxEQ9vivSav/ZIx1o+OzIBYuZzHidqWnj5eLDuPgIi3FhrYyfM8JOgH7v+vEihPyZE3AwNQna9hgiCA=="
+          }
+        ]
+      }
+    }
+  ]
+}

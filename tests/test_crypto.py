@@ -163,6 +163,11 @@ def local_signed_bundle(tmp_path, monkeypatch):
     No network, Fulcio identity or public signing service is involved.
     """
     pytest.importorskip("sigstore")
+    # Verification now checks (and creates, mode 0700) the sigstore-python TUF
+    # cache first; keep that inside tmp_path so the suite never touches the
+    # real user cache.
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     from datetime import UTC, datetime, timedelta
     from types import SimpleNamespace
 
@@ -214,11 +219,11 @@ def local_signed_bundle(tmp_path, monkeypatch):
             ),
         ),
     )
-    verifier = object.__new__(Verifier)
-    monkeypatch.setattr(
-        verifier, "_verify_common_signing_cert", lambda b, p: p.verify(b.signing_certificate)
-    )
-    monkeypatch.setattr(Verifier, "production", classmethod(lambda cls, **kwargs: verifier))
+
+    def init(self, *, trusted_root):
+        self._verify_common_signing_cert = lambda b, p: p.verify(b.signing_certificate)
+
+    monkeypatch.setattr(Verifier, "__init__", init)
     monkeypatch.setattr(Bundle, "from_json", classmethod(lambda cls, raw: bundle))
     bundle_path = tmp_path / "artifact.bundle.json"
     bundle_path.write_text("{}")
@@ -268,10 +273,11 @@ def test_actual_sigstore_parser_rejects_invalid_bundle_before_network(tmp_path, 
     pytest.importorskip("sigstore")
     from sigstore.verify import Verifier
 
-    def unexpected_network_setup(cls, **kwargs):
+    def unexpected_setup(*args, **kwargs):
         pytest.fail("An invalid bundle must be rejected before verifier setup")
 
-    monkeypatch.setattr(Verifier, "production", classmethod(unexpected_network_setup))
+    monkeypatch.setattr(Verifier, "production", classmethod(unexpected_setup))
+    monkeypatch.setattr(Verifier, "__init__", unexpected_setup)
     artifact = tmp_path / "artifact"
     bundle = tmp_path / "bundle"
     artifact.write_bytes(b"data")

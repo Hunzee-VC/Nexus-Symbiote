@@ -33,16 +33,27 @@ _AUTHORIZATION_LOOKBACK = 40
 # A prose word after a scheme ("Bearer authentication") is shorter than this; a value
 # this long after Bearer, Token, Bot or ApiKey is redacted whatever its shape.
 LONG_CREDENTIAL_LENGTH = 16
-# Credential formats with a fixed prefix. The leading lookbehind starts a match
-# only at a word boundary, so a long run is scanned once, not once per position.
-TOKEN_SHAPE = re.compile(
-    r"(?<![\w-])(?:eyJ[\w-]{8,}+\.[\w-]{8,}+(?:\.[\w-]++)?"
-    r"|gh[oprsu]_[A-Za-z0-9]{36,}+|github_pat_\w{22,}+|glpat-[\w-]{20,}+"
-    r"|hf_[A-Za-z0-9]{30,}+"
-    r"|xox[abeoprs]-[\w-]{10,}+|sk-[\w-]{20,}+|[rs]k_(?:live|test)_[A-Za-z0-9]{16,}+"
-    r"|(?:AKIA|ASIA)[A-Z0-9]{16}|AIza[\w-]{35}|ya29\.[\w-]{20,}+|npm_[A-Za-z0-9]{36}"
-    r"|pypi-[\w-]{50,}+)"
+# Formats distinctive enough to stand out inside a name (AWS_AKIA..., X_glpat-...).
+# Each stops at the end of its own run or matches the rest, so starting one after
+# every "_" or "-" keeps the scan linear. An AWS key id must end there, or
+# REGION_ASIAPACIFICSOUTHEAST1 would read as one.
+_DISTINCT_SHAPES = (
+    r"gh[oprsu]_[A-Za-z0-9]{36,}+|github_pat_\w{22,}+|glpat-[\w-]{20,}+"
+    r"|xox[abeoprs]-[\w-]{10,}+|[rs]k_(?:live|test)_[A-Za-z0-9]{16,}+"
+    r"|(?:AKIA|ASIA)[A-Z0-9]{16}(?![A-Za-z0-9])|AIza[\w-]{35}|ya29\.[\w-]{20,}+"
+    r"|npm_[A-Za-z0-9]{36}|pypi-[\w-]{50,}+|hf_[A-Za-z0-9]{30,}+"
 )
+# A JWT can fail only at its first dot, so it starts only at a word boundary: started
+# after every "_" its first segment would be rescanned once per position.
+_JWT = r"eyJ[\w-]{8,}+\.[\w-]{8,}+(?:\.[\w-]++)?"
+# Credential formats with a fixed prefix. sk- also names ordinary things
+# (sk-learn-classifier), so it counts only at a word boundary.
+TOKEN_SHAPE = re.compile(
+    rf"(?<![\w-])(?:{_JWT}|sk-[\w-]{{20,}}+|(?:AKIA|ASIA)[A-Z0-9]{{16}})"
+    rf"|(?<![A-Za-z0-9])(?:{_DISTINCT_SHAPES})"
+)
+# Names matched against other evidence keep sk-... forms; a distinct token is redacted.
+_NAMED_TOKEN = re.compile(rf"(?<![\w-]){_JWT}|(?<![A-Za-z0-9])(?:{_DISTINCT_SHAPES})")
 _RAW_AUTH_HEADER = re.compile(
     r"(?i)(\b(?:proxy-)?authorization[\"']?\s{0,8}[:=]\s{0,8}[\"']?)([A-Za-z0-9_+/=.~:-]{8,}+)"
 )
@@ -234,8 +245,10 @@ def redact_text(
     """Remove known secret values and common URL/auth/assignment/token encodings.
 
     ``identifier`` keeps names that are matched against other evidence, such as tool
-    names, free of the token-format and private key rules: an innocuous name like
-    ``sk-learn-classifier`` must keep matching the name a live server reports.
+    names, free of the private key rule and of the token formats that ordinary names
+    take: an innocuous name like ``sk-learn-classifier`` must keep matching the name a
+    live server reports. A name holding a distinctive token such as ``ghp_...`` is
+    still redacted.
     """
     value = _scrubber(secrets).scrub(value)
     value = _URL.sub(lambda match: redact_url(match.group()), value)
@@ -243,11 +256,11 @@ def redact_text(
         value = _redact_private_keys(value)
     value = _ASSIGNMENT.sub(lambda match: match.group(1) + REDACTED, value)
     value = _AUTH.sub(_auth_replacement, value)
-    if not identifier:
-        value = _RAW_AUTH_HEADER.sub(_raw_auth_replacement, value)
-        value = _COOKIE_HEADER.sub(_cookie_header_replacement, value)
-        value = TOKEN_SHAPE.sub(REDACTED, value)
-    return value
+    if identifier:
+        return _NAMED_TOKEN.sub(REDACTED, value)
+    value = _RAW_AUTH_HEADER.sub(_raw_auth_replacement, value)
+    value = _COOKIE_HEADER.sub(_cookie_header_replacement, value)
+    return TOKEN_SHAPE.sub(REDACTED, value)
 
 
 def redact_metadata(value: Any, secrets: Iterable[str] | SecretScrubber = ()) -> Any:

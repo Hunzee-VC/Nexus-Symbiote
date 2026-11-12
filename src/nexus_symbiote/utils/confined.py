@@ -105,13 +105,15 @@ class _MessageLog:
     lists at most ``MAX_LISTED_FAILURES`` messages or ``MAX_LISTED_FAILURE_CHARACTERS``
     characters of them, and once one does not fit, none does. A message that is not
     listed is not kept either: the caller sums it up, or the log counts it in one line
-    at the end of the list that names the first such message.
+    at the end of the list that names the first such message. ``recorded`` counts every
+    message, listed, counted or already listed, so it grows when the list does not.
     """
 
     def __init__(self, messages: list[str], *, bounded: bool = True, noun: str = "failure") -> None:
         self.messages = messages
         self._seen = set(messages)
         self._synced = len(messages)
+        self._recorded = len(messages)
         self._bounded = bounded
         self._noun = noun
         self._lines = 0
@@ -127,7 +129,19 @@ class _MessageLog:
             self._seen = set(self.messages)
         else:
             self._seen.update(self.messages[self._synced :])
+            self._recorded += len(self.messages) - self._synced
         self._synced = len(self.messages)
+
+    @property
+    def recorded(self) -> int:
+        """Messages recorded so far, including those not listed; it never decreases."""
+        self._sync()
+        return self._recorded
+
+    def tally(self) -> None:
+        """Count one message as recorded, whether or not it is listed."""
+        self._sync()
+        self._recorded += 1
 
     def __contains__(self, message: str) -> bool:
         self._sync()
@@ -175,6 +189,7 @@ class _MessageLog:
 
     def record(self, message: str) -> None:
         """List ``message`` within the bounds, or count it."""
+        self.tally()
         if self.fits(message):
             self.put(message)
         else:
@@ -183,6 +198,7 @@ class _MessageLog:
     def add(self, message: str) -> bool:
         """Record ``message`` unless it is already listed; say whether it was new."""
         if message in self:
+            self.tally()
             return False
         self.record(message)
         return True
@@ -213,6 +229,17 @@ class BoundedRecords(list[str]):
     def __iadd__(self, records: Iterable[str], /) -> Self:  # type: ignore[override,misc]
         self.extend(records)
         return self
+
+    @property
+    def recorded(self) -> int:
+        """Records taken so far, listed or not; compare it, not ``len``, to tell whether
+        an operation recorded one, because past the listing bounds the length stops."""
+        return self.log.recorded
+
+
+def recorded_count(records: list[str]) -> int:
+    """How many records ``records`` has taken, including those past the listing bounds."""
+    return records.recorded if isinstance(records, BoundedRecords) else len(records)
 
 
 class _Unlisted:
@@ -245,14 +272,22 @@ class _Unlisted:
 
 class _WalkScope:
     """One ``iter_files`` walk: its top directory, the directories it walks through
-    symlinks, the list that collects the directory symlinks it met, and the failures
-    it met past the collection's listing bounds."""
+    symlinks, the lists that collect the directory symlinks it met and the entries it
+    skipped by a default-excluded name, and the failures it met past the collection's
+    listing bounds."""
 
-    def __init__(self, top: Path, links: list[Path] | None, unlisted: _Unlisted) -> None:
+    def __init__(
+        self,
+        top: Path,
+        links: list[Path] | None,
+        unlisted: _Unlisted,
+        skipped: list[Path] | None = None,
+    ) -> None:
         self.top = top
         self.walked = {top}
         self.links = links
         self.unlisted = unlisted
+        self.skipped = skipped
 
     def covers(self, target: Path) -> bool:
         """Whether the walk reaches ``target`` already, under its own name."""
@@ -537,6 +572,20 @@ class ConfinedCollection:
         self._summarize(unlisted)
 
     @property
+    def failures_recorded(self) -> int:
+        """Failures recorded so far, including those past the listing bounds and repeats.
+
+        It only grows, so comparing it before and after a read tells whether the read
+        failed; the length of the failure list stops changing once the bounds are full.
+        """
+        return self._failure_log.recorded
+
+    @property
+    def exclusions_recorded(self) -> int:
+        """Coverage gaps recorded so far, counted as ``failures_recorded`` counts failures."""
+        return self._exclusion_log.recorded
+
+    @property
     def bytes_exhausted(self) -> bool:
         """Whether the collection's total byte budget is spent, so no further read succeeds."""
         return self._budget.exhausted
@@ -552,6 +601,7 @@ class ConfinedCollection:
         ``key`` names the reason for a summary when the reason names a path.
         """
         message = f"{path!s}: {reason}"
+        self._failure_log.tally()
         if message in self._failure_log:
             return
         if self._failure_log.fits(message):
@@ -955,7 +1005,11 @@ class ConfinedCollection:
         self._entries_exhausted = True
 
     def iter_files(
-        self, directory: str | Path = ".", *, directory_links: list[Path] | None = None
+        self,
+        directory: str | Path = ".",
+        *,
+        directory_links: list[Path] | None = None,
+        skipped: list[Path] | None = None,
     ) -> Iterator[Path]:
         """Yield root-relative file paths, never through more than one symlink.
 
@@ -966,9 +1020,11 @@ class ConfinedCollection:
         under its own name; one to a directory elsewhere beneath the root is walked
         once under its target's name, as a host reading the walked directory would
         read it, and one to the root or to a directory that holds the walked one is a
-        failure. ``directory_links`` collects the directory symlinks the walk met.
-        Every other symlink is a recorded failure. Past the collection's listing
-        bounds, the walk's per-entry failures end it as one line per reason.
+        failure. ``directory_links`` collects the directory symlinks the walk met, and
+        ``skipped`` the entries it neither entered nor yielded because their name is
+        one of ``DEFAULT_EXCLUDES``, which nothing records otherwise. Every other
+        symlink is a recorded failure. Past the collection's listing bounds, the
+        walk's per-entry failures end it as one line per reason.
         """
         try:
             relative = self._relative(directory)
@@ -991,7 +1047,7 @@ class ConfinedCollection:
             return
         # Each walk ends with its own summary lines, so a caller comparing the failure
         # count before and after a walk sees every walk that met a failure.
-        scope = _WalkScope(walked, directory_links, _Unlisted())
+        scope = _WalkScope(walked, directory_links, _Unlisted(), skipped)
         try:
             yield from self._walk(fd, walked, 0, self._entry_budget, scope)
         finally:
@@ -1027,6 +1083,8 @@ class ConfinedCollection:
                     continue
                 child = relative / name
                 if self.excluded(child):
+                    if scope.skipped is not None and name in DEFAULT_EXCLUDES:
+                        scope.skipped.append(child)
                     continue
                 metadata = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
                 if stat.S_ISLNK(metadata.st_mode):

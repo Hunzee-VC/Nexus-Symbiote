@@ -6,7 +6,7 @@ Agent Bill of Materials (AgentBOM) generator and validator for AI agent supply c
 
 ```
 src/nexus_symbiote/
-  core/        — Domain models (Pydantic v2), enums, AIBOM container, RFC 8785 JCS hashing
+  core/        — Domain models (Pydantic v2), enums, AIBOM container, RFC 8785 JCS hashing, inventory content digest
   scanners/    — Component discovery (MCP, model weights, prompts, RAG, registry, A2A, IDE agents, ShadowScan reports)
   generators/  — Exports: native JSON, CycloneDX 1.7, SPDX 3.0, SARIF, VEX
   validators/  — Completeness, integrity, and risk scoring
@@ -17,6 +17,13 @@ src/nexus_symbiote/
   runtime_validation.py, runtime_cli.py — Offline schema validation worker; `runtime` commands
   policy.py, signature_policy.py       — Caller-selected policy and operator signer policy
   graph.py, lineage.py                 — Repository association graph, blast radius, lineage
+  risk_classes.py, graph_view.py, graph_cli.py — Risk classes, exposure paths; the `graph` HTML/JSON view
+  digest_cli.py                        — `digest`: file, canonical and content digests of an inventory
+  attestation.py, attestation_cli.py   — DSSE/in-toto inventory attestations; `attest`, `verify-attestation`
+  otlp.py, trace_evidence.py, trace_cli.py — Bounded OTLP/JSON trace reading, reported evidence; `trace-diff`
+  crosswalk.py, crosswalk_cli.py       — Framework crosswalk that SARIF tags come from; `crosswalk`
+  minimum_elements.py, minimum_elements_cli.py — G7 AI SBOM minimum-element coverage; `minimum-elements`
+  inventory_export.py, inventory_export_cli.py — ShadowScan simple-list export; `export-inventory`
   advisories.py                        — Explicit, bounded OSV queries for exact package identities
   modes.py                             — Offline by default; live mode is opt-in
   scanner_catalog.py                   — Built-in collector universe for coverage checks

@@ -1,0 +1,242 @@
+{
+  "metadata": {
+    "spec_version": "1.1.0",
+    "serial_number": "urn:uuid:369169b5-fc1e-422b-8091-948631bd7219",
+    "version": 1,
+    "timestamp": "2026-11-12T11:41:20.826264Z",
+    "tool_name": "nexus-symbiote",
+    "tool_version": "0.1.0",
+    "tool_vendor": "aisecnomad",
+    "authors": [],
+    "completeness": {
+      "scope": "repository",
+      "surfaces_scanned": [
+        ".mcp.json",
+        "a2a (no A2A configurations found)",
+        "a2a: Python SDK references (heuristic)",
+        "ide-agents (no IDE agent configs found)",
+        "model-weights (no model files found)",
+        "prompts (no instruction files found)",
+        "rag (no RAG configuration found)",
+        "rag: Python vector-store imports (heuristic)",
+        "registry (no AI-related dependencies found)",
+        "shadowscan-report (no report found)",
+        "skills (no skill or command files found)"
+      ],
+      "surfaces_excluded": [],
+      "scan_failures": [],
+      "timestamp": "2026-11-12T11:41:20.826264Z",
+      "assurance_level": "observed",
+      "collectors_requested": [
+        "mcp",
+        "model",
+        "prompt",
+        "rag",
+        "registry",
+        "shadowscan",
+        "a2a",
+        "ide_agents"
+      ],
+      "collectors_completed": [
+        "mcp",
+        "model",
+        "prompt",
+        "rag",
+        "registry",
+        "shadowscan",
+        "a2a",
+        "ide_agents"
+      ],
+      "unobserved_surfaces": [
+        "runtime",
+        "effective-identity",
+        "effective-authorization",
+        "live-tools",
+        "network"
+      ],
+      "exclusions": [
+        "**/.git",
+        "**/.venv",
+        "**/__pycache__",
+        "**/node_modules",
+        "**/venv",
+        ".git",
+        ".venv",
+        "__pycache__",
+        "node_modules"
+      ],
+      "source_unmapped_count": 0,
+      "source_unmapped_indexes": [],
+      "scanner_status": {
+        "shadowscan": "complete",
+        "mcp": "complete",
+        "model": "complete",
+        "prompt": "complete",
+        "rag": "complete",
+        "registry": "complete",
+        "a2a": "complete",
+        "ide_agents": "complete"
+      }
+    },
+    "policy_source": "built-in",
+    "policy_weakened": []
+  },
+  "components": [
+    {
+      "bom_ref": "mcp-server:146dd7ec16be91c2b267497bf940d8fa6b2d58909b7e2c15c0dd30d10c7a3a3c",
+      "component_type": "mcp-server",
+      "name": "docs",
+      "version": "1.2.3",
+      "hashes": {},
+      "trust_tier": "third-party-unsigned",
+      "assurance_level": "declared",
+      "source_path": ".mcp.json",
+      "properties": {
+        "collection_mode": "static-config",
+        "launch_arguments_redacted": true,
+        "endpoint_credentials_omitted": false,
+        "declared_fields": [
+          "args",
+          "command"
+        ],
+        "launcher": "npx",
+        "packages": [
+          {
+            "identity": "npm:docs-mcp",
+            "version": "1.2.3",
+            "pinned": true,
+            "pin": "version"
+          }
+        ],
+        "source_values_bound": false,
+        "static_config_hash": "sha256:5659d19baa044c9b34e518187103a4dc6ccd872bc0097bc90ce12070d2b580de",
+        "static_config_hash_profile": "nexus-symbiote/mcp-static-config/v3"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "mcp",
+          "locator": ".mcp.json",
+          "observed_at": "2026-11-12T11:41:20.826264Z",
+          "evidence_refs": []
+        }
+      },
+      "transport": "stdio",
+      "command": "npx",
+      "launcher_package": "npm:docs-mcp",
+      "package_url": "pkg:npm/docs-mcp@1.2.3",
+      "args": [
+        "***",
+        "***"
+      ],
+      "env": {},
+      "tool_count": 0,
+      "tool_refs": [],
+      "version_pinned": true,
+      "risks": [
+        {
+          "severity": "medium",
+          "category": "local_process",
+          "detail": "MCP server 'docs' uses stdio transport (local process).",
+          "recommendation": "Ensure the command binary is integrity-checked.",
+          "references": []
+        }
+      ]
+    },
+    {
+      "bom_ref": "mcp-client:claude-code",
+      "component_type": "mcp-client",
+      "name": "claude-code MCP client",
+      "hashes": {},
+      "trust_tier": "internal-unverified",
+      "assurance_level": "declared",
+      "source_path": ".mcp.json",
+      "properties": {
+        "collection_mode": "static-config",
+        "config_paths": [
+          ".mcp.json"
+        ]
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "mcp",
+          "locator": ".mcp.json",
+          "observed_at": "2026-11-12T11:41:20.826264Z",
+          "evidence_refs": []
+        }
+      },
+      "host_application": "claude-code",
+      "server_refs": [
+        "mcp-server:146dd7ec16be91c2b267497bf940d8fa6b2d58909b7e2c15c0dd30d10c7a3a3c"
+      ],
+      "config_path": ".mcp.json",
+      "risks": []
+    },
+    {
+      "bom_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "component_type": "agent",
+      "name": "repository",
+      "description": "Repository agent definition inferred from configuration",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "observed",
+      "properties": {
+        "identity_source": "repository-path",
+        "runtime_use": "unknown"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "repository-assembler",
+          "locator": ".",
+          "observed_at": "2026-11-12T11:41:20.826264Z",
+          "evidence_refs": []
+        },
+        "deployment": {
+          "assurance": "declared",
+          "method": "not-collected",
+          "scope": "runtime",
+          "evidence_refs": [],
+          "unknown_reason": "Repository scan cannot identify a running workload"
+        }
+      },
+      "deployment_status": "unknown",
+      "data_refs": [],
+      "skill_refs": [],
+      "model_refs": [],
+      "tool_refs": [
+        "mcp-server:146dd7ec16be91c2b267497bf940d8fa6b2d58909b7e2c15c0dd30d10c7a3a3c"
+      ],
+      "memory_refs": [],
+      "prompt_refs": [],
+      "guardrail_refs": [],
+      "sub_agent_refs": [],
+      "authorizations": [],
+      "risks": [],
+      "autonomy_level": null
+    }
+  ],
+  "dependencies": [
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "mcp-server:146dd7ec16be91c2b267497bf940d8fa6b2d58909b7e2c15c0dd30d10c7a3a3c",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "mcp-client:claude-code",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    }
+  ]
+}

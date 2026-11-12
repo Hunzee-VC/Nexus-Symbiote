@@ -84,25 +84,35 @@ The pre-commit hooks add their arguments after the command, so set
 | `model-total-bytes` | 256 GiB | 16384 GiB | All bytes the model collector reads, weights and model configuration included; `validate --project` reads a model's bound weight files within the same amount. `validate` charges every artifact it reads to six times this limit, so a supplied inventory cannot multiply the work of the scan behind it. | That file is recorded without a hash; later files are hashed only while they fit in what remains. In `validate`, what does not fit is reported as not checked. |
 | `source-scan-bytes` | 64 MiB | 64 GiB | Source text one collector reads while it looks for references, counted for each collector separately: the Python, TypeScript and JavaScript files the mcp collector searches for SDK and agent framework references, and the Python files the a2a and rag collectors search for SDK and vector-store imports. How many files a project has does not matter. | One failure names the file being read when the budget ran out and says the rest were not read; nothing after it is searched. The mcp collector refuses a single file larger than the whole budget as a failure of its own, without spending the budget. |
 | `syntax-bytes` | 256 KiB | 64 MiB | One file containing an MCP SDK or agent framework reference that the mcp collector parses. | That file is not parsed. |
-| `ts-nodes` | 20000 | 10000000 | Syntax nodes in one TypeScript MCP server file. | That file is not collected. |
+| `ts-nodes` | 20000 | 10000000 | Syntax nodes in one TypeScript or JavaScript file the mcp collector parses for MCP servers and client transports. | That file is not collected. |
+| `python-nodes` | 200000 | 10000000 | Syntax nodes in one Python file the mcp collector parses for MCP servers, clients and agent tools, counted as the Python that runs the scan parses the file. | That file is not collected. |
+| `import-lookups` | 5000 | 1000000 | Memory files whose `@path` imports the prompt collector follows, and distinct import targets it looks up, together in one collection. A monorepo of 2,000 packages whose `CLAUDE.md` files each import three shared documents uses 2,003. | The imports of the file being followed, and of every file after it, are not inventoried. |
 
 ### Source files the mcp collector searches
 
-The mcp collector searches Python, TypeScript and JavaScript files at any depth
+The mcp collector searches Python files and TypeScript and JavaScript files
+(`.ts`, `.mts`, `.cts`, `.tsx`, `.js`, `.mjs`, `.cjs` and `.jsx`) at any depth
 outside directories named `tests`, `test`, `dist`, `build`, `docs`, `benchmarks`
-and `examples` (and `__tests__` for TypeScript servers), other than `.d.ts`,
-`.spec.ts`, `.test.ts`, `.spec.js` and `.test.js` files, root files first. Each is
-read as a stream under `source-scan-bytes`, in the text the language's own tools
-read, and only candidates are parsed:
+and `examples` (and `__tests__` for TypeScript and JavaScript servers), other than
+declaration files (`.d.ts`, `.d.mts`, `.d.cts`) and scripts named with `.spec.` or
+`.test.` before their suffix, root files first. Each is read as a stream under
+`source-scan-bytes`, in the text the language's own tools read, and only
+candidates are parsed:
 
-- A Python file is a candidate when it contains `mcp`, `MCPClient` or the name of
+- A Python file is a candidate when it contains `mcp`, `MCPClient`, `MCPServer`,
+  `FastMCP`, `StdioServerParameters`, `sse_client`, `streamablehttp_client`,
+  `websocket_client` or the name of
   an agent framework whose tools are collected (`langchain`, `crewai`,
   `function_tool`, `smolagents`, `pydantic_ai`) as Python reads it: decoded as its
   encoding declaration says, with identifiers in the NFKC form Python compares them
   in, so fullwidth or other compatibility letters count.
-- A TypeScript server file is a candidate when it contains both
-  `@modelcontextprotocol/` and `McpServer`, and a TypeScript or JavaScript file is
-  a client reference candidate when it contains `@modelcontextprotocol/sdk`. A
+- A TypeScript or JavaScript file is a server candidate when it contains
+  `@modelcontextprotocol/` with `McpServer` or `ClientTransport`, or names a server
+  or client module (it contains `@modelcontextprotocol/sdk/server`,
+  `@modelcontextprotocol/sdk/client`, `@modelcontextprotocol/sdk/dist` or
+  `@modelcontextprotocol/sdk@`, or `@modelcontextprotocol/server` or
+  `@modelcontextprotocol/client` followed by a quote, `/` or `@`), and a client
+  reference candidate when it contains `@modelcontextprotocol/sdk`. A
   TypeScript or JavaScript file that starts with a UTF-16 byte order mark is
   searched and parsed as UTF-16, as tsc and web browsers read it (bun reads only
   the little-endian form); any other is read as UTF-8, as tsc, Node.js and bun
@@ -132,9 +142,11 @@ These are failures rather than silent skips:
   valid UTF-8, as in earlier releases (`invalid UTF-8`), and a candidate that is
   not valid in its encoding (`invalid UTF-8` or `invalid UTF-16`). tsc would read
   such a file with replacement characters, but another runtime could decode it
-  differently. A TypeScript file below the root that is not a candidate is not
-  checked for valid UTF-8, as before.
+  differently. Another script that is not a candidate, below the root or with
+  another suffix, is not checked for valid UTF-8.
 - A candidate larger than `syntax-bytes`, which is not parsed.
+- A Python candidate with more syntax nodes than `python-nodes`, which is parsed
+  but not analysed.
 - A source file larger than `file-bytes` that is a candidate, or that is a Python
   file that is not plain ASCII, because its NFKC form cannot be searched without
   holding it.
@@ -150,14 +162,17 @@ or bundles, are searched as a stream and pass.
 
 An import of the Python MCP server SDK, or of an agent framework's tool decorator
 or agent class, spelled only with compatibility characters is recorded as a gap,
-because its servers and tools are not collected. Only files
+because its servers and tools are not collected. So are a dynamic import whose
+literal arguments name an MCP module, an MCP server that application code starts
+or reaches, and the forms of the TypeScript SDK that the
+[TypeScript inventory](typescript-inventory.md#gaps) lists as gaps. Only files
 whose parse produced a component, a gap or a failure are listed under
 `surfaces_scanned`, so adding an unrelated source file does not change the
 inventory.
 
 ## Why these defaults
 
-Most defaults are the values earlier releases used. Four changed because
+Most defaults are the values earlier releases used. Five changed because
 ordinary projects exceeded them:
 
 - `entries` was 20,000. Mid-size monorepos, and working trees with tool caches
@@ -177,6 +192,17 @@ ordinary projects exceeded them:
   projects failed. A file count says nothing about cost: source collection is now
   bounded by the text read, 64 MiB for each collector under `source-scan-bytes`,
   and the mcp collector parses only candidates.
+- `python-nodes` was a fixed bound of 20,000 syntax nodes that could be neither
+  seen in this table nor raised, so an ordinary module that mentions `mcp` failed
+  the gates; this repository's own `scanners/registry.py` is one such module.
+  Real code has about 0.12 nodes per byte, and at most about 0.45. Of some 7,500
+  modules (the Python 3.13 standard library, the packages of a development
+  environment and this repository), the largest that fits within `syntax-bytes`
+  has 55,456 nodes, and the largest of any size 95,753. Every analysis of a parsed
+  file is linear in its nodes and runs only within the limit; `syntax-bytes` bounds
+  the parse itself, which comes first. On one 2.1 GHz server core, a hostile
+  256 KiB file took half a second and at most 240 MiB of memory to parse, and a
+  file just within 200,000 nodes about a second to parse and analyse.
 
 Hashing a 256 GiB model directory takes several minutes; keep a job timeout, as
 the [README](../README.md) recommends.
@@ -185,14 +211,16 @@ the [README](../README.md) recommends.
 
 These bounds protect a format or the inventory rather than size a project, so
 they are not operator settings. Reaching one is also a scan failure or a refusal
-that names the file, except the listing bound in the first row, which only
-shortens a list of failures that are recorded anyway.
+that names the file, except the listing bounds in the first two rows, which only
+shorten lists whose content is recorded or bound anyway.
 
 | Bound | Value |
 |---|---|
 | Failures one collector lists from its walks, and from the mcp collector's source search, before one line for each reason sums up the rest | 1,000 lines or 65,536 characters |
+| Paths the prompt collector lists in the `imports` and `imported_by` properties of one collection; past it a list is replaced by `imports_count` and `imports_digest`, or by `imported_by_count`, which is not a failure because every imported file is still inventoried and the digest binds what each file imports | 262,144 characters |
+| `@path` import references in one memory or imported file | 1,000 |
 | Codec name in a Python encoding declaration | 64 characters |
-| MCP tool registrations in one TypeScript file | 1,000 |
+| MCP tool registrations in one TypeScript or JavaScript file | 1,000 |
 | TypeScript native parse time per file | 250 ms, in proportion to `syntax-bytes` above its default |
 | TypeScript analysis time per file | 2 s, in proportion to `ts-nodes` above its default |
 | Native inventories and ShadowScan reports read by any command | 16 MiB |

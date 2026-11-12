@@ -13,15 +13,20 @@ from nexus_symbiote.utils.files import OutputRefusedError, write_output_file
 
 # C0/C1 controls move the cursor or rewrite earlier output; bidirectional and
 # invisible format characters (every Unicode format character, category Cf, as of
-# Unicode 15.1) disguise text. Inventory and checkout data may contain any of them.
+# Unicode 15.1) disguise text, and so does every other default-ignorable code point
+# (Default_Ignorable_Code_Point, assigned or not), which renders as nothing or as a
+# blank: variation selectors, which encode hidden bytes as U+E0100 + b, Hangul and
+# Khmer fillers, the combining grapheme joiner and U+2065, U+FFF0 to U+FFF8 and
+# U+E0000 to U+E0FFF. Inventory and checkout data may contain any of them.
 # Line breaks are included: a file name or component name containing one could
 # forge whole output lines, and in CI a line starting with "::" is a workflow command.
 # Such text must not start a line either; safe_line() gives every line a fixed prefix.
 UNSAFE_TEXT = re.compile(
-    r"[\x00-\x08\x0a-\x1f\x7f-\x9f­؀-؅؜۝܏࢐࢑࣢"
-    r"᠎​-‏  ‪-‮⁠-⁤⁦-⁯﻿"
-    r"￹-￻\U000110bd\U000110cd\U00013430-\U0001343f\U0001bca0-\U0001bca3"
-    r"\U0001d173-\U0001d17a\U000e0001\U000e0020-\U000e007f]"
+    r"[\x00-\x08\x0a-\x1f\x7f-\x9f\xad\u034f\u0600-\u0605\u061c\u06dd\u070f\u0890\u0891"
+    r"\u08e2\u115f\u1160\u17b4\u17b5\u180b-\u180f\u200b-\u200f\u2028\u2029\u202a-\u202e"
+    r"\u2060-\u206f\u3164\ufe00-\ufe0f\ufeff\uffa0\ufff0-\ufff8\ufff9-\ufffb\U000110bd"
+    r"\U000110cd\U00013430-\U0001343f\U0001bca0-\U0001bca3\U0001d173-\U0001d17a"
+    r"\U000e0000-\U000e0fff]"
 )
 
 OUTPUT_REFUSED = (

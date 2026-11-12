@@ -20,8 +20,9 @@ from click.testing import CliRunner
 from nexus_symbiote import modes
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
+from nexus_symbiote.core.canonical import NAMESPACE
 from nexus_symbiote.core.models import CompletenessClaim, ToolComponent
-from nexus_symbiote.generators._common import BUILTIN_EXCLUSIONS, NAMESPACE, coverage_aggregate
+from nexus_symbiote.generators._common import BUILTIN_EXCLUSIONS, coverage_aggregate
 from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
 from nexus_symbiote.generators.spdx import SPDXGenerator
 from nexus_symbiote.generators.validation import validate_cyclonedx, validate_spdx
@@ -53,6 +54,7 @@ IMPORTED_MARKERS: dict[str, Any] = {
     "source_projection_limitations": ["unmapped entries are not represented"],
     "source_unmapped_count": 1,
     "source_unmapped_indexes": [0],
+    "source_report_path": "reports/shadowscan.json",
 }
 SCAN_CONDITION = "runtime use and authority unobserved"
 APPROVAL = "only after a human approves the call"

@@ -58,13 +58,13 @@ output:
 | --- | --- | --- |
 | `version` | `"1.0"` | Policy format version. Only `"1.0"` exists. |
 | `scan.scanners` | all eight collectors | Collectors `scan` runs. A collector left out is recorded as `unknown`, which leaves coverage partial, so the scan and risk gates fail; a subset is reported as weakened. `--scanner` overrides it for one run. |
-| `scan.exclude_paths` | `node_modules`, `.git`, `__pycache__`, `.venv` | Root-relative paths not collected. Directories named `.git`, `node_modules`, `__pycache__`, `.venv` or `venv` are always skipped whatever this list says, so the defaults change nothing. Any other entry that matches a file is recorded under `surfaces_excluded`: coverage becomes partial and the scan, validate and risk gates fail. Extra entries are reported as weakened. Absolute paths and `..` are refused. |
+| `scan.exclude_paths` | `node_modules`, `.git`, `__pycache__`, `.venv` | Root-relative paths not collected. Directories named `.git`, `node_modules`, `__pycache__`, `.venv` or `venv` are always skipped whatever this list says, so the defaults change nothing; inside a skill, command, rule or subagent directory such a name is a coverage gap. Any other entry that matches a file is recorded under `surfaces_excluded`: coverage becomes partial and the scan, validate and risk gates fail. Extra entries are reported as weakened. Absolute paths and `..` are refused. |
 | `scan.failure_mode` | `error` | `report-only` makes `scan` exit 0 whatever its gate says, like `--report-only`. Reported as weakened. |
 | `risk.fail_threshold` | `50.0` | The risk gate fails when the aggregate score (critical 10, high 7, medium 4, low 1, uncapped) reaches it. Must be positive. A higher value is reported as weakened. `risk --threshold` overrides it. |
 | `risk.warn_threshold` | `25.0`, or `fail_threshold` when that is lower | At or above it, `risk_level` is `high` instead of `moderate`, `warning_threshold_exceeded` is true and `scan` prints a risk warning. It never fails a gate. It may not exceed `fail_threshold`. A higher value is reported as weakened. |
 | `risk.fail_on_severity` | `critical` | The risk gate fails on any finding at or above this severity: `critical`, `high`, `medium`, `low` or `info`. `none` disables the severity check and is reported as weakened. `risk --fail-on-severity` overrides it. |
 | `risk.ignore_categories` | `[]` | Every finding of these exact category names, on every component, is left out of the score and the gates, and counted as `ignored_findings`. Prefer a [suppression](#suppressions). Reported as weakened. |
-| `risk.suppressions` | `[]` | Accept one finding category on one component; see [Suppressions](#suppressions). Each entry is reported as weakened. |
+| `risk.suppressions` | `[]` | Accept one reviewed finding on one component; see [Suppressions](#suppressions). Each entry is reported as weakened. |
 | `validate.require_completeness` | `true` | `false` skips the completeness check, including reconciliation with `--project`, in `validate`. `risk --project` reconciles regardless. Reported as weakened. |
 | `validate.require_integrity` | `true` | `false` skips the integrity check in `validate`. Reported as weakened. |
 | `validate.minimum_assurance_level` | `declared` | `observed` makes `validate` fail unless every component is observed composition: its identity was measured from bytes (a weight, instruction, skill or static tool-descriptor digest), or a named collector observed it in the repository. Components that rest only on a supplier's or a discovery report's declaration, such as hosted-model aliases from `agent.yaml`, fail it; imported discovery claims that reconciliation bound to the local report are exempt. `verified` always fails, because offline validation cannot establish it. |
@@ -81,13 +81,14 @@ A name that matches no finding is accepted and has no effect.
 
 ## Suppressions
 
-A suppression accepts one known false positive without switching off a whole category or gate:
+A suppression accepts one known false positive without switching off a whole category or gate. It names the finding as it was reviewed, by its fingerprint, so it stops applying when the finding, or the content it was found in, changes:
 
 ```yaml
 risk:
   suppressions:
     - component_ref: "model:fixtures/firmware.bin"
       category: "serialization_format"
+      fingerprint: "sha256:<the 64 hex digits risk printed for the finding>"
       reason: "Test fixture, never loaded by the agent"
       owner: "security@example.com"
       expires: 2027-01-31
@@ -97,17 +98,19 @@ risk:
 | --- | --- |
 | `component_ref` | The finding's exact `component_ref`, as `risk --json-output` prints it. No wildcards: `*` is refused. |
 | `category` | The finding's exact category. |
+| `fingerprint` | The finding's `fingerprint`, as `risk --json-output` prints it, or as human-readable `risk` prints it under each top finding: `sha256:` and 64 lowercase hex digits. Required. |
 | `reason` | Why the finding is acceptable. Required. |
 | `owner` | Who is accountable for the acceptance. Required. |
 | `expires` | A calendar date, `YYYY-MM-DD`, quoted or not. Required: there are no permanent suppressions. |
 
-Each component and category pair may appear once. A malformed entry makes the policy invalid, so every command fails and names the setting.
+The fingerprint is a SHA-256 digest of the ASCII JSON, with sorted keys and no whitespace, of the finding's `component_ref`, `category`, `severity` and `detail`, and of the component's content digest when the inventory records one: a prompt's or dataset's `content_hash`, a tool's `definition_hash`, an MCP server's `schema_hash`, or otherwise the `sha256` entry of its `hashes`, such as a model weight or skill file. Collectors report each category once per component and put the count, not the content, in the detail, so the content digest is what ties the entry to the bytes that were reviewed: a prompt with one bidirectional override and the same prompt with 31 have different fingerprints, and so does a prompt whose single override now sits in a different instruction. Any change to those bytes, even one unrelated to the finding, retires the entry, and so does the same detail at a new severity. A component without a content digest, such as one whose finding comes from configuration, is bound by its detail alone. Each finding may be suppressed once; a component and category with several findings needs one entry per finding. A malformed entry makes the policy invalid, so every command fails and names the setting.
 
 How a suppression applies:
 
-- A finding whose component reference and category both match an entry that has not expired is left out of the score, the severity counts and every gate, including `fail_on_severity`. It is listed under `suppressed_findings` in `risk --json-output` with its severity, reason, owner and expiry, and human-readable `risk` prints how many findings were suppressed.
+- A finding whose component reference, category and fingerprint all match an entry that has not expired is left out of the score, the severity counts and every gate, including `fail_on_severity`. It is listed under `suppressed_findings` in `risk --json-output` with its severity, fingerprint, reason, owner and expiry, and human-readable `risk` prints how many findings were suppressed.
 - The same category on any other component still counts.
 - An entry expires at the end of its `expires` date (UTC). An expired entry suppresses nothing and fails the risk gate with the reason `suppression of CATEGORY on REF expired on DATE` until it is renewed or removed; it is listed under `suppressions_expired`.
+- An entry whose component and category still have a finding, but none with its fingerprint, suppresses nothing: the finding, or the content it was found in, changed after it was reviewed, and it counts again. The entry is listed under `suppressions_stale` with the `current_fingerprints` of those findings, and human-readable `risk` prints `suppression no longer matches: CATEGORY on REF`. Review the finding again before you copy its new fingerprint.
 - An entry that matched no finding is listed under `suppressions_unused`.
 - `--no-project-policy` ignores all suppressions, and `baseline` re-gates with the built-in policy, so a suppression cannot promote a baseline.
 
@@ -121,7 +124,7 @@ How a suppression applies:
 | `risk.fail_on_severity=none` | the severity check is switched off |
 | `risk.fail_threshold=VALUE`, `risk.warn_threshold=VALUE` | raised above the built-in value |
 | `risk.ignore_categories=NAMES` | any category is ignored |
-| `risk.suppressions: CATEGORY on REF until DATE (owner OWNER)` | once per suppression |
+| `risk.suppressions: CATEGORY on REF (FINGERPRINT) until DATE (owner OWNER)` | once per suppression |
 | `scan.failure_mode=report-only` | collection failures never fail `scan` |
 | `scan.scanners=NAMES` | fewer collectors than the built-in set |
 | `scan.exclude_paths=PATHS` | paths beyond the four defaults |
@@ -148,5 +151,6 @@ Stricter values, such as a lower threshold or `fail_on_severity: high`, are not 
 | `invalid or unsupported settings: risk (warn_threshold cannot exceed fail_threshold)` | Both thresholds are set and the warning threshold is the higher one. |
 | `invalid or unsupported settings: version` | `version: 1.0` without quotes. |
 | `invalid or unsupported settings: risk.suppressions.0.expires` | A date that is not `YYYY-MM-DD`, or a date with a time. |
+| `invalid or unsupported settings: risk.suppressions.0.fingerprint` | The entry has no fingerprint, as suppressions written before fingerprints were required do not, or it is not `sha256:` and 64 lowercase hex digits. Copy it from the finding in `risk --json-output`. |
 | `both .nexus-symbiote.yaml and .nexus-symbiote.yml exist` | Remove one of the two files. |
 | `Scan gate failed` after adding `exclude_paths` | Any matched exclusion beyond the defaults is a coverage gap. |

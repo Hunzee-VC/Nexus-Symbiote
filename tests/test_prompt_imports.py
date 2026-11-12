@@ -4,7 +4,6 @@ byte limit of a streamed skill asset."""
 from __future__ import annotations
 
 import os
-import re
 import string
 import subprocess
 import sys
@@ -22,9 +21,9 @@ from nexus_symbiote.scanners.prompt import PromptScanner
 
 RLO = "‮"
 OUTSIDE = "imports a file outside the project root, which is not inventoried"
-RECORDING = re.compile(
-    r"(?P<path>.+): @path import references exceed the inventory's recording limit of "
-    r"262144 path characters; (?P<unlisted>\d+) are counted but not listed"
+LOOKUPS = (
+    "@path imports past this file are not inventoried; import-lookups limit of 40 exceeded; "
+    "raise it with --limit import-lookups=N"
 )
 # Fifteen 200-byte directory names: a rule file's path is 3,031 bytes.
 DEEP = "/".join([".claude/rules", *(letter * 200 for letter in "abcdefghijklmno")])
@@ -155,16 +154,17 @@ def test_a_nested_memory_file_that_the_root_imports_is_followed_once(tmp_path):
     ]
 
 
-def test_nested_memory_files_count_against_the_import_lookup_cap(tmp_path, monkeypatch):
-    monkeypatch.setattr(prompt, "_MAX_IMPORT_LOOKUPS", 40)
+def _lookups(limit: int = 40):
+    return limits.applied(limits.resolve([f"import-lookups={limit}"], {}))
+
+
+def test_nested_memory_files_count_against_the_import_lookup_cap(tmp_path):
     for index in range(30):
         _write(tmp_path, f"pkg{index:02d}/CLAUDE.md", "See @notes.md")
-    result = PromptScanner().scan(tmp_path)
+    with _lookups():
+        result = PromptScanner().scan(tmp_path)
     # Each memory file followed counts once, and so does each target looked up.
-    assert result.scan_failures == [
-        "pkg20/CLAUDE.md: more than 40 distinct @path imports in the project; "
-        "the rest are not inventoried"
-    ]
+    assert result.scan_failures == [f"pkg20/CLAUDE.md: {LOOKUPS}"]
 
 
 def _fan(root: Path, files: int, imports: int) -> None:
@@ -176,18 +176,14 @@ def _fan(root: Path, files: int, imports: int) -> None:
     _write(root, "CLAUDE.md", " ".join(f"@.claude/rules/{name}" for name in names))
 
 
-def test_followed_files_count_against_the_import_lookup_cap(tmp_path, monkeypatch):
-    monkeypatch.setattr(prompt, "_MAX_IMPORT_LOOKUPS", 40)
+def test_followed_files_count_against_the_import_lookup_cap(tmp_path):
     _fan(tmp_path, files=100, imports=3)
-    result = PromptScanner().scan(tmp_path)
-    assert result.scan_failures == [
-        ".claude/rules/039: more than 40 distinct @path imports in the project; "
-        "the rest are not inventoried"
-    ]
+    with _lookups():
+        result = PromptScanner().scan(tmp_path)
+    assert result.scan_failures == [f".claude/rules/039: {LOOKUPS}"]
 
 
 def test_references_resolved_stay_within_the_import_lookup_cap(tmp_path, monkeypatch):
-    monkeypatch.setattr(prompt, "_MAX_IMPORT_LOOKUPS", 40)
     original = prompt._resolve_import
     resolved = []
 
@@ -200,7 +196,8 @@ def test_references_resolved_stay_within_the_import_lookup_cap(tmp_path, monkeyp
     for files in (100, 200, 400):
         _fan(tmp_path / str(files), files, imports=50)
         resolved.clear()
-        PromptScanner().scan(tmp_path / str(files))
+        with _lookups():
+            PromptScanner().scan(tmp_path / str(files))
         work[files] = len(resolved)
     # Only the root file's own references grow with the project: the rule files
     # followed, and so the references they resolve, stop at the cap.
@@ -256,14 +253,12 @@ def test_import_references_listed_stay_within_the_recording_bounds(tmp_path, sha
         if key in component.properties
     ]
     assert sum(len(path) for listed in lists for path in listed) <= 256 * 1024
-    assert not result.surfaces_excluded
-    [failure] = result.scan_failures
-    match = RECORDING.fullmatch(failure)
-    assert match, failure
+    # Counted lists lose no coverage, so they are neither a gap nor a failure.
+    assert not result.surfaces_excluded and not result.scan_failures
     # Every reference is listed or counted, and each list is complete or absent.
     edges = _references(result, "imports")
     assert edges == _references(result, "imported_by")
-    assert int(match["unlisted"]) == 2 * edges - sum(len(listed) for listed in lists)
+    assert 2 * edges > sum(len(listed) for listed in lists)
     for component in result.components:
         properties = component.properties
         assert not ("imports" in properties and "imports_count" in properties)
@@ -274,7 +269,7 @@ def test_import_references_listed_stay_within_the_recording_bounds(tmp_path, sha
     loaded = {component.bom_ref for component in AIBOM.load(output).components}
     assert set(_components(result)) <= loaded
     exported = tmp_path / "bom.cdx.json"
-    assert _scan(project, exported, "-f", "cyclonedx").exit_code == 1
+    assert _scan(project, exported, "-f", "cyclonedx").exit_code == 0
     # Each file's own path is exported several times; its references no longer are.
     # Before the bound, 50 of the long-path files exported 33 MB and 100 of them 161 MB.
     assert exported.stat().st_size < 8 * limits.MIB
@@ -377,7 +372,8 @@ def test_what_is_listed_past_the_bound_does_not_depend_on_hash_order(tmp_path):
         for seed in ("1", "2", "3")
     }
     assert len(outputs) == 1
-    assert "are counted but not listed" in outputs.pop()
+    (only,) = outputs
+    assert "imported_by_count" in only
 
 
 def test_scan_memory_grows_with_the_files_not_with_the_paths_they_reference(tmp_path):
@@ -496,3 +492,54 @@ def test_cli_names_total_bytes_for_a_skill_asset_larger_than_it(tmp_path):
         "--limit total-bytes=N"
     ) in run.output
     assert "file-bytes limit" not in run.output
+
+
+def _monorepo(root: Path, packages: int) -> list[str]:
+    """``packages`` packages with long names, each CLAUDE.md importing three shared docs."""
+    names = [f"packages/{index:04d}-{'service' * 16}" for index in range(packages)]
+    for name in names:
+        _write(
+            root,
+            f"{name}/CLAUDE.md",
+            "@../../docs/style.md\n@../../docs/security.md\n@../../docs/testing.md\n",
+        )
+    for doc in ("style", "security", "testing"):
+        _write(root, f"docs/{doc}.md", "Shared rules.\n")
+    return names
+
+
+def test_a_monorepo_whose_import_lists_overflow_the_recording_bound_passes(tmp_path):
+    names = _monorepo(tmp_path, 800)
+    result = PromptScanner().scan(tmp_path)
+    # Every file is inventoried and each importer lists or digests what it imports, so
+    # the counted lists cost no coverage and fail no gate.
+    assert not result.scan_failures and not result.surfaces_excluded
+    components = _components(result)
+    for doc in ("style", "security", "testing"):
+        shared = components[f"prompt:import:docs/{doc}.md"].properties
+        assert len(shared.get("imported_by", ())) + shared.get("imported_by_count", 0) == 800
+    assert any("imported_by_count" in c.properties for c in result.components)
+    assert {f"prompt:{name}/CLAUDE.md" for name in names} <= set(components)
+    assert _scan(tmp_path, tmp_path.parent / "monorepo.json").exit_code == 0
+
+
+def test_the_import_lookup_limit_names_itself_and_how_to_raise_it(tmp_path):
+    _monorepo(tmp_path, 60)
+    with limits.applied(limits.resolve(["import-lookups=40"], {})):
+        result = PromptScanner().scan(tmp_path)
+    [failure] = result.scan_failures
+    assert failure.endswith(
+        "/CLAUDE.md: @path imports past this file are not inventoried; import-lookups "
+        "limit of 40 exceeded; raise it with --limit import-lookups=N"
+    )
+    with limits.applied(limits.resolve(["import-lookups=63"], {})):
+        assert not PromptScanner().scan(tmp_path).scan_failures
+    run = CliRunner().invoke(
+        main,
+        [
+            *("--limit", "import-lookups=40", "scan", str(tmp_path), "--no-project-policy"),
+            *("--scanner", "prompt", "--check"),
+        ],
+    )
+    assert run.exit_code == 1, run.output
+    assert "raise it with --limit import-lookups=N" in run.output

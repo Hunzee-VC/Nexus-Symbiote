@@ -167,7 +167,14 @@ def test_cli_rejects_forged_discovery_projection_in_combined_bom(tmp_path, edit)
     runner = CliRunner()
     result = runner.invoke(main, ["scan", "--report-only", str(root), "-o", str(target)])
     assert result.exit_code == 0, result.output
-    args = ["validate", "--project", str(root), "--no-project-policy", str(target)]
+    args = [
+        "validate",
+        "--project",
+        str(root),
+        "--no-project-policy",
+        "--allow-unsigned-discovery",
+        str(target),
+    ]
     original = runner.invoke(main, args)
     assert original.exit_code == 0, original.output
     doc = json.loads(target.read_bytes())

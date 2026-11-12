@@ -45,7 +45,7 @@ fields call for one that its findings no longer carry, as in an edited inventory
 | `bidi_override` | critical | `prompt` | An instruction file contains bidirectional embedding, override or isolate characters, which can make text read differently from how it is processed. | Remove them. |
 | `capability_scope` | high or medium | `mcp` | A tool in a configuration's `tools` array declares destructive or financial side effects (high), or is declared read-only but named for a destructive operation (medium). | Require human approval for destructive operations; verify the tool's effects before relying on `readOnlyHint`. |
 | `code_execution` | critical | `model`, `risk` | A model configuration sets `trust_remote_code: true`, so loading the model runs code from its repository. | Audit that code, or use a model that does not need it. |
-| `completeness` | medium or low | `mcp`, `a2a`, `rag` | Low: values that only the binding key binds, so their changes cannot raise a drift alert, or an A2A card that declares no skills. Medium: MCP identity fields withheld because credential values occur in them. | Set `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` for every scan and baseline ([source binding](verification-source-binding.md)); keep credentials out of names, hosts and package references. |
+| `completeness` | medium or low | `mcp`, `a2a`, `rag`, `ide_agents` | Low: values that only the binding key binds, so their changes cannot raise a drift alert, or an A2A card that declares no skills. Medium: MCP identity fields withheld because credential values occur in them. | Set `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` for every scan and baseline ([source binding](verification-source-binding.md)); keep credentials out of names, hosts and package references. |
 | `credential_helper` | medium | `ide_agents` | Claude Code settings declare `apiKeyHelper`, a command that runs to obtain credentials. | Review the command and approve its exact value. |
 | `custom_code` | high | `model` | A model's configuration declares custom code (`auto_map` or `custom_pipelines`), which loading runs under `trust_remote_code`. | Review the declared modules before loading; their digests are recorded, so a change raises a drift alert. |
 | `data_integrity` | high or medium | `rag` | A retrieval endpoint or connection without encryption (high), or a RAG source that declares no content filtering (medium). | Use authenticated encrypted transport; declare and review the ingestion and content controls. |
@@ -56,7 +56,7 @@ fields call for one that its findings no longer carry, as in an edited inventory
 | `hook_commands` | medium | `ide_agents` | Claude Code or Cursor settings declare hook commands that run automatically on agent events. | Review each hook and approve its exact value. |
 | `instruction_layering` | low | `ide_agents` | An IDE agent reads instructions from two locations: `CLAUDE.md` and `.claude/CLAUDE.md`, or `.cursorrules` and `.cursor/rules`. | Document the loading order and who may change each file. |
 | `invalid_safetensors` | high | `risk` | A model recorded as SafeTensors has no established structural safety: its header is malformed, over the inspection limit, or was not inspected. The risk gate fails at any score. | Replace the file with a SafeTensors file that validates, then collect again. |
-| `invisible_characters` | high | `prompt` | An instruction file contains invisible format characters, variation selectors or blank fillers other than bidirectional controls, directional marks and tag characters. | Remove them, or document why each one is there. |
+| `invisible_characters` | high | `prompt` | An instruction file contains invisible format characters, variation selectors, blank fillers or the unassigned default-ignorable code points U+2065 and U+FFF0 to U+FFF8, other than bidirectional controls, directional marks and tag characters. | Remove them, or document why each one is there. |
 | `launch_context` | high, medium or low | `mcp` | High: privileged mode, a container runtime socket or host root mount, disabled confinement, a host-level capability or a command-valued field. Medium: a host namespace, added capabilities, host devices, a broad host mount, or an option, variable or setting that loads local code. Low: a launch through a shell or wrapper. | Remove host-level privileges and code-loading options, or isolate the server; launch the executable directly. |
 | `launcher_identity` | high | `mcp` | The launched package and its pin cannot be established: an unclassified runner, inline code, a nested launch, or a package from git without a full commit, from a URL or from a local path. The server is also a coverage gap. | Launch a registry package pinned to an exact version, or an image pinned by digest, in a form the collector classifies ([known limitations](known-limitations.md#mcp-servers-and-tools)). |
 | `local_process` | medium | `mcp` | An MCP server runs as a local process whose executable the inventory does not verify. | Check the executable's integrity, for example with `verify-live` and a pinned launch policy. |
@@ -72,13 +72,13 @@ fields call for one that its findings no longer carry, as in an edited inventory
 | `plugin_sources` | low | `ide_agents` | Claude Code settings enable plugins or register plugin marketplaces, which can add commands, agents, hooks and MCP servers. | Review each plugin and marketplace, and approve the exact value. |
 | `prompt_size` | medium | `prompt` | An instruction file is larger than 50,000 bytes, which makes review for injected text harder. | Remove unnecessary content. |
 | `rag_discovery` | info | `rag` | A vector store library is imported in Python code, or a vector store is named by environment variable names, without a declared configuration. | Document whether the deployment uses it. |
-| `registry_origin` | low | `registry` | An npm package is resolved from a registry other than the default one. | Confirm that the registry is intended and trusted for the package. |
-| `serialization_format` | critical | `model`, `risk` | A model file's format or loader can execute code, such as a pickle-based format, or a GGUF chat template reaches Python internals. | Convert the weights to SafeTensors; remove or replace the template ([model integrity](model-integrity.md)). |
+| `registry_origin` | low | `registry` | An npm lockfile record resolves the package from a registry other than the default one, or a project setting, such as `registry=` in `.npmrc` or `--index-url` in a requirements file, can send an npm or PyPI package to another registry or index, which leaves the package without a package URL; see [registry and index settings](registry-collector.md#registry-and-index-settings). | Confirm that the registry or index is intended and trusted for the package, and pin artifact digests or integrity hashes. |
+| `serialization_format` | critical | `model`, `risk` | A model file's format or loader can execute code, such as a pickle-based format, or a chat template, embedded in a GGUF file or configured in the model's directory, reaches Python internals. | Convert the weights to SafeTensors; remove or replace the template ([model integrity](model-integrity.md)). |
 | `serialization_format_unknown` | high | `model` | The safety of a model file's format or loader could not be established: a format without a structural validator, such as ONNX or GGUF, or a SafeTensors file that does not validate. | Validate the container and the loader that will read it before admission. |
 | `shadowscan-heuristic` | the report's rating | `shadowscan` | An imported ShadowScan report rated the component. The rating is a heuristic, not a verified vulnerability. | Review the source evidence in the report. |
 | `shadowscan-inventory-unmatched` | info | `shadowscan` | The ShadowScan report found no matching entry in the inventory it was given; authorization is not established. | Reconcile the report's scope with the finding. |
 | `signing_status` | high | `model` | Not every weight file of a model is Sigstore-signed or digest-pinned in the operator's signer policy. | Pin the SHA-256 of every weight file, or sign each one with a Sigstore message signature, in a [signer policy](model-integrity.md#operator-signature-policy). |
-| `tag_characters` | critical | `prompt` | An instruction file contains Unicode tag characters (U+E0000 to U+E007F) outside a flag emoji, a known way to hide prompt text. | Remove them. |
+| `tag_characters` | critical | `prompt` | An instruction file contains Unicode tag characters (U+E0000 to U+E007F) outside a flag emoji, a known way to hide prompt text, or unassigned default-ignorable code points of plane 14 (U+E0080 to U+E00FF, U+E01F0 to U+E0FFF), which can hide text the same way. | Remove them. |
 | `transport_ambiguity` | low | `mcp` | An MCP server declares both a launch command and an endpoint. | Declare one of the two, and an explicit transport type. |
 | `transport_security` | high or low | `mcp`, `a2a`, `rag` | An MCP or A2A endpoint without HTTPS, or an MCP endpoint URL that embeds credentials (high); a RAG locator whose transport is not shown to be encrypted (low). | Use authenticated HTTPS, and pass credentials in a header or an environment reference. |
 | `version_pinning` | high, medium or low | `mcp`, `registry` | A package or image without an exact version or digest: an unpinned MCP launcher package or an image with neither digest nor release tag (high), a nonexact npm or PyPI declaration (medium), or a PyPI pin that applies only under environment markers (low). | Pin an exact version or digest, and keep integrity evidence such as lockfile hashes. |
@@ -98,20 +98,29 @@ which characters count as hidden.
 - **Drift alerts** rate changes between two inventories. A finding added between
   them is one alert among others; [what the alerts mean](drift-gate.md#what-the-alerts-mean)
   rates every change `diff` reports.
+- **`trace-diff` results** compare traces with an inventory and are not written into
+  it: `risk` does not score them, and `ignore_categories` and suppressions do not
+  apply to them. Undeclared and unidentified items fail the trace gate of `trace-diff`
+  itself, and `--sarif` reports them under `runtime_undeclared`
+  ([trace evidence](trace-evidence.md#exit-codes-and-the-gate)).
+- **Risk classes, framework references and minimum-element statuses**, which `graph`,
+  `crosswalk` and `minimum-elements` report, are views of an inventory's records and
+  findings, not findings: no other gate reads them, and only
+  `minimum-elements --fail-under` gates on one of them.
 
 ## SARIF rules
 
 In SARIF output each finding's rule is `nexus_symbiote/<category>/<severity>`, so a
 finding whose severity changes moves to another rule
 ([migration](fingerprint-migration.md#sarif-rule-identifiers)). Findings on
-components imported from a ShadowScan report are left out of SARIF. Of the 44
-categories, 23 have a rule in the catalog that
+components imported from a ShadowScan report are left out of SARIF. Every category
+on this page has a rule in the catalog that
 [standard exports](standard-exports.md#sarif-for-github-code-scanning) lists, with
-its title, CWE and OWASP tags. The other 21 have no catalog entry and get a generic
-rule titled after the category and tagged only `security`: `additional_directories`,
-`auto_approval`, `credential_helper`, `custom_code`, `directional_marks`,
-`endpoint_identity`, `hidden_markup`, `hook_commands`, `invalid_safetensors`,
-`launch_context`, `launcher_identity`, `lockfile_resolution_mismatch`,
-`lockfile_unread`, `mcp_auto_approval`, `missing_lockfile_integrity`,
-`nonregistry_source`, `package_alias`, `package_source`, `plugin_sources`,
-`registry_origin` and `transport_ambiguity`.
+its title and taxonomy tags, and so has `runtime_undeclared`, the category under which
+`trace-diff --sarif` writes a tool, model, agent or MCP endpoint that the agent's own
+telemetry reports and the inventory does not declare, or whose identifier cannot be
+read ([trace evidence](trace-evidence.md#sarif)). The
+[framework crosswalk](framework-crosswalk.md) gives the rationale for each tag and the
+category's EU AI Act and ISO/IEC 42001 references. A category outside the catalog,
+such as one that an edited inventory records, gets a generic rule titled after the
+category and tagged only `security`.

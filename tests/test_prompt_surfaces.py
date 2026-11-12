@@ -410,8 +410,8 @@ def test_import_lookups_are_capped_per_collection(tmp_path):
     _importing_tree(tmp_path, importers=6)
     result = PromptScanner().scan(tmp_path)
     assert result.scan_failures == [
-        "part4.md: more than 5000 distinct @path imports in the project; "
-        "the rest are not inventoried"
+        "part4.md: @path imports past this file are not inventoried; import-lookups limit "
+        "of 5000 exceeded; raise it with --limit import-lookups=N"
     ]
 
 
@@ -524,12 +524,8 @@ def test_import_bookkeeping_counts_every_importer_once_with_large_fan_in(tmp_pat
         assert imported["imported_by_count"] == 1001
         assert "imported_by" not in imported
     assert components["prompt:import:d/999"].properties["imports_count"] == 1000
-    unlisted = 2 * 1_001_000 - _listed_references(result)
-    [failure] = result.scan_failures
-    assert failure.endswith(
-        "@path import references exceed the inventory's recording limit of 262144 path "
-        f"characters; {unlisted} are counted but not listed"
-    )
+    assert _listed_references(result) < 2 * 1_001_000
+    assert not result.scan_failures
 
 
 def _listed_references(result) -> int:

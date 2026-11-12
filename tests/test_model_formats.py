@@ -350,6 +350,29 @@ def test_gguf_budget_is_shared():
         (b"{{ x.__class__ }}", True),
         (b"{{ x['__globals__'] }}", True),
         (b"{{ x|attr('a') }}", True),
+        # Jinja skips Unicode whitespace between tokens and decodes string escapes.
+        ("{{ ''.\u00a0__class__ }}".encode(), True),
+        ("{{ ''.\u3000__class__ }}".encode(), True),
+        (b"{{ ''.\x1c__class__ }}", True),
+        ("{{ ''[\u00a0'__class__'] }}".encode(), True),
+        ("{{ ''|attr\u00a0('__class__') }}".encode(), True),
+        (b"{{ ''['\\x5f\\x5fclass\\x5f\\x5f'] }}", True),
+        (b"{{ ''['\\u005f_class__'] }}", True),
+        (b"{{ ''['\\137\\137class__'] }}", True),
+        (b"{{ ''['\\N{LOW LINE}_class__'] }}", True),
+        (b"{{ ['']|map(attribute='__class__')|list }}", True),
+        (b"{{ x|selectattr('__class__') }}", True),
+        (b"{{ x|sort(attribute='a.__class__') }}", True),
+        # Jinja removes a backslash before a line break, of any kind, in a string.
+        (b"{{ ''['__cl\\\nass__'] }}", True),
+        (b"{{ ''['__cl\\\r\nass__'] }}", True),
+        (b"{{ ''['__cl\\\rass__'] }}", True),
+        (b"{{ x|map(attribute='_\\\n_class__') }}", True),
+        # An escaped backslash is consumed whole, as Jinja reads it.
+        (b"{{ '\\\\x5f\\x5fclass\\x5f\\x5f' }}", False),
+        (b"{{ ''['__cl\\\\\nass__'] }}", False),
+        (b"{{ '\\N{NO SUCH NAME}\\UFFFFFFFF\\x5' }}", False),
+        (b"{{ '\xff__class__' }}", False),
     ],
 )
 def test_template_escape_heuristic(template, escapes):

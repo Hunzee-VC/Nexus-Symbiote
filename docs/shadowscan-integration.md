@@ -30,7 +30,8 @@ nexus-symbiote validate merged.json --project /path/to/repository --no-project-p
 
 The output path must not exist. An incomplete source produces a partial BOM and
 nonzero exit; a malformed or unsupported report is rejected. With `--report-only`
-the exit status is 0 either way; read `metadata.completeness.source_report_status`
+the exit status is 0 either way, except that unverified discovery evidence fails in CI
+unless `--bundle` verifies the producer or `--allow-unsigned-discovery` accepts it; read `metadata.completeness.source_report_status`
 (`complete`, `incomplete` or `unknown`) in the written BOM to tell them apart. A locally generated
 report digest binds the imported bytes, not the identity of their producer or the
 truth of their contents. Verification of signatures, sources and artifacts is a
@@ -286,12 +287,30 @@ BOM are never trusted for this check. A passing check authenticates the
 report's producer, not the truth of its findings, and imported components keep
 declared assurance. Install the Sigstore extra for this mode.
 
-The check binds the report to its producer, not to this repository, commit or
-time. Anyone who can write to the checkout can substitute an older report, or
-another repository's report, signed by the same identity, for example one from
-before a shadow agent appeared, and regenerate the BOM from it. Give each
-repository's discovery workflow its own signer identity, and bind freshness or
-the commit separately where you need that. To accept only one report, write a
+The check binds the report to its producer and to the exact report bytes, and
+the BOM records the verification outcome (`metadata.completeness.discovery_verification`):
+`verified` with the signer identity and issuer, or `unverified`, together with
+the report digest, the report's own run time, and the repository/commit the
+report carries — currently both `unknown`, because the report format carries
+neither. It does not bind the report to this repository or commit. Anyone who
+can write to the checkout can substitute an older report, or another
+repository's report, signed by the same identity, for example one from before a
+shadow agent appeared, and regenerate the BOM from it. Give each repository's
+discovery workflow its own signer identity, and bind the commit separately
+where you need that. Unsigned evidence warns loudly on `import-shadowscan`,
+`validate` and `risk`, and fails in CI (or with `--fail-on-unsigned-discovery`)
+unless the operator explicitly passes `--allow-unsigned-discovery`.
+
+The GitHub Action runs in CI, so a checkout with a ShadowScan report fails its
+completeness and risk gates by default: the `gates` output records both as
+`failed`, `risk-score` stays empty and the job log and step summary give the
+reason. With `validate: 'true'` the Action passes its `signature-policy` snapshot
+to both `validate --project` and `risk --project`, so a policy entry that names the report and
+verifies its producer passes the check. To accept unsigned evidence instead, set
+the `allow-unsigned-discovery` input to `'true'`, which passes
+`--allow-unsigned-discovery` to `validate` and `risk` and prints a warning.
+
+To accept only one report, write a
 version 2 entry (`"kind": "sigstore-message-signature"`) with `expected_sha256`
 set to the report's SHA-256: the check then also fails for other report bytes,
 however they are signed. The report needs such a signature entry: a
@@ -300,7 +319,6 @@ not read (it reads the first of `.shadowscan/report.json`,
 `shadowscan-report.json` and `shadowscan.json` that exists), is reported as an
 unused policy entry by `scan` and `validate --project`
 ([model integrity](model-integrity.md#operator-signature-policy)).
-
 ### Verify the native import and its producer
 
 For a BOM written by `import-shadowscan`, reproduce the direct import and compare
@@ -320,6 +338,13 @@ nexus-symbiote verify-discovery agentbom.json shadowscan.json \
   --issuer "$EXPECTED_ISSUER"
 ```
 
+The same verification can run at import time: `import-shadowscan --bundle
+shadowscan.json.sigstore --signer-identity "$EXPECTED_IDENTITY" --issuer
+"$EXPECTED_ISSUER"` records the evidence as `verified` with the signer identity
+and issuer in the BOM. Without `--bundle` the import records `unverified`;
+`validate` and `risk` then warn loudly, and fail in CI (or with
+`--fail-on-unsigned-discovery`) unless `--allow-unsigned-discovery` is given.
+
 The signed mode also verifies the direct native projection. Use the same importer
 version. The comparison ignores JSON object key ordering and the BOM’s locally
 generated timestamp and serial number. Source findings keep their declared
@@ -330,3 +355,22 @@ The offline signature regression uses a public release bundle from
 [sigstore-python at 19b8aec](https://github.com/sigstore/sigstore-python/blob/19b8aec7063e62c718efd327f5a45582472c3b3c/test/assets/bundle_v3_github.whl.sigstore).
 Its Apache-2.0 license accompanies the fixture. Production report verification
 requires your own producer identity, issuer and report bundle.
+
+## Approve in SymBiote, reconcile in ShadowScan
+
+ShadowScan's `--inventory` does not read the native AgentBOM; it refuses it. To
+make an agent you approved in SymBiote review an approved agent in ShadowScan's
+reconciliation, export the reviewed inventory and give the file to ShadowScan:
+
+```sh
+nexus-symbiote export-inventory reviewed.json --format shadowscan-simple \
+  --resource-prefix github:acme/support-triager -o approved.json
+```
+
+The file approves only the project that ShadowScan's code connectors report for
+the repository at that resource, registered under the agent's reference, which the
+`id` in `agent.yaml` determines. Keep it where the change under review cannot
+write, sign it with `attest`, and check the signature with `verify-attestation`
+before ShadowScan reads it, because ShadowScan checks none. See
+[Approve agents for ShadowScan reconciliation](shadowscan-inventory-export.md) for
+the binding rules, the prefix to use and what the file does not establish.
