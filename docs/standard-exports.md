@@ -176,6 +176,8 @@ How an export covers the minimum SBOM elements that NTIA published in 2021 and t
 
 CISA's updated minimum elements add a component hash, a license, the generating tool and the generation context; check the current CISA publication for the exact list. Hashes and the tool are covered as above; licenses are not collected (SPDX states no assertion, CycloneDX omits them); the generation context is `metadata.lifecycles` (`pre-build`) and `software_sbomType` (`source`) for a repository scan. Fields of AI-specific baselines that the inventory does not collect, such as training data, model performance and energy use, are absent. An export is evidence for such a review, not a determination that a baseline or regulation is met.
 
+[`minimum-elements`](minimum-elements.md) reports, element by element, which of the 50 G7 AI SBOM minimum elements (12 May 2026) the CycloneDX export carries in standard fields, and what each missing one needs.
+
 ## Loading exports into other tools
 
 Neither integration below is tested by this project; check the version you run.

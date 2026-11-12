@@ -39,6 +39,9 @@ MODULE_FLOORS: dict[str, tuple[int, int | None]] = {
     "nexus_symbiote/utils/terminal.py": (95, None),
     "nexus_symbiote/attestation.py": (98, 98),
     "nexus_symbiote/attestation_cli.py": (98, 98),
+    # Measured at 100% of statements and branches when the G7 minimum-element report was added.
+    "nexus_symbiote/minimum_elements.py": (98, 98),
+    "nexus_symbiote/minimum_elements_cli.py": (98, 98),
     # Measured at 87% of statements and 86% of branches when scripts/ joined the report.
     "scripts/run_action.py": (75, 65),
     "nexus_symbiote/core/content_digest.py": (98, 98),

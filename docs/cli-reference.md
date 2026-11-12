@@ -60,6 +60,7 @@ change them. See [collection limits](collection-limits.md).
 | [`baseline`](#baseline) | offline | Write an unsigned snapshot only if the scan gate passes |
 | [`vex`](#vex) | offline | Export findings as a VEX document with status `in_triage` |
 | [`crosswalk`](#crosswalk) | offline | Map findings to OWASP, MITRE ATLAS, NIST AI RMF, EU AI Act, ISO/IEC 42001 and CWE entries |
+| [`minimum-elements`](#minimum-elements) | offline | Report which G7 AI SBOM minimum elements an AgentBOM's CycloneDX export carries, and how to supply the missing ones |
 | [`verify-artifact`](#verify-artifact) | offline | Check a file's SHA-256, and optionally its Sigstore bundle |
 | [`verify-discovery`](#verify-discovery) | offline | Check that a ShadowScan report's bytes match the digest a BOM records; with `--projection` or `--bundle`, also compare the BOM's imported components with the report |
 | [`export-inventory`](#export-inventory) | offline | Write the reviewed repository agent as an approved inventory that ShadowScan's `--inventory` accepts |
@@ -79,8 +80,8 @@ change them. See [collection limits](collection-limits.md).
 
 ## Output and CI logs
 
-Results go to standard output: the reports of `validate`, `risk`, `diff`, `summary`
-and `blast-radius`, the inventory that `scan` and `vex` print without `-o`, and every
+Results go to standard output: the reports of `validate`, `risk`, `diff`, `summary`,
+`blast-radius` and `minimum-elements`, the inventory that `scan` and `vex` print without `-o`, and every
 `--json-output` document. Progress, notes, warnings and errors go to standard error.
 `scan` writes its progress and its gate verdict there too, so that standard output can
 carry the inventory: `nexus-symbiote summary bom.json > summary.txt` keeps the summary,
@@ -103,7 +104,7 @@ CI log:
 every ASCII punctuation character in it follows a backslash, after the replacements
 above.
 
-The JSON that `scan`, `vex`, `crosswalk`, `discover-mcp` and `advisories` print without `-o`, the
+The JSON that `scan`, `vex`, `crosswalk`, `discover-mcp`, `advisories` and `minimum-elements` print without `-o`, the
 JSON that every `runtime` command prints, such as the identities of the snapshot that
 `runtime register` made current, the candidate inventory that `verify-live --record`
 prints, and the `--json-output`
@@ -131,6 +132,7 @@ What exit status 1 means for each gate:
 | `risk` | The risk gate failed, or `--project` reconciliation failed. |
 | `diff` | `--fail-on-alert` was given and the diff reports a security alert. |
 | `graph` | The inventory's graph is invalid, `--focus` names no component, or the view would hold more components than `--max-nodes`. |
+| `minimum-elements` | `--fail-under` was given and fewer than that percentage of the assessable elements are present, or the inventory's CycloneDX export fails its checks. |
 | `baseline` | The scan gate failed, under the project policy or the built-in one. |
 | `verify-artifact`, `verify-discovery` | The digest, signature or projection does not match. |
 | `verify-attestation` | Too few trusted keys signed the attestation, or it does not cover the file's bytes or content, the purpose or the age limit, or an input could not be read. |
@@ -222,6 +224,7 @@ catch a misplaced policy; they do not authenticate it.
 | `risk --json-output` | `passed`; `overall_score` (`null` when `--project` reconciliation failed); `risk_level`; `coverage_status` and `coverage_gaps`; `gate_reasons`; `gate` (the effective thresholds, cutoff, ignored categories and suppression count, each with a `*_source` of `cli`, `project policy` or `built-in`); `findings`; `severity_counts`; `category_scores`; `ignored_findings`; `suppressed_findings`, `suppressions_expired` and `suppressions_unused`; `total_components` and `components_with_risks`; `warning_threshold_exceeded`; `assessment_basis` (`supplied-bom`, `project-reconciled`, `project-reconciled-with-supplier-claims` or `project-reconciliation-failed`); `supplier_claims` and `supplier_claims_omitted`; `discovery_producer` (`verified`, `failed`, `not-verified` or `not-applicable`); `score_threshold` (`null` with `--no-score-threshold`); `fail_on_severity`; `policy_source` and `policy_weakened`. A failed reconciliation has the same keys, with empty findings. |
 | `diff --json-output` | `has_changes`, `total_changes`, `components_added`, `components_removed`, `components_modified`, `dependencies_added`, `dependencies_removed` (each with its `severity` and `conditions`), `security_alerts`, `metadata_changes` and `notes`. |
 | `summary --json-output` | `total_components`, `component_types`, `total_dependencies`, `total_risks`, `risk_breakdown` and the inventory's `completeness` claim. |
+| `minimum-elements --format json` | `format` (`nexus-symbiote/minimum-elements/v1`), `edition`, `guidance`, `statement`, `evaluated` (the standard, the projection and the tool version), `subjects`, `coverage` (`present`, `assessable` and `percent`), `counts` per status, `gate` (`null` without `--fail-under`), `clusters` and `elements`; see [G7 AI SBOM minimum elements](minimum-elements.md#running-the-command). |
 | `blast-radius --json-output` | `subject`, `affected_agents`, `dependent_components`, `reachable_components`, `declared_principals`, `scope`, `effective_authority`, `linked` and `limitations`. |
 | `digest --json-output` | `file_sha256`, `canonical_digest`, `content_digest`, `content_profile`, `spec_version` and `components`, in that order; a digest that is undefined for the inventory is `null`. |
 | `graph --format json` | `format` (`nexus-symbiote/graph-view/v1`), `inventory`, `focus`, `coverage`, `limitations`, `nodes` (each with its risk classes, `basis`, `assessed`, findings summary and facts), `edges` and `exposure` (sources, sinks and ranked `paths`, with omitted counts); see [graph view](graph-view.md#the-json-document). |
@@ -523,6 +526,26 @@ nexus-symbiote init [OPTIONS]
 |---|---|
 | `--force` | Overwrite the existing project policy file (`.nexus-symbiote.yaml`, or `.nexus-symbiote.yml` when that is the only one); refused when both exist |
 | `--path` `PATH` | Directory to create .nexus-symbiote.yaml in |
+
+### `minimum-elements`
+
+Report which G7 AI SBOM minimum elements an inventory's CycloneDX export carries.
+
+```text
+nexus-symbiote minimum-elements [OPTIONS] INVENTORY
+```
+
+| Option | Description |
+|---|---|
+| `-f`, `--format` `text\|json\|markdown` | Report format (default: text). |
+| `-o`, `--output` `PATH` | Write the report to this file instead of standard output; refused when it names the inventory. |
+| `--fail-under` `PERCENT` | Exit with status 1, listing the missing elements, when fewer than `PERCENT` (a decimal number from 0 to 100) of the elements assessable from the BOM are present. Off by default: coverage is not compliance. |
+
+The command generates the inventory's CycloneDX 1.7 export in memory and reports, per
+element of the G7 "Software Bill of Materials for AI – Minimum Elements" (12 May 2026),
+whether a standard field carries it, on which basis, and how to supply a missing one.
+The G7 elements are non-binding, and a present element is recorded, not verified. See
+[G7 AI SBOM minimum elements](minimum-elements.md).
 
 ### `risk`
 
