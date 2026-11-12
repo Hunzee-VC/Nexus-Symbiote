@@ -37,6 +37,7 @@ from nexus_symbiote.reporting import (
 )
 from nexus_symbiote.runtime_cli import register_runtime_commands
 from nexus_symbiote.supply_chain_cli import STAGED_INVENTORY, register_supply_chain_commands
+from nexus_symbiote.trace_cli import register_trace_commands
 from nexus_symbiote.utils.files import write_output_file
 from nexus_symbiote.utils.terminal import (
     echo_line,
@@ -1479,6 +1480,7 @@ register_digest_commands(main)
 register_attestation_commands(main)
 register_graph_commands(main)
 register_crosswalk_commands(main)
+register_trace_commands(main)
 
 if __name__ == "__main__":
     main()

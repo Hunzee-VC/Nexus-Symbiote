@@ -245,7 +245,17 @@ class AIBOM(BaseModel):
         Every failure is a ``NativeFormatError`` whose message names the class of
         problem and never quotes the document.
         """
-        return cls.from_native(parse_native_bytes(read_native_bytes(path)))
+        return cls.load_with_bytes(path)[0]
+
+    @classmethod
+    def load_with_bytes(cls, path: Path) -> tuple[AIBOM, bytes]:
+        """Read like ``load`` and also return the bytes that were read.
+
+        A digest of those bytes binds exactly the document that was validated, never a
+        second read of a path that may have changed in between.
+        """
+        raw = read_native_bytes(path)
+        return cls.from_native(parse_native_bytes(raw)), raw
 
     @classmethod
     def from_native(cls, data: Any) -> AIBOM:

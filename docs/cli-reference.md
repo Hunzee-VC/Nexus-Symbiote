@@ -74,6 +74,7 @@ change them. See [collection limits](collection-limits.md).
 | [`discover-mcp`](#discover-mcp) | **live** | List the tools an HTTPS MCP server serves, without calling them |
 | [`advisories`](#advisories) | **live** | Query OSV for advisories affecting exact PyPI and npm package versions |
 | [`verify-live`](#verify-live) | **live** | Compare an AgentBOM with the tools that operator-pinned stdio servers serve |
+| [`trace-diff`](#trace-diff) | offline | Compare the runtime use that OpenTelemetry traces report with an AgentBOM |
 
 ## Output and CI logs
 
@@ -135,6 +136,7 @@ What exit status 1 means for each gate:
 | `verify-live` | A stdio server could not be observed completely (a run with no stdio server observes nothing), or a server's served tools, declarations or identity differ from the inventory; with `--record`, such drift fails unless `--accept-drift` is given. |
 | `discover-mcp` | The observation is incomplete; with `--record`, nothing is written. |
 | `advisories` | An advisory was found (unless `--no-fail-on-advisory`), or not every package in scope was looked up (`coverage` is `partial` or `none`); with `--dry-run`, only when the report lists an error. |
+| `trace-diff` | With the default `--fail-on undeclared`: the traces report a tool, model, agent or MCP endpoint that the inventory does not declare, or one whose identifier could not be read, or a span whose operation name, MCP method or MCP transport could not be read, or no span carries a GenAI or MCP attribute of its own. An inventory or trace file that cannot be read always exits 1. |
 
 `--report-only` on `scan` and `import-shadowscan` reports collection failures and
 findings without turning them into exit status 1, as a project policy with
@@ -231,6 +233,7 @@ catch a misplaced policy; they do not authenticate it.
 | `runtime digest` | `kind` and `digest`. |
 | `runtime key-id` | `key_id`. |
 | `runtime register` | `registered`, `tenant`, `deployment_id`, `agent_id`, `serial` and `digest`. |
+| `trace-diff --json-output` | The trace evidence, also written by `-o`: `format` (`nexus-symbiote/trace-evidence/v1`), `assurance` (always `reported`), `limitations`, `inputs`, `coverage`, `observed`, `reconciliation` and `gate`; see [trace evidence](trace-evidence.md#the-evidence-document). |
 
 ## Pre-commit hooks
 
@@ -687,6 +690,39 @@ nexus-symbiote summary [OPTIONS] AIBOM_PATH
 | Option | Description |
 |---|---|
 | `--json-output` | Print the summary as JSON. |
+
+### `trace-diff`
+
+Compare the runtime use that OpenTelemetry traces report with a native inventory.
+
+```text
+nexus-symbiote trace-diff [OPTIONS] INVENTORY TRACE_FILE...
+```
+
+| Option | Description |
+|---|---|
+| `-o`, `--output` `PATH` | Write the evidence document to this file. |
+| `--json-output` | Print the evidence document as JSON instead of a summary. |
+| `--sarif` `SARIF_PATH` | Also write SARIF 2.1.0 results for undeclared runtime use to this file. |
+| `--fail-on` `undeclared\|none` | `undeclared` (default): exit 1 when the traces report a tool, model, agent or MCP endpoint that the inventory does not declare or whose identifier cannot be read, or a span whose operation, MCP method or MCP transport cannot be read, or when no span carries GenAI or MCP semantics. `none`: report only. |
+
+`INVENTORY` is a native AgentBOM. Each `TRACE_FILE` is an OTLP/JSON trace export the
+operator already collected: one `ExportTraceServiceRequest` object, or JSON Lines with
+one such object per line, as the OpenTelemetry Collector's `file` exporter writes. The
+command runs nothing and contacts nothing. It reads at most 16 trace files (more is a
+usage error), each at most 64 MiB, and at most 1,000,000 spans and 100,000 distinct
+identifiers in all; a JSON Lines line may hold at most 16 MiB, and traces beyond a bound
+are refused. Trace files are opened like inventories: no symbolic link, FIFO, device or
+directory. Only identifier attributes are read; message, prompt and tool-call content
+attributes are counted, never read, copied or printed. Without
+`--json-output` the command prints a summary that lists at most 20 undeclared or
+unidentified items and counts the rest; its `--json-output` document writes `[` after
+`##` as `\u005b`, like the other JSON documents. An `-o` or `--sarif` path that names the
+inventory, a trace file or the other output is a usage error (exit 2).
+
+Exit 0 means that nothing undeclared appeared in these traces, not that the agent is
+safe or that the traces are complete. See [trace evidence](trace-evidence.md) for what
+is read, the matching rules and the evidence format.
 
 ### `validate`
 

@@ -351,6 +351,12 @@ def test_every_static_command_runs_under_the_offline_guard(tmp_path):
     run("verify-artifact", "system_prompt.md", "--project", str(project), "--sha256", digest)
     run("import-shadowscan", str(SHADOWSCAN_REPORT), "--report-only", "-o", str(imported))
     run("verify-discovery", str(imported), str(SHADOWSCAN_REPORT), "--projection")
+    trace = tmp_path / "trace.json"
+    chat = {"key": "gen_ai.operation.name", "value": {"stringValue": "chat"}}
+    trace.write_text(
+        json.dumps({"resourceSpans": [{"scopeSpans": [{"spans": [{"attributes": [chat]}]}]}]})
+    )
+    run("trace-diff", str(native), str(trace), "--sarif", str(tmp_path / "trace.sarif"))
     run("runtime", "keygen", "--private-key", str(private), "--public-key", str(public))
     signed = tmp_path / "signed.json"
     run(
