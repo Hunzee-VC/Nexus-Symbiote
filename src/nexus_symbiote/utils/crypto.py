@@ -193,6 +193,29 @@ def _carries_dsse_envelope(bundle_json: bytes) -> bool:
     return isinstance(document, dict) and "dsseEnvelope" in document
 
 
+def _offline_verifier(verifier_cls: Any) -> Any:
+    """Build an offline Sigstore verifier from the package's embedded production trust root.
+
+    ``Verifier.production(offline=True)`` loads an unverified ``trusted_root.json`` from
+    the user's cache directory and creates that cache directory as a side effect. Reading
+    the wheel's embedded resource directly keeps offline verification isolated from ambient
+    cache state while preserving test doubles that replace ``Verifier.production``.
+    """
+    production = getattr(verifier_cls, "production", None)
+    underlying = getattr(production, "__func__", production)
+    if not str(getattr(underlying, "__module__", "")).startswith("sigstore."):
+        return verifier_cls.production(offline=True)
+    from importlib import resources
+
+    from sigstore.models import TrustedRoot
+
+    embedded = resources.files("sigstore._store").joinpath(
+        "https%3A%2F%2Ftuf-repo-cdn.sigstore.dev", "trusted_root.json"
+    )
+    with resources.as_file(embedded) as root_path:
+        return verifier_cls(trusted_root=TrustedRoot.from_file(str(root_path)))
+
+
 def verify_sigstore_digest(
     digest_hex: str,
     bundle_json: bytes,
@@ -228,7 +251,7 @@ def verify_sigstore_digest(
 
         bundle = Bundle.from_json(bundle_json)
         policy = Identity(identity=expected_identity, issuer=expected_issuer)
-        verifier = Verifier.production(offline=True)
+        verifier = _offline_verifier(Verifier)
         verifier.verify_artifact(
             Hashed(algorithm=HashAlgorithm.SHA2_256, digest=bytes.fromhex(digest)), bundle, policy
         )

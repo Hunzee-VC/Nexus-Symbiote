@@ -457,9 +457,10 @@ def test_planted_sigstore_cache_cannot_choose_the_trust_root(tmp_path: Path) -> 
         check=False,
         timeout=300,
     )
-    # Control: the CLI on its own takes its offline trust root from that cache.
+    # Both the CLI and the action entry point load the embedded Sigstore trust root
+    # rather than an unverified user cache.
     assert direct.returncode == 0, direct.stderr
-    assert _model(tmp_path / "direct.json")["signing_status"] == "verification-failed"
+    assert _model(tmp_path / "direct.json")["signing_status"] == "sigstore-signed"
     result = _entry_point(tmp_path, workspace, policy, **planted)
     assert "Sigstore artifact verification failed" not in result.stderr
     assert "Hashes verified: 1, failed: 0" in result.stderr

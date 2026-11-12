@@ -41,6 +41,7 @@ from nexus_symbiote.runtime import (
     validation_fields,
     verify_contract,
 )
+from nexus_symbiote.utils.files import _parent, _relative
 from nexus_symbiote.utils.terminal import json_text
 
 MAX_KEY_BYTES = 65536
@@ -152,9 +153,36 @@ def _check_rings(
             )
 
 
+def _path_exists_or_symlink(path: Path) -> bool:
+    try:
+        os.lstat(path)
+    except FileNotFoundError:
+        return False
+    return True
+
+
 def _write_new(path: Path, content: bytes, mode: int = 0o600) -> None:
-    with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode), "wb") as stream:
-        stream.write(content)
+    target = path.absolute()
+    root = Path(target.anchor)
+    relative = _relative(root, target, allow_parent=True)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    with _parent(root, relative, create_parents=False) as parent:
+        fd = os.open(relative.name, flags, mode, dir_fd=parent)
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(content)
+
+
+def _unlink_created(path: Path) -> None:
+    target = path.absolute()
+    root = Path(target.anchor)
+    try:
+        relative = _relative(root, target, allow_parent=True)
+        with _parent(root, relative, create_parents=False) as parent:
+            info = os.stat(relative.name, dir_fd=parent, follow_symlinks=False)
+            if stat.S_ISREG(info.st_mode):
+                os.unlink(relative.name, dir_fd=parent)
+    except (OSError, ValueError):
+        pass
 
 
 def _passphrase(path: Path | None) -> bytes | None:
@@ -227,7 +255,11 @@ def keygen(private_key: Path, public_key: Path, passphrase_file: Path | None) ->
     Use one key pair per purpose: snapshot, approval and trust rings must not share keys.
     """
     try:
-        if private_key.exists() or public_key.exists() or private_key == public_key:
+        if (
+            _path_exists_or_symlink(private_key)
+            or _path_exists_or_symlink(public_key)
+            or private_key.absolute() == public_key.absolute()
+        ):
             raise _KeyFileError("choose distinct, nonexistent key paths")
         passphrase = _passphrase(passphrase_file)
         key = Ed25519PrivateKey.generate()
@@ -247,7 +279,7 @@ def keygen(private_key: Path, public_key: Path, passphrase_file: Path | None) ->
         try:
             _write_new(private_key, private_pem)
         except BaseException:
-            public_key.unlink(missing_ok=True)
+            _unlink_created(public_key)
             raise
         result = {"key_id": key_id(key.public_key()), "encrypted": passphrase is not None}
         click.echo(json_text(json.dumps(result)))

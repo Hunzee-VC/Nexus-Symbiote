@@ -374,7 +374,8 @@ def test_lone_surrogate_in_a_served_descriptor_is_an_authorization_error(tmp_pat
 def test_executor_receives_arguments_as_sent(tmp_path):
     values = list(fixture(tmp_path))
     autonomous(values)
-    arguments = {"to": "team@example.test", "zeta": 1.0, "alpha": -0.0, "big": 1e20}
+    values[0].canonical_arguments = False
+    arguments = {"to": "team@example.test", "zeta": 1.0, "alpha": -0.0, "big": 2.0**53 - 1}
     values[1] = values[1].model_copy(update={"arguments": arguments})
     assert invoke(values, approval=None) == "executed"
     executed = values[-1][0].arguments
@@ -407,7 +408,7 @@ def test_executor_can_receive_the_form_the_approval_binds(tmp_path):
 
 def test_canonical_arguments_is_a_gateway_option(tmp_path):
     gateway = fixture(tmp_path)[0]
-    assert gateway.canonical_arguments is False
+    assert gateway.canonical_arguments is True
     options = {
         name: getattr(gateway, name)
         for name in (
@@ -421,7 +422,7 @@ def test_canonical_arguments_is_a_gateway_option(tmp_path):
             "execute",
         )
     }
-    assert runtime.ReferenceGateway(**options, canonical_arguments=True).canonical_arguments
+    assert not runtime.ReferenceGateway(**options, canonical_arguments=False).canonical_arguments
 
 
 def test_request_digest_is_over_the_canonical_form():
