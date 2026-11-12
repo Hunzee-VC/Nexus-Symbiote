@@ -336,6 +336,7 @@ def test_every_static_command_runs_under_the_offline_guard(tmp_path):
     run("validate", str(native), "--project", str(project), "--no-project-policy", expect=(0, 1))
     run("risk", str(native), "--no-project-policy", expect=(0, 1))
     run("summary", str(native))
+    run("digest", str(native), "--json-output")
     run("diff", str(native), str(native), "--fail-on-alert")
     agent = next(
         c["bom_ref"]

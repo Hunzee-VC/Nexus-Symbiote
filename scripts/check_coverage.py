@@ -39,6 +39,8 @@ MODULE_FLOORS: dict[str, tuple[int, int | None]] = {
     "nexus_symbiote/utils/terminal.py": (95, None),
     # Measured at 87% of statements and 86% of branches when scripts/ joined the report.
     "scripts/run_action.py": (75, 65),
+    "nexus_symbiote/core/content_digest.py": (98, 98),
+    "nexus_symbiote/digest_cli.py": (98, 98),
 }
 COUNTS = (
     ("statement", "covered_lines", "num_statements"),

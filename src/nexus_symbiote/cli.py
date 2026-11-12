@@ -16,6 +16,11 @@ from nexus_symbiote import __version__, limits, modes
 from nexus_symbiote.core.aibom import AIBOM, NativeFormatError
 from nexus_symbiote.core.enums import AssuranceLevel
 from nexus_symbiote.core.models import AIBOMMetadata, CompletenessClaim
+from nexus_symbiote.digest_cli import (
+    register_digest_commands,
+    set_content_serial_number,
+    source_date_epoch,
+)
 from nexus_symbiote.graph import validate_graph
 from nexus_symbiote.live_cli import register_live_commands
 from nexus_symbiote.policy import Policy
@@ -549,6 +554,7 @@ def scan(
     if check_only and output:
         raise click.UsageError("--check writes no inventory; drop -o/--output or --check")
     _require_binding_key()
+    collected_at = source_date_epoch()
     root = _project_root(project_path, label="PROJECT_PATH")
     if not root.is_dir():
         raise click.ClickException(f"{neutralize(project_path)} is not a directory")
@@ -585,6 +591,7 @@ def scan(
                 else policy_source
             ),
             policy_weakened=policy_weakened,
+            timestamp=collected_at,
         )
     )
     aibom.finalize()
@@ -722,6 +729,8 @@ def scan(
                 "SARIF cannot preserve imported discovery coverage; use native JSON, CycloneDX "
                 "or SPDX."
             )
+        if collected_at is not None:
+            set_content_serial_number(aibom)
         try:
             out_data = _render_aibom(aibom, output_format, root)
         except (ValueError, RecursionError) as exc:
@@ -782,6 +791,7 @@ def import_shadowscan(
     """
     from nexus_symbiote.scanners.shadowscan import ShadowScanImporter
 
+    collected_at = source_date_epoch()
     importer = ShadowScanImporter()
     try:
         imported = importer.read_report(Path(report_path))
@@ -789,12 +799,15 @@ def import_shadowscan(
         raise click.ClickException("Failed to safely import the ShadowScan report") from exc
 
     aibom = imported.to_native_bom()
+    aibom.metadata.timestamp = collected_at
     aibom.finalize()
 
     if output_format == "sarif":
         raise click.ClickException(
             "SARIF cannot preserve imported discovery coverage; use native JSON, CycloneDX or SPDX."
         )
+    if collected_at is not None:
+        set_content_serial_number(aibom)
     if output_format == "cyclonedx":
         from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
 
@@ -1459,6 +1472,7 @@ def init(force: bool, path: str) -> None:
 register_runtime_commands(main)
 register_live_commands(main)
 register_supply_chain_commands(main)
+register_digest_commands(main)
 
 if __name__ == "__main__":
     main()

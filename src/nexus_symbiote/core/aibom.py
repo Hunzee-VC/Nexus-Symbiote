@@ -77,6 +77,37 @@ def _open_failure(exc: OSError) -> str:
     return "It cannot be opened for reading."
 
 
+def read_native_bytes(path: Path) -> bytes:
+    """The bytes of a native document, read once without following links or blocking.
+
+    At most ``MAX_NATIVE_BYTES``; every failure is a ``NativeFormatError``.
+    """
+    from nexus_symbiote.core.hashing import open_regular_file
+
+    try:
+        with open_regular_file(path) as stream:
+            raw = stream.read(MAX_NATIVE_BYTES + 1)
+    except OSError as exc:
+        raise NativeFormatError(_open_failure(exc)) from exc
+    if len(raw) > MAX_NATIVE_BYTES:
+        raise NativeFormatError(
+            f"It exceeds the {MAX_NATIVE_BYTES // (1024 * 1024)} MiB native inventory limit."
+        )
+    return raw
+
+
+def parse_native_bytes(raw: bytes) -> Any:
+    """The JSON value of a native document's bytes: strict UTF-8 I-JSON or a NativeFormatError."""
+    from nexus_symbiote.core.hashing import parse_json_strict
+
+    try:
+        return parse_json_strict(raw.decode("utf-8"), max_bytes=MAX_NATIVE_BYTES)
+    except (UnicodeError, ValueError, RecursionError) as exc:
+        raise NativeFormatError(
+            "It is not strict UTF-8 JSON; duplicate keys and nonfinite numbers are refused."
+        ) from exc
+
+
 class DependencyEdge(BaseModel):
     """A typed relationship between two components."""
 
@@ -214,23 +245,11 @@ class AIBOM(BaseModel):
         Every failure is a ``NativeFormatError`` whose message names the class of
         problem and never quotes the document.
         """
-        from nexus_symbiote.core.hashing import open_regular_file, parse_json_strict
+        return cls.from_native(parse_native_bytes(read_native_bytes(path)))
 
-        try:
-            with open_regular_file(path) as stream:
-                raw = stream.read(MAX_NATIVE_BYTES + 1)
-        except OSError as exc:
-            raise NativeFormatError(_open_failure(exc)) from exc
-        if len(raw) > MAX_NATIVE_BYTES:
-            raise NativeFormatError(
-                f"It exceeds the {MAX_NATIVE_BYTES // (1024 * 1024)} MiB native inventory limit."
-            )
-        try:
-            data = parse_json_strict(raw.decode("utf-8"), max_bytes=MAX_NATIVE_BYTES)
-        except (UnicodeError, ValueError, RecursionError) as exc:
-            raise NativeFormatError(
-                "It is not strict UTF-8 JSON; duplicate keys and nonfinite numbers are refused."
-            ) from exc
+    @classmethod
+    def from_native(cls, data: Any) -> AIBOM:
+        """Validate a parsed native document as ``load`` does, without changing ``data``."""
         if isinstance(data, dict) and "metadata" not in data:
             data = {**data, "metadata": {}}
         metadata = data.get("metadata") if isinstance(data, dict) else None

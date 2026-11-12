@@ -54,6 +54,7 @@ change them. See [collection limits](collection-limits.md).
 | [`risk`](#risk) | offline | Score findings and apply the risk gate |
 | [`diff`](#diff) | offline | Compare two AgentBOMs and report security-relevant drift |
 | [`summary`](#summary) | offline | Print component and risk counts |
+| [`digest`](#digest) | offline | Print the digest of an AgentBOM's bytes, its canonical digest and its run-independent content digest |
 | [`blast-radius`](#blast-radius) | offline | List agents and components associated with one component |
 | [`baseline`](#baseline) | offline | Write an unsigned snapshot only if the scan gate passes |
 | [`vex`](#vex) | offline | Export findings as a VEX document with status `in_triage` |
@@ -108,7 +109,7 @@ Colors are used only on a terminal, and `NO_COLOR` turns them off.
 |---|---|
 | `0` | The command completed and every requested gate passed. |
 | `1` | A gate or check failed (risk gate, integrity, digest or signature mismatch, `diff --fail-on-alert`, incomplete collection or observation), the input could not be read or parsed, `import-shadowscan` ran without `--report-only`, or an unexpected internal error occurred. |
-| `2` | Usage error: an unknown command or option, a missing argument or file, a `PROJECT_PATH` of `scan` or `baseline` or a `--project` of `validate`, `risk`, `verify-artifact` or `verify-live` that is a file, a `verify-live` launch policy kept where the [launch policy](#launch-policy) rules forbid, an invalid value (including a malformed `verify-artifact --sha256` and an incomplete `--bundle`, `--signer-identity` and `--issuer` set), a relative project path that a symbolic link leads outside the working directory, an invalid `NEXUS_SYMBIOTE_MODE` or collection limit, a `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` shorter than 32 characters, or a live command run without live mode (`advisories --dry-run` contacts nothing and runs in either mode). |
+| `2` | Usage error: an unknown command or option, a missing argument or file, a `PROJECT_PATH` of `scan` or `baseline` or a `--project` of `validate`, `risk`, `verify-artifact` or `verify-live` that is a file, a `verify-live` launch policy kept where the [launch policy](#launch-policy) rules forbid, an invalid value (including a malformed `verify-artifact --sha256` and an incomplete `--bundle`, `--signer-identity` and `--issuer` set), a relative project path that a symbolic link leads outside the working directory, an invalid `NEXUS_SYMBIOTE_MODE` or collection limit, a `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` shorter than 32 characters, a malformed `SOURCE_DATE_EPOCH` for `scan`, `baseline` or `import-shadowscan`, or a live command run without live mode (`advisories --dry-run` contacts nothing and runs in either mode). |
 
 What exit status 1 means for each gate:
 
@@ -140,6 +141,7 @@ findings without turning them into exit status 1, as a project policy with
 | `XDG_CACHE_HOME`, `HOME` | Where sigstore-python caches the trusted root that offline Sigstore verification uses; see [known limitations](known-limitations.md#signatures). |
 | `TMPDIR` | Where `verify-live` stages the private copy of a pinned launcher. |
 | `_NEXUS_SYMBIOTE_COMPLETE` | Ignored. Shell completion is not offered, because an inherited completion variable would make every command, gates included, exit 0 without running. |
+| `SOURCE_DATE_EPOCH` | A whole number of seconds since 1970-01-01T00:00:00Z: 1 to 12 ASCII digits, at most 253402300799. `scan`, `baseline` and `import-shadowscan` then record that instant as the collection time instead of the clock, and a serial number derived from the content digest, so the same inputs give byte-identical native JSON, CycloneDX and SPDX files. Any other value is a usage error whose message does not repeat it. Gates still use the clock, for example to decide whether a suppression has expired. See [reproducible inventories](reproducible-inventories.md). |
 
 ## File formats
 
@@ -206,6 +208,7 @@ catch a misplaced policy; they do not authenticate it.
 | `diff --json-output` | `has_changes`, `total_changes`, `components_added`, `components_removed`, `components_modified`, `dependencies_added`, `dependencies_removed` (each with its `severity` and `conditions`), `security_alerts`, `metadata_changes` and `notes`. |
 | `summary --json-output` | `total_components`, `component_types`, `total_dependencies`, `total_risks`, `risk_breakdown` and the inventory's `completeness` claim. |
 | `blast-radius --json-output` | `subject`, `affected_agents`, `dependent_components`, `reachable_components`, `declared_principals`, `scope`, `effective_authority`, `linked` and `limitations`. |
+| `digest --json-output` | `file_sha256`, `canonical_digest`, `content_digest`, `content_profile`, `spec_version` and `components`, in that order; a digest that is undefined for the inventory is `null`. |
 | `discover-mcp` | The observation: `endpoint`, `protocol_version` and `requested_protocol_version`, `collector_id`, `collection_id`, `observed_at`, `completed_at`, `client_info`, `user_agent`, `session_established`, `session_digest`, `server_info`, `server_capabilities`, `instructions` and `instructions_hash`, `declaration_hash` and `identity_hash` with their profiles, `tools` (each with its redacted `descriptor`, `definition_hash`, `fingerprint` and `lints`), `prompts`, `resource_templates`, `failures`, `complete`, `pages_observed`, `bytes_observed` and `coverage`, which names what was not observed. With `--record`, a native AgentBOM instead. |
 | `advisories` | `components_checked`, `components_skipped` and `components_excluded`, with the `skipped` and `excluded` entries and their reasons; `queries` (the ecosystem, name and version of each package in scope); `advisories`; `errors`; `coverage` (`complete`, `partial` or `none`) and `complete`; `dry_run`; `checked_at`, `tool_version` and `inventory_sha256`; `scope` and `sent_to_osv`. |
 | `verify-live --json-output` | `complete`, `servers_checked`, `servers_reachable`, `servers_skipped`, `has_drift`, `inputs` (the SHA-256 of the inventory and of the launch policy) and `results`: per MCP server, `server`, `server_ref`, `status` (`verified`, `failed` or `not-verifiable`), `reachable`, `reason`, `error`, `transport`, `protocol_version`, `launcher_sha256`, `rug_pull_detected`, `live_schema_hash`, `declaration_hash` and `declaration_status`, `identity_hash` and `identity_status`, and `tools` (each tool's `name`, `definition_hash` and `status`: `match`, `changed`, `new` or `unverifiable`). |
@@ -318,6 +321,43 @@ The report lists security alerts, notes (`[INFO]` metadata changes, and `[NOTE]`
 about the comparison itself, also after `No changes detected.`), and added, removed and
 modified components, and added and removed relationships, each with its severity and
 conditions.
+
+### `digest`
+
+Print the file, canonical and content digests of a native inventory.
+
+```text
+nexus-symbiote digest [OPTIONS] INVENTORY_PATH
+```
+
+| Option | Description |
+|---|---|
+| `--json-output` | Print the digests as one JSON object. |
+
+`digest` reads the file once, as every command reads an AgentBOM, checks that it is a
+native inventory this build reads, and prints one line per value:
+
+- `file_sha256`: the SHA-256 of the file's exact bytes;
+- `canonical_digest`: the SHA-256 of the RFC 8785 form of the parsed document, the
+  digest a signed runtime snapshot binds (`runtime digest --kind bom` prints the same);
+- `content_digest` and `content_profile`: the digest of the document without the
+  fields that record the collection event (its serial number and collection times),
+  under the profile `nexus-symbiote/inventory-content/v1`;
+- `spec_version` and `components`: the native format version as read and the number
+  of components.
+
+Two inventories of the same content have the same content digest, wherever and
+whenever each was collected; equal digests say nothing about who produced either file.
+A file that is not a valid native inventory prints nothing and exits 1 with the same
+reasons as other commands. A valid one can lack a digest. The content digest needs a
+metadata object and a components list. For the canonical digest, a runtime snapshot
+binds a document only when its compact JSON, with every character outside ASCII
+escaped and each number counted as 24 bytes, is at most 16 MiB, it holds at most
+1,000,000 values and no value is nested more than 64 levels deep; a file well under
+16 MiB with much text outside ASCII, or many numbers, can exceed that. `digest` then
+prints `unavailable` for the missing digest (`null` with `--json-output`) and every
+other value as usual, names the reason and exits 1. See
+[reproducible inventories](reproducible-inventories.md).
 
 ### `discover-mcp`
 
@@ -537,6 +577,14 @@ says how many more it holds; `--check` and `baseline` keep no inventory, so thei
 says to run `scan -o FILE` to see the rest. An export that fails its
 schema or consistency checks ends the command with an error that names the format;
 rerun with `--debug` for details.
+
+With `SOURCE_DATE_EPOCH` set, `scan` records that instant as the collection time and a
+serial number derived from the content digest, so two scans of the same content write
+byte-identical native JSON, CycloneDX and SPDX. SARIF locations are relative to the
+working directory when the scanned directory lies below it, and relative to the scanned
+directory otherwise, so two SARIF files are identical too when the scanned directory
+lies at the same path below the working directory in both scans, or below it in
+neither. See [reproducible inventories](reproducible-inventories.md).
 
 ### `summary`
 
