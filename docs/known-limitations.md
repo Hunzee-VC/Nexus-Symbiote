@@ -84,8 +84,9 @@ A way around a limit that its entry does not describe is worth a
 - **Unclassified runners are gaps.** `dnx`, `jbang`, `pip-run`, `nix run`,
   `dotnet tool`, `gem exec`, `pixi exec`, `corepack`, `mise`, `pkgx`, `finch`,
   Apple `container` and `apptainer` are a high `launcher_identity` finding and a
-  gap, and so are package installs (`pip install`, `python -m pip install`,
-  `gem install`, `cargo install`, `conda` or `mamba install`), `uv run` of a URL or
+  gap, and so are package installs (`pip install`, also as `pip3.12` and after any
+  run of options, `python -m pip install`, `gem install` or `gem i`, `cargo install`,
+  `conda` or `mamba install`), `uv run` of a URL or
   of standard input, and a package from git without a full commit, from a URL or
   from a local path.
 - **Inline code and nested launches are gaps.** Inline interpreter code such as
@@ -101,7 +102,9 @@ A way around a limit that its entry does not describe is worth a
   `eval` and `pwsh -Command` are classified only when no word holds a character the
   reader rewrites: braces, patterns, `~`, `#`, `!`, `^`, `$`, backquotes,
   non-ASCII text or, except for a POSIX shell, quoting. `cmd /c` needs a plain
-  program word and no `%`, `!`, `"`, `^` or unusual whitespace. Anything else is an
+  program word and no `%`, `!`, `"`, `^` or unusual whitespace; cmd keeps
+  backslashes and single quotes, so `'npx'` is a gap and `n\px` is a program `px`
+  in directory `n`. Anything else is an
   inline shell script: a gap. So `sh -c "npx -y pkg@1.2.3 $HOME/data"` is a gap;
   pass such values as separate arguments or through `env`.
 - **Shell startup code is a gap.** bash sources a `--rcfile` or `--init-file`
@@ -134,7 +137,7 @@ A way around a limit that its entry does not describe is worth a
   unknown. Other locations and the runner's own namespace (`UV_*`, `PIP_*`,
   `YARN_*`, `BUN_*`, `DOCKER_*` and similar) are a medium `package_source`
   finding, and the package URL is withheld. Configuration names that look like
-  tokens are exported as `[redacted]`.
+  tokens or hold one after a prefix (`AWS_AKIA...`) are exported as `[redacted]`.
 - **Changed values need the binding key.** Launch arguments, environment and header
   values are exported only as redacted positions and names, and endpoint and
   package index URLs as origins. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, `diff`

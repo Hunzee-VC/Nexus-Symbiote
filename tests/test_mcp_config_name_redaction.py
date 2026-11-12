@@ -87,6 +87,56 @@ def test_a_withheld_name_still_changes_the_static_configuration_digest(tmp_path)
     assert plain != added
 
 
+# A credential pasted after a prefix is still a credential.
+PREFIXED = {"AWS_" + TOKENS["aws"], "UV_" + TOKENS["aws"], "X_" + TOKENS["gitlab"]}
+
+
+def test_a_token_inside_an_environment_or_header_name_is_withheld(tmp_path):
+    env = {**dict.fromkeys(PREFIXED, "1"), "OPENAI_API_KEY": "${OPENAI_API_KEY}"}
+    record = _server(
+        tmp_path,
+        {
+            "command": "node",
+            "args": ["server.js"],
+            "env": env,
+            "headers": {"X_" + TOKENS["aws"]: "1"},
+        },
+    )
+    text = record.model_dump_json()
+    assert not any(token in text for token in (TOKENS["aws"], TOKENS["gitlab"]))
+    assert "OPENAI_API_KEY" in record.env
+
+
+@pytest.mark.parametrize("fmt", ["json", "cyclonedx", "spdx"])
+def test_no_export_carries_a_token_in_a_server_tool_or_environment_name(tmp_path, fmt):
+    project = tmp_path / "p"
+    project.mkdir()
+    server = {
+        "command": "node",
+        "args": ["server.js"],
+        "env": dict.fromkeys(PREFIXED, "1"),
+        "tools": [{"name": TOKENS["github"], "description": "Lists issues"}],
+    }
+    (project / ".mcp.json").write_text(json.dumps({"mcpServers": {TOKENS["github"]: server}}))
+    output = tmp_path / f"out.{fmt}.json"
+    result = CliRunner().invoke(
+        main,
+        [
+            "scan",
+            str(project),
+            "--no-project-policy",
+            "--report-only",
+            "-f",
+            fmt,
+            "-o",
+            str(output),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    text = output.read_text()
+    assert all(token not in text for token in (TOKENS["github"], TOKENS["aws"], TOKENS["gitlab"]))
+
+
 @pytest.mark.parametrize("fmt", ["json", "cyclonedx", "spdx"])
 def test_no_export_carries_a_token_shaped_name(tmp_path, fmt):
     project = tmp_path / "p"
