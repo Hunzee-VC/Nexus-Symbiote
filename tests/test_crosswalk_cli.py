@@ -375,9 +375,9 @@ def test_json_keeps_categories_exact_and_the_guide_says_which_fields_are_neutral
     assert finding["detail"] == neutralize(hostile)
     guide = " ".join(PAGE.read_text(encoding="utf-8").split())
     assert (
-        "Only in `detail` are control, bidirectional and invisible characters replaced as on "
-        "a terminal; `category` and `component_ref` are kept exactly as the inventory records "
-        "them" in guide
+        "Only in `detail` are control, bidirectional and invisible characters, including every "
+        "default-ignorable code point, replaced as on a terminal; `category` and "
+        "`component_ref` are kept exactly as the inventory records them" in guide
     )
     assert "Treat them as untrusted: escape them before you print them" in guide
 

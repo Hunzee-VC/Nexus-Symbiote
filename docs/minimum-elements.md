@@ -391,7 +391,7 @@ registry entry, a container image, is the one infrastructure component. With
 `--fail-under 50` the report gains one line after its `Overall:` line:
 
 ```text
-Gate: failed: 12 of 39 present (30.7%), below the required 50%
+Gate: failed: 11 of 39 present (28.2%), below the required 50%
 ```
 
 and is followed by this on standard error, and the command exits 1:
