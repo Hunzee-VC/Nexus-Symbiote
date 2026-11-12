@@ -104,11 +104,20 @@ A way around a limit that its entry does not describe is worth a
   program word and no `%`, `!`, `"`, `^` or unusual whitespace. Anything else is an
   inline shell script: a gap. So `sh -c "npx -y pkg@1.2.3 $HOME/data"` is a gap;
   pass such values as separate arguments or through `env`.
-- **Shell startup code is a gap.** An interactive shell (`-i`) given `--rcfile` or
-  `--init-file`, a `BASH_FUNC_<name>%%` exported function in the server's
-  environment, and a `BASH_ENV` that is not an absolute path run code before the
-  script that can replace the runner it names, so the launcher is unknown. An
-  absolute `BASH_ENV` and `ENV` stay a medium code-loading finding.
+- **Shell startup code is a gap.** bash sources a `--rcfile` or `--init-file`
+  (also spelled `-rcfile`) when it is interactive or its standard input is a socket,
+  as MCP clients provide; it imports exported functions (`BASH_FUNC_<name>%%` and its
+  variants) from the environment; a non-interactive bash sources `BASH_ENV` and an
+  interactive POSIX shell (`-i` or `-o interactive`) `ENV`; a shell tracing its
+  commands (`-x`, `-o xtrace` or `xtrace` in `SHELLOPTS`) expands `PS4` before each
+  one. Each runs code before the script that can replace the runner it names. A
+  startup-file option or an exported function makes the launcher unknown, and so does
+  a `PS4` with an expansion while tracing is on; `BASH_ENV`, and `ENV` for an
+  interactive shell, do when the file may lie in the project: a path that is not
+  absolute, has a `..` segment, or lies under `/proc` or `/dev/fd`. An absolute
+  `BASH_ENV`, `ENV` for a shell that is not interactive, and `SHELLOPTS`, `BASHOPTS`
+  or `PS4` otherwise stay a medium code-loading finding; an absolute path that happens
+  to lead into the checkout through another link is not recognised.
 - **A runner named by a path is classified by its name.** `./tools/npx`,
   `${workspaceFolder}/tools/npx` or a `PATH` entry in the project can run checkout
   code that the record attributes to the registry package. On Windows, an
