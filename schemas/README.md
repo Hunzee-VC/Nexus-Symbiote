@@ -46,7 +46,7 @@ Unknown fields are rejected rather than ignored, on every object including depen
 | Version | Written by | Change |
 | --- | --- | --- |
 | 1.0.0 | 0.1.0 | Initial format. Collectors recorded absolute scan-host paths. |
-| 1.1.0 | this build | Collectors record POSIX paths relative to the scan root (`source_path`, claim locators, `surfaces_scanned`), so the same tree produces the same inventory wherever it is checked out. Adds `metadata.policy_source` and `metadata.policy_weakened`; dependency edges refuse unknown fields; `bom_ref` and edge endpoints are limited to 16,384 characters. |
+| 1.1.0 | this build | Collectors record POSIX paths relative to the scan root (`source_path`, claim locators, `surfaces_scanned`), so the same tree produces the same inventory wherever it is checked out. Adds `metadata.policy_source` and `metadata.policy_weakened`, and on the completeness claim `discovery_verification` (how an imported ShadowScan report was authenticated) and `source_report_path` (the report's location relative to the scan root, or its file name when imported from outside one); dependency edges refuse unknown fields; `bom_ref` and edge endpoints are limited to 16,384 characters. |
 
 The rule for readers:
 

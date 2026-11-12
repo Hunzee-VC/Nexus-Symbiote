@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import os
+import stat
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
@@ -15,14 +16,18 @@ from typing import TYPE_CHECKING, Any
 from nexus_symbiote.core.hashing import (
     descriptor_binding,
     normalize_digest,
+    open_directory_nofollow,
     open_regular_file,
     pathname_identity,
 )
 
 if TYPE_CHECKING:
+    from sigstore.models import TrustedRoot
+
     from nexus_symbiote.core.models import ClaimEvidence
 
 MAX_BUNDLE_BYTES = 4 * 1024 * 1024
+MAX_TRUST_ROOT_BYTES = 4 * 1024 * 1024
 MAX_SIGNED_ARTIFACT_BYTES = 5 * 1024 * 1024 * 1024
 # A fixed message, so callers can report it instead of a generic signature failure.
 SIGSTORE_MISSING = "sigstore package not installed; install nexus-symbiote[sigstore]"
@@ -75,6 +80,13 @@ def _sha256(value: str | None) -> str | None:
         return None
     algorithm, digest = normalize_digest(value, "sha256")
     return f"{algorithm}:{digest}"
+
+
+# Explicit Sigstore trust-root override. A flag value wins over the environment;
+# when neither is set, the sigstore-python TUF cache is used after the private
+# cache check and single read in _read_sigstore_cache.
+TRUST_ROOT_ENV = "NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT"
+TRUST_ROOT_SHA256_ENV = "NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT_SHA256"
 
 
 @dataclass(frozen=True)
@@ -159,6 +171,342 @@ class VerificationResult:
     details: dict[str, Any] | None = None
 
 
+def _current_uid() -> int | None:
+    """Current user id, or None on platforms without user ids."""
+    geteuid = getattr(os, "geteuid", None)
+    if callable(geteuid):
+        uid: int = geteuid()
+        return uid
+    return None
+
+
+def _owner_error(info: os.stat_result, path: Path, *, what: str) -> str | None:
+    """Return an error when a trust entry is not owned by the current user."""
+    uid = _current_uid()
+    if uid is not None and info.st_uid != uid:
+        return f"{what} {path} is not owned by the current user"
+    return None
+
+
+def _private_dir_error(path: Path, *, what: str) -> str | None:
+    """Return an error unless a path is a user-owned private directory, not a symlink."""
+    try:
+        info = os.lstat(path)
+    except OSError:
+        return f"{what} {path} cannot be inspected"
+    return _private_dir_info_error(info, path, what=what)
+
+
+def _private_dir_info_error(info: os.stat_result, path: Path, *, what: str) -> str | None:
+    if stat.S_ISLNK(info.st_mode):
+        return f"{what} {path} must not be a symlink"
+    if not stat.S_ISDIR(info.st_mode):
+        return f"{what} {path} is not a directory"
+    if (error := _owner_error(info, path, what=what)) is not None:
+        return error
+    if info.st_mode & 0o022:
+        return (
+            f"{what} {path} is group/world-writable; make it private, point "
+            "XDG_CACHE_HOME at a directory you own, or use an explicit trust root "
+            f"({TRUST_ROOT_ENV} or --trust-root)"
+        )
+    return None
+
+
+def _private_file_info_error(
+    info: os.stat_result, parent_mode: int | None, path: Path, *, what: str
+) -> str | None:
+    """Return an error unless a trust file is user-owned and private.
+
+    A group/world-writable file is accepted only when its parent directory
+    keeps everyone else from traversing to it: sigstore-python seeds
+    trusted_root.json with the ambient umask, so under umask 002/007 the file
+    is group-writable and only the private directory (mode 0700, as
+    _check_sigstore_cache_dirs creates) protects it.
+    """
+    if (error := _owner_error(info, path, what=what)) is not None:
+        return error
+    if info.st_mode & 0o022:
+        if parent_mode is None or parent_mode & 0o011:
+            return (
+                f"{what} {path} is group/world-writable and its directory lets "
+                "others reach it; make the file private, make its directory "
+                "private, or use an explicit trust root "
+                f"({TRUST_ROOT_ENV} or --trust-root)"
+            )
+    return None
+
+
+def _sigstore_cache_targets_dir() -> Path:
+    """Resolve the TUF targets directory exactly as sigstore-python does.
+
+    sigstore-python exposes no public API for this path, so this uses the same
+    resolver its TrustUpdater uses. If that private API moves, verification
+    fails closed instead of checking the wrong directory.
+    """
+    from sigstore._internal.tuf import DEFAULT_TUF_URL, _get_dirs
+
+    _metadata_dir, targets_dir = _get_dirs(DEFAULT_TUF_URL)
+    return targets_dir
+
+
+def _check_sigstore_cache_dirs() -> tuple[Path | None, str | None]:
+    """Ensure the offline TUF cache directories are private, creating them mode 0700.
+
+    Offline, sigstore-python reads ``trusted_root.json`` from its user cache
+    without verifying it, so anyone who can write to the cache (or rename a
+    component above it) chooses the accepted certificate authorities and
+    transparency logs. This checks the TUF targets directory and every ancestor
+    up to the Sigstore cache directory and fails closed on any symlink, foreign
+    owner, or group/world write bit; ``_read_sigstore_cache`` checks the file.
+    The cache home above the Sigstore directory is shared by other applications
+    and is not checked; on a shared machine point XDG_CACHE_HOME at a private
+    directory instead.
+
+    Returns (targets_dir, error); exactly one of them is set.
+    """
+    try:
+        import platformdirs
+
+        targets_dir = _sigstore_cache_targets_dir()
+        sigstore_dir = Path(platformdirs.user_cache_dir("sigstore-python", "sigstore"))
+    except Exception:
+        return None, "Cannot resolve the Sigstore trust-root cache location"
+    missing: list[Path] = []
+    probe = targets_dir
+    while not probe.exists():
+        missing.append(probe)
+        if probe == probe.parent:
+            break
+        probe = probe.parent
+    for component in reversed(missing):
+        try:
+            os.mkdir(component, 0o700)
+        except FileExistsError:
+            continue  # Created concurrently; the chain check below vets it.
+        except OSError:
+            return None, f"Cannot create the private Sigstore trust-root cache at {component}"
+    current = targets_dir
+    while True:
+        error = _private_dir_error(current, what="Sigstore trust-root cache directory")
+        if error is not None:
+            return None, error
+        if current == sigstore_dir:
+            break
+        if sigstore_dir not in current.parents:
+            return None, (
+                "Sigstore trust-root cache "
+                f"{targets_dir} is outside the Sigstore cache directory {sigstore_dir}"
+            )
+        current = current.parent
+    return targets_dir, None
+
+
+def _read_sigstore_cache() -> tuple[Path | None, bytes | None, str | None]:
+    """Check the offline TUF cache and read its trusted root once.
+
+    After the directory chain passes ``_check_sigstore_cache_dirs``, a missing
+    ``trusted_root.json`` is seeded mode 0600 from the root embedded in
+    sigstore-python, as sigstore-python itself would. The file is then opened
+    once without following symlinks, must be user-owned and not group/world
+    writable where anyone else can reach it (a file sigstore-python seeded
+    under a group-writable umask is accepted only inside a private directory),
+    judged by fstat on that descriptor and its directory's, and read. The
+    caller must build the verifier from the returned bytes and never let
+    sigstore-python re-read the path, which a process running as the same user
+    could replace in between.
+
+    Returns (trusted_root_path, content, error); the error is set alone on failure.
+    """
+    targets_dir, error = _check_sigstore_cache_dirs()
+    if error is not None or targets_dir is None:
+        return None, None, error or "Sigstore trust-root cache could not be checked"
+    trusted_root = targets_dir / "trusted_root.json"
+    error = _seed_sigstore_cache(trusted_root)
+    if error is not None:
+        return None, None, error
+    content, error = _read_checked_trust_root(
+        trusted_root,
+        private=True,
+        what="Sigstore trusted root",
+        dir_what="Sigstore trust-root cache directory",
+    )
+    if content is None:
+        return None, None, error or f"Sigstore trusted root {trusted_root} cannot be inspected"
+    return trusted_root, content, None
+
+
+def _seed_sigstore_cache(trusted_root: Path) -> str | None:
+    """Create a missing cached trusted root from sigstore-python's embedded copy.
+
+    The file is created exclusively and without following symlinks, so an
+    existing entry of any kind is left in place for the checked read to vet.
+    """
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+    failure = f"Cannot seed the Sigstore trusted root {trusted_root}"
+    try:
+        dir_fd = open_directory_nofollow(trusted_root.parent)
+    except OSError:
+        return failure
+    try:
+        try:
+            fd = os.open(trusted_root.name, flags, 0o600, dir_fd=dir_fd)
+        except FileExistsError:
+            return None
+        with os.fdopen(fd, "wb") as stream:
+            try:
+                from sigstore._internal.tuf import DEFAULT_TUF_URL
+                from sigstore._utils import read_embedded
+
+                stream.write(read_embedded("trusted_root.json", DEFAULT_TUF_URL))
+            except Exception:
+                os.unlink(trusted_root.name, dir_fd=dir_fd)
+                return failure
+    except OSError:
+        return failure
+    finally:
+        os.close(dir_fd)
+    return None
+
+
+def _resolve_explicit_trust_root(
+    trust_root: str | Path | None, expected_sha256: str | None
+) -> tuple[Path | None, str | None, str | None]:
+    """Resolve and check an explicit trust root; see ``_read_explicit_trust_root``.
+
+    Returns (path, source, error); source is "flag" or "environment".
+    """
+    path, _content, source, error = _read_explicit_trust_root(trust_root, expected_sha256)
+    return path, source, error
+
+
+def _read_explicit_trust_root(
+    trust_root: str | Path | None, expected_sha256: str | None
+) -> tuple[Path | None, bytes | None, str | None, str | None]:
+    """Resolve an explicit trust root from a flag value or the environment and read it once.
+
+    A flag value wins over ``NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT``. The path
+    names a ``trusted_root.json`` file, or a directory holding one. With a
+    pinned SHA-256 (flag or ``NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT_SHA256``)
+    the file bytes must match it; without one, the file and its parent
+    directory must be user-owned and private. The file is opened once without
+    following symlinks, the checks run against that descriptor, and the bytes
+    returned are exactly the bytes checked, so the caller must load the trust
+    root from them and never re-open the path.
+
+    Returns (path, content, source, error); source is "flag" or "environment".
+    """
+    raw = trust_root
+    source = "flag"
+    if raw is None:
+        raw = os.environ.get(TRUST_ROOT_ENV) or None
+        source = "environment"
+    digest = expected_sha256
+    if digest is None:
+        digest = os.environ.get(TRUST_ROOT_SHA256_ENV) or None
+    if raw is None:
+        if digest is not None:
+            return (
+                None,
+                None,
+                None,
+                "A pinned Sigstore trust-root SHA-256 was supplied without a trust root; "
+                f"set {TRUST_ROOT_ENV} or pass --trust-root",
+            )
+        return None, None, None, None
+    path = Path(raw)
+    if path.is_dir():
+        path = path / "trusted_root.json"
+    expected: str | None = None
+    if digest is not None:
+        try:
+            _algorithm, expected = normalize_digest(digest, "sha256")
+        except ValueError:
+            return (
+                None,
+                None,
+                None,
+                "Pinned Sigstore trust-root SHA-256 must be sha256:<64 lowercase hex characters>",
+            )
+    content, error = _read_checked_trust_root(path, private=expected is None)
+    if expected is not None:
+        if content is None or not hmac.compare_digest(
+            hashlib.sha256(content).hexdigest(), expected
+        ):
+            return (
+                None,
+                None,
+                None,
+                "Explicit Sigstore trust root does not match the pinned SHA-256",
+            )
+        return path, content, source, None
+    if content is None:
+        return None, None, None, error
+    return path, content, source, None
+
+
+def _read_checked_trust_root(
+    path: Path,
+    *,
+    private: bool,
+    what: str = "Explicit Sigstore trust root",
+    dir_what: str = "Explicit Sigstore trust-root directory",
+) -> tuple[bytes | None, str | None]:
+    """Read a trust-root file once through a no-follow descriptor, bounded.
+
+    With ``private``, the file and its parent directory must be user-owned and
+    private, judged by fstat on the very descriptors the bytes come from.
+    """
+    try:
+        dir_fd = open_directory_nofollow(path.parent)
+    except OSError:
+        fallback = _private_dir_error(path.parent, what=dir_what) if private else None
+        return None, fallback or f"{what} {path} cannot be inspected"
+    try:
+        try:
+            linked = os.stat(path.name, dir_fd=dir_fd, follow_symlinks=False)
+        except OSError:
+            return None, f"{what} {path} cannot be inspected"
+        if stat.S_ISLNK(linked.st_mode):
+            return None, f"{what} {path} must not be a symlink"
+        if not stat.S_ISREG(linked.st_mode):
+            return None, f"{what} {path} is not a regular file"
+        flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0)
+        try:
+            fd = os.open(path.name, flags, dir_fd=dir_fd)
+        except OSError:
+            return None, f"{what} {path} cannot be inspected"
+        with os.fdopen(fd, "rb") as stream:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode):
+                return None, f"{what} {path} is not a regular file"
+            if private:
+                dir_info = os.fstat(dir_fd)
+                error = _private_file_info_error(info, dir_info.st_mode, path, what=what)
+                if error is None:
+                    error = _private_dir_info_error(dir_info, path.parent, what=dir_what)
+                if error is not None:
+                    return None, error
+            if info.st_size > MAX_TRUST_ROOT_BYTES:
+                return None, f"{what} {path} exceeds the {MAX_TRUST_ROOT_BYTES}-byte limit"
+            content = stream.read(MAX_TRUST_ROOT_BYTES + 1)
+            if len(content) > MAX_TRUST_ROOT_BYTES:
+                return None, f"{what} {path} exceeds the {MAX_TRUST_ROOT_BYTES}-byte limit"
+            return content, None
+    except OSError:
+        return None, f"{what} {path} cannot be inspected"
+    finally:
+        os.close(dir_fd)
+
+
+def _trusted_root_from_bytes(content: bytes) -> TrustedRoot:
+    """Build a sigstore TrustedRoot from bytes already read, as ``from_file`` does by path."""
+    from sigstore.models import TrustedRoot
+    from sigstore_models.trustroot import v1 as trustroot_v1
+
+    return TrustedRoot(trustroot_v1.TrustedRoot.from_json(content))
+
+
 def verify_file_hash(
     path: Path,
     expected_hash: str,
@@ -198,12 +546,22 @@ def verify_sigstore_digest(
     bundle_json: bytes,
     expected_identity: str,
     expected_issuer: str,
+    *,
+    trust_root: str | Path | None = None,
+    trust_root_sha256: str | None = None,
 ) -> VerificationResult:
     """Verify a caller-inspected SHA-256 subject without a network refresh.
 
     The caller must bind this digest to the inspected artifact. This function
     verifies a message signature over the artifact digest. A DSSE envelope signs
     an in-toto statement instead, so such a bundle is refused with a fixed reason.
+
+    The trust root comes from an explicit ``--trust-root``/``NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT``
+    override when one is set (verified against a pinned SHA-256 when one is
+    supplied, otherwise required to be a user-owned private file); otherwise
+    from the sigstore-python TUF cache, which must be user-owned and private
+    (created mode 0700 when missing) or verification fails closed. The path
+    actually trusted is reported in ``details["trust_root_path"]``.
     """
     if (
         not expected_identity
@@ -214,6 +572,11 @@ def verify_sigstore_digest(
         return VerificationResult(
             False, error="Expected signer identity and OIDC issuer are both required"
         )
+    override_path, override_content, override_source, override_error = _read_explicit_trust_root(
+        trust_root, trust_root_sha256
+    )
+    if override_error is not None:
+        return VerificationResult(False, error=override_error)
     try:
         _, digest = normalize_digest(digest_hex, "sha256")
         if len(bundle_json) > MAX_BUNDLE_BYTES:
@@ -228,7 +591,21 @@ def verify_sigstore_digest(
 
         bundle = Bundle.from_json(bundle_json)
         policy = Identity(identity=expected_identity, issuer=expected_issuer)
-        verifier = Verifier.production(offline=True)
+        if override_path is not None and override_content is not None:
+            trust_root_path = override_path
+            trust_root_source = override_source or "explicit"
+            verifier = Verifier(trusted_root=_trusted_root_from_bytes(override_content))
+        else:
+            cached_path, cached_content, cache_error = _read_sigstore_cache()
+            if cache_error is not None or cached_path is None or cached_content is None:
+                return VerificationResult(
+                    False,
+                    error=cache_error or "Sigstore trust-root cache could not be checked",
+                    details={"trust_root_path": None},
+                )
+            trust_root_path = cached_path
+            trust_root_source = "cache"
+            verifier = Verifier(trusted_root=_trusted_root_from_bytes(cached_content))
         verifier.verify_artifact(
             Hashed(algorithm=HashAlgorithm.SHA2_256, digest=bytes.fromhex(digest)), bundle, policy
         )
@@ -240,6 +617,8 @@ def verify_sigstore_digest(
                 "artifact_digest": f"sha256:{digest}",
                 "bundle_digest": f"sha256:{hashlib.sha256(bundle_json).hexdigest()}",
                 "method": "sigstore-python.verify_artifact",
+                "trust_root_path": str(trust_root_path),
+                "trust_root_source": trust_root_source,
             },
         )
     except ImportError:
@@ -255,12 +634,18 @@ def verify_sigstore_bundle(
     bundle_path: Path,
     expected_identity: str | None = None,
     expected_issuer: str | None = None,
+    *,
+    trust_root: str | Path | None = None,
+    trust_root_sha256: str | None = None,
 ) -> VerificationResult:
     """Verify an exact local artifact under an explicitly selected signer policy.
 
     Inputs are bounded, regular files with no symlink traversal. Streaming hash
     verification uses the supported public sigstore-python 4.x API and offline
     trust material. Missing trust material fails; no network refresh is initiated.
+    An explicit trust root (``trust_root``/``NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT``,
+    optionally pinned by ``trust_root_sha256``) bypasses the user cache; otherwise
+    the cache must pass the private-cache check in ``_read_sigstore_cache``.
     """
     if (
         not expected_identity
@@ -281,7 +666,14 @@ def verify_sigstore_bundle(
             return VerificationResult(
                 False, error="Artifact is unavailable, changed, or exceeds verification limit"
             )
-        return verify_sigstore_digest(digest, bundle_bytes, expected_identity, expected_issuer)
+        return verify_sigstore_digest(
+            digest,
+            bundle_bytes,
+            expected_identity,
+            expected_issuer,
+            trust_root=trust_root,
+            trust_root_sha256=trust_root_sha256,
+        )
     except (OSError, ValueError):
         return VerificationResult(
             False, error="Signature verification inputs could not be read safely"

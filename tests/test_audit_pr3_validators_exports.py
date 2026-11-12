@@ -20,7 +20,6 @@ from nexus_symbiote.core.enums import (
     SerializationSafety,
     TrustTier,
 )
-from nexus_symbiote.core.evidence import AuthorityClaim, AuthorityKind, ClaimState, EvidenceRecord
 from nexus_symbiote.core.hashing import (
     TOOL_DEFINITION_HASH_VERSION,
     extract_version_pin,
@@ -29,7 +28,6 @@ from nexus_symbiote.core.hashing import (
 )
 from nexus_symbiote.core.models import (
     A2AServerComponent,
-    AuthorizationRecord,
     ClaimEvidence,
     CompletenessClaim,
     ModelComponent,
@@ -398,7 +396,8 @@ def test_strict_i_json_save_load_a2a_bool_and_aware_timestamps(tmp_path: Path) -
             )
         ]
     )
-    with pytest.raises(NativeFormatError, match="strict I-JSON"):
+    # The content-digest serial is derived first and refuses the same value.
+    with pytest.raises(ValueError, match="I-JSON"):
         bad_bom.to_native_json()
 
     # A2AServerComponent.authentication_required rejects string/int coercion
@@ -413,39 +412,14 @@ def test_strict_i_json_save_load_a2a_bool_and_aware_timestamps(tmp_path: Path) -
         is True
     )
 
-    # Timezone-naive ISO timestamps rejected across Timestamp-typed models
-    with pytest.raises(ValidationError, match="timezone"):
-        ClaimEvidence.model_validate(
-            {
-                "assurance": "observed",
-                "method": "static-config",
-                "observed_at": "2026-11-12T12:00:00",
-            }
-        )
-    with pytest.raises(ValidationError, match="timezone"):
-        EvidenceRecord.model_validate(
-            {
-                "source": "scanner",
-                "collector": "mcp",
-                "collected_at": "2026-11-12T12:00:00",
-            }
-        )
-    with pytest.raises(ValidationError, match="timezone"):
-        AuthorizationRecord.model_validate(
-            {
-                "principal": "spiffe://acme.example/agent",
-                "action": "invoke",
-                "expires_at": "2026-11-12T12:00:00",
-            }
-        )
-    with pytest.raises(ValidationError, match="timezone"):
-        AuthorityClaim.model_validate(
-            {
-                "kind": AuthorityKind.DECLARED,
-                "state": ClaimState.DECLARED,
-                "principal": "spiffe://acme.example/agent",
-                "action": "invoke",
-                "resource": "tool:ledger",
-                "observed_at": "2026-11-12T12:00:00",
-            }
-        )
+    # Reading stays as the native format has always been read: a timestamp without an
+    # offset is accepted, so inventories written before this change still load.
+    naive = ClaimEvidence.model_validate(
+        {
+            "assurance": "observed",
+            "method": "static-config",
+            "scope": "repository",
+            "observed_at": "2026-11-12T12:00:00",
+        }
+    )
+    assert naive.observed_at is not None and naive.observed_at.tzinfo is None

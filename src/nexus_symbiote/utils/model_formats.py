@@ -449,13 +449,40 @@ def gguf_metadata(read: Read, budget: InspectionBudget | None = None) -> GGUFMet
 
 # Chat templates ----------------------------------------------------------------
 
-# Jinja sandbox escapes reach Python internals through dunder attributes, by
-# name or through the attr filter. Ordinary chat templates do neither.
+# Jinja sandbox escapes reach Python internals through dunder attributes: by name,
+# by a string that a subscript, the attr filter or an attribute argument looks up,
+# or through the attr filter. Ordinary chat templates do none of these. Jinja skips
+# Unicode whitespace between tokens, so the pattern matches text, not bytes.
 _TEMPLATE_ESCAPE = re.compile(
-    rb"\.\s*__[A-Za-z0-9_]+__|\[\s*['\"]__[A-Za-z0-9_]+__['\"]\s*\]|(?<![A-Za-z0-9_])attr\s*\("
+    r"\.\s*__[A-Za-z0-9_]+__|['\"]__[A-Za-z0-9_]+__['\"]|(?<![A-Za-z0-9_])attr\s*\("
+)
+# The escapes Jinja decodes in a string literal, with an escaped backslash first so
+# that it is consumed whole; every other backslash is kept as written. Jinja turns
+# every line break into a line feed first, and a backslash before one is removed.
+_STRING_ESCAPE = re.compile(
+    r"\\(?:\\|\r\n?|\n|x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8}|[0-7]{1,3}"
+    r"|N\{[A-Za-z0-9 -]{1,100}\})"
 )
 
 
+def _unescaped(match: re.Match[str]) -> str:
+    if match.group()[1] in "\r\n":
+        return ""
+    try:
+        return match.group().encode("ascii").decode("unicode-escape")
+    except UnicodeDecodeError:
+        return match.group()
+
+
 def template_escape_markers(template: bytes) -> bool:
-    """Whether a template carries the attribute access that Jinja sandbox escapes use."""
-    return _TEMPLATE_ESCAPE.search(template) is not None
+    """Whether a template carries the attribute access that Jinja sandbox escapes use.
+
+    The template is matched as Jinja reads it: as text, with string-literal escapes
+    decoded, so ``\\x5f`` spells an underscore. Escapes outside a literal are decoded
+    too, and the text is also matched as written, so decoding can only add a match.
+    """
+    text = template.decode("utf-8", "replace")
+    return any(
+        _TEMPLATE_ESCAPE.search(form) is not None
+        for form in (text, _STRING_ESCAPE.sub(_unescaped, text))
+    )

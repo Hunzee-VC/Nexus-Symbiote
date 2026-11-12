@@ -140,7 +140,15 @@ def test_native_counts_use_final_findings_and_accept_legacy_reports(tmp_path):
         source.write_text(json.dumps(report))
         path = tmp_path / f"{variant}.json"
         imported = runner.invoke(
-            main, ["import-shadowscan", str(source), "-o", str(path), "--report-only"]
+            main,
+            [
+                "import-shadowscan",
+                str(source),
+                "-o",
+                str(path),
+                "--report-only",
+                "--allow-unsigned-discovery",
+            ],
         )
         assert imported.exit_code == 0, imported.output
         assert (

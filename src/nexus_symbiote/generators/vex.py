@@ -16,14 +16,12 @@ import re
 import uuid
 from typing import Any
 
-from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote.core.aibom import AIBOM, prepare
+from nexus_symbiote.core.canonical import NAMESPACE, content_digest
 from nexus_symbiote.core.models import ModelComponent
 from nexus_symbiote.generators._common import (
-    NAMESPACE,
     OMITTED_IMPORTED_FINDINGS,
-    content_digest,
     imported_discovery_component,
-    prepare,
 )
 from nexus_symbiote.generators.base import Generator
 from nexus_symbiote.generators.cyclonedx import standard_component
@@ -48,7 +46,8 @@ class VEXGenerator(Generator):
 
     def generate(self, bom: AIBOM) -> dict[str, Any]:
         # The same content-derived serial as the inventory exports, so the BOM-Link
-        # names the CycloneDX export of this inventory.
+        # names the CycloneDX export of this inventory. prepare() derives the
+        # serial from content (timestamps excluded); it is not wall-clock.
         prepare(bom)
         serial = str(bom.metadata.serial_number)
         stamp = bom.metadata.timestamp

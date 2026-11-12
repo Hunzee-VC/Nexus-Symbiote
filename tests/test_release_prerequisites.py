@@ -73,26 +73,26 @@ def test_the_landing_time_is_the_later_of_commit_and_first_push_run():
 DISPATCHED = "2026-11-10T11:50:00Z"
 
 
-def test_a_backdated_commit_without_a_push_run_waits_from_its_first_dispatch():
-    # A "[skip ci]" push creates no push run; its commit date can say anything.
+def test_a_commit_without_a_push_run_has_no_landing_time():
+    # A "[skip ci]" push creates no push run; its commit date can say anything, and a
+    # dispatch "on main" may have run on a tag named main, so neither shows the landing.
     backdated = branch("2026-11-07T12:00:00Z")
     only_dispatch = [run(event="workflow_dispatch", created_at=DISPATCHED)]
-    moment = landed(backdated, only_dispatch)
-    assert moment == datetime(2026, 11, 10, 11, 50, tzinfo=UTC)
-    assert controls.evaluate_soak(moment, NOW, "")
-    assert controls.evaluate_soak(moment, moment + timedelta(hours=23, minutes=59), "")
-    assert controls.evaluate_soak(moment, moment + timedelta(hours=24), "") == []
-    # The first trusted run counts, whatever its event; runs elsewhere count for nothing.
-    later = run(id=124, event="workflow_dispatch", created_at="2026-11-10T11:55:00Z")
+    assert landed(backdated, only_dispatch) is None
+    assert controls.evaluate_soak(None, NOW + timedelta(days=30), "")
+    # Runs elsewhere count for nothing either; only a push run on the branch does.
     early = "2026-11-01T00:00:00Z"
     elsewhere = [
-        run(id=90, event="workflow_dispatch", head_branch="release-prep", created_at=early),
+        run(id=90, head_branch="release-prep", created_at=early),
         run(id=91, event="pull_request", created_at=early),
         run(id=92, head_repository={"full_name": "fork/repo"}, created_at=early),
         run(id=93, path=".github/workflows/other.yml", created_at=early),
     ]
-    assert landed(backdated, [later, *only_dispatch, *elsewhere]) == moment
-    assert landed(backdated, elsewhere) is None
+    assert landed(backdated, [*only_dispatch, *elsewhere]) is None
+    pushed = run(id=124, created_at="2026-11-10T11:55:00Z")
+    assert landed(backdated, [*only_dispatch, *elsewhere, pushed]) == datetime(
+        2026, 11, 10, 11, 55, tzinfo=UTC
+    )
 
 
 def test_a_push_run_marks_the_landing_even_after_an_earlier_dispatch():
@@ -261,10 +261,16 @@ MAIN_ONLY = {"total_count": 1, "branch_policies": [{"name": "main", "type": "bra
 
 def test_a_reviewed_main_only_environment_without_bypass_passes():
     assert controls.evaluate_environment(environment(), MAIN_ONLY, name="pypi", branch="main") == []
+
+
+def test_an_environment_open_to_every_protected_branch_is_not_limited_to_main():
+    # Any branch given a protection rule, such as a release branch, could deploy.
     protected = environment(
         deployment_branch_policy={"protected_branches": True, "custom_branch_policies": False}
     )
-    assert controls.evaluate_environment(protected, None, name="pypi", branch="main") == []
+    assert controls.evaluate_environment(protected, None, name="pypi", branch="main") == [
+        "the pypi environment accepts deployments from refs other than main"
+    ]
 
 
 @pytest.mark.parametrize(
@@ -377,15 +383,18 @@ def test_a_fresh_commit_blocks_pypi_but_not_the_testpypi_rehearsal(live, capsys)
     assert controls.main() == 0
 
 
-def test_a_backdated_skip_ci_commit_waits_for_its_dispatch_on_the_branch(live, capsys):
-    # Pushed with "[skip ci]" and dated three days back; CI was then dispatched on main.
+def test_a_skip_ci_commit_dispatched_long_ago_still_needs_a_stated_override(live, capsys):
+    # Pushed with "[skip ci]", so no push run; a dispatch "on main" two days ago may have
+    # run on a tag named main and does not show when the commit reached the branch.
     now = datetime.now(UTC)
     live.setattr(controls, "fetch_branch", lambda *_: branch(stamp(now - timedelta(days=3))))
-    dispatch = run(event="workflow_dispatch", created_at=stamp(now))
+    dispatch = run(event="workflow_dispatch", created_at=stamp(now - timedelta(days=2)))
     live.setattr(controls, "fetch_runs", lambda *_: [dispatch])
     live.setattr("sys.argv", [*ARGV, "--publish", "pypi"])
     assert controls.main() == 1
-    assert "waits 24 hours" in capsys.readouterr().err
+    assert "reached the branch is unavailable" in capsys.readouterr().err
+    live.setenv("SOAK_OVERRIDE", "Publishes the fix for an actively exploited gate bypass")
+    assert controls.main() == 0
 
 
 def test_without_a_trusted_run_the_soak_needs_a_stated_override(live, capsys):

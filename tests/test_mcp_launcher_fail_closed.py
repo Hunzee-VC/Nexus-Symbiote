@@ -199,6 +199,10 @@ CMD_FORMS = [
     ["/c", "npx", "-y", '"good-mcp@1.2.3"'],
     ["/c", "npx -y good-mcp@1.2.3 %MCP_OPTS%"],
     ["/c", "n\xa0px -y evil-mcp@latest"],
+    # cmd keeps single quotes, so these command words are not npx.
+    ["/c", "'npx' -y evil-mcp@latest"],
+    ["/c", "np''x -y evil-mcp@latest"],
+    ["/c", "'npx'", "-y", "evil-mcp@latest"],
 ]
 
 
@@ -235,6 +239,20 @@ def test_cmd_behind_other_wrappers_is_read_with_the_same_rule(tmp_path, server):
 def test_ordinary_cmd_lines_stay_classified(tmp_path, args, pinned):
     record = assert_no_gap(tmp_path, {"command": "cmd", "args": args})
     assert record.launcher_package == "npm:pkg" and record.version_pinned is pinned
+
+
+@pytest.mark.parametrize(
+    "line", ["C:\\nodejs\\npx.cmd -y pkg@1.2.3", "node_modules\\.bin\\npx -y pkg@1.2.3"]
+)
+def test_cmd_keeps_backslashes_in_a_command_line(tmp_path, line):
+    record = assert_no_gap(tmp_path, {"command": "cmd", "args": ["/c", line]})
+    assert record.launcher_package == "npm:pkg" and record.version_pinned is True
+
+
+def test_a_backslash_in_a_cmd_command_word_is_a_path_not_an_escape(tmp_path):
+    record, _ = scan(tmp_path, {"command": "cmd", "args": ["/c", "n\\px -y evil-mcp@latest"]})
+    assert record.properties.get("launcher") != "npx"
+    assert record.launcher_package is None and record.version_pinned is not True
 
 
 @pytest.mark.parametrize(

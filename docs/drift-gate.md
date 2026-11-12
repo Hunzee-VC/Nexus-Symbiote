@@ -6,20 +6,22 @@ page says where the reviewed snapshot must come from, how to take both snapshots
 they compare, and what each alert means.
 
 The gate compares what the inventory records. Content the collectors do not record,
-such as Codex `config.toml` settings other than its approval, sandbox and MCP server
-settings, or instruction files under names the `prompt` collector does not read, cannot
-alert. Without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, neither can a changed MCP launch
+such as instruction files under names the `prompt` collector does not read, or what a
+local program or project script started as an MCP server runs, cannot alert. Without
+`NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, neither can a changed MCP launch
 argument other than the launcher package, a changed environment or header value, an
 endpoint or package index path changed on the same host, a changed value of a project
-resolver setting such as an `.npmrc` entry, or an A2A or RAG URL path changed on the same
-host that keeps its depth; see [source binding](verification-source-binding.md).
+resolver setting such as an `.npmrc` entry, an A2A or RAG URL path changed on the same
+host that keeps its depth, or a value the redaction removes from `.codex/config.toml`,
+`.cursor/cli.json` or the Antigravity, xAI and Copilot settings files, such as a token or
+a URL path in a `notify` command; see [source binding](verification-source-binding.md).
 The [known limitations](known-limitations.md) list those surfaces.
 
 ## The trust anchor is the baseline
 
-A baseline is an unsigned JSON file. `diff` cannot tell a reviewed baseline from one
-the change under review wrote, so the gate is only as strong as the place the
-baseline comes from.
+`baseline` writes an unsigned JSON file, and `diff` checks no signature. `diff`
+alone cannot tell a reviewed baseline from one the change under review wrote, so the
+gate is only as strong as the place the baseline comes from.
 
 - **Keep the baseline out of the pull request's reach.** Read it from the protected
   base branch (for example `git show "$BASE_SHA:.nexus-symbiote/reviewed.json"`), or
@@ -32,6 +34,14 @@ baseline comes from.
 - **Decide who may change it.** Updating the baseline approves everything in it.
   Change it only in a reviewed pull request to the protected branch, and require
   code-owner review for that path.
+- **Verify its attestation before `diff`.** A reviewer can sign the baseline with
+  `attest --purpose reviewed`, and the job can check it with `verify-attestation`,
+  using a public key taken from outside the checkout, before it runs `diff`; see
+  [gate a pull request on an attested baseline](inventory-attestation.md#gate-a-pull-request-on-an-attested-baseline).
+  That establishes that a key holder you trust signed exactly that file for that
+  purpose. It does not retire older attested baselines: an older file the same keys
+  signed still verifies, so bound its age with `--max-age-days` and keep attested
+  baselines where the change under review cannot choose among them.
 - **Protect the gate itself.** On the `pull_request` event the workflow file comes
   from the pull request, so an author can edit `--fail-on-alert` away. Require the
   workflow through an organization ruleset, or run the comparison in a
@@ -70,8 +80,9 @@ request with itself, and that gate can never fail.
 - **Use the same binding key for both.** Set one `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`
   of 32 or more characters for the baseline and every candidate scan. Without it, the
   values described above cannot alert; with a different key, every MCP, A2A, RAG and
-  IDE settings binding changes and alerts, and IDE settings digests differ between a
-  keyed and an unkeyed scan. A `pull_request_target` job holds no secret, so it scans
+  IDE settings binding changes and alerts, and the digests of the IDE settings files
+  digested as read differ between a keyed and an unkeyed scan. A
+  `pull_request_target` job holds no secret, so it scans
   without the key: approve the baseline it reads without the key too. See
   [source binding](verification-source-binding.md).
 - **Paths are root-relative.** Recorded paths are relative to the scan root, so a
@@ -107,7 +118,7 @@ then notes, then the added, removed and modified components and relationships.
 | MCP endpoint, transport, launch command, launcher package or static source binding changed | critical |
 | Tool definition, input schema, description or annotations changed | critical |
 | Security field changed (for example capabilities, authorizations, claims, endpoints, A2A card URL, package URL, provider, source URI, signing identity or key reference, permission mode, version pin), a `*_ref` or `*_refs` field changed, declared autonomy level changed, trust tier or signing status downgraded, a digest removed or changed | high |
-| Trust tier or signing status raised | medium: a snapshot is unsigned, so a raised label is a claim to review |
+| Trust tier or signing status raised | medium: a snapshot is written unsigned, so a raised label is a claim to review |
 | Risk findings added | the highest added severity, at least medium |
 | Risk findings removed; any other field changed, including snapshot metadata such as the producer's `tool_name` or `tool_vendor` | medium |
 | Relationship added | medium; high for `invokes`, `delegates-to` and `acts-as-identity` |
