@@ -1,12 +1,15 @@
 # Reproducible inventories
 
-Scan one checkout twice and you get two inventories that record the same content but
-differ in when, and in which run, they were collected. This page lists exactly what
-differs, describes the content digest that leaves it out, and shows how
-`SOURCE_DATE_EPOCH` makes the files themselves byte-identical.
+Scan one checkout twice and you get the same inventory: SymBiote records no collection
+time unless you ask for one, writes components and dependencies sorted, and derives the
+serial number from the content. This page lists the fields that record the collection
+event, describes the content digest that leaves them out and the serial number derived
+from it, and shows how `SOURCE_DATE_EPOCH` records a collection time while keeping the
+files byte-identical.
 
 - [What differs between two collections](#what-differs-between-two-collections)
 - [The content digest](#the-content-digest)
+- [The serial number](#the-serial-number)
 - [Byte-identical files with `SOURCE_DATE_EPOCH`](#byte-identical-files-with-source_date_epoch)
 - [Example](#example)
 - [Limits](#limits)
@@ -15,22 +18,29 @@ differs, describes the content digest that leaves it out, and shows how
 
 An inventory records paths relative to the scanned directory, so where a checkout lies
 does not enter it. Two scans of the same checkout, with the same tool and settings,
-differ only in fields that record the collection event:
+can differ only in fields that record the collection event:
 
 | Field | What a scan writes |
 |---|---|
-| `metadata.serial_number` | A random `urn:uuid:` URN (a version 4 UUID) |
-| `metadata.timestamp` | The time the scan started |
-| `metadata.completeness.timestamp` | The same time |
-| `components[].claims.<name>.observed_at` | The same time, in each claim a collector attached |
+| `metadata.serial_number` | `urn:uuid:` and a version 5 UUID of the content digest (see [the serial number](#the-serial-number)) |
+| `metadata.timestamp` | Nothing; with `SOURCE_DATE_EPOCH` set, that instant |
+| `metadata.completeness.timestamp` | The same as `metadata.timestamp` |
+| `components[].claims.<name>.observed_at` | The same, in each claim a collector attached |
+| `metadata.completeness.source_report_path` | Only with a ShadowScan report: where it was read from, relative to the scanned directory for `scan`, and its file name for `import-shadowscan` |
 
-`import-shadowscan` writes the first two; its records carry no collection times.
+`import-shadowscan` writes the serial number, `metadata.timestamp` and the report's
+file name; its records carry no collection times.
 
-Every digest of a whole document therefore changes from run to run: the SHA-256 of the
-file's bytes, and the canonical digest that a signed runtime snapshot binds
-(`runtime digest --kind bom`). The exports carry the same values: CycloneDX
-`serialNumber` and `metadata.timestamp`, SPDX `created` and a document identifier
-derived from the whole native document, and SARIF `endTimeUtc`.
+By default, then, two scans of the same checkout write byte-identical native JSON and
+CycloneDX files, and so the same SHA-256 of the file's bytes and the same canonical
+digest that a signed runtime snapshot binds (`runtime digest --kind bom`). SPDX requires
+a creation time, so without a recorded one an SPDX export writes the time of the export
+as `CreationInfo.created`, and two SPDX files differ in that field only. SARIF writes
+`endTimeUtc` only when the inventory records a time; its file locations depend on the
+working directory (see [below](#byte-identical-files-with-source_date_epoch)). Two
+imports of copies of one report under different file names differ in
+`source_report_path`, and so in their bytes, but not in their content digest or serial
+number.
 
 ## The content digest
 
@@ -41,6 +51,8 @@ JSON of the native document as parsed from the file, with these fields left out:
 
 - `metadata.serial_number`, when it is null or a `urn:uuid:` URN in lower-case
   hexadecimal;
+- `metadata.completeness.source_report_path`, when it is a string: where an imported
+  report was read from is not part of what it records;
 - `metadata.timestamp`, `metadata.completeness.timestamp` and the `observed_at` of each
   component claim, when null or an RFC 3339 timestamp of the form
   `YYYY-MM-DDThh:mm:ss`, with up to nine digits of fractional seconds, and `Z` or a
@@ -53,7 +65,8 @@ JSON object, and only when its value has that shape. Everything else is content:
   edge or in a deployment profile, so that a change cannot hide behind a field that is
   merely named like a collection event;
 - any other value at these locations, such as a timestamp without a time of day;
-- the order of every list, `components` and `dependencies` included;
+- the order of every list, `components` and `dependencies` included (this build writes
+  both sorted; see [limits](#limits));
 - the tool version, the governing policy and its relaxations, and the whole coverage
   record.
 
@@ -70,37 +83,45 @@ safe: a forged inventory that copies a genuine one's content has the same conten
 digest. Compare content digests of inventories that came from sources you trust, and
 use the SHA-256 of the file to name an exact file.
 
+## The serial number
+
+When an inventory is written without a serial number, which is how `scan`, `baseline`
+and `import-shadowscan` build one, SymBiote sets `metadata.serial_number` to `urn:uuid:`
+followed by the version 5 UUID of the content digest, as `digest` prints it, in the
+namespace `ccaa2a43-8ba9-58e6-8f22-f8793a2039d5`. The serial number is not content, so
+anyone who holds the native JSON file can recompute it from that file, and it names the
+content: two inventories of the same content have the same serial number, whatever
+instant each records and wherever an imported report was read from. CycloneDX and SPDX
+exports carry the same serial number and embed the native document as the native file
+records it. It is a name, not a digest: compare content digests to compare content.
+
+An inventory whose content digest cannot be computed, because it holds a value outside
+the I-JSON range, such as a lone surrogate, or nests too deeply, has no serial number
+and is not written: `scan` and `import-shadowscan` exit 1.
+
 ## Byte-identical files with `SOURCE_DATE_EPOCH`
 
 Set `SOURCE_DATE_EPOCH`, the variable that reproducible builds use, to a whole number
 of seconds since 1970-01-01T00:00:00Z: 1 to 12 ASCII digits, at most 253402300799
 (9999-12-31T23:59:59Z). Then `scan`, `baseline`, which runs `scan`, and
-`import-shadowscan`:
+`import-shadowscan` record that instant as `metadata.timestamp` and, for a scan, in
+every other time field of the table above. The serial number does not change: the
+recorded time is not content.
 
-- record that instant, instead of the clock, in every field of the table above;
-- once collection has finished, set `metadata.serial_number` to `urn:uuid:` followed
-  by the version 5 UUID of the content digest in the namespace
-  `ccaa2a43-8ba9-58e6-8f22-f8793a2039d5`, which the standard exports already use.
-
-The serial number is not content, so anyone who holds the native JSON file can
-recompute it from that file, and it names the content: two inventories of the same
-content have the same serial number, whatever instant each records. CycloneDX and SPDX
-exports carry the same serial number, but it cannot be recomputed from an export, which
-embeds a sorted copy of the native document (see [limits](#limits)). It is a name, not a
-digest: compare content digests to compare content.
-
-The same inputs then give byte-identical native JSON, CycloneDX and SPDX files, and
-`vex` gives identical documents for them. SARIF records file locations relative to the
-working directory when the scanned directory lies below it, and relative to the scanned
-directory otherwise. Two SARIF files are therefore identical when the scanned directory
-lies at the same path below the working directory in both scans, or below it in
-neither: a scan run from inside the scanned directory, as CI and the pre-commit hooks
-do, and a scan of a directory elsewhere record the same locations.
+CycloneDX writes that instant as `metadata.timestamp` and SPDX as
+`CreationInfo.created`, so the same inputs give byte-identical native JSON, CycloneDX
+and SPDX files, and `vex` gives identical documents for them. SARIF records file
+locations relative to the working directory when the scanned directory lies below it,
+and relative to the scanned directory otherwise. Two SARIF files are therefore
+identical when the scanned directory lies at the same path below the working directory
+in both scans, or below it in neither: a scan run from inside the scanned directory, as
+CI and the pre-commit hooks do, and a scan of a directory elsewhere record the same
+locations.
 
 Any other value, such as an empty, signed, fractional or hexadecimal number, one with
 spaces, one of more than 12 digits or one after the year 9999, is a usage error (exit
 status 2) before anything is collected, and the message does not repeat it. Without
-the variable nothing changes: a scan records the clock and a random serial number.
+the variable an inventory records no collection time.
 
 No gate and no other command reads the variable:
 
@@ -112,14 +133,8 @@ No gate and no other command reads the variable:
 
 The release workflow exports the variable, set to the commit time, for its whole build
 job. The `project.cdx.json` it publishes as release evidence therefore records the
-commit time, not the time of its scan, and a serial number derived from its content;
-see [releasing](releasing.md#what-the-pipeline-guarantees).
-
-With the variable set, an inventory whose content digest cannot be computed, because
-it holds a value outside the I-JSON range, such as a lone surrogate, or nests too
-deeply, is not written: `scan` exits 1 rather than write a serial number that does not
-name its content. Without the variable, such an inventory cannot be exported either,
-or is written in a form that the other commands refuse.
+commit time as its collection time; its serial number is derived from its content; see
+[releasing](releasing.md#what-the-pipeline-guarantees).
 
 ## Example
 
@@ -136,15 +151,17 @@ $ nexus-symbiote scan ci/work/second -o second.json 2>/dev/null
 $ cmp first.json second.json && echo identical
 identical
 $ nexus-symbiote digest first.json
-file_sha256: sha256:36a53ae4f4cc8fa9263a767288418d6d4d5aca849b4a71d2ab48d863d54fd1c7
-canonical_digest: sha256:c0e584e39a8f160ae335a09c77593493de085958e52b882a3c4cd125732affc7
-content_digest: sha256:70565ff758239dcaacd4c27eea8c10a3756ee135b35bccb0306ebeaa6a5f86a0
+file_sha256: sha256:6b5ebdeb0bffdf610d7c1dafd31338dc5abb40ef84882649d5cf42aefe8dc899
+canonical_digest: sha256:5335b1487bd2452fbb56c4e4b7b765c67e4a0eb5f18f8279872de1a78d3522b5
+content_digest: sha256:c91bf0341dad84dc92fd855b4d5583821de5c246a67a5133f6bb0fe8ea20d985
 content_profile: nexus-symbiote/inventory-content/v1
 spec_version: 1.1.0
 components: 11
 ```
 
-Without the variable, a new scan writes a different file with the same content digest:
+Without the variable, a scan records no collection time, so its file differs from the
+pinned one, but its content digest and serial number are the same, and a second scan
+writes the same bytes:
 
 ```console
 $ unset SOURCE_DATE_EPOCH
@@ -152,7 +169,13 @@ $ nexus-symbiote scan "$demo" -o now.json 2>/dev/null
 $ cmp -s first.json now.json || echo different
 different
 $ nexus-symbiote digest now.json --json-output | grep content_digest
-  "content_digest": "sha256:70565ff758239dcaacd4c27eea8c10a3756ee135b35bccb0306ebeaa6a5f86a0",
+  "content_digest": "sha256:c91bf0341dad84dc92fd855b4d5583821de5c246a67a5133f6bb0fe8ea20d985",
+$ grep serial_number first.json now.json
+first.json:    "serial_number": "urn:uuid:6f80d56a-de49-5e34-b131-0ca0f1087d06",
+now.json:    "serial_number": "urn:uuid:6f80d56a-de49-5e34-b131-0ca0f1087d06",
+$ nexus-symbiote scan "$demo" -o again.json 2>/dev/null
+$ cmp now.json again.json && echo identical
+identical
 ```
 
 These are the digests of this tree's scan of the demo; a release that records anything
@@ -169,12 +192,12 @@ against the current tree.
   [source binding](verification-source-binding.md)). Take the inventories you compare
   the same way; see
   [take both snapshots the same way](drift-gate.md#take-both-snapshots-the-same-way).
-- **List order is content.** CycloneDX and SPDX exports embed the native document with
-  its components and dependencies sorted, so a native document recovered from an
-  export has another content digest than the native file, although it records the same
-  inventory. Compare native files with native files. For the same reason, an export's
-  serial number names the content of the native file, not of the sorted copy the export
-  embeds.
+- **List order is content.** This build writes components and dependencies sorted, and
+  the CycloneDX and SPDX exports embed the native document as written, so a native
+  document recovered from an export is the native file. A document written by another
+  build, or edited by hand, with its lists in another order has another content digest
+  than its sorted rewrite, although it records the same inventory; its serial number,
+  if it has one, may not be the one this build would derive.
 - **SARIF locations depend on the working directory**, as described above.
 - **A readable inventory can lack a digest.** A document without a `metadata` object or
   a `components` list has no content digest. A runtime snapshot binds a document only

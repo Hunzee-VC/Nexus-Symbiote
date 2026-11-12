@@ -237,16 +237,16 @@ def test_hints_are_fixed_single_lines_that_say_when_this_build_cannot_carry_an_e
 def test_demo_agent_coverage_is_pinned(tmp_path, monkeypatch):
     report = me.assess(scanned_demo(tmp_path, monkeypatch))
     assert report.counts() == {
-        me.PRESENT: 12,
-        me.MISSING: 27,
+        me.PRESENT: 11,
+        me.MISSING: 28,
         me.EXPLICIT_UNKNOWN: 0,
         me.NEEDS_PRODUCER_INPUT: 11,
         me.NOT_APPLICABLE: 0,
     }
-    assert report.coverage() == me.Coverage(12, 39)
-    assert report.coverage().percent() == "30.7"
+    assert report.coverage() == me.Coverage(11, 39)
+    assert report.coverage().percent() == "28.2"
     assert [(report.coverage(c).present, report.coverage(c).assessable) for c in me.CLUSTERS] == [
-        (7, 9),
+        (6, 9),
         (1, 7),
         (3, 12),
         (0, 7),
@@ -260,6 +260,14 @@ def test_demo_agent_coverage_is_pinned(tmp_path, monkeypatch):
     assert (name.status, name.reasons) == (me.MISSING, ("inferred-placeholder",))
     hashes = result(report, "model-hash-value")
     assert (hashes.status, hashes.basis) == (me.PRESENT, me.OBSERVED)
+    # A scan records no timestamp unless SOURCE_DATE_EPOCH pins one.
+    stamp = result(report, "sbom-timestamp")
+    assert (stamp.status, stamp.reasons) == (me.MISSING, ())
+    assert "SOURCE_DATE_EPOCH" in stamp.element.hint
+    monkeypatch.setenv("SOURCE_DATE_EPOCH", "1767225600")
+    pinned = me.assess(scanned_demo(tmp_path, monkeypatch))
+    assert pinned.coverage() == me.Coverage(12, 39)
+    assert result(pinned, "sbom-timestamp").status == me.PRESENT
     assert hashes.cyclonedx.items == ("/components/6/hashes/0/content",)
     flow = result(report, "system-data-flow")
     assert flow.extension_only and len(flow.native.items) == 3
@@ -372,9 +380,12 @@ def test_unknown_never_reads_better_than_missing():
 def test_values_an_export_would_substitute_are_not_counted():
     bom = AIBOM(components=[subject()])
     report = me.assess(bom)
-    for slug in ("sbom-timestamp", "sbom-tool-version", "sbom-version"):
+    for slug in ("sbom-tool-version", "sbom-version"):
         assert result(report, slug).status == me.MISSING, slug
         assert result(report, slug).reasons == ("export-default",)
+    # The export writes no timestamp the inventory lacks, so there is none to discount.
+    assert export_of(bom)["metadata"].get("timestamp") is None
+    assert result(report, "sbom-timestamp").status == me.MISSING
     # The inventory is not changed, so the report cannot depend on the wall clock.
     assert bom.metadata.timestamp is None and bom.metadata.serial_number is None
     assert me.assess(bom).to_dict() == report.to_dict()
@@ -820,7 +831,7 @@ def test_the_report_is_deterministic_and_names_its_format(tmp_path, monkeypatch)
     assert first["guidance"]["binding"] is False
     assert first["guidance"]["verification"] == "secondary"
     assert [e["id"] for e in first["elements"]] == [e.id for e in me.ELEMENTS]
-    assert first["coverage"] == {"present": 12, "assessable": 39, "percent": 30.7}
+    assert first["coverage"] == {"present": 11, "assessable": 39, "percent": 28.2}
     assert first["gate"] is None
     gated = me.assess(bom).to_dict(fail_under="30.8")
     assert gated["gate"] == {"fail_under": "30.8", "passed": False}

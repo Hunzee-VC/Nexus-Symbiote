@@ -163,6 +163,11 @@ def local_signed_bundle(tmp_path, monkeypatch):
     No network, Fulcio identity or public signing service is involved.
     """
     pytest.importorskip("sigstore")
+    # Verification now checks (and creates, mode 0700) the sigstore-python TUF
+    # cache first; keep that inside tmp_path so the suite never touches the
+    # real user cache.
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     from datetime import UTC, datetime, timedelta
     from types import SimpleNamespace
 

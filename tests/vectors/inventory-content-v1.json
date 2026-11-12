@@ -5,7 +5,7 @@
   "vectors": [
     {
       "id": "native-1.1.0",
-      "note": "A native 1.1.0 document. Left out: the URN UUID serial number, both RFC 3339 timestamps and the observed_at of every claim, null or not. The same names inside properties stay.",
+      "note": "A native 1.1.0 document. Left out: the URN UUID serial number, both RFC 3339 timestamps, the observed_at of every claim, null or not, and the completeness claim's source_report_path. The same names inside properties stay.",
       "document": {
         "metadata": {
           "spec_version": "1.1.0",
@@ -32,7 +32,8 @@
             ],
             "scanner_status": {
               "mcp": "complete"
-            }
+            },
+            "source_report_path": "reports/shadowscan.json"
           },
           "policy_source": "built-in",
           "policy_weakened": []
@@ -49,6 +50,7 @@
               "note": "Café ☕",
               "observed_at": "2026-11-12T10:00:00Z",
               "serial_number": "urn:uuid:3e4f1c2a-9b7d-4e21-8f0a-5c6d7e8f9a0b",
+              "source_report_path": "reports/shadowscan.json",
               "timestamp": "2026-11-12T10:00:00Z"
             },
             "claims": {
@@ -99,8 +101,8 @@
           }
         ]
       },
-      "content": "{\"components\":[{\"assurance_level\":\"observed\",\"bom_ref\":\"mcp-server:docs\",\"claims\":{\"operator_review\":{\"assurance\":\"declared\",\"evidence_refs\":[\"ticket:42\"],\"method\":\"manual-review\",\"scope\":\"repository\"},\"repository_presence\":{\"assurance\":\"observed\",\"collector\":\"mcp\",\"evidence_refs\":[],\"locator\":\".mcp.json\",\"method\":\"filesystem-inventory\",\"scope\":\"repository\"}},\"component_type\":\"mcp-server\",\"name\":\"docs\",\"properties\":{\"note\":\"Café ☕\",\"observed_at\":\"2026-11-12T10:00:00Z\",\"serial_number\":\"urn:uuid:3e4f1c2a-9b7d-4e21-8f0a-5c6d7e8f9a0b\",\"timestamp\":\"2026-11-12T10:00:00Z\"},\"source_path\":\".mcp.json\",\"version\":\"1.2.3\"},{\"bom_ref\":\"tool:docs/search\",\"claims\":{\"repository_presence\":{\"assurance\":\"observed\",\"collector\":\"mcp\",\"evidence_refs\":[],\"locator\":\".mcp.json\",\"method\":\"filesystem-inventory\",\"scope\":\"repository\"}},\"component_type\":\"tool\",\"description\":\"Search the documentation\",\"name\":\"search\",\"source_path\":\".mcp.json\"}],\"dependencies\":[{\"relationship\":\"provides-tool\",\"source_ref\":\"mcp-server:docs\",\"target_ref\":\"tool:docs/search\"}],\"metadata\":{\"authors\":[],\"completeness\":{\"assurance_level\":\"observed\",\"collectors_completed\":[\"mcp\"],\"collectors_requested\":[\"mcp\"],\"scan_failures\":[],\"scanner_status\":{\"mcp\":\"complete\"},\"scope\":\"repository\",\"surfaces_excluded\":[],\"surfaces_scanned\":[\"mcp:.mcp.json\"]},\"policy_source\":\"built-in\",\"policy_weakened\":[],\"spec_version\":\"1.1.0\",\"tool_name\":\"nexus-symbiote\",\"tool_version\":\"0.1.0\",\"version\":1}}",
-      "digest": "sha256:cf564be640932d57411b38b7022070fe369f6bfb1bfc8b3d3f9089a94c9134d7"
+      "content": "{\"components\":[{\"assurance_level\":\"observed\",\"bom_ref\":\"mcp-server:docs\",\"claims\":{\"operator_review\":{\"assurance\":\"declared\",\"evidence_refs\":[\"ticket:42\"],\"method\":\"manual-review\",\"scope\":\"repository\"},\"repository_presence\":{\"assurance\":\"observed\",\"collector\":\"mcp\",\"evidence_refs\":[],\"locator\":\".mcp.json\",\"method\":\"filesystem-inventory\",\"scope\":\"repository\"}},\"component_type\":\"mcp-server\",\"name\":\"docs\",\"properties\":{\"note\":\"Café ☕\",\"observed_at\":\"2026-11-12T10:00:00Z\",\"serial_number\":\"urn:uuid:3e4f1c2a-9b7d-4e21-8f0a-5c6d7e8f9a0b\",\"source_report_path\":\"reports/shadowscan.json\",\"timestamp\":\"2026-11-12T10:00:00Z\"},\"source_path\":\".mcp.json\",\"version\":\"1.2.3\"},{\"bom_ref\":\"tool:docs/search\",\"claims\":{\"repository_presence\":{\"assurance\":\"observed\",\"collector\":\"mcp\",\"evidence_refs\":[],\"locator\":\".mcp.json\",\"method\":\"filesystem-inventory\",\"scope\":\"repository\"}},\"component_type\":\"tool\",\"description\":\"Search the documentation\",\"name\":\"search\",\"source_path\":\".mcp.json\"}],\"dependencies\":[{\"relationship\":\"provides-tool\",\"source_ref\":\"mcp-server:docs\",\"target_ref\":\"tool:docs/search\"}],\"metadata\":{\"authors\":[],\"completeness\":{\"assurance_level\":\"observed\",\"collectors_completed\":[\"mcp\"],\"collectors_requested\":[\"mcp\"],\"scan_failures\":[],\"scanner_status\":{\"mcp\":\"complete\"},\"scope\":\"repository\",\"surfaces_excluded\":[],\"surfaces_scanned\":[\"mcp:.mcp.json\"]},\"policy_source\":\"built-in\",\"policy_weakened\":[],\"spec_version\":\"1.1.0\",\"tool_name\":\"nexus-symbiote\",\"tool_version\":\"0.1.0\",\"version\":1}}",
+      "digest": "sha256:38122f15e46c354b05c1edf082058bb515ccdbb7b54df0d4259d630e75dbdd8f"
     },
     {
       "id": "undeclared-1.0.0",

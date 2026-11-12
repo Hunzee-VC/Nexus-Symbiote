@@ -176,6 +176,7 @@ class Config:
     integrity: bool = True
     limits: str = ""
     baseline: bytes | None = field(default=None, repr=False)
+    allow_unsigned_discovery: bool = False
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> Config:
@@ -236,6 +237,9 @@ class Config:
             _boolean(env.get("SYMBIOTE_VALIDATE_INTEGRITY", "true"), "validate-integrity"),
             limits,
             baseline,
+            _boolean(
+                env.get("SYMBIOTE_ALLOW_UNSIGNED_DISCOVERY", "false"), "allow-unsigned-discovery"
+            ),
         )
 
 
@@ -319,6 +323,20 @@ def _json_object(text: str) -> dict[str, Any] | None:
     return document if isinstance(document, dict) else None
 
 
+def _gate_reasons(document: Mapping[str, Any] | None) -> list[str]:
+    reasons = document.get("gate_reasons") if document is not None else None
+    if not isinstance(reasons, list):
+        return []
+    return [reason for reason in reasons if isinstance(reason, str)]
+
+
+def _finite_score(document: Mapping[str, Any] | None) -> float | int | None:
+    score = document.get("overall_score") if document is not None else None
+    if isinstance(score, bool) or not isinstance(score, (int, float)) or not math.isfinite(score):
+        return None
+    return score
+
+
 def _report(lines: Iterable[tuple[str, str | None]]) -> list[str]:
     return [text for text, _ in lines]
 
@@ -381,6 +399,12 @@ def _announce(config: Config) -> None:
             "notice",
             "risk-threshold is 0: the aggregate score does not fail this run; critical "
             "findings, unverified SafeTensors, incomplete coverage and missing evidence still do",
+        )
+    if config.allow_unsigned_discovery:
+        _annotate(
+            "warning",
+            "allow-unsigned-discovery is 'true': ShadowScan discovery evidence whose producer "
+            "signature was not verified is accepted by validation and the risk gate",
         )
     if config.limits:
         _annotate("notice", "collection limits set by the limits input: " + config.limits)
@@ -460,12 +484,13 @@ def run(
         native = scratch / "native.json"
         signers: list[str] = []
         if config.signature_policy is not None:
-            # Collection and validation read one snapshot of the caller's trust root.
+            # Collection, validation and risk read one snapshot of the caller's trust root.
             snapshot = scratch / "signature-policy.json"
             snapshot.write_bytes(config.signature_policy)
             signers = ["--signature-policy", str(snapshot)]
             digest = hashlib.sha256(config.signature_policy).hexdigest()
             out.emit(signature_policy_digest=f"sha256:{digest}")
+        unsigned = ["--allow-unsigned-discovery"] if config.allow_unsigned_discovery else []
         args = [
             "scan",
             "--no-project-policy",
@@ -527,7 +552,7 @@ def run(
             out.emit(validation_passed="skipped")
         else:
             arguments = ["validate", "--no-project-policy", "--json-output", str(native)]
-            arguments += ["--project", str(config.project), *signers]
+            arguments += ["--project", str(config.project), *signers, *unsigned]
             if not config.integrity:
                 arguments.append("--skip-integrity")
             validated = command(arguments)
@@ -557,7 +582,11 @@ def run(
             record("risk", "skipped")
             out.emit(passed="skipped")
         else:
-            arguments = ["risk", "--no-project-policy", str(native), "--json-output"]
+            arguments = ["risk", "--no-project-policy", str(native), "--json-output", *unsigned]
+            if config.validate:
+                # The same reconciliation and signers as validation, so a signer policy
+                # that verifies the discovery producer counts here too.
+                arguments += ["--project", str(config.project), *signers]
             if config.threshold == 0:
                 arguments.append("--no-score-threshold")
             else:
@@ -567,22 +596,31 @@ def run(
                 _relay("nexus-symbiote risk", _process_lines(scored.stderr))
                 raise ActionError("risk evaluation failed to run")
             report = _json_object(scored.stdout)
-            score = report.get("overall_score") if report is not None else None
-            if (
-                report is None
-                or isinstance(score, bool)
-                or not isinstance(score, (int, float))
-                or not math.isfinite(score)
-            ):
+            score = _finite_score(report)
+            if score is None and scored.returncode == 0:
                 raise ActionError("risk evaluation returned no finite numeric score")
-            passed = scored.returncode == 0 and report.get("passed", True) is True
-            shown = _report(risk_report_lines({**report, "passed": passed}))
+            passed = score is not None and scored.returncode == 0
+            passed = passed and report is not None and report.get("passed", True) is True
+            shown = (
+                _report(risk_report_lines({**report, "passed": passed}))
+                if report is not None
+                else []
+            )
             _relay("nexus-symbiote risk", [*shown, *_process_lines(scored.stderr)])
-            out.emit(risk_score=str(score), passed="true" if passed else "false")
+            out.emit(passed="true" if passed else "false")
             record("risk", "passed" if passed else "failed")
-            notes.append(f"Risk score: {float(score):.1f}")
+            if score is None:
+                # The CLI refuses to score unverified discovery evidence in CI and an
+                # inventory that does not reconcile with the project.
+                _say("The risk gate failed without a score; its reasons are listed above.")
+                notes.append("Risk score: not computed")
+            else:
+                out.emit(risk_score=str(score))
+                notes.append(f"Risk score: {float(score):.1f}")
             if not passed:
-                reasons = [_markdown(r) for r in report.get("gate_reasons") or []]
+                reasons = [_markdown(r) for r in _gate_reasons(report)]
+                if not reasons and score is None:
+                    reasons = ["risk evaluation failed without a score; see the job log"]
                 notes.extend(f"Risk gate reason: {reason}" for reason in reasons)
 
         if config.baseline is None:

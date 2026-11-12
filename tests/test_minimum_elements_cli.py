@@ -84,10 +84,10 @@ def test_text_report_lists_each_missing_element_with_how_to_supply_it(runner, de
     lines = result.stdout.splitlines()
     assert lines[0] == "G7 AI SBOM minimum-element coverage, edition g7-ai-sbom-2026-05-12"
     assert lines[1].startswith("Statement: Coverage is not compliance.")
-    assert lines[4].startswith("Overall: 12 of 39 present (30.7%)")
+    assert lines[4].startswith("Overall: 11 of 39 present (28.2%)")
     report = me.assess(AIBOM.load(demo))
     missing = [r for r in report.elements if r.status != me.PRESENT]
-    assert len(missing) == 38
+    assert len(missing) == 39
     for item in missing:
         label = item.status.replace("-", " ")
         heading = next(
@@ -108,7 +108,7 @@ def test_json_report_is_versioned_complete_and_byte_for_byte_deterministic(runne
     assert document["edition"] == "g7-ai-sbom-2026-05-12"
     assert len(document["elements"]) == 50
     assert sum(document["counts"].values()) == 50
-    assert document["coverage"] == {"present": 12, "assessable": 39, "percent": 30.7}
+    assert document["coverage"] == {"present": 11, "assessable": 39, "percent": 28.2}
     assert [c["coverage"]["assessable"] for c in document["clusters"]] == [9, 7, 12, 7, 1, 3, 0]
     written = tmp_path / "report.json"
     assert run(runner, str(demo), "-f", "json", "-o", str(written)).stdout == ""
@@ -129,7 +129,7 @@ def test_markdown_report_has_a_summary_and_a_table_per_cluster(runner, demo, tmp
     rows = [line for line in text.splitlines() if line.startswith("| ") and "---" not in line]
     assert len(rows) == 1 + len(me.CLUSTERS) + len(me.CLUSTERS) + 50
     assert "- Model version: `model:models/intent-classifier.safetensors`" in text
-    assert "| Metadata | 7 of 9 present (77.7%) | 7 | 2 | 0 | 1 | 0 |" in text
+    assert "| Metadata | 6 of 9 present (66.6%) | 6 | 3 | 0 | 1 | 0 |" in text
 
 
 def test_hostile_references_cannot_forge_lines_controls_or_log_commands(runner, hostile):
@@ -176,7 +176,7 @@ def test_hostile_references_are_exact_inert_code_spans_to_a_commonmark_parser(ru
 
 @pytest.mark.parametrize(
     ("threshold", "exit_code"),
-    [("0", 0), ("30", 0), ("30.7", 0), ("30.769", 0), ("30.77", 1), ("30.8", 1), ("100", 1)],
+    [("0", 0), ("28", 0), ("28.2", 0), ("28.205", 0), ("28.21", 1), ("28.3", 1), ("100", 1)],
 )
 def test_fail_under_gates_the_printed_ratio_exactly(runner, demo, threshold, exit_code):
     result = run(runner, str(demo), "--fail-under", threshold)
@@ -185,14 +185,14 @@ def test_fail_under_gates_the_printed_ratio_exactly(runner, demo, threshold, exi
     verdict = result.stderr.splitlines()
     if exit_code:
         assert verdict[0] == (
-            f"Coverage gate failed: 12 of 39 present (30.7%), below the required {threshold}%"
+            f"Coverage gate failed: 11 of 39 present (28.2%), below the required {threshold}%"
         )
         listed = [line for line in verdict[1:] if line.startswith("  missing: ")]
-        assert len(listed) == 27
+        assert len(listed) == 28
         assert "  missing: SBOM author (g7ai-2026/metadata/sbom-author)" in verdict
     else:
         assert verdict == [
-            f"Coverage gate passed: 12 of 39 present (30.7%), at or above the required {threshold}%"
+            f"Coverage gate passed: 11 of 39 present (28.2%), at or above the required {threshold}%"
         ]
 
 
@@ -395,5 +395,5 @@ def test_markdown_states_the_gate_it_was_run_with(runner, demo):
     result = run(runner, str(demo), "-f", "markdown", "--fail-under", "25")
     assert result.exit_code == 0
     assert (
-        "**Gate:** passed: 12 of 39 present (30.7%), at or above the required 25%." in result.stdout
+        "**Gate:** passed: 11 of 39 present (28.2%), at or above the required 25%." in result.stdout
     )

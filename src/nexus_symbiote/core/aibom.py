@@ -5,13 +5,13 @@ from __future__ import annotations
 import errno
 import json
 import uuid
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from nexus_symbiote import __version__
+from nexus_symbiote.core.canonical import NAMESPACE, json_text
 from nexus_symbiote.core.enums import ComponentType
 from nexus_symbiote.core.models import (
     MAX_REFERENCE_CHARS,
@@ -57,6 +57,20 @@ Relationship = Literal[
 
 class NativeFormatError(ValueError):
     """A native AgentBOM document cannot be read; the message never quotes its content."""
+
+
+NO_CONTENT_SERIAL = (
+    "Inventory not written. Its serial number is derived from its content digest, which "
+    "cannot be computed: the inventory records a value outside the I-JSON range, such as "
+    "a lone surrogate, or nests too deeply."
+)
+
+
+class ContentSerialError(ValueError):
+    """The serial number cannot be derived because the content digest is undefined."""
+
+    def __init__(self) -> None:
+        super().__init__(NO_CONTENT_SERIAL)
 
 
 def _open_failure(exc: OSError) -> str:
@@ -201,16 +215,20 @@ class AIBOM(BaseModel):
         return results
 
     def finalize(self) -> None:
-        if self.metadata.timestamp is None:
-            self.metadata.timestamp = datetime.now(UTC)
+        """Fill the deterministic tool stamp only.
+
+        The serial number and the observation timestamp are export concerns
+        owned by :func:`prepare`: the
+        serial is a content-derived uuid5, and no wall-clock timestamp is
+        stamped here, so two exports of the same inventory are identical.
+        A timestamp set explicitly by a caller is preserved untouched.
+        """
         if self.metadata.tool_version is None:
             self.metadata.tool_version = __version__
-        if self.metadata.serial_number is None:
-            self.metadata.serial_number = f"urn:uuid:{uuid.uuid4()}"
 
     def to_dict(self) -> dict[str, Any]:
-        self.finalize()
-        return self.model_dump(mode="json", exclude_none=True)
+        prepare(self)
+        return native_document(self)
 
     def to_json(self, indent: int = 2) -> str:
         return json.dumps(self.to_dict(), indent=indent, default=str)
@@ -295,3 +313,49 @@ class AIBOM(BaseModel):
                 else None
             ),
         }
+
+
+def prepare(bom: AIBOM) -> AIBOM:
+    """Fill missing export metadata once; never reset an existing observation timestamp.
+
+    A missing serial number becomes the uuid5, in ``core.canonical.NAMESPACE``, of the
+    inventory content digest (``core.content_digest``) of the native document: the
+    collection time, the observation times and the location an imported report was
+    read from are not content, so collecting the same inventory at another time or
+    from another checkout keeps the same serial, and anyone can recompute it from the
+    native file with ``nexus-symbiote digest``. Two documents that differ only in
+    those fields therefore share a serial by design. No wall-clock timestamp is
+    stamped here, so two exports of the same inventory are byte-identical; a
+    timestamp set explicitly by a caller (``SOURCE_DATE_EPOCH``) is preserved.
+    Formats whose schema requires a timestamp (SPDX ``CreationInfo.created``) supply
+    it at render time when the inventory has none.
+
+    Raises ``ContentSerialError`` when the content digest is undefined for the inventory.
+    """
+    if bom.metadata.timestamp is not None and bom.metadata.timestamp.tzinfo is None:
+        raise ValueError("export timestamps must include a timezone")
+    if bom.metadata.tool_version is None:
+        bom.metadata.tool_version = __version__
+    if bom.metadata.serial_number is None:
+        from nexus_symbiote.core.content_digest import inventory_content_digest
+
+        try:
+            digest = inventory_content_digest(native_document(bom))
+        except (ValueError, RecursionError):
+            raise ContentSerialError from None
+        bom.metadata.serial_number = "urn:uuid:" + str(uuid.uuid5(NAMESPACE, digest))
+    ids = [c.bom_ref for c in bom.components]
+    if len(ids) != len(set(ids)):
+        raise ValueError("duplicate component references")
+    known = set(ids)
+    for edge in bom.dependencies:
+        if edge.source_ref not in known or edge.target_ref not in known:
+            raise ValueError("dependency references an unknown component")
+    return bom
+
+
+def native_document(bom: AIBOM) -> dict[str, Any]:
+    document = bom.model_dump(mode="json", exclude_none=True)
+    document["components"] = sorted(document["components"], key=lambda c: c["bom_ref"])
+    document["dependencies"] = sorted(document["dependencies"], key=json_text)
+    return document

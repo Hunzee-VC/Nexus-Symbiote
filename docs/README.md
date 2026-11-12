@@ -37,12 +37,12 @@ Reference material: exact behavior, fields and limits.
 | [Standard exports](standard-exports.md) | What CycloneDX, SPDX, SARIF and VEX output carry, the extension property names, projection versions and the SARIF rule catalog |
 | [G7 AI SBOM minimum elements](minimum-elements.md) | Which of the 50 G7 AI SBOM minimum elements an inventory's CycloneDX export carries, how each element is evaluated, and how to supply a missing one; coverage, not compliance |
 | [Framework crosswalk](framework-crosswalk.md) | Which OWASP, MITRE ATLAS, NIST AI RMF, EU AI Act, ISO/IEC 42001 and CWE entries each finding category bears on and why, what a reference means and does not mean, the `crosswalk` report, and the SARIF tags taken from it |
-| [Reproducible inventories](reproducible-inventories.md) | What differs between two collections of one project, the content digest and what equal digests do and do not establish, and byte-identical output with `SOURCE_DATE_EPOCH` |
+| [Reproducible inventories](reproducible-inventories.md) | What can differ between two collections of one project, the content digest and what equal digests do and do not establish, the serial number derived from it, and recording a collection time with `SOURCE_DATE_EPOCH` while keeping output byte-identical |
 | [Graph view](graph-view.md) | What `nexus-symbiote graph` shows and does not show, the risk-class rules, exposure-path ranking and caps, and how the HTML file is made safe to open |
 | [Source binding](verification-source-binding.md) | How MCP, A2A, RAG and IDE settings records are bound to their configuration, with and without the binding key, and reconciled with a project |
 | [TypeScript inventory](typescript-inventory.md) | Static collection of MCP tool registrations from TypeScript and JavaScript servers, the SDK forms that are recorded as gaps, those that leave none, and its limits |
 | [Model integrity](model-integrity.md) | What the model collector binds by digest, the operator signature policy (Sigstore entries and digest pins) and the signing evidence it records |
-| [Registry collector](registry-collector.md) | Which packages and images the registry collector inventories, what it reads, its gaps, findings and limits |
+| [Registry collector](registry-collector.md) | Which packages and images the registry collector inventories, what it reads, which project settings redirect a package to another registry or index, its gaps, findings and limits |
 | [Lockfile evidence](npm-lockfile-evidence.md) | What the registry collector records from npm, pnpm, Yarn, uv and Poetry lockfiles |
 | [Deployment evidence](deployment-evidence.md) | The optional deployment profile and its scoped authority claims |
 | [Runtime contract reference](runtime-contract-reference.md) | Signed runtime contracts: envelope, fields, digests, order of checks, reason codes, state store, key lifecycle and what an integrator must build |

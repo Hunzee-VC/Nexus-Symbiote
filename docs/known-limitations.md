@@ -131,11 +131,20 @@ A way around a limit that its entry does not describe is worth a
   program word and no `%`, `!`, `"`, `^` or unusual whitespace. Anything else is an
   inline shell script: a gap. So `sh -c "npx -y pkg@1.2.3 $HOME/data"` is a gap;
   pass such values as separate arguments or through `env`.
-- **Shell startup code is a gap.** An interactive shell (`-i`) given `--rcfile` or
-  `--init-file`, a `BASH_FUNC_<name>%%` exported function in the server's
-  environment, and a `BASH_ENV` that is not an absolute path run code before the
-  script that can replace the runner it names, so the launcher is unknown. An
-  absolute `BASH_ENV` and `ENV` stay a medium code-loading finding.
+- **Shell startup code is a gap.** bash sources a `--rcfile` or `--init-file`
+  (also spelled `-rcfile`) when it is interactive or its standard input is a socket,
+  as MCP clients provide; it imports exported functions (`BASH_FUNC_<name>%%` and its
+  variants) from the environment; a non-interactive bash sources `BASH_ENV` and an
+  interactive POSIX shell (`-i` or `-o interactive`) `ENV`; a shell tracing its
+  commands (`-x`, `-o xtrace` or `xtrace` in `SHELLOPTS`) expands `PS4` before each
+  one. Each runs code before the script that can replace the runner it names. A
+  startup-file option or an exported function makes the launcher unknown, and so does
+  a `PS4` with an expansion while tracing is on; `BASH_ENV`, and `ENV` for an
+  interactive shell, do when the file may lie in the project: a path that is not
+  absolute, has a `..` segment, or lies under `/proc` or `/dev/fd`. An absolute
+  `BASH_ENV`, `ENV` for a shell that is not interactive, and `SHELLOPTS`, `BASHOPTS`
+  or `PS4` otherwise stay a medium code-loading finding; an absolute path that happens
+  to lead into the checkout through another link is not recognised.
 - **A runner named by a path is classified by its name.** `./tools/npx`,
   `${workspaceFolder}/tools/npx` or a `PATH` entry in the project can run checkout
   code that the record attributes to the registry package. On Windows, an
@@ -461,14 +470,17 @@ A way around a limit that its entry does not describe is worth a
 
 ## ShadowScan
 
-- **Producer verification is opt-in.** `validate` and `risk` accept unsigned
-  ShadowScan evidence, and say so, unless an operator signature policy names the
-  report, `--require-discovery-signature` is passed, or an honored project policy
-  sets `validate.require_discovery_signature`. `scan` does not verify the report.
-- **The result is not recorded.** The check's result is not written into the
-  inventory, so `validate` or `risk` without `--project` cannot enforce it. A
-  project-policy setting can be removed by the change it gates, and is ignored under
-  `--no-project-policy`.
+- **Producer verification is recorded, and unsigned evidence fails in CI.** Importing a report
+  records the verification outcome in the BOM (`metadata.completeness.discovery_verification`):
+  `verified` with the signer identity and issuer when `import-shadowscan --bundle` (or a passing
+  `validate`/`risk --project` producer check) authenticated the exact report bytes, otherwise
+  `unverified`, with the report digest, the report's own run time, and the repository/commit the
+  report carries — currently both `unknown`, because the ShadowScan report format carries neither,
+  so the digest and run time are the binding, not a repository claim. Unsigned evidence warns
+  loudly on `import-shadowscan`, `validate` and `risk`, and fails the run in CI (or with
+  `--fail-on-unsigned-discovery`) unless the operator explicitly passes `--allow-unsigned-discovery`.
+  A project-policy setting can still be removed by the change it gates, and is ignored under
+  `--no-project-policy`. `scan` does not verify the report.
 - **A signature does not bind a commit or time.** A passing check authenticates the
   report's producer only. Anyone who can write to the checkout can substitute an
   older report, or another repository's report signed by the same identity. Give
@@ -501,14 +513,25 @@ A way around a limit that its entry does not describe is worth a
 
 ## Signatures
 
-- **The CLI trusts a writable cache.** Offline verification uses the trusted root
+- **The CLI checks the cache before trusting it.** Offline verification uses the trusted root
   that sigstore-python caches in `$XDG_CACHE_HOME/sigstore-python` when
   `XDG_CACHE_HOME` is set, and otherwise in `~/.cache/sigstore-python` on Linux or
-  `~/Library/Caches/sigstore-python` on macOS. sigstore-python reads that file
-  without verifying it, so anyone who can write there chooses which certificate
-  authorities and transparency logs are accepted. On shared or persistent machines,
+  `~/Library/Caches/sigstore-python` on macOS. Before trusting it, the CLI checks that every
+  directory from the TUF targets directory up to the sigstore-python cache directory is owned
+  by the current user and is not group/world-writable or a symlink, and that `trusted_root.json`
+  itself, when present, is owned by the current user, is not a symlink, and is not
+  group/world-writable where anyone else can reach it (a file sigstore-python wrote under a
+  group-writable umask is accepted only inside a private directory); a missing cache is created
+  mode 0700, and any check failure fails verification closed with the offending path named. Pass
+  an explicit trust root instead with `--trust-root` on `verify-artifact`/`verify-discovery`, or
+  `NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT` for any verification path, verified against a pinned
+  SHA-256 when `--trust-root-sha256` or `NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT_SHA256` is supplied.
+  A successful verification prints the trust-root path it used. On shared or persistent machines,
   such as self-hosted runners, set `XDG_CACHE_HOME` to an empty directory you own;
   on macOS, setting `HOME` alone is not enough when `XDG_CACHE_HOME` is set.
+  An explicit trust root is read once and verified from those bytes. The cached root is
+  checked and then loaded again by sigstore-python, so a process running as the same user
+  could replace it between the two reads; an explicit, pinned trust root closes that gap.
 - **The Action's trust root ages.** The Action gives its scans an empty private
   cache, so it uses the root embedded in its hash-locked `sigstore` package. A
   bundle that relies on a key Sigstore introduced later fails until you update the
@@ -563,16 +586,24 @@ A way around a limit that its entry does not describe is worth a
   PyPI or npm URL with a qualifier other than a `repository_url` that names the
   component's own registry. Regenerate them from the native inventory; see
   [standard projection versions](fingerprint-migration.md#standard-projection-versions).
+- **A recorded timestamp does not change the serial.** The serial number is the
+  version 5 UUID of the inventory content digest, which excludes `metadata.timestamp`,
+  the completeness claim's `timestamp` and `source_report_path`, and every claim's
+  `observed_at`, so two documents that differ only in those fields share a serial.
+  This is deliberate: the serial names the inventory, not the moment or the checkout
+  it was observed from. Compare timestamps directly when they matter.
 - **Malformed input stops some exports.** A JSON-escaped lone surrogate, such as
   `\ud800`, in a field that a record carries, such as an A2A skill name or version or
-  a `package.json` dependency version, makes CycloneDX, SPDX and SARIF export exit 1
-  with `Error: The inventory cannot be exported as <format>: ...`. The native JSON
-  written for it is refused by the other commands. In an A2A card's name or
+  a `package.json` dependency version, has no content digest and so no serial number:
+  `scan` and `import-shadowscan` exit 1 with `Error: Inventory not written. Its serial
+  number is derived from its content digest, ...` in every format, and write nothing.
+  In an A2A card's name or
   requirement lists, in a RAG source, or anywhere in a card collected with
   `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, it is a scan failure instead. Both fail
   closed.
-- **SARIF locations depend on the working directory.** With `SOURCE_DATE_EPOCH`, native
-  JSON, CycloneDX and SPDX are byte-identical for the same inputs, but SARIF
+- **SARIF locations depend on the working directory.** Native JSON and CycloneDX are
+  byte-identical for the same inputs, and SPDX too with `SOURCE_DATE_EPOCH` set (without
+  it, SPDX records the export time as `CreationInfo.created`), but SARIF
   locations are relative to the working directory when the scanned directory lies
   below it, so two SARIF files match only when the scanned directory lies at the same
   path below the working directory in both scans, or below it in neither; see
@@ -626,9 +657,11 @@ A way around a limit that its entry does not describe is worth a
   settings files digested as read differ between a keyed and an unkeyed scan.
 - **A content digest names content, not a producer.** Two inventories of the same
   content, a forged copy of a genuine one included, have the same content digest.
-  List order is content, so a native document recovered from a CycloneDX or SPDX
-  export, which sorts components and dependencies, has another content digest than
-  the native file; see [reproducible inventories](reproducible-inventories.md#limits).
+  List order is content: this build writes components and dependencies sorted, so a
+  native document recovered from its CycloneDX or SPDX export is the native file, but
+  a document another build wrote with its lists in another order has another content
+  digest than its sorted rewrite; see
+  [reproducible inventories](reproducible-inventories.md#limits).
 - **Some readable inventories have no digests.** A document without a `metadata`
   object or a `components` list has no content digest, and one larger or deeper than
   a runtime snapshot binds has no canonical digest; `digest` prints `unavailable`
@@ -636,7 +669,7 @@ A way around a limit that its entry does not describe is worth a
 - **A malformed `SOURCE_DATE_EPOCH` stops collection.** `scan`, `baseline` and
   `import-shadowscan` exit 2 when it is set to anything but 1 to 12 ASCII digits
   naming an instant up to 9999-12-31T23:59:59Z, an empty value included. Unset it to
-  record the clock.
+  record no collection time.
 
 ## Trace evidence
 

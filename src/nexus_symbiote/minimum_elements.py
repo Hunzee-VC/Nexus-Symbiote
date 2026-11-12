@@ -269,8 +269,9 @@ ELEMENTS: tuple[Element, ...] = (
         "CreationInfo.created",
         "metadata.timestamp is set, and the inventory records its own timestamp.",
         (
-            "Collect the inventory with scan, which records when it was generated in "
-            "metadata.timestamp."
+            "Collect the inventory with SOURCE_DATE_EPOCH set to the collection time, such "
+            "as the commit time: scan, baseline and import-shadowscan then record it in "
+            "metadata.timestamp, and without it an inventory records no timestamp."
         ),
     ),
     _element(
@@ -861,8 +862,8 @@ ELEMENTS: tuple[Element, ...] = (
 
 REASONS = {
     "export-default": (
-        "The inventory does not record it; an export would substitute the time of export, "
-        "this build's version or a serial number derived from the content."
+        "The inventory does not record it; an export would substitute a value of its own, "
+        "such as this build's version or a serial number derived from the content."
     ),
     "inferred-placeholder": (
         "The subject's name is the placeholder repository, not a declared name."
@@ -1125,8 +1126,9 @@ def _metadata(context: _Context) -> Mapping[str, Any]:
 def _generated(context: _Context, pairs: Pairs, field: str | None = None) -> _Outcome:
     """A value the export writes about itself, counted only when the inventory records it.
 
-    Without the inventory's own ``field``, an export substitutes the time of export, this
-    build's version or a serial number derived from the content.
+    Without the inventory's own ``field``, an export substitutes this build's version or a
+    serial number derived from the content. The CycloneDX export writes no timestamp the
+    inventory lacks; the check covers it all the same.
     """
     outcome = _combine(pairs, GENERATED)
     if outcome.state == PRESENT and field and getattr(context.bom.metadata, field) is None:

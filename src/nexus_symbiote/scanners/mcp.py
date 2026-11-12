@@ -17,6 +17,7 @@ import hmac
 import ipaddress
 import json
 import os
+import posixpath
 import re
 import tomllib
 from collections.abc import Callable, Iterable, Mapping
@@ -376,7 +377,7 @@ _CODE_LOADING_ENVIRONMENT = _names(
     "LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT DYLD_INSERT_LIBRARIES DYLD_LIBRARY_PATH "
     "DYLD_FRAMEWORK_PATH NODE_OPTIONS NODE_PATH PYTHONPATH PYTHONSTARTUP PYTHONHOME "
     "PERL5OPT PERL5LIB RUBYOPT RUBYLIB JAVA_TOOL_OPTIONS _JAVA_OPTIONS JDK_JAVA_OPTIONS "
-    "BASH_ENV ENV NPM_CONFIG_NODE_OPTIONS NPM_CONFIG_SCRIPT_SHELL "
+    "BASH_ENV ENV NPM_CONFIG_NODE_OPTIONS NPM_CONFIG_SCRIPT_SHELL SHELLOPTS BASHOPTS PS4 "
     "HOME ZDOTDIR XDG_CONFIG_HOME PYTHONUSERBASE"
 )
 # Environment names that make a package runner resolve from another registry, index,
@@ -482,14 +483,25 @@ _DISPLAY_ENVIRONMENT = _names(
 _RELOCATED = "environment relocates resolver configuration into the project"
 _SEARCHED = "PATH may search the project for the runner"
 _REPLACED = "environment replaces or constrains the launched package"
-# bash imports BASH_FUNC_<name>%% (and the older BASH_FUNC_<name>()) as a function that
-# replaces the program <name> in every bash the launch starts, the package runner included.
-_EXPORTED_FUNCTION = "BASH_FUNC_"
+# bash imports BASH_FUNC_<name>%% (BASH_FUNC_<name>() on some distributions, and
+# __BASH_FUNC<name>() in Apple's bash) as a function that replaces the program <name> in
+# every bash the launch starts, the package runner included. bash from before 2014 did
+# so for any variable whose value starts with "() {".
+_EXPORTED_FUNCTION = re.compile(r"(?:__)?BASH_FUNC[_<]", re.IGNORECASE)
 _FUNCTION_REPLACED = "environment defines a shell function that can replace the launched program"
-# A non-interactive bash sources BASH_ENV before its script; a file that may lie in the
-# project can define a function that replaces the runner. ENV is read only interactively.
+# A non-interactive bash sources BASH_ENV before its script, and an interactive POSIX
+# shell sources ENV; a file that may lie in the project can replace the runner.
 _STARTUP_ENVIRONMENT = "BASH_ENV"
+_INTERACTIVE_STARTUP_ENVIRONMENT = "ENV"
 _STARTUP_IN_PROJECT = "environment names a shell startup file that may lie in the project"
+# A shell tracing its commands expands PS4 before each one; an arithmetic or command
+# expansion there can set PATH or run project code before the runner starts.
+_TRACE_PROMPT = "environment sets a trace prompt the shell expands before the runner starts"
+_TRACE_EXPANSION = re.compile(r"[$`]")
+# /proc/self/cwd and its kin resolve to the working directory, the project; /dev/fd is a
+# link into /proc, and a .. after any link can lead there too.
+_PROC = re.compile(r"/+(?:proc|dev/+fd)(?:/|$)")
+_PARENT = re.compile(r"(?:^|/)\.\.(?:/|$)")
 _WINDOWS_ROOT = re.compile(r"[A-Za-z]:[\\/]|[\\/]")
 _SCHEME_LETTERS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
 _SCHEME_CHARACTERS = _SCHEME_LETTERS | frozenset("0123456789+.-")
@@ -771,7 +783,20 @@ def _absolute(value: str, *, windows: bool = False) -> bool:
     """
     if not value or expands(value):
         return False
-    return bool(_WINDOWS_ROOT.match(value)) if windows else value.startswith("/")
+    if windows:
+        return bool(_WINDOWS_ROOT.match(value))
+    return (
+        value.startswith("/")
+        and _PARENT.search(value) is None
+        and _PROC.match(posixpath.normpath(value)) is None
+    )
+
+
+def _exported_function(variable: str, value: object) -> bool:
+    """Whether bash imports the variable as a function that replaces a program."""
+    return _EXPORTED_FUNCTION.match(variable) is not None or (
+        isinstance(value, str) and value.startswith("() {")
+    )
 
 
 def _absolute_list(value: str) -> bool:
@@ -787,7 +812,11 @@ def _absolute_list(value: str) -> bool:
 
 
 def _runner_environment(
-    family: str, environment: list[tuple[str, str]]
+    family: str,
+    environment: list[tuple[str, str]],
+    *,
+    interactive: bool = False,
+    xtrace: bool = False,
 ) -> tuple[list[tuple[str, str]], list[str]]:
     """Package sources a runner's environment adds, and why it leaves the identity unknown.
 
@@ -800,14 +829,24 @@ def _runner_environment(
     sources: list[tuple[str, str]] = []
     reasons: list[str] = []
     explicit = _REDIRECT_ENVIRONMENT.get(family)
+    # bash also turns tracing on from SHELLOPTS in the environment.
+    traced = xtrace or any(
+        variable.upper() == "SHELLOPTS" and isinstance(value, str) and "xtrace" in value.lower()
+        for variable, value in environment
+    )
     for variable, value in environment if family else ():
         name = variable.upper()
         windows = name in _WINDOWS_LOCATION_ENVIRONMENT
-        if name.startswith(_EXPORTED_FUNCTION):
+        if _exported_function(variable, value):
             reasons.append(_FUNCTION_REPLACED)
-        elif name == _STARTUP_ENVIRONMENT:
+        elif name == _STARTUP_ENVIRONMENT or (
+            interactive and name == _INTERACTIVE_STARTUP_ENVIRONMENT
+        ):
             if not _absolute(value):
                 reasons.append(_STARTUP_IN_PROJECT)
+        elif name == "PS4":
+            if traced and isinstance(value, str) and _TRACE_EXPANSION.search(value):
+                reasons.append(_TRACE_PROMPT)
         elif name == "PATH":
             if not _absolute_list(value):
                 sources.append((_environment_label(variable), value))
@@ -1442,7 +1481,12 @@ class MCPScanner(Scanner):
             or _launch_directory(dialect.path) != ""
         )
         environment = [*env.items(), *launch.environment]
-        runner_sources, runner_reasons = _runner_environment(launch.family or "", environment)
+        runner_sources, runner_reasons = _runner_environment(
+            launch.family or "",
+            environment,
+            interactive=launch.interactive,
+            xtrace=launch.xtrace,
+        )
         environment_file = "envFile" in config or launch.injected_environment
         view = self._resolver_view(launch, relocated, environment, environment_file)
         identity = self._identity(
@@ -1508,9 +1552,9 @@ class MCPScanner(Scanner):
         context = dict(launch.context)
         loading = [
             variable
-            for variable in (*env, *(variable for variable, _ in launch.environment))
+            for variable, value in environment
             if variable.upper() in _CODE_LOADING_ENVIRONMENT
-            or variable.upper().startswith(_EXPORTED_FUNCTION)
+            or _exported_function(variable, value)
             or _npm_key(variable) in _NPM_CODE_SETTINGS
         ]
         if loading:

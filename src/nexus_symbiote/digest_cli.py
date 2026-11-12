@@ -7,9 +7,12 @@ collected. Equal content digests mean equal recorded content; they say nothing a
 who produced either file or whether what it records is safe.
 
 With ``SOURCE_DATE_EPOCH`` set, ``scan`` (and so ``baseline``) and ``import-shadowscan``
-record that instant instead of the clock, and a serial number derived from the content
-digest, so equal inputs give byte-identical files. Nothing else reads the variable:
-gate decisions, such as whether a suppression has expired, keep using the clock.
+record that instant as the collection time; without it they record none. The serial
+number does not depend on it: ``core.aibom.prepare`` derives a missing one from the
+content digest. Equal inputs give byte-identical native JSON and CycloneDX either
+way, and byte-identical SPDX, whose schema requires a creation time, only with it.
+Nothing else reads the variable: gate decisions, such as whether a suppression has
+expired, keep using the clock.
 """
 
 from __future__ import annotations
@@ -17,17 +20,12 @@ from __future__ import annotations
 import json
 import os
 import re
-import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import click
 
 from nexus_symbiote.utils.terminal import echo_line, json_text, neutralize
-
-if TYPE_CHECKING:
-    from nexus_symbiote.core.aibom import AIBOM
 
 _EPOCH = re.compile(r"[0-9]{1,12}")
 MALFORMED_EPOCH = (
@@ -35,11 +33,6 @@ MALFORMED_EPOCH = (
     "1 to 12 ASCII digits, at most 253402300799 (9999-12-31T23:59:59Z)"
 )
 UNAVAILABLE = "unavailable"
-NO_REPRODUCIBLE_SERIAL = (
-    "Inventory not written. SOURCE_DATE_EPOCH derives the serial number from the content "
-    "digest, which cannot be computed: the inventory records a value outside the I-JSON "
-    "range, such as a lone surrogate, or nests too deeply."
-)
 
 
 def source_date_epoch() -> datetime | None:
@@ -56,23 +49,6 @@ def source_date_epoch() -> datetime | None:
         return datetime.fromtimestamp(int(value), UTC)
     except (OverflowError, OSError, ValueError):
         raise click.UsageError(MALFORMED_EPOCH) from None
-
-
-def set_content_serial_number(aibom: AIBOM) -> None:
-    """Name a finished inventory by its content: a UUIDv5 of its content digest.
-
-    The serial number is not content, so setting it leaves the digest unchanged. It can
-    be recomputed from the native JSON file. An export carries the same serial number
-    but embeds a sorted copy of the native document, whose content digest differs.
-    """
-    from nexus_symbiote.core.content_digest import inventory_content_digest
-    from nexus_symbiote.generators._common import NAMESPACE
-
-    try:
-        digest = inventory_content_digest(aibom.to_dict())
-    except (ValueError, RecursionError) as exc:
-        raise click.ClickException(NO_REPRODUCIBLE_SERIAL) from exc
-    aibom.metadata.serial_number = f"urn:uuid:{uuid.uuid5(NAMESPACE, digest)}"
 
 
 @click.command("digest")

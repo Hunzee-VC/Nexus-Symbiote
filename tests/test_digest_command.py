@@ -53,10 +53,12 @@ def _digest(path: Path, *extra: str) -> Result:
     return CliRunner().invoke(main, ["digest", str(path), *extra])
 
 
-def _scanned(tmp_path: Path, name: str = "bom.json", *, project: Path = DEMO) -> Path:
+def _scanned(
+    tmp_path: Path, name: str = "bom.json", *, project: Path = DEMO, epoch: str | None = None
+) -> Path:
     output = tmp_path / name
     result = CliRunner().invoke(
-        main, ["scan", str(project), "-o", str(output)], env={"SOURCE_DATE_EPOCH": None}
+        main, ["scan", str(project), "-o", str(output)], env={"SOURCE_DATE_EPOCH": epoch}
     )
     assert result.exit_code == 0, result.output
     return output
@@ -126,14 +128,17 @@ def test_the_canonical_digest_is_the_one_runtime_snapshots_bind(tmp_path):
 def test_two_collections_of_one_project_share_only_the_content_digest(tmp_path):
     copies = [tmp_path / "laptop" / "demo-agent", tmp_path / "ci" / "demo-agent"]
     printed = []
-    for index, project in enumerate(copies):
+    for index, (project, epoch) in enumerate(zip(copies, (None, "1767225600"), strict=True)):
         shutil.copytree(DEMO, project)
-        inventory = _scanned(tmp_path, f"{index}.json", project=project)
+        inventory = _scanned(tmp_path, f"{index}.json", project=project, epoch=epoch)
         printed.append(json.loads(_digest(inventory, "--json-output").stdout))
     first, second = printed
     assert first["content_digest"] == second["content_digest"]
     assert first["file_sha256"] != second["file_sha256"]
     assert first["canonical_digest"] != second["canonical_digest"]
+    # Without a recorded collection time, two collections are the same file.
+    again = _scanned(tmp_path, "again.json", project=copies[1])
+    assert json.loads(_digest(again, "--json-output").stdout) == first
 
 
 def test_a_format_1_0_0_inventory_is_digested_as_read(tmp_path):

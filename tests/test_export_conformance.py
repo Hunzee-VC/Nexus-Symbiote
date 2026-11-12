@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
+from nexus_symbiote.core.aibom import AIBOM, DependencyEdge, native_document
 from nexus_symbiote.core.enums import RiskSeverity
 from nexus_symbiote.core.models import (
     A2AClientComponent,
@@ -27,7 +27,6 @@ from nexus_symbiote.core.models import (
     ToolComponent,
     VerifiedExtensionComponent,
 )
-from nexus_symbiote.generators._common import native_document
 from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
 from nexus_symbiote.generators.sarif import SARIFGenerator
 from nexus_symbiote.generators.spdx import SPDXGenerator
@@ -348,9 +347,9 @@ def test_new_client_server_ide_and_extension_types_round_trip_without_trust_upgr
 
 @pytest.mark.parametrize("generator", [CycloneDXGenerator, SPDXGenerator])
 def test_security_field_loss_report_tracks_normalized_paths(generator):
+    from nexus_symbiote.core.canonical import content_digest
     from nexus_symbiote.core.evidence import AuthorityClaim, DeploymentProfile
     from nexus_symbiote.core.models import CompletenessClaim
-    from nexus_symbiote.generators._common import content_digest
 
     bom = fixture_bom()
     bom.metadata.completeness = CompletenessClaim(scope="partial")

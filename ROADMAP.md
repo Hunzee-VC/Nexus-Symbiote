@@ -9,7 +9,11 @@ and roadmap" and the end-to-end audit of v0.1.0), checks every recommendation ag
 and turns what survives into one plan with acceptance tests.
 
 - **Checked against:** `main` at 3ad53a2 (12 November 2026, native format 1.1.0), plus the changes
-  delivered with this roadmap.
+  delivered with this roadmap. `main` has since merged #131 (fd20305: shell startup-code bypasses
+  in MCP launchers, bounded launch-argument expansion) and #132 (9cb6a47: the P0 audit findings
+  SEC-F1, SEC-C1, ARCH-F1 and DOC-F3/F7); this branch merges both, and the rows below that they
+  changed say so. Measurements in [where it stands](#where-it-stands) are still those taken at
+  3ad53a2.
 - **How:** every recommendation was located in the code, and most were reproduced by running the
   tool on synthetic fixtures. External facts (standards, other tools, identifiers) were read from
   primary sources on 12 November 2026; the few that could only be checked through secondary sources
@@ -86,6 +90,17 @@ named `venv` or `node_modules` left no coverage gap; the ShadowScan bridge still
 ShadowScan's 18 finding kinds (open); and ShadowScan refuses the native inventory SymBiote writes, so
 an approved SymBiote inventory cannot become ShadowScan's approved list.
 
+**What `main` closed after 3ad53a2.** #131 treats as unknown launchers the shell startup code that
+can replace a pinned MCP runner (`--rcfile` and `--init-file`, exported bash functions, a relative
+or `/proc` `BASH_ENV`, `ENV` with an interactive shell, `PS4` expansions while tracing) and bounds
+launch-argument expansion in time and memory. #132 closes four P0 findings of a separate audit:
+SEC-F1 (a ShadowScan import records its producer verification in the inventory, and unverified
+discovery evidence fails `import-shadowscan`, `validate` and `risk` in CI unless explicitly
+allowed), SEC-C1 (offline Sigstore verification checks the cached trust root before trusting it,
+or uses an explicit, optionally pinned one), ARCH-F1 (deterministic output: no wall-clock
+timestamp, components and dependencies sorted, a content-derived serial number) and DOC-F3/F7
+(stale roadmap and repository-controls rows).
+
 ## Delivered with this roadmap
 
 Each entry names the review items it closes ([traceability](#traceability)) and the guide that
@@ -94,7 +109,7 @@ documents it.
 | # | Delivered | Closes | Guide |
 | --- | --- | --- | --- |
 | D1 | **Coverage honesty.** Every IDE settings file the collector recognizes is bound by a digest, now including `.cursor/cli.json`, the Antigravity, xAI and Copilot files and `.codex/config.toml` as a whole (these are digested after redaction, so their digests cannot confirm a guess of a value the redaction removes, such as a token, and without the binding key a change only to such a value does not alert; with the key an HMAC covers every value as read); unassigned default-ignorable code points are hidden-character findings and are neutralized in output; Hugging Face chat templates get the template-escape check GGUF templates get; nested `GEMINI.md` and `.cursorrules` files are collected; agent files inside default-excluded directory names, JavaScript-family MCP servers, namespace and `require` imports, dynamic imports with literal module names and servers that application code starts or reaches through the SDK and framework classes the collector knows are inventoried or reported as coverage gaps | the 0.1.0 limitations on default exclusions inside agent directories and on JavaScript-family, namespace-import and `require` MCP servers; G fixes 1–3; c R3.d–f; audit related mediums | [known limitations](docs/known-limitations.md), [TypeScript inventory](docs/typescript-inventory.md), [source binding](docs/verification-source-binding.md) |
-| D2 | **Reproducible inventories.** `SOURCE_DATE_EPOCH` makes `scan`, `baseline` and `import-shadowscan` write byte-identical native JSON, CycloneDX and SPDX for identical input (SARIF when both scans run from the same place relative to the scanned directory); `digest` prints the file digest, the canonical digest signed runtime snapshots bind, and a new content digest (`nexus-symbiote/inventory-content/v1`) that is equal for equal content whenever and wherever it was collected | the P1 acceptance test "same agent, same inputs, same build-time BOM hash"; c R2.d | [reproducible inventories](docs/reproducible-inventories.md) |
+| D2 | **Reproducible inventories.** On top of ARCH-F1 (#132 on `main`), which makes native JSON and CycloneDX byte-identical by default by recording no collection time, sorting components and dependencies and deriving the serial number from the content: a published content digest (`nexus-symbiote/inventory-content/v1`, with known-answer vectors) that is equal for equal content whenever and wherever it was collected and that `digest` prints beside the file digest and the canonical digest signed runtime snapshots bind; the serial number derived from that digest, so anyone can recompute it from the native file; and `SOURCE_DATE_EPOCH`, which makes `scan`, `baseline` and `import-shadowscan` record that instant as the collection time, so native JSON, CycloneDX and SPDX are byte-identical for identical input with a recorded time (SARIF when both scans run from the same place relative to the scanned directory) | the P1 acceptance test "same agent, same inputs, same build-time BOM hash"; c R2.d | [reproducible inventories](docs/reproducible-inventories.md) |
 | D3 | **Inventory attestation.** `attest` signs an inventory (or any export) as a DSSE envelope carrying an in-toto Statement bound to the file's SHA-256 and, for native inventories, to its content digest, for a stated purpose (`generated` or `reviewed`); `verify-attestation` checks it against operator-held Ed25519 keys with a threshold, purpose, age and either byte or content matching. Offline | A gap 6; B Now 4; c R7.a; d P0 6; e fix 6 | [inventory attestation](docs/inventory-attestation.md) |
 | D4 | **Runtime telemetry versus the inventory.** `trace-diff` reads OpenTelemetry traces the operator exported (GenAI and MCP semantic conventions, OTLP/JSON), never the content they may carry, and reports the tools, models, agents and MCP endpoints that the traces report but the inventory does not declare (exit 1), declarations that no span mentions (which does not show they went unused), and ambiguities; optional SARIF. Telemetry is recorded as `reported` evidence and never raises assurance | A gap 2 ("the diff is the product"); B Now 8; c R2.a–b; d P0 3; e fix 2 | [trace evidence](docs/trace-evidence.md) |
 | D5 | **Framework crosswalk.** Every finding category has a SARIF rule; SARIF tags add MITRE ATLAS 2026.10, OWASP LLM Top 10 2026 and NIST AI RMF identifiers beside the existing CWE, OWASP LLM 2025 and OWASP Agentic ones; `crosswalk` reports findings per framework entry, including EU AI Act articles and ISO/IEC 42001 controls | A compliance table; B gap 10; c 7.2.c; d P1 2; e 4.4; G fix 16 | [framework crosswalk](docs/framework-crosswalk.md) |
@@ -102,6 +117,7 @@ documents it.
 | D7 | **Graph view and risk classes.** `graph` writes a self-contained, script-hashed `graph.html` (and a JSON model) of components, relationships, findings and the shortest recorded exposure paths from agents to components whose recorded evidence gives a code-exec, write-capable, exfil-capable or secret-access risk class, or that carry a high or critical finding; risk classes restate recorded evidence, not what a component does at run time, and components with none are shown as unclassified, never as safe | A gap 7 and DevEx graph; B Next 7; c R8.a, R8.d; d P1 7; e fix 7 | [graph view](docs/graph-view.md) |
 | D8 | **Approve in SymBiote, reconcile in ShadowScan.** `export-inventory --format shadowscan-simple` writes ShadowScan's documented simple inventory list from a reviewed inventory, so the repository agent approved in SymBiote review becomes an approved agent in ShadowScan, bound only to the repository's root project (checked against ShadowScan 999bef1) | G fix 9 (P0) and move 2.a; A ShadowScan target state 5 | [ShadowScan inventory export](docs/shadowscan-inventory-export.md) |
 | D9 | **Positioning.** The disambiguation line in `README.md` and `SECURITY.md`; this roadmap | A gap 1; B Now 1; c R13.a; d P0 1; e fix 1 | this page |
+| D10 | **No gate failures for reasons no operator can act on.** The Python MCP source cap (a hidden, fixed 20,000 syntax nodes that the repository's own `registry.py` exceeded) is the operator limit `python-nodes`, and reaching it is a collection failure that names it; the helper analysis and the MCP origin-label scan run in linear time; another spelling of an instruction file the `prompt` collector reads at any depth, such as `pkg/claude.md`, is a collection failure, also beside the exact name; the registry collector records the project settings that redirect an inventoried npm or PyPI package to another registry or index, by origin only, with a low `registry_origin` finding and no package URL; `action.yml` says that its `scanners` input makes coverage partial. Symbolic links out of the project stay failures ([decisions](#decisions-and-non-goals)) | audit H5 residue, M4; the self-scan | [collection limits](docs/collection-limits.md), [registry collector](docs/registry-collector.md#registry-and-index-settings), [known limitations](docs/known-limitations.md) |
 
 ## Plan
 
@@ -116,15 +132,14 @@ assurance.
 | --- | --- | --- | --- | --- |
 | N1 | **Require an attestation in the gates.** `validate` and `risk` accept `--require-attestation ENVELOPE` with operator-held keys and fail closed on a missing, altered, wrongly purposed or unsigned inventory; the GitHub Action gains an input for a reviewed-baseline attestation | "unsigned BOMs are rejected by default in verification mode" (A, B, c R7.b, d, e) | an unsigned or altered baseline fails `validate` under the CI policy; a signed one passes and its signer is printed | M |
 | N2 | **Attest in the GitHub Action.** Optional `attest: true` input adding a pinned `actions/attest-build-provenance` step over the uploaded inventory and an `aibom-digest` output; document the caller permissions and `gh attestation verify` | G fix 17; B Now 4 | a third party verifies the Action's inventory with `gh attestation verify` | M |
-| N3 | **ShadowScan bridge depth.** Map `framework-usage` and `agent-config` findings (projection profile v5), keep every other kind an explicit gap, carry readable names when the report verifies under the operator signer policy, and record the producer check in the inventory | G fixes 7–8; c R1.a, R1.c, R7.c | a ShadowScan code report from an agent-framework repository imports with no unmapped entries | M |
+| N3 | **ShadowScan bridge depth.** Map `framework-usage` and `agent-config` findings (projection profile v5), keep every other kind an explicit gap, and carry readable names when the report verifies under the operator signer policy. (The producer check is recorded in the inventory since SEC-F1, #132.) | G fixes 7–8; c R1.a, R1.c, R7.c | a ShadowScan code report from an agent-framework repository imports with no unmapped entries | M |
 | N4 | **CycloneDX projection 3.** Remote MCP servers and A2A servers as `services` (endpoints, authentication); MCP launcher packages with their purl; model licences and a minimal `modelCard` from local model-card front matter, as declared evidence; a `--spec-version 1.6` option with the vendored 1.6 schema; projection 2 kept for recovery | G fix 13; c R5.a, R6.a; G7 elements that only standard fields satisfy | a consumer using only cyclonedx-python-lib recovers MCP services and model licences; both versions validate | L |
 | N5 | **Operator VEX decisions.** `vex --decisions FILE` (operator-owned, outside the checkout) records `not_affected`, `exploitable`, `resolved` with justification, owner and expiry; `--advisories REPORT` links OSV results | G fix 15; c R8.e | an expired decision reverts to `in_triage` with a warning | M |
 | N6 | **Autonomy vocabulary.** Accept ISO/IEC 22989 automation names in `agent.yaml`, export them, and publish one mapping table between SymBiote's L0–L4, ShadowScan's 0–5 and the ISO names (SPDX 3.1's `isoAutomationLevel` uses the ISO ladder) | G fix 12; G standards row (SPDX 3.1) | the table is tested against both enumerations | M |
-| N7 | **Release and governance controls.** Apply the release-tag ruleset and turn off administrator bypass (the publication preflight already refuses without them) and record the date; add the OpenSSF Scorecard badge (the workflow exists) and register for the Best Practices badge; publish the v0.1.0 audit and its remediation map under `docs/audits/` | G fix 18, move 5.a; c R11.c | `scripts/check_repository_controls.py --verify-bypass-actors` passes and is recorded | S |
+| N7 | **Release and governance controls.** Apply the release-tag ruleset, which must now also protect the existing `v0.1.0` tag, and turn off administrator bypass on the `testpypi` and `pypi` environments (the publication preflight already refuses without them), and record the date; add the OpenSSF Scorecard badge (the workflow exists) and register for the Best Practices badge; publish the v0.1.0 audit and its remediation map under `docs/audits/` | G fix 18, move 5.a; c R11.c | `scripts/check_repository_controls.py --verify-bypass-actors` passes and is recorded | S |
 | N8 | **Supported surface.** Decide which collectors, exports and runtime adapters 0.2.x supports and which stay experimental (open since 0.1.0) | single maintainer; the code grew 2.3 times since v0.1.0 | the decision is in `GOVERNANCE.md` and the README | S |
 | N9 | **Verification regressions.** Add `model_drift` and `a2a_scope_drift` kinds (a flipped weight byte, a widened OAuth scope) to the security regression corpus, with negative controls, and map every remaining known limitation to a fixture | G move 5.d; c R3 acceptance, R12.a | the corpus fails if either alert disappears | M |
 | N10 | **SARIF against the official schema** in tests, beside the structural validator | c correction to "already done"; audit M9 | an invalid document fails the suite | S |
-| N11 | **No gate failures for reasons no operator can act on.** The Python MCP source cap (20,000 syntax nodes, undocumented, trips on the repository's own `registry.py`) becomes a named operator limit; a symbolic link no collector would read stops failing six collectors; `action.yml` says that its `scanners` input makes coverage partial. The audit residue on nested instruction files under another letter case and on registry redirects for inventoried packages is closed too | audit H5 residue, M4; the self-scan | an ordinary 100 KB module that mentions `mcp` no longer fails the default gate | S |
 | N12 | **Integrity that means what it says.** A re-hash of the checkout an inventory was just built from no longer counts as verified integrity; operator digest pins verify any model format, not only SafeTensors | audit M3 | an MCP-only repository does not move from UNKNOWN to PASS by adding an instruction file | M |
 
 ### Next — lead
@@ -161,7 +176,7 @@ The reviews' acceptance tests, restated so that they can pass or fail:
 | Test | Status |
 | --- | --- |
 | **P0.** An agent calls an MCP tool its repository does not declare. The static scan does not contain it; the agent's exported traces reach `trace-diff`, which reports the tool as undeclared and exits 1; CI fails; the SARIF result carries the crosswalk tags. | Delivered (D4, D5), with the [walk-through](docs/trace-evidence.md). The reviews' "graph shows the new edge" needs the graph to read trace evidence (X2). |
-| **P1.** Same agent, same inputs: same build-time inventory hash; the runtime evidence shows only the delta, each item tagged with its evidence source. | Delivered (D2, D4): byte-identical native JSON, CycloneDX and SPDX with `SOURCE_DATE_EPOCH`, an equal content digest without it; trace evidence is a separate `reported` document that lists undeclared and unobserved items apart from matched ones. |
+| **P1.** Same agent, same inputs: same build-time inventory hash; the runtime evidence shows only the delta, each item tagged with its evidence source. | Delivered (ARCH-F1 on `main`, D2, D4): byte-identical native JSON and CycloneDX by default, SPDX too with `SOURCE_DATE_EPOCH`, and an equal content digest and serial number whatever time is recorded; trace evidence is a separate `reported` document that lists undeclared and unobserved items apart from matched ones. |
 | **P2.** An independent evaluator reruns the published benchmark and reproduces its numbers; two external reviewers have reviewed the security model; three or more maintainers. | Open (L3, L4). |
 | An unsigned or altered baseline fails the CI gate; a signed one passes and names its signer. | Partly delivered: D3 verifies; N1 puts it in the gates. |
 | Every known limitation in `SECURITY.md` has a regression fixture, and the list shrinks to items reported as gaps. | Partly delivered (D1); the fixture mapping is part of N9. |
@@ -173,10 +188,10 @@ What "first in this lane" means, as measures anyone can check. Values are at the
 
 | Measure | Target | Now |
 | --- | --- | --- |
-| Coverage honesty | No documented surface passes every gate without a gap | D1 closed the bypasses reproduced at 3ad53a2 that [where it stands](#where-it-stands) lists; the audit residue is N11, and the remaining exceptions are listed in [known limitations](docs/known-limitations.md) |
+| Coverage honesty | No documented surface passes every gate without a gap | D1 closed the bypasses reproduced at 3ad53a2 that [where it stands](#where-it-stands) lists, #131 the shell startup-code bypasses and D10 the audit residue; the remaining exceptions are listed in [known limitations](docs/known-limitations.md) |
 | Evidence grading | Every component and claim carries its assurance and a locator | Met for collected components; telemetry is a separate `reported` document |
-| Reproducibility | Identical input gives byte-identical output | Met with `SOURCE_DATE_EPOCH` for native JSON, CycloneDX and SPDX, and for SARIF when both scans run from the same place relative to the scanned directory; equal content digest without it |
-| Integrity | Every exported inventory can be signed and verified offline, one command each | Met (D3); gate enforcement is N1 |
+| Reproducibility | Identical input gives byte-identical output | Met by default for native JSON and CycloneDX (ARCH-F1, #132); with `SOURCE_DATE_EPOCH`, also for SPDX, whose schema requires a creation time; for SARIF when both scans run from the same place relative to the scanned directory; equal content digest and serial number whatever time is recorded (D2) |
+| Integrity | Every exported inventory can be signed and verified offline, one command each | Met (D3); gate enforcement is N1. Offline Sigstore verification checks the trust root it uses (SEC-C1, #132) |
 | Standards fidelity | CycloneDX and SPDX exports validate with the official schemas and load in Dependency-Track with properties intact | Schemas met; Dependency-Track untested (X7) |
 | Completeness | G7 minimum-element coverage reported for every inventory, with the missing fields | Met (D6) |
 | Runtime truth | Declared versus reported use, gated in CI | Met for OpenTelemetry GenAI and MCP traces (D4); more sources in X2 |
@@ -202,6 +217,7 @@ What "first in this lane" means, as measures anyone can check. Values are at the
 | The broadest scanner, a CVE database, a production MCP firewall | **Non-goals** | other projects do these well; SymBiote imports their output (X1) and publishes the contract gateways enforce ([runtime contract reference](docs/runtime-contract-reference.md)) |
 | Claiming that an inventory or a low score proves an agent or model benign | **Non-goal** | absence of evidence is unknown, not safe |
 | Default execution of project code, MCP launchers or model loaders | **Non-goal** | `verify-live` is the only explicit, operator-pinned exception |
+| Stop failing the walking collectors on a symbolic link out of the project that none of them would read (audit residue) | **Declined; confinement unchanged** | a link's name cannot show whether it names a directory, and all six walking collectors read names at any depth below directories of any name; finding out would mean examining a path outside the project chosen by the checkout, and the answer would hold only on the scanning machine, not on the one that later opens the checkout. Replace the link with the file or a relative link inside the project ([known limitations](docs/known-limitations.md#every-collector)) |
 
 **Historical experimental work.** The [closed-PR audit](docs/audits/closed-pr-review-2026-11-02.md)
 records what reached the supported package and what remains separate. The experimental foundation's
@@ -219,7 +235,7 @@ Statements in the reviews that were wrong or had become stale by 12 November 202
 | "OWASP LLM Top 10 2025" as the current edition; LLM03 is Supply Chain | The 2026 edition was published on 4 August 2026 and renumbered the list (LLM03:2026 Excessive Agency, LLM04:2026 Supply Chain). Identifiers are meaningful only with their edition; SymBiote now tags both. |
 | "50 G7 elements" could not be confirmed, or "roughly 50" | Exactly 50 elements in 7 clusters (10/9/13/10/2/4/2), non-binding, with no official identifiers and no required or optional tiers. Report coverage, not compliance. |
 | "No CI gate, no SARIF, no pre-commit hook, no pickle detection, no self-validation" | All existed at v0.1.0 (SARIF validation is structural, not the official schema). |
-| "Sigstore is only an optional extra; signing must become the default path" | Sigstore *verification* of model files and ShadowScan reports exists under an operator signer policy; inventory signing did not exist (D3 adds it; enforcing it in the gates is N1). |
+| "Sigstore is only an optional extra; signing must become the default path" | Sigstore *verification* of model files and ShadowScan reports exists under an operator signer policy, and since #132 unverified ShadowScan discovery evidence fails in CI unless explicitly allowed (SEC-F1); inventory signing did not exist (D3 adds it; enforcing it in the gates is N1). |
 | Claude hooks, deny rules, subagents, skill scripts, nested instruction files, `.vscode/mcp.json` are not read | Read or digest-bound since 3ad53a2; the reproduced residue (marker files, Codex keys, JavaScript-family servers, excluded directory names) is D1. |
 | "Fixed list of hidden characters, instruction files only" | Every format character (Unicode category Cf) on every text file the prompt collector reads; the unassigned default-ignorable ranges were the remaining hole (D1). |
 | "No GGUF template-injection assignment" | Assigned since 3ad53a2; Hugging Face chat templates were the remaining hole (D1). |
@@ -287,7 +303,7 @@ e "Blueprint to Undisputed #1", G "Fixes, moves and roadmap", audit "end-to-end 
 | --- | --- | --- | --- |
 | Name collision | A gap 1; B gap 1; c gap 1, R13.a; d P0 1; e fix 1 | Done (one name everywhere; disambiguation line added); `nsb` declined | D9 |
 | Static only / runtime layer | A gap 2, Layer 2; B gap 2, Now 8; c gap 2, R2; d P0 3; e fix 2 | Done for exported telemetry; more sources next | D4, X2 |
-| Reproducibility | A ALOHA row; B 7.1 determinism; c R2.d; e P1 test | Done | D2 |
+| Reproducibility | A ALOHA row; B 7.1 determinism; c R2.d; e P1 test | Done (ARCH-F1 on `main`, #132; content digest, recomputable serial and `SOURCE_DATE_EPOCH` here) | D2 |
 | Tool permission model and risk classes | A gap 3; B gap 3, Now 5; c gap 3, R8.a; d P0 4; e fix 3 | Risk classes done; per-tool egress has no source in a repository | D7, X9 |
 | Data, memory, RAG and guardrail provenance | A gap 4; B Next 1; c gap 4; d P1 1; e fix 4 | Open | X5 |
 | Identity and delegation graph | A gap 5; B Next 2; c gap 5, R1.b; d P0 5; e fix 5 | Open (needs a format minor version) | X3 |
@@ -296,8 +312,8 @@ e "Blueprint to Undisputed #1", G "Fixes, moves and roadmap", audit "end-to-end 
 | Model security | A gap 8; B gap 8, Next 5; c gap 8, R7.d; d P1 5; e fix 8; G borrow 2 | Pickle and loaders critical, GGUF and HF templates checked; opcode depth and OMS next | D1, X4 |
 | Hardening and offline | A gap 9; e fix 8; c 7.2.d | Done (offline default, redaction); envelope encryption declined | — |
 | Maturity and governance | A gap 10; B gaps 11–12; c R11–R12; d P2 5; G move 5 | Open; depends on people | N7, N8, L3, L4 |
-| Coverage honesty | G fixes 1–3, move 1; c R3; audit H1–H5 and related mediums | Done for the bypasses reproduced at 3ad53a2; the audit residue is next; remaining limits documented | D1, N11 |
-| ShadowScan bridge | A integration 1–5; B Now 2; c R1; d discovery row; G fixes 7–12, move 2 | Inventory export done; kind mapping, names and autonomy next | D8, N3, N6 |
+| Coverage honesty | G fixes 1–3, move 1; c R3; audit H1–H5 and related mediums | Done for the bypasses reproduced at 3ad53a2, the shell startup-code bypasses (#131 on `main`) and the audit residue; out-of-project links stay failures by decision; remaining limits documented | D1, D10 |
+| ShadowScan bridge | A integration 1–5; B Now 2; c R1; d discovery row; G fixes 7–12, move 2 | Inventory export done; producer verification recorded and unsigned discovery failing in CI (SEC-F1, #132 on `main`); kind mapping, names and autonomy next | D8, N3, N6 |
 | Compliance crosswalk | A table; B gap 10; c 7.2.c; d P1 2; e 4.4; G fix 16 | Done | D5 |
 | G7 minimum elements | A; B; c R10; d; e; G standards row | Coverage report done; standard fields that would satisfy more elements in N4 | D6, N4 |
 | Standard fields (services, modelCard, SPDX AI, CycloneDX 1.6) | A data model; B 7.1; c R5–R6; d P0 8; e 4.1; G fixes 13–14 | Open | N4, X8 |
@@ -315,8 +331,11 @@ re-checked at 3ad53a2, most by running the tool: 29 done, 22 partial, 1 open. Al
 (H1–H7) are fixed and were reproduced as fixed, as were M1, M2, M6 and M8 and the demo numbers;
 the audit's three section-6 checks now give: the two-path scans compare clean, the README
 quickstart matches exactly, and the self-scan still fails, correctly, on the deliberately hostile
-regression fixtures. The residue maps to this roadmap: the Python MCP source-size cap and
-out-of-scope symlinks (N11), integrity semantics for non-SafeTensors pins and self-re-hashes (N12),
-registry redirects and nested case variants (N11), operator-side suppressions and signed
-baselines (N1), the `scanners` input note in `action.yml` (N11), SARIF schema validation (N10), a
-library scan pipeline with typed coverage records (N8), and the second maintainer (L3).
+regression fixtures. Since then D10 closed the residue on the Python MCP source-size cap, nested
+case variants, registry redirects and the `scanners` input note in `action.yml`, and out-of-scope
+symlinks stay failures by [decision](#decisions-and-non-goals). The rest maps to this roadmap:
+integrity semantics for non-SafeTensors pins and self-re-hashes (N12), operator-side suppressions
+and signed baselines (N1), SARIF schema validation (N10), a library scan pipeline with typed
+coverage records (N8), and the second maintainer (L3). The P0 findings of the separate audit that
+#132 names (SEC-F1, SEC-C1, ARCH-F1, DOC-F3/F7) and the shell startup-code bypasses #131 closes
+are closed on `main` and merged here.

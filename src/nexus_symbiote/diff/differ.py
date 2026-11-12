@@ -1093,6 +1093,19 @@ class AIBOMDiffer:
                 f"ShadowScan projection limitations no longer reported: "
                 f"{_listing((before_limits - after_limits).elements())}.",
             )
+
+        AIBOMDiffer._diff_discovery_verification(old, new, regression, improvement)
+
+        if None not in (old.source_report_path, new.source_report_path) and (
+            old.source_report_path != new.source_report_path
+        ):
+            # The location is where the import read the report, not its content, which the
+            # report digests bind; a moved report is information, not drift.
+            improvement(
+                "source_report_path",
+                f"ShadowScan report location changed from {old.source_report_path} to "
+                f"{new.source_report_path}.",
+            )
         return {
             "source_report_digest",
             "source_report_content_digest",
@@ -1102,7 +1115,47 @@ class AIBOMDiffer:
             "source_unmapped_count",
             "source_unmapped_indexes",
             "source_projection_limitations",
+            "discovery_verification",
+            "source_report_path",
         }
+
+    @staticmethod
+    def _diff_discovery_verification(
+        old: CompletenessClaim,
+        new: CompletenessClaim,
+        regression: Callable[[str, str], None],
+        improvement: Callable[[str, str], None],
+    ) -> None:
+        """Alert when signature verification is gained, lost or re-attributed.
+
+        A baseline written before the record existed carries none: that reads as
+        not-applicable, not as a change. Report digests and run times change on
+        every rerun and the content digest is already compared above, so only the
+        status and, for verified evidence, the signer binding are compared here.
+        """
+        before, after = old.discovery_verification, new.discovery_verification
+        before_status = before.status if before is not None else "not-applicable"
+        after_status = after.status if after is not None else "not-applicable"
+        if before_status == "verified" and after_status != "verified":
+            regression(
+                "discovery_verification",
+                "ShadowScan discovery evidence is no longer signature-verified.",
+            )
+        elif before_status != "verified" and after_status == "verified":
+            improvement(
+                "discovery_verification",
+                "ShadowScan discovery evidence is now signature-verified.",
+            )
+        elif (
+            before is not None
+            and after is not None
+            and before_status == "verified"
+            and (before.signer_identity, before.issuer) != (after.signer_identity, after.issuer)
+        ):
+            regression(
+                "discovery_verification",
+                "ShadowScan discovery evidence is now signed by a different identity or issuer.",
+            )
 
     @staticmethod
     def _note_shared_gaps(

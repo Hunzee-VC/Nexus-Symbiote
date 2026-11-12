@@ -82,8 +82,8 @@ def test_one_policy_snapshot_reaches_collection_and_validation(tmp_path: Path) -
     assert validate[validate.index("--signature-policy") + 1] == str(snapshot)
     assert snapshot != policy and not snapshot.is_relative_to(workspace)
     assert not snapshot.exists()
-    assert seen == [policy_document(), policy_document()]
-    assert "--signature-policy" not in risk
+    assert seen == [policy_document()] * 3
+    assert risk[risk.index("--signature-policy") + 1] == str(snapshot)
     digest = hashlib.sha256(policy_document().encode()).hexdigest()
     assert f"signature_policy_digest=sha256:{digest}\n" in outputs.read_text()
 

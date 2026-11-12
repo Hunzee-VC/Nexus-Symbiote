@@ -62,8 +62,8 @@ Pass the file to ShadowScan with `--inventory approved.json`, or check what it
 loads with `shadowscan inventory check approved.json`. The two digests identify
 the inventory the file came from: the SHA-256 of its bytes, and its content
 digest under the profile `nexus-symbiote/inventory-content/v1`, which leaves out
-only the serial number and the collection times, so two scans of the same content
-share it. Record both with the exported file.
+only the serial number, the collection times and where an imported report was read
+from, so two scans of the same content share it. Record both with the exported file.
 
 ## What the file approves
 

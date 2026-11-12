@@ -165,7 +165,8 @@ def risk_report_lines(
         basis = document.get("assessment_basis", "unknown")
         lines.append((safe_line("  Assessment basis: ", basis), None))
         if document.get("discovery_producer") == "not-verified":
-            lines.append(("  Discovery producer: not verified (unsigned evidence accepted)", None))
+            outcome = "unsigned evidence accepted" if document.get("passed") else "unsigned"
+            lines.append((f"  Discovery producer: not verified ({outcome})", None))
         lines.append((safe_line("  Coverage: ", document.get("coverage_status", "unknown")), None))
         total = _shown(document.get("total_components"))
         risky = _shown(document.get("components_with_risks"))
@@ -356,7 +357,13 @@ def validation_report_lines(
         problems = discovery.get("problems") or []
         producer = discovery.get("status")
         if producer == "not-verified":
-            lines.append(("Discovery producer: not verified (unsigned evidence accepted)", None))
+            unsigned = document.get("unsigned_discovery")
+            if unsigned:
+                lines.append((safe_line("Discovery producer: not verified. ", unsigned), "red"))
+            else:
+                lines.append(
+                    ("Discovery producer: not verified (unsigned evidence accepted)", None)
+                )
         else:
             lines.append(("Discovery producer check", "bold"))
             if problems or producer == "failed":

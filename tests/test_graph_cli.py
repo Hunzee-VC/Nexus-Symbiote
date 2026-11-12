@@ -181,7 +181,11 @@ def test_an_invalid_graph_fails_like_blast_radius(runner, tmp_path):
         components=[AgentComponent(bom_ref="a", name="a")],
         dependencies=[DependencyEdge(source_ref="a", target_ref="gone", relationship="invokes")],
     )
-    path = saved(tmp_path, bom)
+    # Written as another producer could write it: this build refuses to save a dangling edge.
+    with pytest.raises(ValueError, match="unknown component"):
+        bom.save(tmp_path / "refused.json")
+    document = bom.model_dump(mode="json", exclude_none=True)
+    path = write_inventory(tmp_path, json.dumps(document).encode())
     result = runner.invoke(main, ["graph", str(path), "--format", "json"])
     assert result.exit_code == 1
     assert "invalid graph: invokes: dangling edge a -> gone" in result.output

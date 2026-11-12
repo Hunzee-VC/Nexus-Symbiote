@@ -167,7 +167,7 @@ nexus-symbiote graph INVENTORY [-o OUTPUT] [--format html|json] [--focus REF] [-
 
 | Key | Contents |
 | --- | --- |
-| `inventory` | `spec_version`, `timestamp`, and the inventory's `components` and `dependencies` counts |
+| `inventory` | `spec_version`, `timestamp` (`null` when the inventory records no collection time, as a scan without `SOURCE_DATE_EPOCH` does; the HTML page then says "not recorded"), and the inventory's `components` and `dependencies` counts |
 | `focus` | The `--focus` reference, or `null` |
 | `coverage` | `status` (`unknown` or `incomplete`), `collection` (`complete`, `partial` or `unknown`), `scan_failures`, `surfaces_excluded`, `gaps` and `gaps_omitted` |
 | `limitations` | Fixed sentences on what the view does not establish |

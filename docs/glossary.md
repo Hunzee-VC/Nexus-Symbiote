@@ -28,11 +28,14 @@ saved at one time so that a later one can be compared with it.
 ### Content digest
 
 The SHA-256 of an inventory's RFC 8785 canonical JSON without the fields that record
-the collection event: its serial number and collection times. Two collections of the
-same content have the same content digest, wherever and whenever each was taken;
-equal digests say nothing about who produced either file. `digest` prints it under the
-profile `nexus-symbiote/inventory-content/v1`
-([reproducible inventories](reproducible-inventories.md#the-content-digest)).
+the collection event: its serial number, its collection times and, for an import,
+where the report was read from. Two collections of the same content have the same
+content digest, wherever and whenever each was taken; equal digests say nothing about
+who produced either file. `digest` prints it under the profile
+`nexus-symbiote/inventory-content/v1`
+([reproducible inventories](reproducible-inventories.md#the-content-digest)), and an
+inventory's serial number is the version 5 UUID of it
+([the serial number](reproducible-inventories.md#the-serial-number)).
 
 ### Component
 

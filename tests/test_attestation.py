@@ -229,7 +229,10 @@ def test_other_file_round_trip_has_no_content_fields():
 
 
 def test_content_match_accepts_another_collection_of_the_same_content():
-    later = AIBOM().to_json().encode()
+    # Another collection of the same content that records when it was collected.
+    collected = AIBOM()
+    collected.metadata.timestamp = datetime(2026, 1, 1, tzinfo=UTC)
+    later = collected.to_json().encode()
     assert later != NATIVE
     envelope = sign_statement(statement(), [A])
     refused("subject-mismatch", verify, envelope, later)

@@ -2,7 +2,8 @@
 
 Two collections of one checkout differ only in when, and in which run, they were made. The
 content digest leaves exactly that out, wherever the native format records it and nowhere
-else; with SOURCE_DATE_EPOCH set, the files themselves are byte-identical.
+else, and the serial number is derived from it. Without SOURCE_DATE_EPOCH no collection time
+is recorded; with it, that instant is, and every format writes it identically.
 """
 
 from __future__ import annotations
@@ -14,7 +15,6 @@ import os
 import shutil
 import uuid
 from collections.abc import Callable, Iterator
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +23,8 @@ import yaml
 from click.testing import CliRunner, Result
 
 from nexus_symbiote.cli import main
-from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote.core.aibom import AIBOM, NO_CONTENT_SERIAL
+from nexus_symbiote.core.canonical import NAMESPACE
 from nexus_symbiote.core.content_digest import (
     INVENTORY_CONTENT_PROFILE,
     NESTED_TOO_DEEPLY,
@@ -33,8 +34,7 @@ from nexus_symbiote.core.content_digest import (
 )
 from nexus_symbiote.core.hashing import parse_json_strict
 from nexus_symbiote.core.models import AnyComponent, PromptComponent, ToolComponent
-from nexus_symbiote.digest_cli import MALFORMED_EPOCH, NO_REPRODUCIBLE_SERIAL
-from nexus_symbiote.generators._common import NAMESPACE
+from nexus_symbiote.digest_cli import MALFORMED_EPOCH
 from nexus_symbiote.scanners.base import Scanner, ScanResult
 from tests.support import scaling_ratio
 
@@ -149,6 +149,7 @@ def _hand_built_content(case_id: str, document: dict[str, Any]) -> dict[str, Any
     if case_id == "native-1.1.0":
         del metadata["serial_number"], metadata["timestamp"]
         del metadata["completeness"]["timestamp"]
+        del metadata["completeness"]["source_report_path"]
         server, tool = expected["components"]
         del server["claims"]["repository_presence"]["observed_at"]
         del server["claims"]["operator_review"]["observed_at"]
@@ -179,10 +180,13 @@ def test_two_collections_at_different_paths_and_times_have_one_content_digest(tm
     first = _scan(_checkout(tmp_path, "laptop"), tmp_path / "first.json", epoch=None)
     second = _scan(_checkout(tmp_path, "ci", "runner"), tmp_path / "second.json", epoch="0")
     third = _scan(_checkout(tmp_path, "renamed"), tmp_path / "third.json", epoch=None)
-    assert first["metadata"]["timestamp"] != second["metadata"]["timestamp"]
-    assert len({doc["metadata"]["serial_number"] for doc in (first, second, third)}) == 3
+    assert "timestamp" not in first["metadata"]
+    assert second["metadata"]["timestamp"] == "1970-01-01T00:00:00Z"
     assert inventory_content_digest(first) == inventory_content_digest(second)
     assert inventory_content_digest(first) == inventory_content_digest(third)
+    # The serial number names the content, so the recorded time does not change it.
+    serials = {doc["metadata"]["serial_number"] for doc in (first, second, third)}
+    assert serials == {_content_serial(first)}
 
 
 def test_every_value_outside_the_collection_event_is_content(tmp_path):
@@ -290,6 +294,10 @@ DECOYS = [
     ("metadata", "observed_at"),
     ("metadata", "completeness", "observed_at"),
     ("metadata", "completeness", "serial_number"),
+    ("components", 0, "properties", "source_report_path"),
+    ("components", 0, "source_report_path"),
+    ("components", 0, "claims", "repository_presence", "source_report_path"),
+    ("metadata", "source_report_path"),
     ("dependencies", 0, "timestamp"),
     ("dependencies", 0, "observed_at"),
     ("timestamp",),
@@ -307,6 +315,19 @@ def test_an_event_name_anywhere_else_stays_content(path):
     serial = inventory_content_digest(_set(document, path, OTHER_SERIAL))
     null = inventory_content_digest(_set(document, path, None))
     assert len({original, first, second, serial, null}) == 5
+
+
+def test_the_import_location_is_left_out_only_when_it_is_text():
+    document = CASES["native-1.1.0"]["document"]
+    original = inventory_content_digest(document)
+    path = ("metadata", "completeness", "source_report_path")
+    for location in ("elsewhere/report.json", "", "::error::forged"):
+        assert inventory_content_digest(_set(document, path, location)) == original
+    without = copy.deepcopy(document)
+    del without["metadata"]["completeness"]["source_report_path"]
+    assert inventory_content_digest(without) == original
+    for other in (None, 7, ["report.json"], {"path": "report.json"}):
+        assert inventory_content_digest(_set(document, path, other)) != original, other
 
 
 def test_the_document_is_not_changed():
@@ -485,19 +506,24 @@ def test_a_pinned_scan_records_the_instant_and_a_content_serial_number(tmp_path)
     assert later["metadata"]["timestamp"] == "2026-01-01T00:00:01Z"
 
 
-def test_without_the_variable_a_scan_keeps_the_clock_and_a_random_serial(tmp_path):
+def test_without_the_variable_a_scan_records_no_time_and_the_same_serial(tmp_path):
     # The suite removes an ambient value (conftest); the release job exports one.
     assert "SOURCE_DATE_EPOCH" not in os.environ
     first = _scan(DEMO, tmp_path / "first.json", epoch=None)
-    second = _scan(DEMO, tmp_path / "second.json", epoch=None)
-    serials = [doc["metadata"]["serial_number"] for doc in (first, second)]
-    assert serials[0] != serials[1]
-    assert {uuid.UUID(serial.removeprefix("urn:uuid:")).version for serial in serials} == {4}
-    assert serials[0] != _content_serial(first)
-    recorded = datetime.fromisoformat(first["metadata"]["timestamp"])
-    assert abs(datetime.now(UTC) - recorded) < timedelta(minutes=10)
+    _scan(DEMO, tmp_path / "second.json", epoch=None)
+    assert (tmp_path / "first.json").read_bytes() == (tmp_path / "second.json").read_bytes()
+    metadata = first["metadata"]
+    assert "timestamp" not in metadata and "timestamp" not in metadata["completeness"]
+    assert not [
+        claim
+        for component in first["components"]
+        for claim in component["claims"].values()
+        if "observed_at" in claim
+    ]
+    assert metadata["serial_number"] == _content_serial(first)
     pinned = _scan(DEMO, tmp_path / "pinned.json")
     assert inventory_content_digest(first) == inventory_content_digest(pinned)
+    assert pinned["metadata"]["serial_number"] == metadata["serial_number"]
 
 
 MALFORMED = [
@@ -602,34 +628,36 @@ def _embedded_native(export: dict[str, Any]) -> dict[str, Any]:
     return document
 
 
+@pytest.mark.parametrize("epoch", [EPOCH, None])
 @pytest.mark.parametrize("output_format", ["cyclonedx", "spdx"])
-def test_an_embedded_native_document_differs_from_the_file_only_in_list_order(
-    tmp_path, output_format
+def test_an_export_embeds_the_native_document_and_carries_its_serial(
+    tmp_path, output_format, epoch
 ):
-    """The documented limit: list order is content, and exports sort what they embed."""
-    native = _scan(DEMO, tmp_path / "bom.json")
+    """Components and dependencies are written sorted, so the embedded copy is the file."""
+    native = _scan(DEMO, tmp_path / "bom.json", epoch=epoch)
     export = tmp_path / f"bom.{output_format}"
-    result = _invoke("scan", str(DEMO), "-f", output_format, "-o", str(export))
+    result = _invoke("scan", str(DEMO), "-f", output_format, "-o", str(export), epoch=epoch)
     assert result.exit_code == 0, result.output
     exported = json.loads(export.read_text(encoding="utf-8"))
     embedded = _embedded_native(exported)
-    # So an export's serial number names the native file's content, not the embedded copy's.
+    assert embedded == native
     serial = native["metadata"]["serial_number"]
-    assert embedded["metadata"]["serial_number"] == serial == _content_serial(native)
+    assert serial == _content_serial(native)
     assert exported.get("serialNumber", serial) == serial
-    assert _content_serial(embedded) != serial
+    refs = [component["bom_ref"] for component in native["components"]]
+    assert refs == sorted(refs)
     page = " ".join((ROOT / "docs" / "reproducible-inventories.md").read_text("utf-8").split())
     assert "anyone who holds the native JSON file can recompute it from that file" in page
-    assert (
-        "an export's serial number names the content of the native file, not of the sorted "
-        "copy the export embeds" in page
-    )
-    assert inventory_content_digest(embedded) != inventory_content_digest(native)
-    native["components"].sort(key=lambda component: component["bom_ref"])
-    native["dependencies"].sort(
-        key=lambda edge: json.dumps(edge, sort_keys=True, separators=(",", ":"))
-    )
-    assert inventory_content_digest(embedded) == inventory_content_digest(native)
+
+
+def test_list_order_in_a_document_another_build_wrote_is_content():
+    """The documented limit: an unsorted file has another digest than its sorted rewrite."""
+    document = copy.deepcopy(CASES["native-1.1.0"]["document"])
+    original = inventory_content_digest(document)
+    document["components"].reverse()
+    assert inventory_content_digest(document) != original
+    page = " ".join((ROOT / "docs" / "reproducible-inventories.md").read_text("utf-8").split())
+    assert "written by another build" in page
 
 
 def test_a_malformed_epoch_stops_baseline_and_leaves_nothing_behind(tmp_path):
@@ -662,14 +690,39 @@ def test_pinned_imports_of_a_shadowscan_report_are_byte_identical(tmp_path, outp
         assert verified.exit_code == 0, verified.output
 
 
-def test_unpinned_imports_keep_the_clock_and_a_random_serial(tmp_path):
-    serials = []
-    for name in ("first.json", "second.json"):
+def test_unpinned_imports_record_no_time_and_are_byte_identical(tmp_path):
+    files = []
+    for name in ("first", "second"):
+        target = tmp_path / name / "bom.json"
+        target.parent.mkdir()
         args = ("import-shadowscan", str(SHADOWSCAN_REPORT), "--report-only")
-        result = _invoke(*args, "-o", str(tmp_path / name), epoch=None)
+        result = _invoke(*args, "-o", str(target), epoch=None)
         assert result.exit_code == 0, result.output
-        serials.append(json.loads((tmp_path / name).read_text())["metadata"]["serial_number"])
-    assert serials[0] != serials[1]
+        files.append(target.read_bytes())
+    assert files[0] == files[1]
+    document = json.loads(files[0])
+    assert "timestamp" not in document["metadata"]
+    assert document["metadata"]["serial_number"] == _content_serial(document)
+
+
+def test_imports_of_one_report_under_two_names_share_the_serial_and_content(tmp_path):
+    documents = []
+    for name in ("report.json", "renamed-report.json"):
+        report = tmp_path / name
+        shutil.copyfile(SHADOWSCAN_REPORT, report)
+        target = tmp_path / f"{name}.bom.json"
+        args = ("import-shadowscan", str(report), "--report-only", "-o", str(target))
+        result = _invoke(*args, epoch=None)
+        assert result.exit_code == 0, result.output
+        documents.append(json.loads(target.read_text(encoding="utf-8")))
+    first, second = documents
+    paths = [doc["metadata"]["completeness"]["source_report_path"] for doc in documents]
+    assert paths == ["report.json", "renamed-report.json"]
+    assert inventory_content_digest(first) == inventory_content_digest(second)
+    assert first["metadata"]["serial_number"] == second["metadata"]["serial_number"]
+    assert first["metadata"]["serial_number"] == _content_serial(first)
+    second["metadata"]["completeness"]["source_report_path"] = "report.json"
+    assert first == second
 
 
 def test_a_malformed_epoch_stops_import_shadowscan_before_it_writes(tmp_path):
@@ -753,6 +806,9 @@ def test_the_documented_example_is_reproducible(tmp_path):
     assert printed in page, stale
     unpinned = _scan(DEMO, tmp_path / "now.json", epoch=None)
     assert f'"content_digest": "{inventory_content_digest(unpinned)}",\n' in page, stale
+    serial = unpinned["metadata"]["serial_number"]
+    assert f'now.json:    "serial_number": "{serial}",\n' in page, stale
+    assert f'first.json:    "serial_number": "{serial}",\n' in page, stale
 
 
 def _undigestible_collector(monkeypatch: pytest.MonkeyPatch, component: AnyComponent) -> None:
@@ -784,17 +840,18 @@ UNDIGESTIBLE: dict[str, Callable[[], AnyComponent]] = {
 }
 
 
+@pytest.mark.parametrize("epoch", [EPOCH, None])
 @pytest.mark.parametrize("output_format", ["json", "cyclonedx"])
 @pytest.mark.parametrize("case", sorted(UNDIGESTIBLE))
-def test_an_inventory_without_a_content_digest_is_not_written_as_reproducible(
-    tmp_path, monkeypatch, output_format, case
+def test_an_inventory_without_a_content_digest_is_not_written(
+    tmp_path, monkeypatch, output_format, case, epoch
 ):
     _undigestible_collector(monkeypatch, UNDIGESTIBLE[case]())
     output = tmp_path / "bom.json"
     args = ("scan", str(tmp_path), "--scanner", "fixed", "--report-only", "-f", output_format)
-    result = _invoke(*args, "-o", str(output))
+    result = _invoke(*args, "-o", str(output), epoch=epoch)
     assert result.exit_code == 1
-    assert result.stderr.endswith(f"Error: {NO_REPRODUCIBLE_SERIAL}\n")
+    assert result.stderr.endswith(f"Error: {NO_CONTENT_SERIAL}\n")
     assert not output.exists()
     # Without output there is no serial number to derive, and the gate decides alone.
     checked = _invoke("scan", str(tmp_path), "--scanner", "fixed", "--report-only", "--check")

@@ -91,13 +91,11 @@ def test_the_export_matches_the_golden_file_byte_for_byte(
 
 
 def test_a_fresh_scan_of_the_fixture_project_exports_the_golden_bytes(runner, tmp_path):
-    # The collection time and serial number differ from the fixture's; the export does not.
+    # The fixture records a collection time and a fresh scan none; the export does not differ.
     inventory = _scan(runner, _project(tmp_path / "project"), tmp_path / "bom.json")
     fixture = json.loads((INVENTORY / "declared-agent.aibom.json").read_text())
-    assert (
-        json.loads(inventory.read_text())["metadata"]["timestamp"]
-        != (fixture["metadata"]["timestamp"])
-    )
+    assert "timestamp" not in json.loads(inventory.read_text())["metadata"]
+    assert "timestamp" in fixture["metadata"]
     for name in ("first.json", "second.json"):
         result = runner.invoke(main, _args(inventory, tmp_path / name))
         assert result.exit_code == 0, result.output

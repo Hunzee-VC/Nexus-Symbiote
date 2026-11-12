@@ -20,16 +20,15 @@ from typing import Any
 from urllib.parse import quote
 
 from nexus_symbiote import __version__
-from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote.core.aibom import AIBOM, prepare
+from nexus_symbiote.core.canonical import content_digest
 from nexus_symbiote.core.enums import RiskSeverity
 from nexus_symbiote.core.models import AnyComponent, CompletenessClaim
 from nexus_symbiote.generators._common import (
     OMITTED_IMPORTED_FINDINGS,
     PROJECTION_SCANNERS,
-    content_digest,
     coverage_aggregate,
     imported_discovery_component,
-    prepare,
 )
 from nexus_symbiote.generators._rules import GENERIC_HELP, RULES, rule_tags
 from nexus_symbiote.generators.base import Generator

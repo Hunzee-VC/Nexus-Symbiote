@@ -21,7 +21,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from nexus_symbiote.core.aibom import MAX_NATIVE_BYTES, NativeFormatError
-from nexus_symbiote.core.content_digest import inventory_content_digest
+from nexus_symbiote.core.content_digest import NESTED_TOO_DEEPLY, inventory_content_digest
 from nexus_symbiote.graph import INFERRED_AGENT_REF
 from nexus_symbiote.inventory_export import (
     LEGACY_IDENTITY,
@@ -547,6 +547,20 @@ def test_nesting_at_the_depth_limit_is_refused_never_raised(tmp_path):
         accepted, refused = (middle, refused) if refusal(middle) is None else (accepted, middle)
     message = "It is not strict UTF-8 JSON; duplicate keys and nonfinite numbers are refused."
     assert refusal(refused) == refusal(refused + 1) == message
+
+
+def test_a_digest_too_deep_for_the_stack_is_refused_as_the_parse_refuses_it(tmp_path, monkeypatch):
+    # Which of the parse and the digest reaches the stack limit first depends on the depth
+    # of the caller's stack, so the bisection above may never reach the digest's refusal.
+    def too_deep(document: Any) -> str:
+        raise ValueError(NESTED_TOO_DEEPLY)
+
+    monkeypatch.setattr("nexus_symbiote.inventory_export.inventory_content_digest", too_deep)
+    with pytest.raises(NativeFormatError) as refused:
+        read_native_inventory(_written(tmp_path, _document()))
+    assert str(refused.value) == (
+        "It is not strict UTF-8 JSON; duplicate keys and nonfinite numbers are refused."
+    )
 
 
 def test_export_time_is_linear_in_the_number_of_agents(tmp_path):

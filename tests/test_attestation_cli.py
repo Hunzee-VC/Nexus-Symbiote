@@ -219,8 +219,14 @@ def test_content_match_across_two_scans_of_the_same_tree(runner, setup, tmp_path
     )
     (project / "system_prompt.md").write_text("Answer from the documentation only.\n")
     first, second = setup["work"] / "first.json", setup["work"] / "second.json"
-    for output in (first, second):
-        assert invoke(runner, "scan", project, "-o", output, "--report-only").exit_code == 0
+    assert invoke(runner, "scan", project, "-o", first, "--report-only").exit_code == 0
+    # The second collection records its collection time; the first records none.
+    pinned = runner.invoke(
+        main,
+        ["scan", str(project), "-o", str(second), "--report-only"],
+        env={"SOURCE_DATE_EPOCH": "1767225600"},
+    )
+    assert pinned.exit_code == 0, pinned.output
     assert first.read_bytes() != second.read_bytes()
     out = setup["work"] / "first.json.att"
     assert attest(runner, first, out, private).exit_code == 0

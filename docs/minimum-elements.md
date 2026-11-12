@@ -103,9 +103,11 @@ The rules:
    `metadata.component`, which is the repository agent that `scan` assembles. Without
    exactly one, every system element assessable from the BOM is missing.
 5. **The inventory can only make a result stricter.** A value counts only when the
-   inventory records it: without the inventory's own timestamp, tool version or serial
-   number, an export substitutes the time of export, this build's version or a
-   serial number derived from the content, so those elements are missing. The name
+   inventory records it: without the inventory's own tool version or serial number, an
+   export substitutes this build's version or a serial number derived from the content,
+   so those elements are missing. Without the inventory's own timestamp, which a scan
+   records only when `SOURCE_DATE_EPOCH` is set, the export writes none, and the SBOM
+   timestamp is missing. The name
    `repository` that a scan gives an agent without an `agent.yaml` name is a
    placeholder. A label that the ShadowScan importer derives from a digest is not a
    model name. Infrastructure software counts the npm and PyPI packages and the
@@ -142,7 +144,7 @@ contribute, the weakest basis is reported, in the order `imported`, `declared`,
 
 **The ratio.** The report prints one ratio: present elements over the elements that
 are applicable and assessable from the BOM, that is present, missing and
-explicit-unknown ones, always with its denominator ("12 of 39 present (30.7%)").
+explicit-unknown ones, always with its denominator ("11 of 39 present (28.2%)").
 Elements that need producer input and those not applicable are counted separately and
 left out. An explicit unknown is in the denominator and not in the numerator, so
 writing `unknown` never raises the ratio. The percentage is rounded down to a tenth.
@@ -250,13 +252,15 @@ G7 AI SBOM minimum-element coverage, edition g7-ai-sbom-2026-05-12
 Statement: Coverage is not compliance. The G7 minimum elements are non-binding guidance. This report says which elements the CycloneDX 1.7 export of the inventory carries in standard fields; a value only a nexus-symbiote: property carries does not count, and a present element is a recorded value, not a verified one.
 Evaluated: standard fields of the CycloneDX 1.7 export this build writes for the inventory (projection cyclonedx-1.7/2)
 Subjects: system subject yes; models 1; datasets 0; retrieval sources 1
-Overall: 12 of 39 present (30.7%) among the elements assessable from the BOM; missing 27, explicit unknown 0, needs producer input 11, not applicable 0
-Metadata: 7 of 9 present (77.7%); missing 2, explicit unknown 0, needs producer input 1, not applicable 0
-  present (generated): SBOM version; SBOM data format name; SBOM data format version; SBOM tool name; SBOM tool version; SBOM generation context; SBOM timestamp
+Overall: 11 of 39 present (28.2%) among the elements assessable from the BOM; missing 28, explicit unknown 0, needs producer input 11, not applicable 0
+Metadata: 6 of 9 present (66.6%); missing 3, explicit unknown 0, needs producer input 1, not applicable 0
+  present (generated): SBOM version; SBOM data format name; SBOM data format version; SBOM tool name; SBOM tool version; SBOM generation context
   missing: SBOM author
     how to supply it: Add the responsible person or organisation to metadata.authors in the inventory; no command records an author, and the tool is not one.
   needs producer input: SBOM author signature
     how to supply it: Sign the exact exported file in the release pipeline; this build embeds no signature, and a detached one is outside the BOM.
+  missing: SBOM timestamp
+    how to supply it: Collect the inventory with SOURCE_DATE_EPOCH set to the collection time, such as the commit time: scan, baseline and import-shadowscan then record it in metadata.timestamp, and without it an inventory records no timestamp.
   missing: SBOM dependency relationship (0 of 10 relationships exported)
     only in the inventory's extension: /dependencies/0, /dependencies/1, /dependencies/2, /dependencies/3, /dependencies/4, /dependencies/5, /dependencies/6, /dependencies/7, /dependencies/8, /dependencies/9
     how to supply it: Collect tools from MCP server source: only unconditional depends-on and provides-tool relationships are exported, and a scan's repository associations are conditional.
@@ -273,7 +277,7 @@ System Level Properties: 1 of 7 present (14.2%); missing 6, explicit unknown 0, 
     why: CycloneDX 1.7 has no dedicated standard field for this element.
     how to supply it: Not available in this build: CycloneDX 1.7 has no field for when the system was last updated, and the BOM timestamp is not it.
   missing: System data flow
-    only in the inventory's extension: /components/2/endpoint_url, /components/6/source_uris, /components/8/endpoint_url
+    only in the inventory's extension: /components/0/endpoint_url, /components/4/endpoint_url, /components/9/source_uris
     how to supply it: Not available in this build: it writes no services, so declared MCP, A2A, model and retrieval endpoints stay in the extension.
   needs producer input: System data usage
     how to supply it: Producer documentation: how the system processes and consumes its data, such as data used to improve models and API call logs.
@@ -318,7 +322,7 @@ Datasets Properties: 0 of 7 present (0.0%); missing 7, explicit unknown 0, needs
   note: Retrieval sources (rag-source) are scored as datasets the system uses; this says nothing about the data its models were trained on.
   missing: Dataset name (0 of 1 have it)
     why: No standard field identifies the component as a model (type machine-learning-model) or a dataset (a data[] entry of type dataset, or a dataset tag).
-    only in the inventory's extension: /components/6/name
+    only in the inventory's extension: /components/9/name
     without it: rag:product-notes
     how to supply it: Not available in this build: it writes datasets and retrieval sources as generic data components without a data[] entry of type dataset.
   missing: Dataset description (0 of 1 have it)
@@ -331,7 +335,7 @@ Datasets Properties: 0 of 7 present (0.0%); missing 7, explicit unknown 0, needs
     how to supply it: Not available in this build: it writes no data[].contents describing a dataset's content and format.
   missing: Dataset identifier (0 of 1 have it)
     why: No standard field identifies the component as a model (type machine-learning-model) or a dataset (a data[] entry of type dataset, or a dataset tag).
-    only in the inventory's extension: /components/6/source_uris
+    only in the inventory's extension: /components/9/source_uris
     without it: rag:product-notes
     how to supply it: Not available in this build: source URIs stay in the extension, and it writes no dataset identifier.
   missing: Dataset hash (0 of 1 have it)
@@ -359,7 +363,7 @@ Infrastructure: 1 of 1 present (100.0%); missing 0, explicit unknown 0, needs pr
 Security Properties: 0 of 3 present (0.0%); missing 3, explicit unknown 0, needs producer input 1, not applicable 0
   missing: Security controls
     why: CycloneDX 1.7 has no dedicated standard field for this element.
-    only in the inventory's extension: /components/8/authentication_required
+    only in the inventory's extension: /components/0/authentication_required
     how to supply it: Not available in this build: CycloneDX 1.7 has no dedicated field; declared guardrail, authentication and encryption settings stay in the extension and do not show that a control works.
   needs producer input: Security compliance
     how to supply it: Producer documentation: the standards, certifications or frameworks the system complies with.
@@ -374,8 +378,11 @@ Key Performance Indicators: no element is assessable from the BOM; missing 0, ex
     how to supply it: Runtime measurements such as uptime, latency and throughput, which a repository does not contain.
 ```
 
-Twelve of the 39 assessable elements are present. The demo declares no `agent.yaml`,
-so the system name is the placeholder and no producer or version is declared; its ten
+Eleven of the 39 assessable elements are present. The scan ran without
+`SOURCE_DATE_EPOCH`, so the inventory records no timestamp and the SBOM timestamp is
+missing; with the variable set, it is present and twelve are. The demo declares no
+`agent.yaml`, so the system name is the placeholder and no producer or version is
+declared; its ten
 relationships are conditional repository associations, so the export carries none of
 them; its one model is a local weight file, so its name and SHA-256 digest are present
 and nothing else about it is; its retrieval source is not marked as a dataset; and its
@@ -384,8 +391,9 @@ registry entry, a container image, is the one infrastructure component. With
 report is followed by this on standard error, and the command exits 1:
 
 ```text
-Coverage gate failed: 12 of 39 present (30.7%), below the required 50%
+Coverage gate failed: 11 of 39 present (28.2%), below the required 50%
   missing: SBOM author (g7ai-2026/metadata/sbom-author)
+  missing: SBOM timestamp (g7ai-2026/metadata/sbom-timestamp)
   missing: SBOM dependency relationship (g7ai-2026/metadata/sbom-dependency-relationship)
 ```
 

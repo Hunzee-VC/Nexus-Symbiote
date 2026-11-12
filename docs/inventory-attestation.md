@@ -25,7 +25,7 @@ A verified attestation establishes three facts:
 - **These bytes.** With `--match bytes`, the default, the file has the SHA-256 that
   the attestation records. With `--match content`, the file is a native inventory
   whose [content digest](#content-digest) equals the recorded one: the same content,
-  collected at another time.
+  collected at another time or recording another collection time.
 - **This purpose.** The signers chose `generated` ("I produced this file", such as a
   CI job signing what it built) or `reviewed` ("I reviewed this file as a
   baseline"). The verifier names the purpose it expects, and an attestation made for
@@ -94,11 +94,12 @@ nexus-symbiote attest reviewed.json --key reviewer.pem --purpose reviewed --out 
 ```
 
 `scan` reports its progress on standard error. `runtime keygen` and `attest` each
-print one JSON line; key IDs, digests and times differ on every run:
+print one JSON line; key IDs and times differ on every run, and the digests are those
+of this tree's scan of the demo:
 
 ```text
 {"key_id": "04dd7d9aae8c50a5198c1d0afb768051addeda362dfcdf2d795fd36258205f39", "encrypted": false}
-{"out": "reviewed.json.att", "subject_sha256": "76797565fd5ade79405d4bde989b8460657c8be99e1c7703cb7a8b542df781bf", "subject_format": "nexus-symbiote-aibom", "content_digest": "sha256:70565ff758239dcaacd4c27eea8c10a3756ee135b35bccb0306ebeaa6a5f86a0", "purpose": "reviewed", "signers": ["04dd7d9aae8c50a5198c1d0afb768051addeda362dfcdf2d795fd36258205f39"], "signed": true}
+{"out": "reviewed.json.att", "subject_sha256": "75943d9e0135c050b60ad4f483a1c4a8b911116645369bed36872aec0c32ea99", "subject_format": "nexus-symbiote-aibom", "content_digest": "sha256:c91bf0341dad84dc92fd855b4d5583821de5c246a67a5133f6bb0fe8ea20d985", "purpose": "reviewed", "signers": ["04dd7d9aae8c50a5198c1d0afb768051addeda362dfcdf2d795fd36258205f39"], "signed": true}
 ```
 
 Verify it with the public key:
@@ -110,10 +111,10 @@ nexus-symbiote verify-attestation reviewed.json reviewed.json.att --trusted-key 
 ```text
 Attestation verified: purpose reviewed, 1 trusted key. It does not establish that the file is accurate, complete or safe.
 Signer key ID: 04dd7d9aae8c50a5198c1d0afb768051addeda362dfcdf2d795fd36258205f39
-Subject SHA-256: 76797565fd5ade79405d4bde989b8460657c8be99e1c7703cb7a8b542df781bf
+Subject SHA-256: 75943d9e0135c050b60ad4f483a1c4a8b911116645369bed36872aec0c32ea99
 Match: bytes
 Subject format: nexus-symbiote-aibom 1.1.0
-Content digest: sha256:70565ff758239dcaacd4c27eea8c10a3756ee135b35bccb0306ebeaa6a5f86a0 (nexus-symbiote/inventory-content/v1)
+Content digest: sha256:c91bf0341dad84dc92fd855b4d5583821de5c246a67a5133f6bb0fe8ea20d985 (nexus-symbiote/inventory-content/v1)
 Signed at (signer's clock): 2026-11-12T11:09:57Z
 ```
 
@@ -129,22 +130,25 @@ nexus-symbiote verify-attestation tampered.json reviewed.json.att --trusted-key 
 Error: attestation verification failed: file does not match the attested subject (subject-mismatch)
 ```
 
-A new collection of the unchanged project records a new serial number and new times,
-so its bytes differ and `--match bytes` fails the same way. Its content is the
-reviewed content, which `--match content` checks:
+A new collection of the unchanged project with the same release and options writes the
+same bytes, so `--match bytes` verifies it as well. A collection that records when it
+was made, such as one taken with `SOURCE_DATE_EPOCH` set (see
+[reproducible inventories](reproducible-inventories.md)), has other bytes, and
+`--match bytes` fails on it as on the tampered copy. Its content is the reviewed
+content, which `--match content` checks:
 
 ```bash
-nexus-symbiote scan "$demo" -o candidate.json
+SOURCE_DATE_EPOCH=1767225600 nexus-symbiote scan "$demo" -o candidate.json
 nexus-symbiote verify-attestation candidate.json reviewed.json.att --trusted-key reviewer.pub --purpose reviewed --match content
 ```
 
 ```text
 Attestation verified: purpose reviewed, 1 trusted key. It does not establish that the file is accurate, complete or safe.
 Signer key ID: 04dd7d9aae8c50a5198c1d0afb768051addeda362dfcdf2d795fd36258205f39
-Subject SHA-256: fcfb0c98418c6a10112c1e2416e80494bb9fbd9a761b28f9f8b6a509001d9f15
-Match: content; the attested file's SHA-256 is 76797565fd5ade79405d4bde989b8460657c8be99e1c7703cb7a8b542df781bf
+Subject SHA-256: 6b5ebdeb0bffdf610d7c1dafd31338dc5abb40ef84882649d5cf42aefe8dc899
+Match: content; the attested file's SHA-256 is 75943d9e0135c050b60ad4f483a1c4a8b911116645369bed36872aec0c32ea99
 Subject format: nexus-symbiote-aibom 1.1.0
-Content digest: sha256:70565ff758239dcaacd4c27eea8c10a3756ee135b35bccb0306ebeaa6a5f86a0 (nexus-symbiote/inventory-content/v1)
+Content digest: sha256:c91bf0341dad84dc92fd855b4d5583821de5c246a67a5133f6bb0fe8ea20d985 (nexus-symbiote/inventory-content/v1)
 Signed at (signer's clock): 2026-11-12T11:09:57Z
 ```
 
@@ -201,8 +205,8 @@ nexus-symbiote verify-attestation "$RUNNER_TEMP/agentbom.json" "$RUNNER_TEMP/rev
   --trusted-key "$RUNNER_TEMP/reviewer.pub" --purpose reviewed --match content
 ```
 
-The content digest covers everything but the collection's serial number and times,
-including the tool version and the policy recorded in the metadata, so take the
+The content digest covers everything but the collection's serial number and times
+(and, for an import, where the report was read from), including the tool version and the policy recorded in the metadata, so take the
 reviewed and the new collection with the same release and the same options.
 
 ## Trusted keys
@@ -291,9 +295,9 @@ serialization (no duplicate keys, `NaN` or `Infinity`) whose predicate is in thi
 
 The content digest is the SHA-256 of the RFC 8785 canonical JSON of the parsed
 inventory without the fields that record the collection event:
-`metadata.serial_number`, `metadata.timestamp`, `metadata.completeness.timestamp` and
-the `observed_at` of each component claim, each left out only when it has the form the
-native format writes. Two collections of the same content therefore have the same
+`metadata.serial_number`, `metadata.timestamp`, `metadata.completeness.timestamp`,
+`metadata.completeness.source_report_path` and the `observed_at` of each component
+claim, each left out only when it has the form the native format writes. Two collections of the same content therefore have the same
 content digest. `attest` decides `subject_format` from the bytes it signs: a strict
 JSON object of at most 16 MiB, with arrays and objects nested at most 256 levels deep,
 that has `metadata` and `components` and validates as a native inventory is

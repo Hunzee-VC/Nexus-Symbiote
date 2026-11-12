@@ -13,7 +13,8 @@ from dataclasses import dataclass
 from datetime import UTC
 from typing import Any
 
-from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
+from nexus_symbiote.core.aibom import AIBOM, DependencyEdge, native_document, prepare
+from nexus_symbiote.core.canonical import NAMESPACE, content_digest, json_text
 from nexus_symbiote.core.enums import ComponentType
 from nexus_symbiote.core.models import (
     AgentComponent,
@@ -29,16 +30,11 @@ from nexus_symbiote.core.models import (
     ToolComponent,
 )
 from nexus_symbiote.generators._common import (
-    NAMESPACE,
     claim_properties,
     component_property,
-    content_digest,
     coverage_aggregate,
-    json_text,
     native_components,
-    native_document,
     normalize_hash,
-    prepare,
 )
 from nexus_symbiote.generators.package_identifiers import (
     package_identifier,

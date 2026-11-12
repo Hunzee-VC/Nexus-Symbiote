@@ -1,10 +1,12 @@
 """Run-independent digest of a native inventory's content.
 
 Two collections of the same project differ only in the fields that record the
-collection event: the serial number and the collection time. The content digest
-leaves exactly those fields out, so equal content gives an equal digest whenever
-and wherever it was collected. It identifies content for comparison; it is neither
-authentication of a producer nor a substitute for the digest of a file's bytes.
+collection event: the serial number, the collection time and the location an
+imported report was read from. The content digest leaves exactly those fields out,
+so equal content gives an equal digest whenever and wherever it was collected; it
+is also what a missing serial number is derived from (``core.aibom.prepare``). It
+identifies content for comparison; it is neither authentication of a producer nor
+a substitute for the digest of a file's bytes.
 """
 
 from __future__ import annotations
@@ -62,8 +64,9 @@ def _component_content(component: object) -> object:
 def inventory_content(document: Mapping[str, Any]) -> dict[str, Any]:
     """A copy of a parsed native document without its collection-event fields.
 
-    Left out: ``metadata.serial_number`` when null or a URN UUID, and, when null or an
-    RFC 3339 timestamp, ``metadata.timestamp``, ``metadata.completeness.timestamp``
+    Left out: ``metadata.serial_number`` when null or a URN UUID;
+    ``metadata.completeness.source_report_path`` when a string; and, when null
+    or an RFC 3339 timestamp, ``metadata.timestamp``, ``metadata.completeness.timestamp``
     and the ``observed_at`` of each component claim. The argument is not changed; the
     values the copy keeps are shared with it, not copied.
     """
@@ -74,7 +77,11 @@ def inventory_content(document: Mapping[str, Any]) -> dict[str, Any]:
     reduced = _without(_without(metadata, "serial_number", _SERIAL_NUMBER), "timestamp")
     completeness = reduced.get("completeness")
     if isinstance(completeness, Mapping):
-        reduced["completeness"] = _without(completeness, "timestamp")
+        reduced["completeness"] = {
+            key: value
+            for key, value in _without(completeness, "timestamp").items()
+            if key != "source_report_path" or not isinstance(value, str)
+        }
     return {
         **document,
         "metadata": reduced,
