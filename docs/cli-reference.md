@@ -62,6 +62,7 @@ change them. See [collection limits](collection-limits.md).
 | [`crosswalk`](#crosswalk) | offline | Map findings to OWASP, MITRE ATLAS, NIST AI RMF, EU AI Act, ISO/IEC 42001 and CWE entries |
 | [`verify-artifact`](#verify-artifact) | offline | Check a file's SHA-256, and optionally its Sigstore bundle |
 | [`verify-discovery`](#verify-discovery) | offline | Check that a ShadowScan report's bytes match the digest a BOM records; with `--projection` or `--bundle`, also compare the BOM's imported components with the report |
+| [`export-inventory`](#export-inventory) | offline | Write the reviewed repository agent as an approved inventory that ShadowScan's `--inventory` accepts |
 | [`init`](#init) | offline | Create a `.nexus-symbiote.yaml` policy file |
 | [`runtime keygen`](#runtime-keygen) | offline | Create an Ed25519 key pair for runtime contracts |
 | [`runtime sign`](#runtime-sign) | offline | Sign a runtime contract |
@@ -137,6 +138,7 @@ What exit status 1 means for each gate:
 | `discover-mcp` | The observation is incomplete; with `--record`, nothing is written. |
 | `advisories` | An advisory was found (unless `--no-fail-on-advisory`), or not every package in scope was looked up (`coverage` is `partial` or `none`); with `--dry-run`, only when the report lists an error. |
 | `trace-diff` | With the default `--fail-on undeclared`: the traces report a tool, model, agent or MCP endpoint that the inventory does not declare, or one whose identifier could not be read, or a span whose operation name, MCP method or MCP transport could not be read, or no span carries a GenAI or MCP attribute of its own. An inventory or trace file that cannot be read always exits 1. |
+| `export-inventory` | The inventory holds no repository agent or more than one, its agent's identity is not declared and `--include-unnamed` is absent, or its name or owner cannot be written so that ShadowScan reads it back exactly; nothing is written. |
 
 `--report-only` on `scan` and `import-shadowscan` reports collection failures and
 findings without turning them into exit status 1, as a project policy with
@@ -445,6 +447,29 @@ nexus-symbiote discover-mcp [OPTIONS] ENDPOINT
 | `--client-version` `TEXT` | `clientInfo` version sent in `initialize` (default: the tool version). |
 | `--user-agent` `TEXT` | `User-Agent` header to send; none is sent by default. |
 | `--raw-descriptors` `PATH` | Also write the unredacted server info, capabilities, instructions, tool descriptors, prompts and resource templates to this new file (mode 0600) for review; only the bearer token and session ID are masked. |
+
+### `export-inventory`
+
+Offline: write the reviewed repository agent as a ShadowScan approved inventory.
+
+```text
+nexus-symbiote export-inventory [OPTIONS] INVENTORY
+```
+
+| Option | Description |
+|---|---|
+| `--format` `shadowscan-simple` | ShadowScan's simple inventory list as JSON (required; the only format). |
+| `-o`, `--output` `PATH` | Write the approved inventory to this file, which must end in `.json` (required). |
+| `--resource-prefix` `PREFIX` | The exact resource ShadowScan reports for the repository's root project (required): `github:OWNER/REPO`, `gitlab:NAMESPACE/PROJECT`, the label of a `code.filesystem` connector with a single `path` (`LABEL/root-id-ID` with labelled `paths`), or the absolute scan root when it has no label; see [Choose the resource prefix](shadowscan-inventory-export.md#choose-the-resource-prefix). |
+| `--include-unnamed` | Also export a repository agent whose `agent.yaml` declares no `id`, under an id derived from the inventory content digest. |
+
+The file holds one entry, the repository agent, bound to `PREFIX` as a literal
+pattern and limited to ShadowScan's `project` observation on the `code` surface;
+it carries no autonomy level and binds no component. Standard error names the
+inventory's file SHA-256 and content digest. The command exits 1 when the
+inventory is invalid, holds no repository agent or more than one, or its agent
+has no declared identity and `--include-unnamed` is absent; see
+[Approve agents for ShadowScan reconciliation](shadowscan-inventory-export.md).
 
 ### `graph`
 

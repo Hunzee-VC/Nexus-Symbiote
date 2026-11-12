@@ -51,6 +51,9 @@ MODULE_FLOORS: dict[str, tuple[int, int | None]] = {
     "nexus_symbiote/otlp.py": (98, 98),
     "nexus_symbiote/trace_evidence.py": (98, 98),
     "nexus_symbiote/trace_cli.py": (98, 98),
+    # The ShadowScan approved-inventory export; both measured at 100% when added.
+    "nexus_symbiote/inventory_export.py": (98, 98),
+    "nexus_symbiote/inventory_export_cli.py": (98, 98),
 }
 COUNTS = (
     ("statement", "covered_lines", "num_statements"),

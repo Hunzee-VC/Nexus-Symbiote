@@ -357,6 +357,17 @@ def test_every_static_command_runs_under_the_offline_guard(tmp_path):
         json.dumps({"resourceSpans": [{"scopeSpans": [{"spans": [{"attributes": [chat]}]}]}]})
     )
     run("trace-diff", str(native), str(trace), "--sarif", str(tmp_path / "trace.sarif"))
+    run(
+        "export-inventory",
+        str(native),
+        "--format",
+        "shadowscan-simple",
+        "--resource-prefix",
+        "github:acme/project",
+        "--include-unnamed",
+        "-o",
+        str(tmp_path / "approved.json"),
+    )
     run("runtime", "keygen", "--private-key", str(private), "--public-key", str(public))
     signed = tmp_path / "signed.json"
     run(

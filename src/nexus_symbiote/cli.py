@@ -25,6 +25,7 @@ from nexus_symbiote.digest_cli import (
 )
 from nexus_symbiote.graph import validate_graph
 from nexus_symbiote.graph_cli import register_graph_commands
+from nexus_symbiote.inventory_export_cli import register_inventory_export_commands
 from nexus_symbiote.live_cli import register_live_commands
 from nexus_symbiote.policy import Policy
 from nexus_symbiote.reporting import (
@@ -1481,6 +1482,7 @@ register_attestation_commands(main)
 register_graph_commands(main)
 register_crosswalk_commands(main)
 register_trace_commands(main)
+register_inventory_export_commands(main)
 
 if __name__ == "__main__":
     main()
