@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -12,7 +14,6 @@ from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.collection import is_imported
 from nexus_symbiote.core.coverage import CoverageStatus, assess_coverage
 from nexus_symbiote.core.enums import RiskSeverity, SerializationSafety
-from nexus_symbiote.core.hashing import hash_canonical
 from nexus_symbiote.core.models import (
     AgentComponent,
     ComponentBase,
@@ -94,16 +95,21 @@ def finding_fingerprint(
     detail: str,
     content: str | None = None,
 ) -> str:
-    """The digest a suppression names, so it covers the finding as it was reviewed."""
-    return hash_canonical(
-        {
-            "component_ref": component_ref,
-            "category": category,
-            "severity": severity.value,
-            "detail": detail,
-            "content": content,
-        }
-    )
+    """The digest a suppression names, so it covers the finding as it was reviewed.
+
+    The fields are hashed as ASCII JSON with sorted keys rather than RFC 8785 text:
+    a detail can quote a lone surrogate from the checkout, which RFC 8785 cannot
+    encode, and ASCII escaping keeps it distinct from any other string.
+    """
+    document = {
+        "component_ref": component_ref,
+        "category": category,
+        "severity": severity.value,
+        "detail": detail,
+        "content": content,
+    }
+    text = json.dumps(document, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(text.encode("ascii")).hexdigest()
 
 
 @dataclass

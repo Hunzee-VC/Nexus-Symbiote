@@ -244,3 +244,17 @@ def test_cli_scan_cyclonedx_twice_byte_identical(tmp_path: Path) -> None:
 def test_cli_scan_spdx_twice_identical_except_created(tmp_path: Path) -> None:
     first, second = _scan_twice(tmp_path, "spdx")
     assert _without_created(json.loads(first)) == _without_created(json.loads(second))
+
+
+def test_a_lone_surrogate_from_the_checkout_does_not_block_the_export(tmp_path):
+    from click.testing import CliRunner
+
+    from nexus_symbiote.cli import main
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "package.json").write_bytes(b'{"dependencies":{"openai":"\\ud800"}}')
+    out = tmp_path / "bom.json"
+    result = CliRunner().invoke(main, ["scan", str(project), "--no-project-policy", "-o", str(out)])
+    assert "internal error" not in result.output and "cannot be exported" not in result.output
+    assert json.loads(out.read_text())["metadata"]["serial_number"].startswith("urn:uuid:")

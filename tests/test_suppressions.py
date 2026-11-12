@@ -383,3 +383,12 @@ def test_a_fingerprint_binds_severity_and_detail_and_unmatched_entries_stay_unus
     assert any(f.component_ref == fixture for f in report.findings)
     assert [item.suppression for item in report.suppressions_stale] == [stale]
     assert report.suppressions_unused == [elsewhere]
+
+
+def test_a_fingerprint_handles_a_detail_quoting_a_lone_surrogate():
+    from nexus_symbiote.core.enums import RiskSeverity
+    from nexus_symbiote.validators.risk import finding_fingerprint
+
+    surrogate = finding_fingerprint("ref", "cat", RiskSeverity.HIGH, "version \ud800")
+    escaped = finding_fingerprint("ref", "cat", RiskSeverity.HIGH, "version \\ud800")
+    assert surrogate.startswith("sha256:") and surrogate != escaped
