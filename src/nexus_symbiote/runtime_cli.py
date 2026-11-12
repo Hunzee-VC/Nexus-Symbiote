@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -16,6 +17,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 from pydantic import ValidationError
 
+from nexus_symbiote.attestation import MAX_INVENTORY_BYTES, sign_inventory, verify_inventory
 from nexus_symbiote.core.hashing import open_regular_file
 from nexus_symbiote.runtime import (
     CONTRACTS,
@@ -551,5 +553,100 @@ def register(
         raise click.ClickException(_safe_error(exc, "registration")) from None
 
 
+@click.command("attest")
+@click.argument("inventory_path", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "--key",
+    "keys",
+    multiple=True,
+    required=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Ed25519 private key PEM with mode 0600; repeat for multiple signers.",
+)
+@click.option(
+    "--out",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="Attestation file to create; must not exist.",
+)
+@click.option(
+    "--passphrase-file",
+    type=click.Path(path_type=Path),
+    help="Passphrase for encrypted private keys, on the first line of this file, "
+    "which only its owner may read.",
+)
+def attest(
+    inventory_path: Path, keys: tuple[Path, ...], out: Path, passphrase_file: Path | None
+) -> None:
+    """Sign the exact bytes of an inventory, baseline or export; the content is not checked.
+
+    Writes a detached DSSE envelope around an in-toto statement. Keys come from
+    `runtime keygen`; use a key pair kept for this purpose.
+    """
+    try:
+        content = _read(inventory_path, MAX_INVENTORY_BYTES)
+        passphrase = _passphrase(passphrase_file)
+        loaded = tuple(_load_private(path, passphrase) for path in keys)
+        envelope = sign_inventory(content, loaded, name=inventory_path.name)
+        _write_new(
+            out,
+            (json.dumps(envelope.model_dump(mode="json", by_alias=True), indent=2) + "\n").encode(),
+        )
+        result = {
+            "out": str(out),
+            "sha256": hashlib.sha256(content).hexdigest(),
+            "signers": sorted({key_id(private.public_key()) for private in loaded}),
+            "signed": True,
+        }
+        click.echo(json_text(json.dumps(result)))
+    except _HANDLED as exc:
+        raise click.ClickException(_safe_error(exc, "attestation")) from None
+
+
+@click.command("verify-attestation")
+@click.argument("inventory_path", type=click.Path(exists=True, path_type=Path))
+@click.argument("attestation_path", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "--public-key",
+    "keys",
+    multiple=True,
+    required=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Trusted Ed25519 public key PEM; repeat to build the trusted key ring.",
+)
+@click.option(
+    "--threshold",
+    type=click.IntRange(min=1, max=32),
+    default=1,
+    help="Minimum number of distinct trusted signatures (default: 1).",
+)
+def verify_attestation(
+    inventory_path: Path, attestation_path: Path, keys: tuple[Path, ...], threshold: int
+) -> None:
+    """Check that trusted keys signed exactly these bytes; exits 1 otherwise.
+
+    A pass shows who signed the file, not that the inventory is complete or correct.
+    Keep the public keys outside the checkout the inventory describes.
+    """
+    try:
+        ring = _ring(keys)
+        content = _read(inventory_path, MAX_INVENTORY_BYTES)
+        envelope = Envelope.model_validate(_json_object(attestation_path))
+        attestation, accepted = verify_inventory(content, envelope, ring, threshold=threshold)
+        result = {
+            "attestation_verified": True,
+            "sha256": hashlib.sha256(content).hexdigest(),
+            "accepted_signers": sorted(accepted),
+            "signed_at": attestation.signed_at.isoformat(),
+            "generator_version": attestation.generator_version,
+            "content_verified": False,
+        }
+        click.echo(json_text(json.dumps(result, indent=2)))
+    except _HANDLED as exc:
+        raise click.ClickException(_safe_error(exc, "attestation verification")) from None
+
+
 def register_runtime_commands(main: click.Group) -> None:
     main.add_command(runtime_group)
+    main.add_command(attest)
+    main.add_command(verify_attestation)

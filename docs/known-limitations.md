@@ -449,9 +449,12 @@ A way around a limit that its entry does not describe is worth a
   printed as a warning. Pass `--no-project-policy` in CI; there is no
   operator-owned policy file. See
   [what `policy_weakened` reports](policy-reference.md#what-policy_weakened-reports).
-- **A baseline is unsigned.** `diff` cannot tell a reviewed baseline from one the
-  change under review wrote. Read it from the protected branch; see
-  [the trust anchor is the baseline](drift-gate.md#the-trust-anchor-is-the-baseline).
+- **No gate checks a baseline's signature.** `diff` cannot tell a reviewed baseline
+  from one the change under review wrote. Read it from the protected branch, or sign
+  it with `attest` and run `verify-attestation` as a step of its own before `diff`;
+  see [the trust anchor is the baseline](drift-gate.md#the-trust-anchor-is-the-baseline).
+  An attestation shows who signed the file's bytes, not that its content is correct,
+  it has no expiry or revocation, and it is not a Sigstore bundle.
 - **Inventories from 0.1.0 need a new baseline.** They record absolute paths, a
   path-derived agent reference, native format 1.0.0 and older MCP bindings. On an
   unchanged project, `diff --fail-on-alert` against a 0.1.0 baseline fails with high

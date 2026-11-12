@@ -66,6 +66,8 @@ change them. See [collection limits](collection-limits.md).
 | [`runtime digest`](#runtime-digest) | offline | Print the digest a runtime contract, approval or revocation list binds |
 | [`runtime key-id`](#runtime-key-id) | offline | Print the key ID of an Ed25519 public key |
 | [`runtime register`](#runtime-register) | offline | Make a newly issued runtime snapshot current in a gateway state store |
+| [`attest`](#attest) | offline | Sign the exact bytes of an inventory, baseline or export with Ed25519 keys |
+| [`verify-attestation`](#verify-attestation) | offline | Check that trusted keys signed exactly the bytes of an inventory file |
 | [`discover-mcp`](#discover-mcp) | **live** | List the tools an HTTPS MCP server serves, without calling them |
 | [`advisories`](#advisories) | **live** | Query OSV for advisories affecting exact PyPI and npm package versions |
 | [`verify-live`](#verify-live) | **live** | Compare an AgentBOM with the tools that operator-pinned stdio servers serve |
@@ -271,6 +273,29 @@ nothing up, so `coverage` is `none`, and it exits 1 only when a package in scope
 no exact identity or more than 500 packages would be sent. A report keeps at most
 10,000 advisories per package and 20,000 in total; beyond that, lookups end with an
 error and `coverage` is `partial`.
+
+### `attest`
+
+Sign the exact bytes of an inventory, baseline or export; the content is not checked.
+
+```text
+nexus-symbiote attest [OPTIONS] INVENTORY_PATH
+```
+
+| Option | Description |
+|---|---|
+| `--key` `PATH` | Ed25519 private key PEM with mode 0600; repeat for multiple signers. (required, repeatable) |
+| `--out` `PATH` | Attestation file to create; must not exist. (required) |
+| `--passphrase-file` `PATH` | Passphrase for encrypted private keys, on the first line of this file, which only its owner may read. |
+
+The attestation is a detached DSSE envelope around an in-toto Statement v1 whose
+subject is the SHA-256 of the file's bytes. Its predicate type, held in
+`nexus_symbiote.attestation.PREDICATE_TYPE`, differs from every runtime contract's. Create keys
+with [`runtime keygen`](#runtime-keygen), and keep a key pair for this purpose: do not
+reuse a runtime contract key. The file may be any inventory up to 16 MiB: native JSON,
+a baseline, or a CycloneDX, SPDX, SARIF or VEX export. Any later change to the file,
+including whitespace, invalidates the attestation. The envelope is not a Sigstore
+bundle, so `gh attestation verify` does not read it.
 
 ### `baseline`
 
@@ -601,6 +626,28 @@ nexus-symbiote verify-artifact [OPTIONS] ARTIFACT_PATH
 
 A malformed `--sha256`, or a `--bundle`, `--signer-identity` and `--issuer` set that
 is incomplete, is a usage error (exit 2).
+
+### `verify-attestation`
+
+Check that trusted keys signed exactly these bytes; exits 1 otherwise.
+
+```text
+nexus-symbiote verify-attestation [OPTIONS] INVENTORY_PATH ATTESTATION_PATH
+```
+
+| Option | Description |
+|---|---|
+| `--public-key` `PATH` | Trusted Ed25519 public key PEM; repeat to build the trusted key ring. (required, repeatable) |
+| `--threshold` `INTEGER RANGE` | Minimum number of distinct trusted signatures (default: 1). |
+
+A pass shows who signed the file. It does not show that the inventory is complete or
+correct, which is why the result carries `"content_verified": false`; run `validate`
+and `risk` for that. Signatures are checked before the statement is read, the subject
+is matched by digest and never by name, and a runtime contract signed by the same key
+is refused as `statement-purpose-mismatch`. Take the public keys from a place the
+change under review cannot write to, never from the checkout the inventory describes.
+The reason codes are those of the
+[runtime contract reference](runtime-contract-reference.md#reason-codes).
 
 ### `verify-discovery`
 

@@ -21,6 +21,17 @@ A baseline is an unsigned JSON file. `diff` cannot tell a reviewed baseline from
 the change under review wrote, so the gate is only as strong as the place the
 baseline comes from.
 
+To bind a baseline to its reviewer, sign it after review and verify it before every
+comparison, with public keys the pull request cannot change:
+
+```bash
+nexus-symbiote attest reviewed.json --key reviewer.pem --out reviewed.intoto.json
+nexus-symbiote verify-attestation reviewed.json reviewed.intoto.json --public-key reviewer.pub
+```
+
+`diff` does not run this check itself, and a signature says who approved the bytes,
+not that the snapshot is correct ([`attest`](cli-reference.md#attest)).
+
 - **Keep the baseline out of the pull request's reach.** Read it from the protected
   base branch (for example `git show "$BASE_SHA:.nexus-symbiote/reviewed.json"`), or
   from an artifact store only maintainers can write. Never read it from the

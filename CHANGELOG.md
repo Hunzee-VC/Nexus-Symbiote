@@ -67,6 +67,7 @@ Closes detection gaps listed under 0.1.0's known limitations and others found in
 - `scan --check`, `validate --json-output` and `--skip-integrity`, `summary --json-output`, `risk --no-score-threshold`, `--require-discovery-signature` and `--debug`.
 - Action inputs `reviewed-baseline` (a drift gate), `validate-integrity`, `limits`, `artifact-name`, `sarif-category` and `upload-artifact`, and outputs `result`, `gates`, `validation-passed`, `drift-passed` and `drift-alerts`.
 - `discover-mcp --record` for drift on remote MCP servers, `verify-live --accept-drift`, `advisories --dry-run` and `--exclude`, and `runtime digest`, `key-id` and `register`.
+- `attest` and `verify-attestation`: sign the exact bytes of an inventory, baseline or export with Ed25519 keys, as a detached in-toto statement in a DSSE envelope, and check it against a trusted key ring ([CLI reference](docs/cli-reference.md#attest)).
 - Discovery of Python agent SDK tools declared with decorators, and of SDK references in nested source files.
 - Signature policy version 2 with digest pins, and `.tflite`, `.mlmodel`, `.pte` and `saved_model.pbtxt` models.
 - Guides to the [drift gate](docs/drift-gate.md), [agent manifest](docs/agent-manifest.md), [standard exports](docs/standard-exports.md), [registry collector](docs/registry-collector.md) and [runtime contracts](docs/runtime-contract-reference.md).
