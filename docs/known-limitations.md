@@ -51,9 +51,14 @@ A way around a limit that its entry does not describe is worth a
   as a coverage gap, so excluding a file that fails collection turns the failure
   into a gap; the default gates still fail.
 - **Default exclusions match by name.** Any path component named `.git`,
-  `node_modules`, `__pycache__`, `.venv` or `venv` is skipped, also inside agent
-  configuration directories: `.claude/skills/venv/SKILL.md` is not inventoried.
-  These defaults are listed under `exclusions` in the inventory but are not a gap.
+  `node_modules`, `__pycache__`, `.venv` or `venv` is skipped. These defaults are
+  listed under `exclusions` in the inventory but are not a gap, except inside a
+  directory whose every file the `prompt` collector reads, such as a skill, command,
+  rule or subagent directory. There such an entry, such as `.claude/skills/venv` or
+  `.claude/agents/node_modules`, is a coverage gap that names it, so the default
+  gates fail. A skill checked out with its own `.git`, including a Git submodule,
+  whose `.git` is a file, or one whose script left a `__pycache__` beside it, fails
+  them until that entry is removed.
 - **Case variants.** When a fixed path such as `CLAUDE.md`, `.mcp.json` or
   `.claude/settings.json` is absent, a file whose name differs only by case or
   Unicode normalization is a failure, because case-insensitive file systems open
@@ -232,59 +237,84 @@ A way around a limit that its entry does not describe is worth a
 - **Some files are not inventoried.** Pickles under names other than the
   [listed suffixes](model-integrity.md#model-files-and-references), NumPy `.npy` and
   `.npz` arrays, and `.pb` files other than `saved_model.pb` produce no component.
-- **Templates and tensors are checked shallowly.** GGUF chat templates are checked
-  only for known sandbox-escape shapes. Hugging Face chat templates are digested but
-  not inspected. SafeTensors tensor bytes are hashed but not inspected. See
+- **Templates and tensors are checked shallowly.** GGUF and Hugging Face chat
+  templates are checked only for known sandbox-escape shapes. A template file larger
+  than the `file-bytes` limit is digested but not checked, and is a coverage gap.
+  SafeTensors tensor bytes are hashed but not inspected. See
   [what this does not establish](model-integrity.md#what-this-does-not-establish).
 
 ## Instructions and IDE settings
 
 - **Instruction files under other names are not recorded.** The `prompt` collector
   reads the fixed files the [README lists](../README.md#what-each-collector-reads),
-  `CLAUDE.md` and `AGENTS.md` in any subdirectory, and every file in the rule,
-  prompt and subagent directories. Nested names must match exactly, so
-  `CLAUDE.local.md`, `GEMINI.md` or `.cursorrules` below the root, `claude.md` in a
-  subdirectory, and other hosts' conventions are neither inventoried nor checked
-  for hidden characters. List such files in an [`agent.yaml`](agent-manifest.md).
-- **Imports are followed from root memory files only.** `@path` imports are followed
-  from the root `CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md` and `GEMINI.md`
-  to five hops. The imports of a nested `CLAUDE.md` that no root memory file
-  imports are not followed. An import that leaves the project root, names an
+  `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` and `.cursorrules` in any subdirectory, and
+  every file in the rule, prompt and subagent directories. Nested names must match
+  exactly, so `CLAUDE.local.md`, `AGENTS.override.md`, `.clinerules` or
+  `.windsurfrules` below the root, `claude.md` in a subdirectory, and other hosts'
+  conventions are neither inventoried nor checked for hidden characters. List such
+  files in an [`agent.yaml`](agent-manifest.md).
+- **Imports are followed from memory files.** `@path` imports are followed to five
+  hops from the root `CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md` and
+  `GEMINI.md`, and from every `CLAUDE.md` and `GEMINI.md` below the root, resolved
+  from that file's directory. An import that leaves the project root, names an
   excluded path or lies deeper than the `depth` limit is a gap, so write a path
   alias such as `@/components` as code.
-- **Fixtures count.** A nested `CLAUDE.md` or `AGENTS.md` in test fixtures or vendored
-  code is inventoried, and its findings count, like any other.
+- **Fixtures count.** A nested `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` or `.cursorrules`
+  in test fixtures or vendored code is inventoried, and its findings count, like any
+  other.
 - **Skill front matter is not interpreted.** Every file in the skill and command
   directories is bound by digest, but settings such as `allowed-tools` are not
   read. A skill declaration (`.md`, `.mdc`, `.markdown`, `.txt`, `.yaml`, `.yml`,
   `.json`, `.toml`) above the `file-bytes` limit is a failure; a larger script or
   other resource is streamed and digested.
 - **Hidden-character detection is character-based.** Lookalike letters are not
-  detected. HTML and Markdown comments are reported by count, not text, and only in
-  Markdown files and instruction files without a suffix, such as `.cursorrules`.
-- **Settings alerts do not say what changed.** Claude Code rules and hook commands
-  are bound by a digest of each settings file, not recorded. A changed value, such
-  as an added hook command or a removed deny rule, raises a medium
-  `properties changed` alert that names the agent, not the setting.
+  detected, and neither are control characters such as ESC, spaces other than
+  U+0020, such as U+00A0 and U+3000, or private-use characters. HTML and Markdown
+  comments are reported by count, not text, and only in Markdown files and
+  instruction files without a suffix, such as `.cursorrules`.
+- **Settings alerts do not say what changed.** Rules, hook commands and other
+  settings are bound by a digest of each settings file, not recorded. A changed
+  value, such as an added hook command or a removed deny rule, raises a high
+  `properties.settings_hashes changed` alert that names the agent, not the setting.
 - **Effective permissions are not resolved.** User and managed settings, workspace
   trust and session flags are not read, and deny and ask rules are counted, not
   applied to the allow list.
 - **Settings digests can confirm guesses.** Without
-  `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, each digest covers the settings file as read,
+  `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, the digests of the Claude Code settings,
+  plugin manifests and plugin hooks, the Gemini CLI, Windsurf and Cline settings,
+  `.cursor/settings.json`, `.cursor/hooks.json` and `.codex/config.json` cover the
+  file as read, including the environment values of the MCP servers that
+  `.gemini/settings.json` declares, which the `mcp` records bind only with the key,
   so anyone holding the inventory can confirm a guess of a whole file. With the key,
-  a value the redaction leaves in place, such as a password pasted into a hook
-  command, can still be confirmed. Keep credentials out of settings
-  files; see [IDE agent settings](verification-source-binding.md#ide-agent-settings).
-- **Codex settings are read in part.** Only `approval_policy`, `sandbox_mode` and
-  the `mcp_servers` table of `.codex/config.toml` are read. The file is not
-  digested, so another setting, such as a `notify` command, changes without an
-  alert.
-- **Other IDE agents are recorded by marker.** For Cursor, Windsurf and Cline, a
-  permission mode is read only from an `agent.permissionMode` key in their settings
-  files, a convention their vendors do not document; for Codex, from that key in
-  `.codex/config.json` or from `approval_policy`. No mode is read for Copilot or
-  Gemini CLI. Files that are only markers, such as `.cursor/cli.json`, are recorded
-  as present, not digested.
+  and for the other settings files without it, a value the redaction leaves in
+  place, such as a password pasted into a hook command, can still be confirmed. Keep
+  credentials out of settings files; see
+  [IDE agent settings](verification-source-binding.md#ide-agent-settings).
+- **Some settings changes alert only with the key.** `.codex/config.toml`,
+  `.cursor/cli.json` and the Antigravity, xAI and Copilot settings files are
+  digested after the redaction, so that their digests cannot confirm a guess either.
+  Without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, a change only to a value the
+  redaction removes, such as an MCP server's environment value, a token, or a URL
+  path on the same host in a `notify` command, raises no alert.
+- **Codex settings are interpreted in part.** `.codex/config.toml` is digested
+  whole, so a changed setting such as a `notify` command raises an alert, but only
+  `approval_policy`, `sandbox_mode` and the `mcp_servers` table are interpreted. A
+  value that the digest or the keyed binding covers and that RFC 8785 JSON cannot
+  represent, such as a TOML date or time, `nan`, `inf` or an integer of magnitude
+  2^53 or more, is a failure.
+- **Other IDE agents' settings are digested, not interpreted.** For Cursor, Windsurf
+  and Cline, a permission mode is read only from an `agent.permissionMode` key in
+  their settings files, a convention their vendors do not document; for Codex, from
+  that key in `.codex/config.json` or from `approval_policy`. No mode is read for
+  Copilot, Gemini CLI, Antigravity or xAI. Files such as `.cursor/cli.json`,
+  `.antigravity/settings.json`, `.xai/config.json` and
+  `.github/copilot-extensions.json` are digested, so a change raises the same high
+  alert as other settings changes, but their permissions are not read: widening the
+  Cursor CLI allow list from `Shell(ls)` to `Shell(*)` adds no finding.
+- **Other settings files are not recorded.** A file the `ide_agents` collector does
+  not recognize, such as `.vscode/settings.json`, or a host's user or managed
+  settings outside the project, is neither digested nor a gap, so a change to it
+  passes every gate.
 
 ## Registry and containers
 

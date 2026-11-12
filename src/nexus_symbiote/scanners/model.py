@@ -62,6 +62,7 @@ from nexus_symbiote.utils.model_formats import (
     template_escape_markers,
 )
 from nexus_symbiote.utils.tensors import HeaderLimitError, fingerprint_stream, read_header
+from nexus_symbiote.utils.terminal import neutralize
 
 MODEL_EXTENSIONS = {
     ".safetensors": ("safetensors", "safe-tensors"),
@@ -129,6 +130,8 @@ SIGNING_SUFFIXES = [".sig", ".sigstore", ".sigstore.json"]
 
 MAX_MODEL_HEADER_BYTES = 1024 * 1024
 MAX_PICKLE_INSPECTION_BYTES = 65536
+# Chat templates a finding names; it counts the rest.
+_LISTED_TEMPLATES = 3
 _UNSAFE_SUFFIXES = {
     ".pickle",
     ".pkl",
@@ -1012,6 +1015,9 @@ class _DirectoryContext:
     custom_code: dict[str, Any] | None
     index_refs: dict[Path, list[Path]]
     base_model: str | None
+    # The sources of the directory's Hugging Face chat templates that carry the
+    # attribute access Jinja sandbox escapes use.
+    template_escapes: list[str] = field(default_factory=list)
 
 
 def _checked_config(files: ConfinedCollection, path: Path, data: dict[str, Any]) -> dict[str, Any]:
@@ -1146,6 +1152,7 @@ class ModelScanner(Scanner):
         merged: dict[str, Any] = {}
         remote: list[bool] = []
         templates: list[tuple[str, str]] = []
+        escapes: list[str] = []
         declared_in: list[str] = []
         references: list[str] = []
         base_model: str | None = None
@@ -1167,18 +1174,18 @@ class ModelScanner(Scanner):
             candidate = data.get("base_model_name_or_path")
             if path.name == "adapter_config.json" and isinstance(candidate, str):
                 base_model = candidate if _HUB_ID.fullmatch(candidate) else None
-            templates.extend(self._config_templates(files, path, data.get("chat_template")))
+            # Bounded already: the configuration was read within the file-bytes limit.
+            for source, template in self._config_templates(files, path, data.get("chat_template")):
+                templates.append((source, hash_bytes(template)))
+                if template_escape_markers(template):
+                    escapes.append(source)
 
         for name in CHAT_TEMPLATE_FILES:
             if model_dir / name in tree.paths:
-                digest = self._digest(files, model_dir / name)
-                if digest is not None:
-                    templates.append(((model_dir / name).as_posix(), digest))
+                self._template_file(files, model_dir / name, templates, escapes)
         for path in tree.children.get(model_dir / CHAT_TEMPLATE_DIRECTORY, ()):
             if path.suffix == ".jinja":
-                digest = self._digest(files, path)
-                if digest is not None:
-                    templates.append((path.as_posix(), digest))
+                self._template_file(files, path, templates, escapes)
 
         tokenizer_files = [
             (model_dir / name, digest)
@@ -1212,30 +1219,64 @@ class ModelScanner(Scanner):
             custom_code=custom_code,
             index_refs=index_refs,
             base_model=base_model,
+            template_escapes=escapes,
         )
 
     @staticmethod
     def _config_templates(
         files: ConfinedCollection, path: Path, value: object
-    ) -> list[tuple[str, str]]:
+    ) -> list[tuple[str, bytes]]:
         """Chat templates from a configuration: one string, or a list of named templates."""
         if value is None:
             return []
         locator = f"{path.as_posix()}#chat_template"
         if isinstance(value, str):
-            return [(locator, hash_bytes(value.encode("utf-8", "surrogatepass")))]
+            return [(locator, value.encode("utf-8", "surrogatepass"))]
         if isinstance(value, list) and all(
             isinstance(item, dict) and isinstance(item.get("template"), str) for item in value
         ):
             return [
-                (
-                    f"{locator}/{index}",
-                    hash_bytes(item["template"].encode("utf-8", "surrogatepass")),
-                )
+                (f"{locator}/{index}", item["template"].encode("utf-8", "surrogatepass"))
                 for index, item in enumerate(value)
             ]
         files._fail(path, "chat_template must be a string or a list of named templates")
         return []
+
+    def _template_file(
+        self,
+        files: ConfinedCollection,
+        path: Path,
+        templates: list[tuple[str, str]],
+        escapes: list[str],
+    ) -> None:
+        """Digest a chat template file and check its text for sandbox-escape shapes.
+
+        A template is read whole within the file-bytes limit. A larger one is streamed
+        for its digest only, and is a coverage gap because its text was not checked.
+        """
+        source = path.as_posix()
+        found = files.regular_file(path)
+        if found is not None and found[1] <= files.max_file_bytes:
+            self._read.add(path)
+            raw = files.read_bytes(path)
+            if raw is None:
+                self._digests[path] = None
+                return
+            digest = self._digests[path] = hash_bytes(raw)
+            templates.append((source, digest))
+            if template_escape_markers(raw):
+                escapes.append(source)
+            return
+        streamed = self._digest(files, path)
+        if streamed is None:
+            return
+        templates.append((source, streamed))
+        reason = (
+            limits.bound("file-bytes").exceeded()
+            if found is not None
+            else "the file could not be read whole"
+        )
+        files.exclusions.append(f"{source}: chat template not inspected: {reason}")
 
     def _scan_model_file(
         self,
@@ -1269,6 +1310,13 @@ class ModelScanner(Scanner):
             safety, format_evidence = SerializationSafety.UNKNOWN, "Artifact could not be inspected"
             weight_hash = None
         self._digests[path] = weight_hash
+        # A GGUF template is the artifact's own; the directory's Hugging Face templates
+        # apply to every model in it, and each gets their finding. They overrule only a
+        # safe rating: the unverified-SafeTensors and unknown-format findings derive
+        # from an unknown one, and a code-executing one is worse.
+        embedded = safety == SerializationSafety.UNSAFE_TEMPLATE_INJECTION
+        if context.template_escapes and safety == SerializationSafety.SAFE:
+            safety = SerializationSafety.UNSAFE_TEMPLATE_INJECTION
 
         companions = bound_weight_files(
             self._tree,
@@ -1374,7 +1422,9 @@ class ModelScanner(Scanner):
             hashes={"sha256": weight_hash} if weight_hash else {},
             source_path=name,
             trust_tier=trust_tier,
-            risks=self._assess_model_risks(path, fmt_key, safety, status.value, context),
+            risks=self._assess_model_risks(
+                path, fmt_key, safety, status.value, context, embedded=embedded
+            ),
             claims=(
                 {SIGNING_EVIDENCE_CLAIM: verification.evidence}
                 if verification.evidence is not None
@@ -1411,6 +1461,8 @@ class ModelScanner(Scanner):
         safety: SerializationSafety,
         signing_status: str,
         context: _DirectoryContext,
+        *,
+        embedded: bool,
     ) -> list[RiskAssessment]:
         risks: list[RiskAssessment] = []
 
@@ -1425,13 +1477,37 @@ class ModelScanner(Scanner):
                 )
             )
 
-        if safety == SerializationSafety.UNSAFE_TEMPLATE_INJECTION:
+        if embedded:
             risks.append(
                 RiskAssessment(
                     severity=RiskSeverity.CRITICAL,
                     category="serialization_format",
                     detail=f"Model '{path.name}' embeds a chat template that reaches Python internals, as Jinja2 sandbox escapes such as CVE-2024-34359 do.",
                     recommendation="Remove the template or replace it with a reviewed one; render templates only in a sandboxed Jinja2 environment (llama-cpp-python >= 0.2.72).",
+                    references=["https://nvd.nist.gov/vuln/detail/CVE-2024-34359"],
+                )
+            )
+
+        if context.template_escapes:
+            shown = ", ".join(
+                neutralize(source) for source in context.template_escapes[:_LISTED_TEMPLATES]
+            )
+            more = len(context.template_escapes) - _LISTED_TEMPLATES
+            risks.append(
+                RiskAssessment(
+                    severity=RiskSeverity.CRITICAL,
+                    category="serialization_format",
+                    detail=(
+                        f"Model '{path.name}' is configured with a chat template that reaches "
+                        "Python internals through dunder attributes or the attr filter, as "
+                        f"Jinja2 sandbox escapes such as CVE-2024-34359 do: {shown}"
+                        + (f" and {more} more" if more > 0 else "")
+                        + "."
+                    ),
+                    recommendation=(
+                        "Remove the template or replace it with a reviewed one; render chat "
+                        "templates only in a sandboxed Jinja2 environment."
+                    ),
                     references=["https://nvd.nist.gov/vuln/detail/CVE-2024-34359"],
                 )
             )

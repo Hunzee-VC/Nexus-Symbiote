@@ -46,16 +46,26 @@ DIRECTIONAL_MARKS: dict[str, str] = {
 }
 
 TAG_CHAR_RANGE = re.compile(r"[\U000e0000-\U000e007f]")
+# Code points that Unicode reserves as default-ignorable but has not assigned (property
+# Other_Default_Ignorable_Code_Point, category Cn). Renderers draw nothing for them, and
+# unicodedata exposes no property that identifies them, so they are listed; U+E0000 and
+# U+E0002 to U+E001F, which are of the same kind, lie in the tag range above.
+_UNASSIGNED_IGNORABLE = "\u2065\ufff0-\ufff8\U000e0080-\U000e00ff\U000e01f0-\U000e0fff"
+_UNASSIGNED = re.compile(f"[{_UNASSIGNED_IGNORABLE}]")
+# The plane-14 part lies beside the tag characters and variation selectors that
+# encodings of hidden text use, and like them it has no legitimate use in instructions.
+_UNASSIGNED_PLANE_14 = re.compile(r"[\U000e0080-\U000e00ff\U000e01f0-\U000e0fff]")
 
-# Every format character (category Cf) of Unicode 15.1, the variation selectors, and
-# letters and marks that render as nothing. The scan also checks each distinct
-# character's category, so format characters added in later versions are found too.
+# Every default-ignorable code point of Unicode 15.1, assigned or not, every format
+# character (category Cf) and the blank Braille pattern. The scan also checks each
+# distinct character's category, so format characters added in later versions are
+# found too.
 _HIDDEN = re.compile(
     "[­͏؀-؅؜۝܏࢐࢑࣢ᅟᅠ"
     "឴឵᠋-᠏​-‏‪-‮⁠-⁤⁦-⁯"
     "⠀ㅤ︀-️﻿ﾠ￹-￻\U000110bd\U000110cd"
     "\U00013430-\U0001343f\U0001bca0-\U0001bca3\U0001d173-\U0001d17a"
-    "\U000e0000-\U000e007f\U000e0100-\U000e01ef]"
+    f"\U000e0000-\U000e007f\U000e0100-\U000e01ef{_UNASSIGNED_IGNORABLE}]"
 )
 _ZWJ = "‍"
 _PRESENTATION_SELECTORS = frozenset({"︎", "️"})
@@ -110,15 +120,21 @@ def _emoji_context(content: str, index: int) -> bool:
 
 
 def _character_name(char: str) -> str:
-    return unicodedata.name(char, "UNNAMED FORMAT CHARACTER")
+    unnamed = (
+        "UNASSIGNED DEFAULT-IGNORABLE CODE POINT"
+        if _UNASSIGNED.match(char)
+        else "UNNAMED FORMAT CHARACTER"
+    )
+    return unicodedata.name(char, unnamed)
 
 
 def detect_invisible_characters(content: str, source_name: str) -> list[RiskAssessment]:
     """Detect invisible Unicode characters that could be used for prompt trojans.
 
-    Every format character (category Cf), variation selector and blank-rendering
-    filler is reported. Bidirectional embeddings, overrides and isolates and tag
-    characters are critical; directional marks, which right-to-left text uses, are
+    Every format character (category Cf), variation selector, blank-rendering filler
+    and unassigned default-ignorable code point is reported. Bidirectional
+    embeddings, overrides and isolates, tag characters and the unassigned code points
+    of plane 14 are critical; directional marks, which right-to-left text uses, are
     medium; the others are high. A zero-width joiner inside an emoji sequence, a
     presentation selector after a pictograph, a byte-order mark that starts the text
     and the England, Scotland and Wales flag sequences are ordinary text.
@@ -198,10 +214,14 @@ def _hidden_character_risks(
 ) -> list[RiskAssessment]:
     risks: list[RiskAssessment] = []
     shown = neutralize(source_name)
+    # Counted, not listed: there are 3,728 of them, and they are rated with tag characters.
+    plane_14 = sum(count for char, count in counts.items() if _UNASSIGNED_PLANE_14.match(char))
     invisible = [
         f"{INVISIBLE_CHARS.get(char) or _character_name(char)} (U+{ord(char):04X}) x{count}"
         for char, count in sorted(counts.items(), key=lambda item: ord(item[0]))
-        if char not in BIDI_OVERRIDES and char not in DIRECTIONAL_MARKS
+        if char not in BIDI_OVERRIDES
+        and char not in DIRECTIONAL_MARKS
+        and not _UNASSIGNED_PLANE_14.match(char)
     ]
     if invisible:
         risks.append(
@@ -254,17 +274,28 @@ def _hidden_character_risks(
             )
         )
 
-    if tags:
+    if tags or plane_14:
+        found = []
+        removed = "tag characters"
+        if tags:
+            found.append(
+                f"{tags} deprecated Unicode tag characters (U+E0000–U+E007F) outside a flag emoji"
+            )
+        if plane_14:
+            found.append(
+                f"{plane_14} unassigned default-ignorable code points of plane 14 "
+                "(U+E0080–U+E00FF, U+E01F0–U+E0FFF)"
+            )
+            removed = "tag characters and unassigned code points"
         risks.append(
             RiskAssessment(
                 severity=RiskSeverity.CRITICAL,
                 category="tag_characters",
                 detail=(
-                    f"'{shown}' contains {tags} deprecated Unicode tag "
-                    "characters (U+E0000–U+E007F) outside a flag emoji. These are "
+                    f"'{shown}' contains {' and '.join(found)}. These are "
                     "invisible and have no legitimate use in prompt files."
                 ),
-                recommendation="Remove all tag characters — likely a prompt trojan.",
+                recommendation=f"Remove all {removed} — likely a prompt trojan.",
             )
         )
     return risks
@@ -321,8 +352,14 @@ INSTRUCTION_FILES: dict[str, str] = {
 # Both spellings are read; neither is a case variant of the other.
 _CODEX_SPELLINGS = frozenset({"CODEX.md", "codex.md"})
 
-# Instruction files a host loads from below the root: per-directory memory files.
-NESTED_INSTRUCTION_NAMES = {"CLAUDE.md": "system-prompt", "AGENTS.md": "system-prompt"}
+# Instruction files a host loads from below the root: per-directory memory and context
+# files, and the rules file of a project opened at that directory.
+NESTED_INSTRUCTION_NAMES = {
+    "CLAUDE.md": "system-prompt",
+    "AGENTS.md": "system-prompt",
+    "GEMINI.md": "system-prompt",
+    ".cursorrules": "rules-file",
+}
 
 # Subagent definitions and rule or prompt directories. Every file in them is inventoried
 # by digest, and each directory is walked on its own, so a directory symlink out of one
@@ -520,6 +557,21 @@ class _ImportListing:
         return hash_bytes(b"".join(sorted(leaves[target] for target in targets)))
 
 
+def _report_skipped(skipped: list[Path], reported: set[Path], result: ScanResult) -> None:
+    """A coverage gap for each entry that a walk of an agent configuration directory
+    skipped because its name, such as ``venv`` or ``node_modules``, is excluded by
+    default. A host reads such a skill or subagent file like any other, so it is not
+    a dependency tree to leave out silently. Each path is reported once.
+    """
+    for path in skipped:
+        if path not in reported:
+            reported.add(path)
+            result.surfaces_excluded.append(
+                f"{path.as_posix()}: default-excluded name inside an agent configuration "
+                "directory; not collected"
+            )
+
+
 class PromptScanner(Scanner):
     name = "prompt"
 
@@ -544,9 +596,10 @@ class PromptScanner(Scanner):
                     if PurePosixPath(rel_path).name in _IMPORTING_NAMES:
                         importers.append(rel_path)
 
-            # Memory files below the root, found by name; a name takes precedence over
-            # the directory that holds the file. A host that loads a nested CLAUDE.md, as
-            # it does in a session started in that directory, expands its imports too.
+            # Instruction files below the root, found by name; a name takes precedence
+            # over the directory that holds the file. A host that loads a nested CLAUDE.md
+            # or GEMINI.md, as it does in a session started in that directory, expands its
+            # imports too. Dependency trees and other default-excluded names stay skipped.
             for path in sorted(files.iter_files()):
                 relative = path.as_posix()
                 nested_type = NESTED_INSTRUCTION_NAMES.get(path.name)
@@ -567,10 +620,12 @@ class PromptScanner(Scanner):
                     if path.name in _IMPORTING_NAMES:
                         importers.append(relative)
 
+            reported: set[Path] = set()
             for directory, prompt_type in INSTRUCTION_DIRECTORIES.items():
                 if directory in INSTRUCTION_FILES and not files.is_directory(directory):
                     continue
-                for path in files.iter_files(directory):
+                skipped: list[Path] = []
+                for path in files.iter_files(directory, skipped=skipped):
                     relative = path.as_posix()
                     if relative in recorded:
                         continue
@@ -581,9 +636,10 @@ class PromptScanner(Scanner):
                     if component is not None:
                         recorded[relative] = component
                         texts[relative] = content.decode("utf-8")
+                _report_skipped(skipped, reported, result)
 
             self._follow_imports(importers, texts, recorded, files, result)
-            self._scan_skills(files, result)
+            self._scan_skills(files, result, reported)
 
         if not result.components and not result.scan_failures and not result.surfaces_excluded:
             result.surfaces_scanned.append("prompts (no instruction files found)")
@@ -737,10 +793,13 @@ class PromptScanner(Scanner):
             return None
         return files.read_bytes(target, missing_ok=True)
 
-    def _scan_skills(self, files: ConfinedCollection, result: ScanResult) -> None:
+    def _scan_skills(
+        self, files: ConfinedCollection, result: ScanResult, reported: set[Path]
+    ) -> None:
         seen: set[str] = set()
         for skill_dir in SKILL_DIRECTORIES:
-            for path in files.iter_files(skill_dir):
+            skipped: list[Path] = []
+            for path in files.iter_files(skill_dir, skipped=skipped):
                 relative = path.as_posix()
                 if relative in seen:
                     continue
@@ -765,6 +824,7 @@ class PromptScanner(Scanner):
                         risks=risks,
                     )
                 )
+            _report_skipped(skipped, reported, result)
         if not seen and not result.scan_failures and not result.surfaces_excluded:
             result.surfaces_scanned.append("skills (no skill or command files found)")
 

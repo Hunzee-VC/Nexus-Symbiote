@@ -6,13 +6,15 @@ page says where the reviewed snapshot must come from, how to take both snapshots
 they compare, and what each alert means.
 
 The gate compares what the inventory records. Content the collectors do not record,
-such as Codex `config.toml` settings other than its approval, sandbox and MCP server
-settings, or instruction files under names the `prompt` collector does not read, cannot
-alert. Without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, neither can a changed MCP launch
+such as instruction files under names the `prompt` collector does not read, or what a
+local program or project script started as an MCP server runs, cannot alert. Without
+`NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, neither can a changed MCP launch
 argument other than the launcher package, a changed environment or header value, an
 endpoint or package index path changed on the same host, a changed value of a project
-resolver setting such as an `.npmrc` entry, or an A2A or RAG URL path changed on the same
-host that keeps its depth; see [source binding](verification-source-binding.md).
+resolver setting such as an `.npmrc` entry, an A2A or RAG URL path changed on the same
+host that keeps its depth, or a value the redaction removes from `.codex/config.toml`,
+`.cursor/cli.json` or the Antigravity, xAI and Copilot settings files, such as a token or
+a URL path in a `notify` command; see [source binding](verification-source-binding.md).
 The [known limitations](known-limitations.md) list those surfaces.
 
 ## The trust anchor is the baseline
@@ -70,8 +72,9 @@ request with itself, and that gate can never fail.
 - **Use the same binding key for both.** Set one `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`
   of 32 or more characters for the baseline and every candidate scan. Without it, the
   values described above cannot alert; with a different key, every MCP, A2A, RAG and
-  IDE settings binding changes and alerts, and IDE settings digests differ between a
-  keyed and an unkeyed scan. A `pull_request_target` job holds no secret, so it scans
+  IDE settings binding changes and alerts, and the digests of the IDE settings files
+  digested as read differ between a keyed and an unkeyed scan. A
+  `pull_request_target` job holds no secret, so it scans
   without the key: approve the baseline it reads without the key too. See
   [source binding](verification-source-binding.md).
 - **Paths are root-relative.** Recorded paths are relative to the scan root, so a

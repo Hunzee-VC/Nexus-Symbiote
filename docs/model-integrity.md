@@ -26,8 +26,8 @@ The serialization rating is:
 | Rating | When |
 | --- | --- |
 | `unsafe-code-execution` | A pickle-family name, rated on the name alone, even when the file cannot be read; or content recognized as a binary or text-protocol pickle, or a ZIP archive whose first member is a pickle (as `torch.save` writes it), under any other model suffix |
-| `safe` | A SafeTensors file whose header is UTF-8 JSON with string metadata, known dtypes and tensor spans that index the whole data region; the scan and `validate` use the same validator |
-| `unsafe-template-injection` | A GGUF file whose embedded chat template reaches Python internals through dunder attributes or the `attr` filter, as Jinja2 sandbox escapes such as CVE-2024-34359 do |
+| `safe` | A SafeTensors file whose header is UTF-8 JSON with string metadata, known dtypes and tensor spans that index the whole data region, in a directory that configures no chat template that reaches Python internals; the scan and `validate` check the header with the same validator, and `validate` compares the templates only through its completeness check |
+| `unsafe-template-injection` | A GGUF file whose embedded chat template reaches Python internals through dunder attributes or the `attr` filter, as Jinja2 sandbox escapes such as CVE-2024-34359 do, or a SafeTensors file that would be `safe` in a directory whose Hugging Face chat template does |
 | `unknown` | Everything else, including ONNX, GGUF, Keras, HDF5, SavedModel, TFLite, Core ML and ExecuTorch files, and a SafeTensors header over the 1 MiB inspection limit |
 
 ## Files bound to the weights
@@ -114,6 +114,20 @@ recorded, so adding an unrelated script does not change the inventory. The
 In `diff`, a change to `tokenizer_hash` or `chat_template_hash` is a high alert,
 and a change to a bound weight file, a configuration file or custom code is a
 medium `properties changed` alert.
+
+Every chat template that `properties.chat_templates` lists is checked for the
+attribute access that Jinja2 sandbox escapes use: a dunder attribute, named or
+subscripted, or the `attr` filter. A Hugging Face template that matches gives every
+model in its directory a critical `serialization_format` finding that names up to
+three matching templates and counts the rest, and a model that would otherwise be
+rated `safe` is rated `unsafe-template-injection`. A model rated `unknown` or
+`unsafe-code-execution` keeps its rating and the findings that come with it, such as
+`invalid_safetensors` for a SafeTensors file that does not validate, so a suppression
+of the template finding does not accept them. `validate` checks each model file's own
+structure again, not its directory's templates: its completeness check, on by
+default, and `risk --project` compare the rating and the finding with a new
+collection. A template file larger than the `file-bytes` limit is digested but not
+checked, and is a coverage gap in `surfaces_excluded`.
 
 A GGUF file whose metadata exceeds the reader's bounds (65,536 keys, 16 MiB
 strings, 2,097,152 array items, 128 MiB of metadata, or the 16,000,000
@@ -223,6 +237,6 @@ structural validator: Keras Lambda layers, SavedModel operations and custom
 TensorRT or TFLite operators are not inspected. Pickles under names other than
 those listed above, and NumPy `.npy` and `.npz` arrays, are not inventoried. SafeTensors
 tensor bytes are hashed but not inspected, so a payload that also parses as
-another format is not flagged. The GGUF template check is a heuristic for known
-sandbox-escape shapes, not a template analysis, and Hugging Face chat templates
-are digested but not inspected.
+another format is not flagged. The chat template check is a heuristic for known
+sandbox-escape shapes, not a template analysis: a template that escapes the
+sandbox another way, or that instructs the model, passes it.

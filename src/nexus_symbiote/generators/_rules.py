@@ -109,7 +109,8 @@ RULES: dict[str, RuleInfo] = {
     ),
     "tag_characters": RuleInfo(
         "Unicode tag characters in instructions",
-        "An instruction file contains invisible Unicode tag characters, a known way to hide "
+        "An instruction file contains invisible Unicode tag characters, or unassigned "
+        "default-ignorable code points of plane 14, a known way to hide "
         "prompt text.",
         cwe=(451, 1427),
         owasp=_INSTRUCTION,

@@ -12,7 +12,11 @@ Discovers configurations for IDE-integrated AI coding agents:
   - GitHub Copilot (.github/copilot-instructions.md)
 
 Markers and settings are read at fixed paths beneath the project root; the tree is
-walked only for the `.claude` settings of subdirectories.
+walked only for the `.claude` settings of subdirectories. Every settings file a record
+recognizes, JSON or TOML, is digested whole, so a changed value changes the record,
+except, without the operator key, a value the redaction withholds from a file digested
+after it; only some values are interpreted. Instruction files and directories among
+the markers are inventoried by the `prompt` collector.
 """
 
 from __future__ import annotations
@@ -24,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from nexus_symbiote.core.enums import RiskSeverity, TrustTier
-from nexus_symbiote.core.hashing import hash_canonical, parse_json_strict
+from nexus_symbiote.core.hashing import canonical_json, hash_canonical, parse_json_strict
 from nexus_symbiote.core.models import IDEAgentComponent, RiskAssessment, VerifiedExtensionComponent
 from nexus_symbiote.scanners.base import Scanner, ScanResult
 from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
@@ -129,10 +133,26 @@ _AGENT_MODE_SETTINGS = {
     "cline": [".cline/settings.json"],
     "codex": [".codex/config.json"],
 }
+# Settings files whose values no record interprets. Each is read as editors read JSON,
+# with comments and trailing commas, only to be digested.
+_DIGESTED_SETTINGS = {
+    "cursor": [".cursor/cli.json"],
+    "antigravity": [".antigravity/config.json", ".antigravity/settings.json"],
+    "xai": [".xai/config.json", ".xai/settings.json"],
+    "copilot": [".github/copilot-extensions.json"],
+}
 # The keyed binding of every settings file an IDE record digests in `settings_hashes`.
 SETTINGS_VALUE_BINDING_PROFILE = "nexus-symbiote/ide-settings-values/v1"
+CODEX_CONFIG = ".codex/config.toml"
 CURSOR_HOOKS = ".cursor/hooks.json"
 GEMINI_SETTINGS = ".gemini/settings.json"
+# Digested after the redaction with or without the operator key, so no unkeyed digest
+# covers a value it withholds, such as the environment of an MCP server that Codex
+# settings declare. The other files keep the digest of the file as read that existing
+# baselines record.
+_REDACTED_DIGESTS = frozenset(
+    {CODEX_CONFIG, *(path for paths in _DIGESTED_SETTINGS.values() for path in paths)}
+)
 _PERMISSION_MODES = frozenset(
     {
         "default",
@@ -222,15 +242,16 @@ def _projection(value: Any, depth: int = 0, *, env: bool = False) -> Any:
     return value
 
 
-def _settings_digest(data: dict[str, Any], *, keyed: bool) -> str:
+def _settings_digest(data: dict[str, Any], *, redacted: bool) -> str:
     """The RFC 8785 digest of one settings file, as `settings_hashes` records it.
 
-    Without the operator key it covers the file as read, so any changed value changes
-    it. With the key, the keyed binding covers the values as read, and this unkeyed
-    digest covers the file after the standard redaction and with environment variable
-    names only, so it cannot confirm a guess of a value the redaction removes.
+    A redacted digest covers the file after the standard redaction and with
+    environment variable names only, so it cannot confirm a guess of a value the
+    redaction removes, and does not change with one; only the keyed binding covers
+    those values. Otherwise the digest covers the file as read, so any changed value
+    changes it.
     """
-    projected: dict[str, Any] = _projection(data) if keyed else data
+    projected: dict[str, Any] = _projection(data) if redacted else data
     return hash_canonical(projected)
 
 
@@ -354,18 +375,22 @@ class IDEAgentScanner(Scanner):
         """One agent's record; ``base`` names the subdirectory of nested settings."""
         risks: list[RiskAssessment] = []
         properties: dict[str, Any] = {"settings_directory": base} if base else {}
-        # Every JSON settings file the record reads, as read; each is digested.
+        # Every settings file the record reads, as read; each is digested.
         documents: dict[str, dict[str, Any]] = {}
         if ide_type == "claude-code":
             settings = self._claude_settings(result, risks, properties, documents, base=base)
         else:
             settings = self._agent_mode_settings(ide_type, result, documents)
         if ide_type == "codex":
-            self._codex_settings(files, result, risks, properties)
+            self._codex_settings(files, result, risks, properties, documents)
         elif ide_type == "gemini":
             self._gemini_settings(files, result, documents)
         elif ide_type == "cursor":
             self._cursor_hooks(files, result, risks, properties, documents)
+        for relative in _DIGESTED_SETTINGS.get(ide_type, []):
+            data = self._read_jsonc(files, relative, result)
+            if data is not None:
+                documents[relative] = data
         self._bind_settings(documents, result, properties)
         mode = self._extract_permission_mode(settings or {}, ide_type, result)
         if ide_type == "codex" and mode is None:
@@ -622,10 +647,12 @@ class IDEAgentScanner(Scanner):
     ) -> None:
         """Digest each settings file into `settings_hashes`; bind their values with the key.
 
-        Without the operator key each digest covers the file as read. With it, the
-        digests leave out what the redaction removes and the environment values, and an
+        Without the operator key each digest covers the file as read, except that the
+        files of `_REDACTED_DIGESTS` are digested after the redaction. With it, every
+        digest leaves out what the redaction removes and the environment values, and an
         HMAC under the key covers every file as read, so the inventory never carries an
-        unkeyed digest of those values.
+        unkeyed digest of those values. A file that has no RFC 8785 form, such as TOML
+        with a date, is a failure that names it, and leaves the record's values unbound.
         """
         if not documents:
             return
@@ -633,11 +660,19 @@ class IDEAgentScanner(Scanner):
         hashes: dict[str, str] = {}
         for relative, data in documents.items():
             try:
-                hashes[relative] = _settings_digest(data, keyed=keyed)
+                digest = _settings_digest(data, redacted=keyed or relative in _REDACTED_DIGESTS)
+                if keyed:
+                    # The keyed binding covers the file as read, not only its projection.
+                    canonical_json(data)
             except (TypeError, ValueError, RecursionError):
                 result.scan_failures.append(f"{relative}: settings cannot be canonicalized")
+            else:
+                hashes[relative] = digest
         if hashes:
             properties["settings_hashes"] = hashes
+        if len(hashes) < len(documents):
+            properties["source_values_bound"] = False
+            return
         try:
             binding = value_binding(SETTINGS_VALUE_BINDING_PROFILE, documents)
         except BindingError as exc:
@@ -652,25 +687,31 @@ class IDEAgentScanner(Scanner):
         result: ScanResult,
         risks: list[RiskAssessment],
         properties: dict[str, Any],
+        documents: dict[str, dict[str, Any]],
     ) -> None:
-        text = files.read_text(".codex/config.toml", missing_ok=True)
+        """Read the approval and sandbox modes; the whole file is digested.
+
+        The ``mcp`` collector inventories the MCP servers it declares.
+        """
+        text = files.read_text(CODEX_CONFIG, missing_ok=True)
         if text is None:
             return
         try:
             config = tomllib.loads(text)
         except (tomllib.TOMLDecodeError, ValueError, RecursionError):
-            result.scan_failures.append(".codex/config.toml: invalid TOML")
+            result.scan_failures.append(f"{CODEX_CONFIG}: invalid TOML")
             return
+        documents[CODEX_CONFIG] = config
         approval, sandbox = config.get("approval_policy"), config.get("sandbox_mode")
         if approval is not None and (
             not isinstance(approval, str) or approval not in _PERMISSION_MODES
         ):
-            result.scan_failures.append(".codex/config.toml: unsupported approval_policy")
+            result.scan_failures.append(f"{CODEX_CONFIG}: unsupported approval_policy")
             approval = None
         if sandbox is not None and (
             not isinstance(sandbox, str) or sandbox not in _PERMISSION_MODES
         ):
-            result.scan_failures.append(".codex/config.toml: unsupported sandbox_mode")
+            result.scan_failures.append(f"{CODEX_CONFIG}: unsupported sandbox_mode")
             sandbox = None
         properties["approval_policy"] = approval
         properties["sandbox_mode"] = sandbox
