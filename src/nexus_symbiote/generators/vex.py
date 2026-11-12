@@ -58,7 +58,9 @@ class VEXGenerator(Generator):
         seen: set[str] = set()
         omitted = 0
         for comp in sorted(bom.components, key=lambda c: c.bom_ref):
-            risks = getattr(comp, "risks", [])
+            from nexus_symbiote.validators.risk import effective_component_risks
+
+            risks = effective_component_risks(comp)
             if imported_discovery_component(comp):
                 omitted += len(risks)
                 continue

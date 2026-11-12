@@ -174,17 +174,20 @@ class SARIFGenerator(Generator):
         return self._anchor, "anchor"
 
     def generate(self, bom: AIBOM) -> dict[str, Any]:
+        from nexus_symbiote.validators.risk import effective_component_risks
+
         prepare(bom)
         by_ref = {component.bom_ref: component for component in bom.components}
         findings: dict[tuple[str, str], dict[str, Any]] = {}
         rules: dict[str, dict[str, Any]] = {}
         omitted = 0
         for comp in sorted(bom.components, key=lambda c: c.bom_ref):
+            comp_risks = effective_component_risks(comp)
             if imported_discovery_component(comp):
-                omitted += len(getattr(comp, "risks", []))
+                omitted += len(comp_risks)
                 continue
             risks = sorted(
-                getattr(comp, "risks", []),
+                comp_risks,
                 key=lambda r: (r.category, r.detail, SEVERITY_ORDER[r.severity]),
             )
             for risk in risks:

@@ -12,7 +12,7 @@ from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.collection import is_imported
 from nexus_symbiote.core.coverage import CoverageStatus, assess_coverage
 from nexus_symbiote.core.enums import RiskSeverity, SerializationSafety
-from nexus_symbiote.core.models import AgentComponent, ModelComponent, RiskAssessment
+from nexus_symbiote.core.models import AgentComponent, AnyComponent, ModelComponent, RiskAssessment
 from nexus_symbiote.scanner_catalog import BUILTIN_SCANNER_NAMES
 
 if TYPE_CHECKING:
@@ -52,7 +52,7 @@ def _intrinsic_model_risks(component: ModelComponent) -> list[RiskAssessment]:
             "The model configuration enables repository code execution.",
         ),
         (
-            component.serialization_format in {"safetensors", "safe-tensors"}
+            (component.serialization_format or "").lower() in {"safetensors", "safe-tensors"}
             and component.serialization_safety == SerializationSafety.UNKNOWN,
             RiskSeverity.HIGH,
             "invalid_safetensors",
@@ -63,6 +63,13 @@ def _intrinsic_model_risks(component: ModelComponent) -> list[RiskAssessment]:
         if applies and not any(r.category == category and r.severity == severity for r in risks):
             risks.append(RiskAssessment(severity=severity, category=category, detail=detail))
     return risks
+
+
+def effective_component_risks(component: AnyComponent) -> list[RiskAssessment]:
+    """Return declared risks together with intrinsic security-fact risks."""
+    if isinstance(component, ModelComponent):
+        return _intrinsic_model_risks(component)
+    return list(getattr(component, "risks", []))
 
 
 @dataclass
@@ -163,7 +170,7 @@ class RiskScorer:
         self,
         severity_weights: dict[RiskSeverity, float] | None = None,
         fail_threshold: float = 50.0,
-        warn_threshold: float = 20.0,
+        warn_threshold: float = 25.0,
         ignore_categories: list[str] | None = None,
         fail_on_severity: str = "critical",
         suppressions: Sequence[Suppression] = (),
@@ -231,11 +238,7 @@ class RiskScorer:
         category_scores: dict[str, float] = {}
 
         for comp in bom.components:
-            risks = (
-                _intrinsic_model_risks(comp)
-                if isinstance(comp, ModelComponent)
-                else getattr(comp, "risks", [])
-            )
+            risks = effective_component_risks(comp)
             if not risks:
                 continue
             for risk in risks:

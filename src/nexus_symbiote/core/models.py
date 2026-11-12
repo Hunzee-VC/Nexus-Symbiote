@@ -500,7 +500,7 @@ class A2AServerComponent(ComponentBase):
     endpoint_url: str | None = None
     supported_protocols: list[str] = Field(default_factory=list)
     skills_declared: list[str] = Field(default_factory=list)
-    authentication_required: bool | None = None
+    authentication_required: StrictBool | None = None
     capabilities: CapabilityDeclaration | None = None
     risks: list[RiskAssessment] = Field(default_factory=list)
 

@@ -10,7 +10,15 @@ from datetime import datetime
 from enum import Enum
 from typing import Annotated, Self
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 
 def _timestamp_input(value: object) -> object:
@@ -20,7 +28,17 @@ def _timestamp_input(value: object) -> object:
     raise ValueError("timestamps must be ISO 8601 strings")
 
 
-Timestamp = Annotated[datetime, BeforeValidator(_timestamp_input)]
+def _require_aware_timestamp(value: datetime) -> datetime:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError("timestamps must include a timezone offset")
+    return value
+
+
+Timestamp = Annotated[
+    datetime,
+    BeforeValidator(_timestamp_input),
+    AfterValidator(_require_aware_timestamp),
+]
 """A timestamp that, like the published schema, accepts ISO 8601 text but no numbers."""
 
 

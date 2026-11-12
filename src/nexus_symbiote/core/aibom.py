@@ -190,10 +190,20 @@ class AIBOM(BaseModel):
         Indented output is preferred; a document that only fits without indentation is
         written compactly rather than being written in a form ``load`` rejects.
         """
-        text = self.to_json()
+        from nexus_symbiote.core.hashing import canonical_json
+
+        payload = self.to_dict()
+        try:
+            canonical_json(payload)
+        except (TypeError, ValueError) as exc:
+            raise NativeFormatError(
+                "The inventory contains values outside strict I-JSON (such as nonfinite "
+                "numbers or integers outside IEEE-754 exact range) that native readers reject."
+            ) from exc
+        text = json.dumps(payload, indent=2, default=str)
         if len(text.encode("utf-8")) <= MAX_NATIVE_BYTES:
             return text
-        text = json.dumps(self.to_dict(), separators=(",", ":"))
+        text = json.dumps(payload, separators=(",", ":"))
         if len(text.encode("utf-8")) <= MAX_NATIVE_BYTES:
             return text
         raise NativeFormatError(
@@ -226,7 +236,7 @@ class AIBOM(BaseModel):
                 f"It exceeds the {MAX_NATIVE_BYTES // (1024 * 1024)} MiB native inventory limit."
             )
         try:
-            data = parse_json_strict(raw.decode("utf-8"), max_bytes=MAX_NATIVE_BYTES)
+            data = parse_json_strict(raw, max_bytes=MAX_NATIVE_BYTES)
         except (UnicodeError, ValueError, RecursionError) as exc:
             raise NativeFormatError(
                 "It is not strict UTF-8 JSON; duplicate keys and nonfinite numbers are refused."
