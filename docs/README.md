@@ -57,6 +57,7 @@ Reference material: exact behavior, fields and limits.
 | [Offline and live modes](offline-and-live-modes.md#how) | Observe a live MCP server, query advisories, or verify pinned launchers |
 | [ShadowScan integration](shadowscan-integration.md) | Import and verify Nexus-ShadowScan discovery reports |
 | [Runtime assurance](runtime-assurance.md) | Sign snapshots and approvals, and mediate tool calls through a gateway |
+| [Operational guidance](operational-guidance.md) | Practices that keep a deployment inside the documented guarantees |
 
 ### Upgrade existing inventories
 
