@@ -171,7 +171,7 @@ class AIBOM(BaseModel):
         """Fill the deterministic tool stamp only.
 
         The serial number and the observation timestamp are export concerns
-        owned by :func:`nexus_symbiote.generators._common.prepare`: the
+        owned by :func:`nexus_symbiote.core.canonical.prepare`: the
         serial is a content-derived uuid5, and no wall-clock timestamp is
         stamped here, so two exports of the same inventory are identical.
         A timestamp set explicitly by a caller is preserved untouched.
@@ -180,7 +180,7 @@ class AIBOM(BaseModel):
             self.metadata.tool_version = __version__
 
     def to_dict(self) -> dict[str, Any]:
-        from nexus_symbiote.generators._common import native_document, prepare
+        from nexus_symbiote.core.canonical import native_document, prepare
 
         prepare(self)
         return native_document(self)
