@@ -942,18 +942,24 @@ CROSSWALK: dict[str, tuple[Reference, ...]] = {
         _ref(
             OWASP_LLM_2025,
             "LLM03:2025",
-            "A package resolves from a registry other than the default one.",
+            "A package resolves, or is configured to resolve, from a registry or index other "
+            "than the default one.",
         ),
-        _ref(OWASP_ASI_2026, "ASI04", "The agent's dependency comes from a non-default registry."),
+        _ref(
+            OWASP_ASI_2026,
+            "ASI04",
+            "The agent's dependency comes, or may come, from a non-default registry or index.",
+        ),
         _ref(
             OWASP_LLM_2026,
             "LLM04:2026",
-            "A package resolves from a registry other than the default one.",
+            "A package resolves, or is configured to resolve, from a registry or index other "
+            "than the default one.",
         ),
         _ref(
             MITRE_ATLAS,
             "AML.T0010.001",
-            "The registry a package resolves from is part of its software supply chain.",
+            "The registry or index a package resolves from is part of its software supply chain.",
         ),
         _ref(NIST_AI_RMF, "MANAGE-3.1", _THIRD_PARTY),
         _ref(ISO_42001, "A.10.3", _SUPPLIER),

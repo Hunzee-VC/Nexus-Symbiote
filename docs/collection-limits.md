@@ -85,6 +85,7 @@ The pre-commit hooks add their arguments after the command, so set
 | `source-scan-bytes` | 64 MiB | 64 GiB | Source text one collector reads while it looks for references, counted for each collector separately: the Python, TypeScript and JavaScript files the mcp collector searches for SDK and agent framework references, and the Python files the a2a and rag collectors search for SDK and vector-store imports. How many files a project has does not matter. | One failure names the file being read when the budget ran out and says the rest were not read; nothing after it is searched. The mcp collector refuses a single file larger than the whole budget as a failure of its own, without spending the budget. |
 | `syntax-bytes` | 256 KiB | 64 MiB | One file containing an MCP SDK or agent framework reference that the mcp collector parses. | That file is not parsed. |
 | `ts-nodes` | 20000 | 10000000 | Syntax nodes in one TypeScript or JavaScript file the mcp collector parses for MCP servers and client transports. | That file is not collected. |
+| `python-nodes` | 200000 | 10000000 | Syntax nodes in one Python file the mcp collector parses for MCP servers, clients and agent tools, counted as the Python that runs the scan parses the file. | That file is not collected. |
 
 ### Source files the mcp collector searches
 
@@ -141,6 +142,8 @@ These are failures rather than silent skips:
   differently. Another script that is not a candidate, below the root or with
   another suffix, is not checked for valid UTF-8.
 - A candidate larger than `syntax-bytes`, which is not parsed.
+- A Python candidate with more syntax nodes than `python-nodes`, which is parsed
+  but not analysed.
 - A source file larger than `file-bytes` that is a candidate, or that is a Python
   file that is not plain ASCII, because its NFKC form cannot be searched without
   holding it.
@@ -166,7 +169,7 @@ inventory.
 
 ## Why these defaults
 
-Most defaults are the values earlier releases used. Four changed because
+Most defaults are the values earlier releases used. Five changed because
 ordinary projects exceeded them:
 
 - `entries` was 20,000. Mid-size monorepos, and working trees with tool caches
@@ -186,6 +189,17 @@ ordinary projects exceeded them:
   projects failed. A file count says nothing about cost: source collection is now
   bounded by the text read, 64 MiB for each collector under `source-scan-bytes`,
   and the mcp collector parses only candidates.
+- `python-nodes` was a fixed bound of 20,000 syntax nodes that could be neither
+  seen in this table nor raised, so an ordinary module that mentions `mcp` failed
+  the gates; this repository's own `scanners/registry.py` is one such module.
+  Real code has about 0.12 nodes per byte, and at most about 0.45. Of some 7,500
+  modules (the Python 3.13 standard library, the packages of a development
+  environment and this repository), the largest that fits within `syntax-bytes`
+  has 55,456 nodes, and the largest of any size 95,753. Every analysis of a parsed
+  file is linear in its nodes and runs only within the limit; `syntax-bytes` bounds
+  the parse itself, which comes first. On one 2.1 GHz server core, a hostile
+  256 KiB file took half a second and at most 240 MiB of memory to parse, and a
+  file just within 200,000 nodes about a second to parse and analyse.
 
 Hashing a 256 GiB model directory takes several minutes; keep a job timeout, as
 the [README](../README.md) recommends.

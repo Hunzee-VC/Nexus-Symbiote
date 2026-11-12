@@ -15,7 +15,7 @@ from nexus_symbiote.core.enums import RiskSeverity, TrustTier
 from nexus_symbiote.core.hashing import hash_bytes
 from nexus_symbiote.core.models import PromptComponent, RiskAssessment, SkillPackageComponent
 from nexus_symbiote.scanners.base import Scanner, ScanResult
-from nexus_symbiote.utils.confined import CollectionError, ConfinedCollection
+from nexus_symbiote.utils.confined import CollectionError, ConfinedCollection, fold_name
 from nexus_symbiote.utils.terminal import neutralize
 
 INVISIBLE_CHARS: dict[str, str] = {
@@ -360,6 +360,10 @@ NESTED_INSTRUCTION_NAMES = {
     "GEMINI.md": "system-prompt",
     ".cursorrules": "rules-file",
 }
+# Another spelling of one of them is the file a case-insensitive file system opens in
+# its place, as at the root, so it is a failure wherever the walk meets it, unless a
+# walk inventories it under its own name.
+_FOLDED_NESTED_NAMES = {fold_name(name): name for name in NESTED_INSTRUCTION_NAMES}
 
 # Subagent definitions and rule or prompt directories. Every file in them is inventoried
 # by digest, and each directory is walked on its own, so a directory symlink out of one
@@ -389,6 +393,7 @@ SKILL_DIRECTORIES = [
     ".cursor/commands",
     ".gemini/commands",
 ]
+_SKILL_PARTS = tuple(PurePosixPath(directory).parts for directory in SKILL_DIRECTORIES)
 
 # Skill and command declarations, read as text, which must be UTF-8; every other file of
 # a skill or command directory, such as a bundled script, is a resource bound by digest.
@@ -582,13 +587,23 @@ class PromptScanner(Scanner):
             recorded: dict[str, PromptComponent] = {}
             texts: dict[str, str] = {}
             importers: list[str] = []
+            # Other spellings of instruction names, each with the path it stands for; they
+            # are reported once every walk has run.
+            variants: list[tuple[Path, Path]] = []
             for rel_path, prompt_type in INSTRUCTION_FILES.items():
                 if rel_path in INSTRUCTION_DIRECTORIES and files.is_directory(rel_path):
                     continue
-                variants = _CODEX_SPELLINGS if rel_path in _CODEX_SPELLINGS else ()
-                content = files.read_bytes(rel_path, missing_ok=True, variants_read=variants)
+                spellings = _CODEX_SPELLINGS if rel_path in _CODEX_SPELLINGS else ()
+                content = files.read_bytes(rel_path, missing_ok=True, variants_read=spellings)
                 if content is None:
                     continue
+                # A case-insensitive checkout holds one file for the name and another
+                # spelling beside it, with the content of whichever it wrote last.
+                variants.extend(
+                    (variant, Path(rel_path))
+                    for variant in files.case_variants(rel_path)
+                    if variant.as_posix() not in spellings and not files.excluded(variant)
+                )
                 component = self._record(rel_path, prompt_type, content, files, result)
                 if component is not None:
                     recorded[rel_path] = component
@@ -603,6 +618,10 @@ class PromptScanner(Scanner):
             for path in sorted(files.iter_files()):
                 relative = path.as_posix()
                 nested_type = NESTED_INSTRUCTION_NAMES.get(path.name)
+                if nested_type is None and len(path.parts) > 1:
+                    canonical = _FOLDED_NESTED_NAMES.get(fold_name(path.name))
+                    if canonical is not None:
+                        variants.append((path, path.with_name(canonical)))
                 if (
                     nested_type is None
                     or len(path.parts) < 2
@@ -638,13 +657,52 @@ class PromptScanner(Scanner):
                         texts[relative] = content.decode("utf-8")
                 _report_skipped(skipped, reported, result)
 
+            importers += self._variant_importers(variants, texts, set(importers), files)
             self._follow_imports(importers, texts, recorded, files, result)
             self._scan_skills(files, result, reported)
+            # A spelling that a walk inventories is recorded and checked under its own
+            # name; any other is a file the collector does not read.
+            inventoried = {component.source_path for component in result.components}
+            for variant, named in variants:
+                if variant.as_posix() not in inventoried:
+                    files.report_case_variant(variant, named)
 
         if not result.components and not result.scan_failures and not result.surfaces_excluded:
             result.surfaces_scanned.append("prompts (no instruction files found)")
 
         return result
+
+    @staticmethod
+    def _variant_importers(
+        variants: list[tuple[Path, Path]],
+        texts: dict[str, str],
+        importers: set[str],
+        files: ConfinedCollection,
+    ) -> list[str]:
+        """The spellings of CLAUDE.md and GEMINI.md that a walk inventories, whose imports
+        a host that opens one under that name expands, and that are not importers yet.
+
+        A subagent, rule or prompt directory walk has recorded its text already. A skill
+        or command directory walk records its file after imports are followed, so the
+        text is read here; a file that cannot be read is that walk's failure.
+        """
+        found: dict[str, None] = {}
+        for variant, canonical in variants:
+            relative = variant.as_posix()
+            if canonical.name not in _IMPORTING_NAMES or relative in found or relative in importers:
+                continue
+            if relative not in texts:
+                if not any(variant.parts[: len(parts)] == parts for parts in _SKILL_PARTS):
+                    continue
+                content = files.read_bytes(variant)
+                if content is None:
+                    continue
+                try:
+                    texts[relative] = content.decode("utf-8")
+                except UnicodeDecodeError:
+                    continue
+            found[relative] = None
+        return list(found)
 
     def _record(
         self,

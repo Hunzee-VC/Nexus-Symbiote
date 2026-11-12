@@ -705,10 +705,10 @@ every rule.
 
 | Framework | Entry | Severities | Rationale |
 | --- | --- | --- | --- |
-| `owasp-llm-2025` | LLM03:2025 Supply Chain | all | A package resolves from a registry other than the default one. |
-| `owasp-llm-2026` | LLM04:2026 Supply Chain | all | A package resolves from a registry other than the default one. |
-| `owasp-asi-2026` | ASI04 Agentic Supply Chain Vulnerabilities | all | The agent's dependency comes from a non-default registry. |
-| `mitre-atlas-2026.10` | AML.T0010.001 Supply Chain Compromise: Software | all | The registry a package resolves from is part of its software supply chain. |
+| `owasp-llm-2025` | LLM03:2025 Supply Chain | all | A package resolves, or is configured to resolve, from a registry or index other than the default one. |
+| `owasp-llm-2026` | LLM04:2026 Supply Chain | all | A package resolves, or is configured to resolve, from a registry or index other than the default one. |
+| `owasp-asi-2026` | ASI04 Agentic Supply Chain Vulnerabilities | all | The agent's dependency comes, or may come, from a non-default registry or index. |
+| `mitre-atlas-2026.10` | AML.T0010.001 Supply Chain Compromise: Software | all | The registry or index a package resolves from is part of its software supply chain. |
 | `nist-ai-rmf-1.0` | MANAGE-3.1 Third-party AI risks are monitored and controlled | all | Records a third-party component whose identity, version or resolution is not established. |
 | `iso-iec-42001-2023` | A.10.3 Suppliers are managed | all | Records a supplied component whose identity, version or resolution is not established. |
 

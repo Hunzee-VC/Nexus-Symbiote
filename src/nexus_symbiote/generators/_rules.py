@@ -215,7 +215,8 @@ RULES: dict[str, RuleInfo] = {
     ),
     "registry_origin": RuleInfo(
         "Non-default package registry",
-        "An npm package is resolved from a registry other than the default one.",
+        "An npm or PyPI package resolves, or the project configures it to resolve, from a "
+        "registry or index other than the default one.",
     ),
     "transport_ambiguity": RuleInfo(
         "Ambiguous MCP transport",

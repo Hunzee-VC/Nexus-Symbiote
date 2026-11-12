@@ -19,7 +19,7 @@ import json
 import os
 import re
 import tomllib
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -491,7 +491,9 @@ _FUNCTION_REPLACED = "environment defines a shell function that can replace the 
 _STARTUP_ENVIRONMENT = "BASH_ENV"
 _STARTUP_IN_PROJECT = "environment names a shell startup file that may lie in the project"
 _WINDOWS_ROOT = re.compile(r"[A-Za-z]:[\\/]|[\\/]")
-_LOCATOR = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s,;\"']+")
+_SCHEME_LETTERS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+_SCHEME_CHARACTERS = _SCHEME_LETTERS | frozenset("0123456789+.-")
+_LOCATOR_STOPS = frozenset(",;\"'")
 _NPM_PURL_NAME = re.compile(r"(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*")
 _CONTEXT_HIGH = {
     "privileged": "privileged mode",
@@ -524,11 +526,40 @@ def _declared_transport(config: dict[str, Any]) -> str | None:
     return _TRANSPORT_TYPES.get(declared.strip().lower().replace("_", "-"))
 
 
+def _locators(value: str) -> list[str]:
+    """Each ``scheme://rest`` locator in a value, left to right, in time linear in its length.
+
+    A scheme is an ASCII letter followed by letters, digits, ``+``, ``.`` and ``-``, and
+    the rest runs to white space or one of ``,;"'``: the matches that
+    ``re.findall(r"[A-Za-z][A-Za-z0-9+.-]*://[^\\s,;\"']+", value)`` returns. That
+    expression takes time quadratic in a long run of scheme characters, and a project
+    file such as .npmrc can hold one.
+    """
+    found: list[str] = []
+    position = 0
+    while (mark := value.find("://", position)) >= 0:
+        start = mark
+        while start > position and value[start - 1] in _SCHEME_CHARACTERS:
+            start -= 1
+        while start < mark and value[start] not in _SCHEME_LETTERS:
+            start += 1
+        end = mark + 3
+        if start < mark:
+            while end < len(value) and not (value[end].isspace() or value[end] in _LOCATOR_STOPS):
+                end += 1
+        if end > mark + 3:
+            found.append(value[start:end])
+            position = end
+        else:
+            position = mark + 1
+    return found
+
+
 def _origin_label(value: str) -> list[str]:
     """Exported locations of a package source value: origins, never paths or credentials."""
     if expands(value):
         return ["[unresolved]"]
-    found = [origin(match) or "[redacted]" for match in _LOCATOR.findall(value)]
+    found = [origin(match) or "[redacted]" for match in _locators(value)]
     if found:
         return sorted(set(found))
     return ["[local]"] if value.strip() else []
@@ -1095,6 +1126,41 @@ class _ResolverView:
         self.code = 0
         # The package manager's own environment settings were read here.
         self.environment = False
+
+
+def npm_registry_settings(
+    settings: Mapping[str, str], package: str, default: str, scope: str | None = None
+) -> list[str]:
+    """The settings that may name the registry npm fetches a package from.
+
+    A setting for the package's own scope wins. npm then uses the registry of a
+    configured ``scope`` for a package whose own scope has none, unscoped packages
+    included (npm-registry-fetch), and otherwise the file's default registry setting.
+    npm fills in ``${...}`` in a ``scope`` from the environment, so such a scope may
+    name any scope: ``scope`` itself is then returned, with the default registry
+    setting, which applies when the scope it names has no registry. A caller passes
+    such a scope only when the file has a registry setting for some scope
+    (:func:`npm_scope_registry`).
+    """
+    own = package.split("/", 1)[0] if package.startswith("@") else None
+    if own is not None and f"{own}:{default}" in settings:
+        return [f"{own}:{default}"]
+    found: list[str] = []
+    if scope and expands(scope):
+        found.append("scope")
+    elif scope:
+        fallback = f"{scope if scope.startswith('@') else '@' + scope}:registry"
+        if fallback in settings:
+            return [fallback]
+    if default in settings:
+        found.append(default)
+    return found
+
+
+def npm_scope_registry(key: str) -> bool:
+    """Whether an .npmrc key is one a ``scope`` setting can select: npm looks up
+    ``@<scope>:registry`` exactly, whatever characters the scope holds."""
+    return key.startswith("@") and key.endswith(":registry")
 
 
 def _registry_url(value: Any) -> str | None:
@@ -1709,14 +1775,16 @@ class MCPScanner(Scanner):
             # replace what the runner fetches; their names are not visible here.
             view.unresolved.append("environment-file")
         launched = {str(package.name) for package in packages}
-        npm_environment: dict[str, str] = {}
+        # The label and value of a `scope` from the environment, which wins over .npmrc.
+        environment_scope: tuple[str, str] | None = None
         if family == "npm":
             view.environment = True
             for variable, value in environment:
                 key = _npm_key(variable)
                 if key is None or value == "":
                     continue
-                npm_environment[key] = value
+                if key == "scope":
+                    environment_scope = (_environment_label(variable), value)
                 kind = _npm_setting(key, value)
                 if kind == "identity":
                     view.identity.append(f"npm {key} setting from the environment")
@@ -1762,30 +1830,26 @@ class MCPScanner(Scanner):
             if path in {"uv.toml", "pyproject.toml", ".env.yarn"}:
                 continue
             default = "npmRegistryServer" if path == ".yarnrc.yml" else "registry"
-            # npm uses the registry of a configured `scope` for a package whose own
-            # scope has none, unscoped packages included (npm-registry-fetch).
-            selected_scope = (
-                npm_environment.get("scope") or settings.get("scope") if path == ".npmrc" else None
+            scope_label, scope = (
+                environment_scope or (f"{path}:scope", settings.get("scope", ""))
+                if path == ".npmrc"
+                else ("", "")
             )
-            fallback = (
-                f"{selected_scope if selected_scope.startswith('@') else '@' + selected_scope}"
-                ":registry"
-                if selected_scope
-                else None
-            )
+            if expands(scope) and not any(npm_scope_registry(key) for key in settings):
+                # Whatever scope the environment names, no setting here is its registry.
+                scope = ""
             for package in packages:
                 name = package.name or ""
-                scope = name.split("/", 1)[0] if name.startswith("@") else None
-                scoped = f"{scope}:{default}" if scope else None
-                if scoped in settings:
-                    selected = scoped
-                elif fallback in settings:
-                    selected = fallback
-                else:
-                    selected = default
-                if selected in settings:
+                chosen = npm_registry_settings(settings, name, default, scope)
+                if launch.launcher not in {"npx", "npm exec"}:
+                    # pnpm and Bun ignore `scope` and take the default registry, so for a
+                    # launcher other than npm's both settings count.
+                    chosen += npm_registry_settings(settings, name, default)
+                for selected in dict.fromkeys(chosen):
                     view.sources.append(
-                        (f"{path}:{_setting_name(selected, launched)}", settings[selected])
+                        (scope_label, scope)
+                        if selected == "scope"
+                        else (f"{path}:{_setting_name(selected, launched)}", settings[selected])
                     )
         return view
 

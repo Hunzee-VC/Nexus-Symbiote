@@ -31,6 +31,17 @@ from nexus_symbiote.core.enums import AssuranceLevel, RiskSeverity, TrustTier
 from nexus_symbiote.core.hashing import extract_version_pin, hash_bytes, parse_json_strict
 from nexus_symbiote.core.models import ClaimEvidence, RegistryEntryComponent, RiskAssessment
 from nexus_symbiote.scanners.base import Scanner, ScanResult, sanitized_origin
+from nexus_symbiote.scanners.mcp import (
+    _npmrc,
+    _origin_label,
+    _registries,
+    _setting_name,
+    _uv_settings,
+    _yarnrc,
+    npm_registry_settings,
+    npm_scope_registry,
+)
+from nexus_symbiote.scanners.mcp_launch import expands
 from nexus_symbiote.utils.confined import ConfinedCollection
 from nexus_symbiote.utils.secrets import redact_text, redact_url
 from nexus_symbiote.utils.terminal import UNSAFE_TEXT
@@ -630,6 +641,154 @@ def _vcs_pinned(url: str) -> bool:
     return _FULL_COMMIT.fullmatch(revision) is not None
 
 
+# Project files that choose the registry npm, pnpm, Yarn and Bun fetch from, each with
+# the setting that names its default registry: npm and pnpm read .npmrc, Yarn 1 .npmrc
+# and .yarnrc, later Yarn .yarnrc.yml, and Bun .npmrc and bunfig.toml. Which of them
+# installs is not known, so every one is read.
+_NPM_REGISTRY_FILES = (
+    (".npmrc", "registry"),
+    (".yarnrc", "registry"),
+    (".yarnrc.yml", "npmRegistryServer"),
+    ("bunfig.toml", "registry"),
+)
+# Letter case is ignored in ASCII only: Unicode case folding would also match dotless
+# i and other letters that IDNA turns into another host.
+_DEFAULT_NPM_REGISTRY = re.compile(
+    r"https://registry\.(?:npmjs\.org|yarnpkg\.com)(?::443)?/?", re.ASCII | re.IGNORECASE
+)
+_DEFAULT_PYPI_INDEX = re.compile(r"(?i:https://pypi\.org)(?::443)?/simple/?", re.ASCII)
+# The pip options and configuration keys that replace or add where packages come from;
+# pip reads --pypi-url as --index-url. Index options on a requirement line are ignored.
+# pip looks a configuration key up as the long option --<key>, so the long name of each
+# of these options is also a key.
+_PIP_INDEX_OPTIONS = frozenset({"--index-url", "--pypi-url", "--extra-index-url", "--find-links"})
+_PIP_INDEX_KEYS = frozenset(option.removeprefix("--") for option in _PIP_INDEX_OPTIONS)
+# pip reads a configuration file that PIP_CONFIG_FILE names or that lies at the root of
+# the virtual environment it runs in; a project that keeps one there means it to be used.
+_PIP_CONFIG_FILES = ("pip.conf", "pip.ini")
+_PIP_CONFIG_LINE = re.compile(r"\r\n|\r|\n")
+# A redirect value longer than this is recorded without its origins.
+_LONGEST_REDIRECT = 4096
+# Package sources one entry lists; one more entry counts the rest.
+_MAX_LISTED_SOURCES = 32
+# Settings named in a finding's detail; the rest are counted.
+_MAX_NAMED_SOURCES = 8
+_REDIRECT_ADVICE = (
+    "Confirm that each configured registry or index is intended and trusted for this "
+    "package, and pin artifact digests or integrity hashes."
+)
+
+
+def _pip_config(text: str) -> list[tuple[str, str]] | None:
+    """The index settings of a pip configuration file, read as configparser reads it.
+
+    Keys are lowercased, and pip reads ``_`` as ``-`` and ignores a leading ``--`` and
+    an empty value. An indented line continues the value above it, and a comment line
+    ends nothing. None when configparser, and so pip, refuses the file: text before the
+    first section, a line that is neither a section nor ``key = value`` or
+    ``key: value``, or a section or key given twice. Every section counts, because the
+    sections pip reads depend on the command it runs and DEFAULT applies to all of them.
+    """
+    found: list[tuple[str, str]] = []
+    sections: set[str] = set()
+    keys: set[tuple[str, str]] = set()
+    section: str | None = None
+    key: str | None = None
+    values: list[str] = []
+    indent = 0
+
+    def close() -> None:
+        if key is not None:
+            name = key.replace("_", "-").removeprefix("--")
+            value = "\n".join(values).strip()
+            if name in _PIP_INDEX_KEYS and value:
+                found.append((name, value))
+
+    for line in _PIP_CONFIG_LINE.split(text):
+        stripped = line.strip()
+        if stripped.startswith(("#", ";")):
+            continue
+        if not stripped:
+            values.append("")
+            continue
+        level = len(line) - len(line.lstrip())
+        if key is not None and level > indent:
+            values.append(stripped)
+            continue
+        close()
+        key, values, indent = None, [], level
+        end = stripped.rfind("]")
+        if stripped.startswith("[") and end > 1:
+            section = stripped[1:end]
+            if section in sections:
+                return None
+            if section != "DEFAULT":
+                sections.add(section)
+            continue
+        found_delimiters = [i for i in (stripped.find("="), stripped.find(":")) if i >= 0]
+        if section is None or not found_delimiters or min(found_delimiters) == 0:
+            return None
+        delimiter = min(found_delimiters)
+        name = stripped[:delimiter].rstrip().lower()
+        if (section, name) in keys:
+            return None
+        keys.add((section, name))
+        key, values = name, [stripped[delimiter + 1 :].strip()]
+    close()
+    return found
+
+
+class _SourceLabels:
+    """Exported ``setting=origin`` entries for redirecting settings; each value is read once.
+
+    Only a value's origins are exported, never paths or credentials, as for MCP servers.
+    """
+
+    def __init__(self) -> None:
+        self._origins: dict[str, list[str]] = {}
+
+    def _locations(self, value: str) -> list[str]:
+        origins = self._origins.get(value)
+        if origins is None:
+            origins = (
+                ["[not parsed]"]
+                if len(value) > _LONGEST_REDIRECT
+                else _origin_label(value) or ["[set]"]
+            )
+            self._origins[value] = origins
+        return origins
+
+    def entries(self, redirects: Iterable[tuple[str, str]]) -> list[str]:
+        found = {
+            f"{label}={location}"
+            for label, value in redirects
+            for location in self._locations(value)
+        }
+        listed = sorted(found)
+        if len(listed) > _MAX_LISTED_SOURCES:
+            more = len(listed) - _MAX_LISTED_SOURCES
+            listed = [*listed[:_MAX_LISTED_SOURCES], f"[{more} more not listed]"]
+        return listed
+
+
+def _named(redirects: Iterable[tuple[str, str]]) -> str:
+    names = sorted({label for label, _ in redirects})
+    shown = ", ".join(names[:_MAX_NAMED_SOURCES])
+    more = len(names) - _MAX_NAMED_SOURCES
+    return shown + (f" and {more} more" if more > 0 else "")
+
+
+def _redirect(component: RegistryEntryComponent, sources: list[str], detail: str) -> None:
+    """Record the settings that send a package's resolution elsewhere.
+
+    Its name and version then do not identify what is installed, so no package URL
+    is claimed for it.
+    """
+    component.package_url = None
+    component.properties["package_sources"] = sources
+    component.risks.append(_risk(RiskSeverity.LOW, "registry_origin", detail, _REDIRECT_ADVICE))
+
+
 class _Resolution(NamedTuple):
     version: str
     origin: str | None
@@ -844,6 +1003,8 @@ class RegistryScanner(Scanner):
         resolutions: dict[str, Any] = lock[1] if lock else {}
         overrides = self._npm_overrides(data)
         components: list[RegistryEntryComponent] = []
+        # Each package fetched from a registry, by the name the registry knows it by.
+        fetched: list[tuple[RegistryEntryComponent, str]] = []
         gaps: dict[str, None] = {}
         for key, specs in sorted(declared.items()):
             spec = specs[-1][1]
@@ -869,6 +1030,8 @@ class RegistryScanner(Scanner):
                     key, package, kind, version_range, specs, record, lock, overridden, result
                 )
             )
+            if kind in ("registry", "alias"):
+                fetched.append((components[-1], package))
         if overrides is None or any(self._is_ai_package(t) for t in overrides[1]):
             # Too many overrides to read, or one that installs an AI package under
             # another package's name.
@@ -888,7 +1051,100 @@ class RegistryScanner(Scanner):
                 self._resolve_pnpm_lockfile(raw_lock, components, result)
             else:
                 self._resolve_yarn_lockfile(raw_lock, components, result)
+        if fetched:
+            self._redirect_npm(result, fetched)
         return components
+
+    def _npm_registries(
+        self, result: ScanResult
+    ) -> list[tuple[str, dict[str, str], str, str | None]]:
+        """Each project file's registry settings, the setting that names its default
+        registry, and for .npmrc the scope its ``scope`` setting selects.
+
+        The files are read with the MCP collector's readers. An empty value selects
+        nothing, as npm reads it. A .npmrc key that names an environment variable may
+        be any setting, so its registries are a coverage gap.
+        """
+        found: list[tuple[str, dict[str, str], str, str | None]] = []
+        for name, default in _NPM_REGISTRY_FILES:
+            scope: str | None = None
+            if name == "bunfig.toml":
+                data = self._toml(name, result)
+                if data is None:
+                    continue
+                install = data.get("install")
+                settings = (
+                    _registries(install, default, "scopes") if isinstance(install, dict) else []
+                )
+            elif name == ".yarnrc.yml":
+                mapping = self._read_mapping(Path(name), result)
+                if mapping is None:
+                    continue
+                result.surfaces_scanned.append(name)
+                settings = _registries(mapping, default, "npmScopes")
+            else:
+                text = self._read(name, result)
+                if text is None:
+                    continue
+                if name == ".yarnrc":
+                    settings = list(_yarnrc(text))
+                else:
+                    parsed = _npmrc(text)
+                    if parsed.unresolved:
+                        result.surfaces_excluded.append(
+                            ".npmrc: a setting name depends on the environment; registries "
+                            "not resolved"
+                        )
+                    settings = list(parsed.settings)
+                    scope = dict(parsed.settings).get("scope")
+            found.append((name, {key: value for key, value in settings if value}, default, scope))
+        return found
+
+    def _redirect_npm(
+        self, result: ScanResult, fetched: list[tuple[RegistryEntryComponent, str]]
+    ) -> None:
+        """Record on every package fetched from a registry the project settings that may
+        choose another registry for it.
+
+        Every package manager takes the registry of the package's own scope. For a
+        package without one, npm takes the registry of the scope that .npmrc ``scope``
+        names, and pnpm, Yarn 1 and Bun, which ignore ``scope``, the default registry;
+        which of them installs is not known, so both count. A ``scope`` that npm fills
+        in from the environment counts as ``.npmrc:scope=[unresolved]`` when the file
+        gives some scope a registry other than the default one.
+        """
+        registries: list[tuple[str, dict[str, str], str, str | None]] = []
+        for name, settings, default, scope in self._npm_registries(result):
+            if expands(scope or "") and not any(
+                npm_scope_registry(key) and not _DEFAULT_NPM_REGISTRY.fullmatch(value)
+                for key, value in settings.items()
+            ):
+                # No scope the environment can name has a registry here but the default.
+                scope = None
+            registries.append((name, settings, default, scope))
+        labels = _SourceLabels()
+        for component, package in fetched:
+            found: list[tuple[str, str]] = []
+            for name, settings, default, scope in registries:
+                selected = dict.fromkeys(
+                    [
+                        *npm_registry_settings(settings, package, default, scope),
+                        *npm_registry_settings(settings, package, default),
+                    ]
+                )
+                found.extend(
+                    (f"{name}:{_setting_name(key, set())}", settings[key])
+                    for key in selected
+                    if not _DEFAULT_NPM_REGISTRY.fullmatch(settings[key])
+                )
+            if found:
+                _redirect(
+                    component,
+                    labels.entries(found),
+                    f"npm package '{component.name}' may resolve from a registry that the project "
+                    f"configures ({_named(found)}), not the default npm registry; its name and "
+                    "version do not establish identity.",
+                )
 
     @staticmethod
     def _installed_name(key: str, record: Any, resolutions: dict[str, Any]) -> str | None:
@@ -2025,12 +2281,14 @@ class RegistryScanner(Scanner):
         return len(text) > _LONGEST_OPTIONS and any(c in text for c in "\"'\\")
 
     @classmethod
-    def _option_gaps(cls, text: str, names: set[str], entries: set[str]) -> list[str]:
-        """What an option line adds or pins that the collector does not read.
+    def _option_gaps(
+        cls, options: list[tuple[str, str]], names: set[str], entries: set[str]
+    ) -> list[str]:
+        """What the options of a line add or pin that the collector does not read.
 
         The gap never names the target, which can be a URL carrying a credential.
         """
-        options, gaps = cls._options(text)
+        gaps: list[str] = []
         for option, value in options:
             gap = cls._PACKAGE_OPTIONS.get(option)
             if gap is None:
@@ -2217,6 +2475,7 @@ class RegistryScanner(Scanner):
 
     def _scan_pip(self, result: ScanResult, entries: list[str]) -> list[RegistryEntryComponent]:
         packages: dict[str, _Package] = {}
+        redirects: set[tuple[str, str]] = set()
 
         def declare(
             source: str,
@@ -2231,8 +2490,8 @@ class RegistryScanner(Scanner):
             if declaration is not None:
                 packages.setdefault(declaration.name, _Package()).add(declaration)
 
-        self._scan_requirements(result, entries, declare)
-        for text, group, untranslated in self._pyproject_declarations(result):
+        self._scan_requirements(result, entries, declare, redirects)
+        for text, group, untranslated in self._pyproject_declarations(result, redirects):
             # Compare the text the requirement is parsed from, without a trailing comment.
             declare(
                 "pyproject.toml", text.strip().split(" #", 1)[0].strip(), group, (), untranslated
@@ -2252,7 +2511,61 @@ class RegistryScanner(Scanner):
                 )
             }
             self._resolve_python_lockfiles(components, result, from_urls)
+            indexed = [
+                component
+                for component, package in zip(components, packages.values(), strict=True)
+                if not all(
+                    d.requirement is not None and d.requirement.url for d in package.declarations
+                )
+            ]
+            if indexed:
+                self._redirect_python(result, indexed, redirects)
         return components
+
+    def _redirect_python(
+        self,
+        result: ScanResult,
+        components: list[RegistryEntryComponent],
+        redirects: set[tuple[str, str]],
+    ) -> None:
+        """Record on every package installed from an index the settings that redirect it.
+
+        pip applies index options and its configuration to every package of a run, and
+        uv, Poetry and PDM their sources to every package they resolve; which files one
+        install reads is not known, so each such setting may apply to each package.
+        """
+        for name in _PIP_CONFIG_FILES:
+            text = self._read(name, result)
+            if text is None:
+                continue
+            settings = _pip_config(text)
+            if settings is None:
+                result.surfaces_excluded.append(
+                    f"{name}: not read as pip reads it; index settings not resolved"
+                )
+                continue
+            redirects.update((f"{name}:{key}", value) for key, value in settings)
+        uv = self._toml("uv.toml", result)
+        if uv is not None:
+            redirects.update(self._uv_redirects(uv, "uv.toml:"))
+        found = sorted(
+            (label, value) for label, value in redirects if not _DEFAULT_PYPI_INDEX.fullmatch(value)
+        )
+        if not found:
+            return
+        sources = _SourceLabels().entries(found)
+        named = _named(found)
+        for component in components:
+            if "package_resolution" not in component.claims:
+                # PyPI was assumed, not recorded; a lockfile record names its index.
+                component.registry_uri = None
+            _redirect(
+                component,
+                list(sources),
+                f"PyPI package '{component.name}' may resolve from an index or location that "
+                f"the project configures ({named}); its name and version do not establish "
+                "identity.",
+            )
 
     def _resolve_python_lockfiles(
         self,
@@ -2375,6 +2688,7 @@ class RegistryScanner(Scanner):
         result: ScanResult,
         entries: list[str],
         declare: Callable[[str, str, str, tuple[str, ...]], None],
+        redirects: set[tuple[str, str]],
     ) -> None:
         filenames = self._requirement_files(entries)
         names = {n.casefold() for n in filenames}
@@ -2422,9 +2736,16 @@ class RegistryScanner(Scanner):
                 gaps: list[str] = []
                 if text.startswith("-"):
                     # Includes, constraints and editable installs are not followed. One
-                    # that reaches beyond what is read here is a coverage gap; index
-                    # options add no package.
-                    gaps = self._option_gaps(text, names, folded)
+                    # that reaches beyond what is read here is a coverage gap. Index
+                    # options add no package, but pip applies them to every package
+                    # of the run that reads them.
+                    options, gaps = self._options(text)
+                    gaps += self._option_gaps(options, names, folded)
+                    redirects.update(
+                        (f"{filename}:{option}", value)
+                        for option, value in options
+                        if option in _PIP_INDEX_OPTIONS
+                    )
                 else:
                     # Per-requirement options such as --hash follow the requirement
                     # itself. pip splits them off on spaces only, so a tab or another
@@ -2493,26 +2814,32 @@ class RegistryScanner(Scanner):
                     newline = text.find("\n", position)
                     position = len(text) if newline < 0 else newline
 
-    def _pyproject_declarations(self, result: ScanResult) -> list[tuple[str, str, str | None]]:
-        """Each declaration with its group ("" for none) and, when it is not translated,
-        why."""
-        content = self._read("pyproject.toml", result)
+    def _toml(self, name: str, result: ScanResult) -> dict[str, Any] | None:
+        """A root TOML file read within the bounds that keep tomllib's work linear."""
+        content = self._read(name, result)
         if content is None:
-            return []
+            return None
         if len(content) > _PYPROJECT_BUDGET:
-            result.scan_failures.append("pyproject.toml: exceeds the size limit: not read")
-            return []
+            result.scan_failures.append(f"{name}: exceeds the size limit: not read")
+            return None
         if self._longest_dotted_key(content) > _LONGEST_DOTTED_KEY:
-            result.scan_failures.append(
-                "pyproject.toml: dotted key exceeds the length limit: not read"
-            )
-            return []
+            result.scan_failures.append(f"{name}: dotted key exceeds the length limit: not read")
+            return None
         try:
-            data = tomllib.loads(content)
+            return tomllib.loads(content)
         except (ValueError, RecursionError, MemoryError):
             # TOMLDecodeError is a ValueError; tomllib raises a plain one for a decimal
             # integer past CPython's limit on digits it converts.
-            result.scan_failures.append("pyproject.toml: invalid TOML")
+            result.scan_failures.append(f"{name}: invalid TOML")
+            return None
+
+    def _pyproject_declarations(
+        self, result: ScanResult, redirects: set[tuple[str, str]]
+    ) -> list[tuple[str, str, str | None]]:
+        """Each declaration with its group ("" for none) and, when it is not translated,
+        why. The index settings of uv, Poetry and PDM go to ``redirects``."""
+        data = self._toml("pyproject.toml", result)
+        if data is None:
             return []
         declarations: list[tuple[str, str, str | None]] = []
         project = data.get("project", {})
@@ -2545,6 +2872,13 @@ class RegistryScanner(Scanner):
         self._uv_declarations(tool.get("uv", {}), declarations, failures, gaps, strings)
         self._pdm_declarations(tool.get("pdm", {}), declarations, failures, gaps, strings)
         self._poetry_declarations(tool.get("poetry", {}), declarations, failures, gaps)
+        redirects.update(self._uv_redirects(tool.get("uv"), "pyproject.toml:tool.uv."))
+        for name, shown in (("poetry", "Poetry"), ("pdm", "PDM")):
+            found = self._source_redirects(tool.get(name), name)
+            if found is None:
+                failures[f"pyproject.toml: invalid {shown} source"] = None
+            else:
+                redirects.update(found)
         result.scan_failures.extend(failures)
         result.surfaces_excluded.extend(gaps)
         return declarations
@@ -2623,6 +2957,56 @@ class RegistryScanner(Scanner):
                     gaps[cls._UV_GAPS["override"]] = None
                     if key == "override-dependencies":
                         declarations.append((name.group(), "", "override"))
+
+    @staticmethod
+    def _uv_redirects(settings: Any, label: str) -> list[tuple[str, str]]:
+        """The index settings of a uv table and of its pip table: every index but an
+        explicit one, which serves only the packages a source names and is a gap there."""
+        if not isinstance(settings, dict):
+            return []
+        found: list[tuple[str, str]] = []
+        for table, prefix in ((settings, label), (settings.get("pip"), label + "pip.")):
+            if not isinstance(table, dict):
+                continue
+            chosen = {
+                key: table[key]
+                for key in ("index-url", "extra-index-url", "find-links")
+                if key in table
+            }
+            if "index" in table:
+                indexes = table["index"] if isinstance(table["index"], list) else [table["index"]]
+                chosen["index"] = [
+                    index
+                    for index in indexes
+                    if not (isinstance(index, dict) and index.get("explicit") is True)
+                ]
+            found += [(prefix + key, value) for key, value in _uv_settings(chosen).settings]
+        return found
+
+    @staticmethod
+    def _source_redirects(table: Any, tool: str) -> list[tuple[str, str]] | None:
+        """The package sources of a Poetry or PDM table that may serve any package.
+
+        A Poetry source with ``priority = "explicit"`` serves only the dependencies that
+        name it, which are gaps already. A source without a URL other than Poetry's
+        ``PyPI`` cannot be read, and neither can a source list that is not a list of
+        tables: None.
+        """
+        sources = table.get("source", []) if isinstance(table, dict) else []
+        if not isinstance(sources, list) or not all(isinstance(item, dict) for item in sources):
+            return None
+        found: list[tuple[str, str]] = []
+        for source in sources:
+            if tool == "poetry" and source.get("priority") == "explicit":
+                continue
+            url = source.get("url")
+            if isinstance(url, str):
+                found.append((f"pyproject.toml:tool.{tool}.source", url))
+            elif not (
+                url is None and tool == "poetry" and str(source.get("name")).lower() == "pypi"
+            ):
+                return None
+        return found
 
     @classmethod
     def _pdm_declarations(

@@ -32,7 +32,10 @@ and values are trimmed, JSON-decoded when quoted and cut at an unescaped `;` or 
 otherwise, lines end at a carriage return or line feed, keys after the first
 `[section]` line are ignored, and a key containing `${...}` is `[unresolved]`. Its
 registry (and the `@scope:registry` of a configured `scope` for a package without a
-registry of its own, as npm selects it), cache, offline, proxy, `strict-ssl=false`,
+registry of its own, as npm selects it, beside the default registry that pnpm and Bun
+use instead for a launcher other than `npx` and `npm exec`; a `scope` that holds
+`${...}` may name any scope, so it is an `[unresolved]` source when the file gives
+some scope a registry), cache, offline, proxy, `strict-ssl=false`,
 CA, user and global configuration, prefix, workspace and store settings are sources;
 auth settings (`//host/:...`, `_auth`, `username` and similar) are ignored. For npm and
 pnpm, every setting is classified, from `.npmrc` and from `npm_config_*` or

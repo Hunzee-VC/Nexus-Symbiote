@@ -238,7 +238,12 @@ def test_root_files_and_other_spellings_keep_their_records(tmp_path):
         _write(tmp_path, relative, "Rules.")
     _write(tmp_path, ".cursor/rules/.cursorrules", "Rules.")
     result = PromptScanner().scan(tmp_path)
-    assert not result.scan_failures
+    # Another spelling of a nested name is a failure, as at the root, and is not recorded.
+    variant = "is the active file on case-insensitive file systems and is not inventoried"
+    assert result.scan_failures == [
+        f"pkg/.CursorRules: case variant of pkg/.cursorrules {variant}",
+        f"pkg/gemini.md: case variant of pkg/GEMINI.md {variant}",
+    ]
     prompts = sorted(c.bom_ref for c in result.components)
     assert prompts == [
         "prompt:.cursor/rules/.cursorrules",

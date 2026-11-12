@@ -191,7 +191,7 @@ def test_private_origin_exclusion_sends_only_lockfile_backed_public_packages(tmp
         "openai": unrecorded,
         "mcp-acme-tools": unrecorded,
     }
-    # pip requirements name no index: a public PyPI label is not evidence of the origin.
+    # Without a lockfile, a public PyPI label is assumed, so it is not evidence of the origin.
     labelled = package("acme-internal-tools", registry_uri="https://pypi.org")
     quiet = Scripted(clean)
     fetch_advisories(AIBOM(components=[labelled]), transport=quiet, exclude_private_origins=True)

@@ -66,13 +66,31 @@ A way around a limit that its entry does not describe is worth a
 - **Case variants.** When a fixed path such as `CLAUDE.md`, `.mcp.json` or
   `.claude/settings.json` is absent, a file whose name differs only by case or
   Unicode normalization is a failure, because case-insensitive file systems open
-  it. When both exist, only the exact name is read. More than 16 such names in one
-  directory, or a search beyond the `entries` limit, is a failure.
+  it. When both exist, only the exact name is read, except for instruction files:
+  another spelling of a fixed instruction path, such as `claude.md` beside
+  `CLAUDE.md`, and of `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` or `.cursorrules` below
+  the root, such as `pkg/claude.md`, is a failure even beside the exact name, as are
+  those of nested `.claude/settings.json` files, because a case-insensitive checkout
+  holds one file for both names. `CODEX.md` and `codex.md` are both read. A spelling
+  that a subagent, rule, prompt, skill or command directory walk inventories, such
+  as `.claude/agents/gemini.md`, is read there instead. Rename any other such file,
+  including a documentation page such as `docs/agents.md`, which case-insensitive
+  file systems open as `docs/AGENTS.md`. More than 16 such names in one directory,
+  or a search beyond the `entries` limit, is a failure.
 - **Symlinks.** A relative symlink to a regular file or directory in the project,
   not excluded, within the `depth` limit and reached without another symlink, is
   read through its target. A read through any other symlink, such as an absolute
   one or `.claude -> .`, is a failure. A walk of the project skips directory
   symlinks and walks their targets under the targets' own names.
+- **Every walk fails on a link out of the project.** An absolute or escaping
+  symlink anywhere in the tree, such as `assets/logo.png -> /usr/share/logo.png`,
+  is a failure for each collector that walks the project (`mcp`, `model`,
+  `prompt`, `rag`, `a2a` and `ide_agents`), whatever its name. Such a link may name
+  a directory, and each of them reads names at any depth below directories of any
+  name; telling a file from a directory would mean following the link out of the
+  project, and the answer would hold only on the machine that scans, not on one
+  that later opens the checkout. Replace the link with the file, or with a relative
+  link inside the project.
 - **Hard links are ordinary files.** A hard-linked file inside the root is read like
   any other, so an inventory can describe a file that also has a name outside the
   root. See [security boundaries](../SECURITY.md#security-boundaries).
@@ -280,15 +298,18 @@ A way around a limit that its entry does not describe is worth a
 - **Instruction files under other names are not recorded.** The `prompt` collector
   reads the fixed files the [README lists](../README.md#what-each-collector-reads),
   `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` and `.cursorrules` in any subdirectory, and
-  every file in the rule, prompt and subagent directories. Nested names must match
-  exactly, so `CLAUDE.local.md`, `AGENTS.override.md`, `.clinerules` or
-  `.windsurfrules` below the root, `claude.md` in a subdirectory, and other hosts'
-  conventions are neither inventoried nor checked for hidden characters. List such
-  files in an [`agent.yaml`](agent-manifest.md).
+  every file in the rule, prompt and subagent directories. Another spelling of a
+  nested name, such as `claude.md` in a subdirectory, is a
+  [failure](#every-collector), not a file that is read, unless one of those
+  directories, or a skill or command directory, holds it. `CLAUDE.local.md`,
+  `AGENTS.override.md`, `.clinerules` or `.windsurfrules` below the root, and other
+  hosts' conventions, are neither inventoried nor checked for hidden characters.
+  List such files in an [`agent.yaml`](agent-manifest.md).
 - **Imports are followed from memory files.** `@path` imports are followed to five
   hops from the root `CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md` and
-  `GEMINI.md`, and from every `CLAUDE.md` and `GEMINI.md` below the root, resolved
-  from that file's directory. An import that leaves the project root, names an
+  `GEMINI.md`, from every `CLAUDE.md` and `GEMINI.md` below the root, and from another
+  spelling of either that a subagent, rule, prompt, skill or command directory holds,
+  resolved from that file's directory. An import that leaves the project root, names an
   excluded path or lies deeper than the `depth` limit is a gap, so write a path
   alias such as `@/components` as code.
 - **Fixtures count.** A nested `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` or `.cursorrules`
@@ -358,10 +379,19 @@ A way around a limit that its entry does not describe is worth a
   Any other dependency, including a look-alike of a listed name, produces no
   component and no finding. It is not a full SBOM and does not detect typosquats.
 - **Several manifests are not read.** Requirements files in subdirectories,
-  `setup.py`, `setup.cfg`, dynamic dependencies, conda `environment.yml`, index
-  choices such as `--index-url` and `.npmrc`, Kubernetes manifests, Helm charts,
-  `.devcontainer` configuration and `docker buildx bake` files are not read and
-  leave no gap. [Not read](registry-collector.md#not-read) lists them all.
+  `setup.py`, `setup.cfg`, dynamic dependencies, conda `environment.yml`,
+  Kubernetes manifests, Helm charts, `.devcontainer` configuration and
+  `docker buildx bake` files are not read and leave no gap.
+  [Not read](registry-collector.md#not-read) lists them all.
+- **Registry redirects are read from the project root only.** The
+  [registry and index settings](registry-collector.md#registry-and-index-settings)
+  of the root `.npmrc`, `.yarnrc`, `.yarnrc.yml`, `bunfig.toml`, requirements
+  files, `pip.conf`, `pip.ini`, `uv.toml` and `pyproject.toml` are recorded. User
+  and global configuration, environment variables such as `PIP_INDEX_URL` or
+  `npm_config_registry`, and command-line options can redirect a package with no
+  finding. A PyPI setting is recorded on every PyPI package, even one that no
+  install reading that file fetches, and an npm or PyPI package that a lockfile
+  pins with integrity values loses its package URL all the same.
 - **Lockfiles are claims.** Versions, integrity values and origins in a lockfile are
   recorded as declared; nothing is fetched or verified. Python lockfiles give the
   version and index origin, not artifact digests, and Yarn Berry `checksum` values
@@ -375,7 +405,8 @@ A way around a limit that its entry does not describe is worth a
   file, such as `requirements-docs.txt`, is never installed.
 - **Some requirement text is not followed.** Options after a requirement, other than
   `-e` and `--hash`, are not checked. A `${NAME}` variable inside an option's value
-  or a `name @ URL` reference is neither resolved nor reported. pip expands
+  or a `name @ URL` reference is neither resolved nor reported, except in an index
+  option's value, which is recorded as an `[unresolved]` redirect. pip expands
   variables before it splits a line, so a value with spaces could add options,
   including an include.
 - **Images outside `FROM` are not recorded.** `COPY --from=<image>` and
@@ -709,10 +740,11 @@ A way around a limit that its entry does not describe is worth a
   see [limits](offline-and-live-modes.md#limits).
 - **`advisories` sends package identities to OSV.** It sends each package's
   ecosystem, name and exact version, including private packages unless excluded.
-  Requirements files and `pyproject.toml` name no index, so a Python package that
-  no `uv.lock` or `poetry.lock` resolves is labelled with the public PyPI origin.
-  Keep a private name local with `--exclude`, and preview with `--dry-run`; see
-  [`advisories`](cli-reference.md#advisories).
+  A Python package that no `uv.lock` or `poetry.lock` resolves is labelled with the
+  public PyPI origin, which is assumed, not recorded. One that a project setting
+  [redirects](registry-collector.md#registry-and-index-settings) has no origin and
+  no package URL, and is not sent. Keep a private name local with `--exclude`, and
+  preview with `--dry-run`; see [`advisories`](cli-reference.md#advisories).
 
 ## Runtime gateway
 

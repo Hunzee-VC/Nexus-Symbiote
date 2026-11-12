@@ -288,16 +288,18 @@ nexus-symbiote advisories [OPTIONS] AIBOM_PATH
 | `-o`, `--output` `PATH` | Write the advisory report to this file instead of standard output. |
 | `--fail-on-advisory` / `--no-fail-on-advisory` | Exit with status 1 when an advisory is found (default: fail). |
 | `--exclude` `NAME` | Never send this package name to OSV; a trailing `*` matches a prefix (repeatable). |
-| `--exclude-private-origins` | Send only packages whose lockfile resolution records the public PyPI or npm registry. Requirements files and `pyproject.toml` record no index, so Python packages that no `uv.lock` or `poetry.lock` resolves are withheld; withhold private names with `--exclude` instead to keep public ones checked. |
+| `--exclude-private-origins` | Send only packages whose lockfile resolution records the public PyPI or npm registry. A Python package that no `uv.lock` or `poetry.lock` resolves has no recorded origin, so it is withheld; withhold private names with `--exclude` instead to keep public ones checked. |
 | `--dry-run` | List the package identities that would be sent, without contacting OSV (works offline). |
 
 The command sends each package's ecosystem, normalized name and exact version to
 `https://api.osv.dev/v1/querybatch`, including packages resolved from a private
-registry unless you exclude them. Requirements files and `pyproject.toml` name no
-index, so the registry collector labels a Python package that no `uv.lock` or
-`poetry.lock` resolves with the public PyPI origin; for such a package only
-`--exclude` (previewed with `--dry-run`) keeps a private name local while public
-ones are still checked. It exits 1 when an advisory is found, or when
+registry unless you exclude them. The registry collector labels a Python package
+that no `uv.lock` or `poetry.lock` resolves with the public PyPI origin, which is
+assumed, not recorded; for such a package only `--exclude` (previewed with
+`--dry-run`) keeps a private name local while public ones are still checked. A
+package that a project setting redirects to another registry or index has no
+package URL, so it is not sent and is reported as `exact package identity
+unavailable`. It exits 1 when an advisory is found, or when
 not every package in scope was looked up (`coverage` is `partial` or `none`,
 including an inventory with no exact PyPI or npm package). With `--dry-run` it looks
 nothing up, so `coverage` is `none`, and it exits 1 only when a package in scope has

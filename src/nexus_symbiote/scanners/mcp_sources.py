@@ -27,6 +27,7 @@ import unicodedata
 import warnings
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from itertools import islice
 from pathlib import Path
 
 from nexus_symbiote import limits
@@ -703,6 +704,7 @@ def collect_source_references(
     of it is the budget's one named gap, and nothing after it is read.
     """
     settings = limits.current()
+    python_nodes = limits.bound("python-nodes")
     servers = _Kind(is_server_source, _server_candidate)
     python = _Kind(_python_source, _python_candidate)
     clients = [_Kind(_script_source(suffix), _client_candidate) for suffix in _CLIENT_SUFFIXES]
@@ -774,7 +776,12 @@ def collect_source_references(
         except (SyntaxError, ValueError, RecursionError):
             fail(path, "invalid Python syntax")
         else:
-            collect_python_tools(tree, text, path, result)
+            # Every analysis below walks the whole tree, so none runs past the bound.
+            nodes = list(islice(ast.walk(tree), python_nodes.value + 1))
+            if len(nodes) > python_nodes.value:
+                fail(path, python_nodes.exceeded())
+                continue
+            collect_python_tools(tree, nodes, text, path, result)
             client = _python_client(tree)
             if client:
                 detected.append(location)
