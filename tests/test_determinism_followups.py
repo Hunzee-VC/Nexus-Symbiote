@@ -11,13 +11,13 @@ from typing import Any
 import pytest
 
 from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote.core.canonical import prepare
 from nexus_symbiote.core.models import (
     AgentComponent,
     CompletenessClaim,
     DiscoveryVerification,
 )
 from nexus_symbiote.diff.differ import AIBOMDiffer
-from nexus_symbiote.generators._common import prepare
 from nexus_symbiote.generators.spdx import SPDXGenerator
 from nexus_symbiote.scanners.shadowscan import ShadowScanImporter
 

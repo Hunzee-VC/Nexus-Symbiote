@@ -20,22 +20,24 @@ from urllib.parse import unquote, urlsplit
 from referencing.exceptions import Unresolvable
 
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
+from nexus_symbiote.core.canonical import (
+    NAMESPACE,
+    content_digest,
+    json_text,
+    native_document,
+    prepare,
+)
 from nexus_symbiote.core.enums import ComponentType
 from nexus_symbiote.core.models import AgentComponent, AnyComponent, ModelComponent
 from nexus_symbiote.generators import _legacy
 from nexus_symbiote.generators._common import (
-    NAMESPACE,
     PROJECTION_PROPERTY,
     claim_properties,
     component_property,
-    content_digest,
     coverage_aggregate,
     declared_projection,
     document_properties,
-    json_text,
     native_components,
-    native_document,
-    prepare,
     recover_native,
     repository_scan,
     repository_subject,

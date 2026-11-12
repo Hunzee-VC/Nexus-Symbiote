@@ -17,6 +17,7 @@ from click.testing import CliRunner
 
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
+from nexus_symbiote.core.canonical import NAMESPACE, native_document, prepare
 from nexus_symbiote.core.enums import RiskSeverity
 from nexus_symbiote.core.models import (
     AgentComponent,
@@ -26,7 +27,6 @@ from nexus_symbiote.core.models import (
     RiskAssessment,
     ToolComponent,
 )
-from nexus_symbiote.generators._common import NAMESPACE, native_document, prepare
 from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
 from nexus_symbiote.generators.sarif import SARIFGenerator
 from nexus_symbiote.generators.spdx import SPDXGenerator

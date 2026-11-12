@@ -7,6 +7,7 @@ import json
 import pytest
 
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
+from nexus_symbiote.core.canonical import prepare
 from nexus_symbiote.core.enums import (
     AutonomyLevel,
     CapabilityClass,
@@ -33,7 +34,6 @@ from nexus_symbiote.core.models import (
     RiskAssessment,
     ToolComponent,
 )
-from nexus_symbiote.generators._common import prepare
 
 
 class TestEnums:

@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
+from nexus_symbiote.core.canonical import native_document
 from nexus_symbiote.core.models import (
     AgentComponent,
     CompletenessClaim,
@@ -22,7 +23,6 @@ from nexus_symbiote.core.models import (
     RegistryEntryComponent,
     ToolComponent,
 )
-from nexus_symbiote.generators._common import native_document
 from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
 from nexus_symbiote.generators.spdx import SPDXGenerator
 from nexus_symbiote.generators.validation import _schema, validate_cyclonedx, validate_spdx

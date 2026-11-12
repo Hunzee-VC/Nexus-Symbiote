@@ -17,13 +17,11 @@ import uuid
 from typing import Any
 
 from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote.core.canonical import NAMESPACE, content_digest, prepare
 from nexus_symbiote.core.models import ModelComponent
 from nexus_symbiote.generators._common import (
-    NAMESPACE,
     OMITTED_IMPORTED_FINDINGS,
-    content_digest,
     imported_discovery_component,
-    prepare,
 )
 from nexus_symbiote.generators.base import Generator
 from nexus_symbiote.generators.cyclonedx import standard_component

@@ -8,11 +8,7 @@ import re
 from typing import Any, Literal
 
 from nexus_symbiote.core.aibom import AIBOM
-from nexus_symbiote.core.canonical import NAMESPACE as NAMESPACE
-from nexus_symbiote.core.canonical import content_digest as content_digest
-from nexus_symbiote.core.canonical import json_text as json_text
-from nexus_symbiote.core.canonical import native_document as native_document
-from nexus_symbiote.core.canonical import prepare as prepare
+from nexus_symbiote.core.canonical import content_digest, json_text, native_document
 from nexus_symbiote.core.enums import ComponentType
 from nexus_symbiote.core.hashing import extract_version_pin, parse_json_strict
 from nexus_symbiote.core.models import AnyComponent, CompletenessClaim, RegistryEntryComponent
