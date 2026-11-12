@@ -146,9 +146,15 @@ def test_candidate_is_separate_and_can_be_verified_twice(tmp_path):
     original = target.read_bytes()
     runner = CliRunner()
     assert runner.invoke(main, args).exit_code != 0
+    # Recording tools that no inventory approved is drift: the candidate is printed
+    # for review, but the command fails unless the operator accepts the drift.
     recorded = runner.invoke(main, args + ["--record"])
-    assert recorded.exit_code == 0, recorded.output
-    candidate = AIBOM.model_validate_json(recorded.stdout)
+    assert recorded.exit_code == 1, recorded.output
+    assert "Drift in server mcp:weather: new tool weather" in recorded.stderr
+    AIBOM.model_validate_json(recorded.stdout)
+    accepted = runner.invoke(main, args + ["--record", "--accept-drift"])
+    assert accepted.exit_code == 0, accepted.output
+    candidate = AIBOM.model_validate_json(accepted.stdout)
     for _ in range(2):
         report = verify_mcp_servers(candidate, trusted_launchers=policy)
         assert report.complete and not report.has_drift
@@ -177,7 +183,9 @@ def test_missing_tools_and_legacy_profiles_fail_without_candidate(tmp_path):
         [TOOL, TOOL],
         [{**TOOL, "inputSchema": []}],
         [{**TOOL, "inputSchema": {"type": "invalid"}}],
-        [{**TOOL, "outputSchema": {"type": "object"}}],
+        [{**TOOL, "outputSchema": {"type": "array"}}],
+        [{**TOOL, "title": 7}],
+        [{**TOOL, "_meta": []}],
         [{**TOOL, "annotations": {"readOnlyHint": "true"}}],
     ],
 )

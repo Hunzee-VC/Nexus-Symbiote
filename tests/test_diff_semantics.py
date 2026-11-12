@@ -178,8 +178,10 @@ def test_coverage_loss_cannot_hide_behind_unchanged_components():
     new.metadata.completeness.scanner_status["model"] = "failed"
     report = AIBOMDiffer().diff(old, new)
     assert report.has_changes and report.total_changes == 1
-    assert report.to_dict()["metadata_changes"][0]["field"] == "completeness"
+    assert report.to_dict()["metadata_changes"][0]["field"] == "completeness.scanner_status.model"
     assert report.security_alerts[0]["severity"] == "high"
+    assert "'model'" in report.security_alerts[0]["alert"]
+    assert "complete to failed" in report.security_alerts[0]["alert"]
 
 
 def test_new_collection_event_is_not_composition_drift():

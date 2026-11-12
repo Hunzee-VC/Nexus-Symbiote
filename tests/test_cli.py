@@ -208,32 +208,60 @@ class TestScanCommand:
         assert data["components"][0]["deployment_status"] == "unknown"
 
 
-class TestValidateCommand:
-    def test_validate_valid_bom(self, tmp_path):
-        project = _create_test_project(tmp_path)
-        runner = CliRunner()
-        bom_path = tmp_path / "test.json"
-        runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_path)])
-        result = runner.invoke(main, ["validate", str(bom_path)])
-        assert result.exit_code in (0, 1)
+def _project_beside_outputs(tmp_path: Path) -> Path:
+    """The test project in its own directory, so written inventories are not scanned."""
+    project = tmp_path / "project"
+    project.mkdir()
+    return _create_test_project(project)
 
-    def test_validate_with_project(self, tmp_path):
+
+def _scanned(runner: CliRunner, project: Path, bom_path: Path) -> Path:
+    result = runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_path)])
+    assert result.exit_code == 0, result.output
+    return bom_path
+
+
+class TestValidateCommand:
+    def test_validate_without_project_cannot_verify_recorded_hashes(self, tmp_path):
         project = _create_test_project(tmp_path)
         runner = CliRunner()
-        bom_path = tmp_path / "test.json"
-        runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_path)])
+        bom_path = _scanned(runner, project, tmp_path / "test.json")
+        # Without the project root no recorded artifact hash can be re-checked: the
+        # zero-filled SafeTensors file and the prompt cannot be verified.
+        result = runner.invoke(main, ["validate", str(bom_path)])
+        assert result.exit_code == 1
+        assert "Assessment basis: supplied-bom" in result.stdout
+        assert result.stdout.splitlines()[-1] == "Validation: FAILED"
+
+    def test_validate_with_project_fails_on_the_malformed_model_only(self, tmp_path):
+        project = _project_beside_outputs(tmp_path)
+        runner = CliRunner()
+        bom_path = _scanned(runner, project, tmp_path / "test.json")
         result = runner.invoke(main, ["validate", str(bom_path), "--project", str(project)])
-        assert result.exit_code in (0, 1)
+        assert result.exit_code == 1
+        lines = result.stdout.splitlines()
+        assert any(line.startswith("Assessment basis: project-reconciled") for line in lines)
+        assert lines[lines.index("Integrity check") + 1] == "  Status: UNKNOWN"
+        (project / "models" / "model.safetensors").unlink()
+        (project / "models" / "config.json").unlink()
+        (project / "models").rmdir()
+        bom_path = _scanned(runner, project, tmp_path / "without-model.json")
+        result = runner.invoke(main, ["validate", str(bom_path), "--project", str(project)])
+        assert result.exit_code == 0, result.output
 
 
 class TestRiskCommand:
-    def test_risk_clean_project(self, tmp_path):
+    def test_risk_gate_names_the_unverified_model(self, tmp_path):
         project = _create_test_project(tmp_path)
         runner = CliRunner()
-        bom_path = tmp_path / "test.json"
-        runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_path)])
+        bom_path = _scanned(runner, project, tmp_path / "test.json")
         result = runner.invoke(main, ["risk", str(bom_path)])
-        assert result.exit_code in (0, 1)
+        assert result.exit_code == 1
+        assert "  - SafeTensors structural safety is unverified" in result.stdout.splitlines()
+        result = runner.invoke(main, ["risk", str(bom_path), "--json-output"])
+        assert result.exit_code == 1
+        reasons = json.loads(result.stdout)["gate_reasons"]
+        assert any("SafeTensors" in reason for reason in reasons), reasons
 
     def test_risk_json_output(self, tmp_path):
         project = _create_test_project(tmp_path)
@@ -242,8 +270,10 @@ class TestRiskCommand:
         runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_path)])
         result = runner.invoke(main, ["risk", str(bom_path), "--json-output"])
         data = json.loads(result.output)
+        assert result.exit_code == 1 and data["passed"] is False
         assert "overall_score" in data
         assert "risk_level" in data
+        assert data["gate_reasons"] == ["SafeTensors structural safety is unverified"]
 
     def test_risk_custom_threshold(self, tmp_path):
         project = _create_test_project(tmp_path)
@@ -265,17 +295,27 @@ class TestDiffCommand:
         assert result.exit_code == 0
 
     def test_diff_with_changes(self, tmp_path):
-        project = _create_test_project(tmp_path)
+        project = _project_beside_outputs(tmp_path)
         runner = CliRunner()
-        bom_a = tmp_path / "a.json"
-        runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_a)])
+        bom_a = _scanned(runner, project, tmp_path / "a.json")
 
         (project / "requirements.txt").write_text("transformers==4.41.0\nlangchain>=0.1\n")
-        bom_b = tmp_path / "b.json"
-        runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_b)])
+        bom_b = _scanned(runner, project, tmp_path / "b.json")
 
         result = runner.invoke(main, ["diff", str(bom_a), str(bom_b)])
         assert result.exit_code == 0
+        assert "changes detected" in result.stdout
+        assert any(line.startswith("  + langchain") for line in result.stdout.splitlines())
+        assert (
+            runner.invoke(main, ["diff", str(bom_a), str(bom_b), "--fail-on-alert"]).exit_code == 1
+        )
+        result = runner.invoke(main, ["diff", str(bom_a), str(bom_b), "--json-output"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["has_changes"] is True
+        assert [c["bom_ref"] for c in data["components_modified"]] == ["registry:pypi/transformers"]
+        assert [c["bom_ref"] for c in data["components_added"]] == ["registry:pypi/langchain"]
+        assert data["components_removed"] == []
 
     def test_diff_json_output(self, tmp_path):
         project = _create_test_project(tmp_path)
@@ -445,7 +485,11 @@ class TestDiffFixture:
         runner = CliRunner()
         result = runner.invoke(main, ["diff", str(old_path), str(new_path)])
         assert result.exit_code == 0
-        assert "modified" in result.output.lower() or "Security Alerts" in result.output
+        assert "modified" in result.output.lower()
+        data = json.loads(
+            runner.invoke(main, ["diff", str(old_path), str(new_path), "--json-output"]).output
+        )
+        assert [c["bom_ref"] for c in data["components_modified"]] == ["tool-read"]
 
     def test_diff_json_with_security_alert(self, tmp_path):
         old_path = _make_fixture_bom(tmp_path, filename="old.json")

@@ -4,13 +4,17 @@ The release evidence already records the locked runtime as raw ``pip inspect`` J
 This script projects that record into a standard SBOM for consumers that read
 CycloneDX, validated against the vendored official schema. It describes what pip
 reports as installed, with dependency edges from the declared requirements that
-apply to the inspected interpreter; it does not authenticate the files or prove the
-lock was used.
+apply to the inspected interpreter. With ``--lock`` every installed distribution
+except this project and the virtual environment's own pip must be pinned by that
+lock at the installed version, and the SBOM records the lock's SHA-256. It does not
+authenticate the installed files: pip does not record which of a lock entry's
+hashed files it installed from an index, so components carry no file hashes.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -24,6 +28,9 @@ from packaging.requirements import InvalidRequirement, Requirement
 from nexus_symbiote.generators.validation import require_valid
 
 MAX_INPUT_BYTES = 64 * 1024 * 1024
+PROJECT = "nexus-symbiote"
+# Installed by `python -m venv` before any lock is read, so no lock pins it.
+BOOTSTRAP = frozenset({"pip"})
 NAMESPACE = uuid.UUID("5a1d4c3e-9b7f-4e2a-8c6d-0f1e2d3c4b5a")
 MARKER_KEYS = (
     "implementation_name",
@@ -44,15 +51,16 @@ def normalize(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
-def _component(record: dict[str, Any]) -> dict[str, Any] | None:
+def _component(record: dict[str, Any]) -> dict[str, Any]:
+    """A record pip reports must become a component; one that cannot is an error, not a gap."""
     metadata = record.get("metadata")
     if not isinstance(metadata, dict):
-        return None
+        raise ValueError("an installed distribution has no metadata")
     name, version = metadata.get("name"), metadata.get("version")
     if not isinstance(name, str) or not isinstance(version, str) or not name or not version:
-        return None
+        raise ValueError("an installed distribution has no name or version")
     if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,199}", name) is None or len(version) > 200:
-        return None
+        raise ValueError("an installed distribution's name or version cannot be represented")
     canonical = normalize(name)
     purl = f"pkg:pypi/{canonical}@{version}"
     component: dict[str, Any] = {
@@ -71,10 +79,14 @@ def _component(record: dict[str, Any]) -> dict[str, Any] | None:
         if isinstance(value, str) and value.startswith("License :: ")
     ]
     expression = metadata.get("license_expression")
+    legacy = metadata.get("license")
     if isinstance(expression, str) and expression.strip():
         component["licenses"] = [{"expression": expression.strip()}]
     elif licenses:
         component["licenses"] = [{"license": {"name": value}} for value in licenses[:8]]
+    elif isinstance(legacy, str) and legacy.strip() and "\n" not in legacy.strip():
+        # The legacy License field, when it is a name rather than a pasted licence text.
+        component["licenses"] = [{"license": {"name": legacy.strip()[:200]}}]
     return component
 
 
@@ -157,22 +169,51 @@ def _requires(
     return sorted(refs)
 
 
-def build_sbom(inspect: dict[str, Any], *, timestamp: datetime) -> dict[str, Any]:
+def locked_versions(text: str) -> dict[str, set[str]]:
+    """Every exact name and version a hash lock pins, whatever its marker."""
+    pinned: dict[str, set[str]] = {}
+    for line in text.splitlines():
+        if not line.strip() or line[0].isspace() or line.lstrip().startswith("#"):
+            continue
+        requirement = Requirement(line.removesuffix("\\").strip())
+        clauses = list(requirement.specifier)
+        if len(clauses) != 1 or clauses[0].operator != "==":
+            raise ValueError("lock entry is not one exact pin")
+        pinned.setdefault(normalize(requirement.name), set()).add(clauses[0].version)
+    if not pinned:
+        raise ValueError("lock pins nothing")
+    return pinned
+
+
+def build_sbom(
+    inspect: dict[str, Any],
+    *,
+    timestamp: datetime,
+    lock: tuple[dict[str, set[str]], str] | None = None,
+) -> dict[str, Any]:
     records = inspect.get("installed")
     if not isinstance(records, list):
         raise ValueError("pip inspect output must contain an installed list")
     marker_environment = _marker_environment(inspect)
+    if not all(isinstance(record, dict) for record in records):
+        raise ValueError("pip inspect output lists a malformed installed record")
     pairs = sorted(
-        (
-            (component, record)
-            for record in records
-            if isinstance(record, dict)
-            for component in [_component(record)]
-            if component
-        ),
+        ((_component(record), record) for record in records),
         key=lambda pair: (pair[0]["name"], pair[0]["version"]),
     )
     components = [component for component, _ in pairs]
+    if lock is not None:
+        pinned, _ = lock
+        for component in components:
+            name = component["name"]
+            if (
+                name != PROJECT
+                and name not in BOOTSTRAP
+                and component["version"] not in pinned.get(name, set())
+            ):
+                raise ValueError(
+                    f"{component['name']}=={component['version']} is installed but not locked"
+                )
     installed = {c["name"]: c["bom-ref"] for c in components}
     if len(installed) != len(components):
         raise ValueError("an installed distribution appears more than once")
@@ -207,6 +248,15 @@ def build_sbom(inspect: dict[str, Any], *, timestamp: datetime) -> dict[str, Any
             "timestamp": timestamp.isoformat().replace("+00:00", "Z"),
             "tools": {"components": [{"type": "application", "name": "nexus-symbiote-release"}]},
             "component": root,
+            **(
+                {
+                    "properties": [
+                        {"name": "nexus-symbiote:lock-sha256", "value": lock[1]},
+                    ]
+                }
+                if lock is not None
+                else {}
+            ),
         },
         "components": components,
         "dependencies": dependencies,
@@ -219,7 +269,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("inspect_json", type=Path, help="output of `python -m pip inspect`")
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--lock", type=Path, help="require every installed pin to be in it")
     args = parser.parse_args()
+    lock = None
+    if args.lock is not None:
+        text = args.lock.read_bytes()
+        lock = (locked_versions(text.decode("utf-8")), hashlib.sha256(text).hexdigest())
     with args.inspect_json.open("rb") as stream:
         raw = stream.read(MAX_INPUT_BYTES + 1)
     if len(raw) > MAX_INPUT_BYTES:
@@ -230,7 +285,7 @@ def main() -> int:
         if epoch and epoch.isdigit()
         else datetime.now(UTC)
     )
-    document = build_sbom(json.loads(raw), timestamp=timestamp)
+    document = build_sbom(json.loads(raw), timestamp=timestamp, lock=lock)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"Environment SBOM: {len(document['components'])} distributions -> {args.out}")

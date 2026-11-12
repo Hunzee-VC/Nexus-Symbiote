@@ -5,6 +5,8 @@ from __future__ import annotations
 import importlib.util
 import json
 import shutil
+import subprocess
+import types
 from pathlib import Path
 
 import pytest
@@ -23,9 +25,15 @@ def clone_corpus(tmp_path):
     return corpus / "manifest.json"
 
 
+# The digest of the committed manifest, labels and fixtures. The gate compares results
+# only with the manifest they were produced from, so a label flipped in the same change as
+# the detector would pass it; changing any case must also change this line, visibly.
+CORPUS_DIGEST = "81143e881262c5cf1b890c18afe3a02cba5357a5716dc13f6f8dfb824d386e1e"
+
+
 def test_committed_inputs_have_exact_hashes_and_explicit_labels():
     manifest, digest = benchmark.load_manifest(benchmark.DEFAULT_MANIFEST)
-    assert len(digest) == 64
+    assert digest == CORPUS_DIGEST
     assert len(manifest["cases"]) == 18
     assert sum(c["task"] == "detection" for c in manifest["cases"]) == 16
     assert any(c["truth"] is True for c in manifest["cases"])
@@ -118,3 +126,25 @@ def test_actual_corpus_run_records_evidence_and_unknown_coverage():
     # Do not assert perfect efficacy: the report must retain any actual FP/FN.
     counts = sum(report["metrics"][k] for k in ["tp", "fp", "tn", "fn"])
     assert counts == report["metrics"]["scored_cases"]
+
+
+def test_benchmark_revision_comes_from_the_workflow_or_a_tracked_checkout(tmp_path, monkeypatch):
+    monkeypatch.setenv("GITHUB_SHA", "c" * 40)
+    identity = benchmark._source_identity()
+    assert (identity["git_sha"], identity["revision_source"]) == ("c" * 40, "GITHUB_SHA")
+    monkeypatch.delenv("GITHUB_SHA")
+    # An installed copy inside an unrelated checkout is not that checkout's revision.
+    checkout = tmp_path / "checkout"
+    package = checkout / ".venv/lib/site-packages/nexus_symbiote"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("")
+    (checkout / "README.md").write_text("unrelated")
+    git = ["git", "-C", str(checkout), "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+    for arguments in (["init", "-q"], ["add", "README.md"], ["commit", "-q", "-m", "x"]):
+        subprocess.run([*git, *arguments], check=True, capture_output=True, timeout=30)  # noqa: S603
+    installed = types.ModuleType("nexus_symbiote")
+    installed.__file__ = str(package / "__init__.py")
+    installed.__version__ = "0"
+    monkeypatch.setattr(benchmark, "nexus_symbiote", installed)
+    identity = benchmark._source_identity()
+    assert identity["git_sha"] is None and identity["revision_source"] is None

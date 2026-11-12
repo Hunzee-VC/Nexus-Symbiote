@@ -28,13 +28,12 @@ def test_cyclonedx_preserves_edge_semantics_without_invalid_fields():
 
 
 def test_cyclonedx_strict_validator():
-    # Optional dependency; CI should install a CycloneDX 1.7-capable version.
-    pytest.importorskip("cyclonedx.validation.json")
+    # The locked test environment installs a CycloneDX 1.7-capable library; a missing or
+    # older one is a broken environment, not a reason to stop checking conformance.
     from cyclonedx.schema import SchemaVersion
     from cyclonedx.validation.json import JsonStrictValidator
 
-    if not hasattr(SchemaVersion, "V1_7"):
-        pytest.skip("installed cyclonedx library does not support 1.7")
+    assert hasattr(SchemaVersion, "V1_7"), "installed cyclonedx library does not support 1.7"
     data = CycloneDXGenerator().generate_json(_sample_aibom())
     assert JsonStrictValidator(SchemaVersion.V1_7).validate_str(data) is None
 

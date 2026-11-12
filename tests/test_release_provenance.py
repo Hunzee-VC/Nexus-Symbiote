@@ -78,6 +78,7 @@ def test_publish_verification_gate_checks_every_distribution(tmp_path, case):
         capture_output=True,
         text=True,
         check=False,
+        timeout=60,
     )
     assert (process.returncode == 0) == (case == "success")
     if case in {"success", "bad-subject"}:

@@ -100,7 +100,14 @@ class TestFullPipeline:
         diff = runner.invoke(main, ["diff", str(bom_v1), str(bom_v2), "--json-output"])
         assert diff.exit_code == 0
         diff_data = json.loads(diff.output)
-        assert "has_changes" in diff_data
+        assert diff_data["has_changes"] is True
+        assert {c["bom_ref"] for c in diff_data["components_modified"]} == {
+            "registry:pypi/langchain",
+            "registry:pypi/openai",
+            "registry:pypi/transformers",
+        }
+        assert [c["bom_ref"] for c in diff_data["components_added"]] == ["registry:pypi/chromadb"]
+        assert diff_data["components_removed"] == []
 
     def test_all_output_formats(self, tmp_path: Path) -> None:
         """Verify all three output formats produce valid JSON."""
@@ -153,8 +160,14 @@ class TestFullPipeline:
         unsafe.write_bytes(b"\x00" * 50)
         runner = CliRunner()
         bom_path = tmp_path / "risky.json"
-        runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_path)])
+        scanned = runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_path)])
+        assert scanned.exit_code == 0
         result = runner.invoke(main, ["risk", str(bom_path), "--json-output"])
+        assert result.exit_code == 1
         data = json.loads(result.output)
-        assert data["overall_score"] > 0
-        assert data["components_with_risks"] >= 1
+        pickle_findings = {
+            (finding["severity"], finding["category"])
+            for finding in data["findings"]
+            if finding["component_name"].endswith("extra.pkl")
+        }
+        assert ("critical", "serialization_format") in pickle_findings

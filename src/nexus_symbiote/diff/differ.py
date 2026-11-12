@@ -1,19 +1,36 @@
 """AIBOM diff engine — compares two AIBOMs to detect supply chain changes.
 
 Critical for detecting rug-pull attacks, tool definition mutations,
-unauthorized component additions, and trust tier downgrades.
+unauthorized component additions and removals, trust tier downgrades and
+coverage regressions.
 """
 
 from __future__ import annotations
 
 import json
+import re
+from collections import Counter
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
-from nexus_symbiote.core.enums import TrustTier
-from nexus_symbiote.core.hashing import TOOL_DEFINITION_HASH_VERSION
-from nexus_symbiote.core.models import MCPServerComponent
+from nexus_symbiote.core.enums import ComponentType, TrustTier
+from nexus_symbiote.core.hashing import TOOL_DEFINITION_HASH_VERSION, canonical_json
+from nexus_symbiote.core.models import (
+    AnyComponent,
+    CompletenessClaim,
+    MCPServerComponent,
+    check_spec_version,
+)
+from nexus_symbiote.utils.crypto import (
+    VERIFIED_SIGNING_STATUSES,
+    SigningStatus,
+    component_evidence_refs,
+)
+
+SEVERITIES = ("info", "low", "medium", "high", "critical")
 
 TRUST_TIER_ORDER = {
     TrustTier.INTERNAL_VERIFIED: 0,
@@ -34,6 +51,7 @@ _SECURITY_FIELDS = {
     "claims",
     "endpoint",
     "endpoint_url",
+    "agent_card_url",
     "command",
     "args",
     "env",
@@ -45,6 +63,7 @@ _SECURITY_FIELDS = {
     "deployment_status",
     "deployment_profile",
     "signing_identity",
+    "signing_key_reference",
     "publisher_verified",
     "publisher_identity",
     "attestation_status",
@@ -53,9 +72,11 @@ _SECURITY_FIELDS = {
     "permission_mode",
     "authentication_required",
     "package_url",
+    "provider",
     "registry_uri",
     "registry_source",
     "registry_type",
+    "source_uri",
     "source_uris",
     "resolved_revision",
     "requested_alias",
@@ -99,10 +120,123 @@ _SET_LISTS = {
     "source_unmapped_indexes",
 }
 
+# A removed record of these types can take away a tool, an instruction, a model or a
+# control, or move configuration out of the collectors' reach.
+_REMOVAL_HIGH_TYPES = frozenset(
+    {
+        ComponentType.MCP_SERVER,
+        ComponentType.MCP_CLIENT,
+        ComponentType.TOOL,
+        ComponentType.MODEL,
+        ComponentType.PROMPT_TEMPLATE,
+        ComponentType.SKILL_PACKAGE,
+        ComponentType.GUARDRAIL_POLICY,
+        ComponentType.IDE_AGENT,
+        ComponentType.VERIFIED_EXTENSION,
+        ComponentType.A2A_CLIENT,
+        ComponentType.A2A_SERVER,
+    }
+)
+_EDGE_ADDED_HIGH = frozenset({"delegates-to", "acts-as-identity", "invokes"})
+_EDGE_REMOVED_HIGH = frozenset({"uses-guardrail", "approved-under"})
+# The dependency-array position is provenance, not content: reordering the source
+# document must not look like a changed relationship.
+_IMPORTED_EDGE_CONDITION = re.compile(
+    r"Source-reported CycloneDX dependency; dependencies index [0-9]+; not independently verified"
+)
+_IMPORTED_EDGE_CONDITION_STABLE = "Source-reported CycloneDX dependency; not independently verified"
 
 _FINDING_DIGEST = "shadowscan:finding-sha256"
+_FINDING_INDEX = "shadowscan:finding-index"
 _REPORT_DIGEST = "shadowscan:report-sha256"
 _PROJECTION = "shadowscan:projection-profile"
+_DECLARED_AUTONOMY = "declared_autonomy_level"
+
+# A digest as collectors record one, anywhere inside a value: an algorithm-prefixed hex
+# digest, or a Subresource Integrity value such as an npm lockfile's.
+_DIGEST_VALUE = re.compile(
+    r"sha256:[0-9a-f]{64}|sha384:[0-9a-f]{96}|sha512:[0-9a-f]{128}"
+    r"|sha(?:256|384|512)-[A-Za-z0-9+/]{43,86}={0,2}",
+    re.IGNORECASE,
+)
+_DIGEST_NAME = re.compile(r"_(?:hash|hashes|digest|integrity|sha256)\Z", re.IGNORECASE)
+_NAMED_PROPERTIES = 20
+"""How many changed properties of one record a change names; the rest are counted."""
+# Signing evidence from strongest to weakest. Any other status, such as
+# signature-not-found, verification-failed or one this release does not know, is weakest.
+_SIGNING_RANK = {
+    **dict.fromkeys((*sorted(VERIFIED_SIGNING_STATUSES), "pgp-signed"), 0),
+    SigningStatus.PARTIALLY_VERIFIED.value: 1,
+    SigningStatus.SIGNATURE_PRESENT_UNVERIFIED.value: 2,
+}
+_WEAKEST_SIGNING = max(_SIGNING_RANK.values()) + 1
+_STATUS_RANK = {"complete": 0, "partial": 1, "failed": 2, "unknown": 2}
+_ASSURANCE_RANK = {"verified": 0, "observed": 1, "declared": 2}
+_SOURCE_STATUS_RANK = {"complete": 0, "incomplete": 1, "unknown": 2}
+_INFO_METADATA = frozenset({"tool_version"})
+_LISTED = 5
+_SHOWN = 200
+
+
+def _severity_rank(severity: str) -> int:
+    return SEVERITIES.index(severity) if severity in SEVERITIES else len(SEVERITIES)
+
+
+def _max_severity(severities: Iterable[str]) -> str:
+    return max(severities, key=_severity_rank, default="info")
+
+
+def _json_text(value: Any) -> str:
+    """Compare as JSON values: `true` is not `1`, and key order never matters."""
+    try:
+        return canonical_json(value)
+    except (TypeError, ValueError, OverflowError):
+        return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def _readable_spec_version(version: object) -> bool:
+    """The native format rule of ``core.models``, so the differ and the reader agree."""
+    try:
+        check_spec_version(version)
+    except ValueError:
+        return False
+    return True
+
+
+def _clip(value: object) -> str:
+    text = str(value)
+    return text if len(text) <= _SHOWN else text[: _SHOWN - 1] + "…"
+
+
+def _listing(values: Iterable[str]) -> str:
+    items = sorted(values)
+    shown = "; ".join(_clip(item) for item in items[:_LISTED])
+    return shown + (f"; and {len(items) - _LISTED} more" if len(items) > _LISTED else "")
+
+
+def _incompleteness(claim: CompletenessClaim) -> list[str]:
+    """What keeps a claim short of complete coverage of its own scope, by name."""
+    found = []
+    if claim.scan_failures:
+        found.append(f"Scan failures: {_listing(claim.scan_failures)}.")
+    if claim.surfaces_excluded:
+        found.append(f"Coverage gaps: {_listing(claim.surfaces_excluded)}.")
+    collectors = {
+        name: state for name, state in claim.scanner_status.items() if state != "complete"
+    }
+    for name in claim.collectors_requested:
+        if name not in claim.collectors_completed:
+            collectors.setdefault(name, "not completed")
+    if collectors:
+        listed = _listing(f"{name} ({state})" for name, state in collectors.items())
+        found.append(f"Collectors not complete: {listed}.")
+    elif not claim.collectors_requested and not claim.scanner_status:
+        found.append("No collector is recorded.")
+    if claim.source_report_status not in (None, "complete"):
+        found.append(f"ShadowScan source status: {claim.source_report_status}.")
+    if claim.source_unmapped_count:
+        found.append(f"ShadowScan entries left unmapped: {claim.source_unmapped_count}.")
+    return found
 
 
 def _semantic_value(value: Any, path: tuple[str, ...]) -> Any:
@@ -114,6 +248,9 @@ def _semantic_value(value: Any, path: tuple[str, ...]) -> Any:
             if not (len(path) == 2 and path[0] == "claims" and key == "observed_at")
         }
     if isinstance(value, list):
+        if len(path) == 3 and path[0] == "claims" and path[2] == "evidence_refs":
+            # The operator policy file's digest says which run verified, not what.
+            value = component_evidence_refs(value)
         items = [_semantic_value(item, (*path, "[]")) for item in value]
         opaque = any(
             part in {"properties", "input_schema", "annotations", "variable_schema"}
@@ -122,21 +259,71 @@ def _semantic_value(value: Any, path: tuple[str, ...]) -> Any:
         key = path[-1]
         if not opaque and key == "risks":
             # Risk scoring counts each occurrence, so preserve multiplicity.
-            return sorted(json.dumps(item, sort_keys=True, separators=(",", ":")) for item in items)
+            return sorted(_json_text(item) for item in items)
         if not opaque and (key in _SET_LISTS or key.endswith("_refs")):
-            return sorted(
-                {json.dumps(item, sort_keys=True, separators=(",", ":")) for item in items}
-            )
+            return sorted({_json_text(item) for item in items})
         return items
     return value
+
+
+def _same(old: Any, new: Any, path: tuple[str, ...]) -> bool:
+    return _json_text(_semantic_value(old, path)) == _json_text(_semantic_value(new, path))
+
+
+def _signing_rank(status: object) -> int:
+    if not isinstance(status, str):
+        return _WEAKEST_SIGNING
+    return _SIGNING_RANK.get(status, _WEAKEST_SIGNING)
+
+
+def _property_texts(properties: dict[str, Any]) -> dict[str, str]:
+    return {
+        key: _json_text(_semantic_value(value, ("properties", key)))
+        for key, value in properties.items()
+    }
+
+
+def _property_changes(old: dict[str, Any], new: dict[str, Any]) -> list[dict[str, str]]:
+    """Name each changed property; changing or removing one that records a digest is high.
+
+    Collectors keep companion weight files, custom code, settings files and lockfile
+    integrity as digests in properties, so a swapped file shows only there.
+    """
+    before, after = _property_texts(old), _property_texts(new)
+    changes: list[tuple[str, str, str]] = []
+    for key in before.keys() | after.keys():
+        old_text, new_text = before.get(key), after.get(key)
+        if old_text == new_text:
+            continue
+        if old_text is None:
+            changes.append(("medium", key, "added"))
+            continue
+        texts = (old_text,) if new_text is None else (old_text, new_text)
+        digest = _DIGEST_NAME.search(key) is not None or any(
+            _DIGEST_VALUE.search(text) is not None for text in texts
+        )
+        verb = "removed" if new_text is None else "changed"
+        changes.append(("high" if digest else "medium", key, verb))
+    changes.sort(key=lambda change: (-_severity_rank(change[0]), change[1]))
+    named = [
+        {"detail": f"properties.{_clip(key)} {verb}.", "severity": severity}
+        for severity, key, verb in changes[:_NAMED_PROPERTIES]
+    ]
+    rest = [severity for severity, _, _ in changes[_NAMED_PROPERTIES:]]
+    if rest:
+        named.append(
+            {"detail": f"properties: {len(rest)} more changed.", "severity": _max_severity(rest)}
+        )
+    return named
 
 
 def _discovery_finding_drift(old_fields: dict[str, Any], new_fields: dict[str, Any]) -> bool | None:
     """Compare an imported finding by its content digest instead of its report's exact bytes.
 
     A rerun that only records new run times changes every component's exact report
-    digest. Returns None, leaving the fields untouched, when either side lacks a
-    comparable finding digest, so legacy inventories keep the stricter comparison.
+    digest, and a finding inserted before others shifts their positional index. Returns
+    None, leaving the fields untouched, when either side lacks a comparable finding
+    digest, so legacy inventories keep the stricter comparison.
     """
     old_props, new_props = old_fields.get("properties"), new_fields.get("properties")
     if (
@@ -151,11 +338,47 @@ def _discovery_finding_drift(old_fields: dict[str, Any], new_fields: dict[str, A
     for props in (old_props, new_props):
         props.pop(_FINDING_DIGEST)
         props.pop(_REPORT_DIGEST, None)
+        props.pop(_FINDING_INDEX, None)
     return changed
 
 
+def _edge_record(edge: DependencyEdge) -> dict[str, Any]:
+    record = edge.model_dump(mode="json")
+    if isinstance(record.get("conditions"), str) and _IMPORTED_EDGE_CONDITION.fullmatch(
+        record["conditions"]
+    ):
+        record["conditions"] = _IMPORTED_EDGE_CONDITION_STABLE
+    return record
+
+
 def _edge_key(edge: DependencyEdge) -> str:
-    return json.dumps(edge.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+    return _json_text(_edge_record(edge))
+
+
+def _carried_integrity(component: AnyComponent) -> bool:
+    """Whether the record held evidence that would make a later change to it alert."""
+    if component.hashes:
+        return True
+    if any(
+        getattr(component, name, None)
+        for name in ("content_hash", "definition_hash", "package_url", "schema_hash")
+    ):
+        return True
+    if getattr(component, "version_pinned", None) is True:
+        return True
+    return any(key in component.properties for key in ("lockfile_integrity", "static_config_hash"))
+
+
+def _records_absolute_paths(bom: AIBOM) -> bool:
+    def absolute(value: str | None) -> bool:
+        if not value:
+            return False
+        return value.startswith(("/", "\\\\")) or re.match(r"[A-Za-z]:[\\/]", value) is not None
+
+    claim = bom.metadata.completeness
+    return any(absolute(c.source_path) for c in bom.components) or (
+        claim is not None and any(absolute(surface) for surface in claim.surfaces_scanned)
+    )
 
 
 @dataclass
@@ -176,6 +399,7 @@ class DependencyChange:
     change_type: str  # added, removed
     assurance_level: str | None = None
     conditions: str | None = None
+    severity: str = "medium"
 
 
 @dataclass
@@ -188,6 +412,8 @@ class DiffReport:
     dependencies_removed: list[DependencyChange] = field(default_factory=list)
     security_alerts: list[dict[str, str]] = field(default_factory=list)
     metadata_changes: list[dict[str, str]] = field(default_factory=list)
+    # Context about the comparison itself, such as gaps both snapshots share. Not changes.
+    notes: list[dict[str, str]] = field(default_factory=list)
 
     @property
     def total_changes(self) -> int:
@@ -207,28 +433,22 @@ class DiffReport:
             "components_added": [self._change_dict(c) for c in self.components_added],
             "components_removed": [self._change_dict(c) for c in self.components_removed],
             "components_modified": [self._change_dict(c) for c in self.components_modified],
-            "dependencies_added": [
-                {
-                    "source": d.source_ref,
-                    "target": d.target_ref,
-                    "relationship": d.relationship,
-                    "assurance_level": d.assurance_level,
-                    "conditions": d.conditions,
-                }
-                for d in self.dependencies_added
-            ],
-            "dependencies_removed": [
-                {
-                    "source": d.source_ref,
-                    "target": d.target_ref,
-                    "relationship": d.relationship,
-                    "assurance_level": d.assurance_level,
-                    "conditions": d.conditions,
-                }
-                for d in self.dependencies_removed
-            ],
+            "dependencies_added": [self._edge_dict(d) for d in self.dependencies_added],
+            "dependencies_removed": [self._edge_dict(d) for d in self.dependencies_removed],
             "security_alerts": self.security_alerts,
             "metadata_changes": self.metadata_changes,
+            "notes": self.notes,
+        }
+
+    @staticmethod
+    def _edge_dict(d: DependencyChange) -> dict[str, Any]:
+        return {
+            "source": d.source_ref,
+            "target": d.target_ref,
+            "relationship": d.relationship,
+            "assurance_level": d.assurance_level,
+            "conditions": d.conditions,
+            "severity": d.severity,
         }
 
     def _change_dict(self, c: ComponentChange) -> dict[str, Any]:
@@ -270,12 +490,13 @@ class AIBOMDiffer:
 
         for ref in sorted(old_refs - new_refs):
             comp = old_map[ref]
+            high = comp.component_type in _REMOVAL_HIGH_TYPES or _carried_integrity(comp)
             change = ComponentChange(
                 bom_ref=ref,
                 name=comp.name,
                 change_type="removed",
                 component_type=comp.component_type.value,
-                severity="info",
+                severity="high" if high else "medium",
                 details=[f"{comp.component_type.value} component removed."],
             )
             report.components_removed.append(change)
@@ -283,10 +504,7 @@ class AIBOMDiffer:
         for ref in sorted(old_refs & new_refs):
             modifications = self._compare_components(old_map[ref], new_map[ref])
             if modifications:
-                severity = max(
-                    (m.get("severity", "info") for m in modifications),
-                    key=lambda s: ["info", "low", "medium", "high", "critical"].index(s),
-                )
+                severity = _max_severity(m.get("severity", "info") for m in modifications)
                 change = ComponentChange(
                     bom_ref=ref,
                     name=new_map[ref].name,
@@ -298,7 +516,8 @@ class AIBOMDiffer:
                 report.components_modified.append(change)
 
         self._diff_metadata(old, new, report)
-        self._diff_dependencies(old, new, report)
+        self._diff_inputs(old, new, report)
+        self._diff_dependencies(old, new, report, old_refs & new_refs)
         self._generate_security_alerts(report)
 
         report.has_changes = report.total_changes > 0
@@ -316,6 +535,23 @@ class AIBOMDiffer:
             ):
                 if before != after:
                     # External or legacy inventories may contain credentials in these fields.
+                    modifications.append(
+                        {
+                            "detail": f"MCP server {label} changed. Review before execution.",
+                            "severity": "critical",
+                        }
+                    )
+            # Observed digests: the served tool set, and the instructions, prompts,
+            # resource templates and other descriptor members a live observation binds.
+            for label, before, after in (
+                ("served tool set", old.schema_hash, new.schema_hash),
+                (
+                    "served instructions, prompts or resource templates",
+                    old.properties.get("observed_declaration_hash"),
+                    new.properties.get("observed_declaration_hash"),
+                ),
+            ):
+                if before and after and before != after:
                     modifications.append(
                         {
                             "detail": f"MCP server {label} changed. Review before execution.",
@@ -359,12 +595,13 @@ class AIBOMDiffer:
                     }
                 )
             else:
+                # A snapshot is unsigned: a raised label is a claim to review, not evidence.
                 modifications.append(
                     {
                         "detail": (
                             f"Trust tier upgraded: {old.trust_tier.value} → {new.trust_tier.value}"
                         ),
-                        "severity": "info",
+                        "severity": "medium",
                     }
                 )
 
@@ -428,7 +665,7 @@ class AIBOMDiffer:
                 }
             )
 
-        for hash_key in set(old.hashes.keys()) | set(new.hashes.keys()):
+        for hash_key in sorted(set(old.hashes.keys()) | set(new.hashes.keys())):
             old_h = old.hashes.get(hash_key)
             new_h = new.hashes.get(hash_key)
             if old_h != new_h:
@@ -465,11 +702,12 @@ class AIBOMDiffer:
         old_signing = getattr(old, "signing_status", None)
         new_signing = getattr(new, "signing_status", None)
         if old_signing != new_signing:
-            sev = "high" if old_signing in {"sigstore-signed", "pgp-signed"} else "info"
+            # A snapshot is unsigned: only a stronger status is a claim to review at medium.
+            raised = _signing_rank(new_signing) < _signing_rank(old_signing)
             modifications.append(
                 {
-                    "detail": f"Signing status changed: {old_signing} → {new_signing}",
-                    "severity": sev,
+                    "detail": f"Signing status changed: {_clip(old_signing)} → {_clip(new_signing)}",
+                    "severity": "medium" if raised else "high",
                 }
             )
 
@@ -484,6 +722,7 @@ class AIBOMDiffer:
             "serialization_safety",
             "signing_status",
             "launcher_package",
+            "risks",
         }
         # These special cases cover only some transitions; retain the generic
         # comparison for all other version/profile changes.
@@ -493,6 +732,7 @@ class AIBOMDiffer:
             handled.add("definition_hash_version")
         old_fields = old.model_dump(mode="json")
         new_fields = new.model_dump(mode="json")
+        modifications.extend(self._risk_changes(old_fields["risks"], new_fields["risks"]))
         if _discovery_finding_drift(old_fields, new_fields):
             modifications.append(
                 {
@@ -501,13 +741,29 @@ class AIBOMDiffer:
                     "severity": "medium",
                 }
             )
+        old_props, new_props = old_fields.get("properties"), new_fields.get("properties")
+        if isinstance(old_props, dict) and isinstance(new_props, dict):
+            before = old_props.pop(_DECLARED_AUTONOMY, None)
+            after = new_props.pop(_DECLARED_AUTONOMY, None)
+            if not _same(before, after, ("properties", _DECLARED_AUTONOMY)):
+                # The manifest's autonomy declaration is recorded as a property because
+                # it is not an observation; a change is as consequential as the typed field.
+                modifications.append(
+                    {"detail": "Declared autonomy level changed.", "severity": "high"}
+                )
+            modifications.extend(_property_changes(old_props, new_props))
+            handled.add("properties")
         for key in sorted((old_fields.keys() | new_fields.keys()) - handled):
             old_value = old_fields.get(key)
             new_value = new_fields.get(key)
-            if _semantic_value(old_value, (key,)) == _semantic_value(new_value, (key,)):
+            if _same(old_value, new_value, (key,)):
                 continue
             severity = "medium"
-            if key in _SECURITY_FIELDS or key.endswith("_refs") or key.endswith("_ref"):
+            if (
+                key in _SECURITY_FIELDS
+                or key.endswith(("_ref", "_refs"))
+                or _DIGEST_NAME.search(key) is not None
+            ):
                 severity = "high"
             if (key == "trust_remote_code" and new_value is True) or key in {
                 "input_schema",
@@ -518,48 +774,65 @@ class AIBOMDiffer:
             modifications.append({"detail": f"{key} changed.", "severity": severity})
         return modifications
 
+    @staticmethod
+    def _risk_changes(old_risks: list[Any], new_risks: list[Any]) -> list[dict[str, str]]:
+        """Report added and removed findings with their own severity, not as one opaque change."""
+        records = {_json_text(risk): risk for risk in (*old_risks, *new_risks)}
+        before = Counter(_json_text(risk) for risk in old_risks)
+        after = Counter(_json_text(risk) for risk in new_risks)
+
+        def summary(found: Counter[str]) -> tuple[str, list[str]]:
+            groups: Counter[tuple[str, str]] = Counter()
+            for key, count in found.items():
+                record = records[key]
+                groups[(str(record.get("severity")), _clip(record.get("category")))] += count
+            severities = [severity for severity, _ in groups]
+            shown = ", ".join(
+                f"{count} {severity} ({category})"
+                for (severity, category), count in sorted(
+                    groups.items(), key=lambda item: (-_severity_rank(item[0][0]), item[0][1])
+                )
+            )
+            return shown, severities
+
+        changes: list[dict[str, str]] = []
+        added, removed = after - before, before - after
+        if added:
+            shown, severities = summary(added)
+            changes.append(
+                {
+                    "detail": f"Risk findings added: {shown}.",
+                    "severity": _max_severity(["medium", *severities]),
+                }
+            )
+        if removed:
+            shown, _ = summary(removed)
+            changes.append({"detail": f"Risk findings removed: {shown}.", "severity": "medium"})
+        return changes
+
     def _diff_metadata(self, old: AIBOM, new: AIBOM, report: DiffReport) -> None:
         old_metadata = old.metadata.model_dump(mode="json")
         new_metadata = new.metadata.model_dump(mode="json")
-        old_claim, new_claim = old.metadata.completeness, new.metadata.completeness
-        # Exact report bytes authenticate a report; they also change with its run
-        # times. Drift uses the content digest only when both sides carry it.
-        content_comparable = (
-            old_claim is not None
-            and new_claim is not None
-            and old_claim.source_report_content_digest is not None
-            and new_claim.source_report_content_digest is not None
-            and old_claim.source_report_content_profile is not None
-            and old_claim.source_report_content_profile == new_claim.source_report_content_profile
-        )
         for metadata in (old_metadata, new_metadata):
             # These identify a collection event, rather than its composition.
             metadata.pop("serial_number", None)
             metadata.pop("timestamp", None)
-            if metadata.get("completeness") is not None:
-                metadata["completeness"].pop("timestamp", None)
-                if content_comparable:
-                    metadata["completeness"].pop("source_report_digest", None)
-        if (
-            content_comparable
-            and old_claim is not None
-            and new_claim is not None
-            and old_claim.source_report_digest != new_claim.source_report_digest
-            and old_claim.source_report_content_digest == new_claim.source_report_content_digest
-        ):
-            report.metadata_changes.append(
-                {
-                    "field": "completeness.source_report_digest",
-                    "severity": "info",
-                    "detail": "ShadowScan report regenerated; normalized content unchanged.",
-                }
-            )
+            metadata.pop("completeness", None)
+        self._diff_completeness(old.metadata.completeness, new.metadata.completeness, report)
         for key in sorted(old_metadata.keys() | new_metadata.keys()):
-            if _semantic_value(old_metadata.get(key), (key,)) == _semantic_value(
-                new_metadata.get(key), (key,)
-            ):
+            if _same(old_metadata.get(key), new_metadata.get(key), (key,)):
                 continue
-            severity = "high" if key in {"completeness", "spec_version"} else "medium"
+            if key in _INFO_METADATA:
+                report.metadata_changes.append(
+                    {
+                        "field": key,
+                        "severity": "info",
+                        "detail": "The snapshots were written by different Nexus SymBiote "
+                        "releases; a release can record evidence differently.",
+                    }
+                )
+                continue
+            severity = "high" if key == "spec_version" else "medium"
             change = {
                 "field": key,
                 "severity": severity,
@@ -570,9 +843,379 @@ class AIBOMDiffer:
                 {"severity": severity, "component": "metadata", "alert": change["detail"]}
             )
 
-    def _diff_dependencies(self, old: AIBOM, new: AIBOM, report: DiffReport) -> None:
+    def _diff_completeness(
+        self,
+        old: CompletenessClaim | None,
+        new: CompletenessClaim | None,
+        report: DiffReport,
+    ) -> None:
+        """Compare coverage field by field: a regression alerts and names what regressed."""
+
+        def regression(name: str, detail: str) -> None:
+            report.metadata_changes.append(
+                {"field": f"completeness.{name}", "severity": "high", "detail": detail}
+            )
+            report.security_alerts.append(
+                {"severity": "high", "component": "metadata", "alert": detail}
+            )
+
+        def improvement(name: str, detail: str) -> None:
+            report.metadata_changes.append(
+                {"field": f"completeness.{name}", "severity": "info", "detail": detail}
+            )
+
+        if old is None and new is None:
+            report.notes.append(
+                {
+                    "field": "completeness",
+                    "severity": "info",
+                    "detail": "Neither snapshot carries a completeness claim, so coverage "
+                    "cannot be compared.",
+                }
+            )
+            return
+        if new is None:
+            regression(
+                "claim", "The new snapshot carries no completeness claim; its coverage is unknown."
+            )
+            return
+        if old is None:
+            # Nothing shows the baseline had the same gaps, so any gap the new snapshot
+            # records could have been introduced by the change under review.
+            gaps = _incompleteness(new)
+            if gaps:
+                regression(
+                    "claim",
+                    "The baseline carries no completeness claim, so gaps in the new snapshot "
+                    "cannot be shown to predate this change. " + " ".join(gaps),
+                )
+            else:
+                improvement(
+                    "claim",
+                    "The baseline carries no completeness claim, so coverage changes cannot be "
+                    "assessed against it; the new snapshot records complete coverage.",
+                )
+            return
+
+        old_fields = old.model_dump(mode="json")
+        new_fields = new.model_dump(mode="json")
+        handled = {"timestamp"}
+
+        handled.add("scope")
+        if old.scope != new.scope:
+            regression(
+                "scope",
+                f"Coverage scope changed from '{_clip(old.scope)}' to '{_clip(new.scope)}'.",
+            )
+
+        handled.add("scanner_status")
+        for name in sorted(old.scanner_status.keys() | new.scanner_status.keys()):
+            before, after = old.scanner_status.get(name), new.scanner_status.get(name)
+            if before == after:
+                continue
+            label = f"scanner_status.{name}"
+            if after is None:
+                regression(
+                    label, f"Collector '{_clip(name)}' is no longer recorded (was {_clip(before)})."
+                )
+            elif before is None:
+                improvement(label, f"Collector '{_clip(name)}' is now recorded as {_clip(after)}.")
+            elif _STATUS_RANK.get(after, 3) < _STATUS_RANK.get(before, 3):
+                improvement(
+                    label,
+                    f"Collector '{_clip(name)}' coverage changed from {_clip(before)} to "
+                    f"{_clip(after)}.",
+                )
+            else:
+                regression(
+                    label,
+                    f"Collector '{_clip(name)}' coverage changed from {_clip(before)} to "
+                    f"{_clip(after)}.",
+                )
+
+        # (field, whether an added entry is the regression, regression text, improvement text)
+        for name, growth_regresses, worse, better in (
+            ("collectors_requested", False, "Collectors no longer requested", "Collectors added"),
+            (
+                "collectors_completed",
+                False,
+                "Collectors no longer completed",
+                "Collectors now completed",
+            ),
+            ("scan_failures", True, "New scan failures", "Scan failures no longer reported"),
+            ("surfaces_excluded", True, "New coverage gaps", "Coverage gaps no longer reported"),
+            ("exclusions", True, "New collection exclusions", "Collection exclusions removed"),
+            (
+                "unobserved_surfaces",
+                True,
+                "Surfaces newly recorded as unobserved",
+                "Surfaces no longer recorded as unobserved",
+            ),
+        ):
+            handled.add(name)
+            # Multisets: a second identical gap or failure is a new one.
+            before_items = Counter(str(item) for item in getattr(old, name))
+            after_items = Counter(str(item) for item in getattr(new, name))
+            added, removed = after_items - before_items, before_items - after_items
+            lost, gained = (added, removed) if growth_regresses else (removed, added)
+            if lost:
+                regression(name, f"{worse}: {_listing(lost.elements())}.")
+            if gained:
+                improvement(name, f"{better}: {_listing(gained.elements())}.")
+
+        handled.add("surfaces_scanned")
+        scanned_before, scanned_after = set(old.surfaces_scanned), set(new.surfaces_scanned)
+        if scanned_before != scanned_after:
+            parts = []
+            if scanned_after - scanned_before:
+                parts.append(
+                    f"{len(scanned_after - scanned_before)} added "
+                    f"({_listing(scanned_after - scanned_before)})"
+                )
+            if scanned_before - scanned_after:
+                parts.append(
+                    f"{len(scanned_before - scanned_after)} removed "
+                    f"({_listing(scanned_before - scanned_after)})"
+                )
+            improvement(
+                "surfaces_scanned",
+                "Scanned surfaces changed: "
+                + ", ".join(parts)
+                + ". Components found there are compared separately.",
+            )
+
+        handled.add("assurance_level")
+        if old.assurance_level != new.assurance_level:
+            before_level, after_level = old.assurance_level.value, new.assurance_level.value
+            message = f"Coverage assurance changed from {before_level} to {after_level}."
+            if _ASSURANCE_RANK.get(after_level, 3) < _ASSURANCE_RANK.get(before_level, 3):
+                improvement("assurance_level", message)
+            else:
+                regression("assurance_level", message)
+
+        handled |= self._diff_source_report(old, new, regression, improvement)
+
+        for name in sorted((old_fields.keys() | new_fields.keys()) - handled):
+            if not _same(old_fields.get(name), new_fields.get(name), (name,)):
+                regression(name, f"Completeness field {name} changed.")
+
+        self._note_shared_gaps(old, new, report)
+
+    @staticmethod
+    def _diff_source_report(
+        old: CompletenessClaim,
+        new: CompletenessClaim,
+        regression: Callable[[str, str], None],
+        improvement: Callable[[str, str], None],
+    ) -> set[str]:
+        """Exact report bytes authenticate a report; its normalized content is what drifts."""
+        content_comparable = (
+            old.source_report_content_digest is not None
+            and new.source_report_content_digest is not None
+            and old.source_report_content_profile is not None
+            and old.source_report_content_profile == new.source_report_content_profile
+        )
+        if content_comparable:
+            if old.source_report_content_digest != new.source_report_content_digest:
+                regression(
+                    "source_report_content_digest",
+                    "ShadowScan report content changed; review the report and the imported "
+                    "components.",
+                )
+            elif old.source_report_digest != new.source_report_digest:
+                improvement(
+                    "source_report_digest",
+                    "ShadowScan report regenerated; normalized content unchanged.",
+                )
+        elif old.source_report_digest != new.source_report_digest:
+            if new.source_report_digest is None:
+                regression("source_report_digest", "The ShadowScan report is no longer imported.")
+            elif old.source_report_digest is None:
+                regression("source_report_digest", "A ShadowScan report is now imported.")
+            else:
+                regression(
+                    "source_report_digest",
+                    "ShadowScan report bytes changed, and the snapshots carry no comparable "
+                    "content digest.",
+                )
+
+        if old.source_report_format != new.source_report_format and None not in (
+            old.source_report_format,
+            new.source_report_format,
+        ):
+            message = (
+                f"ShadowScan report format changed from {old.source_report_format} to "
+                f"{new.source_report_format}."
+            )
+            if new.source_report_format == "shadowscan-json":
+                improvement("source_report_format", message)
+            else:
+                regression("source_report_format", message)
+
+        before_status, after_status = old.source_report_status, new.source_report_status
+        if before_status != after_status and None not in (before_status, after_status):
+            message = f"ShadowScan source status changed from {before_status} to {after_status}."
+            if _SOURCE_STATUS_RANK.get(str(after_status), 3) < _SOURCE_STATUS_RANK.get(
+                str(before_status), 3
+            ):
+                improvement("source_report_status", message)
+            else:
+                regression("source_report_status", message)
+
+        if new.source_unmapped_count > old.source_unmapped_count:
+            regression(
+                "source_unmapped_count",
+                f"ShadowScan entries left unmapped rose from {old.source_unmapped_count} to "
+                f"{new.source_unmapped_count}.",
+            )
+        elif new.source_unmapped_count < old.source_unmapped_count:
+            improvement(
+                "source_unmapped_count",
+                f"ShadowScan entries left unmapped fell from {old.source_unmapped_count} to "
+                f"{new.source_unmapped_count}.",
+            )
+        elif sorted(old.source_unmapped_indexes) != sorted(new.source_unmapped_indexes):
+            improvement(
+                "source_unmapped_indexes",
+                "Unmapped ShadowScan entries moved within the report; their number is unchanged.",
+            )
+
+        before_limits = Counter(old.source_projection_limitations or [])
+        after_limits = Counter(new.source_projection_limitations or [])
+        if after_limits - before_limits:
+            regression(
+                "source_projection_limitations",
+                f"New ShadowScan projection limitations: {_listing((after_limits - before_limits).elements())}.",
+            )
+        if before_limits - after_limits:
+            improvement(
+                "source_projection_limitations",
+                f"ShadowScan projection limitations no longer reported: "
+                f"{_listing((before_limits - after_limits).elements())}.",
+            )
+        return {
+            "source_report_digest",
+            "source_report_content_digest",
+            "source_report_content_profile",
+            "source_report_format",
+            "source_report_status",
+            "source_unmapped_count",
+            "source_unmapped_indexes",
+            "source_projection_limitations",
+        }
+
+    @staticmethod
+    def _note_shared_gaps(
+        old: CompletenessClaim, new: CompletenessClaim, report: DiffReport
+    ) -> None:
+        """Equal incompleteness is no drift, but the report must say the baseline had gaps."""
+        collectors = [
+            f"{_clip(name)} ({_clip(state)})"
+            for name, state in sorted(new.scanner_status.items())
+            if state != "complete" and old.scanner_status.get(name, "unknown") != "complete"
+        ]
+        failures = sum((Counter(old.scan_failures) & Counter(new.scan_failures)).values())
+        gaps = sum((Counter(old.surfaces_excluded) & Counter(new.surfaces_excluded)).values())
+        if not (collectors or failures or gaps):
+            return
+        parts = []
+        if collectors:
+            parts.append("collectors not complete in either: " + ", ".join(collectors))
+        if failures:
+            parts.append(f"{failures} scan failure(s) in both")
+        if gaps:
+            parts.append(f"{gaps} coverage gap(s) in both")
+        report.notes.append(
+            {
+                "field": "completeness",
+                "severity": "info",
+                "detail": "Both snapshots are incomplete ("
+                + "; ".join(parts)
+                + "). The baseline was already incomplete; changes inside these gaps cannot "
+                "be detected.",
+            }
+        )
+
+    def _diff_inputs(self, old: AIBOM, new: AIBOM, report: DiffReport) -> None:
+        """Inputs that other commands would refuse must not compare clean."""
+        from nexus_symbiote.graph import validate_graph
+
+        for label, bom in (("baseline", old), ("candidate", new)):
+            if not _readable_spec_version(bom.metadata.spec_version):
+                detail = (
+                    f"The {label} snapshot uses a spec_version this release does not support; "
+                    "the comparison can miss fields."
+                )
+                report.metadata_changes.append(
+                    {"field": "spec_version", "severity": "high", "detail": detail}
+                )
+                report.security_alerts.append(
+                    {"severity": "high", "component": "metadata", "alert": detail}
+                )
+
+        before, after = set(validate_graph(old)), set(validate_graph(new))
+        if after - before:
+            detail = (
+                f"The candidate snapshot has {len(after - before)} new graph consistency "
+                f"problem(s), such as dangling or mistyped references: {_listing(after - before)}."
+            )
+            report.metadata_changes.append({"field": "graph", "severity": "high", "detail": detail})
+            report.security_alerts.append(
+                {"severity": "high", "component": "metadata", "alert": detail}
+            )
+        if before - after:
+            report.metadata_changes.append(
+                {
+                    "field": "graph",
+                    "severity": "info",
+                    "detail": f"Graph consistency problems of the baseline no longer present: "
+                    f"{_listing(before - after)}.",
+                }
+            )
+        if before & after:
+            report.notes.append(
+                {
+                    "field": "graph",
+                    "severity": "info",
+                    "detail": f"Both snapshots have {len(before & after)} graph consistency "
+                    "problem(s); neither is a valid inventory.",
+                }
+            )
+
+        old_time, new_time = old.metadata.timestamp, new.metadata.timestamp
+        if isinstance(old_time, datetime) and isinstance(new_time, datetime):
+            try:
+                reversed_order = old_time > new_time
+            except TypeError:
+                reversed_order = False
+            if reversed_order:
+                report.notes.append(
+                    {
+                        "field": "timestamp",
+                        "severity": "info",
+                        "detail": "The baseline (first argument) was recorded after the "
+                        "candidate; check the argument order, since swapped snapshots show "
+                        "additions as removals.",
+                    }
+                )
+        if _records_absolute_paths(old) != _records_absolute_paths(new):
+            report.notes.append(
+                {
+                    "field": "paths",
+                    "severity": "info",
+                    "detail": "One snapshot records absolute file paths, as release 0.1.0 "
+                    "did, and the other root-relative paths, so location fields differ. "
+                    "Re-create the baseline with this release from its reviewed commit.",
+                }
+            )
+
+    def _diff_dependencies(
+        self, old: AIBOM, new: AIBOM, report: DiffReport, retained: set[str]
+    ) -> None:
         old_deps = {_edge_key(edge): edge for edge in old.dependencies}
         new_deps = {_edge_key(edge): edge for edge in new.dependencies}
+        old_bindings = {(e.source_ref, e.target_ref, e.relationship) for e in old.dependencies}
+        new_bindings = {(e.source_ref, e.target_ref, e.relationship) for e in new.dependencies}
         for key in sorted(new_deps.keys() - old_deps.keys()):
             edge = new_deps[key]
             report.dependencies_added.append(
@@ -583,6 +1226,7 @@ class AIBOMDiffer:
                     change_type="added",
                     assurance_level=edge.assurance_level,
                     conditions=edge.conditions,
+                    severity="high" if edge.relationship in _EDGE_ADDED_HIGH else "medium",
                 )
             )
         for key in sorted(old_deps.keys() - new_deps.keys()):
@@ -595,23 +1239,45 @@ class AIBOMDiffer:
                     change_type="removed",
                     assurance_level=edge.assurance_level,
                     conditions=edge.conditions,
+                    severity="high" if edge.relationship in _EDGE_REMOVED_HIGH else "medium",
                 )
             )
-        old_bindings = {(e.source_ref, e.target_ref, e.relationship) for e in old.dependencies}
-        for change in report.dependencies_added:
-            if (change.source_ref, change.target_ref, change.relationship) in old_bindings:
+        modified: set[tuple[str, str, str]] = set()
+        for change in (*report.dependencies_added, *report.dependencies_removed):
+            binding = (change.source_ref, change.target_ref, change.relationship)
+            if binding in old_bindings and binding in new_bindings:
+                change.severity = "high"
+                if binding in modified:
+                    continue
+                modified.add(binding)
                 report.security_alerts.append(
                     {
                         "severity": "high",
                         "component": change.source_ref,
-                        "alert": "Dependency assurance or conditions changed; review the full edge records.",
+                        "alert": "Dependency assurance or conditions changed; review the full "
+                        "edge records.",
                     }
                 )
+                continue
+            # An edge to a component that was itself added or removed is covered by that
+            # component's alert, unless the relationship grants or withdraws authority.
+            explained = not {change.source_ref, change.target_ref} <= retained
+            if explained and change.severity != "high":
+                continue
+            verb = "added" if change.change_type == "added" else "removed"
+            report.security_alerts.append(
+                {
+                    "severity": change.severity,
+                    "component": change.source_ref,
+                    "alert": f"Relationship {verb}: '{_clip(change.source_ref)}' "
+                    f"{change.relationship} '{_clip(change.target_ref)}'.",
+                }
+            )
 
     def _generate_security_alerts(self, report: DiffReport) -> None:
         # An in-place change is at least as consequential as an addition, which
-        # always alerts: a version bump, a swapped lockfile integrity value or a
-        # replaced tool body is rated medium, and must still fail the CI gate.
+        # always alerts: a change rated medium, such as a version bump, must still
+        # fail the CI gate.
         for change in report.components_modified:
             if change.severity in {"medium", "high", "critical"}:
                 report.security_alerts.append(
@@ -632,6 +1298,20 @@ class AIBOMDiffer:
                     "alert": (
                         f"New component '{change.name}' "
                         f"({change.component_type}) added to supply chain."
+                    ),
+                }
+            )
+
+        # A record that disappears is as reviewable as one that appears: it may have been
+        # deleted, or moved where no collector reads it, taking its fingerprint along.
+        for change in report.components_removed:
+            report.security_alerts.append(
+                {
+                    "severity": change.severity,
+                    "component": change.bom_ref,
+                    "alert": (
+                        f"Component '{change.name}' ({change.component_type}) is no longer in "
+                        "the inventory: confirm it was deleted, not moved out of collector scope."
                     ),
                 }
             )

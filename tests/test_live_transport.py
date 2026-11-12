@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import socket
 import ssl
+import threading
 import time
 
 import pytest
@@ -73,6 +74,35 @@ def test_mixed_dns_answers_fail_closed(monkeypatch):
     )
     with pytest.raises(live.DiscoveryError):
         live._resolve_public("fixture.example", 443, 1)
+
+
+def test_stuck_lookups_time_out_and_at_most_two_stay_outstanding(monkeypatch):
+    release = threading.Event()
+    lookups = []
+    answer = (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("93.184.216.34", 443))
+
+    def stuck(*args, **kwargs):
+        lookups.append(args[0])
+        release.wait(10)
+        return [answer]
+
+    monkeypatch.setattr(socket, "getaddrinfo", stuck)
+    try:
+        for _ in range(2):
+            started = time.monotonic()
+            with pytest.raises(live.DiscoveryError, match="DNS resolution timed out"):
+                live._resolve_public("fixture.example", 443, 0.2)
+            assert time.monotonic() - started < 2
+        with pytest.raises(live.DiscoveryError, match="resolver capacity unavailable"):
+            live._resolve_public("fixture.example", 443, 0.2)
+        assert lookups == ["fixture.example", "fixture.example"]
+    finally:
+        release.set()
+    # Both slots return once the stuck lookups finish, and resolution works again.
+    assert live._RESOLVER_SLOTS.acquire(timeout=5) and live._RESOLVER_SLOTS.acquire(timeout=5)
+    live._RESOLVER_SLOTS.release()
+    live._RESOLVER_SLOTS.release()
+    assert live._resolve_public("fixture.example", 443, 1) == (socket.AF_INET, "93.184.216.34")
 
 
 def test_https_dials_pinned_numeric_ip_and_verifies_original_hostname(monkeypatch):
@@ -147,6 +177,9 @@ class Reply:
 
     def read(self, size):
         return self.body[:size]
+
+    def readline(self, limit=-1):
+        return self.fp.readline(limit)
 
     def close(self):
         self.fp.close()

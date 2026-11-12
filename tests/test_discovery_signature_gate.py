@@ -18,7 +18,10 @@ from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.policy import Policy
 from nexus_symbiote.utils.crypto import SIGSTORE_MISSING, VerificationResult
-from nexus_symbiote.validators.completeness import discovery_producer_problems
+from nexus_symbiote.validators.completeness import (
+    discovery_producer_check,
+    discovery_producer_problems,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 REPORT = FIXTURES / "shadowscan/code-report-0.1.4.json"
@@ -184,7 +187,15 @@ def test_discovery_evidence_needs_a_recorded_digest(tmp_path):
     doc["metadata"]["completeness"].update(
         scope="repository", source_report_format=None, source_report_status=None
     )
-    assert discovery_producer_problems(AIBOM.model_validate(doc), project, []) == []
+    # Stripping every discovery marker cannot turn the check into a vacuous pass.
+    assert discovery_producer_problems(AIBOM.model_validate(doc), project, []) == [
+        "The inventory omits the ShadowScan report present beneath the project root."
+    ]
+    (project / ".shadowscan/report.json").unlink()
+    assert discovery_producer_check(AIBOM.model_validate(doc), project, []) == (
+        "not-applicable",
+        [],
+    )
 
 
 def test_the_policy_flag_is_strict_and_off_by_default():
@@ -272,3 +283,78 @@ def test_an_entry_naming_the_report_file_differently_still_requires_its_signer(
     result = _validate(bom, project, "--signature-policy", signers)
     assert result.exit_code == 1 and len(calls) == 1
     assert "ShadowScan report signature or signer policy verification failed" in result.output
+
+
+def _strip_discovery(doc: dict) -> None:
+    imported = {c["bom_ref"] for c in doc["components"] if c["bom_ref"].startswith("shadowscan:")}
+    doc["components"] = [c for c in doc["components"] if c["bom_ref"] not in imported]
+    doc["dependencies"] = [
+        e for e in doc["dependencies"] if not {e["source_ref"], e["target_ref"]} & imported
+    ]
+    doc["metadata"]["completeness"].update(
+        scope="repository",
+        source_report_digest=None,
+        source_report_content_digest=None,
+        source_report_content_profile=None,
+        source_report_format=None,
+        source_report_status=None,
+        source_projection_limitations=None,
+    )
+
+
+def test_removing_all_discovery_evidence_fails_the_producer_check(tmp_path, monkeypatch):
+    _verifier(monkeypatch)
+    project, bom = _project(tmp_path, UNCHECKED)
+    signers = str(_signers(tmp_path))
+    doc = json.loads(bom.read_text())
+    _strip_discovery(doc)
+    bom.write_text(json.dumps(doc))
+    result = _validate(bom, project, "--signature-policy", signers)
+    assert result.exit_code == 1, result.output
+    assert "omits the ShadowScan report that the operator signature policy names" in result.output
+
+
+def test_operator_flag_requires_the_signature_when_the_project_policy_is_ignored(tmp_path):
+    project, bom = _project(tmp_path, UNGATED)
+    plain = _validate(bom, project, "--no-project-policy")
+    assert "Discovery producer check" not in plain.output
+    assert "Discovery producer: not verified (unsigned evidence accepted)" in plain.output
+    required = _validate(bom, project, "--no-project-policy", "--require-discovery-signature")
+    assert required.exit_code == 1
+    assert "No operator signature policy entry names the ShadowScan report" in required.output
+    risk = CliRunner().invoke(
+        main,
+        ["risk", str(bom), "--project", str(project), "--no-project-policy", "--json-output"],
+    )
+    assert json.loads(risk.stdout)["discovery_producer"] == "not-verified"
+    text = CliRunner().invoke(
+        main, ["risk", str(bom), "--project", str(project), "--no-project-policy"]
+    )
+    assert "Discovery producer: not verified (unsigned evidence accepted)" in text.output
+    gated = CliRunner().invoke(
+        main,
+        [
+            "risk",
+            str(bom),
+            "--project",
+            str(project),
+            "--no-project-policy",
+            "--json-output",
+            "--require-discovery-signature",
+        ],
+    )
+    assert gated.exit_code == 1
+    assert json.loads(gated.stdout)["discovery_producer"] == "failed"
+    unscoped = CliRunner().invoke(main, ["validate", str(bom), "--require-discovery-signature"])
+    assert unscoped.exit_code == 2 and "requires --project" in unscoped.output
+
+
+def test_signed_report_reports_a_verified_producer(tmp_path, monkeypatch):
+    _verifier(monkeypatch)
+    project, bom = _project(tmp_path, UNGATED)
+    risk = CliRunner().invoke(
+        main,
+        ["risk", str(bom), "--project", str(project), "--no-project-policy", "--json-output"]
+        + ["--signature-policy", str(_signers(tmp_path))],
+    )
+    assert json.loads(risk.stdout)["discovery_producer"] == "verified"

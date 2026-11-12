@@ -2,18 +2,24 @@
 
 from __future__ import annotations
 
+import hashlib
+import os
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+from nexus_symbiote import limits
 from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote.core.collection import is_imported
 from nexus_symbiote.core.enums import SerializationSafety
 from nexus_symbiote.core.hashing import (
     TOOL_DEFINITION_HASH_VERSION,
+    descriptor_binding,
     hash_tool_definition,
     normalize_digest,
     open_regular_file,
+    pathname_identity,
 )
 from nexus_symbiote.core.models import (
     AnyComponent,
@@ -23,12 +29,51 @@ from nexus_symbiote.core.models import (
     ToolComponent,
 )
 from nexus_symbiote.scanners.mcp import MCPScanner
-from nexus_symbiote.scanners.model import inspect_model_artifact
+from nexus_symbiote.scanners.model import (
+    ModelPackages,
+    memoized,
+    model_format,
+    unused_policy_entries,
+    verify_weight_files,
+)
+from nexus_symbiote.utils.confined import ConfinedCollection
 from nexus_symbiote.utils.crypto import (
+    MAX_BUNDLE_BYTES,
+    ArtifactPolicy,
     SigstoreArtifactPolicy,
-    verify_file_hash,
+    policy_entries,
     verify_sigstore_bundle,
 )
+
+VALIDATION_PASSES = 6
+"""How many times a scan's model reads one validation may read from artifacts.
+
+A maximal scan inventory (the model collector reads at most the operator's
+``model-total-bytes`` of weights) needs at most four passes over its models; the rest
+is headroom. So a supplied BOM cannot multiply the work of the scan behind it.
+"""
+VALIDATION_BYTE_BUDGET = VALIDATION_PASSES * limits.DEFAULTS.model_total_bytes
+"""The validation budget under the default limits; a validator uses the limits in force."""
+SIGNATURE_VERIFICATION_COST = MAX_BUNDLE_BYTES
+"""Work charged for one offline signature verification beyond the bytes it reads.
+
+Loading the trust root and checking the certificate chain is charged like reading
+this many bytes, so verification work draws on the same budget as artifact reads.
+"""
+MAX_REPORTED_ISSUES = 1000
+_IMPORTED_EVIDENCE_GAPS = frozenset(
+    {
+        "artifact_unavailable",
+        "missing_hash",
+        "missing_definition",
+        "unverified_signature",
+        "unsigned_model",
+        "descriptor_source_unavailable",
+    }
+)
+"""Unknown-evidence categories that a bound imported claim reports without blocking."""
+_BLOCKING = {"critical", "error"}
+_SEVERITY_RANK = {"critical": 0, "error": 0, "unknown": 1, "warning": 2, "info": 3}
 
 
 @dataclass
@@ -47,12 +92,17 @@ class IntegrityReport:
     signatures_checked: int = 0
     signatures_verified: int = 0
     issues: list[IntegrityIssue] = field(default_factory=list)
+    basis: Literal["supplied-bom", "project"] = "supplied-bom"
+    bytes_charged: int = 0
+    issues_omitted: int = 0
+    omitted_severities: set[str] = field(default_factory=set)
 
     @property
     def status(self) -> Literal["pass", "fail", "unknown"]:
-        if any(i.severity in {"critical", "error"} for i in self.issues):
+        severities = {i.severity for i in self.issues} | self.omitted_severities
+        if severities & _BLOCKING:
             return "fail"
-        if any(i.severity == "unknown" for i in self.issues):
+        if "unknown" in severities:
             return "unknown"
         if self.hashes_verified + self.signatures_verified == 0:
             return "unknown"
@@ -63,15 +113,27 @@ class IntegrityReport:
         """Compatibility gate: unknown evidence never produces a passing verdict."""
         return self.status == "pass"
 
+    def bound_issues(self) -> None:
+        """Keep at most ``MAX_REPORTED_ISSUES`` issues, blocking ones first; the verdict keeps all."""
+        if len(self.issues) <= MAX_REPORTED_ISSUES:
+            return
+        ranked = sorted(self.issues, key=lambda issue: _SEVERITY_RANK.get(issue.severity, 0))
+        omitted = ranked[MAX_REPORTED_ISSUES:]
+        self.issues_omitted += len(omitted)
+        self.omitted_severities |= {issue.severity for issue in omitted}
+        self.issues = ranked[:MAX_REPORTED_ISSUES]
+
     def to_dict(self) -> dict[str, object]:
         return {
             "is_valid": self.is_valid,
             "status": self.status,
+            "assessment_basis": self.basis,
             "components_checked": self.components_checked,
             "hashes_verified": self.hashes_verified,
             "hashes_failed": self.hashes_failed,
             "signatures_checked": self.signatures_checked,
             "signatures_verified": self.signatures_verified,
+            "bytes_charged": self.bytes_charged,
             "issues": [
                 {
                     "component_ref": i.component_ref,
@@ -81,7 +143,97 @@ class IntegrityReport:
                 }
                 for i in self.issues
             ],
+            "issues_omitted": self.issues_omitted,
         }
+
+
+class _BudgetExhaustedError(Exception):
+    pass
+
+
+class _ArtifactDigests:
+    """Hash each artifact at most once per algorithm within one validation.
+
+    Entries are keyed by the open descriptor's identity, so a file changed between two
+    reads is hashed again. Bytes read are charged to one validation-wide budget.
+    """
+
+    def __init__(self, budget: int) -> None:
+        self.remaining = budget
+        self._digests: dict[tuple[tuple[int, ...], str], str | None] = {}
+
+    def charge(self, size: int) -> None:
+        if size > self.remaining:
+            raise _BudgetExhaustedError
+        self.remaining -= size
+
+    def digest(self, path: Path, algorithm: str) -> str | None:
+        """Return ``algorithm:hex`` of ``path``, or None when it cannot be read safely."""
+        try:
+            with open_regular_file(path) as stream:
+                before = os.fstat(stream.fileno())
+                key = (descriptor_binding(before), algorithm)
+                if key in self._digests:
+                    return self._digests[key]
+                if before.st_size > limits.current().model_bytes:
+                    self._digests[key] = None
+                    return None
+                self.charge(before.st_size)
+                digest = hashlib.new(algorithm)
+                total = 0
+                while chunk := stream.read(1024 * 1024):
+                    total += len(chunk)
+                    if total > before.st_size:
+                        return None
+                    digest.update(chunk)
+                after = os.fstat(stream.fileno())
+                if descriptor_binding(before) != descriptor_binding(after) or pathname_identity(
+                    path
+                ) != (after.st_dev, after.st_ino):
+                    return None
+        except (OSError, ValueError):
+            return None
+        value = f"{algorithm}:{digest.hexdigest()}"
+        self._digests[key] = value
+        return value
+
+
+def _locate_artifact(project_root: Path, source_path: str) -> Path | str:
+    """Return the in-root artifact a component names, or the fixed reason it is refused.
+
+    Every reader applies these rules: no parent traversal, inside the resolved root,
+    not a symbolic link, and a regular file. Collectors read through one in-root
+    symlink at any component, such as CLAUDE.md -> AGENTS.md or .claude ->
+    config/claude, resolved lexically without following anything, so the artifact is
+    that target; the rules then apply to it. Reasons never quote the path.
+    """
+    root = project_root.resolve()
+    candidate = Path(source_path)
+    if ".." in candidate.parts:
+        return "Parent traversal is not permitted"
+    if not candidate.is_absolute():
+        candidate = root / candidate
+    try:
+        if candidate.is_relative_to(root):
+            with ConfinedCollection(root, []) as files:
+                target = files.in_root_target(candidate.relative_to(root))
+            candidate = candidate if target is None else root / target
+        if candidate.is_symlink() or not candidate.resolve().is_relative_to(root):
+            return "Artifact path escapes the supplied project root or is a symlink"
+        if not candidate.is_file():
+            return "Declared artifact is missing or is not a regular file"
+    except (OSError, RuntimeError, ValueError):
+        return "Declared artifact could not be examined"
+    return candidate
+
+
+def _regular_file_size(path: Path) -> int:
+    """Size of the regular file a no-follow open reaches; zero when there is none."""
+    try:
+        with open_regular_file(path) as stream:
+            return os.fstat(stream.fileno()).st_size
+    except (OSError, ValueError):
+        return 0
 
 
 class IntegrityValidator:
@@ -89,7 +241,9 @@ class IntegrityValidator:
 
     Signature policies must come from the trusted caller. BOM signing_status and
     signing_identity fields, and adjacent signature filenames, are never trusted
-    as verification evidence. Model signatures are required by default.
+    as verification evidence. Model signatures are required by default. A digest
+    that agrees only with other fields of the same BOM is self-consistency, not
+    verification: it is reported as unknown evidence and never counted as verified.
     """
 
     def __init__(
@@ -97,11 +251,21 @@ class IntegrityValidator:
         signature_policies: Sequence[SigstoreArtifactPolicy] = (),
         *,
         require_model_signatures: bool = True,
+        byte_budget: int | None = None,
     ) -> None:
-        self._signature_policies = {p.artifact_path.resolve(): p for p in signature_policies}
-        if len(self._signature_policies) != len(signature_policies):
-            raise ValueError("Duplicate artifact signature policies")
+        # Digest pins arrive with the Sigstore entries of a loaded policy set.
+        self._signature_policies: dict[Path, ArtifactPolicy] = {
+            p.artifact_path.resolve(): p for p in policy_entries(signature_policies)
+        }
+        self._packages: tuple[IntegrityReport, ModelPackages] | None = None
         self.require_model_signatures = require_model_signatures
+        self.byte_budget = (
+            VALIDATION_PASSES * limits.current().model_total_bytes
+            if byte_budget is None
+            else byte_budget
+        )
+        self._digests = _ArtifactDigests(self.byte_budget)
+        self._inspected_models: set[Path] = set()
 
     def validate(
         self,
@@ -109,8 +273,18 @@ class IntegrityValidator:
         project_root: Path | None = None,
         *,
         exclude_paths: Sequence[str] = (),
+        bound_imports: frozenset[str] = frozenset(),
     ) -> IntegrityReport:
-        report = IntegrityReport()
+        """Check every component; ``bound_imports`` names imported discovery claims.
+
+        Only references that project reconciliation bound to the local discovery report
+        may be passed as ``bound_imports``. Those are judged as imported claims: their
+        unavailable local evidence is reported without blocking, while intrinsic findings
+        such as an unsafe loading format still fail.
+        """
+        report = IntegrityReport(basis="supplied-bom" if project_root is None else "project")
+        self._digests = _ArtifactDigests(self.byte_budget)
+        self._inspected_models = set()
         local_tools: dict[str, ToolComponent | None] = {}
         if project_root is not None and any(isinstance(c, ToolComponent) for c in bom.components):
             # Resolve configuration only inside the operator's root. Never use a BOM-supplied
@@ -122,6 +296,11 @@ class IntegrityValidator:
                     local_tools[local.bom_ref] = None if local.bom_ref in local_tools else local
         for comp in bom.components:
             report.components_checked += 1
+            first_issue = len(report.issues)
+            if isinstance(comp, ModelComponent) and not self._admit_model(
+                comp, project_root, report
+            ):
+                continue
             if isinstance(comp, ToolComponent):
                 self._check_tool_hash(comp, report, local_tools)
             elif isinstance(comp, ModelComponent):
@@ -153,7 +332,84 @@ class IntegrityValidator:
                         )
                     )
             self._check_file_hash(comp, project_root, report)
+            if comp.bom_ref in bound_imports and is_imported(comp):
+                for issue in report.issues[first_issue:]:
+                    if issue.severity == "unknown" and issue.category in _IMPORTED_EVIDENCE_GAPS:
+                        issue.severity = "info"
+                        issue.detail = "Imported discovery claim without local evidence: " + (
+                            issue.detail
+                        )
+        self._report_unused_policies(project_root, report)
+        report.bytes_charged = self.byte_budget - self._digests.remaining
+        if report.hashes_verified + report.signatures_verified == 0 and not any(
+            i.severity in {"critical", "error", "unknown"} for i in report.issues
+        ):
+            report.issues.append(
+                IntegrityIssue(
+                    "inventory",
+                    "nothing_verified",
+                    "No artifact hash or signature could be verified against local evidence",
+                    "unknown",
+                )
+            )
+        report.bound_issues()
         return report
+
+    def _admit_model(
+        self, comp: ModelComponent, project_root: Path | None, report: IntegrityReport
+    ) -> bool:
+        """Charge a model's artifact work to the validation budget before it happens.
+
+        The model check observes the artifact once (inspection, digest and tensor
+        metadata come from that one read); a Sigstore entry reads it once more,
+        reads its bundle and costs a fixed amount of work, while a digest pin is
+        compared with the observed digest. The weight files a model binds are read
+        within the model check's own scan-sized budget. A weights file, or a file the
+        signer policy covers, is inspected for one component only: a later model
+        component naming it fails instead of repeating the work. Other files, such as
+        the manifest that declares hosted models, are charged for each component. A
+        component the budget cannot cover is unknown, not skipped silently. A path the
+        readers refuse costs nothing here; the checks report why.
+        """
+        if project_root is None or not comp.source_path:
+            return True
+        located = _locate_artifact(project_root, comp.source_path)
+        if isinstance(located, str):
+            return True
+        try:
+            artifact = located.resolve()
+        except (OSError, RuntimeError, ValueError):
+            return True
+        policy = self._signature_policies.get(artifact)
+        once = policy is not None or model_format(artifact) is not None
+        if once and artifact in self._inspected_models:
+            report.issues.append(
+                IntegrityIssue(
+                    comp.bom_ref,
+                    "duplicate_artifact",
+                    "An earlier model component already names this artifact; an inventory "
+                    "describes each model artifact once",
+                )
+            )
+            return False
+        size = _regular_file_size(located)
+        cost = size
+        if isinstance(policy, SigstoreArtifactPolicy):
+            bundle = min(_regular_file_size(policy.bundle_path), MAX_BUNDLE_BYTES + 1)
+            cost += size + bundle + SIGNATURE_VERIFICATION_COST
+        try:
+            self._digests.charge(cost)
+        except _BudgetExhaustedError:
+            report.issues.append(_budget_issue(comp.bom_ref, self.byte_budget))
+            # The model is unchecked, not unused: its policy entry must not be
+            # reported as naming nothing.
+            root = project_root.resolve()
+            if artifact.is_relative_to(root):
+                self._model_packages(report, root).covered.add(artifact.relative_to(root))
+            return False
+        if once:
+            self._inspected_models.add(artifact)
+        return True
 
     def _check_tensor_metadata(
         self, comp: ModelComponent, project_root: Path | None, report: IntegrityReport
@@ -165,8 +421,6 @@ class IntegrityValidator:
         declared = {key: value for key, value in declared.items() if value is not None}
         if not declared:
             return
-        from nexus_symbiote.scanners.model import safetensors_fingerprint
-
         try:
             if project_root is None or comp.source_path is None:
                 raise ValueError("project root and artifact path are required")
@@ -174,11 +428,22 @@ class IntegrityValidator:
             if not expected_weight:
                 raise ValueError("tensor metadata requires a whole-artifact SHA-256 binding")
             algorithm, hex_digest = normalize_digest(expected_weight, "sha256")
-            live = safetensors_fingerprint(
-                Path(comp.source_path),
-                root=project_root,
-                expected_digest=f"{algorithm}:{hex_digest}",
+            root = project_root.resolve()
+            source = Path(comp.source_path)
+            # The integrity check's observation of the same file; the artifact is
+            # read once per validation.
+            observation = self._model_packages(report, root).observation(
+                source.relative_to(root) if source.is_absolute() else source
             )
+            if (
+                observation is None
+                or observation.safety != SerializationSafety.SAFE
+                or not observation.fingerprint
+            ):
+                raise ValueError("SafeTensors metadata could not be corroborated")
+            if observation.digest != f"{algorithm}:{hex_digest}":
+                raise ValueError("Tensor metadata belongs to different artifact bytes")
+            live = observation.fingerprint
             for key, expected in declared.items():
                 assert expected is not None
                 normalize_digest(expected, "sha256")
@@ -254,6 +519,18 @@ class IntegrityValidator:
                     )
                 )
                 return
+            else:
+                # The descriptor and its digest both come from the document under review.
+                report.issues.append(
+                    IntegrityIssue(
+                        comp.bom_ref,
+                        "descriptor_source_unavailable",
+                        "Tool descriptor matches only its own recorded digest; no local "
+                        "configuration corroborates it",
+                        "unknown",
+                    )
+                )
+                return
         except (ValueError, TypeError, UnicodeError, RecursionError) as exc:
             report.hashes_failed += 1
             report.issues.append(IntegrityIssue(comp.bom_ref, "hash_mismatch", str(exc)))
@@ -273,26 +550,11 @@ class IntegrityValidator:
                 )
             )
             return None
-        root = project_root.resolve()
-        candidate = Path(comp.source_path)
-        if ".." in candidate.parts:
-            report.issues.append(
-                IntegrityIssue(
-                    comp.bom_ref, "missing_artifact", "Parent traversal is not permitted"
-                )
-            )
+        located = _locate_artifact(project_root, comp.source_path)
+        if isinstance(located, str):
+            report.issues.append(IntegrityIssue(comp.bom_ref, "missing_artifact", located))
             return None
-        if not candidate.is_absolute():
-            candidate = root / candidate
-        try:
-            if candidate.is_symlink() or not candidate.resolve().is_relative_to(root):
-                raise ValueError("Artifact path escapes the supplied project root or is a symlink")
-            if not candidate.is_file():
-                raise ValueError("Declared artifact is missing or is not a regular file")
-        except (OSError, ValueError) as exc:
-            report.issues.append(IntegrityIssue(comp.bom_ref, "missing_artifact", str(exc)))
-            return None
-        return candidate
+        return located
 
     def _check_model_integrity(
         self, comp: ModelComponent, project_root: Path | None, report: IntegrityReport
@@ -319,14 +581,44 @@ class IntegrityValidator:
                 )
             )
         path = self._artifact_path(comp, project_root, report)
-        if path is not None:
-            try:
-                with open_regular_file(path) as stream:
-                    actual, explanation, inspected_digest = inspect_model_artifact(
-                        path, stream=stream
+        if path is None or project_root is None:
+            self._unsigned_model(comp, report)
+            return
+        root = project_root.resolve()
+        packages = self._model_packages(report, root)
+        try:
+            relative = path.resolve().relative_to(root)
+            # The collector's own confined observation: the same verdict, digest and
+            # bound weight files for the same bytes, never the BOM's account of them.
+            package = packages.observe(relative)
+        except (OSError, ValueError):
+            package = None
+        observation = package.observation if package is not None else None
+        if observation is None:
+            actual, explanation = (
+                SerializationSafety.UNKNOWN,
+                "Model structure could not be bound to its SHA-256 subject",
+            )
+        else:
+            actual, explanation = observation.safety, observation.explanation
+            recorded = comp.hashes.get("sha256")
+            if recorded is None:
+                # No subject to bind: missing evidence, not a contradiction. The observed
+                # verdict is still reported below.
+                report.issues.append(
+                    IntegrityIssue(
+                        comp.bom_ref,
+                        "format_unverified",
+                        "Model structure could not be bound to its SHA-256 subject",
+                        "unknown",
                     )
-                _, expected_digest = normalize_digest(comp.hashes.get("sha256", ""), "sha256")
-                if inspected_digest != f"sha256:{expected_digest}":
+                )
+            else:
+                try:
+                    _, expected_digest = normalize_digest(recorded, "sha256")
+                    if observation.digest != f"sha256:{expected_digest}":
+                        raise ValueError("subject mismatch")
+                except ValueError:
                     report.issues.append(
                         IntegrityIssue(
                             comp.bom_ref,
@@ -334,77 +626,129 @@ class IntegrityValidator:
                             "Inspected model structure does not match the BOM's SHA-256 subject",
                         )
                     )
-            except (OSError, ValueError):
-                actual, explanation = (
-                    SerializationSafety.UNKNOWN,
-                    "Model structure could not be bound to its SHA-256 subject",
-                )
-            if actual in {
-                SerializationSafety.UNSAFE_CODE_EXECUTION,
-                SerializationSafety.UNSAFE_TEMPLATE_INJECTION,
-            }:
-                report.issues.append(
-                    IntegrityIssue(comp.bom_ref, "unsafe_format", explanation, "critical")
-                )
-            elif actual == SerializationSafety.UNKNOWN:
-                report.issues.append(
-                    IntegrityIssue(comp.bom_ref, "format_unverified", explanation, "unknown")
-                )
-            if (
-                comp.serialization_safety == SerializationSafety.SAFE
-                and actual != SerializationSafety.SAFE
-            ):
-                report.issues.append(
-                    IntegrityIssue(
-                        comp.bom_ref,
-                        "format_claim_mismatch",
-                        "Declared safe format was not corroborated",
-                    )
-                )
-
-        policy = self._signature_policies.get(path.resolve()) if path is not None else None
-        if policy is None or path is None:
-            category = (
-                "unsigned_model" if comp.signing_status == "unsigned" else "unverified_signature"
-            )
-            severity = "unknown" if self.require_model_signatures else "warning"
+        if actual in {
+            SerializationSafety.UNSAFE_CODE_EXECUTION,
+            SerializationSafety.UNSAFE_TEMPLATE_INJECTION,
+        }:
             report.issues.append(
-                IntegrityIssue(
-                    comp.bom_ref,
-                    category,
-                    "No trusted artifact-bound signer policy was supplied",
-                    severity,
-                )
+                IntegrityIssue(comp.bom_ref, "unsafe_format", explanation, "critical")
             )
-            return
-        report.signatures_checked += 1
-        result = verify_sigstore_bundle(
-            path, policy.bundle_path, policy.expected_identity, policy.expected_issuer
-        )
+        elif actual == SerializationSafety.UNKNOWN:
+            report.issues.append(
+                IntegrityIssue(comp.bom_ref, "format_unverified", explanation, "unknown")
+            )
         if (
-            not result.verified
-            or result.identity != policy.expected_identity
-            or result.issuer != policy.expected_issuer
+            comp.serialization_safety == SerializationSafety.SAFE
+            and actual != SerializationSafety.SAFE
         ):
             report.issues.append(
                 IntegrityIssue(
                     comp.bom_ref,
-                    "signature_verification_failed",
-                    result.error or "Signature verification failed",
+                    "format_claim_mismatch",
+                    "Declared safe format was not corroborated",
                 )
             )
+        if package is None:
+            self._unsigned_model(comp, report)
             return
-        # Bind the verification result to the same bytes represented by the BOM.
-        try:
-            _, digest = normalize_digest(comp.hashes.get("sha256", ""), "sha256")
-            if not result.details or result.details.get("artifact_digest") != f"sha256:{digest}":
-                raise ValueError("Signed artifact does not match the BOM's SHA-256 digest")
-        except ValueError as exc:
+        if package.budget_exhausted:
             report.issues.append(
-                IntegrityIssue(comp.bom_ref, "signature_subject_mismatch", str(exc))
+                IntegrityIssue(
+                    comp.bom_ref,
+                    "validation_budget_exhausted",
+                    "Model files of this inventory exceed the bytes or weight-file bindings "
+                    "one validation checks (as many as one scan); this model was not checked "
+                    "completely",
+                    "unknown",
+                )
             )
+        if not package.complete:
+            report.issues.append(
+                IntegrityIssue(
+                    comp.bom_ref,
+                    "weight_files_unverified",
+                    "The weight files bound to this model could not all be read beneath the root",
+                    "unknown",
+                )
+            )
+        local = sorted((weight.as_posix(), digest) for weight, digest in package.weight_files[1:])
+        if self._recorded_weight_files(comp) != local:
+            report.hashes_failed += 1
+            report.issues.append(
+                IntegrityIssue(
+                    comp.bom_ref,
+                    "weight_files_mismatch",
+                    "Weight files bound to this model differ from the BOM's record",
+                )
+            )
+        verification = verify_weight_files(
+            package.weight_files,
+            root,
+            self._signature_policies,
+            verify=memoized(verify_sigstore_bundle, packages.verified),
+        )
+        if verification.status is None:
+            self._unsigned_model(comp, report)
             return
-        report.signatures_verified += 1
+        report.signatures_checked += verification.signatures_checked
+        report.signatures_verified += verification.signatures_verified
+        report.hashes_verified += verification.pins_verified
+        for category, detail, severity in verification.issues:
+            if severity == "unknown" and not self.require_model_signatures:
+                severity = "warning"
+            report.issues.append(IntegrityIssue(comp.bom_ref, category, detail, severity))
+
+    def _model_packages(self, report: IntegrityReport, root: Path) -> ModelPackages:
+        """One observer per validation, so models share walks, digests and one byte budget."""
+        current = self._packages
+        if current is None or current[0] is not report or current[1].root != root:
+            current = self._packages = (report, ModelPackages(root))
+        return current[1]
+
+    def _report_unused_policies(self, project_root: Path | None, report: IntegrityReport) -> None:
+        """An operator entry that no model of this inventory uses must not look enforced.
+
+        The model collector reports the same entries when validation recollects the
+        project; this states them even when the completeness check does not run.
+        """
+        if not self._signature_policies or project_root is None:
+            return
+        root = project_root.resolve()
+        covered = self._model_packages(report, root).covered
+        with ConfinedCollection(root, []) as files:
+            unused = unused_policy_entries(files, self._signature_policies, covered)
+        for label, reason in unused:
+            report.issues.append(
+                IntegrityIssue("signature-policy", "unused_policy_entry", f"{label}: {reason}")
+            )
+
+    @staticmethod
+    def _recorded_weight_files(comp: ModelComponent) -> list[tuple[str, str | None]] | None:
+        recorded = comp.properties.get("weight_files", [])
+        if not isinstance(recorded, list):
+            return None
+        entries: list[tuple[str, str | None]] = []
+        for item in recorded:
+            if not isinstance(item, dict) or not isinstance(item.get("path"), str):
+                return None
+            digest = item.get("sha256")
+            entries.append((item["path"], digest if isinstance(digest, str) else None))
+        return sorted(entries)
+
+    def _unsigned_model(self, comp: ModelComponent, report: IntegrityReport) -> None:
+        category = (
+            "unsigned_model"
+            if comp.signing_status in {"unsigned", "signature-not-found"}
+            else "unverified_signature"
+        )
+        report.issues.append(
+            IntegrityIssue(
+                comp.bom_ref,
+                category,
+                "No trusted artifact-bound signer policy was supplied",
+                "unknown" if self.require_model_signatures else "warning",
+            )
+        )
 
     def _check_prompt_hash(
         self, comp: PromptComponent, project_root: Path | None, report: IntegrityReport
@@ -420,14 +764,40 @@ class IntegrityValidator:
         if path is None:
             report.hashes_failed += 1
             return
-        result = verify_file_hash(path, comp.content_hash)
-        if result.verified:
+        self._verify_digest(comp, path, comp.content_hash, None, report, "hash_mismatch")
+
+    def _verify_digest(
+        self,
+        comp: AnyComponent,
+        path: Path,
+        expected: str,
+        algorithm: str | None,
+        report: IntegrityReport,
+        category: str,
+    ) -> None:
+        try:
+            algorithm, digest = normalize_digest(expected, algorithm)
+        except ValueError as exc:
+            report.hashes_failed += 1
+            report.issues.append(IntegrityIssue(comp.bom_ref, category, str(exc)))
+            return
+        try:
+            actual = self._digests.digest(path, algorithm)
+        except _BudgetExhaustedError:
+            report.issues.append(_budget_issue(comp.bom_ref, self.byte_budget))
+            return
+        if actual is None:
+            report.hashes_failed += 1
+            report.issues.append(
+                IntegrityIssue(comp.bom_ref, category, "Failed to read a regular artifact file")
+            )
+        elif actual == f"{algorithm}:{digest}":
             report.hashes_verified += 1
         else:
             report.hashes_failed += 1
             report.issues.append(
                 IntegrityIssue(
-                    comp.bom_ref, "hash_mismatch", result.error or "Prompt digest mismatch"
+                    comp.bom_ref, category, "Hash mismatch against the expected artifact digest"
                 )
             )
 
@@ -445,12 +815,16 @@ class IntegrityValidator:
                     )
                 )
             return
-        # Reject malformed declarations even when the artifact cannot be opened.
-        valid: list[tuple[str, str]] = []
+        # Reject malformed declarations even when the artifact cannot be opened. Keys
+        # differing only in case name one algorithm and must not buy another full read.
+        valid: dict[str, str] = {}
         for algorithm, expected in comp.hashes.items():
+            folded = algorithm.lower()
             try:
-                normalize_digest(expected, algorithm)
-                valid.append((algorithm, expected))
+                if folded in valid:
+                    raise ValueError("Digest algorithm is declared more than once")
+                normalize_digest(expected, folded)
+                valid[folded] = expected
             except ValueError as exc:
                 report.hashes_failed += 1
                 report.issues.append(IntegrityIssue(comp.bom_ref, "file_hash_mismatch", str(exc)))
@@ -460,16 +834,14 @@ class IntegrityValidator:
         if path is None:
             report.hashes_failed += len(valid)
             return
-        for algorithm, expected in valid:
-            result = verify_file_hash(path, expected, algorithm)
-            if result.verified:
-                report.hashes_verified += 1
-            else:
-                report.hashes_failed += 1
-                report.issues.append(
-                    IntegrityIssue(
-                        comp.bom_ref,
-                        "file_hash_mismatch",
-                        result.error or "Artifact digest mismatch",
-                    )
-                )
+        for algorithm, expected in valid.items():
+            self._verify_digest(comp, path, expected, algorithm, report, "file_hash_mismatch")
+
+
+def _budget_issue(component_ref: str, budget: int) -> IntegrityIssue:
+    return IntegrityIssue(
+        component_ref,
+        "validation_budget_exhausted",
+        f"Not checked: the work would exceed this validation's artifact budget of {budget:,} bytes",
+        "unknown",
+    )

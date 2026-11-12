@@ -11,29 +11,70 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import click
-from rich.console import Console
-from rich.markup import escape
-from rich.table import Table
 
-from nexus_symbiote import __version__, modes
-from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote import __version__, limits, modes
+from nexus_symbiote.core.aibom import AIBOM, NativeFormatError
 from nexus_symbiote.core.enums import AssuranceLevel
 from nexus_symbiote.core.models import AIBOMMetadata, CompletenessClaim
 from nexus_symbiote.graph import validate_graph
 from nexus_symbiote.live_cli import register_live_commands
 from nexus_symbiote.policy import Policy
+from nexus_symbiote.reporting import (
+    ReportLine,
+    diff_report_lines,
+    print_lines,
+    risk_report_lines,
+    scan_gate_lines,
+    validation_report_lines,
+)
 from nexus_symbiote.runtime_cli import register_runtime_commands
-from nexus_symbiote.supply_chain_cli import register_supply_chain_commands
+from nexus_symbiote.supply_chain_cli import STAGED_INVENTORY, register_supply_chain_commands
 from nexus_symbiote.utils.files import write_output_file
-from nexus_symbiote.utils.terminal import UNSAFE_TEXT as _UNSAFE_TEXT
-from nexus_symbiote.utils.terminal import output_failure, write_cli_output
+from nexus_symbiote.utils.terminal import (
+    echo_line,
+    json_text,
+    neutralize,
+    output_failure,
+    safe_line,
+    write_cli_output,
+)
 
 if TYPE_CHECKING:
     from nexus_symbiote.scanners.base import ScanResult
     from nexus_symbiote.utils.crypto import SigstoreArtifactPolicy
 
-console = Console(stderr=True)
-err_console = console
+DEBUG_KEY = "nexus_symbiote.debug"
+BUILTIN_SCANNERS = "mcp, model, prompt, rag, registry, a2a, ide_agents, shadowscan"
+# Gate reports name the agent manifest and the graph check like collectors.
+MANIFEST = "agent.yaml"
+
+
+def _debug_enabled() -> bool:
+    ctx = click.get_current_context(silent=True)
+    return bool(ctx is not None and ctx.meta.get(DEBUG_KEY))
+
+
+def _staged_inventory() -> bool:
+    ctx = click.get_current_context(silent=True)
+    return bool(ctx is not None and ctx.meta.get(STAGED_INVENTORY))
+
+
+def _print_traceback(exc: BaseException) -> None:
+    import traceback
+
+    # An error's message can quote project or inventory text, secrets included; its
+    # class and where it was raised are what a defect report needs, so only those print.
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        echo_line("Debug: ", type(current).__name__, " raised at:", err=True)
+        for frame in traceback.extract_tb(current.__traceback__):
+            echo_line("Debug:   ", frame.filename, ":", frame.lineno, " in ", frame.name, err=True)
+        cause = current.__cause__
+        current = (
+            cause if cause is not None or current.__suppress_context__ else current.__context__
+        )
 
 
 def _scanner_error_summary(exc: Exception) -> str:
@@ -50,9 +91,24 @@ def _scanner_error_summary(exc: Exception) -> str:
     return "collector failed (scanner-internal-error)"
 
 
-def _policy(root: Path, *, ignore_project: bool = False) -> Policy:
-    policy, _, _ = _policy_with_source(root, ignore_project=ignore_project)
-    return policy
+def _input_problem(exc: BaseException) -> str:
+    """Name the class of an input failure without quoting the input."""
+    from pydantic import ValidationError
+
+    if isinstance(exc, OSError):
+        return "it cannot be read"
+    if isinstance(exc, RecursionError):
+        return "it is nested too deeply"
+    if isinstance(exc, UnicodeError):
+        return "it is not UTF-8 text"
+    if isinstance(exc, ValidationError):
+        return "it does not match the native AIBOM schema"
+    if isinstance(exc, json.JSONDecodeError):
+        return "it is not valid JSON"
+    return (
+        "it is not strict JSON (duplicate keys and non-finite numbers are refused) "
+        "or exceeds the size limit"
+    )
 
 
 def _policy_with_source(
@@ -67,28 +123,26 @@ def _policy_with_source(
     from nexus_symbiote.policy import (
         PolicyError,
         default_policy,
-        find_policy_path,
-        load_policy,
+        load_policy_file,
         weakened_settings,
     )
 
     if ignore_project:
         return default_policy(), "built-in", []
     try:
-        path = find_policy_path(root)
-        policy = load_policy(root) or default_policy()
+        loaded = load_policy_file(root)
     except PolicyError as exc:
         raise _failure(exc) from exc
-    if path is None:
-        return policy, "built-in", []
+    if loaded is None:
+        return default_policy(), "built-in", []
+    policy, path, _ = loaded
     weaker = weakened_settings(policy)
     if weaker and warn:
         # The path and the relaxed values come from the checkout, so neither may move
         # the cursor or start a new line that hides this warning or forges a CI command.
-        shown = _UNSAFE_TEXT.sub(
-            "\ufffd", f"policy {path} weakens the built-in gates: " + "; ".join(weaker)
+        echo_line(
+            "WARNING: policy ", path, " weakens the built-in gates: ", "; ".join(weaker), err=True
         )
-        click.echo("WARNING: " + shown, err=True)
     return policy, f"project:{path}", weaker
 
 
@@ -107,48 +161,94 @@ def _inventory_policy(
     if not ignore_project:
         unapplied = nearest_policy_file(Path(aibom_path).resolve().parent)
         if unapplied is not None:
-            shown = _UNSAFE_TEXT.sub("\ufffd", str(unapplied))
-            click.echo(
-                f"Note: {shown} was not applied. Without --project the built-in "
-                "policy is used; name a trusted project with --project to apply its policy.",
+            echo_line(
+                "Note: ",
+                unapplied,
+                " was not applied. Without --project the built-in policy is used; "
+                "name a trusted project with --project to apply its policy.",
                 err=True,
             )
     return default_policy(), "built-in", []
 
 
-def _safe(value: object) -> str:
-    """Render untrusted text literally: no Rich markup and no terminal control sequences."""
-    return escape(_UNSAFE_TEXT.sub("\ufffd", str(value)))
+def _gate_sources(
+    policy: Policy, policy_source: str, threshold_from_cli: bool, fail_on_severity: str | None
+) -> dict[str, str]:
+    """Where each effective risk-gate parameter came from: cli, project policy or built-in."""
 
+    def origin(name: str) -> str:
+        if policy_source.startswith("project:") and name in policy.risk.model_fields_set:
+            return "project policy"
+        return "built-in"
 
-_MAX_SHOWN_FAILURES = 20
-
-
-def _print_gate_reasons(reasons: list[str], failures: list[str]) -> None:
-    """Say why a gate failed; a bare verdict leaves the reader to search the inventory."""
-    for reason in reasons:
-        err_console.print(f"  - {_safe(reason)}", soft_wrap=True)
-    for failure in failures[:_MAX_SHOWN_FAILURES]:
-        err_console.print(f"  - collection: {_safe(failure)}", soft_wrap=True)
-    if len(failures) > _MAX_SHOWN_FAILURES:
-        hidden = len(failures) - _MAX_SHOWN_FAILURES
-        err_console.print(
-            f"  - collection: {hidden} more in metadata.completeness.scan_failures", soft_wrap=True
-        )
+    return {
+        "fail_threshold_source": "cli" if threshold_from_cli else origin("fail_threshold"),
+        "fail_on_severity_source": "cli" if fail_on_severity else origin("fail_on_severity"),
+        "warn_threshold_source": origin("warn_threshold"),
+        "ignore_categories_source": origin("ignore_categories"),
+        "suppressions_source": origin("suppressions"),
+    }
 
 
 def _failure(exc: Exception) -> click.ClickException:
     # Policy, graph and inventory errors quote keys, file names and paths from the
     # checkout or the inventory, so they get the same neutralization as other output.
-    return click.ClickException(_UNSAFE_TEXT.sub("\ufffd", str(exc)))
+    return click.ClickException(neutralize(exc))
 
 
 def _load_bom(path: str | Path) -> AIBOM:
-    # Parser and validation messages can quote attacker-controlled input; keep them out.
+    # Parser and validation messages can quote attacker-controlled input; name only the
+    # class of the problem. A NativeFormatError names it without quoting the document.
     try:
         return AIBOM.load(Path(path))
+    except NativeFormatError as exc:
+        raise click.ClickException(
+            f"{neutralize(path)} is not a valid native AIBOM file. {neutralize(exc)}"
+        ) from exc
     except (OSError, ValueError, RecursionError) as exc:
-        raise click.ClickException(f"{path} is not a valid native AIBOM file.") from exc
+        raise click.ClickException(
+            f"{neutralize(path)} is not a valid native AIBOM file. Reason: {_input_problem(exc)}."
+        ) from exc
+
+
+def _project_root(value: str | Path, *, label: str) -> Path:
+    """Resolve a project directory, saying so when a symbolic link redirects it.
+
+    The confined collectors refuse a root reached through a symbolic link, so the CLI
+    resolves the path first. A checkout can replace a directory it contains with a
+    link to any directory on the machine, and a plain relative path can only leave
+    the working directory through such a link, so that case is refused.
+    """
+    requested = Path(value)
+    resolved = requested.resolve()
+    if Path(os.path.normpath(requested.absolute())) == resolved:
+        return resolved
+    if (
+        not requested.is_absolute()
+        and ".." not in requested.parts
+        and not resolved.is_relative_to(Path.cwd().resolve())
+    ):
+        raise click.BadParameter(
+            f"{value} leads outside the current directory through a symbolic link; "
+            f"name the directory it resolves to, {resolved}, to collect that directory",
+            param_hint=label,
+        )
+    echo_line(
+        "Note: ", label, " ", value, " resolves through a symbolic link to ", resolved, err=True
+    )
+    return resolved
+
+
+def _require_binding_key() -> None:
+    """A malformed operator key is a usage error, not a failure of the scanned files."""
+    from nexus_symbiote.scanners.mcp import _MIN_SOURCE_BINDING_KEY_LENGTH, SOURCE_BINDING_KEY_ENV
+
+    key = os.environ.get(SOURCE_BINDING_KEY_ENV, "")
+    if key and len(key) < _MIN_SOURCE_BINDING_KEY_LENGTH:
+        raise click.UsageError(
+            f"{SOURCE_BINDING_KEY_ENV} must contain at least "
+            f"{_MIN_SOURCE_BINDING_KEY_LENGTH} characters"
+        )
 
 
 SCANNER_REGISTRY: dict[str, type] = {}
@@ -194,28 +294,88 @@ def _get_scanners() -> dict[str, type]:
 
 
 _MODE_FLAGS = frozenset({"--offline", "--live"})
+# Click 8.2+ shows a group's own help, which carries no input, through this error.
+_HELP_ERRORS = tuple(
+    error
+    for error in (getattr(click.exceptions, "NoArgsIsHelpError", None),)
+    if isinstance(error, type)
+)
+
+
+def _neutralized(exc: click.ClickException) -> click.ClickException:
+    """The same error with neutralized text: it can quote checkout or inventory text."""
+    message = neutralize(exc.format_message())
+    if isinstance(exc, click.UsageError):
+        return click.UsageError(message, ctx=exc.ctx)
+    return click.ClickException(message)
+
+
+def _declared_text_only(exc: click.ClickException) -> bool:
+    """Click's own missing-parameter error, worded only from the parameter's declaration.
+
+    Its lines (such as one per allowed choice) come from this program, never from input,
+    so they keep Click's layout instead of being joined into one neutralized line.
+    """
+    return (
+        type(exc) is click.MissingParameter
+        and not exc.message
+        and exc.param is not None
+        and exc.param_hint is None
+        and exc.param_type is None
+    )
 
 
 class _RootGroup(click.Group):
-    """Root group that turns mode refusals into clear, nonzero CLI errors."""
+    """Root group: clear mode refusals, neutralized error text and no tracebacks."""
+
+    def _main_shell_completion(
+        self,
+        ctx_args: Any,
+        prog_name: str,
+        complete_var: str | None = None,
+    ) -> None:
+        # Shell completion is not offered: an inherited _NEXUS_SYMBIOTE_COMPLETE would
+        # make every command, gates included, print a script and exit 0 without running.
+        return None
 
     def invoke(self, ctx: click.Context) -> Any:
         try:
             return super().invoke(ctx)
         except click.NoSuchOption as exc:
+            if exc.option_name == limits.OPTION:
+                raise click.UsageError(
+                    f"No such option: {limits.OPTION}. Limits go before the command: "
+                    f"nexus-symbiote {limits.OPTION} NAME=VALUE <command> ...",
+                    ctx=exc.ctx,
+                ) from None
             if exc.option_name not in _MODE_FLAGS:
-                raise
+                raise _neutralized(exc) from None
             raise click.UsageError(
                 f"No such option: {exc.option_name}. Mode flags go before the command: "
                 f"nexus-symbiote {exc.option_name} <command> ...",
                 ctx=exc.ctx,
             ) from None
         except modes.LiveModeRequiredError as exc:
-            raise click.UsageError(str(exc)) from None
+            raise click.UsageError(neutralize(exc)) from None
         except modes.OfflineViolation as exc:
             raise click.ClickException(
-                f"offline mode blocked {exc} before the command completed. This command "
-                "never needs the network or a subprocess; please report this as a defect."
+                f"offline mode blocked {neutralize(exc)} before the command completed. This "
+                "command never needs the network or a subprocess; please report this as a defect."
+            ) from None
+        except click.ClickException as exc:
+            if isinstance(exc, _HELP_ERRORS) or _declared_text_only(exc):
+                raise
+            raise _neutralized(exc) from None
+        except (click.exceptions.Exit, click.Abort):
+            raise
+        except Exception as exc:
+            # A traceback can quote project or inventory text, so it is shown only on
+            # request; the command still fails closed.
+            if ctx.meta.get(DEBUG_KEY):
+                _print_traceback(exc)
+            raise click.ClickException(
+                f"internal error ({type(exc).__name__}); nothing was approved. Rerun with "
+                "--debug before the command to see where it was raised, and please report it."
             ) from None
 
 
@@ -236,20 +396,54 @@ class _RootGroup(click.Group):
         "(discover-mcp, advisories, verify-live). Other commands stay offline."
     ),
 )
+@click.option(
+    "--debug",
+    "debug_flag",
+    is_flag=True,
+    help=(
+        "Print where a collector or internal error was raised (its class, files, lines and "
+        "functions) on standard error, without its message, which can quote input."
+    ),
+)
+@click.option(
+    limits.OPTION,
+    "limit_settings",
+    multiple=True,
+    metavar="NAME=VALUE",
+    help=(
+        "Set one collection limit for this command, for example entries=200000 or "
+        "model-bytes=128GiB. Repeatable; overrides NEXUS_SYMBIOTE_LIMITS for that name. "
+        "Limits: " + ", ".join(limits.SPECS) + "."
+    ),
+)
 @click.pass_context
-def main(ctx: click.Context, offline_flag: bool, live_flag: bool) -> None:
+def main(
+    ctx: click.Context,
+    offline_flag: bool,
+    live_flag: bool,
+    debug_flag: bool,
+    limit_settings: tuple[str, ...] = (),
+) -> None:
     """Nexus SymBiote — Agent Bill of Materials for AI supply chain security.
 
     Every command runs offline by default: no name resolution, network
     connections or subprocesses. Only discover-mcp, advisories and verify-live
     reach outside local files, and only in live mode: pass --live before the
     command or set NEXUS_SYMBIOTE_MODE=live.
+
+    Collection limits bound what one command reads from a project. Reaching one
+    fails the scan and names the limit; raise it with --limit before the command
+    or with NEXUS_SYMBIOTE_LIMITS=NAME=VALUE,NAME=VALUE. A project's own files
+    never change a limit.
     """
+    ctx.meta[DEBUG_KEY] = debug_flag
     try:
         requested = modes.resolve(offline=offline_flag, live=live_flag, environ=os.environ)
+        collection_limits = limits.resolve(limit_settings, os.environ)
     except ValueError as exc:
         raise click.UsageError(str(exc), ctx=ctx) from None
     ctx.meta["nexus_symbiote.mode"] = requested
+    ctx.with_resource(limits.applied(collection_limits))
     ctx.with_resource(modes.enforce(modes.command_mode(requested.mode, ctx.invoked_subcommand)))
 
 
@@ -260,31 +454,17 @@ def _merge_scan_result(
     collected: dict[str, Any],
     scan_failures: list[str],
 ) -> None:
-    from nexus_symbiote.core.models import ClaimEvidence
+    from nexus_symbiote.core.collection import merge_collected
 
     accepted_refs: set[str] = set()
     for comp in result.components:
         # Discovery of a file/configuration does not verify every supplier assertion.
-        imported = name == "shadowscan"
-        comp.claims["discovery_report_entry" if imported else "repository_presence"] = (
-            ClaimEvidence(
-                assurance=AssuranceLevel.DECLARED if imported else AssuranceLevel.OBSERVED,
-                method="imported-discovery-report" if imported else "filesystem-inventory",
-                scope="source-report" if imported else "repository",
-                collector=name,
-                locator=comp.source_path,
-                observed_at=aibom.metadata.timestamp,
-            )
-        )
-        if comp.assurance_level is AssuranceLevel.VERIFIED:
-            comp.assurance_level = AssuranceLevel.DECLARED
-        existing = collected.get(comp.bom_ref)
-        if existing is not None and existing != comp:
+        outcome = merge_collected(collected, comp, name, aibom.metadata.timestamp)
+        if outcome == "conflict":
             scan_failures.append(f"{name}: conflicting duplicate component {comp.bom_ref}")
             continue
-        if existing is None:
+        if outcome == "added":
             aibom.components.append(comp)
-            collected[comp.bom_ref] = comp
         accepted_refs.add(comp.bom_ref)
     for edge in result.dependencies:
         if edge.source_ref in accepted_refs and edge.target_ref in accepted_refs:
@@ -293,7 +473,7 @@ def _merge_scan_result(
             scan_failures.append(f"{name}: dependency endpoint was not imported")
 
 
-def _render_aibom(aibom: AIBOM, output_format: str) -> str:
+def _render_aibom(aibom: AIBOM, output_format: str, root: Path) -> str:
     if output_format == "cyclonedx":
         from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
 
@@ -305,13 +485,20 @@ def _render_aibom(aibom: AIBOM, output_format: str) -> str:
     if output_format == "sarif":
         from nexus_symbiote.generators.sarif import SARIFGenerator
 
-        return SARIFGenerator().generate_json(aibom)
-    return aibom.to_json()
+        # Inventory paths are relative to the scanned root; SARIF URIs to the working
+        # directory, or to the scanned root when the scan starts outside it.
+        return SARIFGenerator(scan_root=root).generate_json(aibom)
+    try:
+        return aibom.to_native_json()
+    except NativeFormatError as exc:
+        raise click.ClickException(f"Inventory not written. {exc}") from exc
 
 
 @main.command()
-@click.argument("project_path", type=click.Path(exists=True), default=".")
-@click.option("-o", "--output", type=click.Path(), help="Output file path")
+@click.argument("project_path", type=click.Path(exists=True, file_okay=False), default=".")
+@click.option(
+    "-o", "--output", type=click.Path(), help="Output file path (default: standard output)"
+)
 @click.option(
     "-f",
     "--format",
@@ -324,10 +511,19 @@ def _render_aibom(aibom: AIBOM, output_format: str) -> str:
     "--scanner",
     "scanners",
     multiple=True,
-    help="Specific scanners to run (default: all, or from .nexus-symbiote.yaml)",
+    help=(
+        f"Collector to run, once each: {BUILTIN_SCANNERS} (default: all, or from "
+        ".nexus-symbiote.yaml). A collector left out makes coverage partial."
+    ),
 )
 @click.option(
     "--report-only", is_flag=True, help="Emit findings and collection failures without a CI failure"
+)
+@click.option(
+    "--check",
+    "check_only",
+    is_flag=True,
+    help="Collect and apply the scan gate without writing an inventory.",
 )
 @click.option(
     "--signature-policy",
@@ -347,19 +543,24 @@ def scan(
     report_only: bool = False,
     signature_policy: Path | None = None,
     no_project_policy: bool = False,
+    check_only: bool = False,
 ) -> None:
     """Scan a project and generate an AIBOM."""
-    root = Path(project_path).resolve()
+    if check_only and output:
+        raise click.UsageError("--check writes no inventory; drop -o/--output or --check")
+    _require_binding_key()
+    root = _project_root(project_path, label="PROJECT_PATH")
     if not root.is_dir():
-        err_console.print(f"[red]Error:[/] '{_safe(project_path)}' is not a directory")
-        sys.exit(1)
+        raise click.ClickException(f"{neutralize(project_path)} is not a directory")
 
     from nexus_symbiote.graph import assemble_repository_agent
     from nexus_symbiote.policy import PolicyError
     from nexus_symbiote.utils.confined import DEFAULT_EXCLUDES
     from nexus_symbiote.validators.risk import RiskScorer
 
-    policy = _policy(root, ignore_project=no_project_policy)
+    policy, policy_source, policy_weakened = _policy_with_source(
+        root, ignore_project=no_project_policy
+    )
     signature_policies = _signer_policies(signature_policy, root)
     output_format = output_format or policy.output.default_format
     all_scanners = _get_scanners()
@@ -369,14 +570,29 @@ def scan(
         raise click.BadParameter(
             "Unknown scanner: " + ", ".join(sorted(unknown)), param_hint="--scanner"
         )
+    if len(set(selected)) != len(selected):
+        raise click.BadParameter("each collector may be selected only once", param_hint="--scanner")
     if output_format not in {"json", "cyclonedx", "spdx", "sarif"}:
         raise click.BadParameter("Unknown output format", param_hint="--format")
-    console.print(f"[bold]Scanning[/] {_safe(root)}")
-    aibom = AIBOM(metadata=AIBOMMetadata(authors=[]))
+    echo_line("Scanning ", root, err=True)
+    # The policy file always sits in the scan root; record it relative to that root.
+    aibom = AIBOM(
+        metadata=AIBOMMetadata(
+            authors=[],
+            policy_source=(
+                "project:" + policy_source.rsplit("/", 1)[-1]
+                if policy_source.startswith("project:")
+                else policy_source
+            ),
+            policy_weakened=policy_weakened,
+        )
+    )
     aibom.finalize()
     surfaces_scanned: list[str] = []
     surfaces_excluded: list[str] = []
     scan_failures: list[str] = []
+    failures_by: dict[str, list[str]] = {}
+    excluded_by: dict[str, list[str]] = {}
     completed: list[str] = []
     source_report_digest = None
     source_report_content_digest = None
@@ -396,14 +612,14 @@ def scan(
             if name == "model"
             else all_scanners[name]()
         )
-        console.print(f"  Running [cyan]{_safe(name)}[/] scanner...")
+        echo_line("  Running ", name, " scanner...", err=True)
+        failure_count = len(scan_failures)
         try:
             configure = getattr(scanner, "configure", None)
             if configure:
                 configure(exclude_paths=policy.scan.exclude_paths)
             elif policy.scan.exclude_paths:
                 raise ValueError("scanner does not support configured exclude_paths")
-            failure_count = len(scan_failures)
             result = scanner.scan(root)
             result.make_portable(root)
             if name == "shadowscan":
@@ -419,6 +635,8 @@ def scan(
             surfaces_scanned.extend(result.surfaces_scanned)
             surfaces_excluded.extend(result.surfaces_excluded)
             scan_failures.extend(result.scan_failures)
+            failures_by[name] = scan_failures[failure_count:]
+            excluded_by[name] = list(result.surfaces_excluded)
             # A collector that produced a conflicting duplicate component or a
             # dangling dependency edge has failed even when its own ScanResult
             # reports no failure. Derive both coverage records from the same
@@ -433,19 +651,37 @@ def scan(
             )
             if scanner_status[name] != "failed":
                 completed.append(name)
-            console.print(f"    Found [green]{len(result.components)}[/] components")
+            state = "" if scanner_status[name] == "complete" else f" ({scanner_status[name]})"
+            click.echo(f"    Found {len(result.components)} components{state}", err=True)
         except Exception as exc:
             summary = _scanner_error_summary(exc)
-            err_console.print(
-                f"  [red]Scanner '{_safe(name)}' failed:[/] {_safe(summary)}", soft_wrap=True
-            )
+            echo_line("  Scanner '", name, "' failed: ", summary, err=True)
+            if _debug_enabled():
+                _print_traceback(exc)
             scan_failures.append(f"{name}: {summary}")
+            failures_by[name] = scan_failures[failure_count:]
             scanner_status[name] = "failed"
+    failure_count, exclusion_count = len(scan_failures), len(surfaces_excluded)
     try:
-        assemble_repository_agent(aibom, root)
+        # Manifest problems are recorded like collector failures; the inventory is still written.
+        assemble_repository_agent(
+            aibom,
+            root,
+            exclude_paths=policy.scan.exclude_paths,
+            failures=scan_failures,
+            exclusions=surfaces_excluded,
+            surfaces=surfaces_scanned,
+        )
     except (PolicyError, ValueError, OSError) as exc:
         raise _failure(exc) from exc
-    scan_failures.extend(validate_graph(aibom))
+    if len(scan_failures) > failure_count:
+        failures_by[MANIFEST] = scan_failures[failure_count:]
+    if len(surfaces_excluded) > exclusion_count:
+        excluded_by[MANIFEST] = surfaces_excluded[exclusion_count:]
+    graph_failures = validate_graph(aibom)
+    scan_failures.extend(graph_failures)
+    if graph_failures:
+        failures_by["graph"] = graph_failures
     aibom.metadata.completeness = CompletenessClaim(
         scope="repository+shadowscan" if source_report_digest else "repository",
         source_report_digest=source_report_digest,
@@ -475,33 +711,53 @@ def scan(
             "network",
         ],
     )
-    passed, risk_report = RiskScorer(
-        fail_threshold=policy.risk.fail_threshold,
-        warn_threshold=policy.risk.warn_threshold,
-        ignore_categories=policy.risk.ignore_categories,
-        fail_on_severity=policy.risk.fail_on_severity,
-    ).passes_gate(aibom)
+    scorer = RiskScorer.from_policy(policy.risk)
+    passed, risk_report = scorer.passes_gate(aibom)
     report_mode = report_only or policy.scan.failure_mode == "report-only"
+    staged = _staged_inventory()
 
-    if source_report_digest and output_format == "sarif":
-        raise click.ClickException(
-            "SARIF cannot preserve imported discovery coverage; use native JSON, CycloneDX or SPDX."
-        )
-    out_data = _render_aibom(aibom, output_format)
-
-    if output:
-        write_cli_output(Path(output), out_data)
-        console.print(f"[bold green]Saved[/] {_safe(output)}")
-    else:
-        click.echo(out_data)
+    if not check_only:
+        if source_report_digest and output_format == "sarif":
+            raise click.ClickException(
+                "SARIF cannot preserve imported discovery coverage; use native JSON, CycloneDX "
+                "or SPDX."
+            )
+        try:
+            out_data = _render_aibom(aibom, output_format, root)
+        except (ValueError, RecursionError) as exc:
+            # Export checks quote inventory values; name the format, never the values.
+            if _debug_enabled():
+                _print_traceback(exc)
+            raise click.ClickException(
+                f"The inventory cannot be exported as {output_format}: the export failed its "
+                "schema or consistency checks. Write native JSON to inspect the inventory, or "
+                "rerun with --debug before the command for details."
+            ) from exc
+        if output:
+            write_cli_output(Path(output), out_data)
+            if not staged:
+                echo_line("Saved ", output, err=True)
+        else:
+            click.echo(json_text(out_data))
 
     if risk_report.warning_threshold_exceeded:
-        err_console.print(f"[yellow]Risk warning:[/] score {risk_report.overall_score:.1f}")
-    if scan_failures or not passed:
-        err_console.print("[yellow]Report only[/]" if report_mode else "[red]Scan gate failed[/]")
-        _print_gate_reasons(risk_report.gate_reasons, scan_failures)
-        if not report_mode:
-            raise click.exceptions.Exit(1)
+        click.echo(f"Risk warning: score {risk_report.overall_score:.1f}", err=True)
+    if not scan_failures and passed:
+        print_lines([("Scan gate passed", "green")], err=True)
+        return
+    heading = "Scan gate failed (report only: exit status 0)" if report_mode else "Scan gate failed"
+    document = {
+        **risk_report.to_dict(),
+        "fail_on_severity": scorer.fail_on_severity,
+        "score_threshold": scorer.fail_threshold,
+    }
+    not_collected = sorted(set(all_scanners) - set(selected))
+    gate = scan_gate_lines(
+        document, failures_by, excluded_by, not_collected, recorded=not (check_only or staged)
+    )
+    print_lines([(heading, "yellow" if report_mode else "red"), *gate], err=True)
+    if not report_mode:
+        raise click.exceptions.Exit(1)
 
 
 @main.command("import-shadowscan")
@@ -548,7 +804,10 @@ def import_shadowscan(
 
         out_data = SPDXGenerator().generate_json(aibom)
     else:
-        out_data = aibom.to_json()
+        try:
+            out_data = aibom.to_native_json()
+        except NativeFormatError as exc:
+            raise click.ClickException(f"Inventory not written. {exc}") from exc
 
     try:
         write_output_file(Path(output), out_data, overwrite=False)
@@ -556,8 +815,13 @@ def import_shadowscan(
         raise click.ClickException("Cannot create output; choose a new output path") from exc
     except (OSError, ValueError) as exc:
         raise output_failure(exc) from exc
-    console.print(
-        f"Imported {len(imported.components)} components and saved {output}; discovery coverage remains partial."
+    echo_line(
+        "Imported ",
+        len(imported.components),
+        " components and saved ",
+        output,
+        "; discovery coverage remains partial.",
+        err=True,
     )
     if report_only:
         return
@@ -572,7 +836,7 @@ def import_shadowscan(
     "--project",
     required=True,
     type=click.Path(exists=True, file_okay=False),
-    help="Trusted project root",
+    help="Trusted project root; ARTIFACT_PATH is relative to it",
 )
 @click.option(
     "--sha256", "expected_digest", required=True, help="Expected sha256:<hex> from a trusted source"
@@ -598,15 +862,16 @@ def verify_artifact(
     from nexus_symbiote.utils.crypto import SIGSTORE_MISSING, verify_sigstore_digest
 
     if not re.fullmatch(r"sha256:[0-9a-f]{64}", expected_digest):
-        raise click.ClickException(
-            "Expected SHA-256 must be sha256:<64 lowercase hexadecimal characters>"
+        raise click.BadParameter(
+            "Expected SHA-256 must be sha256:<64 lowercase hexadecimal characters>",
+            param_hint="'--sha256'",
         )
     if bool(bundle) != bool(signer_identity and issuer) or (
         not bundle and (signer_identity or issuer)
     ):
-        raise click.ClickException("Bundle verification requires both signer identity and issuer")
+        raise click.UsageError("--bundle, --signer-identity and --issuer must be supplied together")
     try:
-        digest = hash_confined_file(Path(project), artifact_path)
+        digest = hash_confined_file(_project_root(project, label="--project"), artifact_path)
     except OSError as exc:
         raise click.ClickException(
             "Cannot safely hash the artifact within the project root"
@@ -619,8 +884,8 @@ def verify_artifact(
         except (OSError, UnicodeError) as exc:
             raise click.ClickException("Cannot safely read the Sigstore bundle") from exc
         if signer_identity is None or issuer is None:
-            raise click.ClickException(
-                "Bundle verification requires both signer identity and issuer"
+            raise click.UsageError(
+                "--bundle, --signer-identity and --issuer must be supplied together"
             )
         verified = verify_sigstore_digest(digest, bundle_bytes, signer_identity, issuer)
         if not verified.verified:
@@ -674,9 +939,14 @@ def verify_discovery(
             max_bytes=MAX_REPORT_BYTES,
         )
         bom = AIBOM.model_validate(doc)
-        text = read_regular_text(Path(report_path), max_bytes=MAX_REPORT_BYTES)
     except (OSError, ValueError, UnicodeError, RecursionError) as exc:
-        raise click.ClickException("Cannot safely read the BOM or discovery report") from exc
+        raise click.ClickException(f"Cannot safely read the BOM: {_input_problem(exc)}") from exc
+    try:
+        text = read_regular_text(Path(report_path), max_bytes=MAX_REPORT_BYTES)
+    except (OSError, ValueError, UnicodeError) as exc:
+        raise click.ClickException(
+            f"Cannot safely read the discovery report: {_input_problem(exc)}"
+        ) from exc
     claim = bom.metadata.completeness
     expected = claim.source_report_digest if claim else None
     if not isinstance(expected, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", expected):
@@ -728,7 +998,7 @@ def verify_discovery(
 @click.argument("aibom_path", type=click.Path(exists=True))
 @click.option(
     "--project",
-    type=click.Path(exists=True),
+    type=click.Path(exists=True, file_okay=False),
     help="Project root for cross-validation; the only source of a project policy",
 )
 @click.option(
@@ -741,118 +1011,152 @@ def verify_discovery(
     is_flag=True,
     help="Use built-in policy without reading configuration from the target.",
 )
+@click.option(
+    "--skip-integrity",
+    is_flag=True,
+    help=(
+        "Check completeness only and report integrity as skipped, for a repository whose "
+        "models cannot be signed yet. The skip is printed and recorded in --json-output."
+    ),
+)
+@click.option("--json-output", is_flag=True, help="Print the validation report as JSON.")
+@click.option(
+    "--require-discovery-signature",
+    is_flag=True,
+    help=(
+        "Require the operator signature policy to verify any ShadowScan report the inventory "
+        "records or the project contains, whatever the project policy says; requires --project."
+    ),
+)
 def validate(
     aibom_path: str,
     project: str | None,
     signature_policy: Path | None = None,
     no_project_policy: bool = False,
+    skip_integrity: bool = False,
+    json_output: bool = False,
+    require_discovery_signature: bool = False,
 ) -> None:
-    """Validate an AIBOM for completeness and integrity."""
+    """Validate an AIBOM for completeness and integrity.
+
+    Without --project only the inventory's own claims are checked: its coverage claim
+    and its self-consistency. With --project the inventory is compared with a fresh
+    local collection of that project, unless the policy skips the completeness check.
+    """
     bom = _load_bom(aibom_path)
 
     from nexus_symbiote.validators.completeness import (
         CompletenessValidator,
-        discovery_producer_problems,
+        assurance_problems,
+        carries_discovery_evidence,
+        discovery_producer_check,
         discovery_signature_required,
     )
     from nexus_symbiote.validators.integrity import IntegrityValidator
 
-    signature_policies = _signer_policies(signature_policy, Path(project) if project else None)
-
-    policy, policy_source, _ = _inventory_policy(
-        Path(project).resolve() if project else None,
-        aibom_path,
-        ignore_project=no_project_policy,
+    if require_discovery_signature and not project:
+        raise click.BadParameter(
+            "--require-discovery-signature requires --project",
+            param_hint="--require-discovery-signature",
+        )
+    root = _project_root(project, label="--project") if project else None
+    if root is not None:
+        _require_binding_key()
+    signature_policies = _signer_policies(signature_policy, root)
+    policy, policy_source, policy_weakened = _inventory_policy(
+        root, aibom_path, ignore_project=no_project_policy, warn=not json_output
     )
-    console.print(f"Policy: {_safe(policy_source)}", soft_wrap=True)
-    valid = True
-    console.print("[bold]Completeness check[/]")
-    if policy.validation.require_completeness:
-        cv = CompletenessValidator()
-        c_report = (
-            cv.validate_against_project(
-                bom,
-                Path(project).resolve(),
-                exclude_paths=policy.scan.exclude_paths,
-                signature_policies=signature_policies,
-            )
-            if project
-            else cv.validate(bom)
-        )
-        console.print("  Status: " + ("[green]PASS[/]" if c_report.is_complete else "[red]FAIL[/]"))
-        console.print(f"  Components: {c_report.total_components}")
-        for issue in c_report.issues:
-            console.print(
-                f"  {_safe(issue.severity.upper())} \\[{_safe(issue.surface)}] "
-                f"{_safe(issue.description)}",
-                soft_wrap=True,
-            )
-        valid = valid and c_report.is_complete
-    else:
-        console.print("  SKIPPED by explicit policy")
-    console.print("\n[bold]Integrity check[/]")
-    if policy.validation.require_integrity:
-        i_report = IntegrityValidator(signature_policies=signature_policies).validate(
-            bom,
-            Path(project).resolve() if project else None,
-            exclude_paths=policy.scan.exclude_paths,
-        )
-        console.print("  Status: " + ("[green]PASS[/]" if i_report.is_valid else "[red]FAIL[/]"))
-        console.print(
-            f"  Hashes verified: {i_report.hashes_verified}, failed: {i_report.hashes_failed}"
-        )
-        for integrity_issue in i_report.issues:
-            console.print(
-                f"  {_safe(integrity_issue.severity.upper())} \\[{_safe(integrity_issue.component_ref)}] "
-                f"{_safe(integrity_issue.detail)}",
-                soft_wrap=True,
-            )
-        valid = valid and i_report.is_valid
-    else:
-        console.print("  SKIPPED by explicit policy")
-    if project and discovery_signature_required(
-        policy.validation.require_discovery_signature, Path(project).resolve(), signature_policies
-    ):
-        console.print("\n[bold]Discovery producer check[/]")
-        problems = discovery_producer_problems(
-            bom,
-            Path(project).resolve(),
-            signature_policies,
-            exclude_paths=policy.scan.exclude_paths,
-        )
-        console.print("  Status: " + ("[red]FAIL[/]" if problems else "[green]PASS[/]"))
-        for problem in problems:
-            console.print(f"  ERROR \\[shadowscan] {_safe(problem)}", soft_wrap=True)
-        valid = valid and not problems
     minimum = policy.validation.minimum_assurance_level
     if minimum == "verified":
         raise click.ClickException(
             "offline validate cannot establish verified assurance; use subject-bound cryptographic verification"
         )
-    if minimum == "observed":
-        levels = [c.assurance_level for c in bom.components]
-        if (
-            not bom.metadata.completeness
-            or not levels
-            or any(level is AssuranceLevel.DECLARED for level in levels)
-        ):
-            console.print("  ERROR: minimum observed assurance not attained")
-            valid = False
-        elif any(not c.claims for c in bom.components):
-            console.print("  ERROR: observed assurance requires claim provenance")
-            valid = False
+    passed = True
+    # Only the reconciliation below may claim that the inventory was compared with the project.
+    basis = "project-not-reconciled" if root is not None else "supplied-bom"
+    bound_imports: frozenset[str] = frozenset()
+    completeness: dict[str, Any] = {"status": "skipped", "skipped_by": "policy"}
+    if policy.validation.require_completeness:
+        cv = CompletenessValidator()
+        c_report = (
+            cv.validate_against_project(
+                bom,
+                root,
+                exclude_paths=policy.scan.exclude_paths,
+                signature_policies=signature_policies,
+            )
+            if root is not None
+            else cv.validate(bom)
+        )
+        completeness = {"status": "pass" if c_report.is_complete else "fail", **c_report.to_dict()}
+        bound_imports = c_report.bound_imports
+        if root is not None:
+            # The risk command's vocabulary: reconciled, with supplier claims, or failed.
+            basis = c_report.basis
+        passed = passed and c_report.is_complete
+    integrity: dict[str, Any] = {"status": "skipped", "skipped_by": "--skip-integrity"}
+    if not skip_integrity:
+        if policy.validation.require_integrity:
+            i_report = IntegrityValidator(signature_policies=signature_policies).validate(
+                bom, root, exclude_paths=policy.scan.exclude_paths, bound_imports=bound_imports
+            )
+            integrity = i_report.to_dict()
+            passed = passed and i_report.is_valid
+        else:
+            integrity = {"status": "skipped", "skipped_by": "policy"}
+    discovery: dict[str, Any] | None = None
+    if root is not None and discovery_signature_required(
+        policy.validation.require_discovery_signature or require_discovery_signature,
+        root,
+        signature_policies,
+    ):
+        status, problems = discovery_producer_check(
+            bom, root, signature_policies, exclude_paths=policy.scan.exclude_paths
+        )
+        discovery = {"status": status, "problems": problems}
+        passed = passed and not problems
+    elif carries_discovery_evidence(bom):
+        discovery = {"status": "not-verified", "problems": []}
+    assurance_errors = assurance_problems(bom, minimum, imported_claims=bound_imports)
     # Graph integrity is structural and cannot be disabled by a coverage policy.
     graph_issues = validate_graph(bom)
-    if graph_issues:
-        console.print("  ERROR: " + _safe("; ".join(graph_issues)), soft_wrap=True)
-        valid = False
-    if not valid:
+    passed = passed and not assurance_errors and not graph_issues
+    document = {
+        "passed": passed,
+        "assessment_basis": basis,
+        "policy_source": policy_source,
+        "policy_weakened": policy_weakened,
+        "completeness": completeness,
+        "integrity": integrity,
+        "discovery_producer": discovery,
+        "minimum_assurance_level": minimum,
+        "assurance_errors": assurance_errors,
+        "graph_issues": graph_issues,
+    }
+    if json_output:
+        click.echo(json_text(json.dumps(document, indent=2)))
+    else:
+        print_lines(validation_report_lines(document, project=root))
+    if not passed:
         raise click.exceptions.Exit(1)
 
 
 @main.command()
 @click.argument("aibom_path", type=click.Path(exists=True))
-@click.option("--threshold", type=float, default=None, help="Fail threshold score")
+@click.option(
+    "--threshold",
+    type=float,
+    default=None,
+    help="Fail when the aggregate score reaches this positive value (default: from policy, built-in 50).",
+)
+@click.option(
+    "--no-score-threshold",
+    is_flag=True,
+    help=(
+        "Do not gate on the aggregate score. Findings at or above --fail-on-severity, "
+        "unverified SafeTensors, incomplete coverage and missing evidence still fail the gate."
+    ),
+)
 @click.option("--json-output", is_flag=True, help="Output as JSON")
 @click.option(
     "--project",
@@ -878,6 +1182,14 @@ def validate(
     is_flag=True,
     help="Use built-in policy without reading configuration from the target.",
 )
+@click.option(
+    "--require-discovery-signature",
+    is_flag=True,
+    help=(
+        "Require the operator signature policy to verify any ShadowScan report the inventory "
+        "records or the project contains, whatever the project policy says; requires --project."
+    ),
+)
 def risk(
     aibom_path: str,
     threshold: float | None,
@@ -886,25 +1198,48 @@ def risk(
     no_project_policy: bool = False,
     project: Path | None = None,
     signature_policy: Path | None = None,
+    no_score_threshold: bool = False,
+    require_discovery_signature: bool = False,
 ) -> None:
     """Score supply-chain risks in an AIBOM."""
     bom = _load_bom(aibom_path)
 
-    from nexus_symbiote.validators.risk import RiskScorer
+    from nexus_symbiote.validators.completeness import carries_discovery_evidence
+    from nexus_symbiote.validators.risk import RiskReport, RiskScorer
 
-    root = project.resolve() if project else None
+    if no_score_threshold and threshold is not None:
+        raise click.UsageError("--threshold and --no-score-threshold cannot be combined")
+    if require_discovery_signature and project is None:
+        raise click.BadParameter(
+            "--require-discovery-signature requires --project",
+            param_hint="--require-discovery-signature",
+        )
+    root = _project_root(project, label="--project") if project else None
+    if root is not None:
+        _require_binding_key()
     signature_policies = _signer_policies(signature_policy, root)
     policy, policy_source, policy_weakened = _inventory_policy(
         root, aibom_path, ignore_project=no_project_policy, warn=not json_output
     )
+    threshold_from_cli = threshold is not None or no_score_threshold
     threshold = threshold if threshold is not None else policy.risk.fail_threshold
     if threshold <= 0 or not math.isfinite(threshold):
         raise click.BadParameter("threshold must be positive and finite", param_hint="--threshold")
+    severity = fail_on_severity or policy.risk.fail_on_severity
+    context = {
+        "fail_on_severity": severity,
+        "score_threshold": None if no_score_threshold else threshold,
+        "policy_source": policy_source,
+        "policy_weakened": policy_weakened,
+    }
     basis = "supplied-bom"
+    supplier_claims: list[dict[str, str]] = []
+    supplier_claims_omitted = 0
+    producer = "not-verified" if carries_discovery_evidence(bom) else "not-applicable"
     if root is not None:
         from nexus_symbiote.validators.completeness import (
             CompletenessValidator,
-            discovery_producer_problems,
+            discovery_producer_check,
             discovery_signature_required,
         )
 
@@ -914,110 +1249,80 @@ def risk(
             exclude_paths=policy.scan.exclude_paths,
             signature_policies=signature_policies,
         )
-        discovery = (
-            discovery_producer_problems(
+        discovery: list[str] = []
+        if discovery_signature_required(
+            policy.validation.require_discovery_signature or require_discovery_signature,
+            root,
+            signature_policies,
+        ):
+            producer, discovery = discovery_producer_check(
                 bom, root, signature_policies, exclude_paths=policy.scan.exclude_paths
             )
-            if discovery_signature_required(
-                policy.validation.require_discovery_signature, root, signature_policies
-            )
-            else []
-        )
-        if not checked.is_complete or not checked.local_subjects or discovery:
-            reasons = [issue.description for issue in checked.issues if issue.severity == "error"]
-            if not checked.local_subjects:
-                reasons.append("No local project subject was available to reconcile.")
+        if not checked.is_complete or discovery:
+            reasons = [
+                issue.description
+                for issue in checked.issues
+                if issue.severity in {"error", "unknown"}
+            ]
             reasons.extend(discovery)
+            # The same keys as a scored report, so consumers need not special-case it.
+            failed = {
+                **RiskReport().to_dict(),
+                "passed": False,
+                "assessment_basis": "project-reconciliation-failed",
+                "overall_score": None,
+                "risk_level": "unknown",
+                "coverage_status": "unreconciled",
+                "gate_reasons": reasons,
+                "total_components": len(bom.components),
+                "supplier_claims": [],
+                "supplier_claims_omitted": 0,
+                "discovery_producer": producer,
+                **context,
+            }
             if json_output:
-                click.echo(
-                    json.dumps(
-                        {
-                            "assessment_basis": "project-reconciliation-failed",
-                            "overall_score": None,
-                            "risk_level": "unknown",
-                            "coverage_status": "unreconciled",
-                            "gate_reasons": reasons,
-                            "policy_source": policy_source,
-                            "policy_weakened": policy_weakened,
-                        },
-                        indent=2,
-                    )
-                )
+                click.echo(json_text(json.dumps(failed, indent=2)))
             else:
-                click.echo("Risk unknown. Project reconciliation failed.", err=True)
-                for reason in reasons:
-                    click.echo(_UNSAFE_TEXT.sub("\ufffd", reason), err=True)
+                print_lines(risk_report_lines(failed))
             raise click.exceptions.Exit(1)
-        basis = "project-reconciled"
-    scorer = RiskScorer(
-        fail_threshold=threshold,
-        warn_threshold=policy.risk.warn_threshold,
-        ignore_categories=policy.risk.ignore_categories,
-        fail_on_severity=fail_on_severity or policy.risk.fail_on_severity,
+        basis = checked.basis
+        supplier_claims = [
+            {"subject": c.subject, "kind": c.kind, "detail": c.detail}
+            for c in checked.supplier_claims
+        ]
+        supplier_claims_omitted = checked.supplier_claims_omitted
+    scorer = RiskScorer.from_policy(
+        policy.risk,
+        # The scorer requires a finite threshold; none can be reached by a sum of weights.
+        fail_threshold=sys.float_info.max if no_score_threshold else threshold,
+        fail_on_severity=fail_on_severity,
     )
     passed, report = scorer.passes_gate(bom)
-
-    if json_output:
-        click.echo(
-            json.dumps(
-                {
-                    **report.to_dict(),
-                    "assessment_basis": basis,
-                    "policy_source": policy_source,
-                    "policy_weakened": policy_weakened,
-                },
-                indent=2,
-            )
-        )
-        sys.exit(0 if passed else 1)
-
-    level_colors = {
-        "critical": "red",
-        "high": "red",
-        "moderate": "yellow",
-        "clean": "green",
-        "unknown": "yellow",
+    gate = {
+        **report.gate,
+        **_gate_sources(policy, policy_source, threshold_from_cli, fail_on_severity),
     }
-    color = level_colors[report.risk_level]
-    score = report.overall_score
-    level = report.risk_level
-    console.print(f"[bold]Risk Score:[/] [{color}]{score:.1f}[/] ({level})")
-    console.print(f"  Assessment basis: {basis}")
-    total = report.total_components
-    risky = report.components_with_risks
-    console.print(f"  Components: {total} total, {risky} with risks")
-
-    if report.severity_counts:
-        console.print("  Severity breakdown:")
-        for sev, count in sorted(report.severity_counts.items()):
-            console.print(f"    {sev}: {count}")
-
-    if report.findings:
-        table = Table(title="Top Findings", show_lines=True)
-        table.add_column("Severity", style="bold", min_width=8, no_wrap=True)
-        table.add_column("Component", ratio=2, max_width=30)
-        table.add_column("Category", ratio=1, max_width=20)
-        table.add_column("Detail", ratio=3)
-
-        for finding in report.findings[:15]:
-            sev_color = {"critical": "red", "high": "red", "medium": "yellow", "low": "blue"}.get(
-                finding.severity.value, "white"
-            )
-            table.add_row(
-                f"[{sev_color}]{_safe(finding.severity.value)}[/]",
-                _safe(finding.component_name),
-                _safe(finding.category),
-                _safe(finding.detail),
-            )
-        console.print(table)
-
-    gate = "[green]PASSED[/]" if passed else "[red]FAILED[/]"
-    console.print(f"\nGate (threshold={threshold}): {gate}")
-
-    if not passed:
+    if no_score_threshold:
+        gate["fail_threshold"] = None
+    document = {
+        **report.to_dict(),
+        "gate": gate,
+        "passed": passed,
+        "assessment_basis": basis,
+        "supplier_claims": supplier_claims,
+        "supplier_claims_omitted": supplier_claims_omitted,
+        "discovery_producer": producer,
+        **context,
+    }
+    if json_output:
+        click.echo(json_text(json.dumps(document, indent=2)))
+    else:
+        # Upstream's gate report lists the inventory's own collection failures.
         coverage = bom.metadata.completeness
-        _print_gate_reasons(report.gate_reasons, list(coverage.scan_failures) if coverage else [])
-        sys.exit(1)
+        failures = list(coverage.scan_failures) if coverage else []
+        print_lines(risk_report_lines(document, failures=failures))
+    if not passed:
+        raise click.exceptions.Exit(1)
 
 
 @main.command()
@@ -1034,69 +1339,46 @@ def diff(old_path: str, new_path: str, json_output: bool, fail_on_alert: bool = 
 
     from nexus_symbiote.diff.differ import AIBOMDiffer
 
-    differ = AIBOMDiffer()
-    result = differ.diff(old_bom, new_bom)
-
+    result = AIBOMDiffer().diff(old_bom, new_bom)
+    document = result.to_dict()
     if json_output:
-        click.echo(json.dumps(result.to_dict(), indent=2))
+        click.echo(json_text(json.dumps(document, indent=2)))
     else:
-        if not result.has_changes:
-            console.print("[green]No changes detected.[/]")
-            return
-
-        console.print(f"[bold]{result.total_changes} changes detected[/]")
-
-        if result.security_alerts:
-            console.print("\n[bold red]Security Alerts:[/]")
-            for alert in result.security_alerts:
-                console.print(
-                    f"  \\[{_safe(alert['severity'].upper())}] {_safe(alert['alert'])}",
-                    soft_wrap=True,
-                )
-
-        notes = [change for change in result.metadata_changes if change["severity"] == "info"]
-        if notes:
-            console.print("\n[bold]Notes:[/]")
-            for change in notes:
-                console.print(f"  \\[INFO] {_safe(change['detail'])}", soft_wrap=True)
-
-        if result.components_added:
-            console.print(f"\n[green]+{len(result.components_added)} added[/]")
-            for c in result.components_added:
-                console.print(f"  + {_safe(c.name)} ({_safe(c.component_type)})", soft_wrap=True)
-        if result.components_removed:
-            console.print(f"\n[red]-{len(result.components_removed)} removed[/]")
-            for c in result.components_removed:
-                console.print(f"  - {_safe(c.name)} ({_safe(c.component_type)})", soft_wrap=True)
-        if result.components_modified:
-            console.print(f"\n[yellow]~{len(result.components_modified)} modified[/]")
-            for c in result.components_modified:
-                console.print(f"  ~ {_safe(c.name)}: {_safe('; '.join(c.details))}", soft_wrap=True)
-
+        print_lines(diff_report_lines(document))
     if fail_on_alert and result.security_alerts:
         raise click.exceptions.Exit(1)
 
 
 @main.command()
 @click.argument("aibom_path", type=click.Path(exists=True))
-def summary(aibom_path: str) -> None:
+@click.option("--json-output", is_flag=True, help="Print the summary as JSON.")
+def summary(aibom_path: str, json_output: bool = False) -> None:
     """Print a summary of an AIBOM."""
     bom = _load_bom(aibom_path)
     s = bom.summary()
-
-    console.print("[bold]AIBOM Summary[/]")
-    console.print(f"  Components: {s['total_components']}")
-    console.print(f"  Dependencies: {s['total_dependencies']}")
-    console.print(f"  Risks: {s['total_risks']}")
-
+    if json_output:
+        claim = bom.metadata.completeness
+        document = {
+            **s,
+            "completeness": claim.model_dump(mode="json", exclude_none=True) if claim else None,
+        }
+        click.echo(json_text(json.dumps(document, indent=2)))
+        return
+    lines: list[ReportLine] = [
+        ("AIBOM Summary", "bold"),
+        (f"  Components: {s['total_components']}", None),
+        (f"  Dependencies: {s['total_dependencies']}", None),
+        (f"  Risks: {s['total_risks']}", None),
+    ]
     if s["component_types"]:
-        console.print("  Component types:")
+        lines.append(("  Component types:", None))
         for ctype, count in sorted(s["component_types"].items()):
-            console.print(f"    {_safe(ctype)}: {count}")
+            lines.append((safe_line("    - ", ctype, ": ", count), None))
     if s["risk_breakdown"]:
-        console.print("  Risk breakdown:")
+        lines.append(("  Risk breakdown:", None))
         for sev, count in sorted(s["risk_breakdown"].items()):
-            console.print(f"    {_safe(sev)}: {count}")
+            lines.append((safe_line("    - ", sev, ": ", count), None))
+    print_lines(lines)
 
 
 @main.command("blast-radius")
@@ -1113,19 +1395,24 @@ def blast_radius_command(aibom_path: str, component_ref: str, json_output: bool)
     except ValueError as exc:
         raise _failure(exc) from exc
     if json_output:
-        click.echo(json.dumps(result, indent=2))
-    else:
-        console.print(
-            "[bold]Potential blast radius[/] (repository association; effective authority unknown)"
-        )
-        console.print("  Agents: " + _safe(", ".join(result["affected_agents"])), soft_wrap=True)
-        console.print(
-            "  Components: " + _safe(", ".join(result["reachable_components"])), soft_wrap=True
-        )
+        click.echo(json_text(json.dumps(result, indent=2)))
+        return
+    print_lines(
+        [
+            (
+                "Potential blast radius (repository association; effective authority unknown)",
+                "bold",
+            ),
+            (safe_line("  Agents: ", ", ".join(result["affected_agents"])), None),
+            (safe_line("  Dependents: ", ", ".join(result["dependent_components"])), None),
+            (safe_line("  Components: ", ", ".join(result["reachable_components"])), None),
+            *((safe_line("  Note: ", note), None) for note in result["limitations"][1:]),
+        ]
+    )
 
 
 @main.command()
-@click.option("--force", is_flag=True, help="Overwrite existing .nexus-symbiote.yaml")
+@click.option("--force", is_flag=True, help="Overwrite the existing project policy file")
 @click.option(
     "--path",
     type=click.Path(),
@@ -1134,23 +1421,39 @@ def blast_radius_command(aibom_path: str, component_ref: str, json_output: bool)
 )
 def init(force: bool, path: str) -> None:
     """Initialize a .nexus-symbiote.yaml policy configuration."""
-    from nexus_symbiote.policy import DEFAULT_POLICY_YAML
+    from nexus_symbiote.policy import DEFAULT_POLICY_YAML, POLICY_FILE_NAMES
 
     # absolute(), not resolve(): a symlinked directory is refused like any other output.
-    target = Path(path).absolute() / ".nexus-symbiote.yaml"
+    directory = Path(path).absolute()
     try:
-        exists = target.exists()
+        existing = [
+            directory / name
+            for name in POLICY_FILE_NAMES
+            if (directory / name).exists() or (directory / name).is_symlink()
+        ]
     except OSError as exc:
         raise output_failure(exc) from exc
-    if exists and not force:
-        err_console.print(
-            f"[yellow]Warning:[/] {_safe(target)} already exists. Use --force to overwrite."
+    # A second policy name would shadow, or be shadowed by, the existing one.
+    target = existing[0] if len(existing) == 1 else directory / POLICY_FILE_NAMES[0]
+    if len(existing) > 1:
+        echo_line(
+            "Warning: both ",
+            POLICY_FILE_NAMES[0],
+            " and ",
+            POLICY_FILE_NAMES[1],
+            " exist in ",
+            directory,
+            "; keep one policy file.",
+            err=True,
         )
+        sys.exit(1)
+    if existing and not force:
+        echo_line("Warning: ", target, " already exists. Use --force to overwrite.", err=True)
         sys.exit(1)
 
     write_cli_output(target, DEFAULT_POLICY_YAML, overwrite=force)
-    console.print(f"[bold green]Created[/] {_safe(target)}")
-    console.print("  Edit this file to customize scan, risk, and validation policies.")
+    echo_line("Created ", target)
+    click.echo("  Edit this file to customize scan, risk, and validation policies.")
 
 
 register_runtime_commands(main)

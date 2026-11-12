@@ -89,3 +89,18 @@ def test_risk_command_names_the_reasons(tmp_path, monkeypatch):
     run = CliRunner().invoke(main, ["risk", str(output)])
     assert run.exit_code == 1
     assert "collection: notes.md: invalid UTF-8" in run.output
+
+
+def test_one_gate_report_lists_each_collection_failure_once(tmp_path, monkeypatch):
+    # scan, risk and baseline share reporting.gate_reason_lines: the failure is a
+    # "collection:" line naming its collector in scan, and risk does not repeat it
+    # among the coverage gaps that restate the inventory's failures.
+    result = ScanResult(
+        scanner_name="fixed", components=[_prompt()], scan_failures=["notes.md: invalid UTF-8"]
+    )
+    scanned, output = _run(tmp_path, monkeypatch, result, "--report-only")
+    assert "  - collection: notes.md: invalid UTF-8 (from fixed)" in scanned.stderr.splitlines()
+    run = CliRunner().invoke(main, ["risk", str(output)])
+    assert run.exit_code == 1
+    assert run.stdout.count("notes.md: invalid UTF-8") == 1
+    assert "  - collection: notes.md: invalid UTF-8" in run.stdout.splitlines()

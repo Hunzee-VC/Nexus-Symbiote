@@ -8,9 +8,14 @@ authors:
   - given-names: Emmanuel
     family-names: Dahunsi
 repository-code: https://github.com/Hunzee-VC/Nexus-Symbiote
+repository-artifact: https://pypi.org/project/nexus-symbiote/
 url: https://github.com/Hunzee-VC/Nexus-Symbiote
+# The code's licence. The distributions also bundle CycloneDX schemas (Apache-2.0) and
+# SPDX schemas (Community-Spec-1.0); see src/nexus_symbiote/generators/schemas/vendor/NOTICE.txt.
 license: MIT
+# scripts/check_repository_hygiene.py requires this version to match pyproject.toml.
 version: 0.1.0
+date-released: "2026-11-08"
 keywords:
   - aibom
   - agent-bill-of-materials
@@ -24,5 +29,5 @@ abstract: >-
   Agent Bill of Materials (AgentBOM) generator and validator
   for AI agent supply chain security. Inventories MCP servers,
   model artifacts, prompts, retrieval configurations, A2A agent
-  cards, IDE extensions, and package dependencies — then checks
+  cards, IDE agent settings, and package dependencies — then checks
   integrity, scores risk, and exports standard BOMs.

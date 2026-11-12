@@ -275,6 +275,9 @@
       "parameters": {
         "forbidden_literals": [
           "SYMBIOTE_PUBLIC_SYNTHETIC_SECRET_SENTINEL_00"
+        ],
+        "required_literals": [
+          "API_TOKEN"
         ]
       }
     },

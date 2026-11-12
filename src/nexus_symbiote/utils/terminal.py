@@ -16,6 +16,7 @@ from nexus_symbiote.utils.files import OutputRefusedError, write_output_file
 # Unicode 15.1) disguise text. Inventory and checkout data may contain any of them.
 # Line breaks are included: a file name or component name containing one could
 # forge whole output lines, and in CI a line starting with "::" is a workflow command.
+# Such text must not start a line either; safe_line() gives every line a fixed prefix.
 UNSAFE_TEXT = re.compile(
     r"[\x00-\x08\x0a-\x1f\x7f-\x9f­؀-؅؜۝܏࢐࢑࣢"
     r"᠎​-‏  ‪-‮⁠-⁤⁦-⁯﻿"
@@ -30,9 +31,50 @@ OUTPUT_REFUSED = (
 )
 
 
+# CI runners act on a "##name[" introducer anywhere in a line, not only at its start:
+# GitHub Actions' legacy "##[command]" form, Azure Pipelines' "##vso[" and TeamCity's
+# "##teamcity[". A replacement character after the "##" breaks each one visibly.
+LOG_COMMAND = re.compile(r"##(?=[A-Za-z]*\[)")
+_JSON_LOG_COMMAND = re.compile(r"(##[A-Za-z]*)\[")
+
+
 def neutralize(value: object) -> str:
-    """Replace every character that can rewrite or disguise terminal and CI output."""
-    return UNSAFE_TEXT.sub("�", str(value))
+    """Replace every character that can rewrite or disguise terminal and CI output.
+
+    Apply it to a whole output line, not to its pieces: two harmless pieces, such as a
+    name ending in "##" and a following "[", can join into a CI log command.
+    """
+    return LOG_COMMAND.sub("##\ufffd", UNSAFE_TEXT.sub("\ufffd", str(value)))
+
+
+def safe_line(prefix: str, *values: object) -> str:
+    """One neutralized output line that starts with a fixed, visible prefix.
+
+    Inventory and checkout text must never begin a line: GitHub Actions treats a line
+    that starts with "::", after leading white space, as a workflow command.
+    """
+    if not prefix.strip():
+        raise ValueError("an output line needs a visible fixed prefix")
+    return neutralize(prefix + "".join(map(str, values)))
+
+
+def echo_line(prefix: str, *values: object, err: bool = False) -> None:
+    """Print safe_line(prefix, *values) as plain text, without markup or wrapping.
+
+    Plain text is printed as it is, so untrusted text never passes through a markup
+    parser, a highlighter or a line wrapper, any of which can rewrite it, split it onto
+    a new line or take time quadratic in its length.
+    """
+    click.echo(safe_line(prefix, *values), err=err)
+
+
+def json_text(text: str) -> str:
+    """JSON text in which no CI runner can find a "##name[" log command.
+
+    In valid JSON, "##" occurs only inside a string, where the escape "\\u005b" stands
+    for the same "[": the document parses to exactly the same value.
+    """
+    return _JSON_LOG_COMMAND.sub(lambda match: match.group(1) + "\\u005b", text)
 
 
 # What the output rules themselves produce: a missing directory, a link or file on

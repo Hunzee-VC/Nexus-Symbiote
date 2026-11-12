@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from nexus_symbiote.core.aibom import DependencyEdge
+from nexus_symbiote.generators import _legacy
 from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
 from nexus_symbiote.generators.spdx import SPDXGenerator
 from tests.test_export_conformance import fixture_bom
@@ -31,7 +32,11 @@ def test_cyclonedx_projects_only_unconditional_dependencies():
         ]
     )
     document = CycloneDXGenerator().generate(bom)
-    assert document["dependencies"] == [{"ref": "agent:main", "dependsOn": ["model:one"]}]
+    # A tool requires the server that provides it; the conditional edge stays out.
+    assert document["dependencies"] == [
+        {"ref": "agent:main", "dependsOn": ["model:one"]},
+        {"ref": "tool:send", "dependsOn": ["server:one"]},
+    ]
     recovered = CycloneDXGenerator.recover(document)
     assert sorted(recovered.dependencies, key=str) == sorted(bom.dependencies, key=str)
     assert any(
@@ -88,7 +93,8 @@ def test_spdx_recovery_rejects_conflicting_public_view(field):
 
 def test_legacy_cyclonedx_recovery_accepts_only_the_unchanged_historical_projection():
     bom = fixture_bom()
-    document = CycloneDXGenerator().generate(bom)
+    # Legacy mode applies only to documents without a projection marker, as 0.1.0 wrote.
+    document = _legacy.cyclonedx_projection(bom)
     historical = deepcopy(document)
     historical["dependencies"] = [{"ref": "agent:main", "dependsOn": ["tool:send", "model:one"]}]
     with pytest.raises(ValueError, match="projection conflicts"):

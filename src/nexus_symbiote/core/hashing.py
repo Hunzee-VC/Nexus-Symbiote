@@ -12,8 +12,9 @@ import os
 import re
 import stat
 import sys
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, BinaryIO, Literal
+from typing import Any, BinaryIO, Literal, TypedDict
 
 import rfc8785
 from packaging.requirements import InvalidRequirement, Requirement
@@ -96,13 +97,21 @@ def descriptor_binding(info: os.stat_result) -> tuple[int, int, int, int, int, i
     )
 
 
+def _unnormalized_absolute(path: Path) -> Path:
+    # os.path.abspath would collapse "link/.." textually and name a different file
+    # than the kernel opens; each ".." is walked instead, through the real parent.
+    return path if path.is_absolute() else Path.cwd() / path
+
+
 def open_directory_nofollow(directory: Path) -> int:
     """Open a directory without following symlinks in the target path.
 
     Walks from the filesystem anchor using ``O_NOFOLLOW`` descriptors, allowing
     traverse-only (execute-without-read) system ancestor directories after
     verifying via ``lstat`` that each ancestor is a real directory (or a
-    standard macOS root firmlink/symlink to ``/private/{var,tmp,etc}``).
+    standard macOS root firmlink/symlink to ``/private/{var,tmp,etc}``). A ``..``
+    component is opened through the real parent, as the kernel resolves it, so
+    ``link/..`` fails closed instead of naming the directory that holds the link.
     """
     if (
         not hasattr(os, "O_NOFOLLOW")
@@ -110,7 +119,7 @@ def open_directory_nofollow(directory: Path) -> int:
         or os.open not in os.supports_dir_fd
     ):
         raise OSError("Descriptor-relative no-follow file access is unavailable")
-    absolute = Path(os.path.abspath(directory))
+    absolute = _unnormalized_absolute(Path(directory))
     parts = list(absolute.parts)
     if (
         sys.platform == "darwin"
@@ -186,7 +195,7 @@ def pathname_identity(path: Path) -> tuple[int, int] | None:
     component. Compare the result with the open descriptor's identity after a
     read to prove the pathname still names the bytes that were read.
     """
-    absolute = Path(os.path.abspath(path))
+    absolute = _unnormalized_absolute(Path(path))
     try:
         parent_fd = _open_parent_no_follow(absolute)
         try:
@@ -205,7 +214,7 @@ def open_regular_file(path: Path) -> BinaryIO:
     replacement between a check and the final open. Fail closed on platforms
     without the required no-follow APIs.
     """
-    absolute = Path(os.path.abspath(path))
+    absolute = _unnormalized_absolute(Path(path))
     parent_fd = _open_parent_no_follow(absolute)
     try:
         flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0)
@@ -229,14 +238,38 @@ def hash_canonical(data: dict[str, Any], algorithm: str = "sha256") -> str:
     return f"{algorithm}:{h.hexdigest()}"
 
 
+class ToolDefinitionExtensions(TypedDict):
+    title: str | None
+    output_schema: dict[str, Any] | None
+    meta: dict[str, Any] | None
+
+
+def tool_definition_extensions(descriptor: Mapping[str, Any]) -> ToolDefinitionExtensions:
+    """Read the optional MCP descriptor members that ``hash_tool_definition`` binds."""
+    title, output_schema, meta = (descriptor.get(key) for key in ("title", "outputSchema", "_meta"))
+    if (
+        (title is not None and not isinstance(title, str))
+        or (output_schema is not None and not isinstance(output_schema, dict))
+        or (meta is not None and not isinstance(meta, dict))
+    ):
+        raise ValueError("invalid tool fields")
+    return {"title": title, "output_schema": output_schema, "meta": meta}
+
+
 def hash_tool_definition(
     name: str,
     description: str,
     input_schema: dict[str, Any] | None = None,
     annotations: dict[str, Any] | None = None,
+    *,
+    title: str | None = None,
+    output_schema: dict[str, Any] | None = None,
+    meta: dict[str, Any] | None = None,
 ) -> str:
     """Hash v2 model-visible metadata, normalizing omitted annotations to {}.
 
+    ``title``, ``outputSchema`` and ``_meta`` enter the definition only when they
+    are not None, so a definition without them keeps the digest it always had.
     Callers carry TOOL_DEFINITION_HASH_VERSION beside the digest. Comparing to an
     authenticated approved baseline detects metadata drift; this fingerprint does
     not establish publisher identity or constrain a tool's implementation.
@@ -250,6 +283,12 @@ def hash_tool_definition(
     # Missing and empty MCP annotations have the same defined digest contract.
     # A producer and consumer must not disagree because the model fills defaults.
     definition["annotations"] = annotations or {}
+    if title is not None:
+        definition["title"] = title
+    if output_schema is not None:
+        definition["outputSchema"] = output_schema
+    if meta is not None:
+        definition["_meta"] = meta
     return hash_canonical(definition)
 
 

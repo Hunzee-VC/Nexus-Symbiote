@@ -55,7 +55,13 @@ def test_registry_reads_every_root_requirements_file_with_hash_continuations(tmp
     versions = {c.name: c.version for c in result.components}
     assert versions == {"torch": "==2.4.0", "transformers": "==4.40.0"}
     assert result.scan_failures == []
-    assert str(tmp_path / "requirements-gpu.txt") in result.surfaces_scanned
+    # Recorded relative to the scan root, so the same tree scans the same anywhere.
+    assert "requirements-gpu.txt" in result.surfaces_scanned
+    by_name = {c.name: c for c in result.components}
+    assert by_name["torch"].properties["requirement_hashes"] == [
+        f"requirements-gpu.txt: sha256:{'a' * 64}",
+        f"requirements-gpu.txt: sha256:{'b' * 64}",
+    ]
 
 
 CONFLICT = "PyPI package '{}' is declared more than once with requirements that conflict."
@@ -356,9 +362,13 @@ def test_a_pyproject_comment_is_not_compared(tmp_path):
     assert component.risks == []
 
 
-def test_ranges_with_pins_in_a_lock_file_leave_the_default_gate_as_on_main(tmp_path):
-    # Main read only requirements.txt here: seven ranges, 7 x 4 = 28. Reading the
-    # lock file must record its pins without adding a finding per package.
+def test_pins_in_a_lock_file_resolve_the_ranges_they_satisfy(tmp_path):
+    # Main read only requirements.txt here and rated each of its seven ranges medium
+    # (7 x 4 = 28), but rated the same ranges in pyproject.toml as resolved by these
+    # pins. The rating now follows every declaration whichever file is read first:
+    # an exact pin resolves the ranges it satisfies in any root file, so the gate
+    # score is 0 and each pin is the package URL. docs/registry-collector.md states
+    # that a pin in any file counts, including one in a file that is never installed.
     project = tmp_path / "project"
     project.mkdir()
     (project / "AGENTS.md").write_text("Keep receipts.")
@@ -383,7 +393,11 @@ def test_ranges_with_pins_in_a_lock_file_leave_the_default_gate_as_on_main(tmp_p
     assert scanned.exit_code == 0, scanned.output
     risk = runner.invoke(main, ["risk", str(bom), "--json-output"])
     assert risk.exit_code == 0, risk.output
-    assert json.loads(risk.stdout)["overall_score"] == 28.0
+    assert json.loads(risk.stdout)["overall_score"] == 0.0
+    components = json.loads(bom.read_text())["components"]
+    assert {c["name"]: c["package_url"] for c in components if c.get("registry_type")} == {
+        name: f"pkg:pypi/{name}@{pin}" for name, (_, pin) in pins.items()
+    }
 
 
 def test_requirements_file_names_match_without_regard_to_case(tmp_path):
@@ -409,7 +423,7 @@ def test_the_exact_requirements_txt_is_kept_ahead_of_its_case_variants(tmp_path)
     except OSError:
         pytest.skip("file system rejects the name")
     by_name = {c.name: c for c in RegistryScanner().scan(tmp_path).components}
-    assert str(by_name["torch"].source_path).endswith("/requirements.txt")
+    assert by_name["torch"].source_path == "requirements.txt"
     assert by_name["torch"].version == "==2.3.0" and by_name["torch"].risks == []
     assert by_name["openai"].version == "==1.30.1"
 
@@ -575,7 +589,14 @@ def test_a_changed_second_declaration_reaches_the_drift_gate(tmp_path):
         ["diff", "--fail-on-alert", str(tmp_path / "before.json"), str(tmp_path / "after.json")],
     )
     assert drift.exit_code != 0, drift.output
-    assert "registry:pypi/torch" in drift.output or "torch" in drift.output
+    report = json.loads(
+        runner.invoke(
+            main,
+            ["diff", "--json-output", str(tmp_path / "before.json"), str(tmp_path / "after.json")],
+        ).output
+    )
+    assert [c["bom_ref"] for c in report["components_modified"]] == ["registry:pypi/torch"]
+    assert any("torch" in json.dumps(alert) for alert in report["security_alerts"])
 
 
 def test_vex_refuses_a_second_name_for_its_input(tmp_path, monkeypatch):

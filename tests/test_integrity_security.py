@@ -5,10 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+from nexus_symbiote import limits
 from nexus_symbiote.core import AIBOM, ModelComponent, PromptComponent, ToolComponent
 from nexus_symbiote.core.enums import SerializationSafety, TrustTier
 from nexus_symbiote.core.hashing import (
@@ -58,8 +60,9 @@ def test_model_replacement_cannot_bind_safe_structure_to_other_bytes(tmp_path, m
     write_safetensors(path)
     inspect = model.inspect_model_format
 
-    def replace_after_inspection(path, *, stream=None):
-        observation = inspect(path, stream=stream)
+    def replace_after_inspection(inspected, *, stream=None):
+        # The collector passes root-relative paths; replace the scanned file itself.
+        observation = inspect(inspected, stream=stream)
         replacement = tmp_path / "replacement"
         replacement.write_bytes(b"not a tensor container")
         replacement.replace(path)
@@ -111,13 +114,13 @@ def test_validator_format_evidence_must_match_the_hashed_subject(tmp_path, monke
         serialization_safety=SerializationSafety.SAFE,
         hashes={"sha256": "sha256:" + hashlib.sha256(replacement).hexdigest()},
     )
-    verify = integrity.verify_file_hash
+    digest = integrity._ArtifactDigests.digest
 
-    def replace_before_hash(path, expected, algorithm):
+    def replace_before_hash(self, path, algorithm):
         path.write_bytes(replacement)
-        return verify(path, expected, algorithm)
+        return digest(self, path, algorithm)
 
-    monkeypatch.setattr(integrity, "verify_file_hash", replace_before_hash)
+    monkeypatch.setattr(integrity._ArtifactDigests, "digest", replace_before_hash)
     report = IntegrityValidator(require_model_signatures=False).validate(
         AIBOM(components=[component]), tmp_path
     )
@@ -222,10 +225,13 @@ def test_unchanged_tool_without_annotations_passes_digest_check(tmp_path):
         )
     )
     bom = AIBOM(components=MCPScanner().scan(tmp_path).components)
-    report = IntegrityValidator().validate(bom)
+    report = IntegrityValidator().validate(bom, tmp_path)
     assert report.hashes_verified == 1
     assert report.hashes_failed == 0
     assert report.status == "pass"
+    # Without the project, the descriptor only agrees with its own recorded digest.
+    unbound = IntegrityValidator().validate(bom)
+    assert unbound.hashes_verified == 0 and unbound.status == "unknown"
 
 
 def test_critical_unsafe_model_fails_without_remote_code_flag():
@@ -375,10 +381,10 @@ def test_model_config_symlink_is_never_read(tmp_path):
     assert result.components[0].trust_remote_code is None
 
 
-def test_model_hash_limit_is_explicit_missing_evidence(tmp_path, monkeypatch):
-    monkeypatch.setattr("nexus_symbiote.scanners.model.MAX_HASH_SIZE", 8)
+def test_model_hash_limit_is_explicit_missing_evidence(tmp_path):
     write_safetensors(tmp_path / "model.safetensors")
-    result = ModelScanner().scan(tmp_path)
+    with limits.applied(replace(limits.DEFAULTS, model_bytes=8)):
+        result = ModelScanner().scan(tmp_path)
     assert result.scan_failures
     assert result.components[0].hashes == {}
     assert result.components[0].serialization_safety == SerializationSafety.UNKNOWN
@@ -411,7 +417,7 @@ def test_legacy_tool_fingerprints_require_recollection(version):
     assert any(i.category == "fingerprint_version_unknown" for i in report.issues)
 
 
-def test_current_version_tool_fingerprint_can_be_verified():
+def test_current_version_tool_fingerprint_is_only_self_consistent_without_local_evidence():
     tool = ToolComponent(
         bom_ref="tool:current",
         name="current",
@@ -420,5 +426,380 @@ def test_current_version_tool_fingerprint_can_be_verified():
         definition_hash_version=TOOL_DEFINITION_HASH_VERSION,
     )
     report = IntegrityValidator().validate(AIBOM(components=[tool]))
-    assert report.is_valid
-    assert report.hashes_verified == 1
+    assert not report.is_valid and report.status == "unknown"
+    assert report.hashes_verified == 0 and report.hashes_failed == 0
+    assert [i.category for i in report.issues] == ["descriptor_source_unavailable"]
+
+
+def test_supplementary_served_descriptor_cannot_turn_project_integrity_green(tmp_path):
+    from click.testing import CliRunner
+
+    from nexus_symbiote.cli import main
+
+    project = tmp_path / "project"
+    project.mkdir()
+    server = {"command": "npx", "args": ["-y", "pinned-mcp@1.2.3"]}
+    (project / ".mcp.json").write_text(json.dumps({"mcpServers": {"pinned": server}}))
+    target = tmp_path / "bom.json"
+    runner = CliRunner()
+    scan = runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(target)])
+    assert scan.exit_code == 0, scan.output
+    args = ["validate", str(target), "--project", str(project), "--no-project-policy"]
+    honest = runner.invoke(main, args)
+    assert honest.exit_code == 1
+    assert "No artifact hash or signature could be verified" in honest.output
+    doc = json.loads(target.read_text())
+    doc["components"].append(
+        {
+            "bom_ref": "tool:fabricated",
+            "component_type": "tool",
+            "name": "fabricated",
+            "description_text": "d",
+            "definition_hash": hash_tool_definition("fabricated", "d"),
+            "definition_hash_version": TOOL_DEFINITION_HASH_VERSION,
+            "claims": {
+                "tool_definition": {
+                    "method": "operator-pinned-stdio-tools-list",
+                    "scope": "served-descriptor",
+                    "assurance": "observed",
+                }
+            },
+        }
+    )
+    target.write_text(json.dumps(doc))
+    supplemented = runner.invoke(main, args)
+    assert supplemented.exit_code == 1, supplemented.output
+    assert "Hashes verified: 0" in supplemented.output
+
+
+def _prompts_naming_one_file(tmp_path: Path, count: int) -> tuple[AIBOM, bytes]:
+    content = b"Shared instructions.\n" * 1000
+    (tmp_path / "shared.md").write_bytes(content)
+    digest = "sha256:" + hashlib.sha256(content).hexdigest()
+    prompts = [
+        PromptComponent(
+            bom_ref=f"prompt:{index}",
+            name="shared.md",
+            source_path="shared.md",
+            content_hash=digest,
+        )
+        for index in range(count)
+    ]
+    return AIBOM(components=prompts), content
+
+
+def test_many_components_naming_one_artifact_read_it_once(tmp_path):
+    bom, content = _prompts_naming_one_file(tmp_path, 1000)
+    report = IntegrityValidator().validate(bom, tmp_path)
+    assert report.status == "pass" and report.hashes_verified == 1000
+    assert report.bytes_charged == len(content)
+
+
+def test_case_variant_digest_keys_are_one_algorithm_and_one_read(tmp_path):
+    content = b"weights"
+    (tmp_path / "model.bin").write_bytes(content)
+    digest = hashlib.sha256(content).hexdigest()
+    model = ModelComponent(
+        bom_ref="model:m",
+        name="m",
+        source_path="model.bin",
+        hashes={"sha256": digest, "SHA256": digest, "Sha256": digest},
+    )
+    report = IntegrityValidator(require_model_signatures=False).validate(
+        AIBOM(components=[model]), tmp_path
+    )
+    assert report.status == "fail"
+    duplicates = [i for i in report.issues if "more than once" in i.detail]
+    assert len(duplicates) == 2 and report.hashes_verified == 1
+
+
+def test_validation_byte_budget_fails_closed_with_a_reason(tmp_path):
+    bom, content = _prompts_naming_one_file(tmp_path, 1)
+    (tmp_path / "other.md").write_bytes(content)
+    other = PromptComponent(
+        bom_ref="prompt:other",
+        name="other.md",
+        source_path="other.md",
+        content_hash=bom.components[0].content_hash,
+    )
+    bom.components.append(other)
+    report = IntegrityValidator(byte_budget=len(content)).validate(bom, tmp_path)
+    assert report.status == "unknown" and report.hashes_verified == 1
+    (issue,) = [i for i in report.issues if i.category == "validation_budget_exhausted"]
+    assert issue.component_ref == "prompt:other" and issue.severity == "unknown"
+
+
+def test_repeated_models_are_inspected_once_and_fail_as_duplicates(tmp_path, monkeypatch):
+    from nexus_symbiote.scanners import model
+
+    path = tmp_path / "model.safetensors"
+    write_safetensors(path, data=b"abcd" * 1024)
+    size = path.stat().st_size
+    inspected: list[Path] = []
+    real_inspect = model.observe_model_artifact
+
+    def inspect(artifact, **kwargs):
+        inspected.append(artifact)
+        return real_inspect(artifact, **kwargs)
+
+    monkeypatch.setattr(model, "observe_model_artifact", inspect)
+    models = [
+        ModelComponent(bom_ref=f"model:{i}", name="m", source_path="model.safetensors")
+        for i in range(50)
+    ]
+    report = IntegrityValidator(byte_budget=10 * size).validate(AIBOM(components=models), tmp_path)
+    duplicates = [i for i in report.issues if i.category == "duplicate_artifact"]
+    assert len(inspected) == 1 and report.bytes_charged == size
+    assert len(duplicates) == 49 and {i.severity for i in duplicates} == {"error"}
+    assert "model:0" not in {i.component_ref for i in duplicates}
+    assert not [i for i in report.issues if i.category == "validation_budget_exhausted"]
+    assert report.status == "fail"
+
+
+def test_hosted_model_declarations_sharing_one_manifest_are_not_duplicates(tmp_path):
+    from click.testing import CliRunner
+
+    from nexus_symbiote.cli import main
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "CLAUDE.md").write_text("Read-only triage.")
+    (project / "agent.yaml").write_text(
+        "name: triage\ninstructions: [CLAUDE.md]\nmodels:\n"
+        "  chat: {provider: example, requested_ref: latest}\n"
+        "  embed: {provider: example, requested_ref: embed-v2}\n"
+    )
+    target = tmp_path / "bom.json"
+    scan = CliRunner().invoke(
+        main, ["scan", "--no-project-policy", str(project), "-o", str(target)]
+    )
+    assert scan.exit_code == 0, scan.output
+    bom = AIBOM.load(target)
+    hosted = [c for c in bom.components if isinstance(c, ModelComponent)]
+    assert len(hosted) == 2 and {c.source_path for c in hosted} == {"agent.yaml"}
+    report = IntegrityValidator().validate(bom, project)
+    assert report.status == "unknown"
+    assert not [i for i in report.issues if i.category == "duplicate_artifact"]
+
+
+def _signed_weights(tmp_path: Path, bundle_bytes: bytes) -> tuple[Path, SigstoreArtifactPolicy]:
+    weights = tmp_path / "weights"
+    weights.mkdir()
+    path = weights / "model.safetensors"
+    write_safetensors(path)
+    bundle = tmp_path / "model.sigstore"
+    bundle.write_bytes(bundle_bytes)
+    policy = SigstoreArtifactPolicy(
+        path, bundle, "trusted@example.test", "https://issuer.example.test"
+    )
+    return path, policy
+
+
+def test_one_signed_artifact_is_inspected_and_verified_once_however_it_is_named(
+    tmp_path, monkeypatch
+):
+    from nexus_symbiote.scanners import model
+    from nexus_symbiote.validators import integrity
+
+    path, policy = _signed_weights(tmp_path, b"{" + b" " * 65536 + b"}")
+    (tmp_path / "alias").symlink_to(path.parent, target_is_directory=True)
+    verified: list[Path] = []
+    inspected: list[Path] = []
+    real_inspect = model.observe_model_artifact
+
+    def verify(artifact, bundle, identity, issuer):
+        verified.append(artifact)
+        return VerificationResult(
+            True, identity=identity, issuer=issuer, details={"artifact_digest": hash_file(artifact)}
+        )
+
+    def inspect(artifact, **kwargs):
+        inspected.append(artifact)
+        return real_inspect(artifact, **kwargs)
+
+    monkeypatch.setattr(integrity, "verify_sigstore_bundle", verify)
+    monkeypatch.setattr(model, "observe_model_artifact", inspect)
+    spellings = [
+        "weights/model.safetensors",
+        "./weights/model.safetensors",
+        "weights//model.safetensors",
+        str(path),
+        "alias/model.safetensors",
+    ]
+    models = [
+        ModelComponent(
+            bom_ref=f"model:{i}",
+            name="m",
+            source_path=spellings[i % len(spellings)],
+            hashes={"sha256": hash_file(path)},
+        )
+        for i in range(1000)
+    ]
+    report = IntegrityValidator([policy]).validate(AIBOM(components=models), tmp_path)
+    assert len(verified) == 1 and len(inspected) == 1
+    assert report.signatures_checked == report.signatures_verified == 1
+    duplicates = [i for i in report.issues if i.category == "duplicate_artifact"]
+    assert len(duplicates) == 999 and report.status == "fail"
+    size = path.stat().st_size
+    bundle = policy.bundle_path.stat().st_size
+    # Inspection, the verifier's own hash pass and the digest check each read the
+    # weights once; the bundle and a fixed amount of verification work are charged too.
+    assert report.bytes_charged == 3 * size + bundle + integrity.SIGNATURE_VERIFICATION_COST
+
+
+def test_signature_verification_work_draws_on_the_validation_budget(tmp_path, monkeypatch):
+    from nexus_symbiote.validators import integrity
+
+    path, policy = _signed_weights(tmp_path, b"{}")
+    calls: list[Path] = []
+    monkeypatch.setattr(integrity, "verify_sigstore_bundle", lambda *args: calls.append(args[0]))
+    model = ModelComponent(
+        bom_ref="model:m",
+        name="m",
+        source_path="weights/model.safetensors",
+        hashes={"sha256": hash_file(path)},
+    )
+    validator = IntegrityValidator([policy], byte_budget=integrity.SIGNATURE_VERIFICATION_COST)
+    report = validator.validate(AIBOM(components=[model]), tmp_path)
+    (issue,) = [i for i in report.issues if i.category == "validation_budget_exhausted"]
+    assert issue.severity == "unknown" and not calls
+    assert f"{integrity.SIGNATURE_VERIFICATION_COST:,} bytes" in issue.detail
+    assert report.status == "unknown"
+
+
+def test_a_digest_pin_is_charged_for_the_reads_it_needs_and_no_verification(tmp_path):
+    from nexus_symbiote.utils.crypto import DigestPinPolicy, SignaturePolicySet
+
+    path, _ = _signed_weights(tmp_path, b"{}")
+    pin = DigestPinPolicy(path, hash_file(path))
+    model = ModelComponent(
+        bom_ref="model:m",
+        name="m",
+        source_path="weights/model.safetensors",
+        hashes={"sha256": hash_file(path)},
+    )
+    validator = IntegrityValidator(SignaturePolicySet(digest_pins=[pin]))
+    report = validator.validate(AIBOM(components=[model]), tmp_path)
+    assert report.status == "pass" and report.signatures_checked == 0
+    # The model check's observation and the digest check each read the weights once;
+    # a pin is compared with the observed digest, so no bundle or verification work.
+    assert report.bytes_charged == 2 * path.stat().st_size
+
+
+def test_paths_the_readers_refuse_are_never_charged_to_the_budget(tmp_path):
+    project = tmp_path / "project"
+    (project / "real").mkdir(parents=True)
+    outside = tmp_path / "outside.safetensors"
+    write_safetensors(outside, data=b"\0" * 2_000_000)
+    write_safetensors(project / "real" / "model.safetensors", data=b"\0" * 2_000_000)
+    (project / "linked").symlink_to(project / "real", target_is_directory=True)
+    for source in (str(outside), "linked/model.safetensors"):
+        model = ModelComponent(bom_ref="model:m", name="m", source_path=source)
+        report = IntegrityValidator(byte_budget=1_000_000).validate(
+            AIBOM(components=[model]), project
+        )
+        assert report.bytes_charged == 0, source
+        assert not [i for i in report.issues if i.category == "validation_budget_exhausted"]
+        assert report.status != "pass"
+    escaped = IntegrityValidator(byte_budget=1_000_000).validate(
+        AIBOM(components=[ModelComponent(bom_ref="model:m", name="m", source_path=str(outside))]),
+        project,
+    )
+    assert [i.category for i in escaped.issues if i.severity == "error"] == ["missing_artifact"]
+
+
+def test_bound_imports_report_only_unavailable_evidence_without_blocking(tmp_path):
+    # A format without a structural validator: its unknown verdict is not a gap in
+    # evidence the import could fill, so it still blocks.
+    (tmp_path / "weights.h5").write_bytes(b"\0" * 64)
+    imported = ModelComponent(
+        bom_ref="shadowscan:m",
+        name="m",
+        source_path="weights.h5",
+        properties={"collection_mode": "imported-unverified-report"},
+    )
+    report = IntegrityValidator().validate(
+        AIBOM(components=[imported]), tmp_path, bound_imports=frozenset({"shadowscan:m"})
+    )
+    severities = {issue.category: issue.severity for issue in report.issues}
+    assert severities["format_unverified"] == "unknown"
+    assert severities["unverified_signature"] == "info"
+    assert severities["missing_hash"] == "info"
+    assert report.status == "unknown"
+
+
+def test_bound_imports_keep_the_observed_unsafe_verdict_without_a_recorded_digest(tmp_path):
+    # The import records no digest; the verdict comes from the local bytes all the same.
+    (tmp_path / "weights.bin").write_bytes(b"\0" * 64)
+    imported = ModelComponent(
+        bom_ref="shadowscan:m",
+        name="m",
+        source_path="weights.bin",
+        properties={"collection_mode": "imported-unverified-report"},
+    )
+    report = IntegrityValidator().validate(
+        AIBOM(components=[imported]), tmp_path, bound_imports=frozenset({"shadowscan:m"})
+    )
+    severities = {issue.category: issue.severity for issue in report.issues}
+    assert severities["unsafe_format"] == "critical"
+    assert severities["format_unverified"] == "unknown"
+    assert "format_subject_mismatch" not in severities
+    assert report.status == "fail"
+
+
+def test_issue_lists_are_bounded_but_the_verdict_counts_every_issue():
+    from nexus_symbiote.validators.integrity import MAX_REPORTED_ISSUES
+
+    tools = [ToolComponent(bom_ref=f"tool:{i}", name="t") for i in range(MAX_REPORTED_ISSUES)]
+    tools.append(
+        ToolComponent(
+            bom_ref="tool:bad",
+            name="bad",
+            description_text="d",
+            definition_hash="sha256:" + "0" * 64,
+            definition_hash_version=TOOL_DEFINITION_HASH_VERSION,
+        )
+    )
+    report = IntegrityValidator().validate(AIBOM(components=tools))
+    assert len(report.issues) == MAX_REPORTED_ISSUES and report.issues_omitted == 1
+    assert report.status == "fail" and report.issues[0].component_ref == "tool:bad"
+    assert report.to_dict()["issues_omitted"] == 1
+
+
+def test_imported_model_and_tool_claims_are_judged_as_imported_after_reconciliation(tmp_path):
+    from click.testing import CliRunner
+
+    from nexus_symbiote.cli import main
+
+    project = tmp_path / "project"
+    (project / ".shadowscan").mkdir(parents=True)
+    (project / "CLAUDE.md").write_text("Use the configured tools.")
+    report = {
+        "version": "0.1.4",
+        "summary": {"complete": True, "declared_omissions": 0, "tolerated_gaps": 0},
+        "stats": [{"errors": [], "skipped": False, "incomplete": False}],
+        "findings": [
+            {"id": "m1", "kind": "local-model", "surface": "endpoint"},
+            {"id": "t1", "kind": "mcp-server", "resource_type": "mcp-tool", "surface": "code"},
+        ],
+    }
+    (project / ".shadowscan/report.json").write_text(json.dumps(report))
+    target = tmp_path / "bom.json"
+    runner = CliRunner()
+    scan = runner.invoke(main, ["scan", "--no-project-policy", str(project), "-o", str(target)])
+    assert scan.exit_code == 0, scan.output
+    bom = AIBOM.load(target)
+    imported = {c.component_type.value for c in bom.components if c.bom_ref.startswith("shadow")}
+    assert imported == {"model", "tool"}
+    args = ["validate", str(target), "--project", str(project), "--no-project-policy"]
+    reconciled = runner.invoke(main, args)
+    assert reconciled.exit_code == 0, reconciled.output
+    assert "Imported discovery claim without local evidence" in reconciled.output
+    unreconciled = IntegrityValidator().validate(bom, project)
+    assert unreconciled.status == "unknown"
+    # A component merely labelled as imported is never exempt: only reconciliation binds it.
+    forged = bom.model_copy(deep=True)
+    model = next(c for c in forged.components if c.component_type.value == "model")
+    model.serialization_safety = SerializationSafety.UNSAFE_CODE_EXECUTION
+    target.write_text(forged.to_json())
+    assert runner.invoke(main, args).exit_code == 1

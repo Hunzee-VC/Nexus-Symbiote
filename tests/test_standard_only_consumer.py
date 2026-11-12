@@ -149,12 +149,10 @@ def _spdx_round_trip(document: dict[str, Any]) -> dict[str, Any]:
 
 def _cyclonedx_strict(document: dict[str, Any]) -> None:
     assert validate_cyclonedx(document) == []
-    pytest.importorskip("cyclonedx.validation.json")
     from cyclonedx.schema import SchemaVersion
     from cyclonedx.validation.json import JsonStrictValidator
 
-    if not hasattr(SchemaVersion, "V1_7"):
-        pytest.skip("installed cyclonedx library does not support 1.7")
+    assert hasattr(SchemaVersion, "V1_7"), "installed cyclonedx library does not support 1.7"
     assert JsonStrictValidator(SchemaVersion.V1_7).validate_str(json.dumps(document)) is None
 
 
@@ -295,6 +293,11 @@ def test_every_public_spdx_relationship_agrees_with_the_cyclonedx_graph(
         target in row.get("dependsOn", []) for row in graph if row["ref"] == "agent:main"
     )
     assert in_graph == (typed == "dependsOn")
+    # An unconditional provides-tool edge is the tool's dependency on what provides it.
+    provided = any(
+        "agent:main" in row.get("dependsOn", []) for row in graph if row["ref"] == target
+    )
+    assert provided == (relationship == "provides-tool" and not conditions)
     flag = {"conditional": True} if conditions else {}
     assert [p for p in _relationship_properties(cdx) if p["to"] == target] == [
         {"from": "agent:main", "to": target, "type": relationship, **flag}
@@ -491,7 +494,7 @@ def test_cli_runs_record_the_scope_each_case_needs(scans):
 def test_full_static_scan_is_public_unknown_and_never_complete(scans, scan):
     cdx = standard_only(scans[scan]["cyclonedx"], "cyclonedx")
     spdx_view = standard_only(scans[scan]["spdx"], "spdx")
-    assert cdx.get("compositions") == [{"aggregate": "unknown"}]
+    assert [c["aggregate"] for c in cdx.get("compositions", [])] == ["unknown"]
     assert {e.get("completeness") for e in _edges(spdx_view)} == {"noAssertion"}
     assert _spdx_document(spdx_view).get("comment", "").startswith("Collection coverage is unknown")
     _cyclonedx_strict(cdx)
@@ -507,7 +510,7 @@ def test_full_static_scan_is_public_unknown_and_never_complete(scans, scan):
 def test_scoped_or_failed_scan_is_publicly_incomplete(scans, scan):
     cdx = standard_only(scans[scan]["cyclonedx"], "cyclonedx")
     spdx_view = standard_only(scans[scan]["spdx"], "spdx")
-    assert cdx.get("compositions") == [{"aggregate": "incomplete"}]
+    assert [c["aggregate"] for c in cdx.get("compositions", [])] == ["incomplete"]
     assert cdx.get("dependencies", []) == []
     edges = _edges(spdx_view)
     assert edges and {e.get("completeness") for e in edges} == {"incomplete"}
@@ -540,3 +543,28 @@ def test_no_export_claims_complete_coverage(scans):
         cdx, spdx_document = documents["cyclonedx"], documents["spdx"]
         assert all(c["aggregate"] != "complete" for c in cdx["compositions"])
         assert all(e.get("completeness") != "complete" for e in _edges(spdx_document))
+
+
+def test_scan_exports_name_their_subject_types_and_digests(scans):
+    cdx = scans["full"]["cyclonedx"]
+    subject = cdx["metadata"]["component"]
+    assert subject["bom-ref"].startswith("agent:repository:")
+    assert subject["bom-ref"] not in {c["bom-ref"] for c in cdx["components"]}
+    assert cdx["metadata"]["lifecycles"] == [{"phase": "pre-build"}]
+    assert cdx["compositions"] == [
+        {
+            "aggregate": "unknown",
+            "assemblies": [subject["bom-ref"]],
+            "dependencies": [subject["bom-ref"]],
+        }
+    ]
+    components = {c["name"]: c for c in cdx["components"]}
+    assert components["ollama/ollama:latest"]["type"] == "container"
+    assert "platform" not in {c["type"] for c in cdx["components"]}
+    assert [h["alg"] for h in components["system_prompt.md"]["hashes"]] == ["SHA-256"]
+    spdx_document = scans["full"]["spdx"]
+    nodes = {n.get("spdxId", n.get("@id")): n for n in spdx_document["@graph"]}
+    (root,) = _spdx_document(spdx_document)["rootElement"]
+    (agent,) = nodes[root]["rootElement"]
+    assert nodes[agent]["type"] == "ai_AIPackage"
+    assert nodes[root]["software_sbomType"] == ["source"]

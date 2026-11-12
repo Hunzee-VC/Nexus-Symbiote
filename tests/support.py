@@ -1,0 +1,55 @@
+"""Helpers shared by test modules; fixtures that wrap them live in conftest.py."""
+
+from __future__ import annotations
+
+import importlib.util
+import sys
+import time
+from collections.abc import Callable
+from pathlib import Path
+from types import ModuleType
+
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS = ROOT / "scripts"
+
+
+def load_script(name: str) -> ModuleType:
+    """Import scripts/<name>.py once, by its own name, with its sibling scripts importable."""
+    if name in sys.modules:
+        return sys.modules[name]
+    spec = importlib.util.spec_from_file_location(name, SCRIPTS / f"{name}.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    # Dataclasses resolve string annotations through sys.modules.
+    sys.modules[name] = module
+    added = str(SCRIPTS) not in sys.path
+    if added:
+        sys.path.insert(0, str(SCRIPTS))
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        del sys.modules[name]
+        raise
+    finally:
+        if added:
+            sys.path.remove(str(SCRIPTS))
+    return module
+
+
+def scaling_ratio(run: Callable[[int], object], factor: int = 4, repeats: int = 2) -> float:
+    """CPU time of run(factor) over run(1), each the best of ``repeats`` runs.
+
+    Linear work grows about ``factor`` times, quadratic work about ``factor`` squared. Two
+    sizes measured on the same machine cancel what an absolute bound cannot: a slow or busy
+    runner and coverage tracing.
+    """
+
+    def best(scale: int) -> float:
+        timings = []
+        for _ in range(repeats):
+            started = time.process_time()
+            run(scale)
+            timings.append(time.process_time() - started)
+        return max(min(timings), 1e-3)
+
+    return best(factor) / best(1)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import itertools
 import json
 import re
+import sys
 import time
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from click.testing import CliRunner
 
 from nexus_symbiote.cli import main
 from nexus_symbiote.scanners.registry import RegistryScanner
+from tests.support import scaling_ratio
 
 NOTHING_FOUND = "registry (no AI-related dependencies found)"
 
@@ -703,13 +705,17 @@ def test_dockerfile_parsing_is_linear(tmp_path):
 
 
 def test_heredoc_parsing_is_linear(tmp_path):
-    (tmp_path / "Dockerfile").write_text('RUN <<EOF "' + "a" * 3_000_000 + "\n")
-    (tmp_path / "Dockerfile.agent").write_text(
-        "RUN <<A <<B\nx\nA\nB\n" * 100_000 + "FROM ollama/ollama:1\n"
-    )
-    started = time.monotonic()
-    result = RegistryScanner().scan(tmp_path)
-    assert time.monotonic() - started < 5
+    roots = {}
+    for scale in (1, 4):
+        root = roots[scale] = tmp_path / f"scale-{scale}"
+        root.mkdir()
+        (root / "Dockerfile").write_text('RUN <<EOF "' + "a" * 375_000 * scale + "\n")
+        (root / "Dockerfile.agent").write_text(
+            "RUN <<A <<B\nx\nA\nB\n" * 12_500 * scale + "FROM ollama/ollama:1\n"
+        )
+    # Four times the input: about four times the work if linear, sixteen if quadratic.
+    assert scaling_ratio(lambda scale: RegistryScanner().scan(roots[scale])) < 10
+    result = RegistryScanner().scan(roots[1])
     assert result.surfaces_excluded == ["Dockerfile: heredoc not parsed"]
     assert [c.name for c in result.components] == ["ollama/ollama:1"]
 
@@ -901,3 +907,179 @@ def test_poetry_pin_change_is_a_version_change(tmp_path):
     )
     assert diff.exit_code == 1, diff.output
     assert "==2.3.1 \u2192 ==2.3.2" in diff.output and "torch2" not in diff.output
+
+
+# The patterns BuildKit's parser and this collector used before; the hand-written
+# readers that replace them must give the same answers in linear time.
+OLD_DIRECTIVE = re.compile(
+    r"#[\t\n\f\r ]*([A-Za-z][A-Za-z0-9]*)[\t\n\f\r ]*=[\t\n\f\r ]*(.+?)[\t\n\f\r ]*"
+)
+OLD_HEREDOC = re.compile(r"[0-9]*<<(-?)[\t\n\f\r ]*([^<]*)")
+
+
+def test_directive_reader_matches_buildkits_pattern():
+    for length in range(8):
+        for letters in itertools.product("#a1= \x0b", repeat=length):
+            line = "".join(letters)
+            old = OLD_DIRECTIVE.fullmatch(line)
+            expected = (old.group(1), old.group(2)) if old else None
+            assert RegistryScanner._directive(line) == expected, repr(line)
+
+
+def test_heredoc_word_reader_matches_the_heredoc_pattern():
+    for length in range(9):
+        for letters in itertools.product("<-1a ", repeat=length):
+            word = "".join(letters)
+            old = OLD_HEREDOC.fullmatch(word)
+            expected = (old.group(1) == "-", old.group(2)) if old else None
+            assert RegistryScanner._heredoc_word(word) == expected, repr(word)
+
+
+def test_directive_and_heredoc_reading_is_linear_at_the_read_limit(tmp_path):
+    # Both shapes made the old patterns backtrack quadratically: about half a day
+    # each at this size.
+    (tmp_path / "Dockerfile").write_text("# a=x" + " " * 4_000_000 + "y\nFROM ollama/ollama:1\n")
+    (tmp_path / "Dockerfile.agent").write_text(
+        "RUN <<" + " " * 4_000_000 + "a<b\nFROM ollama/ollama:2\n"
+    )
+    started = time.monotonic()
+    result = RegistryScanner().scan(tmp_path)
+    assert time.monotonic() - started < 5
+    assert [c.name for c in result.components] == ["ollama/ollama:1", "ollama/ollama:2"]
+
+
+def test_pyproject_dotted_keys_are_bounded_before_parsing(tmp_path):
+    # tomllib keeps every prefix of a dotted key: about 3.5 MB for 900 parts.
+    (tmp_path / "pyproject.toml").write_text(
+        "".join(f"k{i}." + ".".join(["a"] * 900) + " = 1\n" for i in range(120))
+    )
+    started = time.monotonic()
+    result = RegistryScanner().scan(tmp_path)
+    assert time.monotonic() - started < 5
+    assert result.scan_failures == ["pyproject.toml: dotted key exceeds the length limit: not read"]
+
+
+@pytest.mark.parametrize(
+    "key",
+    ['"a.b.c.d.e.f.g.h.i.j.k.l.m.n.o.p.q.r.s" = 1', "a . b . c = 1", "[tool.a.b.c.d]"],
+)
+def test_dots_in_strings_comments_and_short_keys_are_not_counted(tmp_path, key):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "agent"\nversion = "1.2.3.4.5.6.7.8.9.10.11.12.13.14.15.16.17.18"\n'
+        'description = """' + "One. Two. " * 50 + '""""\n'
+        'dependencies = ["openai==1.0.0"]  # a.b.c.d.e.f.g.h.i.j.k.l.m.n.o.p.q.r.s\n'
+        "[tool.x]\nt = '''" + "a." * 40 + "'''\n" + key + "\n"
+    )
+    result = RegistryScanner().scan(tmp_path)
+    assert result.scan_failures == []
+    assert [c.name for c in result.components] == ["openai"]
+
+
+@pytest.mark.parametrize(
+    "hidden",
+    [
+        # A string ends at the last three of a run of quotes; up to two belong to it.
+        'x = {y = """a"""", ' + ".".join(["a"] * 40) + " = 1}\n",
+        "x = {y = '''a'''', " + ".".join(["a"] * 40) + " = 1}\n",
+        'x = "a\\"", ' + ".".join(["a"] * 40) + " = 1\n",
+    ],
+)
+def test_a_long_dotted_key_cannot_hide_behind_a_string_end(tmp_path, hidden):
+    (tmp_path / "pyproject.toml").write_text(hidden)
+    assert RegistryScanner().scan(tmp_path).scan_failures == [
+        "pyproject.toml: dotted key exceeds the length limit: not read"
+    ]
+
+
+TOO_LONG = ["pyproject.toml: dotted key exceeds the length limit: not read"]
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        # A quoted part, even an empty one, is one part of the key.
+        "k" + '.""' * 20 + " = 1",
+        "k" + ".'a'" * 20 + " = 1",
+        "k" + '."a"' * 20 + " = 1",
+        "k" + ' . "a\\"b"' * 20 + " = 1",
+        "x = {k" + ".'''a'''" * 20 + " = 1}",
+        "[tool" + '."b"' * 20 + "]",
+        "[[tool" + ".'b'" * 20 + "]]",
+    ],
+)
+def test_quoted_parts_count_toward_the_dotted_key_bound(tmp_path, key):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "agent"\ndependencies = ["openai==1.0.0"]\n' + key + "\n"
+    )
+    assert RegistryScanner().scan(tmp_path).scan_failures == TOO_LONG
+
+
+def test_a_long_key_of_quoted_parts_is_refused_before_parsing(tmp_path):
+    # tomllib keeps every prefix of a dotted key: 7.5 s and 2.3 GB for this one.
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "agent"\ndependencies = ["openai==1.0.0"]\n[tool.x]\nk'
+        + '.""' * 20_000
+        + " = 1\n"
+    )
+    started = time.monotonic()
+    result = RegistryScanner().scan(tmp_path)
+    assert time.monotonic() - started < 5
+    assert result.scan_failures == TOO_LONG
+
+
+def test_a_large_pyproject_is_not_parsed(tmp_path):
+    (tmp_path / "pyproject.toml").write_text("x = 1\n" * 50_000)
+    assert RegistryScanner().scan(tmp_path).scan_failures == [
+        "pyproject.toml: exceeds the size limit: not read"
+    ]
+
+
+def test_an_integer_too_long_to_convert_fails_only_pyproject(tmp_path):
+    # tomllib raises a plain ValueError past CPython's limit on decimal digits; it
+    # used to fail the whole collector and drop the npm and image components.
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "a"\nversion = "1"\ndependencies = ["anthropic==0.40.0"]\n'
+        "[tool.x]\nn = " + "1" * 5_000 + "\n"
+    )
+    (tmp_path / "package.json").write_text('{"dependencies": {"openai": "4.52.0"}}')
+    (tmp_path / "Dockerfile").write_text("FROM ollama/ollama:0.5.7\n")
+    previous = sys.get_int_max_str_digits()
+    sys.set_int_max_str_digits(sys.int_info.default_max_str_digits)
+    try:
+        result = RegistryScanner().scan(tmp_path)
+    finally:
+        sys.set_int_max_str_digits(previous)
+    assert result.scan_failures == ["pyproject.toml: invalid TOML"]
+    assert sorted(c.bom_ref for c in result.components) == [
+        "registry:docker/ollama/ollama:0.5.7",
+        "registry:npm/openai",
+    ]
+
+
+def test_long_quoted_option_text_is_not_split_and_is_a_gap(tmp_path):
+    # shlex grows a token one character at a time: minutes for a 4 MiB quoted word.
+    word = "'" + "a" * 1_500_000 + "'"
+    (tmp_path / "requirements.txt").write_text(f"openai==1.0.0 --hash {word}\n-i {word}\n")
+    started = time.monotonic()
+    result = RegistryScanner().scan(tmp_path)
+    assert time.monotonic() - started < 5
+    assert result.surfaces_excluded == ["requirements.txt: option line not parsed"]
+    assert [c.name for c in result.components] == ["openai"]
+
+
+def test_a_deeply_nested_marker_fails_its_line_and_keeps_the_rest(tmp_path):
+    # packaging parses markers by recursion; the RecursionError used to end the
+    # collector and discard every component it had built.
+    (tmp_path / "requirements.txt").write_text(
+        "openai ; " + "(" * 600 + "python_version > '3'" + ")" * 600 + "\nanthropic==0.30.0\n"
+    )
+    (tmp_path / "package.json").write_text('{"dependencies": {"@anthropic-ai/sdk": "0.30.1"}}')
+    (tmp_path / "Dockerfile").write_text("FROM ollama/ollama:0.5.7\n")
+    result = RegistryScanner().scan(tmp_path)
+    assert result.scan_failures == ["requirements.txt: invalid or unsupported PyPI requirement"]
+    assert sorted(c.bom_ref for c in result.components) == [
+        "registry:docker/ollama/ollama:0.5.7",
+        "registry:npm/@anthropic-ai/sdk",
+        "registry:pypi/anthropic",
+        "registry:pypi/openai",
+    ]

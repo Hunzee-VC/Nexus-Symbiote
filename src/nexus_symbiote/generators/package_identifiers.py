@@ -29,7 +29,8 @@ def package_identifier(component: AnyComponent) -> PackageIdentifierProjection:
     The parser normalizes casing and escaping. Reject ambiguous or damaged input
     before that normalization; otherwise a newline or malformed escape could be
     silently repaired into an apparently usable identifier. PyPI/npm identities
-    also agree with the component's declared ecosystem, name and exact version.
+    also agree with the component's declared ecosystem, name, exact version and
+    registry, and OCI identities with the digest its image reference pins.
     Unsupported or invalid claims remain available in the native extension only.
     """
     if not isinstance(component, RegistryEntryComponent) or component.package_url is None:
@@ -73,8 +74,25 @@ def package_identifier(component: AnyComponent) -> PackageIdentifierProjection:
 
 
 def _agrees_with_component(package: PackageURL, component: RegistryEntryComponent) -> bool:
+    """Whether a package URL names what the component declares.
+
+    Only PyPI, npm and OCI identities have such a rule; any other type is not
+    projected, because nothing ties it to the component. A qualifier these rules
+    do not know could change what the identifier names, so it is not accepted.
+    """
     if component.registry_type in {"pypi", "npm"} and package.type != component.registry_type:
         return False
+    qualifiers = package.qualifiers if isinstance(package.qualifiers, dict) else None
+    if qualifiers is None:
+        return False
+    if package.type in {"pypi", "npm"} and (
+        set(qualifiers) - {"repository_url"}
+        or qualifiers.get("repository_url", component.registry_uri) != component.registry_uri
+    ):
+        # The registry a package was resolved from is part of its identity.
+        return False
+    if package.type == "oci":
+        return _oci_agrees(package, qualifiers, component)
     if package.type == "pypi":
         if (
             package.namespace
@@ -118,7 +136,29 @@ def _agrees_with_component(package: PackageURL, component: RegistryEntryComponen
             expected = extract_version_pin(name + "@" + component.version, ecosystem="npm")
             if expected is None or package.version != expected:
                 return False
+    else:
+        return False
     return True
+
+
+def _oci_agrees(
+    package: PackageURL, qualifiers: dict[str, str], component: RegistryEntryComponent
+) -> bool:
+    """An OCI identity names the digest the component's image reference pins."""
+    from nexus_symbiote.scanners.registry import parse_image_reference
+
+    if component.registry_type not in {"oci", "docker-hub"} or package.namespace:
+        return False
+    reference = parse_image_reference(component.name)
+    if reference is None or reference.digest is None or not reference.pinned:
+        return False
+    return (
+        package.name == reference.path.rsplit("/", 1)[-1]
+        and package.version == reference.digest
+        and not set(qualifiers) - {"repository_url", "tag"}
+        and qualifiers.get("repository_url", reference.repository) == reference.repository
+        and qualifiers.get("tag", reference.tag) == reference.tag
+    )
 
 
 def package_identifier_properties(component: AnyComponent) -> list[dict[str, str]]:

@@ -104,7 +104,7 @@ def test_complete_producer_report_preserves_partial_projection(tmp_path):
     assert all(c.trust_tier == TrustTier.UNKNOWN for c in assets)
     assert not any(e.target_ref in {c.bom_ref for c in assets} for e in bom.dependencies)
     exported = CycloneDXGenerator().generate(bom)
-    assert exported["compositions"] == [{"aggregate": "incomplete"}]
+    assert [c["aggregate"] for c in exported["compositions"]] == ["incomplete"]
     assert CycloneDXGenerator.recover(exported).metadata.completeness == claim
     direct = tmp_path / "direct.json"
     result = runner.invoke(main, ["import-shadowscan", str(report), "-o", str(direct)])

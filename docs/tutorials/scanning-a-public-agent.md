@@ -121,11 +121,13 @@ nexus-symbiote scan public-mcp-servers --no-project-policy -o current.aibom.json
 nexus-symbiote diff reviewed.aibom.json current.aibom.json --fail-on-alert
 ```
 
-`--fail-on-alert` fails on in-place changes rated medium or higher: an MCP
-server package bumped at the same version, a swapped lockfile integrity value,
-a replaced MCP tool implementation, an A2A card URL moved to plain HTTP, or
-newly broad IDE agent allowances. The alert set is the one documented in the
-[CHANGELOG](../../CHANGELOG.md) and exercised by the regression suite.
+`--fail-on-alert` fails on changes rated medium or higher: a changed MCP launcher
+package or version, a swapped integrity value in an npm lockfile
+(`npm-shrinkwrap.json` included), a replaced MCP tool implementation in the file
+that declares the tool, an A2A card URL moved to plain HTTP, newly broad IDE agent
+allowances, a removed component or a coverage regression. An added source file
+that changes no component does not alert. [Gate drift in CI](../drift-gate.md#what-the-alerts-mean)
+rates every change, and says where the reviewed baseline must come from.
 
 ## 7. Wire it into a reviewing repository's CI
 
@@ -140,8 +142,9 @@ permissions:
 jobs:
   inventory:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: Hunzee-VC/Nexus-Symbiote@<reviewed-40-character-commit-sha>
@@ -155,10 +158,18 @@ jobs:
 ```
 
 The Action installs its own reviewed source and ignores policy files supplied
-by the scanned checkout, so a hostile PR cannot pick the gates it is reviewed
-under. SARIF upload needs `security-events: write` added to the job and the
-repository's code-scanning entitlement; fork pull requests may have restricted
-tokens, in which case the retained evidence is the fallback.
+by the scanned checkout, so a `.nexus-symbiote.yaml` in a pull request cannot
+relax its gates. The workflow file can: on `pull_request`, GitHub runs the
+workflow from the pull request's merge commit, so a hostile pull request can
+change the inputs above, switch a gate off or delete the step, and pass. The
+Action prints every gate an input switches off as a warning and reports each
+gate in its `gates` output, but to make the check one a pull request cannot
+edit, require the workflow through an organization ruleset or run it on
+`pull_request_target` with read-only permissions and the pull request checked
+out as data, as the [README](../../README.md#protect-the-gate) shows. SARIF upload
+needs `security-events: write` added to the job and the repository's
+code-scanning entitlement; fork pull requests may have restricted tokens, in
+which case the retained evidence is the fallback.
 
 ## 8. What you have, and what you don't
 

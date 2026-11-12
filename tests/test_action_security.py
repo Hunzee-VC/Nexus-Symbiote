@@ -69,6 +69,11 @@ def test_command_runner_never_uses_shell(monkeypatch, tmp_path):
     assert captured["kwargs"].get("shell", False) is False
 
 
+def _published(outputs: Path) -> dict[str, str]:
+    # GITHUB_OUTPUT applies lines in order, so the last value of a name wins.
+    return dict(line.split("=", 1) for line in outputs.read_text().splitlines())
+
+
 @pytest.mark.parametrize("status", [1, 7])
 def test_validation_failure_fails_action_and_preserves_export(tmp_path, status):
     config = configuration(tmp_path)
@@ -78,15 +83,23 @@ def test_validation_failure_fails_action_and_preserves_export(tmp_path, status):
         calls.append(args[0])
         if args[0] == "scan":
             Path(args[args.index("--output") + 1]).write_text("{}")
+        if args[0] == "risk":
+            return subprocess.CompletedProcess(args, 0, '{"overall_score": 0, "passed": true}', "")
         return subprocess.CompletedProcess(
             args, status if args[0] == "validate" else 0, "", "failed"
         )
 
     outputs = tmp_path / "outputs"
     assert runner.run(config, command=command, outputs=outputs) == 1
-    assert calls == ["scan", "validate"]
+    # Every enabled gate runs, so one run reports every failure.
+    assert calls == ["scan", "validate", "risk"]
     assert config.output.exists()
-    assert "aibom_path=" in outputs.read_text()
+    published = _published(outputs)
+    assert published["aibom_path"] == str(config.output)
+    assert published["validation_passed"] == "false"
+    assert published["passed"] == "true"
+    assert published["result"] == "failed"
+    assert json.loads(published["gates"])["completeness"] == "failed"
 
 
 @pytest.mark.parametrize("report", ["{}", '{"overall_score": "0"}', '{"overall_score": NaN}'])
@@ -166,7 +179,10 @@ def test_workflow_pins_structure_and_release_privilege_separation():
     assert jobs["build"]["permissions"] == {"contents": "read", "actions": "read"}
     build_steps = jobs["build"]["steps"]
     build_commands = [step.get("run", "") for step in build_steps]
-    assert any("--require-hashes -r requirements-ci.lock" in command for command in build_commands)
+    assert any(
+        "--require-hashes --only-binary=:all: -r requirements-ci.lock" in command
+        for command in build_commands
+    )
     build = next(s for s in build_steps if s.get("run") == "python -m build --no-isolation")
     assert build["working-directory"].endswith("/release-source")
     assert any("git archive" in command for command in build_commands)
@@ -177,7 +193,7 @@ def test_workflow_pins_structure_and_release_privilege_separation():
     upload = index(lambda s: s.get("name") == "Upload distributions")
     # The attested bytes are uploaded before anything runs tests, writes evidence
     # or installs packages into the evidence environment.
-    assert upload < index(lambda s: s.get("run") == "python -m pytest")
+    assert upload < index(lambda s: s.get("run", "").startswith("python -m pytest"))
     assert upload < index(lambda s: "evidence/" in s.get("run", ""))
     assert upload < index(lambda s: 'release-smoke/bin/python" -m pip install' in s.get("run", ""))
     assert jobs["publish"]["environment"]["name"] == "${{ inputs.publish }}"
@@ -272,7 +288,12 @@ def test_real_entry_point_ignores_untrusted_python_path_and_policy(tmp_path, val
     }
     entry = Path(__file__).parents[1] / "scripts" / "run_action.py"
     result = subprocess.run(  # noqa: S603
-        [sys.executable, "-I", str(entry)], cwd=tmp_path, env=env, capture_output=True, check=False
+        [sys.executable, "-I", str(entry)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        check=False,
+        timeout=300,
     )
     assert result.returncode == (1 if validate else 0)
     assert not (tmp_path / "PWNED").exists()
@@ -311,9 +332,12 @@ def test_workflow_checker_main_rejects_unsafe_workflows_under_either_extension(
     assert checker.main() == 1
     workflow.write_text(
         "on: pull_request\n"
+        "permissions:\n"
+        "  contents: read\n"
         "jobs:\n"
         "  test:\n"
         "    runs-on: ubuntu-latest\n"
+        "    timeout-minutes: 5\n"
         "    steps:\n"
         "      - run: echo safe\n"
     )

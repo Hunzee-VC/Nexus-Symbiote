@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -122,7 +123,7 @@ def test_explicit_read_and_traversal_limits_are_failures(tmp_path):
     failures = []
     with ConfinedCollection(tmp_path, failures, max_entries=3) as files:
         assert list(files.iter_files()) == []
-    assert any("entry limit" in message for message in failures)
+    assert any("entries limit of 3 exceeded" in message for message in failures)
 
 
 def test_cumulative_byte_budget_and_bounded_stream(tmp_path):
@@ -345,3 +346,115 @@ def test_open_directory_nofollow_traverse_only_ancestor_and_symlink_rejection(
     linked_parent.symlink_to(traverse_only, target_is_directory=True)
     with pytest.raises(OSError):
         os.close(open_directory_nofollow(linked_parent / "workspace"))
+
+
+def _listing_refused(monkeypatch, *directories: Path) -> None:
+    """Make these directories traverse-only: opening them fails, paths through them resolve."""
+    real_open = os.open
+    paths = set(directories)
+    names = {directory.name for directory in directories}
+
+    def restricted_open(path, flags, *args, dir_fd=None):
+        if (dir_fd is None and Path(path) in paths) or (dir_fd is not None and path in names):
+            raise PermissionError(13, "Permission denied", str(path))
+        return real_open(path, flags, *args, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "open", restricted_open)
+    monkeypatch.setattr(os, "supports_dir_fd", os.supports_dir_fd | {restricted_open})
+
+
+def test_consecutive_traverse_only_ancestors_still_reach_the_directory(tmp_path, monkeypatch):
+    from nexus_symbiote.core.hashing import open_directory_nofollow
+
+    outer = tmp_path / "outer_listing_refused"
+    inner = outer / "inner_listing_refused"
+    workspace = inner / "workspace"
+    workspace.mkdir(parents=True)
+    _listing_refused(monkeypatch, outer, inner)
+    fd = open_directory_nofollow(workspace)
+    try:
+        assert os.fstat(fd).st_ino == workspace.stat().st_ino
+    finally:
+        os.close(fd)
+
+
+@pytest.mark.parametrize("ancestors", [0, 1])
+def test_the_directory_itself_must_open(tmp_path, monkeypatch, ancestors):
+    from nexus_symbiote.core.hashing import open_directory_nofollow
+
+    refused = [tmp_path / "outer_listing_refused"][:ancestors]
+    workspace = (refused[0] if refused else tmp_path) / "workspace_listing_refused"
+    workspace.mkdir(parents=True)
+    _listing_refused(monkeypatch, *refused, workspace)
+    with pytest.raises(PermissionError):
+        open_directory_nofollow(workspace)
+
+
+@pytest.mark.parametrize("refused", ["outer_listing_refused", "link"])
+def test_a_link_at_or_below_a_traverse_only_ancestor_is_refused(tmp_path, monkeypatch, refused):
+    from nexus_symbiote.core.hashing import open_directory_nofollow
+
+    outer = tmp_path / "outer_listing_refused"
+    (outer / "real" / "workspace").mkdir(parents=True)
+    (outer / "link").symlink_to(outer / "real", target_is_directory=True)
+    _listing_refused(monkeypatch, outer if refused == "outer_listing_refused" else outer / "link")
+    with pytest.raises(OSError, match="Not a directory"):
+        open_directory_nofollow(outer / "link" / "workspace")
+
+
+def test_a_directory_replaced_between_its_check_and_its_open_is_refused(tmp_path, monkeypatch):
+    from nexus_symbiote.core.hashing import open_directory_nofollow
+
+    outer = tmp_path / "outer_listing_refused"
+    workspace = outer / "workspace"
+    workspace.mkdir(parents=True)
+    other = tmp_path / "other"
+    other.mkdir()
+    _listing_refused(monkeypatch, outer)
+    real_lstat = os.lstat
+
+    def swapped(path, *args, **kwargs):
+        # The check sees one directory; the open that follows gets another.
+        return real_lstat(other if Path(path) == workspace else path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "lstat", swapped)
+    with pytest.raises(OSError, match="changed during open"):
+        open_directory_nofollow(workspace)
+
+
+def test_directories_are_not_opened_without_descriptor_relative_no_follow_support(
+    tmp_path, monkeypatch
+):
+    from nexus_symbiote.core.hashing import open_directory_nofollow
+
+    monkeypatch.setattr(os, "supports_dir_fd", set())
+    with pytest.raises(OSError, match="unavailable"):
+        open_directory_nofollow(tmp_path)
+
+
+@pytest.mark.parametrize("firmlink", [True, False])
+def test_macos_root_firmlinks_are_opened_through_private(monkeypatch, firmlink):
+    import sys
+
+    from nexus_symbiote.core import hashing
+
+    opened: list[str] = []
+    real_open, real_islink, real_readlink = os.open, os.path.islink, os.readlink
+
+    def recording_open(path, flags, *args, dir_fd=None):
+        opened.append(str(path))
+        return real_open(path, flags, *args, dir_fd=dir_fd)
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(os, "open", recording_open)
+    monkeypatch.setattr(os, "supports_dir_fd", os.supports_dir_fd | {recording_open})
+    monkeypatch.setattr(os.path, "islink", lambda p: firmlink if p == "/etc" else real_islink(p))
+    monkeypatch.setattr(
+        os, "readlink", lambda p, *a, **k: "private/etc" if p == "/etc" else real_readlink(p)
+    )
+    # On macOS /etc is a symlink to private/etc, so the walk must take the real directory.
+    # Only the path it takes matters here: a Linux host has no /private, and a macOS host
+    # refuses /etc itself.
+    with contextlib.suppress(OSError):
+        os.close(hashing.open_directory_nofollow(Path("/etc")))
+    assert opened[:2] == ["/", "private" if firmlink else "etc"]

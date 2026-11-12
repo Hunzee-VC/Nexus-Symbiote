@@ -6,20 +6,23 @@ import ast
 import os
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from nexus_symbiote import limits
 from nexus_symbiote.core.aibom import DependencyEdge
 from nexus_symbiote.core.models import AnyComponent, MCPClientComponent
-from nexus_symbiote.utils.confined import ConfinedCollection
+from nexus_symbiote.limits import Bound
+from nexus_symbiote.utils.confined import BoundedRecords, ConfinedCollection
 
 MAX_CONFIG_BYTES = 4 * 1024 * 1024
 MAX_MODEL_BYTES = 1024 * 1024 * 1024
-MAX_SOURCE_BYTES = 64 * 1024 * 1024
+# The default only: a source budget reads the operator's source-scan-bytes limit.
+MAX_SOURCE_BYTES = limits.DEFAULTS.source_scan_bytes
 
 
 def read_regular_text(path: Path, *, max_bytes: int = MAX_CONFIG_BYTES) -> str:
@@ -57,16 +60,49 @@ def sanitized_origin(value: str) -> str:
 
 
 def parse_python(source: str) -> ast.Module:
-    """Parse scanned source without printing compiler warnings, which quote its raw bytes."""
+    """Parse scanned source without printing compiler warnings, which quote its raw bytes.
+
+    A UTF-8 byte-order mark is accepted, as CPython accepts it in a source file. The
+    parser reports deeply nested source as MemoryError or RecursionError; both become
+    ValueError, so callers record a failure for the file instead of losing the whole
+    collector.
+    """
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", SyntaxWarning)
         warnings.simplefilter("ignore", DeprecationWarning)
-        return ast.parse(source)
+        try:
+            return ast.parse(source.removeprefix("﻿"))
+        except (MemoryError, RecursionError, OverflowError):
+            raise ValueError("Python source too complex to parse") from None
+
+
+def project_relative(root: Path) -> Callable[[str], str]:
+    """Map a location inside ``root`` to project-relative POSIX text; others stay as given.
+
+    The one rule for paths in an inventory: collection applies it before recording,
+    and readers apply it to records an earlier release wrote with absolute paths.
+    """
+    base = os.path.abspath(root)
+    prefix = base.rstrip(os.sep) + os.sep
+
+    def relative(value: str) -> str:
+        if value == base:
+            return "."
+        if not value.startswith(prefix):
+            return value
+        return value[len(prefix) :].replace(os.sep, "/")
+
+    return relative
 
 
 @dataclass
 class ScanResult:
-    """The output of a single scanner pass."""
+    """The output of a single scanner pass.
+
+    Its failures and excluded surfaces are listed within the listing bounds, past
+    which they are counted, so a collector that records one for every file it meets
+    still yields an inventory that loads.
+    """
 
     scanner_name: str
     components: list[AnyComponent] = field(default_factory=list)
@@ -84,22 +120,19 @@ class ScanResult:
     source_unmapped_count: int = 0
     source_unmapped_indexes: list[int] = field(default_factory=list)
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.scan_failures, BoundedRecords):
+            self.scan_failures = BoundedRecords(self.scan_failures)
+        if not isinstance(self.surfaces_excluded, BoundedRecords):
+            self.surfaces_excluded = BoundedRecords(self.surfaces_excluded, noun="excluded surface")
+
     def make_portable(self, root: Path) -> None:
         """Record locations inside the project rather than where it was checked out.
 
         A checkout path is not a property of the project: recorded, it made the
         same tree collected in CI differ from its baseline on every component.
         """
-        base = os.path.abspath(root)
-        prefix = base.rstrip(os.sep) + os.sep
-
-        def relative(value: str) -> str:
-            if value == base:
-                return "."
-            if not value.startswith(prefix):
-                return value
-            return value[len(prefix) :].replace(os.sep, "/")
-
+        relative = project_relative(root)
         for component in self.components:
             if component.source_path is not None:
                 component.source_path = relative(component.source_path)
@@ -119,25 +152,48 @@ class SourceBudget:
     """Bound the source text a collector reads while it looks for references.
 
     A file count says nothing about cost and made ordinary projects fail, so the
-    bound is the text read. What does not fit is one named coverage gap.
+    bound is the text read: the operator's ``source-scan-bytes`` limit, for each
+    collector that searches source. What does not fit is one named coverage gap,
+    which names the first file not read in full, the limit and how to raise it.
     """
 
-    def __init__(self, label: str, result: ScanResult, limit: int = MAX_SOURCE_BYTES) -> None:
+    def __init__(self, label: str, result: ScanResult, limit: int | None = None) -> None:
         self._label = label
         self._result = result
-        self._remaining = limit
+        value = limits.current().source_scan_bytes if limit is None else limit
+        self.bound = Bound(value, "source-scan-bytes")
+        self._remaining = value
         self.exhausted = False
 
-    def admit(self, size: int) -> bool:
+    def admit(self, size: int, path: str | Path | None = None) -> bool:
+        """Charge ``size`` bytes read from ``path``; False once they do not fit."""
         if self.exhausted:
             return False
         self._remaining -= size
         if self._remaining < 0:
             self.exhausted = True
+            where = "" if path is None else f"{Path(path).as_posix()}: "
             self._result.scan_failures.append(
-                f"{self._label} exceed the combined size limit: the rest were not read"
+                f"{where}{self._label} exceed the combined size limit: the rest were not "
+                "read; " + self.bound.exceeded()
             )
         return not self.exhausted
+
+
+def source_collection_bytes() -> Bound:
+    """The byte limit of a collection that also searches source text.
+
+    Source text is charged to the collection as well, so its limit is the operator's
+    ``total-bytes`` plus ``source-scan-bytes``, and every read of the collection counts
+    against that sum. A failure states both values as the operator set them.
+    """
+    settings = limits.current()
+    total, source = settings.total_bytes, settings.source_scan_bytes
+    shown = (
+        f"{limits.format_value('total-bytes', total)} (plus "
+        f"{limits.format_value('source-scan-bytes', source)} source-scan-bytes for source search)"
+    )
+    return Bound(total + source, "total-bytes", shown=shown)
 
 
 class Scanner(ABC):
@@ -153,14 +209,14 @@ class Scanner(ABC):
 
     @contextmanager
     def _collection(
-        self, root: Path, result: ScanResult, **limits: Any
+        self, root: Path, result: ScanResult, **bounds: Any
     ) -> Iterator[ConfinedCollection]:
         with ConfinedCollection(
             root,
             result.scan_failures,
             result.surfaces_excluded,
             exclude_paths=self._exclude_paths,
-            **limits,
+            **bounds,
         ) as files:
             self._files = files
             try:
@@ -208,7 +264,7 @@ class Scanner(ABC):
                     ):
                         raise ValueError("unsupported YAML graph")
                 data = parse_yaml_mapping(text)
-            except (ValueError, RecursionError, yaml.YAMLError):
+            except (ValueError, RecursionError, OverflowError, IndexError, yaml.YAMLError):
                 result.scan_failures.append(
                     f"{path.name}: YAML mapping parse failed or unsupported"
                 )

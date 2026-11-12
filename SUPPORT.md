@@ -6,7 +6,7 @@ Nexus SymBiote is alpha security tooling maintained by one developer. This guide
 
 | I need to… | Go to |
 | --- | --- |
-| Report a security vulnerability | [SECURITY.md](SECURITY.md); request a private reporting channel |
+| Report a security vulnerability | [SECURITY.md](SECURITY.md): use private vulnerability reporting, never a public issue |
 | Report a bug or request a feature | [GitHub Issues](https://github.com/Hunzee-VC/Nexus-Symbiote/issues) |
 | Find any guide | [Documentation hub](docs/README.md), organized by why, what and how |
 | Install a release or develop from reviewed source | [Install a verified release](README.md#install-a-verified-release) · [Install from reviewed source](README.md#install-from-reviewed-source) · [CONTRIBUTING.md](CONTRIBUTING.md) |
@@ -18,14 +18,14 @@ Keep credentials, private inventories and customer data out of public reports. U
 
 ## Installation and platform requirements
 
-Use Python 3.11 or later in an isolated environment and follow the [verified-release installation](README.md#install-a-verified-release) or the [source-first installation](README.md#install-from-reviewed-source). A package-index install that skips attestation verification is not a verification path.
+Use Python 3.11 to 3.14 on Linux in an isolated environment and follow the [verified-release installation](README.md#install-a-verified-release) or the [source-first installation](README.md#install-from-reviewed-source). A package-index install that skips attestation verification is not a verification path.
 
 Confined file operations and pinned stdio launchers require POSIX descriptor-relative and no-follow primitives. Unsupported platforms fail closed. The configured hosted matrix targets Ubuntu/Python 3.11–3.14; it does not qualify macOS or Windows. A platform classifier or a successful package import is not evidence that all security primitives work on that platform.
 
 If an optional integration is missing, source extras are `.[sigstore]`, `.[cyclonedx]` and `.[all]`. The locked development environment installs the reviewed optional test/integration dependencies:
 
 ```bash
-python -m pip install --require-hashes -r requirements-ci.lock
+python -m pip install --require-hashes --only-binary=:all: -r requirements-ci.lock
 python -m pip install --no-deps --no-build-isolation -e .
 ```
 
@@ -46,6 +46,10 @@ nexus-symbiote risk candidate.json --no-project-policy --threshold 50
 ```
 
 A command can write an inventory while returning a failing status. `--report-only` explicitly permits inspection without a successful gate; do not turn it on to make a deployment approval appear green. The trusted GitHub Action ignores checkout-supplied policy, and disabled Action gates are reported as skipped rather than successful verification.
+
+## A collection limit was exceeded
+
+A scan failure such as `vendor: entries limit of 100000 exceeded; raise it with --limit entries=N` means a collector stopped at one of the [collection limits](docs/collection-limits.md), so its coverage is incomplete and the gates fail. Check first that the path belongs in the scan; otherwise raise the named limit with `--limit NAME=VALUE` before the command or with `NEXUS_SYMBIOTE_LIMITS`. Settings in the scanned project never change a limit.
 
 ## ShadowScan import returns a failing status
 
@@ -71,7 +75,7 @@ mypy src/nexus_symbiote scripts
 python scripts/check_workflows.py
 python scripts/check_repository_hygiene.py
 python scripts/check_security_regressions.py --out security-regressions.json
-python -m pytest --cov=nexus_symbiote --cov-branch --cov-report=json:coverage.json
+python -m pytest --cov=nexus_symbiote --cov=scripts --cov-branch --cov-report=json:coverage.json
 python scripts/check_coverage.py coverage.json
 ```
 

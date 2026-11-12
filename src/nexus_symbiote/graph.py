@@ -3,22 +3,52 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import re
+from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 from urllib.parse import quote
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.enums import AssuranceLevel, AutonomyLevel, ComponentType
+from nexus_symbiote.core.hashing import hash_bytes
 from nexus_symbiote.core.models import (
     AgentComponent,
+    AnyComponent,
     ClaimEvidence,
+    MCPServerComponent,
     ModelComponent,
     PromptComponent,
+    RegistryEntryComponent,
+    SkillPackageComponent,
 )
 
+if TYPE_CHECKING:
+    from nexus_symbiote.utils.confined import ConfinedCollection
+
 NonemptyString = Annotated[str, Field(min_length=1)]
+
+MANIFEST = "agent.yaml"
+MAX_MANIFEST_BYTES = 1024 * 1024
+MAX_MANIFEST_YAML_TOKENS = 20_000
+# Without a declared id the agent is "this repository", wherever it is checked out:
+# the same tree scanned at two locations must yield the same inventory.
+INFERRED_AGENT_IDENTITY = "."
+INFERRED_AGENT_NAME = "repository"
+MAX_GRAPH_ISSUES = 100
+_SHOWN = 200
+_REPOSITORY_ASSOCIATION = "repository association; runtime use and authority unobserved"
+
+
+def _repository_agent_ref(identity: str) -> str:
+    """The repository agent's reference for a declared id, or for the inferred identity."""
+    return "agent:repository:" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
+
+
+INFERRED_AGENT_REF = _repository_agent_ref(INFERRED_AGENT_IDENTITY)
 
 
 class ModelDeclaration(BaseModel):
@@ -49,136 +79,278 @@ class AgentDeclaration(BaseModel):
     autonomy_level: AutonomyLevel | None = None
 
 
+def _clip(value: object) -> str:
+    text = str(value)
+    return text if len(text) <= _SHOWN else text[: _SHOWN - 1] + "…"
+
+
+def _manifest_path(value: str) -> Path | None:
+    """A manifest entry as a path beneath the root, or None when it may not name one."""
+    if "\x00" in value or "\\" in value:
+        return None
+    path = Path(value)
+    if path.is_absolute() or ".." in path.parts or not path.parts:
+        return None
+    return path
+
+
+def _root_relative(source_path: str | None, relative: Callable[[str], str]) -> str | None:
+    """A recorded location as root-relative POSIX text, or None when it names none.
+
+    ``relative`` is the rule collection records paths by (``project_relative``), so a
+    record an earlier release wrote with an absolute path under the root reads the same.
+    """
+    if not source_path or "://" in source_path:
+        return None
+    path = Path(relative(source_path))
+    if path.is_absolute() or ".." in path.parts or not path.parts:
+        return None
+    return path.as_posix()
+
+
+def _parse_manifest(text: str, problems: list[str]) -> AgentDeclaration | None:
+    from nexus_symbiote.policy import parse_yaml_mapping
+
+    try:
+        import yaml
+    except ImportError:
+        problems.append(f"{MANIFEST}: YAML parser unavailable")
+        return None
+    try:
+        # The manifest comes from the checkout: refuse YAML graphs and unbounded documents.
+        for index, token in enumerate(yaml.scan(text)):
+            if index >= MAX_MANIFEST_YAML_TOKENS or isinstance(
+                token, (yaml.AliasToken, yaml.AnchorToken, yaml.TagToken)
+            ):
+                raise ValueError("unsupported YAML graph")
+        data = parse_yaml_mapping(text)
+        # A YAML escape can produce a lone surrogate, which no path or digest can encode.
+        json.dumps(data, ensure_ascii=False, default=str).encode("utf-8")
+        return AgentDeclaration.model_validate(data)
+    except (ValueError, RecursionError, yaml.YAMLError):
+        problems.append(f"{MANIFEST}: does not conform to the agent manifest schema")
+        return None
+
+
+def _collected_digest(component: AnyComponent) -> str | None:
+    if isinstance(component, PromptComponent):
+        return component.content_hash
+    return component.hashes.get("sha256")
+
+
+def _readable_entry(
+    files: ConfinedCollection, path: Path, locator: str, problems: list[str]
+) -> bool:
+    """Apply the operator's exclusions to a manifest-selected path before anything reads it."""
+    from nexus_symbiote.utils.confined import DEFAULT_EXCLUDES
+
+    if any(part in DEFAULT_EXCLUDES for part in path.parts):
+        problems.append(f"{locator}: names a path inside a directory that collection never reads")
+        return False
+    # A policy exclusion is recorded as a coverage gap by the collection itself.
+    return not files.excluded(path)
+
+
 def _manifest_dependencies(
-    bom: AIBOM, declared: AgentDeclaration, root: Path, agent_ref: str
-) -> list[PromptComponent | ModelComponent]:
-    """Collect instruction bytes and local path bindings before changing the BOM."""
-    from nexus_symbiote.policy import PolicyError
-    from nexus_symbiote.utils.confined import MAX_HASH_BYTES, ConfinedCollection
+    bom: AIBOM,
+    declared: AgentDeclaration,
+    files: ConfinedCollection,
+    agent_ref: str,
+    problems: list[str],
+) -> list[AnyComponent]:
+    """Bind declared instructions and local models to collected records before changing the BOM."""
+    from nexus_symbiote import limits
+    from nexus_symbiote.scanners.base import project_relative
+    from nexus_symbiote.scanners.prompt import detect_invisible_characters
 
-    def relative(value: str) -> Path:
-        path = Path(value)
-        if path.is_absolute() or ".." in path.parts or not path.parts:
-            raise PolicyError("agent.yaml references must be relative paths beneath the repository")
-        return path
+    in_root = project_relative(files.root)
+    collected_text: dict[str, list[AnyComponent]] = {}
+    collected_models: dict[str, list[ModelComponent]] = {}
+    for comp in bom.components:
+        relative = _root_relative(comp.source_path, in_root)
+        if relative is None:
+            continue
+        if isinstance(comp, (PromptComponent, SkillPackageComponent)):
+            collected_text.setdefault(relative, []).append(comp)
+        elif isinstance(comp, ModelComponent):
+            collected_models.setdefault(relative, []).append(comp)
+            collected_models.setdefault(Path(relative).parent.as_posix(), []).append(comp)
 
-    additions: list[PromptComponent | ModelComponent] = []
-    failures: list[str] = []
-    with ConfinedCollection(root, failures) as files:
-        for instruction in declared.instructions:
-            path = relative(instruction)
-            digest = files.hash_file(path)
-            if digest is None:
-                raise PolicyError("agent.yaml instruction could not be collected safely")
-            existing = [
-                comp
-                for comp in bom.components
-                if isinstance(comp, PromptComponent) and comp.source_path == path.as_posix()
-            ]
-            if any(comp.content_hash and comp.content_hash != digest for comp in existing):
-                raise PolicyError("agent.yaml instruction changed since scanner collection")
-            if any(comp.content_hash == digest for comp in existing):
-                continue
-            ref = "prompt:manifest:" + hashlib.sha256(path.as_posix().encode()).hexdigest()[:24]
+    additions: list[AnyComponent] = []
+    for index, instruction in enumerate(declared.instructions):
+        locator = f"{MANIFEST}#/instructions/{index}"
+        path = _manifest_path(instruction)
+        if path is None:
+            problems.append(f"{locator}: must be a relative path beneath the repository")
+            continue
+        if not _readable_entry(files, path, locator, problems):
+            continue
+        raw = files.read_bytes(path)
+        if raw is None:
+            problems.append(f"{locator}: the declared instruction could not be collected safely")
+            continue
+        digest = hash_bytes(raw)
+        records = collected_text.get(path.as_posix(), [])
+        if records:
+            # The collector already inventoried this file, with its own checks.
+            if any(_collected_digest(record) != digest for record in records):
+                problems.append(f"{locator}: instruction changed since scanner collection")
+            continue
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            problems.append(f"{locator}: declared instruction is not UTF-8 text")
+            continue
+        ref = "prompt:manifest:" + hashlib.sha256(path.as_posix().encode()).hexdigest()[:24]
+        additions.append(
+            PromptComponent(
+                bom_ref=ref,
+                name=path.name,
+                source_path=path.as_posix(),
+                content_hash=digest,
+                assurance_level=AssuranceLevel.OBSERVED,
+                risks=detect_invisible_characters(text, path.as_posix()),
+                claims={
+                    "content_hash": ClaimEvidence(
+                        assurance=AssuranceLevel.OBSERVED,
+                        method="confined-file-sha256",
+                        scope="repository",
+                        locator=path.as_posix(),
+                        observed_at=bom.metadata.timestamp,
+                    )
+                },
+            )
+        )
+    for key, model in declared.models.items():
+        locator = f"{MANIFEST}#/models/{_clip(quote(key, safe=''))}"
+        if model.path is None:
             additions.append(
-                PromptComponent(
-                    bom_ref=ref,
-                    name=path.name,
-                    source_path=path.as_posix(),
-                    content_hash=digest,
-                    assurance_level=AssuranceLevel.OBSERVED,
+                ModelComponent(
+                    bom_ref=f"model:{agent_ref}/hosted/{quote(key, safe='')}",
+                    name=model.requested_ref or key,
+                    provider=model.provider,
+                    requested_alias=model.requested_ref,
+                    model_type="hosted",
+                    source_path=MANIFEST,
                     claims={
-                        "content_hash": ClaimEvidence(
-                            assurance=AssuranceLevel.OBSERVED,
-                            method="confined-file-sha256",
+                        "requested_alias": ClaimEvidence(
+                            assurance=AssuranceLevel.DECLARED,
+                            method="agent-manifest",
                             scope="repository",
-                            locator=path.as_posix(),
-                            observed_at=bom.metadata.timestamp,
+                            locator=f"{MANIFEST}#/models/{quote(key, safe='')}",
                         )
                     },
                 )
             )
-        for key, model in declared.models.items():
-            if model.path is not None:
-                local = relative(model.path)
-                matches = [
-                    comp
-                    for comp in bom.components
-                    if isinstance(comp, ModelComponent)
-                    and comp.source_path
-                    and (Path(comp.source_path) == local or Path(comp.source_path).parent == local)
-                ]
-                if not matches:
-                    raise PolicyError("agent.yaml local model has no collected model artifact")
-                for comp in matches:
-                    assert comp.source_path is not None
-                    path = relative(comp.source_path)
-                    try:
-                        with files.open_regular(path, max_bytes=MAX_HASH_BYTES):
-                            pass
-                    except OSError as exc:
-                        raise PolicyError("agent.yaml local model path is unavailable") from exc
-            else:
-                ref = f"model:{agent_ref}/hosted/{quote(key, safe='')}"
-                additions.append(
-                    ModelComponent(
-                        bom_ref=ref,
-                        name=model.requested_ref or key,
-                        provider=model.provider,
-                        requested_alias=model.requested_ref,
-                        model_type="hosted",
-                        source_path="agent.yaml",
-                        claims={
-                            "requested_alias": ClaimEvidence(
-                                assurance=AssuranceLevel.DECLARED,
-                                method="agent-manifest",
-                                scope="repository",
-                                locator=f"agent.yaml#/models/{quote(key, safe='')}",
-                            )
-                        },
-                    )
-                )
-    if failures:
-        raise PolicyError("agent.yaml dependencies could not be collected safely")
-    refs = [comp.bom_ref for comp in additions]
-    if len(refs) != len(set(refs)) or any(bom.get_component(ref) for ref in refs):
-        raise PolicyError("agent.yaml dependencies contain conflicting component references")
+            continue
+        local = _manifest_path(model.path)
+        if local is None:
+            problems.append(f"{locator}: must be a relative path beneath the repository")
+            continue
+        if not _readable_entry(files, local, locator, problems):
+            continue
+        matches = collected_models.get(local.as_posix(), [])
+        if not matches:
+            problems.append(f"{locator}: the declared local model has no collected model artifact")
+            continue
+        for comp in matches:
+            relative = _root_relative(comp.source_path, in_root)
+            assert relative is not None
+            try:
+                with files.open_regular(relative, max_bytes=limits.bound("model-bytes")):
+                    pass
+            except OSError:
+                problems.append(f"{locator}: the declared local model is unavailable")
     return additions
 
 
-def assemble_repository_agent(bom: AIBOM, root: Path) -> AgentComponent:
-    """Associate repository-discovered dependencies with a definition, not a running agent."""
-    declared: AgentDeclaration | None = None
-    from nexus_symbiote.policy import PolicyError, parse_yaml_mapping
+def _launcher_key(registry: RegistryEntryComponent) -> str | None:
+    """The MCP launcher-package spelling of a manifest dependency, when one exists."""
+    if registry.registry_type in {"pypi", "npm"}:
+        return f"{registry.registry_type}:{registry.name}"
+    if registry.registry_type == "docker-hub":
+        image = re.sub(r"@sha256:[0-9A-Fa-f]{64}$", "", registry.name)
+        head, _, last = image.rpartition("/")
+        last = last.split(":", 1)[0]
+        return "oci:" + (f"{head}/{last}" if head else last).lower()
+    return None
+
+
+def assemble_repository_agent(
+    bom: AIBOM,
+    root: Path,
+    *,
+    exclude_paths: Iterable[str | Path] = (),
+    failures: list[str] | None = None,
+    exclusions: list[str] | None = None,
+    surfaces: list[str] | None = None,
+) -> AgentComponent:
+    """Associate repository-discovered dependencies with a definition, not a running agent.
+
+    The optional ``agent.yaml`` manifest is read beneath ``root`` under the caller's
+    ``exclude_paths``. Given a ``failures`` list, manifest problems are recorded there,
+    and policy exclusions in ``exclusions``, and the inventory is still assembled from
+    what could be collected. Without one, any problem raises ``PolicyError`` before the
+    BOM is changed. Given ``surfaces``, the manifest and each instruction file only it
+    declares are recorded there once read.
+    """
+    from nexus_symbiote.policy import PolicyError
     from nexus_symbiote.utils.confined import ConfinedCollection
 
-    failures: list[str] = []
-    with ConfinedCollection(root, failures, exclude_paths=(), max_file_bytes=1024 * 1024) as files:
-        text = files.read_text("agent.yaml", missing_ok=True)
-    if failures:
-        raise PolicyError("agent manifest cannot be collected: " + "; ".join(failures))
-    if text is not None:
-        try:
-            declared = AgentDeclaration.model_validate(parse_yaml_mapping(text))
-        except ValueError as exc:
-            raise PolicyError(
-                "agent.yaml must conform to the declared agent identity schema"
-            ) from exc
+    strict = failures is None
+    problems: list[str] = []
+    recorded: list[str] = [] if failures is None else failures
+    # Without a place for coverage gaps, a policy exclusion is recorded as a failure.
+    gaps: list[str] = recorded if strict or exclusions is None else exclusions
+    before = (len(recorded), len(gaps))
+    with ConfinedCollection(
+        root, recorded, gaps, exclude_paths=exclude_paths, max_file_bytes=MAX_MANIFEST_BYTES
+    ) as files:
+        text = files.read_text(MANIFEST, missing_ok=True)
+    declared = None if text is None else _parse_manifest(text, problems)
     # Without a declared id the agent is "this repository", wherever it is checked out.
-    identity = declared.id if declared and declared.id else "."
-    agent_ref = "agent:repository:" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
-    additions = _manifest_dependencies(bom, declared, root, agent_ref) if declared else []
+    identity = declared.id if declared and declared.id else INFERRED_AGENT_IDENTITY
+    agent_ref = _repository_agent_ref(identity)
+    additions: list[AnyComponent] = []
+    if declared is not None:
+        # Entries are checkout text, not paths found on disk: a read problem is recorded
+        # under the entry's locator and never echoes the entry itself.
+        unread: list[str] = []
+        with ConfinedCollection(root, unread, gaps, exclude_paths=exclude_paths) as files:
+            additions = _manifest_dependencies(bom, declared, files, agent_ref, problems)
+
+    index: dict[str, AnyComponent] = {c.bom_ref: c for c in bom.components}
+    accepted: list[AnyComponent] = []
+    for addition in additions:
+        existing = index.get(addition.bom_ref)
+        if existing is not None and existing != addition:
+            problems.append(f"{MANIFEST}: declares a component reference that is already in use")
+        elif existing is None:
+            index[addition.bom_ref] = addition
+            accepted.append(addition)
+    if strict and (problems or (len(recorded), len(gaps)) != before):
+        raise PolicyError("; ".join([*problems, *recorded]))
+    if failures is not None:
+        failures.extend(problems)
+    if surfaces is not None and text is not None:
+        surfaces.append(MANIFEST)
+        surfaces.extend(
+            c.source_path for c in accepted if isinstance(c, PromptComponent) and c.source_path
+        )
+    if agent_ref in index:
+        raise ValueError(f"{MANIFEST}: the repository agent reference is already in use")
+
     discovery = ClaimEvidence(
         assurance=AssuranceLevel.OBSERVED,
         method="filesystem-inventory",
         scope="repository",
         collector="repository-assembler",
-        locator="agent.yaml" if declared else ".",
+        locator=MANIFEST if declared else ".",
         observed_at=bom.metadata.timestamp,
     )
     agent = AgentComponent(
         bom_ref=agent_ref,
-        name=declared.name if declared else "repository",
+        name=declared.name if declared else INFERRED_AGENT_NAME,
         version=declared.version if declared else None,
         framework=declared.framework if declared else None,
         supplier=declared.owner if declared else None,
@@ -197,7 +369,7 @@ def assemble_repository_agent(bom: AIBOM, root: Path) -> AgentComponent:
             ),
         },
         properties={
-            "identity_source": "agent.yaml" if declared else "repository-path",
+            "identity_source": MANIFEST if declared else "repository-path",
             "runtime_use": "unknown",
         },
     )
@@ -220,10 +392,9 @@ def assemble_repository_agent(bom: AIBOM, root: Path) -> AgentComponent:
                     method="agent-manifest",
                     scope="repository",
                     collector="repository-assembler",
-                    locator=f"agent.yaml#/{key}",
+                    locator=f"{MANIFEST}#/{key}",
                 )
-    for addition in additions:
-        bom.add_component(addition)
+    bom.components.extend(accepted)
     relations = {
         ComponentType.MCP_SERVER: ("tool_refs", "configured-with"),
         ComponentType.TOOL: ("tool_refs", "configured-with"),
@@ -235,28 +406,59 @@ def assemble_repository_agent(bom: AIBOM, root: Path) -> AgentComponent:
         ComponentType.RAG_SOURCE: ("data_refs", "retrieves-from"),
         ComponentType.DATA_SOURCE: ("data_refs", "retrieves-from"),
     }
-    associated_kinds = {
-        ComponentType.MCP_CLIENT,
-        ComponentType.A2A_CLIENT,
-        ComponentType.A2A_SERVER,
-        ComponentType.IDE_AGENT,
-        ComponentType.VERIFIED_EXTENSION,
+    # Components with no reference field on the agent are still linked, so a compromise
+    # of a package or image reaches the agent in blast-radius and a removal shows as an
+    # edge change.
+    associated = {
+        ComponentType.MCP_CLIENT: ("configured-with", _REPOSITORY_ASSOCIATION),
+        ComponentType.A2A_CLIENT: ("configured-with", _REPOSITORY_ASSOCIATION),
+        ComponentType.A2A_SERVER: ("configured-with", _REPOSITORY_ASSOCIATION),
+        ComponentType.IDE_AGENT: ("configured-with", _REPOSITORY_ASSOCIATION),
+        ComponentType.VERIFIED_EXTENSION: ("configured-with", _REPOSITORY_ASSOCIATION),
+        ComponentType.REGISTRY_ENTRY: (
+            "depends-on",
+            "repository manifest dependency; installed artifact, runtime use and authority "
+            "unobserved",
+        ),
     }
+    registries: dict[str, list[str]] = {}
+    for component in bom.components:
+        if (
+            isinstance(component, RegistryEntryComponent)
+            and component.properties.get("collection_mode") != "imported-unverified-report"
+        ):
+            launcher = _launcher_key(component)
+            if launcher is not None:
+                registries.setdefault(launcher, []).append(component.bom_ref)
     for component in list(bom.components):
         # A report stored in this repository does not associate discovered assets
         # with this repository agent. Imported relationships remain unobserved.
         if component.properties.get("collection_mode") == "imported-unverified-report":
             continue
-        if component.component_type in associated_kinds:
+        if component.component_type in associated:
+            relationship, conditions = associated[component.component_type]
             bom.add_dependency(
                 DependencyEdge(
                     source_ref=agent_ref,
                     target_ref=component.bom_ref,
-                    relationship="configured-with",
+                    relationship=relationship,
                     assurance_level="declared",
-                    conditions="repository association; runtime use and authority unobserved",
+                    conditions=conditions,
                 )
             )
+        if isinstance(component, MCPServerComponent) and component.launcher_package:
+            for target in registries.get(component.launcher_package, []):
+                bom.add_dependency(
+                    DependencyEdge(
+                        source_ref=component.bom_ref,
+                        target_ref=target,
+                        relationship="registered-as",
+                        assurance_level="declared",
+                        conditions="launcher package name matches a manifest dependency; "
+                        "versions and artifacts are not compared; runtime use and authority "
+                        "unobserved",
+                    )
+                )
         if component.component_type not in relations:
             continue
         field_name, relationship = relations[component.component_type]
@@ -267,11 +469,11 @@ def assemble_repository_agent(bom: AIBOM, root: Path) -> AgentComponent:
                 target_ref=component.bom_ref,
                 relationship=relationship,
                 assurance_level="declared",
-                conditions="repository association; runtime use and authority unobserved",
+                conditions=_REPOSITORY_ASSOCIATION,
             )
         )
         server_ref = getattr(component, "mcp_server_ref", None)
-        if server_ref and bom.get_component(server_ref) is not None:
+        if server_ref and server_ref in index:
             bom.add_dependency(
                 DependencyEdge(
                     source_ref=server_ref,
@@ -280,7 +482,7 @@ def assemble_repository_agent(bom: AIBOM, root: Path) -> AgentComponent:
                     assurance_level="declared",
                 )
             )
-    bom.add_component(agent)
+    bom.components.append(agent)
     return agent
 
 
@@ -303,91 +505,116 @@ _REF_TYPES: dict[str, set[ComponentType]] = {
 }
 
 
+def _references(component: AnyComponent) -> Iterable[tuple[str, str]]:
+    for field_name in _REF_TYPES:
+        value = getattr(component, field_name, None)
+        for ref in value if isinstance(value, list) else [value] if value else []:
+            yield field_name, ref
+
+
 def validate_graph(bom: AIBOM) -> list[str]:
+    """Structural problems, at most MAX_GRAPH_ISSUES distinct ones, with identifiers shortened.
+
+    A hostile inventory can hold a very long reference and a million dangling targets,
+    so the message count and size are bounded, not the work. A repeated message takes
+    one place, so repeats cannot crowd out the distinct problems.
+    """
     nodes = {c.bom_ref: c for c in bom.components}
-    issues: list[str] = []
+    issues: set[str] = set()
+    omitted = 0
+
+    def issue(message: str) -> None:
+        nonlocal omitted
+        if message in issues:
+            return
+        if len(issues) < MAX_GRAPH_ISSUES:
+            issues.add(message)
+        else:
+            omitted += 1
+
     if len(nodes) != len(bom.components):
-        issues.append("duplicate component references")
+        issue("duplicate component references")
     for component in bom.components:
-        for field_name, allowed in _REF_TYPES.items():
-            value = getattr(component, field_name, None)
-            refs = value if isinstance(value, list) else [value] if value else []
-            for ref in refs:
-                target = nodes.get(ref)
-                if target is None:
-                    issues.append(f"{component.bom_ref}.{field_name}: missing target {ref}")
-                elif target.component_type not in allowed:
-                    issues.append(f"{component.bom_ref}.{field_name}: wrong target type {ref}")
+        for field_name, ref in _references(component):
+            target = nodes.get(ref)
+            if target is None:
+                issue(f"{_clip(component.bom_ref)}.{field_name}: missing target {_clip(ref)}")
+            elif target.component_type not in _REF_TYPES[field_name]:
+                issue(f"{_clip(component.bom_ref)}.{field_name}: wrong target type {_clip(ref)}")
     for edge in bom.dependencies:
         if edge.source_ref not in nodes or edge.target_ref not in nodes:
-            issues.append(
-                f"{edge.relationship}: dangling edge {edge.source_ref} -> {edge.target_ref}"
+            issue(
+                f"{edge.relationship}: dangling edge {_clip(edge.source_ref)} -> "
+                f"{_clip(edge.target_ref)}"
             )
         elif edge.relationship == "provides-tool" and (
             nodes[edge.source_ref].component_type is not ComponentType.MCP_SERVER
             or nodes[edge.target_ref].component_type is not ComponentType.TOOL
         ):
-            issues.append("provides-tool must link an MCP server to a tool")
-    return sorted(set(issues))
+            issue("provides-tool must link an MCP server to a tool")
+    shown = sorted(issues)
+    if omitted:
+        shown.append(f"{omitted} further graph issues not shown")
+    return shown
+
+
+def _reach(graph: dict[str, set[str]], starts: Iterable[str]) -> set[str]:
+    """Everything reachable from any start, each node visited once."""
+    seen: set[str] = set()
+    pending = list(starts)
+    while pending:
+        current = pending.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        pending.extend(graph.get(current, ()))
+    return seen
 
 
 def blast_radius(bom: AIBOM, component_ref: str) -> dict[str, Any]:
+    """Potential reach of a compromised component through recorded relationships.
+
+    Linear in the size of the inventory: one reverse traversal finds what depends on
+    the subject, one forward traversal from the subject and every affected agent finds
+    what those agents can reach.
+    """
     issues = validate_graph(bom)
     if issues:
         raise ValueError("invalid graph: " + "; ".join(issues))
-    if bom.get_component(component_ref) is None:
-        raise ValueError(f"unknown component: {component_ref}")
+    nodes = {c.bom_ref: c for c in bom.components}
+    if component_ref not in nodes:
+        raise ValueError(f"unknown component: {_clip(component_ref)}")
     forward: dict[str, set[str]] = {}
     reverse: dict[str, set[str]] = {}
     for component in bom.components:
-        for field_name in _REF_TYPES:
-            value = getattr(component, field_name, None)
-            refs = value if isinstance(value, list) else [value] if value else []
-            for ref in refs:
-                forward.setdefault(component.bom_ref, set()).add(ref)
-                reverse.setdefault(ref, set()).add(component.bom_ref)
+        for _, ref in _references(component):
+            forward.setdefault(component.bom_ref, set()).add(ref)
+            reverse.setdefault(ref, set()).add(component.bom_ref)
     for edge in bom.dependencies:
         forward.setdefault(edge.source_ref, set()).add(edge.target_ref)
         reverse.setdefault(edge.target_ref, set()).add(edge.source_ref)
 
-    def walk(start: str, graph: dict[str, set[str]]) -> set[str]:
-        seen: set[str] = set()
-        pending = [start]
-        while pending:
-            current = pending.pop()
-            if current in seen:
-                continue
-            seen.add(current)
-            pending.extend(graph.get(current, set()) - seen)
-        return seen
-
-    upstream = walk(component_ref, reverse)
-    affected = sorted(
-        c.bom_ref
-        for c in bom.components
-        if c.component_type is ComponentType.AGENT and c.bom_ref in upstream
-    )
-    reach = (
-        set().union(*(walk(a, forward) for a in affected))
-        if affected
-        else walk(component_ref, forward)
-    )
+    upstream = _reach(reverse, [component_ref])
+    affected = sorted(ref for ref in upstream if nodes[ref].component_type is ComponentType.AGENT)
+    reach = _reach(forward, [component_ref, *affected])
     principals = sorted(
-        {
-            auth.principal
-            for c in bom.components
-            if c.bom_ref in reach
-            for auth in getattr(c, "authorizations", [])
-        }
+        {auth.principal for ref in reach for auth in getattr(nodes[ref], "authorizations", [])}
     )
+    limitations = [
+        "Reachability describes potential dependencies, not proven exploitability or runtime access."
+    ]
+    if not forward.get(component_ref) and not reverse.get(component_ref):
+        limitations.append(
+            "The component has no recorded relationships: reachability is unknown, not empty."
+        )
     return {
         "subject": component_ref,
         "affected_agents": affected,
+        "dependent_components": sorted(upstream - {component_ref}),
         "reachable_components": sorted(reach),
         "declared_principals": principals,
         "scope": "repository-association",
         "effective_authority": "unknown",
-        "limitations": [
-            "Reachability describes potential dependencies, not proven exploitability or runtime access."
-        ],
+        "linked": bool(forward.get(component_ref) or reverse.get(component_ref)),
+        "limitations": limitations,
     }

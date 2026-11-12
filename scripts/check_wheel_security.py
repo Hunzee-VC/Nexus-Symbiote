@@ -71,6 +71,8 @@ def main() -> int:
         tests = Path(scratch) / "tests"
         tests.mkdir()
         shutil.copyfile(TESTS / "__init__.py", tests / "__init__.py")
+        # The suite's isolation from ambient variables, its time limit and skip accounting.
+        shutil.copyfile(TESTS / "conftest.py", tests / "conftest.py")
         for filename in {node.split("::", 1)[0] for node in CASES}:
             shutil.copyfile(TESTS / filename, tests / filename)
         shutil.copytree(TESTS / "fixtures", tests / "fixtures")

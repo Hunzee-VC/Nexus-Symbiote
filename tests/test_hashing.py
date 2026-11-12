@@ -173,6 +173,12 @@ class TestExtractVersionPin:
         v = extract_version_pin("latest")
         assert v is None
 
+    def test_ranges_lists_and_urls_are_not_pins(self):
+        assert extract_version_pin("1.2.3 || 2.0.0", ecosystem="npm") is None
+        assert extract_version_pin("pkg@1.0.0;x", ecosystem="npm") is None
+        assert extract_version_pin("1.0.0,2.0.0") is None
+        assert extract_version_pin("https://example.test/pkg-1.0.0.tgz") is None
+
     def test_prerelease(self):
         v = extract_version_pin("1.0.0-beta.1")
         assert v is not None

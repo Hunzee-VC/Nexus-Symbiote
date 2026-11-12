@@ -103,7 +103,9 @@ def test_empty_policy_input_supplies_no_trust_root(tmp_path: Path) -> None:
     outputs = tmp_path / "outputs"
     assert runner.run(config, command=command, outputs=outputs) == 0
     assert len(calls) == 3 and all("--signature-policy" not in args for args in calls)
-    assert "signature_policy_digest" not in outputs.read_text()
+    # The output is declared, so it is written, and empty, before collection starts.
+    digests = [line for line in outputs.read_text().splitlines() if "signature_policy" in line]
+    assert digests == ["signature_policy_digest="]
 
 
 OUTSIDE = "outside GITHUB_WORKSPACE"
@@ -288,6 +290,7 @@ def _entry_point(
         capture_output=True,
         text=True,
         check=False,
+        timeout=300,
     )
 
 
@@ -324,18 +327,18 @@ def test_real_entry_point_verifies_signed_model_only_with_caller_policy(
         assert not (workspace / "result.json").exists()
         assert not outputs.exists()
         return
-    findings = [
-        line.strip()
-        for line in result.stderr.splitlines()
-        if line.lstrip().startswith(("UNKNOWN [", "ERROR [", "CRITICAL ["))
+    # The Action relays the CLI's report lines behind a fixed "| " prefix.
+    relayed = [
+        line.removeprefix(runner.RELAY_PREFIX).strip() for line in result.stderr.splitlines()
     ]
+    findings = [line for line in relayed if line.startswith(("UNKNOWN [", "ERROR [", "CRITICAL ["))]
     model = _model(workspace / "result.json")
     recorded = outputs.read_text()
     if mode == "none":
         assert f"UNKNOWN [{model['bom_ref']}] {UNTRUSTED}" in findings
         assert model["signing_status"] != "sigstore-signed"
         assert "signing_identity" not in model
-        assert "signature_policy_digest" not in recorded
+        assert "signature_policy_digest=sha256:" not in recorded
     elif mode == "caller":
         assert policy is not None
         assert findings == [f"UNKNOWN [{model['bom_ref']}] {STAND_IN_FORMAT}"]
@@ -452,6 +455,7 @@ def test_planted_sigstore_cache_cannot_choose_the_trust_root(tmp_path: Path) -> 
         capture_output=True,
         text=True,
         check=False,
+        timeout=300,
     )
     # Control: the CLI on its own takes its offline trust root from that cache.
     assert direct.returncode == 0, direct.stderr

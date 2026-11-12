@@ -4,40 +4,84 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ## [Unreleased]
 
-Closes detection gaps listed under 0.1.0's known limitations and makes inventories comparable across checkouts. Record baselines again after upgrading: paths, the inferred agent reference and several records change.
+Closes detection gaps listed under 0.1.0's known limitations and others found in review, makes inventories comparable across checkouts, and makes every gate say why it failed. Record baselines again after upgrading, as *Upgrading* below describes: the native format, paths, the inferred agent reference and many records change. [Known limitations](docs/known-limitations.md) lists what is still not collected, compared or verified.
 
 ### Security
 
-- Record Claude Code hooks, deny and ask rules and every other settings value by digest. The `ide_agents` collector adds an RFC 8785 digest of each JSON settings file (`settings_hashes`), rule counts and hook-handler counts per event, so an added hook command or a removed deny rule raises a `diff --fail-on-alert` alert; reordered keys and whitespace do not. Rules and hook commands are not recorded.
-- Score `permissions.defaultMode: bypassPermissions` as a high `permission_scope` finding. It was recorded without a finding, so a project that skipped every permission prompt scored the same as one with a single blanket grant.
-- Collect instruction files below the project root: `CLAUDE.md` and `AGENTS.md` in any subdirectory, subagent definitions under `.claude/agents`, and files under `.cursor/rules`, `.github/instructions` and `.github/prompts`, with the hidden-character checks. A nested instruction file with bidi or zero-width characters produced no component and no finding.
-- Bind a skill's bundled scripts by digest. Every file in a directory that holds a `SKILL.md` is inventoried, not only its `.md`, `.txt`, `.yaml` and `.json` files, so an edited `run.sh` is a drift alert.
-- Read MCP configuration below the project root and for more hosts: `.mcp.json`, `mcp.json`, `mcp-config.json`, `mcp_config.json`, `mcp-servers.json`, `claude_desktop_config.json` and `cline_mcp_settings.json` in any subdirectory, including `.vscode/mcp.json` and `.windsurf/mcp_config.json`. A server added there was not inventoried.
-- State which MCP values an inventory does not bind. A server whose launch arguments, environment values or endpoint path are compared only with `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` carries a low `completeness` finding naming the key, as A2A records do. Without the key a served directory widened from `./notes` to `/` passes the drift gate; that is unchanged, and now visible.
-- Strip JavaScript comments in linear time. The pattern used for the root-level SDK import hint rescanned blank runs and unterminated block comments, so one file within the 262,144-byte limit took about a minute.
-- Resolve AI dependencies from more lockfiles in the `registry` collector: exact versions, SRI integrity and download origins from `pnpm-lock.yaml` and `yarn.lock`, and exact versions and index origins from `uv.lock` and `poetry.lock`. Lockfile evidence is not bound when more than one npm lockfile, or both Python lockfiles, sit in the project root.
-- Support macOS root firmlink aliases (`/var`, `/tmp`, `/etc` to `/private/...`) and traverse-only (`0111`) ancestor directories in `open_directory_nofollow`, and Darwin's refusal of `RLIMIT_AS` in the runtime validation worker. Every segment inside the collection root is still opened without following links, and Linux keeps every worker limit fail-closed.
+- Classify MCP launchers behind wrappers such as `sh -c` and for more package runners such as `pnpm dlx` and `uv run --with`; a known runner that cannot be classified, inline code or a nested launch is a high `launcher_identity` finding and a coverage gap.
+- Withhold an MCP package identity whose registry is redirected, for example by `.npmrc`, and count an MCP container image as pinned only by digest.
+- Read MCP servers from the files of eleven clients and from `.mcp.json`-style files in any subdirectory; without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, MCP and RAG values that only the key binds cannot alert, and raise a low `completeness` finding.
+- Collect nested `CLAUDE.md` and `AGENTS.md` files, `@path` imports, rule, prompt and subagent directories, and every file of a skill; a fixed-path file present only under another case, such as `claude.md`, is a collection failure.
+- Bind Claude Code settings by digest, so an added hook or a removed deny rule alerts, and score `bypassPermissions` (high), `acceptEdits` (medium) and hooks.
+- Match AI packages after name normalization against one [catalog](docs/registry-collector.md#ai-package-catalog), so `mcp`, `fastmcp`, `@anthropic-ai/sdk`, `llama.index.core` and `langgraph-checkpoint` are inventoried.
+- Resolve versions from pnpm, Yarn, uv and Poetry lockfiles, fail on npm, pnpm and Yarn records with SHA-1-only integrity or a non-HTTPS or ambiguous download URL, and report overrides, workspaces and a `Pipfile` as coverage gaps.
+- Digest every weight shard, configuration, tokenizer, chat template and custom-code module of a model, rate Hugging Face custom code high, and detect pickles behind any model suffix ([model integrity](docs/model-integrity.md)).
+- Count a tool descriptor as verified only when it matches the project's MCP configuration, and refuse supplier claims of verified assurance that no local evidence backs.
+- Keep checkout and inventory text inert in all output: it cannot start a line or form a CI log command (`##[`), markup or a link.
+- Let only the operator set collection limits, and run several parsers that one hostile file could stall, JavaScript comment stripping among them, in linear time.
+- In live mode, refuse special-purpose addresses, bound server schemas and OSV replies, and ignore `SSLKEYLOGFILE`; `verify-live` also binds server instructions, prompts and identity.
+- In the runtime gateway, retire superseded snapshots, count approvers rather than keys, and deny every call when the state store is missing.
+- Publish to PyPI only from a signed tag after 24 hours on `main`, unless an urgent fix states why, and check dependencies against OSV daily.
+- Classify MCP launch text that a shell or `cmd` reads again only when every word reads as written: brace, pattern and parameter expansion, `$'...'`, `eval`, `cmd`'s `@ ; , =` prefixes and `%VAR:~%` substrings are a coverage gap, and arguments are also read as a shell may rewrite them ([known limitations](docs/known-limitations.md#mcp-servers-and-tools)).
+- Treat `uv run` of a URL or standard input, Windows names with trailing dots such as `npx.cmd.`, and package installs (`pip`, `gem`, `cargo`, `conda`) as unknown launchers, and withhold an MCP package identity when the server's environment moves or replaces the runner's configuration.
+- Withhold token-shaped MCP field, header and environment names from inventories and exports.
+- Treat an interactive shell given `--rcfile` or `--init-file`, and an exported bash function (`BASH_FUNC_<name>%%`) or a relative `BASH_ENV` in an MCP server's environment, as unknown launchers: each can replace the runner the script names.
+- Read brace, bracket and parameter expansions in MCP launch arguments in linear time; a few kilobytes of unclosed braces or brackets stalled a scan, and default operands nested more than eight deep are a gap.
+- Follow the `@path` imports of nested `CLAUDE.md` files, and treat an A2A card module that is too large to parse or spelled with compatibility characters as a coverage gap.
+- In the runtime gateway with `canonical_arguments=True`, validate and resolve the scope of the arguments the executor receives, and deny schemas that use keywords only drafts before draft-04 define.
+- Measure the PyPI soak from the first trusted CI run when a commit has no push run, treat an unreported ruleset bypass as unknown, and reject workflow gate steps that never run.
 
-### Added
+### Changed
 
-- Discover standalone Python agent SDK tools declared with decorators (`langchain`, `crewai`, `openai-agents`, `smolagents` and `pydantic-ai`) by static AST analysis in `python_tools`.
-- Look for MCP SDK references in nested `.ts` and `.js` files and A2A references in nested Python files, within the 64 MiB source budget. Nested files are decoded only when they name a supported SDK, and `docs`, `benchmarks` and `examples` directories are skipped.
+- **Breaking:** write native format 1.1.0, with paths relative to the scan root and a repository agent reference that no longer depends on the checkout; most records bind more evidence, so a 0.1.0 inventory still loads but no longer reconciles or compares cleanly.
+- **Breaking:** `diff --fail-on-alert` also alerts when a component disappears or a relationship is added or removed ([drift gate](docs/drift-gate.md)).
+- **Breaking:** SARIF rule ids are `nexus_symbiote/<category>/<severity>`, so GitHub code scanning re-creates every alert once, and again when a finding's severity changes; dismissals do not carry over ([details](docs/fingerprint-migration.md#sarif-rule-identifiers)).
+- **Breaking:** the runtime gateway evaluates tool input schemas in their declared dialect with ECMA-262 patterns and denies a schema holding a constraint that dialect would skip; stores need `StateStore.initialize` ([reference](docs/runtime-contract-reference.md#input-schema-evaluation)).
+- **Breaking:** both pre-commit hooks run `nexus-symbiote scan . --no-project-policy --check`: they ignore the checkout's policy and write no file.
+- **Breaking:** in the Action, `risk-threshold: '0'` no longer skips the risk gate, `risk-passed` can be `not-run`, and the Action's Python no longer stays on the job's `PATH`.
+- **Breaking:** `validate`, `risk`, `diff`, `summary` and `blast-radius` print results on standard output, and `advisories` exits 1 when it finds an advisory.
+- **Breaking:** every command refuses a signer policy inside the scanned project, and `verify-live` requires `--project` and a launch policy outside the repository.
+- **Breaking:** the MCP stdio note moves from category `transport_security` to `local_process`.
+- **Breaking:** dependency floors rise to click 8.2.1, pydantic 2.12, packaging 24.2 and jsonschema 4.25; the `yaml` extra is gone, `dev` is now a dependency group, and the unused `rich` dependency is dropped.
+- Raise default limits to 100,000 directory entries and 64 GiB per model file ([collection limits](docs/collection-limits.md)).
+- Export CycloneDX and SPDX through projection 2, which makes the repository agent CycloneDX `metadata.component` and mints SPDX `urn:uuid` identifiers; 0.1.0 exports still recover ([standard exports](docs/standard-exports.md)).
 
 ### Fixed
 
-- **Breaking:** record project-relative paths. `source_path`, claim locators, `config_path`, `config_paths`, `source_paths` and the coverage lists held the absolute checkout path, so the same project scanned in CI differed from a baseline recorded elsewhere on every component and failed `diff --fail-on-alert`. The repository agent inferred without an `agent.yaml` no longer takes its reference from the checkout path or its name from the directory: it is named `repository`. An inventory written by 0.1.0 no longer reconciles or compares cleanly with a fresh collection.
-- Bound MCP and A2A source collection by the text read (64 MiB) instead of by file count. A project with more than 50 Python files outside test directories, more than 50 TypeScript files, more than 10 root-level `.ts` or `.js` files, or more than 20 Python files in the root and `src` failed its gate with a collection-limit failure that no option could lift. Nested Python files that cannot name the SDK are no longer decoded, so one that is not UTF-8 is not a failure.
-- Print why a gate failed. `scan` and `risk` printed only `Scan gate failed`; they now list the gate reasons and up to 20 collection failures on stderr.
-- Recognise more agent packages in the `registry` collector: `mcp`, `fastmcp`, `langgraph`, `litellm`, `pydantic-ai`, `google-adk`, `a2a-sdk`, `claude-agent-sdk`, the Vercel `ai` package, and the `@langchain`, `@anthropic-ai`, `@openai` and `@ai-sdk` scopes, among others. A manifest of 52 common agent packages yielded 17 records.
-- Describe an MCP endpoint URL that embeds credentials as such. It was reported as "not HTTPS" even for an `https://` URL.
-- Correct the demo numbers in the README and the examples walkthrough, which described six findings and a score of 33; a test now compares them with a scan of the demo project.
-- Match `langgraph`, `fastmcp`, `pydantic-ai`, `google-adk`, `smolagents` and `semantic-kernel` as package-name prefixes as well, so packages such as `langgraph-checkpoint` and `pydantic-ai-slim` are recognised.
-- Name nested model directories by their root-relative path. Two directories with the same leaf name (`fixtures/alpha/project` and `fixtures/beta/project`) produced conflicting `bom-ref`s.
-- Infer MCP tool capabilities and side effects from whole words in the tool name and description, including inflected forms (`Writes`, `deleted`, `running`). Substring matching read `author` as `auth`, `compute` as `put` and `monkey` as `key`.
+- Bound every collection failure and gap listing, report a case variant once per file however many links reach it, and refuse symbolic links whose target is not valid UTF-8, so a hostile tree of links no longer takes gigabytes or writes an unloadable inventory.
+- Read each pnpm lockfile key once, and read YAML base-60 numbers such as `1:30` as text, removing two parsers whose time was quadratic in a hostile file.
+- `validate --project` no longer reports `project-reconciled` when a project policy skips the completeness check, reconciliation also compares the supplied coverage claim, and `diff` rates a changed digest kept in a component's properties high.
+- `baseline` prints its output path through the same neutralization as every other command.
+- Bound MCP, A2A and RAG source reading by bytes (`source-scan-bytes`, 64 MiB) instead of file counts, so projects with many source files no longer fail on a limit no option could lift.
+- Print why a gate failed in `scan`, `risk`, `baseline` and the Action: the reasons, the findings at or above the cutoff, the score and up to 20 collection failures.
+- Collect in-root symlinks such as `CLAUDE.md -> AGENTS.md`, `.clinerules` directories and commented `.vscode/extensions.json` files instead of failing.
+- Name models by their root-relative path, so same-named directories no longer collide.
+- Infer MCP tool capabilities and side effects from whole words, and describe an endpoint URL with embedded credentials as such.
+- End unexpected errors with a one-line message instead of a traceback, and record a malformed `agent.yaml` as a scan failure.
+- Support macOS firmlink aliases in confined reads, and run the runtime validation worker there without the address-space limit Darwin refuses; Linux keeps every worker limit.
+- Correct the demo numbers in the README and the examples walkthrough; a test now checks them.
 
-## [0.1.0] - 2026-11-07
+### Added
 
-First alpha of the AgentBOM toolkit under the Hunzee-VC organization. Its known detection gaps, including Claude Code settings beyond the permission mode and blanket grants, skill scripts and subagents, are listed under [known limitations](SECURITY.md#known-limitations-in-010); `diff --fail-on-alert` cannot alert on them.
+- `--limit` and `NEXUS_SYMBIOTE_LIMITS`, and `risk.suppressions` with a reason, owner and expiry ([policy reference](docs/policy-reference.md)).
+- `scan --check`, `validate --json-output` and `--skip-integrity`, `summary --json-output`, `risk --no-score-threshold`, `--require-discovery-signature` and `--debug`.
+- Action inputs `reviewed-baseline` (a drift gate), `validate-integrity`, `limits`, `artifact-name`, `sarif-category` and `upload-artifact`, and outputs `result`, `gates`, `validation-passed`, `drift-passed` and `drift-alerts`.
+- `discover-mcp --record` for drift on remote MCP servers, `verify-live --accept-drift`, `advisories --dry-run` and `--exclude`, and `runtime digest`, `key-id` and `register`.
+- Discovery of Python agent SDK tools declared with decorators, and of SDK references in nested source files.
+- Signature policy version 2 with digest pins, and `.tflite`, `.mlmodel`, `.pte` and `saved_model.pbtxt` models.
+- Guides to the [drift gate](docs/drift-gate.md), [agent manifest](docs/agent-manifest.md), [standard exports](docs/standard-exports.md), [registry collector](docs/registry-collector.md) and [runtime contracts](docs/runtime-contract-reference.md).
+
+### Upgrading
+
+1. Re-collect each baseline from the commit it was reviewed at, with the same `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` as your CI scans, or none, and review `diff old.json new.json` once before adopting it ([drift gate](docs/drift-gate.md#take-both-snapshots-the-same-way)).
+2. Review the new findings and coverage gaps; a gap fails the default gates. Accept a single false positive with `risk.suppressions`, and replace `transport_security` with `local_process` where a policy ignores stdio notes.
+3. In the Action, use `risk-check: 'false'` to skip the risk gate, give each Action step in one run its own `artifact-name` and `sarif-category`, and install Python in later steps that used the Action's.
+4. In scripts, read results from standard output, gate on `risk --json-output`, add `--no-fail-on-advisory` where `advisories` must exit 0, and pass `--project` to `verify-live`.
+5. Keep signer and launch policies outside the scanned repository, and re-apply the GitHub code scanning dismissals that still hold.
+
+## [0.1.0] - 2026-11-08
+
+First alpha of the AgentBOM toolkit under the Hunzee-VC organization. Its known detection gaps, including Claude Code settings beyond the permission mode and blanket grants, skill scripts and subagents, are listed under [known limitations](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/v0.1.0/SECURITY.md#known-limitations-in-010); `diff --fail-on-alert` cannot alert on them.
 
 ### Security
 

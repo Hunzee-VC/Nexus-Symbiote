@@ -19,7 +19,9 @@ exported as typed SPDX relationships or in the CycloneDX dependency graph.
 Every CycloneDX and SPDX inventory export states its coverage in standard
 fields: CycloneDX `compositions` and SPDX relationship `completeness` say
 `incomplete` or `unknown` (`noAssertion` in SPDX), and the SPDX document
-`comment` states it in prose; VEX and SARIF output state no coverage. A
+`comment` states it in prose. SARIF reports collection failures as an
+unsuccessful execution and lists failures, coverage gaps and collectors that did
+not run as tool execution notifications; VEX output states no coverage. A
 lossless extension round trip
 does not authenticate the values or their producer.
 

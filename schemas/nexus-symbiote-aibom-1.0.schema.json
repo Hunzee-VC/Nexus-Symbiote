@@ -6,6 +6,7 @@
       "properties": {
         "bom_ref": {
           "description": "Unique reference within this BOM",
+          "maxLength": 16384,
           "title": "Bom Ref",
           "type": "string"
         },
@@ -68,7 +69,8 @@
         },
         "assurance_level": {
           "$ref": "#/$defs/AssuranceLevel",
-          "default": "declared"
+          "default": "declared",
+          "description": "declared: stated by configuration, a manifest or a supplier; observed: a named collector measured the component's identity from bytes (a file, weight or descriptor digest); verified: established by cryptographic verification, which offline collection never assigns"
         },
         "source_path": {
           "anyOf": [
@@ -80,7 +82,7 @@
             }
           ],
           "default": null,
-          "description": "Filesystem path or URL where this was discovered",
+          "description": "Where this was discovered: a POSIX path relative to the scan root (native format 1.1.0 and later), or a URL. Format 1.0.0 recorded absolute scan-host paths",
           "title": "Source Path"
         },
         "properties": {
@@ -155,6 +157,7 @@
       "properties": {
         "bom_ref": {
           "description": "Unique reference within this BOM",
+          "maxLength": 16384,
           "title": "Bom Ref",
           "type": "string"
         },
@@ -217,7 +220,8 @@
         },
         "assurance_level": {
           "$ref": "#/$defs/AssuranceLevel",
-          "default": "declared"
+          "default": "declared",
+          "description": "declared: stated by configuration, a manifest or a supplier; observed: a named collector measured the component's identity from bytes (a file, weight or descriptor digest); verified: established by cryptographic verification, which offline collection never assigns"
         },
         "source_path": {
           "anyOf": [
@@ -229,7 +233,7 @@
             }
           ],
           "default": null,
-          "description": "Filesystem path or URL where this was discovered",
+          "description": "Where this was discovered: a POSIX path relative to the scan root (native format 1.1.0 and later), or a URL. Format 1.0.0 recorded absolute scan-host paths",
           "title": "Source Path"
         },
         "properties": {
@@ -328,6 +332,7 @@
       "properties": {
         "spec_version": {
           "default": "1.0.0",
+          "description": "Native format version. This build reads 1.0.x and 1.1.x; 1.1.0 records scan-root-relative paths",
           "title": "Spec Version",
           "type": "string"
         },
@@ -400,6 +405,35 @@
             }
           ],
           "default": null
+        },
+        "policy_source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Policy that governed collection: built-in, or project:<file relative to the scan root>. Absent when the producer did not record it",
+          "title": "Policy Source"
+        },
+        "policy_weakened": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Settings of that policy that gate less strictly than the built-in policy",
+          "title": "Policy Weakened"
         }
       },
       "title": "AIBOMMetadata",
@@ -411,6 +445,7 @@
       "properties": {
         "bom_ref": {
           "description": "Unique reference within this BOM",
+          "maxLength": 16384,
           "title": "Bom Ref",
           "type": "string"
         },
@@ -473,7 +508,8 @@
         },
         "assurance_level": {
           "$ref": "#/$defs/AssuranceLevel",
-          "default": "declared"
+          "default": "declared",
+          "description": "declared: stated by configuration, a manifest or a supplier; observed: a named collector measured the component's identity from bytes (a file, weight or descriptor digest); verified: established by cryptographic verification, which offline collection never assigns"
         },
         "source_path": {
           "anyOf": [
@@ -485,7 +521,7 @@
             }
           ],
           "default": null,
-          "description": "Filesystem path or URL where this was discovered",
+          "description": "Where this was discovered: a POSIX path relative to the scan root (native format 1.1.0 and later), or a URL. Format 1.0.0 recorded absolute scan-host paths",
           "title": "Source Path"
         },
         "properties": {
@@ -954,6 +990,7 @@
           "type": "array"
         },
         "egress_domains": {
+          "description": "Reserved: no built-in collector populates this field; supplier assertion",
           "items": {
             "type": "string"
           },
@@ -961,6 +998,7 @@
           "type": "array"
         },
         "filesystem_paths": {
+          "description": "Reserved: no built-in collector populates this field; supplier assertion",
           "items": {
             "type": "string"
           },
@@ -1285,10 +1323,11 @@
     },
     "DataSourceComponent": {
       "additionalProperties": false,
-      "description": "A training or fine-tuning dataset.",
+      "description": "A training or fine-tuning dataset.\n\nReserved: no built-in collector emits this type; it appears only in supplied inventories.",
       "properties": {
         "bom_ref": {
           "description": "Unique reference within this BOM",
+          "maxLength": 16384,
           "title": "Bom Ref",
           "type": "string"
         },
@@ -1351,7 +1390,8 @@
         },
         "assurance_level": {
           "$ref": "#/$defs/AssuranceLevel",
-          "default": "declared"
+          "default": "declared",
+          "description": "declared: stated by configuration, a manifest or a supplier; observed: a named collector measured the component's identity from bytes (a file, weight or descriptor digest); verified: established by cryptographic verification, which offline collection never assigns"
         },
         "source_path": {
           "anyOf": [
@@ -1363,7 +1403,7 @@
             }
           ],
           "default": null,
-          "description": "Filesystem path or URL where this was discovered",
+          "description": "Where this was discovered: a POSIX path relative to the scan root (native format 1.1.0 and later), or a URL. Format 1.0.0 recorded absolute scan-host paths",
           "title": "Source Path"
         },
         "properties": {
@@ -1468,18 +1508,21 @@
       "type": "object"
     },
     "DependencyEdge": {
+      "additionalProperties": false,
       "description": "A typed relationship between two components.",
       "properties": {
         "source_ref": {
+          "maxLength": 16384,
           "title": "Source Ref",
           "type": "string"
         },
         "target_ref": {
+          "maxLength": 16384,
           "title": "Target Ref",
           "type": "string"
         },
         "relationship": {
-          "description": "invokes, delegates-to, retrieves-from, acts-as-identity, registered-as, approved-under, observed-using, trained-on, fine-tuned-from, quantized-from, merged-from, depends-on",
+          "description": "invokes, delegates-to, retrieves-from, acts-as-identity, registered-as, approved-under, observed-using, trained-on, fine-tuned-from, quantized-from, merged-from, depends-on, configured-with, provides-tool, uses-model, reads-instructions, loads-skill, uses-memory, uses-guardrail",
           "enum": [
             "invokes",
             "delegates-to",
@@ -1694,10 +1737,11 @@
     },
     "GuardrailComponent": {
       "additionalProperties": false,
-      "description": "A safety classifier, content filter, or output validator.",
+      "description": "A safety classifier, content filter, or output validator.\n\nReserved: no built-in collector emits this type; it appears only in supplied inventories.",
       "properties": {
         "bom_ref": {
           "description": "Unique reference within this BOM",
+          "maxLength": 16384,
           "title": "Bom Ref",
           "type": "string"
         },
@@ -1760,7 +1804,8 @@
         },
         "assurance_level": {
           "$ref": "#/$defs/AssuranceLevel",
-          "default": "declared"
+          "default": "declared",
+          "description": "declared: stated by configuration, a manifest or a supplier; observed: a named collector measured the component's identity from bytes (a file, weight or descriptor digest); verified: established by cryptographic verification, which offline collection never assigns"
         },
         "source_path": {
           "anyOf": [
@@ -1772,7 +1817,7 @@
             }
           ],
           "default": null,
-          "description": "Filesystem path or URL where this was discovered",
+          "description": "Where this was discovered: a POSIX path relative to the scan root (native format 1.1.0 and later), or a URL. Format 1.0.0 recorded absolute scan-host paths",
           "title": "Source Path"
         },
         "properties": {
@@ -1868,6 +1913,7 @@
       "properties": {
         "bom_ref": {
           "description": "Unique reference within this BOM",
+          "maxLength": 16384,
           "title": "Bom Ref",
           "type": "string"
         },
@@ -1930,7 +1976,8 @@
         },
         "assurance_level": {
           "$ref": "#/$defs/AssuranceLevel",
-          "default": "declared"
+          "default": "declared",
+          "description": "declared: stated by configuration, a manifest or a supplier; observed: a named collector measured the component's identity from bytes (a file, weight or descriptor digest); verified: established by cryptographic verification, which offline collection never assigns"
         },
         "source_path": {
           "anyOf": [
@@ -1942,7 +1989,7 @@
             }
           ],
           "default": null,
-          "description": "Filesystem path or URL where this was discovered",
+          "description": "Where this was discovered: a POSIX path relative to the scan root (native format 1.1.0 and later), or a URL. Format 1.0.0 recorded absolute scan-host paths",
           "title": "Source Path"
         },
         "properties": {
@@ -2025,6 +2072,7 @@
       "properties": {
         "bom_ref": {
           "description": "Unique reference within this BOM",
+          "maxLength": 16384,
           "title": "Bom Ref",
           "type": "string"
         },
@@ -2087,7 +2135,8 @@
         },
         "assurance_level": {
           "$ref": "#/$defs/AssuranceLevel",
-          "default": "declared"
+          "default": "declared",
+          "description": "declared: stated by configuration, a manifest or a supplier; observed: a named collector measured the component's identity from bytes (a file, weight or descriptor digest); verified: established by cryptographic verification, which offline collection never assigns"
         },
         "source_path": {
           "anyOf": [
@@ -2099,7 +2148,7 @@
             }
           ],
           "default": null,
-          "description": "Filesystem path or URL where this was discovered",
+          "description": "Where this was discovered: a POSIX path relative to the scan root (native format 1.1.0 and later), or a URL. Format 1.0.0 recorded absolute scan-host paths",
           "title": "Source Path"
         },
         "properties": {
@@ -2169,6 +2218,7 @@
       "properties": {
         "bom_ref": {
           "description": "Unique reference within this BOM",
+          "maxLength": 16384,
           "title": "Bom Ref",
           "type": "string"
         },
@@ -2231,7 +2281,8 @@
         },
         "assurance_level": {
           "$ref": "#/$defs/AssuranceLevel",
-          "default": "declared"
+          "default": "declared",
+          "description": "declared: stated by configuration, a manifest or a supplier; observed: a named collector measured the component's identity from bytes (a file, weight or descriptor digest); verified: established by cryptographic verification, which offline collection never assigns"
         },
         "source_path": {
           "anyOf": [
@@ -2243,7 +2294,7 @@
             }
           ],
           "default": null,
-          "description": "Filesystem path or URL where this was discovered",
+          "description": "Where this was discovered: a POSIX path relative to the scan root (native format 1.1.0 and later), or a URL. Format 1.0.0 recorded absolute scan-host paths",
           "title": "Source Path"
         },
         "properties": {
@@ -2297,6 +2348,19 @@
           "description": "Declared ecosystem and package name or image repository, when safely identified",
           "title": "Launcher Package"
         },
+        "package_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Exact npm or PyPI package URL of the launched package, only for an exact pin from the default registry; not proof of installed artifact identity",
+          "title": "Package Url"
+        },
         "args": {
           "items": {
             "type": "string"
@@ -2345,6 +2409,7 @@
             }
           ],
           "default": null,
+          "description": "Reserved: no built-in collector populates this field; supplier assertion",
           "title": "Registry Source"
         },
         "version_pinned": {
@@ -2357,7 +2422,7 @@
             }
           ],
           "default": null,
-          "description": "Exact declared package reference; null when no package is declared",
+          "description": "True for an exact version, commit or digest; false for a floating or unclassified package runner reference; null when no package runner is declared",
           "title": "Version Pinned"
         },
         "schema_hash": {
@@ -2390,10 +2455,11 @@
     },
     "MemoryStoreComponent": {
       "additionalProperties": false,
-      "description": "Persistent memory (conversation history, learned facts, skills).",
+      "description": "Persistent memory (conversation history, learned facts, skills).\n\nReserved: no built-in collector emits this type; it appears only in supplied inventories.",
       "properties": {
         "bom_ref": {
           "description": "Unique reference within this BOM",
+          "maxLength": 16384,
           "title": "Bom Ref",
           "type": "string"
         },
@@ -2456,7 +2522,8 @@
         },
         "assurance_level": {
           "$ref": "#/$defs/AssuranceLevel",
-          "default": "declared"
+          "default": "declared",
+          "description": "declared: stated by configuration, a manifest or a supplier; observed: a named collector measured the component's identity from bytes (a file, weight or descriptor digest); verified: established by cryptographic verification, which offline collection never assigns"
         },
         "source_path": {
           "anyOf": [
@@ -2468,7 +2535,7 @@
             }
           ],
           "default": null,
-          "description": "Filesystem path or URL where this was discovered",
+          "description": "Where this was discovered: a POSIX path relative to the scan root (native format 1.1.0 and later), or a URL. Format 1.0.0 recorded absolute scan-host paths",
           "title": "Source Path"
         },
         "properties": {
@@ -2567,6 +2634,7 @@
       "properties": {
         "bom_ref": {
           "description": "Unique reference within this BOM",
+          "maxLength": 16384,
           "title": "Bom Ref",
           "type": "string"
         },
@@ -2629,7 +2697,8 @@
         },
         "assurance_level": {
           "$ref": "#/$defs/AssuranceLevel",
-          "default": "declared"
+          "default": "declared",
+          "description": "declared: stated by configuration, a manifest or a supplier; observed: a named collector measured the component's identity from bytes (a file, weight or descriptor digest); verified: established by cryptographic verification, which offline collection never assigns"
         },
         "source_path": {
           "anyOf": [
@@ -2641,7 +2710,7 @@
             }
           ],
           "default": null,
-          "description": "Filesystem path or URL where this was discovered",
+          "description": "Where this was discovered: a POSIX path relative to the scan root (native format 1.1.0 and later), or a URL. Format 1.0.0 recorded absolute scan-host paths",
           "title": "Source Path"
         },
         "properties": {
@@ -2746,7 +2815,7 @@
             }
           ],
           "default": null,
-          "description": "unsigned, sigstore-signed, pgp-signed",
+          "description": "Collector-reported signature evidence under the operator signer policy: sigstore-signed, digest-pinned, partially-verified, verification-failed, verification-unavailable, signature-present-unverified or signature-not-found; never trusted as verification. unsigned and pgp-signed appear only in older inventories",
           "title": "Signing Status"
         },
         "signing_identity": {
@@ -2882,6 +2951,7 @@
       "properties": {
         "bom_ref": {
           "description": "Unique reference within this BOM",
+          "maxLength": 16384,
           "title": "Bom Ref",
           "type": "string"
         },
@@ -2944,7 +3014,8 @@
         },
         "assurance_level": {
           "$ref": "#/$defs/AssuranceLevel",
-          "default": "declared"
+          "default": "declared",
+          "description": "declared: stated by configuration, a manifest or a supplier; observed: a named collector measured the component's identity from bytes (a file, weight or descriptor digest); verified: established by cryptographic verification, which offline collection never assigns"
         },
         "source_path": {
           "anyOf": [
@@ -2956,7 +3027,7 @@
             }
           ],
           "default": null,
-          "description": "Filesystem path or URL where this was discovered",
+          "description": "Where this was discovered: a POSIX path relative to the scan root (native format 1.1.0 and later), or a URL. Format 1.0.0 recorded absolute scan-host paths",
           "title": "Source Path"
         },
         "properties": {
@@ -3046,6 +3117,7 @@
       "properties": {
         "bom_ref": {
           "description": "Unique reference within this BOM",
+          "maxLength": 16384,
           "title": "Bom Ref",
           "type": "string"
         },
@@ -3108,7 +3180,8 @@
         },
         "assurance_level": {
           "$ref": "#/$defs/AssuranceLevel",
-          "default": "declared"
+          "default": "declared",
+          "description": "declared: stated by configuration, a manifest or a supplier; observed: a named collector measured the component's identity from bytes (a file, weight or descriptor digest); verified: established by cryptographic verification, which offline collection never assigns"
         },
         "source_path": {
           "anyOf": [
@@ -3120,7 +3193,7 @@
             }
           ],
           "default": null,
-          "description": "Filesystem path or URL where this was discovered",
+          "description": "Where this was discovered: a POSIX path relative to the scan root (native format 1.1.0 and later), or a URL. Format 1.0.0 recorded absolute scan-host paths",
           "title": "Source Path"
         },
         "properties": {
@@ -3262,6 +3335,7 @@
       "properties": {
         "bom_ref": {
           "description": "Unique reference within this BOM",
+          "maxLength": 16384,
           "title": "Bom Ref",
           "type": "string"
         },
@@ -3324,7 +3398,8 @@
         },
         "assurance_level": {
           "$ref": "#/$defs/AssuranceLevel",
-          "default": "declared"
+          "default": "declared",
+          "description": "declared: stated by configuration, a manifest or a supplier; observed: a named collector measured the component's identity from bytes (a file, weight or descriptor digest); verified: established by cryptographic verification, which offline collection never assigns"
         },
         "source_path": {
           "anyOf": [
@@ -3336,7 +3411,7 @@
             }
           ],
           "default": null,
-          "description": "Filesystem path or URL where this was discovered",
+          "description": "Where this was discovered: a POSIX path relative to the scan root (native format 1.1.0 and later), or a URL. Format 1.0.0 recorded absolute scan-host paths",
           "title": "Source Path"
         },
         "properties": {
@@ -3375,7 +3450,7 @@
             }
           ],
           "default": null,
-          "description": "npm, pypi, huggingface, mcp-registry, skill-marketplace, docker-hub",
+          "description": "npm, pypi or docker-hub from built-in collectors; huggingface, mcp-registry and skill-marketplace are reserved for supplied inventories",
           "title": "Registry Type"
         },
         "registry_uri": {
@@ -3547,6 +3622,7 @@
       "properties": {
         "bom_ref": {
           "description": "Unique reference within this BOM",
+          "maxLength": 16384,
           "title": "Bom Ref",
           "type": "string"
         },
@@ -3609,7 +3685,8 @@
         },
         "assurance_level": {
           "$ref": "#/$defs/AssuranceLevel",
-          "default": "declared"
+          "default": "declared",
+          "description": "declared: stated by configuration, a manifest or a supplier; observed: a named collector measured the component's identity from bytes (a file, weight or descriptor digest); verified: established by cryptographic verification, which offline collection never assigns"
         },
         "source_path": {
           "anyOf": [
@@ -3621,7 +3698,7 @@
             }
           ],
           "default": null,
-          "description": "Filesystem path or URL where this was discovered",
+          "description": "Where this was discovered: a POSIX path relative to the scan root (native format 1.1.0 and later), or a URL. Format 1.0.0 recorded absolute scan-host paths",
           "title": "Source Path"
         },
         "properties": {
@@ -3706,6 +3783,7 @@
       "properties": {
         "bom_ref": {
           "description": "Unique reference within this BOM",
+          "maxLength": 16384,
           "title": "Bom Ref",
           "type": "string"
         },
@@ -3768,7 +3846,8 @@
         },
         "assurance_level": {
           "$ref": "#/$defs/AssuranceLevel",
-          "default": "declared"
+          "default": "declared",
+          "description": "declared: stated by configuration, a manifest or a supplier; observed: a named collector measured the component's identity from bytes (a file, weight or descriptor digest); verified: established by cryptographic verification, which offline collection never assigns"
         },
         "source_path": {
           "anyOf": [
@@ -3780,7 +3859,7 @@
             }
           ],
           "default": null,
-          "description": "Filesystem path or URL where this was discovered",
+          "description": "Where this was discovered: a POSIX path relative to the scan root (native format 1.1.0 and later), or a URL. Format 1.0.0 recorded absolute scan-host paths",
           "title": "Source Path"
         },
         "properties": {
@@ -3844,7 +3923,7 @@
             }
           ],
           "default": null,
-          "description": "JCS canonical hash of (name, description, inputSchema, annotations)",
+          "description": "RFC 8785 JCS hash of name, description, inputSchema and annotations, plus title, outputSchema and _meta when the descriptor declares them",
           "title": "Definition Hash"
         },
         "redacted_definition_hash": {
@@ -3933,6 +4012,7 @@
       "properties": {
         "bom_ref": {
           "description": "Unique reference within this BOM",
+          "maxLength": 16384,
           "title": "Bom Ref",
           "type": "string"
         },
@@ -3995,7 +4075,8 @@
         },
         "assurance_level": {
           "$ref": "#/$defs/AssuranceLevel",
-          "default": "declared"
+          "default": "declared",
+          "description": "declared: stated by configuration, a manifest or a supplier; observed: a named collector measured the component's identity from bytes (a file, weight or descriptor digest); verified: established by cryptographic verification, which offline collection never assigns"
         },
         "source_path": {
           "anyOf": [
@@ -4007,7 +4088,7 @@
             }
           ],
           "default": null,
-          "description": "Filesystem path or URL where this was discovered",
+          "description": "Where this was discovered: a POSIX path relative to the scan root (native format 1.1.0 and later), or a URL. Format 1.0.0 recorded absolute scan-host paths",
           "title": "Source Path"
         },
         "properties": {
@@ -4049,9 +4130,17 @@
           "title": "Publisher"
         },
         "publisher_verified": {
-          "default": false,
-          "title": "Publisher Verified",
-          "type": "boolean"
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Whether a publisher was verified; null or absent means unknown",
+          "title": "Publisher Verified"
         },
         "attestation_status": {
           "anyOf": [
@@ -4129,6 +4218,8 @@
       "type": "object"
     }
   },
+  "$id": "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/schemas/nexus-symbiote-aibom-1.0.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Agent Bill of Materials \u2014 the complete supply chain inventory.",
   "properties": {

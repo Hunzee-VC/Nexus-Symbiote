@@ -28,7 +28,9 @@ def test_scan_inputs_are_data_not_shell(tmp_path: Path) -> None:
     step = next(step for step in action_steps() if step.get("id") == "scan")
     assert step["env"]["SYMBIOTE_SCAN_PATH"] == "${{ inputs.scan-path }}"
     assert "${{" not in step["run"]
-    assert 'python -I "$SYMBIOTE_ACTION_PATH/scripts/run_action.py"' in step["run"]
+    assert (
+        step["run"] == '"$SYMBIOTE_ACTION_PYTHON" -I "$SYMBIOTE_ACTION_PATH/scripts/run_action.py"'
+    )
     payload = "$(touch PWNED)'quoted space"
     (tmp_path / payload).mkdir()
     config = runner.Config.from_env(
@@ -63,8 +65,10 @@ def test_validation_failure_is_not_suppressed(tmp_path: Path) -> None:
         calls.append(args[0])
         if args[0] == "scan":
             Path(args[args.index("--output") + 1]).write_text("{}")
+        if args[0] == "risk":
+            return subprocess.CompletedProcess(args, 0, '{"overall_score": 0, "passed": true}', "")
         return subprocess.CompletedProcess(args, 7 if args[0] == "validate" else 0, "", "")
 
     assert runner.run(config, command=command) == 1
-    assert calls == ["scan", "validate"]
+    assert calls == ["scan", "validate", "risk"]
     assert config.output.read_text() == "{}"

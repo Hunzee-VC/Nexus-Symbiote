@@ -47,12 +47,12 @@ class TestLoadPolicy:
     def test_load_missing_returns_none(self, tmp_path: Path) -> None:
         assert load_policy(tmp_path) is None
 
-    def test_load_invalid_yaml_returns_none(self, tmp_path: Path) -> None:
+    def test_load_invalid_yaml_raises_policy_error(self, tmp_path: Path) -> None:
         (tmp_path / ".nexus-symbiote.yaml").write_text("{{invalid yaml:::")
         with pytest.raises(PolicyError):
             load_policy(tmp_path)
 
-    def test_load_empty_file_returns_none(self, tmp_path: Path) -> None:
+    def test_load_empty_file_raises_policy_error(self, tmp_path: Path) -> None:
         (tmp_path / ".nexus-symbiote.yaml").write_text("")
         with pytest.raises(PolicyError):
             load_policy(tmp_path)
@@ -149,3 +149,79 @@ def test_weakened_settings_names_only_relaxations():
     assert weakened_settings(stricter) == []
     barely = Policy.model_validate({"risk": {"fail_threshold": 50.000001}})
     assert weakened_settings(barely) == ["risk.fail_threshold=50.000001"]
+
+
+def test_weakened_settings_include_every_setting_that_changes_reported_results():
+    from nexus_symbiote.policy import Policy, weakened_settings
+
+    relaxed = Policy.model_validate(
+        {
+            "risk": {"warn_threshold": 49.0},
+            "scan": {"exclude_paths": ["node_modules", "tests/fixtures"]},
+        }
+    )
+    assert weakened_settings(relaxed) == [
+        "risk.warn_threshold=49.0",
+        "scan.exclude_paths=tests/fixtures",
+    ]
+    # Dropping a default exclusion excludes nothing more, so it relaxes nothing.
+    assert weakened_settings(Policy.model_validate({"scan": {"exclude_paths": []}})) == []
+
+
+def test_a_stricter_fail_threshold_alone_is_accepted(tmp_path):
+    (tmp_path / ".nexus-symbiote.yaml").write_text("risk: {fail_threshold: 20}\n")
+    policy = load_policy(tmp_path)
+    assert policy is not None
+    assert (policy.risk.fail_threshold, policy.risk.warn_threshold) == (20.0, 20.0)
+    (tmp_path / ".nexus-symbiote.yaml").write_text(
+        "risk: {fail_threshold: 20, warn_threshold: 30}\n"
+    )
+    with pytest.raises(PolicyError, match=r"risk \(warn_threshold cannot exceed fail_threshold\)"):
+        load_policy(tmp_path)
+
+
+def test_both_policy_file_names_are_refused_instead_of_one_shadowing_the_other(tmp_path):
+    from click.testing import CliRunner
+
+    from nexus_symbiote.cli import main
+
+    (tmp_path / ".nexus-symbiote.yml").write_text('risk: {fail_on_severity: "high"}\n')
+    runner = CliRunner()
+    assert runner.invoke(main, ["init", "--path", str(tmp_path)]).exit_code == 1
+    assert not (tmp_path / ".nexus-symbiote.yaml").exists()
+    forced = runner.invoke(main, ["init", "--path", str(tmp_path), "--force"])
+    assert forced.exit_code == 0, forced.output
+    assert not (tmp_path / ".nexus-symbiote.yaml").exists()
+    assert "suppressions" in (tmp_path / ".nexus-symbiote.yml").read_text()
+    (tmp_path / ".nexus-symbiote.yaml").write_text('version: "1.0"\n')
+    with pytest.raises(PolicyError, match="keep one policy file"):
+        load_policy(tmp_path)
+    assert runner.invoke(main, ["init", "--path", str(tmp_path), "--force"]).exit_code == 1
+
+
+def test_the_reported_policy_is_the_applied_policy(tmp_path, monkeypatch):
+    from nexus_symbiote import policy as module
+    from nexus_symbiote.policy import load_policy_file
+
+    (tmp_path / ".nexus-symbiote.yaml").write_text("risk: {fail_on_severity: none}\n")
+    calls = []
+    find = module.find_policy_path
+
+    def counted(root):
+        calls.append(root)
+        return find(root)
+
+    monkeypatch.setattr(module, "find_policy_path", counted)
+    loaded = load_policy_file(tmp_path)
+    assert loaded is not None and len(calls) == 1
+    policy, path, digest = loaded
+    assert path.name == ".nexus-symbiote.yaml" and digest.startswith("sha256:")
+    assert policy.risk.fail_on_severity == "none"
+
+
+def test_the_generated_template_loads_to_the_built_in_policy(tmp_path):
+    from nexus_symbiote.policy import DEFAULT_POLICY_YAML, Policy, weakened_settings
+
+    (tmp_path / ".nexus-symbiote.yaml").write_text(DEFAULT_POLICY_YAML)
+    policy = load_policy(tmp_path)
+    assert policy == Policy() and weakened_settings(policy) == []

@@ -186,6 +186,9 @@ def test_collects_standalone_agent_sdk_tool_decorators(
     assert tools[0].claims["tool_definition"].unknown_reason
 
 
+FASTMCP = "from mcp.server.fastmcp import FastMCP\n"
+
+
 @pytest.mark.parametrize(
     "source",
     [
@@ -212,3 +215,92 @@ def test_duplicate_sdk_decorator_name_fails_collection(tmp_path):
     )
     assert [t.name for t in tools] == ["dup"]
     assert any("duplicate Python SDK tool" in failure for failure in result.scan_failures)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        FASTMCP + "mcp = FastMCP('x', tools=[export_all])\n",
+        FASTMCP + "mcp = FastMCP('x', **options)\n",
+        FASTMCP + "mcp = FastMCP('x')\nregister_tools(mcp)\n",
+        FASTMCP + "mcp = FastMCP('x')\nmcp._tool_manager.add_tool(export_all)\n",
+        FASTMCP + "mcp = FastMCP('x')\nmcp.tool()(export_all)\n",
+        FASTMCP + "mcp = FastMCP('x')\nservers = [mcp]\n",
+        FASTMCP + "F = FastMCP\nmcp = F('x')\n",
+        FASTMCP + "class Server(FastMCP):\n    pass\n",
+        FASTMCP + "mcp = FastMCP.from_openapi(spec)\n",
+        "from server import mcp\n@mcp.tool()\ndef export_all(): pass\n",
+        "import server\n@server.mcp.tool()\ndef export_all(): pass\n",
+        "from mcp.server.lowlevel import Server\nserver = Server('x')\n",
+    ],
+)
+def test_registrations_outside_the_supported_forms_are_gaps(tmp_path, source):
+    result, tools = scan(tmp_path, source)
+    assert not tools
+    assert result.surfaces_excluded, source
+
+
+@pytest.mark.parametrize(
+    "module, factory",
+    [
+        ("mcp.server", "FastMCP"),
+        ("mcp.server.fastmcp.server", "FastMCP"),
+        ("fastmcp.server", "FastMCP"),
+    ],
+)
+def test_additional_sdk_import_paths_are_collected(tmp_path, module, factory):
+    result, tools = scan(
+        tmp_path,
+        f"from {module} import {factory}\nmcp = {factory}('x')\n@mcp.tool\ndef add(): pass\n"
+        "if __name__ == '__main__':\n    mcp.run()\n",
+    )
+    assert [tool.name for tool in tools] == ["add"]
+    assert not result.surfaces_excluded
+
+
+def test_ordinary_server_use_and_other_frameworks_are_not_gaps(tmp_path):
+    result, tools = scan(
+        tmp_path,
+        FASTMCP + "mcp = FastMCP('x')\n@mcp.tool()\ndef add(): pass\n"
+        "app = mcp.streamable_http_app()\nmcp.settings.port = 8000\n",
+    )
+    assert [tool.name for tool in tools] == ["add"] and not result.surfaces_excluded
+    result, tools = scan(
+        tmp_path,
+        "from pydantic_ai import Agent\nfrom pydantic_ai.mcp import MCPServerStdio\n"
+        "agent = Agent('model')\n@agent.tool\ndef lookup(): pass\n",
+    )
+    # An agent framework's tool is an SDK tool, never an MCP registration gap.
+    assert [(tool.name, tool.properties["framework"]) for tool in tools] == [
+        ("lookup", "pydantic-ai")
+    ]
+    assert not result.surfaces_excluded
+
+
+def test_references_survive_inserted_lines_and_edits_change_the_digest(tmp_path):
+    source = FASTMCP + "mcp = FastMCP('x')\n@mcp.tool()\ndef add(): pass\n"
+    result, tools = scan(tmp_path, source)
+    server = next(c for c in result.components if c.component_type.value == "mcp-server")
+    moved, moved_tools = scan(tmp_path, "# a new comment line\n\n" + source)
+    moved_server = next(c for c in moved.components if c.component_type.value == "mcp-server")
+    assert moved_server.bom_ref == server.bom_ref == "mcp-python:pkg%2Fserver.py:mcp"
+    assert [t.bom_ref for t in moved_tools] == [t.bom_ref for t in tools]
+    assert moved_server.properties["declaration_line"] == server.properties["declaration_line"] + 2
+    assert server.properties["source_sha256"] != moved_server.properties["source_sha256"]
+
+
+def test_helpers_of_the_same_file_are_judged_by_what_they_do_with_the_server(tmp_path):
+    benign = (
+        FASTMCP + "mcp = FastMCP('x')\n@mcp.tool()\ndef add(): pass\n"
+        "def build(server: FastMCP, *, host: str) -> object:\n"
+        "    return server.streamable_http_app(host=host)\n"
+        "app = build(mcp, host='127.0.0.1')\n"
+    )
+    result, tools = scan(tmp_path, benign)
+    assert [tool.name for tool in tools] == ["add"] and not result.surfaces_excluded
+    registering = benign.replace(
+        "    return server.streamable_http_app(host=host)\n",
+        "    server.add_tool(lambda: None)\n    return server.streamable_http_app(host=host)\n",
+    )
+    result, _ = scan(tmp_path, registering)
+    assert result.surfaces_excluded

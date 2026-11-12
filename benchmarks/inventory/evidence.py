@@ -1,4 +1,10 @@
-"""Prepare reproducible benchmark evidence or verify an operator-signed evidence package."""
+"""Prepare reproducible benchmark evidence and check it.
+
+`check` validates an archive whose provenance was verified separately, such as a release's
+inventory-benchmark.tar.gz after `gh attestation verify`: the statement must bind the results
+and, with --compare-installation, the local scanner, corpus and installed distributions.
+`verify` does the same for an operator-signed statement with its Sigstore bundle.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +12,7 @@ import argparse
 import hashlib
 import json
 import sys
-from importlib.metadata import version
+from importlib.metadata import distributions
 from pathlib import Path
 
 from run_inventory import DIRECTORY, run
@@ -20,9 +26,21 @@ def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+PREDICATE_TYPE = "https://github.com/aisecnomad/nexus-symbiote/benchmark/inventory/v1"
+# Seeded by whichever tool created the environment (venv, virtualenv, uv) at its own
+# version, never imported by the scanner and pinned by no lock: comparing them would fail
+# every consumer whose Python patch release or environment tool differs from the release's.
+BOOTSTRAP = frozenset({"pip", "setuptools", "wheel"})
+
+
 def materials() -> dict[str, str]:
+    """Every installed package file, schemas included, and the corpus; never bytecode caches."""
     package = Path(nexus_symbiote.__file__).resolve().parent
-    files = {f"package/{p.relative_to(package).as_posix()}": p for p in package.rglob("*.py")}
+    files = {
+        f"package/{p.relative_to(package).as_posix()}": p
+        for p in package.rglob("*")
+        if p.is_file() and "__pycache__" not in p.parts and p.suffix != ".pyc"
+    }
     for path in [
         DIRECTORY / "evidence.py",
         DIRECTORY / "run_inventory.py",
@@ -34,6 +52,17 @@ def materials() -> dict[str, str]:
     return {key: digest(path.read_bytes()) for key, path in sorted(files.items())}
 
 
+def installed_versions() -> dict[str, str]:
+    """Every distribution the scanner ran with: the environment without its bootstrap tools."""
+    versions: dict[str, str] = {}
+    for distribution in distributions():
+        name = (distribution.metadata.get_all("Name") or [""])[0]
+        normalized = name.lower().replace("_", "-")
+        if normalized and normalized not in BOOTSTRAP:
+            versions[normalized] = distribution.version
+    return dict(sorted(versions.items()))
+
+
 def prepare(directory: Path) -> None:
     before = materials()
     report = run()
@@ -43,20 +72,11 @@ def prepare(directory: Path) -> None:
     statement = {
         "_type": "https://in-toto.io/Statement/v1",
         "subject": [{"name": "results.json", "digest": {"sha256": digest(results)}}],
-        "predicateType": "https://github.com/aisecnomad/nexus-symbiote/benchmark/inventory/v1",
+        "predicateType": PREDICATE_TYPE,
         "predicate": {
             "materialsSha256": before,
             "pythonVersion": sys.version,
-            "packageVersions": {
-                name: version(name)
-                for name in (
-                    "pydantic",
-                    "tree-sitter",
-                    "tree-sitter-typescript",
-                    "rfc8785",
-                    "cryptography",
-                )
-            },
+            "packageVersions": installed_versions(),
             "corpusVersion": report["corpus_version"],
         },
     }
@@ -65,6 +85,30 @@ def prepare(directory: Path) -> None:
     (directory / "statement.json").write_text(
         json.dumps(statement, sort_keys=True, indent=2) + "\n", encoding="utf-8"
     )
+
+
+def check(directory: Path, *, compare_installation: bool = False) -> None:
+    """Require the statement to bind these results, and optionally this installation."""
+    statement = read_regular_text(directory / "statement.json").encode("utf-8")
+    _check_statement(statement, directory, compare_installation=compare_installation)
+
+
+def _check_statement(statement: bytes, directory: Path, *, compare_installation: bool) -> None:
+    body = parse_json_strict(statement)
+    results = read_regular_text(directory / "results.json").encode("utf-8")
+    if (
+        body.get("_type") != "https://in-toto.io/Statement/v1"
+        or body.get("predicateType") != PREDICATE_TYPE
+        or body.get("subject") != [{"name": "results.json", "digest": {"sha256": digest(results)}}]
+    ):
+        raise ValueError("statement does not bind these benchmark results")
+    if not compare_installation:
+        return
+    predicate = body.get("predicate", {})
+    if predicate.get("materialsSha256") != materials():
+        raise ValueError("installed scanner or benchmark differs from the recorded materials")
+    if predicate.get("packageVersions") != installed_versions():
+        raise ValueError("installed distributions differ from the recorded ones")
 
 
 def verify(
@@ -82,33 +126,26 @@ def verify(
     )
     if not verified.verified:
         raise ValueError(verified.error or "benchmark signature verification failed")
-    body = parse_json_strict(statement)
-    results = read_regular_text(directory / "results.json").encode("utf-8")
-    if (
-        body.get("_type") != "https://in-toto.io/Statement/v1"
-        or body.get("predicateType")
-        != "https://github.com/aisecnomad/nexus-symbiote/benchmark/inventory/v1"
-        or body.get("subject") != [{"name": "results.json", "digest": {"sha256": digest(results)}}]
-    ):
-        raise ValueError("signed statement does not bind these benchmark results")
-    if compare_installation and body["predicate"]["materialsSha256"] != materials():
-        raise ValueError("installed scanner or benchmark differs from signed materials")
+    _check_statement(statement, directory, compare_installation=compare_installation)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    for command in ("prepare", "verify"):
+    for command in ("prepare", "check", "verify"):
         sub = commands.add_parser(command)
         sub.add_argument("directory", type=Path)
         if command == "verify":
             sub.add_argument("--identity", required=True)
             sub.add_argument("--issuer", required=True)
+        if command != "prepare":
             sub.add_argument("--compare-installation", action="store_true")
     args = parser.parse_args()
     try:
         if args.command == "prepare":
             prepare(args.directory)
+        elif args.command == "check":
+            check(args.directory, compare_installation=args.compare_installation)
         else:
             verify(
                 args.directory,

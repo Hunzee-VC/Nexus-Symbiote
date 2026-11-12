@@ -19,7 +19,7 @@ installed with the hash-locked runtime as described in
 
 ```bash
 git clone https://github.com/Hunzee-VC/Nexus-Symbiote && cd Nexus-Symbiote
-python -m venv .venv && . .venv/bin/activate
+python3 -m venv .venv && . .venv/bin/activate
 python -m pip install --require-hashes --only-binary=:all: -r requirements-action.lock
 python -m pip install --no-deps --no-build-isolation .
 ```
@@ -32,8 +32,8 @@ nexus-symbiote summary demo.aibom.json
 ```
 
 All eight collectors complete and record 11 components across 9 types. The scan
-passes the default gate (exit 0) with a risk warning: score 36, below the default
-fail threshold of 50, from three high, three medium and three low findings:
+passes the default gate (exit 0) with a risk warning: score 37, below the default
+fail threshold of 50, from three high, three medium and four low findings:
 
 | Severity | Component | Finding |
 |---|---|---|
@@ -43,6 +43,7 @@ fail threshold of 50, from three high, three medium and three low findings:
 | medium | `notes` and `memory` MCP servers | stdio transport: each runs as a local process |
 | medium | `product-notes` retrieval source | No declared content-filtering control |
 | low | `notes` and `tickets` MCP servers, `support-research-assistant` A2A card | Values not bound without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`: a launch argument, an endpoint path |
+| low | `product-notes` retrieval source | Source URI path not bound without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` |
 
 ### 2. Check it
 
@@ -82,17 +83,21 @@ nexus-symbiote scan /tmp/demo-agent -o after.json
 nexus-symbiote diff before.json after.json --fail-on-alert
 ```
 
-`diff` reports exactly two changes, a critical alert for the changed `tickets`
-endpoint and a high alert for the removed version pin, and exits 1:
+`diff` reports exactly two changes, both critical, and exits 1: the changed
+`tickets` endpoint, and the floated `notes` package, whose static source binding
+records its version and pin and which also names the removed version pin:
 
 ```text
 Security Alerts:
   [CRITICAL] Critical change in 'tickets': MCP server endpoint changed. Review before execution.; MCP server static source binding changed: launcher, arguments, environment, endpoint or declared tools differ, or the binding key changed. Review before execution.; endpoint_url changed.; properties changed.
-  [HIGH] High change in 'notes': Version changed: 2025.8.21 → None; Version pin removed — now floating or unknown.; risks changed.
+  [CRITICAL] Critical change in 'notes': MCP server static source binding changed: launcher, arguments, environment, endpoint or declared tools differ, or the binding key changed. Review before execution.; Version changed: 2025.8.21 → None; Version pin removed — now floating or unknown.; Risk findings added: 1 high (version_pinning).; package_url changed.; properties changed.
 ```
 
 An inventory records paths relative to the project, so a snapshot of one checkout
-compares cleanly with a scan of a copy in another directory.
+compares cleanly with a scan of a copy in another directory. In CI, keep the reviewed
+snapshot where the change under review cannot rewrite it;
+[Gate drift in CI](../docs/drift-gate.md) explains where, how to take comparable
+snapshots, and what each alert means.
 
 ### 5. Import a discovery report
 
@@ -116,9 +121,11 @@ on purpose: imported claims never establish complete, verified coverage.
 nexus-symbiote --live advisories demo.aibom.json -o advisories.json
 ```
 
-The demo declares no exact PyPI or npm package URLs, so `advisories` checks none
-and reports that. Point it at your own inventory to query OSV. See
-[offline and live modes](../docs/offline-and-live-modes.md).
+The demo's `notes` server is launched from an exact npm package, so `advisories`
+sends one identity to OSV, `@modelcontextprotocol/server-filesystem@2025.8.21`;
+add `--dry-run` to list it without contacting OSV. The demo's other components
+declare no exact PyPI or npm package URL. Point it at your own inventory to query
+OSV. See [offline and live modes](../docs/offline-and-live-modes.md).
 
 ## Collector demo
 
