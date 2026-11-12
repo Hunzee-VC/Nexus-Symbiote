@@ -444,10 +444,15 @@ def test_sigstore_offline_verifier_needs_no_network_or_process(tmp_path, monkeyp
     pytest.importorskip("sigstore")
     from sigstore.verify import Verifier
 
+    from nexus_symbiote.utils import crypto
+
     for variable in ("XDG_DATA_HOME", "XDG_CACHE_HOME"):
         monkeypatch.setenv(variable, str(tmp_path / variable.lower()))
+    monkeypatch.delenv(crypto.TRUST_ROOT_ENV, raising=False)
     with modes.enforce(modes.Mode.OFFLINE):
-        Verifier.production(offline=True)
+        _path, content, error = crypto._read_sigstore_cache()
+        assert error is None and content is not None
+        Verifier(trusted_root=crypto._trusted_root_from_bytes(content))
 
 
 def test_offline_guard_lets_import_time_socket_probes_run_in_a_fresh_process(tmp_path):

@@ -64,13 +64,17 @@ def _component_content(component: object) -> object:
 def inventory_content(document: Mapping[str, Any]) -> dict[str, Any]:
     """A copy of a parsed native document without its collection-event fields.
 
+    A document without a ``metadata`` key is read with an empty metadata object, as
+    every reader of native documents reads it (``AIBOM.from_document``), so it has the
+    content of the same document with ``"metadata": {}``.
+
     Left out: ``metadata.serial_number`` when null or a URN UUID;
     ``metadata.completeness.source_report_path`` when a string; and, when null
     or an RFC 3339 timestamp, ``metadata.timestamp``, ``metadata.completeness.timestamp``
     and the ``observed_at`` of each component claim. The argument is not changed; the
     values the copy keeps are shared with it, not copied.
     """
-    metadata = document.get("metadata") if isinstance(document, Mapping) else None
+    metadata = document.get("metadata", {}) if isinstance(document, Mapping) else None
     components = document.get("components") if isinstance(document, Mapping) else None
     if not isinstance(metadata, Mapping) or not isinstance(components, list):
         raise ValueError(NOT_AN_INVENTORY)
@@ -111,8 +115,7 @@ OUTSIDE_SNAPSHOT_BUDGET = (
     "64 levels deep."
 )
 NO_CONTENT_DIGEST = (
-    "It has no content digest, which is defined only for a document that states a metadata "
-    "object and a components list."
+    "It has no content digest, which is defined only for a document that states a components list."
 )
 TOO_DEEP_FOR_CONTENT_DIGEST = "It has no content digest: it nests too deeply to canonicalize."
 _CONTENT_REFUSALS = {
@@ -143,9 +146,9 @@ def inventory_digests(raw: bytes) -> InventoryDigests:
     ``file_sha256`` covers the exact bytes. ``canonical_digest`` is
     ``runtime.bom_digest`` of the parsed document, the digest a signed runtime snapshot
     binds; it is None outside the snapshot budget. ``content_digest`` is
-    ``inventory_content_digest``; it is None for a document without a metadata object
-    or a components list, or one too deep to canonicalize. Each digest is computed
-    whether or not the other is defined.
+    ``inventory_content_digest``; it is None for a document without a components list,
+    or one too deep to canonicalize. Each digest is computed whether or not the other is
+    defined.
     Raises ``NativeFormatError`` when the bytes are not a native inventory this build
     reads.
     """

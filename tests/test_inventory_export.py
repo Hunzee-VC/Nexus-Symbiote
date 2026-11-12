@@ -459,9 +459,9 @@ def _invalid(tmp_path: Path, kind: str) -> Path:
         path.write_bytes(b"\xef\xbb\xbf" + DECLARED.read_bytes())
     elif kind == "schema":
         path.write_text('{"metadata": {}, "components": [{"component_type": "agent"}]}')
-    elif kind == "no-metadata":
+    elif kind == "no-components":
         document = _document()
-        del document["metadata"]
+        del document["components"]
         path.write_text(json.dumps(document))
     return path
 
@@ -478,7 +478,7 @@ def _invalid(tmp_path: Path, kind: str) -> Path:
         ("not-utf8", "strict UTF-8 JSON"),
         ("byte-order-mark", "strict UTF-8 JSON"),
         ("schema", "native AgentBOM schema"),
-        ("no-metadata", "no content digest"),
+        ("no-components", "no content digest"),
     ],
 )
 def test_an_unreadable_or_invalid_inventory_is_refused(tmp_path, kind, reason):

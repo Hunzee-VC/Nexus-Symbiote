@@ -444,3 +444,178 @@ def test_the_action_jobs_outcome_assertions_must_run(tmp_path):
         tmp_path, "ci.yml", condition("action", "sys.exit(bool(failures))", False)
     )
     assert any("action must not continue on error" in error for error in errors), errors
+
+
+def run_locks(script, **step_changes):
+    """Replace the quality job's lock check with `script` and the step settings given."""
+
+    def change(jobs):
+        step = step_running(jobs["quality"], "scripts/check_locks.py")
+        step["run"] = script
+        step.update(step_changes)
+
+    return change
+
+
+NOT_A_GATE = "quality does not run scripts/check_locks.py as a command of its own"
+LOCKS = "python scripts/check_locks.py"
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        f"{LOCKS} && echo ok\necho done",
+        f"set +e\n{LOCKS}\necho done",
+        f"set +o errexit\n{LOCKS}\necho done",
+        f"if {LOCKS}; then :; fi",
+        f"if\n{LOCKS}\nthen :\nfi",
+        f"while {LOCKS}; do break; done",
+        f"! {LOCKS}",
+        f"echo '{LOCKS}'",
+        f'echo "{LOCKS}"',
+        f"echo {LOCKS}",
+        f"{LOCKS} &\nwait",
+        f"{LOCKS} | cat",
+        f"{{ {LOCKS}; }}\necho done",
+        f"( {LOCKS} )\necho done",
+        f"{LOCKS} || if false; then exit 1; fi",
+        f"cd tests/fixtures\n{LOCKS}",
+        f"exit 0\n{LOCKS}",
+        f"trap 'exit 0' EXIT\n{LOCKS}",
+        f"python() {{ :; }}\n{LOCKS}",
+        f"eval 'python() {{ :; }}'\n{LOCKS}",
+        f'tool=echo\n"$tool" {LOCKS.removeprefix("python ")}',
+        "python -c 'print(1)' scripts/check_locks.py",
+        "python -m json.tool scripts/check_locks.py",
+        f"bash -ec 'set +e; {LOCKS}; true'",
+        f"bash -c '{LOCKS}'\ntrue",
+        f"case x in *) {LOCKS};; esac",
+        f"echo $'\\'\n{LOCKS}\n' #'",
+        f'cat <<EO"F"\nEO\n{LOCKS}\nEOF',
+        f"x=$(cat <<'EOF'\n)\n{LOCKS}\n(\nEOF\n)",
+        f"x=$(: # )\n{LOCKS}\n)",
+        f"builtin set +e\n{LOCKS}\necho done",
+        f"builtin -- set +e\n{LOCKS}\necho done",
+        f"builtin -- exit 0\n{LOCKS}",
+        'PY=python3\nbuiltin -- declare PY=echo\n"$PY" scripts/check_locks.py',
+        f"command set +e\n{LOCKS}\necho done",
+        f"command -p set +e\n{LOCKS}\necho done",
+        f"time set +e\n{LOCKS}\necho done",
+        f"shopt -u -o errexit\n{LOCKS}\necho done",
+        f"shopt -uo errexit\n{LOCKS}\necho done",
+        f"x=\n${{x}}set +e\n{LOCKS}\necho done",
+        f"$(echo set) +e\n{LOCKS}\necho done",
+        f"set -n\n{LOCKS}",
+        f"set -o noexec\n{LOCKS}",
+        f"builtin exit 0\n{LOCKS}",
+        f"builtin cd /\n{LOCKS}",
+        f"builtin trap 'exit 0' EXIT\n{LOCKS}",
+        f"hash -p /bin/true python\n{LOCKS}",
+        f"enable -n set\nset +e\n{LOCKS}",
+        'PY=python3\nexport PY=echo\n"$PY" scripts/check_locks.py',
+        'PY=python3\ndeclare PY=echo\n"$PY" scripts/check_locks.py',
+        'PY=python3\nbuiltin declare PY=echo\n"$PY" scripts/check_locks.py',
+        'PY=python3\nfor PY in echo; do :; done\n"$PY" scripts/check_locks.py',
+        'PY=python3\nif true; then for PY in echo; do :; done; fi\n"$PY" scripts/check_locks.py',
+        'PY=python3\nread -r PY <<< echo\n"$PY" scripts/check_locks.py',
+        'PY=python3\nprintf -v PY echo\n"$PY" scripts/check_locks.py',
+        f'x=\n: "${{x:=set}}"\n$x +e\n{LOCKS}\necho done',
+        "python -X scripts/check_locks.py -c pass",
+        "python -W scripts/check_locks.py -c pass",
+        "python -uX scripts/check_locks.py -c pass",
+        "python -uc scripts/check_locks.py",
+        "python --version scripts/check_locks.py",
+        f"bash -n -c '{LOCKS}'",
+    ],
+)
+def test_a_gate_command_that_does_not_stand_alone_is_rejected(tmp_path, script):
+    errors = workflow_errors(tmp_path, "ci.yml", run_locks(script))
+    assert any(NOT_A_GATE in error for error in errors), errors
+
+
+@pytest.mark.parametrize(
+    "script,changes",
+    [
+        (f"set -euo pipefail\n{LOCKS} | cat", {}),
+        (f"{LOCKS} | cat", {"shell": "bash"}),
+        (f"set +e\necho preparing\nset -e\n{LOCKS}", {}),
+        (f"{LOCKS} || exit 3", {}),
+        ('PY=python3\n"$PY" -I scripts/check_locks.py --strict', {}),
+        (f"bash --noprofile --norc -e -o pipefail -c '\n  {LOCKS} | tee log\n'", {}),
+        (f"timeout 5m {LOCKS}", {}),
+        (f"if true; then echo ok; fi\n{LOCKS}", {}),
+        (f"{LOCKS}", {"shell": "bash --noprofile --norc -eo pipefail {0}"}),
+        (f"echo $'it\\'s'\n{LOCKS}", {}),
+        (f'cat <<"EOF" >notes\n{LOCKS}\nEOF\n{LOCKS}', {}),
+        (f"x=$(cat <<'EOF'\n)\nEOF\n)\n{LOCKS}", {}),
+        (f"command -v python\nbuiltin echo ok\n{LOCKS}", {}),
+        (f"shopt -s -o errexit\nshopt -o\n{LOCKS}", {}),
+        (f'"$RUNNER_TEMP/bin/tool" --check\n{LOCKS}', {}),
+        ('PY=python3\nprintf "%s\\n" "$PY"\n"$PY" scripts/check_locks.py', {}),
+        ("python -X dev -W error -Xutf8 scripts/check_locks.py", {}),
+        ("python -I --check-hash-based-pycs never -- scripts/check_locks.py", {}),
+    ],
+)
+def test_a_gate_command_that_stands_alone_is_accepted(tmp_path, script, changes):
+    assert workflow_errors(tmp_path, "ci.yml", run_locks(script, **changes)) == []
+
+
+@pytest.mark.parametrize("shell", ["cat {0}", "true {0}", "sh {0}", "bash +e {0}", "pwsh", 0])
+def test_a_gate_step_in_an_unreviewed_shell_is_rejected(tmp_path, shell):
+    def change(jobs):
+        step_running(jobs["test"], "python -m pytest")["shell"] = shell
+
+    errors = workflow_errors(tmp_path, "ci.yml", change)
+    assert any(f"test runs its gate under the step shell {shell!r}" in e for e in errors), errors
+
+
+@pytest.mark.parametrize("level", ["workflow", "job"])
+@pytest.mark.parametrize(
+    "defaults,message",
+    [
+        ({"run": {"shell": "true {0}"}}, "under the {} defaults shell 'true {{0}}'"),
+        ({"run": {"working-directory": "tests"}}, "in the {} defaults directory 'tests'"),
+        ({"run": "bash"}, "under the {} defaults shell 'unreadable'"),
+    ],
+)
+def test_run_defaults_cannot_change_how_a_gate_runs(tmp_path, level, defaults, message):
+    workflow = ci_workflow()
+    (workflow if level == "workflow" else workflow["jobs"]["quality"])["defaults"] = defaults
+    path = tmp_path / "ci.yml"
+    path.write_text(yaml.safe_dump(workflow))
+    expected = f"quality runs its gate {message.format(level)}"
+    assert any(expected in error for error in checker.check(path)), expected
+
+
+def test_a_gate_step_cannot_move_to_another_directory(tmp_path):
+    errors = workflow_errors(
+        tmp_path, "ci.yml", run_locks(LOCKS, **{"working-directory": "tests/fixtures"})
+    )
+    assert any("quality runs its gate in the step directory 'tests/fixtures'" in e for e in errors)
+
+
+@pytest.mark.parametrize(
+    "script,runs",
+    [
+        (
+            'out=`date`\necho "$(printf "%s)" "a b")" ${HOME:-x}\nfiles=(a "b c")\n'
+            f"exec >log 2>&1\n{LOCKS} &>out <<-EOF\n\tbody\n\tEOF",
+            True,
+        ),
+        (f"for f in a b; do echo $f; done\nuntil true; do :; done\n{LOCKS}", True),
+        (f"cat <<<word\nif true; then :; elif false; then :; else :; fi\n{LOCKS}", True),
+        (f"echo 'unterminated\n{LOCKS}", False),
+        (f'echo "unterminated\n{LOCKS}', False),
+        (f"echo $(unbalanced\n{LOCKS}", False),
+        (f"echo `unterminated\n{LOCKS}", False),
+        (f"{LOCKS} >", False),
+        (f"cat <<EOF\n{LOCKS}", False),
+        (f"cat <<$X\n{LOCKS}\n$X", False),
+        (f"if true; then\n{LOCKS}", False),
+        (f"for f; :\n{LOCKS}", False),
+        (f"; ;\n&& {LOCKS}", False),
+    ],
+)
+def test_the_gate_reader_follows_quoting_expansions_and_redirections(script, runs):
+    gates = checker._gates(script, True, False)
+    assert any(gate.runs("scripts/check_locks.py") for gate in gates) is runs

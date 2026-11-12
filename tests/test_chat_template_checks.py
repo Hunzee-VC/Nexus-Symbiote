@@ -286,6 +286,7 @@ risk:
   suppressions:
     - component_ref: "model:m/{artifact}"
       category: "serialization_format"
+      fingerprint: "{fingerprint}"
       reason: "Template reviewed; rendered only in a sandboxed environment"
       owner: "sec@example.com"
       expires: 2099-12-31
@@ -300,10 +301,19 @@ def test_accepting_the_template_does_not_accept_the_model_file(runner, tmp_path,
     directory.mkdir(parents=True)
     (directory / artifact).write_bytes(UNKNOWN_ARTIFACTS[artifact])
     _template(directory, "tokenizer_config.json#chat_template", ESCAPES[0])
-    (project / ".nexus-symbiote.yaml").write_text(
-        SUPPRESS_TEMPLATE.format(artifact=artifact), encoding="utf-8"
-    )
     bom = tmp_path / "bom.json"
+    runner.invoke(
+        main, ["scan", str(project), "--no-project-policy", "--report-only", "-o", str(bom)]
+    )
+    (fingerprint,) = [
+        finding.fingerprint
+        for finding in RiskScorer().score(AIBOM.load(bom)).findings
+        if finding.component_ref == f"model:m/{artifact}"
+        and finding.category == "serialization_format"
+    ]
+    (project / ".nexus-symbiote.yaml").write_text(
+        SUPPRESS_TEMPLATE.format(artifact=artifact, fingerprint=fingerprint), encoding="utf-8"
+    )
     run = runner.invoke(main, ["scan", str(project), "-o", str(bom)])
     risk = runner.invoke(main, ["risk", str(bom), "--project", str(project), "--json-output"])
     assert risk.exit_code == run.exit_code, risk.output

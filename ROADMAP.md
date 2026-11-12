@@ -10,10 +10,12 @@ and turns what survives into one plan with acceptance tests.
 
 - **Checked against:** `main` at 3ad53a2 (12 November 2026, native format 1.1.0), plus the changes
   delivered with this roadmap. `main` has since merged #131 (fd20305: shell startup-code bypasses
-  in MCP launchers, bounded launch-argument expansion) and #132 (9cb6a47: the P0 audit findings
-  SEC-F1, SEC-C1, ARCH-F1 and DOC-F3/F7); this branch merges both, and the rows below that they
-  changed say so. Measurements in [where it stands](#where-it-stands) are still those taken at
-  3ad53a2.
+  in MCP launchers, bounded launch-argument expansion), #132 (9cb6a47: the P0 audit findings
+  SEC-F1, SEC-C1, ARCH-F1 and DOC-F3/F7) and #133 to #137 (through c792872: suppressions bound to
+  findings, launcher classification gaps, collector bookkeeping, workflow gate checks and the
+  cached Sigstore trust root); this branch merges `main` through c792872, and the rows below that
+  #131 and #132 changed say so. Measurements in [where it stands](#where-it-stands) are still those
+  taken at 3ad53a2.
 - **How:** every recommendation was located in the code, and most were reproduced by running the
   tool on synthetic fixtures. External facts (standards, other tools, identifiers) were read from
   primary sources on 12 November 2026; the few that could only be checked through secondary sources
@@ -96,10 +98,19 @@ or `/proc` `BASH_ENV`, `ENV` with an interactive shell, `PS4` expansions while t
 launch-argument expansion in time and memory. #132 closes four P0 findings of a separate audit:
 SEC-F1 (a ShadowScan import records its producer verification in the inventory, and unverified
 discovery evidence fails `import-shadowscan`, `validate` and `risk` in CI unless explicitly
-allowed), SEC-C1 (offline Sigstore verification checks the cached trust root before trusting it,
-or uses an explicit, optionally pinned one), ARCH-F1 (deterministic output: no wall-clock
-timestamp, components and dependencies sorted, a content-derived serial number) and DOC-F3/F7
-(stale roadmap and repository-controls rows).
+allowed), SEC-C1 (offline Sigstore verification checks the cached trust root before trusting it, or
+uses an explicit, optionally pinned one), ARCH-F1 (deterministic output: no wall-clock timestamp,
+components and dependencies sorted, a content-derived serial number) and DOC-F3/F7 (stale roadmap
+and repository-controls rows). #133 binds each `risk.suppressions` entry to the fingerprint of the
+finding it accepted, so a changed finding counts again. #134 treats more package installs
+(`pip3.12`, `gem i`, `pip install` after options) as unknown launchers, reads `cmd /c` quoting as
+`cmd` does, and redacts a token inside a name and an MCP server or tool name that is a token. #135
+makes the prompt collector's import lookups the operator limit `import-lookups`, keeps a refused
+file distinct from an absent one past the failure listing bound, and reads a native document without
+a `metadata` object as format 1.0.0 everywhere. #136 makes the workflow gate checks structural and
+requires the publishing environment to admit only `main` and the PyPI soak to start from a push run.
+#137 verifies the cached Sigstore trust root from the bytes that were checked, closing the window in
+which a same-user process could replace it between the check and the load.
 
 ## Delivered with this roadmap
 
@@ -337,5 +348,5 @@ symlinks stay failures by [decision](#decisions-and-non-goals). The rest maps to
 integrity semantics for non-SafeTensors pins and self-re-hashes (N12), operator-side suppressions
 and signed baselines (N1), SARIF schema validation (N10), a library scan pipeline with typed
 coverage records (N8), and the second maintainer (L3). The P0 findings of the separate audit that
-#132 names (SEC-F1, SEC-C1, ARCH-F1, DOC-F3/F7) and the shell startup-code bypasses #131 closes
-are closed on `main` and merged here.
+#132 names (SEC-F1, SEC-C1, ARCH-F1, DOC-F3/F7), the shell startup-code bypasses #131 closes and
+the fixes of #133 to #137 are closed on `main` and merged here.

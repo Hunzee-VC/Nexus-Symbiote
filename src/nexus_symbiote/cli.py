@@ -1177,7 +1177,7 @@ def verify_discovery(
             read_regular_text(Path(aibom_path), max_bytes=MAX_REPORT_BYTES),
             max_bytes=MAX_REPORT_BYTES,
         )
-        bom = AIBOM.model_validate(doc)
+        bom = AIBOM.from_document(doc)
     except (OSError, ValueError, UnicodeError, RecursionError) as exc:
         raise click.ClickException(f"Cannot safely read the BOM: {_input_problem(exc)}") from exc
     try:

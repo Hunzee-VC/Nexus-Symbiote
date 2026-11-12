@@ -159,8 +159,8 @@ def read_native_inventory(path: Path) -> NativeInventory:
 
     The read, parse and schema checks are ``AIBOM.load``'s own, and every failure is a
     ``NativeFormatError``. One read keeps the printed digests bound to the bytes the export
-    comes from. A document without a ``metadata`` object or a ``components`` list has no
-    content digest and is refused.
+    comes from. A document without a ``components`` list has no content digest and is
+    refused.
     """
     raw = read_native_bytes(path)
     document = parse_native_bytes(raw)

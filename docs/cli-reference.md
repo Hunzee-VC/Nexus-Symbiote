@@ -16,7 +16,7 @@ nexus-symbiote [--offline | --live] [--debug] [--limit NAME=VALUE]... [--version
 | `--offline` | Refuse name resolution, network connections and process creation (the default). |
 | `--live` | Allow the network and process steps of `discover-mcp`, `advisories` and `verify-live`. Every other command stays offline. |
 | `--debug` | Print where a collector or internal error was raised on standard error: its class and the files, lines and functions of its traceback, without its message, which can quote project or inventory text. Without it, an unexpected error ends the command with `Error: internal error (<error class>)` and exit status 1, and a collector error is recorded by its diagnostic code only. |
-| `--limit` `NAME=VALUE` | Set one [collection limit](collection-limits.md) for this command, such as `entries=200000` or `model-bytes=128GiB`. Repeatable; overrides `NEXUS_SYMBIOTE_LIMITS` for that name. |
+| `--limit` `NAME=VALUE` | Set one [collection limit](collection-limits.md) for this command, such as `entries=200000`, `model-bytes=128GiB` or `import-lookups=20000`. Repeatable; overrides `NEXUS_SYMBIOTE_LIMITS` for that name. |
 | `--version` | Print the version and exit. |
 | `--help` | Print help and exit. |
 
@@ -238,8 +238,8 @@ catch a misplaced policy; they do not authenticate it.
 
 | Command | Document |
 |---|---|
-| `validate --json-output` | `passed`; `assessment_basis` (`supplied-bom`, `project-reconciled`, `project-reconciled-with-supplier-claims` or `project-reconciliation-failed`); `policy_source` and `policy_weakened`; `completeness` and `integrity`, each with a `status` (`pass`, `fail`, `unknown` for integrity, or `skipped` with `skipped_by`) and the validator's report (its own `assessment_basis`, issues, `issues_omitted`; for completeness `supplier_claims` and `supplier_claims_omitted`; for integrity `bytes_charged`); `discovery_producer` (`null` without discovery evidence or a producer check, otherwise a `status` of `verified`, `failed`, `not-applicable` or `not-verified`, with `problems`); `minimum_assurance_level`, `assurance_errors` and `graph_issues`. |
-| `risk --json-output` | `passed`; `overall_score` (`null` when `--project` reconciliation failed); `risk_level`; `coverage_status` and `coverage_gaps`; `gate_reasons`; `gate` (the effective thresholds, cutoff, ignored categories and suppression count, each with a `*_source` of `cli`, `project policy` or `built-in`); `findings`; `severity_counts`; `category_scores`; `ignored_findings`; `suppressed_findings`, `suppressions_expired` and `suppressions_unused`; `total_components` and `components_with_risks`; `warning_threshold_exceeded`; `assessment_basis` (`supplied-bom`, `project-reconciled`, `project-reconciled-with-supplier-claims` or `project-reconciliation-failed`); `supplier_claims` and `supplier_claims_omitted`; `discovery_producer` (`verified`, `failed`, `not-verified` or `not-applicable`); `score_threshold` (`null` with `--no-score-threshold`); `fail_on_severity`; `policy_source` and `policy_weakened`. A failed reconciliation has the same keys, with empty findings. |
+| `validate --json-output` | `passed`; `assessment_basis` (`supplied-bom`, `project-reconciled`, `project-reconciled-with-supplier-claims`, `project-reconciliation-failed`, or `project-not-reconciled` when the project policy skips the completeness check); `policy_source` and `policy_weakened`; `completeness` and `integrity`, each with a `status` (`pass`, `fail`, `unknown` for integrity, or `skipped` with `skipped_by`) and the validator's report (its own `assessment_basis`, issues, `issues_omitted`; for completeness `supplier_claims` and `supplier_claims_omitted`; for integrity `bytes_charged`); `discovery_producer` (`null` without discovery evidence or a producer check, otherwise a `status` of `verified`, `failed`, `not-applicable` or `not-verified`, with `problems`); `minimum_assurance_level`, `assurance_errors` and `graph_issues`. |
+| `risk --json-output` | `passed`; `overall_score` (`null` when `--project` reconciliation failed); `risk_level`; `coverage_status` and `coverage_gaps`; `gate_reasons`; `gate` (the effective thresholds, cutoff, ignored categories and suppression count, each with a `*_source` of `cli`, `project policy` or `built-in`); `findings`, each with its `fingerprint`; `severity_counts`; `category_scores`; `ignored_findings`; `suppressed_findings`, `suppressions_expired`, `suppressions_unused` and `suppressions_stale`; `total_components` and `components_with_risks`; `warning_threshold_exceeded`; `assessment_basis` (`supplied-bom`, `project-reconciled`, `project-reconciled-with-supplier-claims`, `project-reconciliation-failed`, or `unsigned-discovery-evidence` when unverified discovery evidence fails the run); `supplier_claims` and `supplier_claims_omitted`; `discovery_producer` (`verified`, `failed`, `not-verified` or `not-applicable`); `score_threshold` (`null` with `--no-score-threshold`); `fail_on_severity`; `policy_source` and `policy_weakened`. A failed reconciliation has the same keys, with empty findings. |
 | `diff --json-output` | `has_changes`, `total_changes`, `components_added`, `components_removed`, `components_modified`, `dependencies_added`, `dependencies_removed` (each with its `severity` and `conditions`), `security_alerts`, `metadata_changes` and `notes`. |
 | `summary --json-output` | `total_components`, `component_types`, `total_dependencies`, `total_risks`, `risk_breakdown` and the inventory's `completeness` claim. |
 | `minimum-elements --format json` | `format` (`nexus-symbiote/minimum-elements/v1`), `edition`, `guidance`, `statement`, `evaluated` (the standard, the projection and the tool version), `subjects`, `coverage` (`present`, `assessable` and `percent`), `counts` per status, `gate` (`null` without `--fail-under`), `clusters` and `elements`; see [G7 AI SBOM minimum elements](minimum-elements.md#running-the-command). |
@@ -444,7 +444,8 @@ Two inventories of the same content have the same content digest, wherever and
 whenever each was collected; equal digests say nothing about who produced either file.
 A file that is not a valid native inventory prints nothing and exits 1 with the same
 reasons as other commands. A valid one can lack a digest. The content digest needs a
-metadata object and a components list. For the canonical digest, a runtime snapshot
+components list; a document without a metadata object has the content digest of the
+same document with an empty one. For the canonical digest, a runtime snapshot
 binds a document only when its compact JSON, with every character outside ASCII
 escaped and each number counted as 24 bytes, is at most 16 MiB, it holds at most
 1,000,000 values and no value is nested more than 64 levels deep; a file well under
@@ -596,13 +597,14 @@ nexus-symbiote risk [OPTIONS] AIBOM_PATH
 | `--allow-unsigned-discovery` | Accept unverified discovery evidence explicitly (still warns); required in CI |
 
 The report gives the score, the assessment basis, coverage, the severity counts and
-the top 15 findings (`--json-output` lists all). Under `Gate: PASSED` or
+the top 15 findings, each followed by its `fingerprint:` line (`--json-output` lists all). Under `Gate: PASSED` or
 `Gate: FAILED` it lists, one `  - ` line each, every reason, such as
 `finding at or above critical` or `collection coverage is unknown or incomplete`, the
 findings that tripped the severity cutoff, the score with the threshold it was compared
 with, the first 20 of the inventory's collection failures (and how many more
 `metadata.completeness.scan_failures` holds), its other coverage gaps, and how many
-findings the project policy suppressed. When unsigned ShadowScan evidence was accepted,
+findings the project policy suppressed, and each suppression that no longer matches
+its changed finding. When unsigned ShadowScan evidence was accepted,
 the report says `Discovery producer: not verified (unsigned evidence accepted)`.
 ### `runtime keygen`
 
@@ -825,12 +827,14 @@ nexus-symbiote validate [OPTIONS] AIBOM_PATH
 Every report states its assessment basis. Without `--project` it is `supplied-bom`:
 only the inventory's own claims were checked, its coverage claim and its internal
 consistency, and nothing was compared with a project, so a hand-written inventory
-can pass. With `--project` the inventory was compared with a fresh local collection
-of that project, and the basis is `project-reconciled`,
+can pass. With `--project` the completeness check compares the inventory with a
+fresh local collection of that project, and the basis is `project-reconciled`,
 `project-reconciled-with-supplier-claims` (the inventory adds claims the collection
 cannot confirm; each is listed as a `SUPPLIER-CLAIM` line) or
-`project-reconciliation-failed`; `risk --project` uses the same values. The
-completeness check also prints the completeness validator's own `Basis:`
+`project-reconciliation-failed`; `risk --project` uses the same values. When the
+project policy sets `validate.require_completeness: false`, `validate --project`
+skips that comparison and reports `project-not-reconciled`; `risk --project`
+reconciles regardless. The completeness check also prints the completeness validator's own `Basis:`
 (`supplied-claims` without `--project`). Integrity is `PASS`, `FAIL` or `UNKNOWN`;
 unknown fails the check, and when no issue explains it the report says that no hash
 or signature could be verified. When the inventory carries ShadowScan discovery

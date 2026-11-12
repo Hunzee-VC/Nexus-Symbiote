@@ -105,13 +105,15 @@ class _MessageLog:
     lists at most ``MAX_LISTED_FAILURES`` messages or ``MAX_LISTED_FAILURE_CHARACTERS``
     characters of them, and once one does not fit, none does. A message that is not
     listed is not kept either: the caller sums it up, or the log counts it in one line
-    at the end of the list that names the first such message.
+    at the end of the list that names the first such message. ``recorded`` counts every
+    message, listed, counted or already listed, so it grows when the list does not.
     """
 
     def __init__(self, messages: list[str], *, bounded: bool = True, noun: str = "failure") -> None:
         self.messages = messages
         self._seen = set(messages)
         self._synced = len(messages)
+        self._recorded = len(messages)
         self._bounded = bounded
         self._noun = noun
         self._lines = 0
@@ -127,7 +129,19 @@ class _MessageLog:
             self._seen = set(self.messages)
         else:
             self._seen.update(self.messages[self._synced :])
+            self._recorded += len(self.messages) - self._synced
         self._synced = len(self.messages)
+
+    @property
+    def recorded(self) -> int:
+        """Messages recorded so far, including those not listed; it never decreases."""
+        self._sync()
+        return self._recorded
+
+    def tally(self) -> None:
+        """Count one message as recorded, whether or not it is listed."""
+        self._sync()
+        self._recorded += 1
 
     def __contains__(self, message: str) -> bool:
         self._sync()
@@ -175,6 +189,7 @@ class _MessageLog:
 
     def record(self, message: str) -> None:
         """List ``message`` within the bounds, or count it."""
+        self.tally()
         if self.fits(message):
             self.put(message)
         else:
@@ -183,6 +198,7 @@ class _MessageLog:
     def add(self, message: str) -> bool:
         """Record ``message`` unless it is already listed; say whether it was new."""
         if message in self:
+            self.tally()
             return False
         self.record(message)
         return True
@@ -213,6 +229,17 @@ class BoundedRecords(list[str]):
     def __iadd__(self, records: Iterable[str], /) -> Self:  # type: ignore[override,misc]
         self.extend(records)
         return self
+
+    @property
+    def recorded(self) -> int:
+        """Records taken so far, listed or not; compare it, not ``len``, to tell whether
+        an operation recorded one, because past the listing bounds the length stops."""
+        return self.log.recorded
+
+
+def recorded_count(records: list[str]) -> int:
+    """How many records ``records`` has taken, including those past the listing bounds."""
+    return records.recorded if isinstance(records, BoundedRecords) else len(records)
 
 
 class _Unlisted:
@@ -511,6 +538,20 @@ class ConfinedCollection:
         self._summarize(unlisted)
 
     @property
+    def failures_recorded(self) -> int:
+        """Failures recorded so far, including those past the listing bounds and repeats.
+
+        It only grows, so comparing it before and after a read tells whether the read
+        failed; the length of the failure list stops changing once the bounds are full.
+        """
+        return self._failure_log.recorded
+
+    @property
+    def exclusions_recorded(self) -> int:
+        """Coverage gaps recorded so far, counted as ``failures_recorded`` counts failures."""
+        return self._exclusion_log.recorded
+
+    @property
     def bytes_exhausted(self) -> bool:
         """Whether the collection's total byte budget is spent, so no further read succeeds."""
         return self._budget.exhausted
@@ -526,6 +567,7 @@ class ConfinedCollection:
         ``key`` names the reason for a summary when the reason names a path.
         """
         message = f"{path!s}: {reason}"
+        self._failure_log.tally()
         if message in self._failure_log:
             return
         if self._failure_log.fits(message):

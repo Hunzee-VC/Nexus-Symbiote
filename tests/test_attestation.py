@@ -707,7 +707,7 @@ def test_signing_time_in_another_zone_is_recorded_in_utc():
         (b'{"metadata": {}, "components": []}', True),
         (b"{}", False),
         (b'{"metadata": {}}', False),
-        (b'{"components": []}', False),
+        (b'{"components": []}', True),
         (b'{"metadata": {"spec_version": "9.0.0"}, "components": []}', False),
         (b'{"metadata": {}, "components": [], "extra": 1}', False),
         (b'{"metadata": {}, "components": [], "components": []}', False),

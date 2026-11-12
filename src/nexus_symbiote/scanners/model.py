@@ -739,9 +739,9 @@ class ModelPackages:
             cached = self._trees.get(ancestor)
             if cached is not None and (ancestor == directory or cached[1]):
                 return cached
-        before = len(files.failures)
+        before = files.failures_recorded
         tree = ModelTree(files.iter_files(directory))
-        self._trees[directory] = (tree, len(files.failures) == before)
+        self._trees[directory] = (tree, files.failures_recorded == before)
         return self._trees[directory]
 
     def _charge(self, files: ConfinedCollection, path: Path, stream: BinaryIO) -> None:
@@ -801,7 +801,7 @@ class ModelPackages:
     ) -> tuple[dict[Path, list[Path]], list[Path], bool]:
         """The directory's shard references, its index files and whether all were read."""
         if directory not in self._indexes:
-            before = len(files.failures)
+            before = files.failures_recorded
             references, indexes = index_references(
                 files,
                 tree,
@@ -810,7 +810,7 @@ class ModelPackages:
                 self._bindings,
                 read=lambda index: self._read(files, index),
             )
-            self._indexes[directory] = (references, indexes, len(files.failures) == before)
+            self._indexes[directory] = (references, indexes, files.failures_recorded == before)
         return self._indexes[directory]
 
 

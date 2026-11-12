@@ -225,8 +225,8 @@ baseline with `nexus-symbiote diff`; the export does not replace that gate.
 
 The command exits 1, and writes nothing, when the inventory cannot be read as a
 native inventory (a symbolic link, a FIFO, more than 16 MiB, not strict UTF-8
-JSON, an unsupported format version, a schema mismatch, or no `metadata` object
-or `components` list), when it has no repository agent or more than one, when the
+JSON, an unsupported format version, a schema mismatch, or no `components`
+list), when it has no repository agent or more than one, when the
 agent is not declared and `--include-unnamed` is absent, or when ShadowScan could
 not read its name or owner back exactly (empty, longer than 4,096 characters,
 padded with white space, or containing a control, format, line-separator or

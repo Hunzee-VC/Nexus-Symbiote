@@ -194,7 +194,7 @@ def known_executable(name: str | None) -> bool:
         or name in _SHELLS
         or name in _INJECTORS
         or name in _INTERPRETERS
-        or name in _UNCLASSIFIED_RUNNERS
+        or _runner_key(name) in _UNCLASSIFIED_RUNNERS
         or name in _NODE_RUNNERS
         or name in _TS_NODE
         or bool(re.fullmatch(r"(?:python|pypy)[0-9.]*|py|node(?:js)?", name))
@@ -801,7 +801,8 @@ _UNCLASSIFIED_RUNNERS: dict[str, frozenset[str] | None] = {
     "finch": None,
     "dx": None,
     "dotnet": frozenset({"dnx", "tool"}),
-    "gem": frozenset({"exec", "install", "update"}),
+    # RubyGems reads i as install and any unique prefix of a command name.
+    "gem": _set("exec ex exe install i in ins inst insta instal update up upd upda updat"),
     # Installers fetch an attacker-chosen package and run its build code.
     "pip": frozenset({"install", "download", "wheel"}),
     "pip3": frozenset({"install", "download", "wheel"}),
@@ -815,6 +816,17 @@ _UNCLASSIFIED_RUNNERS: dict[str, frozenset[str] | None] = {
     "apptainer": frozenset({"run", "exec", "shell", "instance", "build", "test"}),
     "singularity": frozenset({"run", "exec", "shell", "instance", "build", "test"}),
 }
+# pip2, pip3.12 and pip3.11 are pip as installed for one interpreter version.
+_VERSIONED_PIP = re.compile(r"pip\d+(?:\.\d+)*")
+
+
+def _runner_key(name: str) -> str:
+    """The runner table entry a program name stands for."""
+    if name not in _UNCLASSIFIED_RUNNERS and _VERSIONED_PIP.fullmatch(name):
+        return "pip"
+    return name
+
+
 _ENV_OPTIONS = _set(
     "- -- -i -u -S -C -0 -v --ignore-environment --unset --chdir --split-string --null"
     " --debug --block-signal --default-signal --ignore-signal"
@@ -877,6 +889,8 @@ def _program_name(word: str) -> str | None:
             return family
         if candidate in _PROGRAM_NAMES:
             return candidate
+        if _runner_key(candidate) in _PROGRAM_NAMES:
+            return _runner_key(candidate)
     return None
 
 
@@ -1091,7 +1105,17 @@ def _letters_known(word: str, table: _Options) -> bool:
     )
 
 
-def _launches(name: str, words: list[str], start: int, budget: list[int] | None = None) -> bool:
+_Walks = dict[int, frozenset[str]]
+_RUNNER_STARTS = frozenset().union(*filter(None, _UNCLASSIFIED_RUNNERS.values()))
+
+
+def _launches(
+    name: str,
+    words: list[str],
+    start: int,
+    budget: list[int] | None = None,
+    walks: _Walks | None = None,
+) -> bool:
     """Whether ``name`` followed by ``words[start:]`` can start a program."""
     if start >= len(words):
         return False
@@ -1112,9 +1136,52 @@ def _launches(name: str, words: list[str], start: int, budget: list[int] | None 
     unclassified = _UNCLASSIFIED_RUNNERS.get(name)
     if unclassified is not None:
         # Their options are not tabled and may take several values (nix --option
-        # name value), so any of the next words naming a start counts.
-        return any(word in unclassified for word in words[start : start + 8])
+        # name value), so any of the next words naming a start counts, and so does
+        # one after any run of options each followed by at most one value.
+        return any(word in unclassified for word in words[start : start + 8]) or (
+            _leading_start(words, start, unclassified, budget, walks)
+        )
     return True
+
+
+def _leading_start(
+    words: list[str],
+    start: int,
+    starts: frozenset[str],
+    budget: list[int] | None,
+    walks: _Walks | None = None,
+) -> bool:
+    """Whether a start word follows options that may each take the next word as a value.
+
+    The run an option word begins does not depend on where the walk began or on the
+    runner, so ``walks`` keeps, for each option position of one word list, the start
+    words its run reaches. Each position is walked once, keeping a scan of many
+    runner names linear.
+    """
+    if walks is None:
+        walks = {}
+    after_option = False
+    passed: list[tuple[int, str]] = []
+    reached: frozenset[str] = frozenset()
+    for index in range(start, len(words)):
+        word = words[index]
+        if word.startswith("-") and index in walks:
+            reached = walks[index]
+            break
+        _spend(budget, word)
+        passed.append((index, word))
+        if word.startswith("-"):
+            after_option = "=" not in word
+        elif after_option:
+            after_option = False
+        else:
+            break
+    for index, word in reversed(passed):
+        if word in _RUNNER_STARTS:
+            reached |= {word}
+        if word.startswith("-"):
+            walks[index] = reached
+    return not reached.isdisjoint(starts)
 
 
 def _interpreter_reason(
@@ -1198,6 +1265,7 @@ def _embedded_reason(words: list[str], stop: int | None = None) -> str | None:
 
 
 def _scan_words(words: list[str], stop: int, budget: list[int]) -> str | None:
+    walks: _Walks = {}
     for index in range(min(stop, len(words))):
         word = words[index]
         _spend(budget, word)
@@ -1219,7 +1287,7 @@ def _scan_words(words: list[str], stop: int, budget: list[int]) -> str | None:
             return "arguments contain an expansion too large to read"
         for reading in readings:
             if len(reading) == 1:
-                reason = _starts_code(reading[0], words, index + 1, budget)
+                reason = _starts_code(reading[0], words, index + 1, budget, walks)
             else:
                 # Brace expansion made several words; the copy is charged, so many such
                 # readings exhaust the budget instead of costing the square of the input.
@@ -1244,14 +1312,16 @@ def _command_line_readings(text: str) -> list[list[str]]:
     return readings
 
 
-def _starts_code(word: str, words: list[str], start: int, budget: list[int]) -> str | None:
+def _starts_code(
+    word: str, words: list[str], start: int, budget: list[int], walks: _Walks | None = None
+) -> str | None:
     """What ``word`` followed by ``words[start:]`` starts, if it names a program that may."""
     for name in _program_names(word, budget):
         if name in {"node", "ts-node", "python"} or name in _INLINE_FLAGS:
             found = _interpreter_reason(name, words, budget=budget, start=start)
             if found is not None:
                 return f"arguments run {found}"
-        elif _launches(name, words, start, budget):
+        elif _launches(name, words, start, budget, walks):
             return f"arguments start {name}"
     return None
 
@@ -1894,6 +1964,22 @@ _CMD_REWRITE = re.compile(r"[%!\"^]|[^\S \t]|[^\x00-\x7f]")
 _CMD_PROGRAM = re.compile(r"[A-Za-z0-9_.:\\/-]+")
 
 
+# cmd keeps backslashes and single quotes; only double quotes group its words.
+_CMD_WORD = re.compile(r"[A-Za-z0-9_@%+=:,./\\'-]+")
+
+
+def _split_cmd(line: str) -> list[str] | None:
+    """Words of a cmd command line as cmd separates them; None for anything more."""
+    if len(line) > MAX_SCRIPT_CHARS or _CMD_OPERATOR.search(line) or _POSIX_REWRITE.search(line):
+        return None
+    words = line.split()
+    if not 0 < len(words) <= MAX_SCRIPT_TOKENS or not all(
+        _CMD_WORD.fullmatch(word) for word in words
+    ):
+        return None
+    return words
+
+
 def _unwrap_cmd(rest: list[str], launch: Launch) -> list[str] | None:
     """cmd runs the rest of its command line after /C, /K or /R, glued or not."""
     index = 0
@@ -1919,7 +2005,7 @@ def _unwrap_cmd(rest: list[str], launch: Launch) -> list[str] | None:
     glued = found.group(2)
     remainder = [glued, *rest[index + 1 :]] if glued else rest[index + 1 :]
     if len(remainder) == 1 and any(char.isspace() for char in remainder[0]):
-        words = _split_script(remainder[0], _CMD_OPERATOR)
+        words = _split_cmd(remainder[0])
     elif (
         remainder
         and not any(_CMD_OPERATOR.search(word) for word in remainder)
@@ -2035,13 +2121,14 @@ def _classify(tokens: list[str], launch: Launch) -> None:
         launch.runner = True
         handler(name, rest, launch)
         return
-    if name in _UNCLASSIFIED_RUNNERS and (
-        _UNCLASSIFIED_RUNNERS[name] is None or _launches(name, tokens, 1)
+    runner = _runner_key(name)
+    if runner in _UNCLASSIFIED_RUNNERS and (
+        _UNCLASSIFIED_RUNNERS[runner] is None or _launches(runner, tokens, 1)
     ):
-        launch.launcher, launch.runner = name, True
+        launch.launcher, launch.runner = runner, True
         launch.fail(
             _embedded_reason(rest)
-            or f"{name} runs packages in a form the collector does not classify"
+            or f"{runner} runs packages in a form the collector does not classify"
         )
         return
     # A local program: what it runs is local code, unless its arguments start a

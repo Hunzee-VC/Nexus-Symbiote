@@ -309,13 +309,8 @@ def _described(text: str) -> dict[str, Any]:
     return document
 
 
-def _without_metadata(document: dict[str, Any]) -> dict[str, Any]:
-    return {name: value for name, value in document.items() if name != "metadata"}
-
-
 REASONS = {"canonical_digest": OUTSIDE_SNAPSHOT_BUDGET, "content_digest": NO_CONTENT_DIGEST}
 WITHOUT_DIGESTS: dict[str, tuple[dict[str, Any], tuple[str, ...]]] = {
-    "no metadata": ({"components": []}, ("content_digest",)),
     "no components": ({"metadata": {"spec_version": "1.1.0"}}, ("content_digest",)),
     "nested beyond the snapshot budget": (_deep_property(61), ("canonical_digest",)),
     "more values than the snapshot budget": (
@@ -323,7 +318,7 @@ WITHOUT_DIGESTS: dict[str, tuple[dict[str, Any], tuple[str, ...]]] = {
         ("canonical_digest",),
     ),
     "neither": (
-        _without_metadata(_deep_property(61)),
+        {"metadata": {"authors": [""] * (MAX_BOM_NODES + 1)}},
         ("canonical_digest", "content_digest"),
     ),
 }
@@ -435,7 +430,7 @@ def test_an_error_never_quotes_the_inventory(tmp_path):
     assert not any(piece in result.output for piece in HOSTILE_PIECES)
 
 
-@pytest.mark.parametrize("content", ["{not json", json.dumps({"components": []})])
+@pytest.mark.parametrize("content", ["{not json", json.dumps({"metadata": {}})])
 def test_a_hostile_file_name_is_neutralized(tmp_path, content):
     """Both errors that name the file: an invalid inventory, and one without a digest."""
     path = tmp_path / "##[error]x\x1b[31m‮.json"
@@ -469,15 +464,17 @@ def test_inventory_digests_reads_the_bytes_once_and_names_each_undefined_digest(
     assert INVENTORY_CONTENT_PROFILE == "nexus-symbiote/inventory-content/v1"
     with pytest.raises(NativeFormatError):
         inventory_digests(b"{not json")
+    # Without a metadata object a document is read, and digested, as with an empty one.
     bare = json.dumps({"components": []}).encode()
     assert inventory_digests(bare) == InventoryDigests(
         file_sha256="sha256:" + hashlib.sha256(bare).hexdigest(),
         canonical_digest=bom_digest({"components": []}),
-        content_digest=None,
+        content_digest=inventory_content_digest({"metadata": {}, "components": []}),
         spec_version="1.0.0",
         components=0,
-        unavailable=(NO_CONTENT_DIGEST,),
     )
+    headless = json.dumps({"metadata": {"spec_version": "1.1.0"}}).encode()
+    assert inventory_digests(headless).unavailable == (NO_CONTENT_DIGEST,)
     deep = inventory_digests(json.dumps(_deep_property(70)).encode())
     assert deep.canonical_digest is None
     assert deep.content_digest == inventory_content_digest(_deep_property(70))

@@ -484,11 +484,6 @@ _MARKUP_SUFFIXES = frozenset({".md", ".mdc", ".markdown"})
 _IMPORTING_NAMES = frozenset({"CLAUDE.md", "CLAUDE.local.md", "GEMINI.md"})
 _MAX_IMPORT_DEPTH = 5
 _MAX_IMPORTS = 1000
-# Distinct import targets looked up, and files whose imports are followed, in one
-# collection. Each lookup of a missing file lists the directories on its path for case
-# variants, and each file followed resolves up to _MAX_IMPORTS references, so file
-# content must not be able to ask for an unbounded number of either.
-_MAX_IMPORT_LOOKUPS = 5000
 # Path characters that the `imports` and `imported_by` lists of one collection hold
 # together. One reference can name a 4 KiB path, so a count of references alone would
 # not bound the inventory.
@@ -577,7 +572,9 @@ class _ImportListing:
     listed in full while all lists together hold at most
     ``_MAX_LISTED_IMPORT_CHARACTERS`` characters of paths. A list that does not fit is
     replaced by its count, and ``imports`` also by a digest of the paths, so a change to
-    it is still drift; one failure says how many references are counted but not listed.
+    it is still drift. Every imported file is still inventoried and every importer still
+    binds what it imports, and ``imported_by`` is the inverse of those sets, so counting
+    a list loses no coverage and is not a failure.
     """
 
     def __init__(self) -> None:
@@ -586,16 +583,12 @@ class _ImportListing:
         self._counts: dict[str, int] = {}
         self._overflowed: dict[str, None] = {}
         self._leaves: dict[str, bytes] = {}
-        self._first: str | None = None
-        self._unlisted = 0
 
     def add(self, importer: str, targets: Collection[str], component: PromptComponent) -> None:
         """Record that ``importer`` imports ``targets``, given in the order it names them."""
         if self._take(sum(map(len, targets))):
             component.properties["imports"] = sorted(targets)
         else:
-            self._note(importer)
-            self._unlisted += len(targets)
             component.properties["imports_count"] = len(targets)
             component.properties["imports_digest"] = self._digest(targets)
         for target in targets:
@@ -607,30 +600,18 @@ class _ImportListing:
             else:
                 self._importers.pop(target, None)
                 self._overflowed[target] = None
-                self._note(target)
 
-    def finish(self, recorded: dict[str, PromptComponent], failures: list[str]) -> None:
+    def finish(self, recorded: dict[str, PromptComponent]) -> None:
         for target, importers in self._importers.items():
             recorded[target].properties["imported_by"] = sorted(importers)
         for target in self._overflowed:
             recorded[target].properties["imported_by_count"] = self._counts[target]
-            self._unlisted += self._counts[target]
-        if self._first is not None:
-            failures.append(
-                f"{self._first}: @path import references exceed the inventory's recording "
-                f"limit of {_MAX_LISTED_IMPORT_CHARACTERS} path characters; "
-                f"{self._unlisted} are counted but not listed"
-            )
 
     def _take(self, characters: int) -> bool:
         if characters > self._remaining:
             return False
         self._remaining -= characters
         return True
-
-    def _note(self, path: str) -> None:
-        if self._first is None:
-            self._first = path
 
     def _digest(self, targets: Collection[str]) -> str:
         """SHA-256 over the sorted SHA-256 digests of the paths; each path is hashed once."""
@@ -819,8 +800,10 @@ class PromptScanner(Scanner):
         A host expands the imports of every file it loads this way, including a file
         the collector records under its own name, such as an imported AGENTS.md or a
         nested CLAUDE.md. Each target looked up, and each file whose imports are
-        followed, counts against ``_MAX_IMPORT_LOOKUPS``, so at most that many times
-        ``_MAX_IMPORTS`` references are resolved.
+        followed, counts against the operator's ``import-lookups`` limit, so at most that
+        many times ``_MAX_IMPORTS`` references are resolved. Each lookup of a missing file
+        lists the directories on its path for case variants, so file content must not be
+        able to ask for an unbounded number of either.
         """
         pending = deque((path, 0) for path in importers)
         followed = set(importers)
@@ -828,14 +811,15 @@ class PromptScanner(Scanner):
         # Each path is one object that every reference to it shares.
         paths = {path: path for path in recorded}
         listing = _ImportListing()
+        lookups = limits.bound("import-lookups")
         spent = 0
 
         def spend(importer: str) -> bool:
             nonlocal spent
-            if spent >= _MAX_IMPORT_LOOKUPS:
+            if spent >= lookups.value:
                 result.scan_failures.append(
-                    f"{importer}: more than {_MAX_IMPORT_LOOKUPS} distinct @path imports "
-                    "in the project; the rest are not inventoried"
+                    f"{importer}: @path imports past this file are not inventoried; "
+                    + lookups.exceeded()
                 )
                 return False
             spent += 1
@@ -907,7 +891,7 @@ class PromptScanner(Scanner):
                 )
             if imports and importer in recorded:
                 listing.add(importer, imports, recorded[importer])
-        listing.finish(recorded, result.scan_failures)
+        listing.finish(recorded)
 
     @staticmethod
     def _read_import(

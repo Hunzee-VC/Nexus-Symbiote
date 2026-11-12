@@ -230,7 +230,7 @@ def _native_facts(subject: bytes) -> tuple[str, str] | None:
         if not isinstance(document, dict):
             return None
         content = inventory_content_digest(document)
-        bom = AIBOM.model_validate(document)
+        bom = AIBOM.from_native(document)
     except (ValueError, RecursionError):
         return None
     return bom.metadata.spec_version, content

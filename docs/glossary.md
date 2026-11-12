@@ -149,7 +149,8 @@ one ([inventory attestation](inventory-attestation.md#what-an-attestation-establ
 An inventory a command reads rather than collects. With `--project`, `validate` and
 `risk` collect the checkout again and reconcile the two; the result's
 `assessment_basis` is `project-reconciled`, `project-reconciled-with-supplier-claims`
-or `project-reconciliation-failed`. Without it, the basis is `supplied-bom` (the
+or `project-reconciliation-failed`; `validate` reports `project-not-reconciled` when
+the project policy skips the completeness check. Without it, the basis is `supplied-bom` (the
 completeness check calls it `supplied-claims`): only the inventory's own claims were
 checked.
 

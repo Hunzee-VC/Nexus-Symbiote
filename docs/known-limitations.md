@@ -113,8 +113,9 @@ A way around a limit that its entry does not describe is worth a
 - **Unclassified runners are gaps.** `dnx`, `jbang`, `pip-run`, `nix run`,
   `dotnet tool`, `gem exec`, `pixi exec`, `corepack`, `mise`, `pkgx`, `finch`,
   Apple `container` and `apptainer` are a high `launcher_identity` finding and a
-  gap, and so are package installs (`pip install`, `python -m pip install`,
-  `gem install`, `cargo install`, `conda` or `mamba install`), `uv run` of a URL or
+  gap, and so are package installs (`pip install`, also as `pip3.12` and after any
+  run of options, `python -m pip install`, `gem install` or `gem i`, `cargo install`,
+  `conda` or `mamba install`), `uv run` of a URL or
   of standard input, and a package from git without a full commit, from a URL or
   from a local path.
 - **Inline code and nested launches are gaps.** Inline interpreter code such as
@@ -130,7 +131,9 @@ A way around a limit that its entry does not describe is worth a
   `eval` and `pwsh -Command` are classified only when no word holds a character the
   reader rewrites: braces, patterns, `~`, `#`, `!`, `^`, `$`, backquotes,
   non-ASCII text or, except for a POSIX shell, quoting. `cmd /c` needs a plain
-  program word and no `%`, `!`, `"`, `^` or unusual whitespace. Anything else is an
+  program word and no `%`, `!`, `"`, `^` or unusual whitespace; cmd keeps
+  backslashes and single quotes, so `'npx'` is a gap and `n\px` is a program `px`
+  in directory `n`. Anything else is an
   inline shell script: a gap. So `sh -c "npx -y pkg@1.2.3 $HOME/data"` is a gap;
   pass such values as separate arguments or through `env`.
 - **Shell startup code is a gap.** bash sources a `--rcfile` or `--init-file`
@@ -163,7 +166,7 @@ A way around a limit that its entry does not describe is worth a
   unknown. Other locations and the runner's own namespace (`UV_*`, `PIP_*`,
   `YARN_*`, `BUN_*`, `DOCKER_*` and similar) are a medium `package_source`
   finding, and the package URL is withheld. Configuration names that look like
-  tokens are exported as `[redacted]`.
+  tokens or hold one after a prefix (`AWS_AKIA...`) are exported as `[redacted]`.
 - **Changed values need the binding key.** Launch arguments, environment and header
   values are exported only as redacted positions and names, and endpoint and
   package index URLs as origins. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, `diff`
@@ -351,9 +354,15 @@ A way around a limit that its entry does not describe is worth a
   hops from the root `CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md` and
   `GEMINI.md`, from every `CLAUDE.md` and `GEMINI.md` below the root, and from another
   spelling of either that a subagent, rule, prompt, skill or command directory holds,
-  resolved from that file's directory. An import that leaves the project root, names an
-  excluded path or lies deeper than the `depth` limit is a gap, so write a path
-  alias such as `@/components` as code.
+  resolved from that file's directory. The imports of other instruction files, such
+  as `AGENTS.md` or a rule file, are followed only when a memory file imports them.
+  An import that leaves the project root, names an excluded path or lies deeper than
+  the `depth` limit is a gap, so write a path alias such as `@/components` as code. A
+  project with more than the [`import-lookups`](collection-limits.md#limits) limit of
+  memory files and import targets fails until the limit is raised. Past 262,144
+  characters of listed paths, an `imports` list is replaced by `imports_count` and
+  `imports_digest`, and an `imported_by` list by `imported_by_count`; every file is
+  still inventoried.
 - **Fixtures count.** A nested `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` or `.cursorrules`
   in test fixtures or vendored code is inventoried, and its findings count, like any
   other.
@@ -519,10 +528,12 @@ A way around a limit that its entry does not describe is worth a
   only from `.well-known` directories and from `agent.json`, `agent-card.json` and
   `a2a/agent.json` in the root.
 - **Python import heuristics are shallow.** The a2a and rag collectors read only
-  Python files that name the SDK or a vector-store library, and skip one they cannot
-  read or parse or that exceeds 262,144 characters; for A2A, such a file that names
-  `AgentCard` is a gap. The A2A search skips `tests`, `test`, `dist`, `build`,
-  `docs`, `benchmarks` and `examples`.
+  Python files that name the SDK or a vector-store library. The rag collector skips
+  one it cannot read or parse or that exceeds 262,144 characters. The a2a
+  collector records one it cannot read as a failure, and skips one it cannot parse
+  or that exceeds 262,144 characters unless it names `AgentCard`, which is a gap.
+  The A2A search skips `tests`, `test`, `dist`, `build`, `docs`, `benchmarks` and
+  `examples`.
 
 ## ShadowScan
 
@@ -575,19 +586,21 @@ A way around a limit that its entry does not describe is worth a
   `~/Library/Caches/sigstore-python` on macOS. Before trusting it, the CLI checks that every
   directory from the TUF targets directory up to the sigstore-python cache directory is owned
   by the current user and is not group/world-writable or a symlink, and that `trusted_root.json`
-  itself, when present, is owned by the current user, is not a symlink, and is not
+  itself is owned by the current user, is not a symlink, and is not
   group/world-writable where anyone else can reach it (a file sigstore-python wrote under a
   group-writable umask is accepted only inside a private directory); a missing cache is created
-  mode 0700, and any check failure fails verification closed with the offending path named. Pass
+  mode 0700 and seeded mode 0600 with the root embedded in sigstore-python, and any check
+  failure fails verification closed with the offending path named. Pass
   an explicit trust root instead with `--trust-root` on `verify-artifact`/`verify-discovery`, or
   `NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT` for any verification path, verified against a pinned
   SHA-256 when `--trust-root-sha256` or `NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT_SHA256` is supplied.
   A successful verification prints the trust-root path it used. On shared or persistent machines,
   such as self-hosted runners, set `XDG_CACHE_HOME` to an empty directory you own;
   on macOS, setting `HOME` alone is not enough when `XDG_CACHE_HOME` is set.
-  An explicit trust root is read once and verified from those bytes. The cached root is
-  checked and then loaded again by sigstore-python, so a process running as the same user
-  could replace it between the two reads; an explicit, pinned trust root closes that gap.
+  The cached or explicit trust root is opened once without following symlinks, checked on
+  that descriptor, and verification uses exactly the bytes read. The unpinned cache is still
+  trusted because it is private: a process running as your user can write a root there
+  before verification starts, which only an explicit, pinned trust root rules out.
 - **The Action's trust root ages.** The Action gives its scans an empty private
   cache, so it uses the root embedded in its hash-locked `sigstore` package. A
   bundle that relies on a key Sigstore introduced later fails until you update the
@@ -693,6 +706,13 @@ A way around a limit that its entry does not describe is worth a
   printed as a warning. Pass `--no-project-policy` in CI; there is no
   operator-owned policy file. See
   [what `policy_weakened` reports](policy-reference.md#what-policy_weakened-reports).
+- **A suppressed chat template finding is bound to the model file.** A suppression
+  names the [fingerprint](policy-reference.md#suppressions) of the finding, which
+  binds the model's own content digest, the `sha256` of its file, not the chat
+  template files beside it. A template finding names the matching templates in its
+  detail, so a template file whose text changes while the same templates still match
+  keeps the suppression. `diff --fail-on-alert` against a reviewed baseline reports the changed
+  `chat_template_hash` as a security alert.
 - **A baseline is written unsigned.** `baseline` and `scan` do not sign, and `diff`
   checks no signature, so `diff` alone cannot tell a reviewed baseline from one the
   change under review wrote. Read it from the protected branch. To check also that

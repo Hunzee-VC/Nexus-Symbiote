@@ -1271,11 +1271,18 @@ def test_file_names_that_are_not_utf8_keep_the_evidence_i_json(tmp_path, monkeyp
     assert parse_json_strict(render(evidence)) == evidence
 
 
-def test_an_inventory_without_metadata_has_no_content_digest(tmp_path):
-    inventory = tmp_path / "bom.json"
-    inventory.write_text('{"components": []}')
-    evidence = collect(inventory, [_trace(tmp_path, otlp_export(_tool("a")))])
-    assert evidence["inputs"]["inventory"]["content_digest"] is None
+def test_an_inventory_without_metadata_is_read_as_one_with_empty_metadata(tmp_path):
+    trace = _trace(tmp_path, otlp_export(_tool("a")))
+    found = {}
+    for name, text in (
+        ("bare", '{"components": []}'),
+        ("empty", '{"metadata": {}, "components": []}'),
+    ):
+        inventory = tmp_path / f"{name}.json"
+        inventory.write_text(text)
+        found[name] = collect(inventory, [trace])["inputs"]["inventory"]["content_digest"]
+    assert found["bare"] is not None
+    assert found["bare"] == found["empty"]
 
 
 def test_the_document_is_deterministic_and_independent_of_span_order(tmp_path):

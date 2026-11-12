@@ -36,6 +36,7 @@ from nexus_symbiote.core.hashing import parse_json_strict
 from nexus_symbiote.core.models import AnyComponent, PromptComponent, ToolComponent
 from nexus_symbiote.digest_cli import MALFORMED_EPOCH
 from nexus_symbiote.scanners.base import Scanner, ScanResult
+from nexus_symbiote.validators.risk import RiskScorer
 from tests.support import scaling_ratio
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -206,10 +207,13 @@ def test_every_value_outside_the_collection_event_is_content(tmp_path):
             holder[key] = value
     assert inventory_content_digest(document) == original
     assert len(paths) > 500
-    for path in TOP_LEVEL:
-        incomplete = {key: value for key, value in document.items() if key != path[0]}
-        with pytest.raises(ValueError, match=NOT_AN_INVENTORY):
-            inventory_content_digest(incomplete)
+    without_components = {key: value for key, value in document.items() if key != "components"}
+    with pytest.raises(ValueError, match=NOT_AN_INVENTORY):
+        inventory_content_digest(without_components)
+    # Readers fill in an absent metadata object as empty, so the digest does too.
+    bare = {key: value for key, value in document.items() if key != "metadata"}
+    assert inventory_content_digest(bare) == inventory_content_digest({**bare, "metadata": {}})
+    assert inventory_content_digest(bare) != original
 
 
 def test_collection_event_values_are_left_out_where_the_format_records_them(tmp_path):
@@ -347,7 +351,6 @@ NOT_INVENTORIES = {
     "number": 3,
     "empty object": {},
     "no components": {"metadata": {}},
-    "no metadata": {"components": []},
     "metadata list": {"metadata": [], "components": []},
     "metadata null": {"metadata": None, "components": []},
     "metadata text": {"metadata": "##[error]x", "components": []},
@@ -739,10 +742,19 @@ def _project_with_suppressed_pickle(tmp_path: Path, expires: str) -> Path:
     (project / "models").mkdir(parents=True)
     (project / "AGENTS.md").write_text("Use read-only tools.\n")
     (project / "models" / "classifier.pkl").write_bytes(b"model bytes")
+    inventory = tmp_path / "unsuppressed.json"
+    _invoke("scan", str(project), "--no-project-policy", "--report-only", "-o", str(inventory))
+    (fingerprint,) = [
+        finding.fingerprint
+        for finding in RiskScorer().score(AIBOM.load(inventory)).findings
+        if finding.component_ref == "model:models/classifier.pkl"
+        and finding.category == "serialization_format"
+    ]
     (project / ".nexus-symbiote.yaml").write_text(
         "risk:\n  suppressions:\n"
         '    - component_ref: "model:models/classifier.pkl"\n'
         '      category: "serialization_format"\n'
+        f'      fingerprint: "{fingerprint}"\n'
         '      reason: "Test fixture, never loaded"\n'
         '      owner: "security@example.test"\n'
         f"      expires: {expires}\n"

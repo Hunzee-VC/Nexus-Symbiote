@@ -171,6 +171,74 @@ def test_identifiers_keep_names_that_resemble_token_formats():
     assert descriptor["name"] == name and descriptor["description"] == f"Runs {REDACTED}"
 
 
+# Assembled at run time so the source holds no token-shaped literal.
+AWS_ID = "".join(("AK", "IA", "IOSFODNN7EXAMPLE"))
+GITLAB = "".join(("gl", "pat-", "Xy9fakeFAKEfake12345"))
+GITHUB = "".join(("gh", "p_", "A1b2C3d4E5f6G7h8I9j0", "K1l2M3n4O5p6Q7r8S9t0"))
+
+
+@pytest.mark.parametrize(
+    "name,kept",
+    [
+        (f"AWS_{AWS_ID}", "AWS_"),
+        (f"UV_{AWS_ID}", "UV_"),
+        (f"X_{GITLAB}", "X_"),
+        (f"x-{GITHUB}", "x-"),
+        (f"{AWS_ID}_PROD", None),
+    ],
+)
+@pytest.mark.parametrize("identifier", [False, True])
+def test_a_token_inside_a_name_is_redacted(name, kept, identifier):
+    redacted = redact_text(name, identifier=identifier)
+    assert AWS_ID not in redacted and GITLAB not in redacted and GITHUB not in redacted
+    assert REDACTED in redacted and redacted.startswith(kept or "")
+
+
+@pytest.mark.parametrize("token", [GITHUB, GITLAB, AWS_ID])
+def test_an_identifier_that_is_a_token_is_redacted(token):
+    assert redact_text(token, identifier=True) == REDACTED
+    assert redact_descriptor({"name": token})["name"] == REDACTED
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "GITHUB_TOKEN",
+        "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "OPENAI_API_KEY",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "GITLAB_PAT",
+        "SLACK_BOT_TOKEN",
+        "NPM_TOKEN",
+        "PYPI_API_TOKEN",
+        "REGION_ASIAPACIFICSOUTHEAST1",
+        "X_ASIA_REGION",
+        "run_sk-learn-classifier-model",
+        "my-sk-learn-classifier-tool-v2",
+        "npm_config_registry",
+        "github_pat_rotation_policy",
+        "glpat-rotation",
+        "ya29-client",
+        "xoxb-bot",
+    ],
+)
+@pytest.mark.parametrize("identifier", [False, True])
+def test_ordinary_names_near_token_formats_are_kept(name, identifier):
+    assert redact_text(name, identifier=identifier) == name
+
+
+@pytest.mark.parametrize(
+    "unit", ["_eyJ", "_eyJaaaaaaaaa.", "_glpat-a.", "_AKIA", "_ghp_a", "_github_pat_", "-xoxb-a."]
+)
+def test_tokens_inside_names_are_found_in_linear_time(unit):
+    text = unit * (1_000_000 // len(unit))
+    started = time.monotonic()
+    redact_text(text)
+    redact_text(text, identifier=True)
+    assert time.monotonic() - started < 5
+
+
 @pytest.mark.parametrize(
     "name,value,expected",
     [

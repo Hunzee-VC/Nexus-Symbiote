@@ -308,3 +308,68 @@ def test_validate_explains_an_undeclared_format_1_0_inventory_that_does_not_reco
     )
     assert result.exit_code == 1, result.output
     assert "INFO [format] The inventory uses native format 1.0" in result.stdout
+
+
+@pytest.mark.parametrize("document", [{"components": []}, {"metadata": {}, "components": []}, {}])
+def test_every_reader_reads_a_versionless_document_as_format_1_0(tmp_path, monkeypatch, document):
+    from nexus_symbiote import advisories
+    from nexus_symbiote.core.canonical import content_digest
+    from nexus_symbiote.generators._common import recover_native
+
+    path = tmp_path / "bom.json"
+    path.write_text(json.dumps(document))
+    assert AIBOM.load(path).metadata.spec_version == "1.0.0"
+    assert AIBOM.from_document(dict(document)).metadata.spec_version == "1.0.0"
+    embedded = [
+        {"name": "nexus-symbiote:document", "value": json.dumps(document)},
+        {"name": "nexus-symbiote:documentDigest", "value": content_digest(document)},
+        {"name": "nexus-symbiote:lossReport", "value": "[]"},
+    ]
+    recovered, original = recover_native(embedded)
+    assert recovered.metadata.spec_version == "1.0.0" and original == document
+    seen = []
+    original_fetch = advisories.fetch_advisories
+
+    def spy(bom, **options):
+        seen.append(bom.metadata.spec_version)
+        return original_fetch(bom, **options)
+
+    monkeypatch.setattr(advisories, "fetch_advisories", spy)
+    CliRunner().invoke(main, ["advisories", str(path), "--dry-run"])
+    assert seen == ["1.0.0"]
+
+
+def test_native_documents_are_read_only_through_the_shared_reader():
+    # A dict without metadata cannot be told from AIBOM(components=...) inside the model,
+    # so every reader of a native document goes through AIBOM.from_document.
+    source = Path(__file__).parents[1] / "src" / "nexus_symbiote"
+    callers = [
+        path.relative_to(source).as_posix()
+        for path in sorted(source.rglob("*.py"))
+        if "AIBOM.model_validate(" in path.read_text(encoding="utf-8")
+    ]
+    assert callers == []
+
+
+@pytest.mark.parametrize("document", [{"components": []}, {"metadata": {}, "components": []}, {}])
+def test_the_digest_readers_read_a_versionless_document_alike(document):
+    # digest, attest, trace-diff and export-inventory read through the same helpers: a
+    # document without metadata has the format and the content digest of one with an
+    # empty metadata object, and one without components has no content digest either way.
+    from datetime import UTC, datetime
+
+    from nexus_symbiote.attestation import build_statement
+    from nexus_symbiote.core.content_digest import inventory_content_digest, inventory_digests
+
+    raw = json.dumps(document).encode()
+    digests = inventory_digests(raw)
+    assert digests.spec_version == "1.0.0"
+    stated = {"metadata": {}, **document}
+    expected = inventory_content_digest(stated) if "components" in document else None
+    assert digests.content_digest == expected
+    signed_at = datetime(2026, 1, 1, tzinfo=UTC)
+    predicate = build_statement(raw, name="s", purpose="generated", signed_at=signed_at)[
+        "predicate"
+    ]
+    assert predicate.get("content_digest") == expected
+    assert predicate.get("spec_version") == (None if expected is None else "1.0.0")

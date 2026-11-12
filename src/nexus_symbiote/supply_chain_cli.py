@@ -191,7 +191,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
             with open_regular_file(Path(aibom_path)) as stream:
                 inventory_bytes = stream.read(16 * 1024 * 1024 + 1)
             document = parse_json_strict(inventory_bytes, max_bytes=16 * 1024 * 1024)
-            bom = AIBOM.model_validate(document)
+            bom = AIBOM.from_document(document)
         except (OSError, ValueError, TypeError, RecursionError):
             raise click.ClickException("invalid BOM or operator launch policy") from None
         report = verify_mcp_servers(bom, trusted_launchers=policy)
@@ -418,7 +418,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
         try:
             with open_regular_file(aibom_path) as stream:
                 data = stream.read(16 * 1024 * 1024 + 1)
-            bom = AIBOM.model_validate(parse_json_strict(data, max_bytes=16 * 1024 * 1024))
+            bom = AIBOM.from_document(parse_json_strict(data, max_bytes=16 * 1024 * 1024))
         except (OSError, ValueError, TypeError, RecursionError) as exc:
             raise click.ClickException(
                 f"{neutralize(aibom_path)} is not a valid native AIBOM file."

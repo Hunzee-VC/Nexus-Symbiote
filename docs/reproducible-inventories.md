@@ -70,7 +70,9 @@ JSON object, and only when its value has that shape. Everything else is content:
 - the tool version, the governing policy and its relaxations, and the whole coverage
   record.
 
-The document must be a JSON object with a `metadata` object and a `components` list.
+The document must be a JSON object with a `components` list. A document without a
+`metadata` key is read, as every command reads it, with an empty `metadata` object, so
+it has the content digest of the same document with `"metadata": {}`.
 The digest covers the document as it is in the file: reading an inventory into the
 model and writing it again can fill in defaults and rewrite timestamps, which makes a
 different document. A change to what is left out is a new profile version; the
@@ -199,8 +201,8 @@ against the current tree.
   than its sorted rewrite, although it records the same inventory; its serial number,
   if it has one, may not be the one this build would derive.
 - **SARIF locations depend on the working directory**, as described above.
-- **A readable inventory can lack a digest.** A document without a `metadata` object or
-  a `components` list has no content digest. A runtime snapshot binds a document only
+- **A readable inventory can lack a digest.** A document without a `components` list
+  has no content digest. A runtime snapshot binds a document only
   when its compact JSON, with every character outside ASCII escaped and each number
   counted as 24 bytes, is at most 16 MiB, it holds at most 1,000,000 values and no value
   is nested more than 64 levels deep; any other document has no canonical digest. A
