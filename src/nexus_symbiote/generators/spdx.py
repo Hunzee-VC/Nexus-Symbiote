@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 import uuid
 from dataclasses import dataclass
-from datetime import UTC
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
@@ -118,6 +118,19 @@ def _document_namespace(spdx_id: str) -> str | None:
     raise ValueError("unrecognized SPDX export document identifier")
 
 
+def _without_created(value: Any) -> Any:
+    """Recursively drop SPDX ``CreationInfo.created`` values for comparison.
+
+    ``created`` is render-time metadata, not inventory content, so it is
+    the one field allowed to differ between an export and its recovery.
+    """
+    if isinstance(value, dict):
+        return {key: _without_created(item) for key, item in value.items() if key != "created"}
+    if isinstance(value, list):
+        return [_without_created(item) for item in value]
+    return value
+
+
 @dataclass(frozen=True)
 class _DocumentIds:
     document: str
@@ -176,13 +189,16 @@ class SPDXGenerator(Generator):
             "name": aibom.metadata.tool_name,
             "summary": aibom.metadata.tool_version,
         }
-        if aibom.metadata.timestamp is None:
-            raise ValueError("export timestamps must be set")
+        # SPDX 3.0.1 requires CreationInfo.created. The native BOM carries no
+        # wall-clock timestamp by default, so fall back to the export time.
+        # This is the only wall-clock field in SPDX output: two exports of
+        # the same inventory differ only here.
+        created_at = aibom.metadata.timestamp or datetime.now(UTC)
         creation = {
             "type": "CreationInfo",
             "@id": ci,
             "specVersion": "3.0.1",
-            "created": aibom.metadata.timestamp.astimezone(UTC)
+            "created": created_at.astimezone(UTC)
             .replace(microsecond=0)
             .isoformat()
             .replace("+00:00", "Z"),
@@ -422,8 +438,12 @@ class SPDXGenerator(Generator):
             expected = _legacy.spdx_projection(recovered, namespace, native)
         else:
             raise ValueError("unsupported SPDX projection version")
-        if unordered_projection(_public_view(document)) != unordered_projection(
-            _public_view(expected)
+        # CreationInfo.created is render-time metadata: the native BOM
+        # carries no wall-clock timestamp, so a re-projection at recovery
+        # time legitimately differs only there. The embedded native document
+        # remains the source of truth for the comparison.
+        if unordered_projection(_without_created(_public_view(document))) != unordered_projection(
+            _without_created(_public_view(expected))
         ):
             raise ValueError("SPDX projection conflicts with the embedded native document")
         return recovered

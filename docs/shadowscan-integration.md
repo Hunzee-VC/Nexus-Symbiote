@@ -286,12 +286,21 @@ BOM are never trusted for this check. A passing check authenticates the
 report's producer, not the truth of its findings, and imported components keep
 declared assurance. Install the Sigstore extra for this mode.
 
-The check binds the report to its producer, not to this repository, commit or
-time. Anyone who can write to the checkout can substitute an older report, or
-another repository's report, signed by the same identity, for example one from
-before a shadow agent appeared, and regenerate the BOM from it. Give each
-repository's discovery workflow its own signer identity, and bind freshness or
-the commit separately where you need that. To accept only one report, write a
+The check binds the report to its producer and to the exact report bytes, and
+the BOM records the verification outcome (`metadata.completeness.discovery_verification`):
+`verified` with the signer identity and issuer, or `unverified`, together with
+the report digest, the report's own run time, and the repository/commit the
+report carries — currently both `unknown`, because the report format carries
+neither. It does not bind the report to this repository or commit. Anyone who
+can write to the checkout can substitute an older report, or another
+repository's report, signed by the same identity, for example one from before a
+shadow agent appeared, and regenerate the BOM from it. Give each repository's
+discovery workflow its own signer identity, and bind the commit separately
+where you need that. Unsigned evidence warns loudly on `import-shadowscan`,
+`validate` and `risk`, and fails in CI (or with `--fail-on-unsigned-discovery`)
+unless the operator explicitly passes `--allow-unsigned-discovery`.
+
+To accept only one report, write a
 version 2 entry (`"kind": "sigstore-message-signature"`) with `expected_sha256`
 set to the report's SHA-256: the check then also fails for other report bytes,
 however they are signed. The report needs such a signature entry: a
@@ -300,7 +309,6 @@ not read (it reads the first of `.shadowscan/report.json`,
 `shadowscan-report.json` and `shadowscan.json` that exists), is reported as an
 unused policy entry by `scan` and `validate --project`
 ([model integrity](model-integrity.md#operator-signature-policy)).
-
 ### Verify the native import and its producer
 
 For a BOM written by `import-shadowscan`, reproduce the direct import and compare
@@ -319,6 +327,13 @@ nexus-symbiote verify-discovery agentbom.json shadowscan.json \
   --bundle shadowscan.json.sigstore --signer-identity "$EXPECTED_IDENTITY" \
   --issuer "$EXPECTED_ISSUER"
 ```
+
+The same verification can run at import time: `import-shadowscan --bundle
+shadowscan.json.sigstore --signer-identity "$EXPECTED_IDENTITY" --issuer
+"$EXPECTED_ISSUER"` records the evidence as `verified` with the signer identity
+and issuer in the BOM. Without `--bundle` the import records `unverified`;
+`validate` and `risk` then warn loudly, and fail in CI (or with
+`--fail-on-unsigned-discovery`) unless `--allow-unsigned-discovery` is given.
 
 The signed mode also verifies the direct native projection. Use the same importer
 version. The comparison ignores JSON object key ordering and the BOM’s locally

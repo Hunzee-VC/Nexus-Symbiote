@@ -227,20 +227,21 @@ class CycloneDXGenerator(Generator):
     def _metadata(
         self, aibom: AIBOM, native: dict[str, Any], subject: AnyComponent | None
     ) -> dict[str, Any]:
-        meta: dict[str, Any] = {
-            "timestamp": (
-                aibom.metadata.timestamp.isoformat() if aibom.metadata.timestamp else None
-            ),
-            "tools": {
-                "components": [
-                    {
-                        "type": "application",
-                        "name": aibom.metadata.tool_name,
-                        "version": aibom.metadata.tool_version or "unknown",
-                        "publisher": aibom.metadata.tool_vendor,
-                    }
-                ]
-            },
+        # The native BOM carries no wall-clock timestamp by default; omit
+        # the field rather than emitting null, which the CycloneDX schema
+        # rejects. An explicitly set observation timestamp is preserved.
+        meta: dict[str, Any] = {}
+        if aibom.metadata.timestamp is not None:
+            meta["timestamp"] = aibom.metadata.timestamp.isoformat()
+        meta["tools"] = {
+            "components": [
+                {
+                    "type": "application",
+                    "name": aibom.metadata.tool_name,
+                    "version": aibom.metadata.tool_version or "unknown",
+                    "publisher": aibom.metadata.tool_vendor,
+                }
+            ]
         }
         if aibom.metadata.authors:
             meta["authors"] = [{"name": a} for a in aibom.metadata.authors]

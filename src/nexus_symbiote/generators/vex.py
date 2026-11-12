@@ -48,7 +48,8 @@ class VEXGenerator(Generator):
 
     def generate(self, bom: AIBOM) -> dict[str, Any]:
         # The same content-derived serial as the inventory exports, so the BOM-Link
-        # names the CycloneDX export of this inventory.
+        # names the CycloneDX export of this inventory. prepare() derives the
+        # serial from content (timestamps excluded); it is not wall-clock.
         prepare(bom)
         serial = str(bom.metadata.serial_number)
         stamp = bom.metadata.timestamp

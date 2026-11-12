@@ -1093,6 +1093,52 @@ class AIBOMDiffer:
                 f"ShadowScan projection limitations no longer reported: "
                 f"{_listing((before_limits - after_limits).elements())}.",
             )
+
+        before_verification = (
+            old.discovery_verification.model_dump(mode="json")
+            if old.discovery_verification is not None
+            else None
+        )
+        after_verification = (
+            new.discovery_verification.model_dump(mode="json")
+            if new.discovery_verification is not None
+            else None
+        )
+        for verification in (before_verification, after_verification):
+            if isinstance(verification, dict):
+                # The exact report digest and the report's own run time change
+                # on every rerun; the content digest above is the drift signal,
+                # and the digest stays authenticated by verify-discovery. The
+                # verification status itself still compares: unverified becoming
+                # verified is a change in what the evidence establishes.
+                verification.pop("report_digest", None)
+                verification.pop("report_time", None)
+        if before_verification != after_verification:
+            if (
+                isinstance(before_verification, dict)
+                and isinstance(after_verification, dict)
+                and before_verification.get("status") == "unverified"
+                and after_verification.get("status") == "verified"
+            ):
+                improvement(
+                    "discovery_verification",
+                    "ShadowScan discovery evidence is now signature-verified.",
+                )
+            elif (
+                isinstance(before_verification, dict)
+                and isinstance(after_verification, dict)
+                and before_verification.get("status") == "verified"
+                and after_verification.get("status") == "unverified"
+            ):
+                regression(
+                    "discovery_verification",
+                    "ShadowScan discovery evidence is no longer signature-verified.",
+                )
+            else:
+                regression(
+                    "discovery_verification",
+                    "ShadowScan discovery verification record changed.",
+                )
         return {
             "source_report_digest",
             "source_report_content_digest",
@@ -1102,6 +1148,7 @@ class AIBOMDiffer:
             "source_unmapped_count",
             "source_unmapped_indexes",
             "source_projection_limitations",
+            "discovery_verification",
         }
 
     @staticmethod

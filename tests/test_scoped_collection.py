@@ -95,7 +95,15 @@ def test_complete_producer_report_preserves_partial_projection(tmp_path):
     assert claim.source_report_status == "complete" and not claim.source_unmapped_count
     assert claim.source_projection_limitations
     verified = runner.invoke(
-        main, ["validate", str(output), "--project", str(root), "--no-project-policy"]
+        main,
+        [
+            "validate",
+            str(output),
+            "--project",
+            str(root),
+            "--no-project-policy",
+            "--allow-unsigned-discovery",
+        ],
     )
     assert verified.exit_code == 0, verified.output
     assets = [c for c in bom.components if c.bom_ref.startswith("shadowscan:")]

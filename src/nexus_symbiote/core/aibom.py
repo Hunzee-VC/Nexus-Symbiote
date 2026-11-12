@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import errno
 import json
-import uuid
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, get_args
 
@@ -170,16 +168,22 @@ class AIBOM(BaseModel):
         return results
 
     def finalize(self) -> None:
-        if self.metadata.timestamp is None:
-            self.metadata.timestamp = datetime.now(UTC)
+        """Fill the deterministic tool stamp only.
+
+        The serial number and the observation timestamp are export concerns
+        owned by :func:`nexus_symbiote.generators._common.prepare`: the
+        serial is a content-derived uuid5, and no wall-clock timestamp is
+        stamped here, so two exports of the same inventory are identical.
+        A timestamp set explicitly by a caller is preserved untouched.
+        """
         if self.metadata.tool_version is None:
             self.metadata.tool_version = __version__
-        if self.metadata.serial_number is None:
-            self.metadata.serial_number = f"urn:uuid:{uuid.uuid4()}"
 
     def to_dict(self) -> dict[str, Any]:
-        self.finalize()
-        return self.model_dump(mode="json", exclude_none=True)
+        from nexus_symbiote.generators._common import native_document, prepare
+
+        prepare(self)
+        return native_document(self)
 
     def to_json(self, indent: int = 2) -> str:
         return json.dumps(self.to_dict(), indent=indent, default=str)

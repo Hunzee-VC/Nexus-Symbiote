@@ -352,6 +352,11 @@ nexus-symbiote import-shadowscan [OPTIONS] REPORT_PATH
 | `-o`, `--output` `PATH` | Output AIBOM path (required) |
 | `-f`, `--format` `json\|cyclonedx\|spdx\|sarif` | Output format (default: json). sarif is refused: it cannot carry imported coverage. |
 | `--report-only` | Emit imported claims without a CI gate failure |
+| `--bundle` `FILE` | Verify the report producer's Sigstore bundle over the exact report bytes; requires `--signer-identity` and `--issuer`, and records the evidence as verified in the BOM |
+| `--signer-identity` `TEXT` | Expected report signer, with `--bundle` and `--issuer` |
+| `--issuer` `TEXT` | Expected OIDC issuer, with `--bundle` and `--signer-identity` |
+| `--fail-on-unsigned-discovery` | Exit with status 1 when the imported discovery evidence is unverified |
+| `--allow-unsigned-discovery` | Accept unverified discovery evidence explicitly (still warns); required in CI |
 
 ### `init`
 
@@ -384,6 +389,8 @@ nexus-symbiote risk [OPTIONS] AIBOM_PATH
 | `--fail-on-severity` `critical\|high\|medium\|low\|info\|none` | Fail on any finding at or above this severity (default: from policy, built-in critical); none disables it. |
 | `--no-project-policy` | Use built-in policy without reading configuration from the target. |
 | `--require-discovery-signature` | Require the operator signature policy to verify any ShadowScan report the inventory records or the project contains, whatever the project policy says; requires --project. JSON output reports the result as `discovery_producer` |
+| `--fail-on-unsigned-discovery` | Exit with status 1 when the BOM's ShadowScan evidence is unverified |
+| `--allow-unsigned-discovery` | Accept unverified discovery evidence explicitly (still warns); required in CI |
 
 The report gives the score, the assessment basis, coverage, the severity counts and
 the top 15 findings (`--json-output` lists all). Under `Gate: PASSED` or
@@ -394,7 +401,6 @@ with, the first 20 of the inventory's collection failures (and how many more
 `metadata.completeness.scan_failures` holds), its other coverage gaps, and how many
 findings the project policy suppressed. When unsigned ShadowScan evidence was accepted,
 the report says `Discovery producer: not verified (unsigned evidence accepted)`.
-
 ### `runtime keygen`
 
 Create an Ed25519 key pair without overwriting existing files.
@@ -566,6 +572,8 @@ nexus-symbiote validate [OPTIONS] AIBOM_PATH
 | `--skip-integrity` | Check completeness only and report integrity as skipped, for a repository whose models cannot be signed yet. The skip is printed and recorded in `--json-output`. |
 | `--json-output` | Print the validation report as JSON. |
 | `--require-discovery-signature` | Require the operator signature policy to verify any ShadowScan report the inventory records or the project contains, whatever the project policy says; requires --project |
+| `--fail-on-unsigned-discovery` | Exit with status 1 when the BOM's ShadowScan evidence is unverified |
+| `--allow-unsigned-discovery` | Accept unverified discovery evidence explicitly (still warns); required in CI |
 
 Every report states its assessment basis. Without `--project` it is `supplied-bom`:
 only the inventory's own claims were checked, its coverage claim and its internal
@@ -582,7 +590,6 @@ or signature could be verified. When the inventory carries ShadowScan discovery
 evidence that no producer check covered, the report says
 `Discovery producer: not verified (unsigned evidence accepted)`. The report ends with
 `Validation: PASSED` or `Validation: FAILED`.
-
 ### `verify-artifact`
 
 Verify a local artifact's digest and optionally its Sigstore bundle.
@@ -598,6 +605,8 @@ nexus-symbiote verify-artifact [OPTIONS] ARTIFACT_PATH
 | `--bundle` `FILE` | Optional Sigstore bundle |
 | `--signer-identity` `TEXT` | Expected Sigstore signing identity |
 | `--issuer` `TEXT` | Expected Sigstore OIDC issuer |
+| `--trust-root` `FILE` | Explicit Sigstore trusted_root.json file (or directory holding one); overrides `NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT` and the user cache |
+| `--trust-root-sha256` `TEXT` | Pinned SHA-256 (sha256:\<hex\>) the explicit trust root must match |
 
 A malformed `--sha256`, or a `--bundle`, `--signer-identity` and `--issuer` set that
 is incomplete, is a usage error (exit 2).
@@ -616,6 +625,8 @@ nexus-symbiote verify-discovery [OPTIONS] AIBOM_PATH REPORT_PATH
 | `--bundle` `FILE` | Verify the report producer's Sigstore bundle and the direct native projection. |
 | `--signer-identity` `TEXT` | Expected report signer from operator policy. |
 | `--issuer` `TEXT` | Expected OIDC issuer from operator policy. |
+| `--trust-root` `FILE` | Explicit Sigstore trusted_root.json file (or directory holding one); overrides `NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT` and the user cache |
+| `--trust-root-sha256` `TEXT` | Pinned SHA-256 (sha256:\<hex\>) the explicit trust root must match |
 
 ### `verify-live`
 

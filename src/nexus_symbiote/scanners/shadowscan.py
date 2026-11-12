@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +21,7 @@ from nexus_symbiote.core.models import (
     AIBOMMetadata,
     AnyComponent,
     CompletenessClaim,
+    DiscoveryVerification,
     MCPServerComponent,
     ModelComponent,
     RiskAssessment,
@@ -66,6 +67,21 @@ class ImportedReport:
     unmapped_indexes: list[int] = field(default_factory=list)
     limitations: list[str] = field(default_factory=list)
     unrecognized: Counter[str] = field(default_factory=Counter)
+    # Signature-verification outcome for this report, recorded in the BOM.
+    # ``None`` only for reports built without going through the importer.
+    discovery_verification: DiscoveryVerification | None = None
+    # Path the report was read from, as supplied; ``None`` for parsed bytes.
+    source_path: str | None = None
+
+    def with_verification(self, verification: DiscoveryVerification) -> ImportedReport:
+        """Return this report carrying a verified discovery record.
+
+        The record must bind the same exact report bytes; anything else is a
+        substitution, not a verification.
+        """
+        if verification.report_digest != self.digest:
+            raise ValueError("Discovery verification binds a different report digest")
+        return replace(self, discovery_verification=verification)
 
     def to_native_bom(self) -> AIBOM:
         """Reproduce a direct native import without promoting source assertions."""
@@ -91,6 +107,8 @@ class ImportedReport:
             source_report_status=self.source_status,
             source_unmapped_count=self.unmapped_count,
             source_unmapped_indexes=self.unmapped_indexes,
+            source_report_path=self.source_path,
+            discovery_verification=self.discovery_verification,
             assurance_level=AssuranceLevel.DECLARED,
             collectors_requested=["shadowscan"],
             collectors_completed=["shadowscan"],
@@ -151,6 +169,87 @@ def _unrecognized(
     if surface is not None and surface not in _ALLOWED_SURFACES:
         found.append("a surface")
     return found
+
+
+def _clean_binding(value: Any) -> str | None:
+    """One binding value from a report, or ``None`` when it is absent or unsafe.
+
+    A binding is a short string without control characters. Anything else is
+    not a repository or commit the report can be bound to.
+    """
+    if not isinstance(value, str) or not value or len(value) > 4096:
+        return None
+    if any(ord(char) < 0x20 or ord(char) == 0x7F for char in value):
+        return None
+    return value
+
+
+def _report_time(value: Any) -> str | None:
+    if isinstance(value, str) and _TIMESTAMP.fullmatch(value):
+        return value
+    return None
+
+
+def _report_binding(data: dict[str, Any]) -> tuple[str, str, str]:
+    """Repository, commit and time the report itself carries; ``"unknown"`` when absent.
+
+    Native reports carry their run times (``finished_at``, else ``started_at``)
+    and no repository or commit; CycloneDX reports carry ``metadata.timestamp``
+    and may carry ``shadowscan:repository`` / ``shadowscan:commit`` properties.
+    Nothing is invented: a field the report does not carry stays unknown, and
+    the digest in the verification record is what binds those exact bytes.
+    """
+    repository = _clean_binding(data.get("repository"))
+    commit = _clean_binding(data.get("commit"))
+    report_time = _report_time(data.get("finished_at")) or _report_time(data.get("started_at"))
+    if data.get("bomFormat") == "CycloneDX":
+        meta = data.get("metadata")
+        if isinstance(meta, dict):
+            props = _properties(meta.get("properties", []))
+            repository = _clean_binding(props.get("shadowscan:repository")) or repository
+            commit = _clean_binding(props.get("shadowscan:commit")) or commit
+            report_time = _report_time(meta.get("timestamp")) or report_time
+    return repository or "unknown", commit or "unknown", report_time or "unknown"
+
+
+def verify_discovery_report(
+    record: DiscoveryVerification,
+    bundle_bytes: bytes,
+    expected_identity: str,
+    expected_issuer: str,
+) -> DiscoveryVerification:
+    """Verify a Sigstore bundle over the exact report bytes a record binds.
+
+    Returns a ``verified`` copy of the record carrying the signer identity and
+    issuer. Raises ValueError when the bundle does not verify, names another
+    signer or issuer, or the Sigstore extra is missing; the caller must not
+    record a verified outcome in any of those cases.
+    """
+    from nexus_symbiote.utils.crypto import SIGSTORE_MISSING, verify_sigstore_digest
+
+    if record.report_digest is None:
+        raise ValueError("Discovery verification record has no report digest to verify")
+    verified = verify_sigstore_digest(
+        record.report_digest, bundle_bytes, expected_identity, expected_issuer
+    )
+    if not verified.verified:
+        if verified.error == SIGSTORE_MISSING:
+            raise ValueError(SIGSTORE_MISSING)
+        raise ValueError("ShadowScan report signature or signer policy verification failed")
+    # verify_sigstore_digest enforces the expected identity and issuer as its
+    # verification policy, so a True result already names that signer; the
+    # recorded identity is the operator-supplied expectation it enforced.
+    return DiscoveryVerification(
+        status="verified",
+        method="sigstore",
+        report_digest=record.report_digest,
+        report_content_digest=record.report_content_digest,
+        signer_identity=expected_identity,
+        issuer=expected_issuer,
+        repository=record.repository,
+        commit=record.commit,
+        report_time=record.report_time,
+    )
 
 
 def _risks(level: Any, shadow: Any) -> list[RiskAssessment]:
@@ -286,6 +385,7 @@ class ShadowScanImporter(Scanner):
                 result.source_report_status = imported.source_status
                 result.source_unmapped_count = imported.unmapped_count
                 result.source_unmapped_indexes = imported.unmapped_indexes
+                result.discovery_verification = imported.discovery_verification
                 result.surfaces_scanned.extend(("shadowscan:report", relative))
                 result.source_projection_limitations = list(imported.limitations)
                 if imported.unmapped_count:
@@ -324,7 +424,9 @@ class ShadowScanImporter(Scanner):
             raw = files.read_bytes(report_path.name)
         if raw is None or failures:
             raise ValueError("ShadowScan report unavailable or outside safe read limits")
-        return self._import_bytes(raw)
+        imported = self._import_bytes(raw)
+        imported.source_path = str(report_path)
+        return imported
 
     def parse_report(self, text: str | bytes) -> ImportedReport:
         """Parse the exact bounded bytes used for digest and signature verification."""
@@ -342,6 +444,18 @@ class ShadowScanImporter(Scanner):
         else:
             result = self._from_native(data, digest)
         result.content_digest = report_content_digest(data)
+        # The import-time verification outcome, bound to these exact bytes and
+        # to whatever repository/commit/time the report itself carries. No
+        # signature is checked here, so an import without --bundle records
+        # ``unverified``; that is the outcome, not a missing field.
+        repository, commit, report_time = _report_binding(data)
+        result.discovery_verification = DiscoveryVerification(
+            report_digest=digest,
+            report_content_digest=result.content_digest,
+            repository=repository,
+            commit=commit,
+            report_time=report_time,
+        )
         # Discovery is not a verified, complete BOM even when source scan is complete.
         result.limitations.append(
             "ShadowScan discovery is a source claim; artifact integrity and full BOM coverage are unverified"

@@ -8,7 +8,6 @@ import hashlib
 import json
 import re
 import uuid
-from datetime import UTC, datetime
 from typing import Any, Literal
 
 from nexus_symbiote import __version__
@@ -62,15 +61,30 @@ def content_digest(value: Any) -> str:
 
 
 def prepare(bom: AIBOM) -> AIBOM:
-    """Fill missing export metadata once; never reset an existing observation timestamp."""
-    if bom.metadata.timestamp is None:
-        bom.metadata.timestamp = datetime.now(UTC)
-    if bom.metadata.timestamp.tzinfo is None:
+    """Fill missing export metadata once; never reset an existing observation timestamp.
+
+    The serial number is a uuid5 over the inventory content only: the
+    observation timestamps (``metadata.timestamp`` and the completeness
+    claim's ``timestamp``) are excluded from the digest, so re-exporting
+    the same inventory at a different time keeps the same serial. No
+    wall-clock timestamp is stamped here, so two exports of the same
+    inventory are byte-identical; a timestamp set explicitly by a caller
+    is preserved. Formats whose schema requires a timestamp (SPDX
+    ``CreationInfo.created``) supply it at render time.
+    """
+    if bom.metadata.timestamp is not None and bom.metadata.timestamp.tzinfo is None:
         raise ValueError("export timestamps must include a timezone")
     if bom.metadata.tool_version is None:
         bom.metadata.tool_version = __version__
     if bom.metadata.serial_number is None:
         body = native_document(bom)
+        metadata = {key: value for key, value in body["metadata"].items() if key != "timestamp"}
+        completeness = metadata.get("completeness")
+        if isinstance(completeness, dict):
+            metadata["completeness"] = {
+                key: value for key, value in completeness.items() if key != "timestamp"
+            }
+        body["metadata"] = metadata
         bom.metadata.serial_number = "urn:uuid:" + str(uuid.uuid5(NAMESPACE, content_digest(body)))
     ids = [c.bom_ref for c in bom.components]
     if len(ids) != len(set(ids)):

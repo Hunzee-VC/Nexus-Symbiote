@@ -346,7 +346,14 @@ def test_every_static_command_runs_under_the_offline_guard(tmp_path):
     run("vex", str(native), "-o", str(tmp_path / "vex.json"))
     run("baseline", str(project), "-o", str(tmp_path / "baseline.json"), expect=(0, 1))
     run("verify-artifact", "system_prompt.md", "--project", str(project), "--sha256", digest)
-    run("import-shadowscan", str(SHADOWSCAN_REPORT), "--report-only", "-o", str(imported))
+    run(
+        "import-shadowscan",
+        str(SHADOWSCAN_REPORT),
+        "--report-only",
+        "--allow-unsigned-discovery",
+        "-o",
+        str(imported),
+    )
     run("verify-discovery", str(imported), str(SHADOWSCAN_REPORT), "--projection")
     run("runtime", "keygen", "--private-key", str(private), "--public-key", str(public))
     signed = tmp_path / "signed.json"

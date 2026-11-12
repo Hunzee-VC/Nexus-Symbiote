@@ -1307,6 +1307,31 @@
           "title": "Source Unmapped Indexes",
           "type": "array"
         },
+        "source_report_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path of the imported report as supplied at import, or repo-relative under scan",
+          "title": "Source Report Path"
+        },
+        "discovery_verification": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DiscoveryVerification"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Signature-verification outcome for the imported discovery report, with its digest and repo/commit/time binding; absent on BOMs written before this record existed"
+        },
         "scanner_status": {
           "additionalProperties": {
             "type": "string"
@@ -1638,6 +1663,105 @@
         "environment"
       ],
       "title": "DeploymentProfile",
+      "type": "object"
+    },
+    "DiscoveryVerification": {
+      "additionalProperties": false,
+      "description": "How imported ShadowScan discovery evidence was authenticated at import.\n\nThe record binds the imported report to its exact bytes (``report_digest``),\nits normalized content (``report_content_digest``), and whatever\nrepository/commit/time the report itself carries. The current ShadowScan\nreport format carries no repository or commit, so both read ``\"unknown\"``\nthere \u2014 never a fabricated value \u2014 and ``report_time`` is the report's own\n``finished_at`` (else ``started_at``), or ``\"unknown\"``. Import time is the\nBOM's ``metadata.timestamp``. A ``verified`` record names the signer\nidentity and issuer whose Sigstore bundle was checked over the exact\nreport bytes; ``unverified`` means no such check ran at import.",
+      "properties": {
+        "status": {
+          "default": "unverified",
+          "enum": [
+            "verified",
+            "unverified",
+            "not-applicable"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "method": {
+          "default": "none",
+          "enum": [
+            "sigstore",
+            "none"
+          ],
+          "title": "Method",
+          "type": "string"
+        },
+        "report_digest": {
+          "anyOf": [
+            {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "SHA-256 of the exact imported report bytes",
+          "title": "Report Digest"
+        },
+        "report_content_digest": {
+          "anyOf": [
+            {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "SHA-256 of the RFC 8785 canonical report without run-event fields",
+          "title": "Report Content Digest"
+        },
+        "signer_identity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Sigstore identity that signed the report, when verified",
+          "title": "Signer Identity"
+        },
+        "issuer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "OIDC issuer of the report signer, when verified",
+          "title": "Issuer"
+        },
+        "repository": {
+          "default": "unknown",
+          "description": "Repository the report claims, or 'unknown' when it carries none",
+          "title": "Repository",
+          "type": "string"
+        },
+        "commit": {
+          "default": "unknown",
+          "description": "Commit the report claims, or 'unknown' when it carries none",
+          "title": "Commit",
+          "type": "string"
+        },
+        "report_time": {
+          "default": "unknown",
+          "description": "Report's own finished_at (else started_at), or 'unknown'",
+          "title": "Report Time",
+          "type": "string"
+        }
+      },
+      "title": "DiscoveryVerification",
       "type": "object"
     },
     "EvidenceRecord": {
