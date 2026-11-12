@@ -20,8 +20,8 @@ from typing import Any
 from urllib.parse import quote
 
 from nexus_symbiote import __version__
-from nexus_symbiote.core.aibom import AIBOM
-from nexus_symbiote.core.canonical import content_digest, prepare
+from nexus_symbiote.core.aibom import AIBOM, prepare
+from nexus_symbiote.core.canonical import content_digest
 from nexus_symbiote.core.enums import RiskSeverity
 from nexus_symbiote.core.models import AnyComponent, CompletenessClaim
 from nexus_symbiote.generators._common import (

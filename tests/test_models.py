@@ -6,8 +6,7 @@ import json
 
 import pytest
 
-from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
-from nexus_symbiote.core.canonical import prepare
+from nexus_symbiote.core.aibom import AIBOM, DependencyEdge, prepare
 from nexus_symbiote.core.enums import (
     AutonomyLevel,
     CapabilityClass,

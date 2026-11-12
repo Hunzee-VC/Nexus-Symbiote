@@ -16,8 +16,8 @@ from typing import Any
 from click.testing import CliRunner
 
 from nexus_symbiote.cli import main
-from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
-from nexus_symbiote.core.canonical import NAMESPACE, native_document, prepare
+from nexus_symbiote.core.aibom import AIBOM, DependencyEdge, native_document, prepare
+from nexus_symbiote.core.canonical import NAMESPACE
 from nexus_symbiote.core.enums import RiskSeverity
 from nexus_symbiote.core.models import (
     AgentComponent,

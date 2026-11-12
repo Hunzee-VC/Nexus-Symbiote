@@ -11,8 +11,8 @@ from typing import Any
 
 from referencing.exceptions import Unresolvable
 
-from nexus_symbiote.core.aibom import AIBOM
-from nexus_symbiote.core.canonical import json_text, native_document, prepare
+from nexus_symbiote.core.aibom import AIBOM, native_document, prepare
+from nexus_symbiote.core.canonical import json_text
 from nexus_symbiote.core.enums import ComponentType
 from nexus_symbiote.core.models import (
     AgentComponent,

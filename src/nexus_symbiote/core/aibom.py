@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import errno
 import json
+import uuid
 from pathlib import Path
 from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from nexus_symbiote import __version__
+from nexus_symbiote.core.canonical import NAMESPACE, content_digest, json_text
 from nexus_symbiote.core.enums import ComponentType
 from nexus_symbiote.core.models import (
     MAX_REFERENCE_CHARS,
@@ -171,7 +173,7 @@ class AIBOM(BaseModel):
         """Fill the deterministic tool stamp only.
 
         The serial number and the observation timestamp are export concerns
-        owned by :func:`nexus_symbiote.core.canonical.prepare`: the
+        owned by :func:`prepare`: the
         serial is a content-derived uuid5, and no wall-clock timestamp is
         stamped here, so two exports of the same inventory are identical.
         A timestamp set explicitly by a caller is preserved untouched.
@@ -180,8 +182,6 @@ class AIBOM(BaseModel):
             self.metadata.tool_version = __version__
 
     def to_dict(self) -> dict[str, Any]:
-        from nexus_symbiote.core.canonical import native_document, prepare
-
         prepare(self)
         return native_document(self)
 
@@ -270,3 +270,54 @@ class AIBOM(BaseModel):
                 else None
             ),
         }
+
+
+_SERIAL_EXCLUDED_CLAIM_FIELDS = frozenset({"timestamp", "source_report_path"})
+
+
+def prepare(bom: AIBOM) -> AIBOM:
+    """Fill missing export metadata once; never reset an existing observation timestamp.
+
+    The serial number is a uuid5 over the inventory content only: the
+    observation timestamps (``metadata.timestamp`` and the completeness
+    claim's ``timestamp``) and the location an imported report was read
+    from (``source_report_path``) are excluded from the digest, so
+    re-exporting the same inventory at a different time or from a
+    different checkout keeps the same serial. Two documents that differ
+    only in those fields therefore share a serial by design. No
+    wall-clock timestamp is stamped here, so two exports of the same
+    inventory are byte-identical; a timestamp set explicitly by a caller
+    is preserved. Formats whose schema requires a timestamp (SPDX
+    ``CreationInfo.created``) supply it at render time.
+    """
+    if bom.metadata.timestamp is not None and bom.metadata.timestamp.tzinfo is None:
+        raise ValueError("export timestamps must include a timezone")
+    if bom.metadata.tool_version is None:
+        bom.metadata.tool_version = __version__
+    if bom.metadata.serial_number is None:
+        body = native_document(bom)
+        metadata = {key: value for key, value in body["metadata"].items() if key != "timestamp"}
+        completeness = metadata.get("completeness")
+        if isinstance(completeness, dict):
+            metadata["completeness"] = {
+                key: value
+                for key, value in completeness.items()
+                if key not in _SERIAL_EXCLUDED_CLAIM_FIELDS
+            }
+        body["metadata"] = metadata
+        bom.metadata.serial_number = "urn:uuid:" + str(uuid.uuid5(NAMESPACE, content_digest(body)))
+    ids = [c.bom_ref for c in bom.components]
+    if len(ids) != len(set(ids)):
+        raise ValueError("duplicate component references")
+    known = set(ids)
+    for edge in bom.dependencies:
+        if edge.source_ref not in known or edge.target_ref not in known:
+            raise ValueError("dependency references an unknown component")
+    return bom
+
+
+def native_document(bom: AIBOM) -> dict[str, Any]:
+    document = bom.model_dump(mode="json", exclude_none=True)
+    document["components"] = sorted(document["components"], key=lambda c: c["bom_ref"])
+    document["dependencies"] = sorted(document["dependencies"], key=json_text)
+    return document

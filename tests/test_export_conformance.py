@@ -9,8 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
-from nexus_symbiote.core.canonical import native_document
+from nexus_symbiote.core.aibom import AIBOM, DependencyEdge, native_document
 from nexus_symbiote.core.enums import RiskSeverity
 from nexus_symbiote.core.models import (
     A2AClientComponent,

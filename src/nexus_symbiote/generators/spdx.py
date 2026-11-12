@@ -19,14 +19,8 @@ from urllib.parse import unquote, urlsplit
 
 from referencing.exceptions import Unresolvable
 
-from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
-from nexus_symbiote.core.canonical import (
-    NAMESPACE,
-    content_digest,
-    json_text,
-    native_document,
-    prepare,
-)
+from nexus_symbiote.core.aibom import AIBOM, DependencyEdge, native_document, prepare
+from nexus_symbiote.core.canonical import NAMESPACE, content_digest, json_text
 from nexus_symbiote.core.enums import ComponentType
 from nexus_symbiote.core.models import AgentComponent, AnyComponent, ModelComponent
 from nexus_symbiote.generators import _legacy

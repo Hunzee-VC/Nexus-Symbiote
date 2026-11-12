@@ -7,8 +7,7 @@ import json
 
 import pytest
 
-from nexus_symbiote.core.aibom import AIBOM
-from nexus_symbiote.core.canonical import native_document
+from nexus_symbiote.core.aibom import AIBOM, native_document
 from nexus_symbiote.core.enums import AssuranceLevel, TrustTier
 from nexus_symbiote.core.models import RegistryEntryComponent
 from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator

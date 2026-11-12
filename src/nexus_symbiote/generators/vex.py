@@ -16,8 +16,8 @@ import re
 import uuid
 from typing import Any
 
-from nexus_symbiote.core.aibom import AIBOM
-from nexus_symbiote.core.canonical import NAMESPACE, content_digest, prepare
+from nexus_symbiote.core.aibom import AIBOM, prepare
+from nexus_symbiote.core.canonical import NAMESPACE, content_digest
 from nexus_symbiote.core.models import ModelComponent
 from nexus_symbiote.generators._common import (
     OMITTED_IMPORTED_FINDINGS,

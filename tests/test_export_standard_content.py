@@ -10,8 +10,7 @@ from typing import Any
 
 import pytest
 
-from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
-from nexus_symbiote.core.canonical import native_document
+from nexus_symbiote.core.aibom import AIBOM, DependencyEdge, native_document
 from nexus_symbiote.core.models import (
     AgentComponent,
     CompletenessClaim,

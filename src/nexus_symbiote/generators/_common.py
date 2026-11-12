@@ -7,8 +7,8 @@ import binascii
 import re
 from typing import Any, Literal
 
-from nexus_symbiote.core.aibom import AIBOM
-from nexus_symbiote.core.canonical import content_digest, json_text, native_document
+from nexus_symbiote.core.aibom import AIBOM, native_document
+from nexus_symbiote.core.canonical import content_digest, json_text
 from nexus_symbiote.core.enums import ComponentType
 from nexus_symbiote.core.hashing import extract_version_pin, parse_json_strict
 from nexus_symbiote.core.models import AnyComponent, CompletenessClaim, RegistryEntryComponent
