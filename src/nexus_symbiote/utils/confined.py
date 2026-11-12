@@ -690,6 +690,7 @@ class ConfinedCollection:
                     self._case_sensitive_dirs.add(dir_key)
                     return True
                 except OSError:
+                    # Any other failure decides nothing; the listing below does.
                     pass
         stamp = (info.st_mtime_ns, info.st_ctime_ns)
         cached = self._exact_names.get(dir_key)

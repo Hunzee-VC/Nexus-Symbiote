@@ -3,6 +3,7 @@ byte limit of a streamed skill asset."""
 
 from __future__ import annotations
 
+import contextlib
 import os
 import string
 import subprocess
@@ -42,14 +43,12 @@ def _write(root: Path, relative: str, text: str) -> None:
     dir_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
     try:
         for part in parts[:-1]:
-            try:
+            with contextlib.suppress(FileExistsError):
                 os.mkdir(part, dir_fd=dir_fd)
-            except FileExistsError:
-                pass
             next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY, dir_fd=dir_fd)
             os.close(dir_fd)
             dir_fd = next_fd
-        file_fd = os.open(parts[-1], os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644, dir_fd=dir_fd)
+        file_fd = os.open(parts[-1], os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600, dir_fd=dir_fd)
         with os.fdopen(file_fd, "w", encoding="utf-8") as stream:
             stream.write(text)
     finally:
