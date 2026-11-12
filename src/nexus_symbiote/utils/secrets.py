@@ -41,7 +41,7 @@ _DISTINCT_SHAPES = (
     r"gh[oprsu]_[A-Za-z0-9]{36,}+|github_pat_\w{22,}+|glpat-[\w-]{20,}+"
     r"|xox[abeoprs]-[\w-]{10,}+|[rs]k_(?:live|test)_[A-Za-z0-9]{16,}+"
     r"|(?:AKIA|ASIA)[A-Z0-9]{16}(?![A-Za-z0-9])|AIza[\w-]{35}|ya29\.[\w-]{20,}+"
-    r"|npm_[A-Za-z0-9]{36}|pypi-[\w-]{50,}+"
+    r"|npm_[A-Za-z0-9]{36}|pypi-[\w-]{50,}+|hf_[A-Za-z0-9]{30,}+"
 )
 # A JWT can fail only at its first dot, so it starts only at a word boundary: started
 # after every "_" its first segment would be rescanned once per position.
@@ -54,6 +54,27 @@ TOKEN_SHAPE = re.compile(
 )
 # Names matched against other evidence keep sk-... forms; a distinct token is redacted.
 _NAMED_TOKEN = re.compile(rf"(?<![\w-]){_JWT}|(?<![A-Za-z0-9])(?:{_DISTINCT_SHAPES})")
+_RAW_AUTH_HEADER = re.compile(
+    r"(?i)(\b(?:proxy-)?authorization[\"']?\s{0,8}[:=]\s{0,8}[\"']?)([A-Za-z0-9_+/=.~:-]{8,}+)"
+)
+_AUTH_SCHEMES = frozenset(
+    {
+        "bearer",
+        "basic",
+        "token",
+        "bot",
+        "apikey",
+        "api-key",
+        "digest",
+        "negotiate",
+        "aws4-hmac-sha256",
+    }
+)
+_COOKIE_HEADER = re.compile(r"(?i)(\b(?:set-)?cookie[\"']?\s{0,8}[:=]\s{0,8}[\"']?)([^\r\n\"']++)")
+_COOKIE_PAIR = re.compile(r"([A-Za-z0-9_.-]{1,64}=)([^\s;,\"']++)")
+_COOKIE_ATTRS = frozenset(
+    {"path", "domain", "samesite", "max-age", "expires", "priority", "version"}
+)
 _CREDENTIAL_NAME = re.compile(
     r"(?i)key|token|secret|pass|pwd|credential|auth|cookie|session|private|signature|cert"
     r"|dsn|connection_?str|conn_?str|jwt|bearer|header|(?:^|_)pat(?:_|$)"
@@ -194,6 +215,27 @@ def _redact_private_keys(value: str) -> str:
     return "".join(parts)
 
 
+def _raw_auth_replacement(match: re.Match[str]) -> str:
+    prefix, token = match.groups()
+    if token.lower() in _AUTH_SCHEMES or not _credential_like(token, "token"):
+        return match.group()
+    return prefix + REDACTED
+
+
+def _cookie_pair_replacement(match: re.Match[str]) -> str:
+    name_eq, val = match.groups()
+    if name_eq[:-1].lower() in _COOKIE_ATTRS:
+        return match.group()
+    if len(val) >= MIN_SECRET_LENGTH or _credential_like(val, "token"):
+        return name_eq + REDACTED
+    return match.group()
+
+
+def _cookie_header_replacement(match: re.Match[str]) -> str:
+    prefix, raw_cookies = match.groups()
+    return prefix + _COOKIE_PAIR.sub(_cookie_pair_replacement, raw_cookies)
+
+
 def redact_text(
     value: str,
     secrets: Iterable[str] | SecretScrubber = (),
@@ -214,7 +256,11 @@ def redact_text(
         value = _redact_private_keys(value)
     value = _ASSIGNMENT.sub(lambda match: match.group(1) + REDACTED, value)
     value = _AUTH.sub(_auth_replacement, value)
-    return (_NAMED_TOKEN if identifier else TOKEN_SHAPE).sub(REDACTED, value)
+    if identifier:
+        return _NAMED_TOKEN.sub(REDACTED, value)
+    value = _RAW_AUTH_HEADER.sub(_raw_auth_replacement, value)
+    value = _COOKIE_HEADER.sub(_cookie_header_replacement, value)
+    return TOKEN_SHAPE.sub(REDACTED, value)
 
 
 def redact_metadata(value: Any, secrets: Iterable[str] | SecretScrubber = ()) -> Any:

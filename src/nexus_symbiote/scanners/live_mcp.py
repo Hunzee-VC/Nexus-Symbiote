@@ -545,23 +545,60 @@ class PinnedHTTPTransport:
     def _read_sse(self, response: http.client.HTTPResponse, body: bytes, maximum: int) -> bytes:
         """Read event lines until the requested response arrives.
 
-        HTTPResponse.readline decodes chunked transfer coding. A single line may
-        use the whole response byte limit, since SDK servers put an entire result
-        on one data line.
+        HTTPResponse.read1 / readline decodes chunked transfer coding. Lines may
+        terminate in CRLF, LF or bare CR (WHATWG SSE), and a single line may use
+        the whole response byte limit when SDK servers emit one large data line.
         """
         request_id = _json(body).get("id")
         decoder = _SSEDecoder(self._max_sse_events)
         payload = bytearray()
+        buffer = bytearray()
+        saw_bare_cr = False
+        use_read1 = hasattr(response, "read1")
         while True:
-            line = response.readline(maximum + 1 - len(payload))
-            if not line:
-                break
-            payload.extend(line)
-            if len(payload) > maximum:
+            remaining = maximum + 1 - len(payload) - len(buffer)
+            if remaining <= 0:
                 raise DiscoveryError("SSE response byte limit exceeded")
-            for message in decoder.feed(line):
-                if message.get("id") == request_id and ("result" in message or "error" in message):
-                    return bytes(payload)
+            chunk = (
+                response.read1(min(4096, remaining)) if use_read1 else response.readline(remaining)
+            )
+            eof = not chunk
+            buffer.extend(chunk)
+            while buffer:
+                cr = buffer.find(b"\r")
+                lf = buffer.find(b"\n")
+                if cr < 0 and lf < 0:
+                    if len(payload) + len(buffer) > maximum:
+                        raise DiscoveryError("SSE response byte limit exceeded")
+                    if not eof:
+                        break
+                    end = len(buffer)
+                elif lf >= 0 and (cr < 0 or lf < cr):
+                    end = lf + 1
+                elif cr + 1 < len(buffer):
+                    if buffer[cr + 1] == 0x0A:
+                        end = cr + 2
+                    else:
+                        saw_bare_cr = True
+                        end = cr + 1
+                elif eof or saw_bare_cr:
+                    end = cr + 1
+                else:
+                    if len(payload) + len(buffer) > maximum:
+                        raise DiscoveryError("SSE response byte limit exceeded")
+                    break
+                line = bytes(buffer[:end])
+                del buffer[:end]
+                payload.extend(line)
+                if len(payload) > maximum:
+                    raise DiscoveryError("SSE response byte limit exceeded")
+                for message in decoder.feed(line):
+                    if message.get("id") == request_id and (
+                        "result" in message or "error" in message
+                    ):
+                        return bytes(payload)
+            if eof:
+                break
         raise DiscoveryError("SSE ended without matching response")
 
 

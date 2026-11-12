@@ -130,13 +130,18 @@ def through(
     )
     snapshot = snapshot.model_copy(update={"tools": (grant,)})
     call = call.model_copy(update={"action": action, "resource": resource, "arguments": arguments})
+    outcome = Outcome(reason="executed")
+    try:
+        req_digest = request_digest(call)
+    except AuthorizationError as exc:
+        outcome.reason = exc.reason
+        return outcome
     approval = approval.model_copy(
         update={
             "snapshot_digest": digest(snapshot.model_dump(mode="json")),
-            "request_digest": request_digest(call),
+            "request_digest": req_digest,
         }
     )
-    outcome = Outcome(reason="executed")
     scope = resolve or (lambda _: (action, resource))
 
     def resolve_and_record(seen: runtime.ToolCall) -> tuple[str, str]:
@@ -199,14 +204,24 @@ def through(
             "arguments-number-out-of-range",
             id="nested-float-2-to-the-60",
         ),
+        pytest.param(
+            ANY_OBJECT,
+            {"n": 2.0**70},
+            "arguments-number-out-of-range",
+            id="float-2-to-the-70-exponential",
+        ),
     ],
 )
 def test_canonical_gateway_refuses_arguments_whose_executed_form_fails(
     tmp_path, monkeypatch, route, schema, arguments, reason
 ):
     sent = through(route, tmp_path / "default", monkeypatch, schema, arguments, canonical=False)
-    assert sent.reason == "executed"
-    assert len(sent.executed) == 1
+    if reason == "arguments-number-out-of-range":
+        assert sent.reason == reason
+        assert sent.executed == []
+    else:
+        assert sent.reason == "executed"
+        assert len(sent.executed) == 1
     canonical = through(
         route, tmp_path / "canonical", monkeypatch, schema, arguments, canonical=True
     )
@@ -218,12 +233,12 @@ def test_canonical_gateway_refuses_arguments_whose_executed_form_fails(
 def test_canonical_gateway_executes_numbers_whose_canonical_form_stays_in_range(
     tmp_path, monkeypatch, route
 ):
-    arguments = {"max": 2.0**53 - 1, "min": -(2.0**53 - 1), "huge": 1e21, "tiny": 5e-324}
+    arguments = {"max": 2.0**53 - 1, "min": -(2.0**53 - 1), "frac": 0.5, "tiny": 5e-324}
     outcome = through(route, tmp_path, monkeypatch, ANY_OBJECT, arguments, canonical=True)
     assert outcome.reason == "executed"
     executed = json.loads(outcome.executed[0])
-    assert executed == {"huge": 1e21, "max": 2**53 - 1, "min": -(2**53 - 1), "tiny": 5e-324}
-    assert [type(executed[key]) for key in ("huge", "max", "min", "tiny")] == [
+    assert executed == {"frac": 0.5, "max": 2**53 - 1, "min": -(2**53 - 1), "tiny": 5e-324}
+    assert [type(executed[key]) for key in ("frac", "max", "min", "tiny")] == [
         float,
         int,
         int,
@@ -242,7 +257,7 @@ def test_resolver_schema_check_and_executor_see_the_same_arguments(
         "zeta": 1.0,
         "alpha": -0.0,
         "to": "team@example.test",
-        "list": [2.0, 0.5, {"b": 1, "a": 1e21}],
+        "list": [2.0, 0.5, {"b": 1, "a": 2.5}],
     }
     outcome = through(route, tmp_path, monkeypatch, ANY_OBJECT, arguments, canonical=canonical)
     assert outcome.reason == "executed"
