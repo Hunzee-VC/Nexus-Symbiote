@@ -237,23 +237,31 @@ def markdown_report(report: Report, fail_under: str | None = None) -> str:
     lines = [
         "# G7 AI SBOM minimum-element coverage",
         "",
-        f"Edition `{EDITION}`: {TITLE}, {PUBLISHER}, published {PUBLISHED}. The element "
-        "identifiers are minted by Nexus SymBiote; the G7 document defines none.",
+        (
+            f"Edition `{EDITION}`: {TITLE}, {PUBLISHER}, published {PUBLISHED}. The element "
+            "identifiers are minted by Nexus SymBiote; the G7 document defines none."
+        ),
         "",
         STATEMENT,
         "",
-        "Evaluated: standard fields of the CycloneDX 1.7 export this build writes for the "
-        f"inventory (projection {_code(report.projection or 'unknown')}).",
+        (
+            "Evaluated: standard fields of the CycloneDX 1.7 export this build writes for the "
+            f"inventory (projection {_code(report.projection or 'unknown')})."
+        ),
         "",
-        f"**Overall:** {_ratio(report.coverage())} among the elements assessable from the "
-        f"BOM; {_counts(report)}.",
+        (
+            f"**Overall:** {_ratio(report.coverage())} among the elements assessable from the "
+            f"BOM; {_counts(report)}."
+        ),
     ]
     if fail_under is not None:
         lines += ["", f"**Gate:** {_gate_line(report, fail_under)}."]
     lines += [
         "",
-        "| Cluster | Coverage | Present | Missing | Explicit unknown | Needs producer input "
-        "| Not applicable |",
+        (
+            "| Cluster | Coverage | Present | Missing | Explicit unknown | Needs producer input "
+            "| Not applicable |"
+        ),
         "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     for cluster in CLUSTERS:

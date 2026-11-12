@@ -52,14 +52,22 @@ DETAIL_CHARS = 2_000
 NAME_FILTER_CHARS = 200
 
 LIMITATIONS = (
-    "Edges are repository associations recorded by a static scan; runtime use and "
-    "effective authority are unobserved.",
-    "Risk classes restate recorded, mostly declared or name-inferred evidence; they do "
-    "not establish what a component can do at run time.",
-    "Unclassified means no capability evidence that the risk-class rules read was "
-    "recorded: unknown, not safe.",
-    "Exposure paths show potential reach through recorded edges, not proven "
-    "exploitability or runtime access.",
+    (
+        "Edges are repository associations recorded by a static scan; runtime use and "
+        "effective authority are unobserved."
+    ),
+    (
+        "Risk classes restate recorded, mostly declared or name-inferred evidence; they do "
+        "not establish what a component can do at run time."
+    ),
+    (
+        "Unclassified means no capability evidence that the risk-class rules read was "
+        "recorded: unknown, not safe."
+    ),
+    (
+        "Exposure paths show potential reach through recorded edges, not proven "
+        "exploitability or runtime access."
+    ),
 )
 
 _SOURCE_TYPES = frozenset({ComponentType.AGENT, ComponentType.IDE_AGENT})
@@ -1033,8 +1041,10 @@ def _header(view: GraphView) -> list[str]:
     parts = [
         '<header>\n<p class="kicker">Nexus SymBiote graph view</p>\n',
         "<h1>Agent association graph</h1>\n",
-        f'<div class="banner cov-{_text(coverage.status)}" role="note"><strong>Coverage '
-        f"{_text(coverage.status)}.</strong> {_COVERAGE_NOTE[coverage.status]}</div>\n",
+        (
+            f'<div class="banner cov-{_text(coverage.status)}" role="note"><strong>Coverage '
+            f"{_text(coverage.status)}.</strong> {_COVERAGE_NOTE[coverage.status]}</div>\n"
+        ),
         '<dl class="facts">\n',
         *(f"<div><dt>{name}</dt><dd>{_text(value)}</dd></div>\n" for name, value in facts),
         "</dl>\n",
@@ -1069,8 +1079,10 @@ def _controls() -> list[str]:
         chips,
         '<label for="q">Name contains</label>\n',
         '<input id="q" type="search" autocomplete="off" spellcheck="false">\n',
-        '<p class="keys">Select a component (click, or Enter) to trace what it reaches and '
-        "what depends on it; Escape clears.</p>\n",
+        (
+            '<p class="keys">Select a component (click, or Enter) to trace what it reaches and '
+            "what depends on it; Escape clears.</p>\n"
+        ),
         '<p id="status" class="status" role="status" aria-live="polite"></p>\n',
         "</section>\n",
     ]
@@ -1099,8 +1111,10 @@ def _svg(view: GraphView) -> list[str]:
         for index, (column, row) in places.items()
     }
     parts = [
-        f'<svg class="map" role="group" aria-label="Component association graph" '
-        f'width="{width}" height="{height}" viewBox="0 0 {width} {height}">\n'
+        (
+            f'<svg class="map" role="group" aria-label="Component association graph" '
+            f'width="{width}" height="{height}" viewBox="0 0 {width} {height}">\n'
+        )
     ]
     parts.extend(
         f'<text class="colh" x="{_MARGIN + place * (_BOX_WIDTH + _COLUMN_GAP)}" y="28">'
@@ -1168,13 +1182,15 @@ def _node_svg(node: Node, x: int, y: int) -> str:
     style = f"node k-{node.type.value} g{group}" + ("" if classification.assessed else " unc")
     label = f"{node.type.value}: {node.name}"
     parts = [
-        f'<g class="{style}" data-i="{node.index}" '
-        f'data-classes="{" ".join(risk.value for risk in classification.classes)}" '
-        f'data-sev="{severity.value if severity else "none"}" '
-        f'data-unpinned="{int(node.unpinned)}" '
-        f'data-unclassified="{int(not classification.assessed)}" '
-        f'data-name="{_text(node.name, NAME_FILTER_CHARS)}" tabindex="0" role="button" '
-        f'aria-label="{_text(label, NAME_FILTER_CHARS)}" transform="translate({x},{y})">',
+        (
+            f'<g class="{style}" data-i="{node.index}" '
+            f'data-classes="{" ".join(risk.value for risk in classification.classes)}" '
+            f'data-sev="{severity.value if severity else "none"}" '
+            f'data-unpinned="{int(node.unpinned)}" '
+            f'data-unclassified="{int(not classification.assessed)}" '
+            f'data-name="{_text(node.name, NAME_FILTER_CHARS)}" tabindex="0" role="button" '
+            f'aria-label="{_text(label, NAME_FILTER_CHARS)}" transform="translate({x},{y})">'
+        ),
         f"<title>{_text(label)}</title>",
         f'<rect class="box" width="{_BOX_WIDTH}" height="{_BOX_HEIGHT}" rx="8"/>',
         f'<circle class="g{group}" cx="22" cy="26" r="15"/>',
@@ -1220,11 +1236,15 @@ def _legend() -> list[str]:
         '<section class="legend" aria-labelledby="h-legend">\n<h3 id="h-legend">Legend</h3>\n',
         f"<ul>\n{groups}</ul>\n<ul>\n{classes}</ul>\n<ul>\n{severities}</ul>\n",
         "<ul>\n",
-        '<li><span class="ub"></span> dashed outline: unclassified (no evidence the '
-        "risk-class rules read; unknown, not safe)</li>\n",
+        (
+            '<li><span class="ub"></span> dashed outline: unclassified (no evidence the '
+            "risk-class rules read; unknown, not safe)</li>\n"
+        ),
         '<li><span class="eg"></span> recorded dependency edge</li>\n',
-        '<li><span class="eg cond"></span> conditional association (a static scan\'s '
-        "repository association)</li>\n",
+        (
+            '<li><span class="eg cond"></span> conditional association (a static scan\'s '
+            "repository association)</li>\n"
+        ),
         '<li><span class="eg ref"></span> typed reference field no dependency edge records</li>\n',
         "</ul>\n</section>\n",
     ]
@@ -1246,10 +1266,12 @@ def _route(view: GraphView, path: ExposurePath) -> str:
 def _path_list(view: GraphView) -> list[str]:
     parts = [
         '<section class="paths" aria-labelledby="h-paths">\n<h2 id="h-paths">Exposure paths</h2>\n',
-        '<p class="note">The shortest recorded path from each agent or IDE agent to each '
-        "component with a code-exec, exfil-capable, write-capable or secret-access class or a "
-        "high or critical finding, ranked by that component's weight (critical finding, high "
-        "finding, then the classes in that order), then by length.</p>\n",
+        (
+            '<p class="note">The shortest recorded path from each agent or IDE agent to each '
+            "component with a code-exec, exfil-capable, write-capable or secret-access class or a "
+            "high or critical finding, ranked by that component's weight (critical finding, high "
+            "finding, then the classes in that order), then by length.</p>\n"
+        ),
     ]
     if view.sources_omitted:
         parts.append(
@@ -1321,8 +1343,10 @@ def _findings_html(findings: FindingSummary) -> list[str]:
         return ["<h4>Findings</h4>\n<p>No recorded findings.</p>\n"]
     counts = ", ".join(f"{severity.value} {count}" for severity, count in findings.counts if count)
     parts = [
-        f"<h4>Findings</h4>\n<p>{findings.total} finding{'' if findings.total == 1 else 's'}: "
-        f"{counts}.</p>\n",
+        (
+            f"<h4>Findings</h4>\n<p>{findings.total} finding{'' if findings.total == 1 else 's'}: "
+            f"{counts}.</p>\n"
+        ),
         '<ul class="findings">\n',
     ]
     parts.extend(
@@ -1349,12 +1373,18 @@ def _panel(node: Node) -> str:
         for name, value in node.facts
     )
     parts = [
-        f'<article class="panel" id="c{node.index}" data-i="{node.index}" '
-        f'aria-labelledby="c{node.index}h">\n',
-        f'<h3 id="c{node.index}h"><span class="glyph g{group}" aria-hidden="true">'
-        f"{_GLYPHS[node.type]}</span> {_text(node.name)}</h3>\n",
-        f'<p class="ptype">{_text(node.type.value)} · {_text(node.assurance.value)} · '
-        f"{_text(node.trust_tier.value)}</p>\n",
+        (
+            f'<article class="panel" id="c{node.index}" data-i="{node.index}" '
+            f'aria-labelledby="c{node.index}h">\n'
+        ),
+        (
+            f'<h3 id="c{node.index}h"><span class="glyph g{group}" aria-hidden="true">'
+            f"{_GLYPHS[node.type]}</span> {_text(node.name)}</h3>\n"
+        ),
+        (
+            f'<p class="ptype">{_text(node.type.value)} · {_text(node.assurance.value)} · '
+            f"{_text(node.trust_tier.value)}</p>\n"
+        ),
         '<dl class="kv">\n',
         *(f"<dt>{_text(name)}</dt><dd>{value}</dd>\n" for name, value in rows),
         "</dl>\n",

@@ -153,18 +153,24 @@ def render_markdown(document: dict[str, Any]) -> str:
         "",
         document["meaning"],
         "",
-        f"Findings: {len(findings)}, as `risk` scores them under the {document['policy_source']} "
-        f"policy, with {document['suppressed_findings']} suppressed and "
-        f"{document['ignored_findings']} ignored. Collection coverage, as `risk` assesses it: "
-        f"{document['coverage_status']}.",
+        (
+            f"Findings: {len(findings)}, as `risk` scores them under the {document['policy_source']} "
+            f"policy, with {document['suppressed_findings']} suppressed and "
+            f"{document['ignored_findings']} ignored. Collection coverage, as `risk` assesses it: "
+            f"{document['coverage_status']}."
+        ),
         "",
-        "Entries that no finding references are not listed; that says nothing about whether "
-        "the risk an entry names is present.",
+        (
+            "Entries that no finding references are not listed; that says nothing about whether "
+            "the risk an entry names is present."
+        ),
         "",
         "## Summary",
         "",
-        "| Framework | Edition | Verification | Entries referenced | Findings with a reference "
-        "| Findings without a reference |",
+        (
+            "| Framework | Edition | Verification | Entries referenced | Findings with a reference "
+            "| Findings without a reference |"
+        ),
         "| --- | --- | --- | --- | --- | --- |",
         *(
             f"| {edition['name']} | {edition['edition']} | {edition['verification']} | "
@@ -178,8 +184,10 @@ def render_markdown(document: dict[str, Any]) -> str:
             "",
             f"## {edition['name']} {edition['edition']}",
             "",
-            f"Source: <{edition['source']}>. Verification: {edition['verification']}. "
-            f"{edition['note']}",
+            (
+                f"Source: <{edition['source']}>. Verification: {edition['verification']}. "
+                f"{edition['note']}"
+            ),
             "",
         ]
         if not edition["entries"]:
@@ -216,8 +224,10 @@ def render_markdown(document: dict[str, Any]) -> str:
             if len(listed) > MAX_MARKDOWN_FINDINGS:
                 lines += [
                     "",
-                    f"{len(listed) - MAX_MARKDOWN_FINDINGS} more findings reference this "
-                    "entry; the JSON format lists every one.",
+                    (
+                        f"{len(listed) - MAX_MARKDOWN_FINDINGS} more findings reference this "
+                        "entry; the JSON format lists every one."
+                    ),
                 ]
     lines += ["", "## Categories without a reference", ""]
     if not findings:
@@ -226,9 +236,11 @@ def render_markdown(document: dict[str, Any]) -> str:
         lines.append("Every finding references an entry of the selected framework editions.")
     else:
         lines += [
-            "Findings of these categories reference no entry of the selected framework "
-            "editions. A category outside this version's catalog, as an edited inventory "
-            "or another version can record, is marked no.",
+            (
+                "Findings of these categories reference no entry of the selected framework "
+                "editions. A category outside this version's catalog, as an edited inventory "
+                "or another version can record, is marked no."
+            ),
             "",
             "| Category | Findings | In the catalog |",
             "| --- | --- | --- |",

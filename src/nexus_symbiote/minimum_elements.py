@@ -1502,9 +1502,7 @@ _SUBJECT_RULES: dict[str, _SubjectRule] = {
     ),
     f"{MODELS.id}/model-input-output-properties": _SubjectRule(_model_input_output),
     f"{MODELS.id}/model-license": _SubjectRule(_licenses, ("properties.license",)),
-    f"{MODELS.id}/model-external-references": _SubjectRule(
-        lambda component, pointer: _references(component, pointer)
-    ),
+    f"{MODELS.id}/model-external-references": _SubjectRule(_references),
     f"{DATASETS.id}/dataset-name": _SubjectRule(_dataset_name, ("name",), measured=True),
     f"{DATASETS.id}/dataset-description": _SubjectRule(
         _dataset_description, ("description", "dataset_type")
