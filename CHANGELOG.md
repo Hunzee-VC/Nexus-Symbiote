@@ -30,6 +30,8 @@ Closes detection gaps listed under 0.1.0's known limitations and others found in
 - Follow the `@path` imports of nested `CLAUDE.md` files, and treat an A2A card module that is too large to parse or spelled with compatibility characters as a coverage gap.
 - In the runtime gateway with `canonical_arguments=True`, validate and resolve the scope of the arguments the executor receives, and deny schemas that use keywords only drafts before draft-04 define.
 - Measure the PyPI soak from the first trusted CI run when a commit has no push run, treat an unreported ruleset bypass as unknown, and reject workflow gate steps that never run.
+- **Breaking:** record the ShadowScan discovery verification outcome in the BOM, and fail unverified discovery evidence in CI. Importing a report writes `metadata.completeness.discovery_verification` (`verified` with the signer identity and issuer, otherwise `unverified`) with the report digest and the report's own run time; the repository and commit are recorded as `unknown` because the ShadowScan report format carries neither. The record is unsigned, so it is reported but never trusted: only a producer check in the same run counts as verification (`import-shadowscan --bundle`, or `validate`/`risk --project --signature-policy`). Otherwise `import-shadowscan` (with or without `--report-only`), `validate` and `risk` warn loudly, and fail the run when a CI variable (`CI`, `GITHUB_ACTIONS` and the like) is set unless `--allow-unsigned-discovery` is passed; `--fail-on-unsigned-discovery` forces failure anywhere, and passing both is a usage error. `risk --json-output` reports such a failure with the same keys as a scored report, and `validate` records it as `unsigned_discovery`. The Action takes an `allow-unsigned-discovery` input.
+- **Breaking:** verify the Sigstore trust root before trusting it. Offline verification now fails closed when the sigstore-python cache directory or `trusted_root.json` is group/world-writable, a symlink, or owned by someone else; a missing cache is created mode 0700. Pass an explicit trust root with `--trust-root` on `verify-artifact`/`verify-discovery` (optionally pinned with `--trust-root-sha256`), or `NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT` for any verification path, and the verification output prints the trust-root path used. A verify that passed on a shared or group-writable cache now exits 1 until the cache is made private or a trust root is supplied.
 
 ### Changed
 
@@ -45,6 +47,7 @@ Closes detection gaps listed under 0.1.0's known limitations and others found in
 - **Breaking:** dependency floors rise to click 8.2.1, pydantic 2.12, packaging 24.2 and jsonschema 4.25; the `yaml` extra is gone, `dev` is now a dependency group, and the unused `rich` dependency is dropped.
 - Raise default limits to 100,000 directory entries and 64 GiB per model file ([collection limits](docs/collection-limits.md)).
 - Export CycloneDX and SPDX through projection 2, which makes the repository agent CycloneDX `metadata.component` and mints SPDX `urn:uuid` identifiers; 0.1.0 exports still recover ([standard exports](docs/standard-exports.md)).
+- **Breaking:** emit deterministic native JSON, CycloneDX and SARIF output. `serial_number` is now a uuid5 derived from the inventory content (timestamps excluded), instead of a random uuid4, and no wall-clock timestamp is stamped on export, so two scans of the same project are byte-identical. SPDX keeps a wall-clock `CreationInfo.created` because its schema requires it; that is the only varying field. Native JSON lists components in canonical `bom_ref` order rather than collection order. An inventory recorded before this change has a different serial number, so record baselines again.
 
 ### Fixed
 
@@ -74,10 +77,11 @@ Closes detection gaps listed under 0.1.0's known limitations and others found in
 ### Upgrading
 
 1. Re-collect each baseline from the commit it was reviewed at, with the same `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` as your CI scans, or none, and review `diff old.json new.json` once before adopting it ([drift gate](docs/drift-gate.md#take-both-snapshots-the-same-way)).
-2. Review the new findings and coverage gaps; a gap fails the default gates. Accept a single false positive with `risk.suppressions`, and replace `transport_security` with `local_process` where a policy ignores stdio notes.
-3. In the Action, use `risk-check: 'false'` to skip the risk gate, give each Action step in one run its own `artifact-name` and `sarif-category`, and install Python in later steps that used the Action's.
-4. In scripts, read results from standard output, gate on `risk --json-output`, add `--no-fail-on-advisory` where `advisories` must exit 0, and pass `--project` to `verify-live`.
-5. Keep signer and launch policies outside the scanned repository, and re-apply the GitHub code scanning dismissals that still hold.
+2. In CI, verify ShadowScan reports (`import-shadowscan --bundle`, or `validate`/`risk --project --signature-policy`), or accept unsigned discovery evidence explicitly with `--allow-unsigned-discovery` (the Action's `allow-unsigned-discovery: 'true'`).
+3. Review the new findings and coverage gaps; a gap fails the default gates. Accept a single false positive with `risk.suppressions`, and replace `transport_security` with `local_process` where a policy ignores stdio notes.
+4. In the Action, use `risk-check: 'false'` to skip the risk gate, give each Action step in one run its own `artifact-name` and `sarif-category`, and install Python in later steps that used the Action's.
+5. In scripts, read results from standard output, gate on `risk --json-output`, add `--no-fail-on-advisory` where `advisories` must exit 0, and pass `--project` to `verify-live`.
+6. Keep signer and launch policies outside the scanned repository, and re-apply the GitHub code scanning dismissals that still hold.
 
 ## [0.1.0] - 2026-11-08
 

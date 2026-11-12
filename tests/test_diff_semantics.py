@@ -187,6 +187,9 @@ def test_coverage_loss_cannot_hide_behind_unchanged_components():
 def test_new_collection_event_is_not_composition_drift():
     old = AIBOM()
     old.finalize()
+    # finalize() no longer stamps an observation timestamp (ARCH-F1); the
+    # test sets one explicitly, as a re-collection would observe it.
+    old.metadata.timestamp = datetime.now(UTC)
     old.metadata.completeness = CompletenessClaim(
         scope="repository", surfaces_scanned=["a", "b"], timestamp=datetime.now(UTC)
     )

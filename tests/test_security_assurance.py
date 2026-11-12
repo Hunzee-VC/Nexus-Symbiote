@@ -85,6 +85,23 @@ def test_sigstore_verifier_applies_identity_and_checks_artifact(
     verify_policy.Identity = Identity
     hashes.Hashed = Hashed
     models_common.HashAlgorithm = HashAlgorithm
+    # Verification now resolves the sigstore-python TUF cache first. Fake that
+    # resolver too, pointed inside tmp_path, so the test stays hermetic.
+    from urllib.parse import quote as _url_quote
+
+    cache = tmp_path / "cache"
+    monkeypatch.setenv("XDG_CACHE_HOME", str(cache))
+    internal = ModuleType("sigstore._internal")
+    tuf = ModuleType("sigstore._internal.tuf")
+    tuf.DEFAULT_TUF_URL = "https://tuf-repo-cdn.sigstore.dev"
+    tuf._get_dirs = lambda url: (
+        tmp_path / "meta",
+        cache / "sigstore-python" / "tuf" / _url_quote(url, safe=""),
+    )
+    pkg._internal = internal
+    internal.tuf = tuf
+    monkeypatch.setitem(sys.modules, "sigstore._internal", internal)
+    monkeypatch.setitem(sys.modules, "sigstore._internal.tuf", tuf)
     monkeypatch.setitem(sys.modules, "sigstore", pkg)
     monkeypatch.setitem(sys.modules, "sigstore.models", models)
     monkeypatch.setitem(sys.modules, "sigstore.verify", verify)

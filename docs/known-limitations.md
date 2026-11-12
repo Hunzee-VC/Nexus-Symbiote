@@ -374,14 +374,17 @@ A way around a limit that its entry does not describe is worth a
 
 ## ShadowScan
 
-- **Producer verification is opt-in.** `validate` and `risk` accept unsigned
-  ShadowScan evidence, and say so, unless an operator signature policy names the
-  report, `--require-discovery-signature` is passed, or an honored project policy
-  sets `validate.require_discovery_signature`. `scan` does not verify the report.
-- **The result is not recorded.** The check's result is not written into the
-  inventory, so `validate` or `risk` without `--project` cannot enforce it. A
-  project-policy setting can be removed by the change it gates, and is ignored under
-  `--no-project-policy`.
+- **Producer verification is recorded, and unsigned evidence fails in CI.** Importing a report
+  records the verification outcome in the BOM (`metadata.completeness.discovery_verification`):
+  `verified` with the signer identity and issuer when `import-shadowscan --bundle` (or a passing
+  `validate`/`risk --project` producer check) authenticated the exact report bytes, otherwise
+  `unverified`, with the report digest, the report's own run time, and the repository/commit the
+  report carries — currently both `unknown`, because the ShadowScan report format carries neither,
+  so the digest and run time are the binding, not a repository claim. Unsigned evidence warns
+  loudly on `import-shadowscan`, `validate` and `risk`, and fails the run in CI (or with
+  `--fail-on-unsigned-discovery`) unless the operator explicitly passes `--allow-unsigned-discovery`.
+  A project-policy setting can still be removed by the change it gates, and is ignored under
+  `--no-project-policy`. `scan` does not verify the report.
 - **A signature does not bind a commit or time.** A passing check authenticates the
   report's producer only. Anyone who can write to the checkout can substitute an
   older report, or another repository's report signed by the same identity. Give
@@ -399,14 +402,25 @@ A way around a limit that its entry does not describe is worth a
 
 ## Signatures
 
-- **The CLI trusts a writable cache.** Offline verification uses the trusted root
+- **The CLI checks the cache before trusting it.** Offline verification uses the trusted root
   that sigstore-python caches in `$XDG_CACHE_HOME/sigstore-python` when
   `XDG_CACHE_HOME` is set, and otherwise in `~/.cache/sigstore-python` on Linux or
-  `~/Library/Caches/sigstore-python` on macOS. sigstore-python reads that file
-  without verifying it, so anyone who can write there chooses which certificate
-  authorities and transparency logs are accepted. On shared or persistent machines,
+  `~/Library/Caches/sigstore-python` on macOS. Before trusting it, the CLI checks that every
+  directory from the TUF targets directory up to the sigstore-python cache directory is owned
+  by the current user and is not group/world-writable or a symlink, and that `trusted_root.json`
+  itself, when present, is owned by the current user, is not a symlink, and is not
+  group/world-writable where anyone else can reach it (a file sigstore-python wrote under a
+  group-writable umask is accepted only inside a private directory); a missing cache is created
+  mode 0700, and any check failure fails verification closed with the offending path named. Pass
+  an explicit trust root instead with `--trust-root` on `verify-artifact`/`verify-discovery`, or
+  `NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT` for any verification path, verified against a pinned
+  SHA-256 when `--trust-root-sha256` or `NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT_SHA256` is supplied.
+  A successful verification prints the trust-root path it used. On shared or persistent machines,
   such as self-hosted runners, set `XDG_CACHE_HOME` to an empty directory you own;
   on macOS, setting `HOME` alone is not enough when `XDG_CACHE_HOME` is set.
+  An explicit trust root is read once and verified from those bytes. The cached root is
+  checked and then loaded again by sigstore-python, so a process running as the same user
+  could replace it between the two reads; an explicit, pinned trust root closes that gap.
 - **The Action's trust root ages.** The Action gives its scans an empty private
   cache, so it uses the root embedded in its hash-locked `sigstore` package. A
   bundle that relies on a key Sigstore introduced later fails until you update the
@@ -434,6 +448,11 @@ A way around a limit that its entry does not describe is worth a
   PyPI or npm URL with a qualifier other than a `repository_url` that names the
   component's own registry. Regenerate them from the native inventory; see
   [standard projection versions](fingerprint-migration.md#standard-projection-versions).
+- **A caller-set timestamp does not change the serial.** The content-derived serial
+  number excludes `metadata.timestamp`, the completeness claim's `timestamp` and its
+  `source_report_path`, so two documents that differ only in those fields share a
+  serial. This is deliberate: the serial names the inventory, not the moment or the
+  checkout it was observed from. Compare timestamps directly when they matter.
 - **Malformed input stops some exports.** A JSON-escaped lone surrogate, such as
   `\ud800`, in a field that a record carries, such as an A2A skill name or version or
   a `package.json` dependency version, makes CycloneDX, SPDX and SARIF export exit 1

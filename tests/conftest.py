@@ -38,6 +38,16 @@ ISOLATED_NAMES = frozenset(
         "CLICOLOR_FORCE",
         "TTY_COMPATIBLE",
         "TTY_INTERACTIVE",
+        # The unsigned-discovery gate fails closed when these say the run is automated;
+        # a test that needs that sets one itself.
+        "CI",
+        "GITLAB_CI",
+        "CIRCLECI",
+        "TF_BUILD",
+        "JENKINS_URL",
+        "BUILDKITE",
+        "DRONE",
+        "TRAVIS",
     }
 )
 PRIVATE_DIRECTORIES = ("XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME")

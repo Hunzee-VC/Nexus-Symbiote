@@ -15,7 +15,11 @@ import click
 from nexus_symbiote import __version__, limits, modes
 from nexus_symbiote.core.aibom import AIBOM, NativeFormatError
 from nexus_symbiote.core.enums import AssuranceLevel
-from nexus_symbiote.core.models import AIBOMMetadata, CompletenessClaim
+from nexus_symbiote.core.models import (
+    AIBOMMetadata,
+    CompletenessClaim,
+    DiscoveryVerification,
+)
 from nexus_symbiote.graph import validate_graph
 from nexus_symbiote.live_cli import register_live_commands
 from nexus_symbiote.policy import Policy
@@ -249,6 +253,103 @@ def _require_binding_key() -> None:
             f"{SOURCE_BINDING_KEY_ENV} must contain at least "
             f"{_MIN_SOURCE_BINDING_KEY_LENGTH} characters"
         )
+
+
+_CI_ENVIRONMENT_VARIABLES = (
+    "CI",
+    "GITHUB_ACTIONS",
+    "GITLAB_CI",
+    "CIRCLECI",
+    "TF_BUILD",
+    "JENKINS_URL",
+    "BUILDKITE",
+    "DRONE",
+    "TRAVIS",
+)
+
+
+def _running_in_ci() -> bool:
+    """True when a well-known CI variable says this run is automated.
+
+    ``CI`` is the de-facto standard set by GitHub Actions, GitLab CI and
+    CircleCI; the rest are provider-specific markers. An empty value, ``0``
+    or ``false`` does not count as CI.
+    """
+    return any(
+        os.environ.get(name) not in (None, "", "0", "false") for name in _CI_ENVIRONMENT_VARIABLES
+    )
+
+
+def _unsigned_discovery_flags(fail_on_unsigned_discovery: bool, allow: bool) -> None:
+    if fail_on_unsigned_discovery and allow:
+        raise click.UsageError(
+            "--fail-on-unsigned-discovery and --allow-unsigned-discovery contradict each other"
+        )
+
+
+def _unsigned_discovery_failure_reason(
+    bom: AIBOM,
+    *,
+    fail_on_unsigned_discovery: bool,
+    allow_unsigned_discovery: bool,
+    already_verified: bool = False,
+) -> str | None:
+    """Warn loudly about unverified ShadowScan evidence; return a failure reason when it must not pass.
+
+    Only a producer check made in this run counts as verification
+    (``already_verified``: ``import-shadowscan --bundle``, or
+    ``--project --signature-policy`` at validate and risk time). The BOM's own
+    ``discovery_verification`` record is unsigned text that anyone who can
+    write the BOM can set, so a recorded ``verified`` or ``not-applicable``
+    is reported, never trusted. A BOM that carries no discovery evidence
+    passes. Otherwise the run warns, and fails when the operator asked for it
+    with ``--fail-on-unsigned-discovery``, or when the run looks like CI and
+    the operator did not explicitly accept unsigned evidence with
+    ``--allow-unsigned-discovery``. Interactive runs warn only.
+    """
+    from nexus_symbiote.validators.completeness import _carries_discovery
+
+    if already_verified or not _carries_discovery(bom):
+        return None
+    claim = bom.metadata.completeness
+    record = claim.discovery_verification if claim is not None else None
+    if record is not None:
+        detail = (
+            f"report {record.report_digest}, report time {record.report_time}, "
+            f"repository {record.repository}, commit {record.commit}"
+        )
+        if record.status != "unverified":
+            detail += (
+                f"; the BOM records {record.status!s} at import, but that record is unsigned "
+                "and is not checked again here"
+            )
+    else:
+        detail = "no verification outcome was recorded at import (BOM predates the record)"
+    echo_line(
+        "WARNING: ShadowScan discovery evidence is UNVERIFIED. ",
+        detail,
+        ". The producer's signature was not checked at import, "
+        "so a substituted or replayed report would import the same way. "
+        "Verify it with `verify-discovery --bundle`, require a signer with "
+        "`validate --project --signature-policy`, or import it with "
+        "`import-shadowscan --bundle`.",
+        err=True,
+    )
+    if allow_unsigned_discovery:
+        return None
+    if fail_on_unsigned_discovery:
+        return "Unsigned ShadowScan discovery evidence (--fail-on-unsigned-discovery)."
+    if _running_in_ci():
+        echo_line(
+            "  In CI, pass --allow-unsigned-discovery to accept unsigned discovery "
+            "evidence explicitly.",
+            err=True,
+        )
+        return (
+            "Unsigned ShadowScan discovery evidence in CI; pass "
+            "--allow-unsigned-discovery to accept it explicitly."
+        )
+    return None
 
 
 SCANNER_REGISTRY: dict[str, type] = {}
@@ -576,6 +677,10 @@ def scan(
         raise click.BadParameter("Unknown output format", param_hint="--format")
     echo_line("Scanning ", root, err=True)
     # The policy file always sits in the scan root; record it relative to that root.
+    # No finalize() here: rendering owns the export metadata. The generators
+    # derive the serial deterministically from content via prepare(), and no
+    # wall-clock timestamp is stamped, so two scans of the same project are
+    # byte-identical.
     aibom = AIBOM(
         metadata=AIBOMMetadata(
             authors=[],
@@ -587,7 +692,6 @@ def scan(
             policy_weakened=policy_weakened,
         )
     )
-    aibom.finalize()
     surfaces_scanned: list[str] = []
     surfaces_excluded: list[str] = []
     scan_failures: list[str] = []
@@ -599,6 +703,8 @@ def scan(
     source_report_content_profile = None
     source_report_format = None
     source_report_status = None
+    source_report_path = None
+    discovery_verification: DiscoveryVerification | None = None
     source_projection_limitations = None
     source_unmapped_count = 0
     source_unmapped_indexes: list[int] = []
@@ -626,11 +732,13 @@ def scan(
                 source_report_digest = result.source_report_digest
                 source_report_content_digest = result.source_report_content_digest
                 source_report_content_profile = result.source_report_content_profile
+                source_report_path = result.source_report_path
                 source_report_format = result.source_report_format
                 source_report_status = result.source_report_status
                 source_projection_limitations = result.source_projection_limitations
                 source_unmapped_count = result.source_unmapped_count
                 source_unmapped_indexes = result.source_unmapped_indexes
+                discovery_verification = result.discovery_verification
             _merge_scan_result(name, result, aibom, collected, scan_failures)
             surfaces_scanned.extend(result.surfaces_scanned)
             surfaces_excluded.extend(result.surfaces_excluded)
@@ -687,6 +795,12 @@ def scan(
         source_report_digest=source_report_digest,
         source_report_content_digest=source_report_content_digest,
         source_report_content_profile=source_report_content_profile,
+        source_report_path=source_report_path,
+        discovery_verification=(
+            discovery_verification
+            if discovery_verification is not None
+            else DiscoveryVerification(status="not-applicable", method="none")
+        ),
         source_report_format=source_report_format,
         source_report_status=source_report_status,
         source_projection_limitations=source_projection_limitations,
@@ -771,25 +885,88 @@ def scan(
     default="json",
     help="Output format (default: json). sarif is refused: it cannot carry imported coverage.",
 )
-@click.option("--report-only", is_flag=True, help="Emit imported claims without a CI gate failure")
+@click.option(
+    "--report-only",
+    is_flag=True,
+    help=(
+        "Emit imported claims without failing on incomplete coverage. Unverified discovery "
+        "evidence still fails in CI unless --allow-unsigned-discovery is given."
+    ),
+)
+@click.option(
+    "--bundle",
+    type=click.Path(exists=True, dir_okay=False),
+    help="Verify the report producer's Sigstore bundle over the exact report bytes.",
+)
+@click.option("--signer-identity", help="Expected report signer, with --bundle and --issuer.")
+@click.option("--issuer", help="Expected OIDC issuer, with --bundle and --signer-identity.")
+@click.option(
+    "--fail-on-unsigned-discovery",
+    is_flag=True,
+    help="Exit with status 1 when the imported discovery evidence is unverified.",
+)
+@click.option(
+    "--allow-unsigned-discovery",
+    is_flag=True,
+    help="Accept unverified discovery evidence explicitly (still warns); required in CI.",
+)
 def import_shadowscan(
-    report_path: str, output: str, output_format: str, report_only: bool = False
+    report_path: str,
+    output: str,
+    output_format: str,
+    report_only: bool = False,
+    bundle: str | None = None,
+    signer_identity: str | None = None,
+    issuer: str | None = None,
+    fail_on_unsigned_discovery: bool = False,
+    allow_unsigned_discovery: bool = False,
 ) -> None:
     """Import a Nexus-ShadowScan report and generate an AIBOM of imported claims.
 
     This is the recommended primary workflow: run ShadowScan for discovery,
     then Nexus SymBiote for verification, integrity, and BOM emission.
+
+    Without --bundle the import records the discovery evidence as unverified
+    in the BOM. In CI that fails unless --allow-unsigned-discovery is given;
+    interactively it warns. Pass --bundle with the expected signer identity
+    and issuer to record the evidence as verified instead.
     """
-    from nexus_symbiote.scanners.shadowscan import ShadowScanImporter
+    from nexus_symbiote.scanners.base import read_regular_text
+    from nexus_symbiote.scanners.shadowscan import ShadowScanImporter, verify_discovery_report
+    from nexus_symbiote.utils.crypto import SIGSTORE_MISSING
+
+    _unsigned_discovery_flags(fail_on_unsigned_discovery, allow_unsigned_discovery)
+
+    if any(x is not None for x in (bundle, signer_identity, issuer)) and not all(
+        (bundle, signer_identity, issuer)
+    ):
+        raise click.UsageError("--bundle, --signer-identity and --issuer must be supplied together")
 
     importer = ShadowScanImporter()
     try:
         imported = importer.read_report(Path(report_path))
     except (ValueError, TypeError, OSError, UnicodeError, RecursionError) as exc:
         raise click.ClickException("Failed to safely import the ShadowScan report") from exc
+    if bundle and signer_identity and issuer:
+        try:
+            bundle_bytes = read_regular_text(Path(bundle)).encode("utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise click.ClickException("Cannot safely read the Sigstore bundle") from exc
+        record = imported.discovery_verification
+        if record is None:
+            raise click.ClickException("Failed to safely import the ShadowScan report")
+        try:
+            imported = imported.with_verification(
+                verify_discovery_report(record, bundle_bytes, signer_identity, issuer)
+            )
+        except ValueError as exc:
+            if str(exc) == SIGSTORE_MISSING:
+                raise click.ClickException(SIGSTORE_MISSING) from exc
+            raise click.ClickException(
+                "ShadowScan report signature or signer policy verification failed"
+            ) from exc
 
     aibom = imported.to_native_bom()
-    aibom.finalize()
 
     if output_format == "sarif":
         raise click.ClickException(
@@ -823,7 +1000,15 @@ def import_shadowscan(
         "; discovery coverage remains partial.",
         err=True,
     )
+    unsigned_reason = _unsigned_discovery_failure_reason(
+        aibom,
+        fail_on_unsigned_discovery=fail_on_unsigned_discovery,
+        allow_unsigned_discovery=allow_unsigned_discovery,
+        already_verified=bool(bundle),
+    )
     if report_only:
+        if unsigned_reason is not None:
+            raise click.exceptions.Exit(1)
         return
     if imported.source_status != "complete":
         raise click.ClickException("ShadowScan source report is incomplete; the BOM is partial")
@@ -846,6 +1031,16 @@ def import_shadowscan(
 )
 @click.option("--signer-identity", help="Expected Sigstore signing identity")
 @click.option("--issuer", help="Expected Sigstore OIDC issuer")
+@click.option(
+    "--trust-root",
+    type=click.Path(exists=True, dir_okay=True, file_okay=True),
+    help="Explicit Sigstore trusted_root.json file (or directory holding one); "
+    "overrides NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT and the user cache.",
+)
+@click.option(
+    "--trust-root-sha256",
+    help="Pinned SHA-256 (sha256:<hex>) the explicit trust root must match.",
+)
 def verify_artifact(
     artifact_path: str,
     project: str,
@@ -853,6 +1048,8 @@ def verify_artifact(
     bundle: str | None,
     signer_identity: str | None,
     issuer: str | None,
+    trust_root: str | None,
+    trust_root_sha256: str | None,
 ) -> None:
     """Verify a local artifact's digest and optionally its Sigstore bundle."""
     import hmac
@@ -887,13 +1084,26 @@ def verify_artifact(
             raise click.UsageError(
                 "--bundle, --signer-identity and --issuer must be supplied together"
             )
-        verified = verify_sigstore_digest(digest, bundle_bytes, signer_identity, issuer)
+        verified = verify_sigstore_digest(
+            digest,
+            bundle_bytes,
+            signer_identity,
+            issuer,
+            trust_root=trust_root,
+            trust_root_sha256=trust_root_sha256,
+        )
         if not verified.verified:
             if verified.error == SIGSTORE_MISSING:
                 raise click.ClickException(SIGSTORE_MISSING)
-            raise click.ClickException("Sigstore signature or signer policy verification failed")
+            raise click.ClickException(
+                "Sigstore signature or signer policy verification failed"
+                + (f": {verified.error}" if verified.error else "")
+            )
+        trust_root_path = (verified.details or {}).get("trust_root_path", "unavailable")
         click.echo(
-            "Artifact digest and Sigstore signer policy verified. This does not establish artifact safety or a deployment binding."
+            "Artifact digest and Sigstore signer policy verified. "
+            f"Trust root: {trust_root_path}. "
+            "This does not establish artifact safety or a deployment binding."
         )
     else:
         click.echo(
@@ -912,6 +1122,16 @@ def verify_artifact(
 )
 @click.option("--signer-identity", help="Expected report signer from operator policy.")
 @click.option("--issuer", help="Expected OIDC issuer from operator policy.")
+@click.option(
+    "--trust-root",
+    type=click.Path(exists=True, dir_okay=True, file_okay=True),
+    help="Explicit Sigstore trusted_root.json file (or directory holding one); "
+    "overrides NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT and the user cache.",
+)
+@click.option(
+    "--trust-root-sha256",
+    help="Pinned SHA-256 (sha256:<hex>) the explicit trust root must match.",
+)
 def verify_discovery(
     aibom_path: str,
     report_path: str,
@@ -919,6 +1139,8 @@ def verify_discovery(
     bundle: str | None,
     signer_identity: str | None,
     issuer: str | None,
+    trust_root: str | None,
+    trust_root_sha256: str | None,
 ) -> None:
     """Verify source bytes and optionally their native projection and producer."""
     import hashlib
@@ -957,12 +1179,35 @@ def verify_discovery(
     if projection or bundle:
         try:
             projected = ShadowScanImporter().parse_report(text).to_native_bom().to_dict()
-            # Import time and UUID are generated on each run. Everything else,
-            # including unknown fields in the original JSON, must match.
+            # The serial is derived from content on each run and no import
+            # time is stamped any more. Everything else, including unknown
+            # fields in the original JSON, must match. The import-time
+            # source path is likewise local to the import, not to the
+            # report bytes.
             for field in ("timestamp", "serial_number"):
-                projected["metadata"].pop(field)
-                if not isinstance(doc["metadata"].pop(field, None), str):
-                    raise ValueError("missing generated metadata")
+                projected["metadata"].pop(field, None)
+            if not isinstance(doc["metadata"].pop("serial_number", None), str):
+                raise ValueError("missing generated metadata")
+            doc["metadata"].pop("timestamp", None)
+            stored = doc.get("metadata", {}).get("completeness")
+            recorded = isinstance(stored, dict) and "discovery_verification" in stored
+            for document in (projected, doc):
+                completeness = document.get("metadata", {}).get("completeness")
+                if isinstance(completeness, dict):
+                    completeness.pop("source_report_path", None)
+                    if not recorded:
+                        # A BOM imported before the record existed has none to compare.
+                        completeness.pop("discovery_verification", None)
+                    if bundle:
+                        # A bundle check re-verifies the producer now, so the
+                        # import-time outcome is not part of the projection
+                        # that must reproduce. Without a bundle it still is:
+                        # a BOM claiming verified must not pass on an
+                        # unverified re-projection.
+                        verification = completeness.get("discovery_verification")
+                        if isinstance(verification, dict):
+                            for key in ("status", "method", "signer_identity", "issuer"):
+                                verification.pop(key, None)
             if json.dumps(projected, sort_keys=True) != json.dumps(doc, sort_keys=True):
                 raise ValueError("projection differs")
         except (KeyError, TypeError, ValueError, RecursionError) as exc:
@@ -974,15 +1219,26 @@ def verify_discovery(
             bundle_bytes = read_regular_text(Path(bundle)).encode("utf-8")
         except (OSError, UnicodeError) as exc:
             raise click.ClickException("Cannot safely read the Sigstore bundle") from exc
-        verified = verify_sigstore_digest(actual, bundle_bytes, signer_identity, issuer)
+        verified = verify_sigstore_digest(
+            actual,
+            bundle_bytes,
+            signer_identity,
+            issuer,
+            trust_root=trust_root,
+            trust_root_sha256=trust_root_sha256,
+        )
         if not verified.verified:
             if verified.error == SIGSTORE_MISSING:
                 raise click.ClickException(SIGSTORE_MISSING)
             raise click.ClickException(
                 "ShadowScan report signature or signer policy verification failed"
+                + (f": {verified.error}" if verified.error else "")
             )
+        trust_root_path = (verified.details or {}).get("trust_root_path", "unavailable")
         click.echo(
-            "Report signer and direct native projection verified. Discovery claims retain declared assurance."
+            "Report signer and direct native projection verified. "
+            f"Trust root: {trust_root_path}. "
+            "Discovery claims retain declared assurance."
         )
     elif projection:
         click.echo(
@@ -1028,6 +1284,16 @@ def verify_discovery(
         "records or the project contains, whatever the project policy says; requires --project."
     ),
 )
+@click.option(
+    "--fail-on-unsigned-discovery",
+    is_flag=True,
+    help="Exit with status 1 when the BOM's ShadowScan evidence is unverified.",
+)
+@click.option(
+    "--allow-unsigned-discovery",
+    is_flag=True,
+    help="Accept unverified discovery evidence explicitly (still warns); required in CI.",
+)
 def validate(
     aibom_path: str,
     project: str | None,
@@ -1036,6 +1302,8 @@ def validate(
     skip_integrity: bool = False,
     json_output: bool = False,
     require_discovery_signature: bool = False,
+    fail_on_unsigned_discovery: bool = False,
+    allow_unsigned_discovery: bool = False,
 ) -> None:
     """Validate an AIBOM for completeness and integrity.
 
@@ -1043,6 +1311,7 @@ def validate(
     and its self-consistency. With --project the inventory is compared with a fresh
     local collection of that project, unless the policy skips the completeness check.
     """
+    _unsigned_discovery_flags(fail_on_unsigned_discovery, allow_unsigned_discovery)
     bom = _load_bom(aibom_path)
 
     from nexus_symbiote.validators.completeness import (
@@ -1117,6 +1386,14 @@ def validate(
         passed = passed and not problems
     elif carries_discovery_evidence(bom):
         discovery = {"status": "not-verified", "problems": []}
+    producer_verified = discovery is not None and discovery["status"] == "verified"
+    unsigned_reason = _unsigned_discovery_failure_reason(
+        bom,
+        fail_on_unsigned_discovery=fail_on_unsigned_discovery,
+        allow_unsigned_discovery=allow_unsigned_discovery,
+        already_verified=producer_verified,
+    )
+    passed = passed and unsigned_reason is None
     assurance_errors = assurance_problems(bom, minimum, imported_claims=bound_imports)
     # Graph integrity is structural and cannot be disabled by a coverage policy.
     graph_issues = validate_graph(bom)
@@ -1129,6 +1406,7 @@ def validate(
         "completeness": completeness,
         "integrity": integrity,
         "discovery_producer": discovery,
+        "unsigned_discovery": unsigned_reason,
         "minimum_assurance_level": minimum,
         "assurance_errors": assurance_errors,
         "graph_issues": graph_issues,
@@ -1190,18 +1468,31 @@ def validate(
         "records or the project contains, whatever the project policy says; requires --project."
     ),
 )
+@click.option(
+    "--fail-on-unsigned-discovery",
+    is_flag=True,
+    help="Exit with status 1 when the BOM's ShadowScan evidence is unverified.",
+)
+@click.option(
+    "--allow-unsigned-discovery",
+    is_flag=True,
+    help="Accept unverified discovery evidence explicitly (still warns); required in CI.",
+)
 def risk(
     aibom_path: str,
     threshold: float | None,
     json_output: bool,
     fail_on_severity: str | None,
     no_project_policy: bool = False,
+    fail_on_unsigned_discovery: bool = False,
+    allow_unsigned_discovery: bool = False,
     project: Path | None = None,
     signature_policy: Path | None = None,
     no_score_threshold: bool = False,
     require_discovery_signature: bool = False,
 ) -> None:
     """Score supply-chain risks in an AIBOM."""
+    _unsigned_discovery_flags(fail_on_unsigned_discovery, allow_unsigned_discovery)
     bom = _load_bom(aibom_path)
 
     from nexus_symbiote.validators.completeness import carries_discovery_evidence
@@ -1236,6 +1527,7 @@ def risk(
     supplier_claims: list[dict[str, str]] = []
     supplier_claims_omitted = 0
     producer = "not-verified" if carries_discovery_evidence(bom) else "not-applicable"
+    producer_verified = False
     if root is not None:
         from nexus_symbiote.validators.completeness import (
             CompletenessValidator,
@@ -1258,6 +1550,7 @@ def risk(
             producer, discovery = discovery_producer_check(
                 bom, root, signature_policies, exclude_paths=policy.scan.exclude_paths
             )
+            producer_verified = producer == "verified"
         if not checked.is_complete or discovery:
             reasons = [
                 issue.description
@@ -1291,6 +1584,33 @@ def risk(
             for c in checked.supplier_claims
         ]
         supplier_claims_omitted = checked.supplier_claims_omitted
+    unsigned_reason = _unsigned_discovery_failure_reason(
+        bom,
+        fail_on_unsigned_discovery=fail_on_unsigned_discovery,
+        allow_unsigned_discovery=allow_unsigned_discovery,
+        already_verified=producer_verified,
+    )
+    if unsigned_reason is not None:
+        # The same keys as a scored report, so consumers need not special-case it.
+        unsigned = {
+            **RiskReport().to_dict(),
+            "passed": False,
+            "assessment_basis": "unsigned-discovery-evidence",
+            "overall_score": None,
+            "risk_level": "unknown",
+            "coverage_status": "unreconciled",
+            "gate_reasons": [unsigned_reason],
+            "total_components": len(bom.components),
+            "supplier_claims": supplier_claims,
+            "supplier_claims_omitted": supplier_claims_omitted,
+            "discovery_producer": producer,
+            **context,
+        }
+        if json_output:
+            click.echo(json_text(json.dumps(unsigned, indent=2)))
+        else:
+            print_lines(risk_report_lines(unsigned))
+        raise click.exceptions.Exit(1)
     scorer = RiskScorer.from_policy(
         policy.risk,
         # The scorer requires a finite threshold; none can be reached by a sum of weights.

@@ -283,7 +283,8 @@ def test_dry_run_lists_identities_offline_and_sends_nothing(tmp_path):
     assert result.exit_code == 0, result.output
     document = json.loads(result.stdout)
     assert document["dry_run"] is True and document["sent_to_osv"] == "nothing (dry run)"
-    assert [(q["ecosystem"], q["name"], q["version"]) for q in document["queries"]] == [
+    # Queries follow the inventory's canonical component order, not insertion order.
+    assert sorted((q["ecosystem"], q["name"], q["version"]) for q in document["queries"]) == [
         ("PyPI", "requests", "2.19.0"),
         ("npm", "left-pad", "1.2.3"),
     ]

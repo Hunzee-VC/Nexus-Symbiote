@@ -13,29 +13,25 @@ from __future__ import annotations
 import re
 import uuid
 from dataclasses import dataclass
-from datetime import UTC
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
 from referencing.exceptions import Unresolvable
 
-from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
+from nexus_symbiote.core.aibom import AIBOM, DependencyEdge, native_document, prepare
+from nexus_symbiote.core.canonical import NAMESPACE, content_digest, json_text
 from nexus_symbiote.core.enums import ComponentType
 from nexus_symbiote.core.models import AgentComponent, AnyComponent, ModelComponent
 from nexus_symbiote.generators import _legacy
 from nexus_symbiote.generators._common import (
-    NAMESPACE,
     PROJECTION_PROPERTY,
     claim_properties,
     component_property,
-    content_digest,
     coverage_aggregate,
     declared_projection,
     document_properties,
-    json_text,
     native_components,
-    native_document,
-    prepare,
     recover_native,
     repository_scan,
     repository_subject,
@@ -118,6 +114,25 @@ def _document_namespace(spdx_id: str) -> str | None:
     raise ValueError("unrecognized SPDX export document identifier")
 
 
+def _without_created(value: Any) -> Any:
+    """Recursively drop ``created`` from SPDX ``CreationInfo`` elements only.
+
+    When the embedded native document has no timestamp, ``CreationInfo.created``
+    is render-time metadata, so it is the one value allowed to differ between an
+    export and its recovery. A ``created`` key on any other element is content.
+    """
+    if isinstance(value, dict):
+        creation_info = value.get("type") == "CreationInfo"
+        return {
+            key: _without_created(item)
+            for key, item in value.items()
+            if not (creation_info and key == "created")
+        }
+    if isinstance(value, list):
+        return [_without_created(item) for item in value]
+    return value
+
+
 @dataclass(frozen=True)
 class _DocumentIds:
     document: str
@@ -176,13 +191,16 @@ class SPDXGenerator(Generator):
             "name": aibom.metadata.tool_name,
             "summary": aibom.metadata.tool_version,
         }
-        if aibom.metadata.timestamp is None:
-            raise ValueError("export timestamps must be set")
+        # SPDX 3.0.1 requires CreationInfo.created. The native BOM carries no
+        # wall-clock timestamp by default, so fall back to the export time.
+        # This is the only wall-clock field in SPDX output: two exports of
+        # the same inventory differ only here.
+        created_at = aibom.metadata.timestamp or datetime.now(UTC)
         creation = {
             "type": "CreationInfo",
             "@id": ci,
             "specVersion": "3.0.1",
-            "created": aibom.metadata.timestamp.astimezone(UTC)
+            "created": created_at.astimezone(UTC)
             .replace(microsecond=0)
             .isoformat()
             .replace("+00:00", "Z"),
@@ -422,9 +440,13 @@ class SPDXGenerator(Generator):
             expected = _legacy.spdx_projection(recovered, namespace, native)
         else:
             raise ValueError("unsupported SPDX projection version")
-        if unordered_projection(_public_view(document)) != unordered_projection(
-            _public_view(expected)
-        ):
+        # Without a native timestamp, CreationInfo.created is render-time
+        # metadata and a re-projection at recovery time legitimately differs
+        # only there. With one, the export must carry exactly that timestamp.
+        actual, wanted = _public_view(document), _public_view(expected)
+        if recovered.metadata.timestamp is None:
+            actual, wanted = _without_created(actual), _without_created(wanted)
+        if unordered_projection(actual) != unordered_projection(wanted):
             raise ValueError("SPDX projection conflicts with the embedded native document")
         return recovered
 
