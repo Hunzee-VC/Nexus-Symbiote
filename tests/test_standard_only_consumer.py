@@ -53,6 +53,7 @@ IMPORTED_MARKERS: dict[str, Any] = {
     "source_projection_limitations": ["unmapped entries are not represented"],
     "source_unmapped_count": 1,
     "source_unmapped_indexes": [0],
+    "source_report_path": "reports/shadowscan.json",
 }
 SCAN_CONDITION = "runtime use and authority unobserved"
 APPROVAL = "only after a human approves the call"

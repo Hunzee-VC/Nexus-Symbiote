@@ -138,6 +138,9 @@ findings without turning them into exit status 1, as a project policy with
 | `NEXUS_SYMBIOTE_LIMITS` | Raised collection limits for this invocation, as `NAME=VALUE` pairs separated by commas; the CLI validates the names and values. It is read from the environment of the operator, never from a scanned checkout. The GitHub Action sets it only from its `limits` input. |
 | `NO_COLOR` | Any value turns colors off. |
 | `XDG_CACHE_HOME`, `HOME` | Where sigstore-python caches the trusted root that offline Sigstore verification uses; see [known limitations](known-limitations.md#signatures). |
+| `NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT` | An explicit Sigstore `trusted_root.json` file, or a directory holding one, for offline Sigstore verification. `--trust-root` overrides it. Without a pinned digest the file and its directory must be owned by the user and not writable by group or others. |
+| `NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT_SHA256` | The SHA-256 the explicit trust root's bytes must match. `--trust-root-sha256` overrides it; set without a trust root, it is a usage error. |
+| `CI`, `GITHUB_ACTIONS`, `GITLAB_CI`, `CIRCLECI`, `TF_BUILD`, `JENKINS_URL`, `BUILDKITE`, `DRONE`, `TRAVIS` | Any value other than empty, `0` or `false` marks the run as automated: `import-shadowscan`, `validate` and `risk` then fail on unverified ShadowScan discovery evidence unless `--allow-unsigned-discovery` is given. |
 | `TMPDIR` | Where `verify-live` stages the private copy of a pinned launcher. |
 | `_NEXUS_SYMBIOTE_COMPLETE` | Ignored. Shell completion is not offered, because an inherited completion variable would make every command, gates included, exit 0 without running. |
 

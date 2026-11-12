@@ -9,7 +9,6 @@ real Sigstore provenance.
 from __future__ import annotations
 
 import hashlib
-import os
 import stat
 from pathlib import Path
 
@@ -89,7 +88,7 @@ def test_missing_cache_dir_is_created_private_and_passes(
 def test_group_writable_cache_dir_fails_closed(private_cache: Path, stub_verifier: list) -> None:
     path, error = _prepare_sigstore_cache()
     assert error is None and path is not None
-    os.chmod(path.parent, 0o775)  # noqa: S103 - the insecure fixture under test
+    path.parent.chmod(0o775)  # the insecure fixture under test
     failed_path, failed_error = _prepare_sigstore_cache()
     assert failed_path is None
     assert failed_error is not None
@@ -109,9 +108,9 @@ def test_world_writable_trusted_root_file_fails_closed(
     # The file is only dangerous when someone else can reach it, so make the
     # targets directory traversable first; a private directory is covered by
     # test_group_writable_root_in_private_dir_passes.
-    os.chmod(path.parent, 0o755)  # noqa: S103 - the traversable directory under test
+    path.parent.chmod(0o755)  # the traversable directory under test
     path.write_bytes(b"planted root")
-    os.chmod(path, 0o666)  # noqa: S103 - the insecure fixture under test
+    path.chmod(0o666)  # the insecure fixture under test
     failed_path, failed_error = _prepare_sigstore_cache()
     assert failed_path is None
     assert failed_error is not None
@@ -130,7 +129,7 @@ def test_group_writable_root_in_private_dir_passes(
     path, error = _prepare_sigstore_cache()
     assert error is None and path is not None
     path.write_bytes(b"seeded root")
-    os.chmod(path, 0o660)
+    path.chmod(0o660)
     again_path, again_error = _prepare_sigstore_cache()
     assert again_error is None
     assert again_path == path
@@ -187,7 +186,7 @@ def test_explicit_trust_root_flag_is_honoured(
 
     root = tmp_path / "trusted_root.json"
     root.write_bytes(b"operator trust root")
-    os.chmod(root, 0o600)
+    root.chmod(0o600)
     calls: list = []
     sentinel = object()
 
@@ -215,9 +214,9 @@ def test_explicit_trust_root_directory_resolves_to_file(
 ) -> None:
     root_dir = tmp_path / "root-dir"
     root_dir.mkdir()
-    os.chmod(root_dir, 0o700)  # Plain mkdir follows the ambient umask, which may be group-writable.
+    root_dir.chmod(0o700)  # Plain mkdir follows the ambient umask, which may be group-writable.
     (root_dir / "trusted_root.json").write_bytes(b"operator trust root")
-    os.chmod(root_dir / "trusted_root.json", 0o600)
+    (root_dir / "trusted_root.json").chmod(0o600)
     path, source, error = _resolve_explicit_trust_root(root_dir, None)
     assert error is None
     assert path == root_dir / "trusted_root.json"
@@ -229,7 +228,7 @@ def test_explicit_trust_root_env_var_is_honoured(
 ) -> None:
     root = tmp_path / "trusted_root.json"
     root.write_bytes(b"operator trust root")
-    os.chmod(root, 0o600)
+    root.chmod(0o600)
     monkeypatch.setenv(TRUST_ROOT_ENV, str(root))
     path, source, error = _resolve_explicit_trust_root(None, None)
     assert error is None
@@ -242,7 +241,7 @@ def test_flag_beats_env_for_trust_root(tmp_path: Path, monkeypatch: pytest.Monke
     flag_root = tmp_path / "flag.json"
     for candidate in (env_root, flag_root):
         candidate.write_bytes(b"operator trust root")
-        os.chmod(candidate, 0o600)
+        candidate.chmod(0o600)
     monkeypatch.setenv(TRUST_ROOT_ENV, str(env_root))
     path, source, error = _resolve_explicit_trust_root(str(flag_root), None)
     assert error is None
@@ -254,7 +253,7 @@ def test_explicit_trust_root_pinned_hash(tmp_path: Path) -> None:
     root = tmp_path / "trusted_root.json"
     content = b"operator trust root"
     root.write_bytes(content)
-    os.chmod(root, 0o664)  # A pinned hash excuses permissive modes: content is pinned.
+    root.chmod(0o664)  # A pinned hash excuses permissive modes: content is pinned.
     digest = hashlib.sha256(content).hexdigest()
     path, source, error = _resolve_explicit_trust_root(str(root), f"sha256:{digest}")
     assert error is None
@@ -285,10 +284,10 @@ def test_pinned_hash_without_a_trust_root_is_rejected(
 def test_explicit_trust_root_requires_a_private_file(tmp_path: Path) -> None:
     parent = tmp_path / "shared"
     parent.mkdir()
-    os.chmod(parent, 0o755)  # noqa: S103 - the traversable directory under test
+    parent.chmod(0o755)  # the traversable directory under test
     root = parent / "trusted_root.json"
     root.write_bytes(b"operator trust root")
-    os.chmod(root, 0o664)
+    root.chmod(0o664)
     path, _source, error = _resolve_explicit_trust_root(str(root), None)
     assert path is None
     assert error is not None
@@ -300,10 +299,10 @@ def test_explicit_trust_root_group_writable_file_in_private_dir_passes(
 ) -> None:
     parent = tmp_path / "private"
     parent.mkdir()
-    os.chmod(parent, 0o700)  # Nobody else can traverse to the file.
+    parent.chmod(0o700)  # Nobody else can traverse to the file.
     root = parent / "trusted_root.json"
     root.write_bytes(b"operator trust root")
-    os.chmod(root, 0o664)
+    root.chmod(0o664)
     path, _source, error = _resolve_explicit_trust_root(str(root), None)
     assert error is None
     assert path == root
@@ -325,8 +324,8 @@ def test_explicit_trust_root_group_writable_parent_is_rejected(tmp_path: Path) -
     parent.mkdir()
     root = parent / "trusted_root.json"
     root.write_bytes(b"operator trust root")
-    os.chmod(root, 0o600)
-    os.chmod(parent, 0o775)  # noqa: S103 - the insecure fixture under test
+    root.chmod(0o600)
+    parent.chmod(0o775)  # the insecure fixture under test
     path, _source, error = _resolve_explicit_trust_root(str(root), None)
     assert path is None
     assert error is not None
@@ -425,7 +424,7 @@ def test_cli_verify_artifact_trust_root_flag(
     root = tmp_path / "trusted_root.json"
     content = b"operator trust root"
     root.write_bytes(content)
-    os.chmod(root, 0o600)
+    root.chmod(0o600)
     sentinel = object()
     calls: list = []
 
