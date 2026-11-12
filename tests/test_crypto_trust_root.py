@@ -3,12 +3,14 @@
 The cache tests point XDG_CACHE_HOME at tmp_path so they never touch the real
 user cache. The verifier itself is stubbed at the sigstore boundary, mirroring
 tests/test_crypto.py: only the cache/override handling is exercised here, not
-real Sigstore provenance.
+real Sigstore provenance. The cached root is parsed for real, so the stub
+records which trust root the verifier was built from.
 """
 
 from __future__ import annotations
 
 import hashlib
+import shutil
 import stat
 from pathlib import Path
 
@@ -20,7 +22,7 @@ from nexus_symbiote.utils import crypto
 from nexus_symbiote.utils.crypto import (
     TRUST_ROOT_ENV,
     TRUST_ROOT_SHA256_ENV,
-    _prepare_sigstore_cache,
+    _read_sigstore_cache,
     _resolve_explicit_trust_root,
     verify_sigstore_bundle,
     verify_sigstore_digest,
@@ -43,7 +45,7 @@ def private_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 @pytest.fixture
 def stub_verifier(monkeypatch: pytest.MonkeyPatch) -> list:
-    """Stub Bundle parsing and Verifier.production; record verify_artifact calls."""
+    """Stub Bundle parsing and the Verifier; record (trusted_root, verify_artifact args)."""
     pytest.importorskip("sigstore")
     from sigstore.models import Bundle
     from sigstore.verify import Verifier
@@ -51,12 +53,28 @@ def stub_verifier(monkeypatch: pytest.MonkeyPatch) -> list:
     calls: list = []
 
     class StubVerifier:
+        def __init__(self, *, trusted_root: object) -> None:
+            self.trusted_root = trusted_root
+
         def verify_artifact(self, hashed: object, bundle: object, policy: object) -> None:
-            calls.append((hashed, bundle, policy))
+            calls.append((self.trusted_root, hashed, bundle, policy))
 
     monkeypatch.setattr(Bundle, "from_json", classmethod(lambda cls, raw: object()))
-    monkeypatch.setattr(Verifier, "production", classmethod(lambda cls, **kwargs: StubVerifier()))
+    monkeypatch.setattr(Verifier, "__init__", StubVerifier.__init__)
+    monkeypatch.setattr(Verifier, "verify_artifact", StubVerifier.verify_artifact)
     return calls
+
+
+def _prepare_sigstore_cache() -> tuple[Path | None, str | None]:
+    path, _content, error = _read_sigstore_cache()
+    return path, error
+
+
+def _embedded_root() -> bytes:
+    from sigstore._internal.tuf import DEFAULT_TUF_URL
+    from sigstore._utils import read_embedded
+
+    return read_embedded("trusted_root.json", DEFAULT_TUF_URL)
 
 
 def _expected_cache_path(cache: Path) -> Path:
@@ -84,6 +102,11 @@ def test_missing_cache_dir_is_created_private_and_passes(
     assert result.details["trust_root_path"] == str(path)
     assert result.details["trust_root_source"] == "cache"
     assert len(stub_verifier) == 1
+    from sigstore_models.trustroot import v1 as trustroot_v1
+
+    assert path.read_bytes() == _embedded_root()
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert stub_verifier[0][0]._inner == trustroot_v1.TrustedRoot.from_json(_embedded_root())
 
 
 def test_group_writable_cache_dir_fails_closed(private_cache: Path, stub_verifier: list) -> None:
@@ -129,7 +152,7 @@ def test_group_writable_root_in_private_dir_passes(
     # verification in the same cache must still pass.
     path, error = _prepare_sigstore_cache()
     assert error is None and path is not None
-    path.write_bytes(b"seeded root")
+    path.write_bytes(_embedded_root())
     path.chmod(0o660)
     again_path, again_error = _prepare_sigstore_cache()
     assert again_error is None
@@ -144,7 +167,7 @@ def test_symlinked_cache_dir_fails_closed(private_cache: Path) -> None:
     assert error is None and path is not None
     real = private_cache / "elsewhere"
     real.mkdir()
-    path.parent.rmdir()
+    shutil.rmtree(path.parent)
     path.parent.symlink_to(real, target_is_directory=True)
     failed_path, failed_error = _prepare_sigstore_cache()
     assert failed_path is None
@@ -157,6 +180,7 @@ def test_symlinked_trusted_root_file_fails_closed(private_cache: Path) -> None:
     assert error is None and path is not None
     planted = private_cache / "planted.json"
     planted.write_bytes(b"planted root")
+    path.unlink()
     path.symlink_to(planted)
     failed_path, failed_error = _prepare_sigstore_cache()
     assert failed_path is None
