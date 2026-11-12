@@ -351,6 +351,26 @@ def test_the_guide_example_is_the_real_demo_output(runner, demo):
     assert block.group(1) == run(runner, str(demo)).stdout
 
 
+def test_the_guide_gated_example_is_the_real_demo_output(runner, demo):
+    guide = GUIDE.read_text(encoding="utf-8")
+    block = re.search(
+        r"`--fail-under 50` the report gains one line after its `Overall:` line:\n\n"
+        r"```text\n(.*?)```\n\nand is followed by this on standard error, and the command "
+        r"exits 1:\n\n```text\n(.*?)```\n\nand (\d+) more `missing:` lines",
+        guide,
+        re.S,
+    )
+    assert block, "the guide no longer shows the gated demo output"
+    plain = run(runner, str(demo)).stdout.splitlines(keepends=True)
+    gated = run(runner, str(demo), "--fail-under", "50")
+    assert gated.exit_code == 1
+    assert gated.stdout == "".join([*plain[:5], block.group(1), *plain[5:]])
+    shown = block.group(2).splitlines(keepends=True)
+    errors = gated.stderr.splitlines(keepends=True)
+    assert errors[: len(shown)] == shown
+    assert len(errors) == len(shown) + int(block.group(3))
+
+
 def test_text_names_inapplicable_clusters_and_counts_unlisted_subjects(runner, tmp_path):
     path = tmp_path / "bom.json"
     path.write_text(AIBOM(components=[AgentComponent(bom_ref="agent:a", name="a")]).to_json())

@@ -93,6 +93,11 @@ the RFC 8785 JSON `{"files": [{"path": ..., "sha256": ...}]}` built from the
 recorded list, sorted by path (for a chat template, the path is the source,
 such as `tokenizer_config.json#chat_template`).
 
+An `additional_chat_templates` symlink to a directory in the project is read
+through the link, under the names a loader opens. When one of these files or that
+directory is absent, another spelling of its name that differs only by case or
+Unicode normalization is a failure, because case-insensitive file systems open it.
+
 Every model records these digests for its directory, so one scan records at
 most twice the `entries` limit of them across its models (200,000 by default),
 counting each configuration file,
@@ -117,7 +122,11 @@ medium `properties changed` alert.
 
 Every chat template that `properties.chat_templates` lists is checked for the
 attribute access that Jinja2 sandbox escapes use: a dunder attribute, named or
-subscripted, or the `attr` filter. A Hugging Face template that matches gives every
+subscripted, a dunder name as a string such as an `attribute=` argument, or the
+`attr` filter. The template is matched as Jinja reads it, with Unicode whitespace
+between tokens and string escapes such as `\x5f` decoded, and a backslash before a
+line break in a string removed. A Hugging Face template
+that matches gives every
 model in its directory a critical `serialization_format` finding that names up to
 three matching templates and counts the rest, and a model that would otherwise be
 rated `safe` is rated `unsafe-template-injection`. A model rated `unknown` or
@@ -239,4 +248,5 @@ those listed above, and NumPy `.npy` and `.npz` arrays, are not inventoried. Saf
 tensor bytes are hashed but not inspected, so a payload that also parses as
 another format is not flagged. The chat template check is a heuristic for known
 sandbox-escape shapes, not a template analysis: a template that escapes the
-sandbox another way, or that instructs the model, passes it.
+sandbox another way, such as a dunder name built by concatenating strings, or that
+instructs the model, passes it.

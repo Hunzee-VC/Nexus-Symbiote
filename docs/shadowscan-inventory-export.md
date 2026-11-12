@@ -146,7 +146,7 @@ approves that repository's project instead.
 A prefix is refused when ShadowScan could not report it back exactly: empty,
 longer than 4,096 characters, starting or ending with white space (ShadowScan
 removes it), containing a control, format, line-separator or unencodable
-character, or containing `[REDACTED]` (ShadowScan approves no resource that
+character or another default-ignorable code point (such as a variation selector), or containing `[REDACTED]` (ShadowScan approves no resource that
 does).
 
 ## Declared and unnamed agents
@@ -230,7 +230,7 @@ or `components` list), when it has no repository agent or more than one, when th
 agent is not declared and `--include-unnamed` is absent, or when ShadowScan could
 not read its name or owner back exactly (empty, longer than 4,096 characters,
 padded with white space, or containing a control, format, line-separator or
-unencodable character). Messages name the field, never its text. It exits 2 for a
+unencodable character or another default-ignorable code point). Messages name the field, never its text. It exits 2 for a
 usage error: a missing option, a prefix it refuses, an output that does not end
 in `.json` (ShadowScan reads a file as strict JSON only by that suffix and skips
 other names when it loads a directory), or an output that is the inventory

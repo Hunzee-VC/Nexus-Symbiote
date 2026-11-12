@@ -154,8 +154,9 @@ def _summary(document: Mapping[str, Any]) -> None:
     help=(
         "undeclared: exit 1 when the traces report a tool, model, agent or MCP endpoint "
         "that the inventory does not declare or whose identifier cannot be read, or a span "
-        "whose operation, MCP method or MCP transport cannot be read, or when no span "
-        "carries GenAI or MCP semantics. none: report only."
+        "whose operation, MCP method or MCP transport cannot be read, or a span or resource "
+        "with more than 128 attributes, or when no span carries GenAI or MCP semantics. "
+        "none: report only."
     ),
 )
 def trace_diff(

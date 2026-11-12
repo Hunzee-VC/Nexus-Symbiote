@@ -169,8 +169,8 @@ def read_native_inventory(path: Path) -> NativeInventory:
         digest = inventory_content_digest(document)
     except ValueError as exc:
         if exc.args == (NESTED_TOO_DEEPLY,):
-            # The digest canonicalizes the document again, one call deeper than the parse did,
-            # so nesting the parse just fitted is refused as the parse refuses deeper nesting.
+            # The parse and the digest canonicalize at the same depth today, so the parse
+            # refuses first; should that change, nesting is still refused as the parse does.
             raise NativeFormatError(_NOT_STRICT_JSON) from exc
         raise NativeFormatError(
             "It has no metadata object or no components list, so it has no content digest."

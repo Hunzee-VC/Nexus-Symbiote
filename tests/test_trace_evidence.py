@@ -342,6 +342,55 @@ def test_attributes_after_the_bound_are_counted_and_not_read(tmp_path):
     assert coverage["attribute_lists_over_bound"] == 1
     assert coverage["spans_without_identifier"]["tool"] == 1
     assert "beyond" not in render(evidence)
+    assert evidence["gate"]["passed"] is False
+
+
+def _hidden_call(count: int) -> dict[str, Any]:
+    # ``count`` attributes, the identifying ones last, as a span that buries a call would.
+    call = {
+        "gen_ai.operation.name": "execute_tool",
+        "mcp.method.name": "tools/call",
+        "network.transport": "tcp",
+        "server.address": "evil.example.net",
+        "server.port": 443,
+        "gen_ai.tool.name": "exfiltrate",
+    }
+    filler = {f"app.filler.{i:03d}": "x" for i in range(count - len(call))}
+    return otlp_span({**filler, **call}, kind=CLIENT)
+
+
+def test_a_list_at_the_attribute_bound_is_read_whole(tmp_path):
+    evidence = _evidence(tmp_path, [], _hidden_call(otlp.MAX_ATTRIBUTES))
+    assert evidence["coverage"]["attribute_lists_over_bound"] == 0
+    assert {entry["kind"] for entry in evidence["reconciliation"]["undeclared"]} == {
+        "mcp-endpoint",
+        "tool",
+    }
+    assert evidence["gate"]["passed"] is False
+
+
+@pytest.mark.parametrize("where", ["span", "resource"])
+def test_a_list_over_the_attribute_bound_fails_the_gate(tmp_path, where):
+    declared = _server("mcp:t", "tickets", "https://mcp.example.com")
+    if where == "span":
+        evidence = _evidence(
+            tmp_path, [declared], _mcp_tool("x", "mcp.example.com"), _hidden_call(129)
+        )
+    else:
+        resource: dict[str, object] = {f"app.filler.{i:03d}": "x" for i in range(129)}
+        evidence = _evidence(
+            tmp_path, [declared], _mcp_tool("x", "mcp.example.com"), resource=resource
+        )
+    assert evidence["coverage"]["attribute_lists_over_bound"] == 1
+    assert "exfiltrate" not in render(evidence)
+    gate = evidence["gate"]
+    assert gate["passed"] is False
+    assert gate["reasons"][-1] == (
+        "1 attribute list has more than 128 entries, so what the entries after the first 128 "
+        "report cannot be compared with the inventory"
+    )
+    loose = collect(_inventory(tmp_path, declared), [tmp_path / "trace.json"], fail_on="none")
+    assert loose["gate"] == {"fail_on": "none", "passed": True, "reasons": []}
 
 
 # Reading: what is and is not read
@@ -516,18 +565,108 @@ def test_only_remote_mcp_client_spans_name_an_endpoint(tmp_path):
     evidence = _evidence(tmp_path, [], *spans)
     assert evidence["coverage"]["mcp_client_spans"] == {
         "attributed": 1,
-        "stdio": 1,
-        "unattributed": 2,
+        "stdio": 2,
+        "unattributed": 1,
     }
     observed = {
-        (e["kind"], e.get("endpoint") or e.get("host")): e["span_count"]
+        (e["kind"], e.get("endpoint") or e.get("host"), e.get("transport")): e["span_count"]
         for e in evidence["observed"]
     }
+    # The server span names no endpoint item, but its tool is the one served at its address.
     assert observed == {
-        ("mcp-endpoint", "2001:db8::1"): 1,
-        ("tool", None): 4,
-        ("tool", "[2001:db8::1]:8443"): 1,
+        ("mcp-endpoint", "2001:db8::1", None): 1,
+        ("tool", None, None): 1,
+        ("tool", None, "pipe"): 1,
+        ("tool", None, "unix"): 1,
+        ("tool", "[2001:db8::1]:8443", None): 2,
     }
+
+
+def _shadow_inventory() -> list[AnyComponent]:
+    return [
+        MCPServerComponent(
+            bom_ref="mcp:tickets",
+            name="tickets",
+            transport="streamable-http",
+            endpoint_url="https://mcp.example.com",
+        ),
+        _declared_tool("tool:delete_all", "delete_all", "mcp:tickets"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("transport", "kind"),
+    [
+        ("tcp", CLIENT),
+        (None, CLIENT),
+        ("http", CLIENT),
+        ("TCP", CLIENT),
+        ("tcp", 1),
+        ("tcp", SERVER),
+    ],
+)
+def test_a_reported_address_never_matches_a_tool_served_elsewhere(tmp_path, transport, kind):
+    attributes: dict[str, object] = {
+        "mcp.method.name": "tools/call",
+        "gen_ai.tool.name": "delete_all",
+        "server.address": "evil.example.net",
+        "server.port": 443,
+    }
+    if transport is not None:
+        attributes["network.transport"] = transport
+    evidence = _evidence(tmp_path, _shadow_inventory(), otlp_span(attributes, kind=kind))
+    reconciliation = evidence["reconciliation"]
+    assert reconciliation["matched"] == []
+    assert {
+        "kind": "tool",
+        "name": "delete_all",
+        "endpoint": "evil.example.net:443",
+        "span_count": 1,
+    } in reconciliation["undeclared"]
+    endpoint = {"kind": "mcp-endpoint", "host": "evil.example.net", "port": "443", "span_count": 1}
+    assert (endpoint in reconciliation["undeclared"]) is (kind == CLIENT)
+    assert [entry["inventory_ref"] for entry in reconciliation["unobserved"]] == [
+        "mcp:tickets",
+        "tool:delete_all",
+    ]
+    assert evidence["gate"]["passed"] is False
+
+
+@pytest.mark.parametrize("transport", ["pipe", "unix"])
+def test_a_local_call_never_matches_a_tool_of_a_remote_only_server(tmp_path, transport):
+    span = otlp_span(
+        {
+            "mcp.method.name": "tools/call",
+            "gen_ai.tool.name": "delete_all",
+            "network.transport": transport,
+        },
+        kind=CLIENT,
+    )
+    evidence = _evidence(tmp_path, _shadow_inventory(), span)
+    reconciliation = evidence["reconciliation"]
+    assert reconciliation["matched"] == []
+    assert reconciliation["undeclared"] == [
+        {
+            "kind": "tool",
+            "name": "delete_all",
+            "endpoint": None,
+            "transport": transport,
+            "span_count": 1,
+        }
+    ]
+    assert len(reconciliation["unobserved"]) == 2
+    assert describe(reconciliation["undeclared"][0]) == f"tool 'delete_all' over {transport}"
+    local = [
+        MCPServerComponent(
+            bom_ref="mcp:local", name="local", transport="stdio", endpoint_url="http://h"
+        ),
+        _declared_tool("tool:local", "delete_all", "mcp:local"),
+        *_shadow_inventory(),
+    ]
+    matched = _evidence(tmp_path, local, span)["reconciliation"]["matched"]
+    assert [(entry["inventory_ref"], entry["basis"]) for entry in matched] == [
+        ("tool:local", "name")
+    ]
 
 
 def test_resource_attributes_apply_beneath_each_span(tmp_path):
@@ -685,12 +824,18 @@ def test_a_span_whose_operation_method_or_transport_cannot_be_read_fails_the_gat
         _declared_tool("tool:s", "search", "mcp:t"),
     ]
     evidence = _evidence(tmp_path, components, otlp_span(attributes, kind=CLIENT))
-    assert evidence["reconciliation"]["undeclared"] == []
+    assert [e for e in evidence["reconciliation"]["matched"] if e["kind"] == "tool"] == []
+    undeclared = [
+        {"kind": "tool", "name": "search", "endpoint": "evil.example:443", "span_count": 1}
+    ]
+    assert evidence["reconciliation"]["undeclared"] == (
+        undeclared if attributes.get("server.address") == "evil.example" else []
+    )
     assert evidence["coverage"]["spans_unclassified"] == 1
-    assert evidence["gate"]["reasons"] == [
+    assert evidence["gate"]["reasons"][-1] == (
         "1 span has an operation name, MCP method or MCP transport that could not be read, so "
         "what it reports cannot be compared with the inventory"
-    ]
+    )
     note = (
         "Spans whose operation name, MCP method or MCP transport could not be read: 1. What "
         "they report cannot be compared with the inventory."
@@ -1188,6 +1333,22 @@ def test_sarif_reports_undeclared_and_unidentified_use_only(tmp_path):
     assert len(set(fingerprints)) == 2
 
 
+def test_the_sarif_rule_describes_reported_runtime_use_for_both_statuses(tmp_path):
+    evidence = _evidence(tmp_path, [], _tool("undeclared_tool"), _tool(TOKEN))
+    rule = sarif_document(evidence, "bom.json")["runs"][0]["tool"]["driver"]["rules"][0]
+    assert (
+        rule["shortDescription"]["text"] == "Runtime component not matched to the inventory (high)"
+    )
+    description = rule["fullDescription"]["text"]
+    assert "could not be read" in description and "not in the inventory" not in description
+    help_text = rule["help"]["text"]
+    assert help_text.startswith(description + " ")
+    assert "comes from the agent's own telemetry, not from the inventory" in help_text
+    assert "assurance reported" in help_text and "status unidentified" in help_text
+    assert "recommendation" not in help_text and "declarations in the repository" not in help_text
+    assert rule["helpUri"].endswith("/docs/trace-evidence.md#sarif")
+
+
 def test_sarif_without_findings_still_validates(tmp_path):
     evidence = _evidence(tmp_path, [_declared_tool("tool:a", "a")], _tool("a"))
     sarif = sarif_document(evidence, ".nexus-symbiote.yaml")
@@ -1202,6 +1363,19 @@ def test_sarif_without_findings_still_validates(tmp_path):
         (
             {"kind": "tool", "name": None, "endpoint": "h:1", "unreadable": {"name": "oversized"}},
             "tool <name oversized> on MCP endpoint h:1",
+        ),
+        (
+            {
+                "kind": "tool",
+                "name": "t",
+                "endpoint": "h",
+                "unreadable": {"port": "invalid"},
+            },
+            "tool 't' on MCP endpoint h port <port invalid>",
+        ),
+        (
+            {"kind": "tool", "name": "t", "endpoint": None, "unreadable": {"host": "withheld"}},
+            "tool 't' on MCP endpoint <host withheld>",
         ),
         ({"kind": "model", "provider": None, "model": "m"}, "model 'm'"),
         (
@@ -1461,13 +1635,13 @@ def test_every_coverage_gap_has_a_note(tmp_path):
         ),
         (
             "note",
-            "MCP client spans over stdio: 1. A trace cannot attribute stdio activity to a "
-            "configured server.",
+            "MCP client spans over a pipe or unix socket: 1. A trace cannot attribute local "
+            "activity to a configured server.",
         ),
         (
             "note",
-            "MCP client spans without a tcp or quic server address: 1. Their endpoint is not "
-            "attributed.",
+            "MCP client spans without a server address, or whose transport could not be read: 1. "
+            "Their endpoint is not attributed.",
         ),
         ("note", "Tool spans that name no tool: 1; agent spans that name no agent: 0."),
         ("note", "Spans that name their provider with the legacy gen_ai.system attribute: 1."),

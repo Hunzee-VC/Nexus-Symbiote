@@ -265,7 +265,9 @@ with exactly these members:
 
 The subject digest is the SHA-256 of the file's exact bytes, and it is the binding. The
 name is the file's base name for information only: characters that could rewrite or
-disguise terminal or CI output, a `##name[` CI log command and undecodable bytes are
+disguise terminal or CI output (controls, line breaks, format characters and every other
+default-ignorable code point, such as variation selectors and blank fillers), a
+`##name[` CI log command and undecodable bytes are
 replaced with U+FFFD, and it is cut to 255 characters. Verification does not compare
 it with the file name you pass. Unlike the runtime contracts, whose subject is a
 contract digest, the subject here is a file, as generic in-toto tooling expects. The

@@ -98,7 +98,9 @@ declaration files (`.d.ts`, `.d.mts`, `.d.cts`) and scripts named with `.spec.` 
 `source-scan-bytes`, in the text the language's own tools read, and only
 candidates are parsed:
 
-- A Python file is a candidate when it contains `mcp`, `MCPClient` or the name of
+- A Python file is a candidate when it contains `mcp`, `MCPClient`, `MCPServer`,
+  `FastMCP`, `StdioServerParameters`, `sse_client`, `streamablehttp_client`,
+  `websocket_client` or the name of
   an agent framework whose tools are collected (`langchain`, `crewai`,
   `function_tool`, `smolagents`, `pydantic_ai`) as Python reads it: decoded as its
   encoding declaration says, with identifiers in the NFKC form Python compares them

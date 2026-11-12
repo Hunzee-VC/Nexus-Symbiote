@@ -74,8 +74,12 @@ sorted keys:
   findings the policy left out, which the built-in policy never does;
 - `coverage_status`: collection coverage as `risk` assesses it;
 - `findings`: sorted by severity, category, component and detail, each with its
-  `category`, `severity`, `component_ref` and `detail`, in which control,
-  bidirectional and invisible characters are replaced as on a terminal;
+  `category`, `severity`, `component_ref` and `detail`. Only in `detail` are control,
+  bidirectional and invisible characters, including every default-ignorable code point,
+  replaced as on a terminal; `category` and
+  `component_ref` are kept exactly as the inventory records them, so that they can be
+  matched, and can hold any character. Treat them as untrusted: escape them before you
+  print them or place them in HTML, Markdown or a shell command;
 - `frameworks`: one per selected edition, in the order of the Editions table, with its
   `framework` key, `name`, `edition`, `source`, `verification`, `note`,
   `findings_with_reference`, `findings_without_reference` and `entries`. Each entry has
@@ -89,7 +93,8 @@ sorted keys:
 Markdown (`--format markdown`) states what a reference means at the top, then gives a
 summary table, a table of the referenced entries of each edition and, under each entry,
 its rationales and its findings. Text from the inventory is escaped: control,
-bidirectional and invisible characters become U+FFFD, a `##` CI log command is broken,
+bidirectional and invisible characters, including every default-ignorable code point such
+as variation selectors and blank fillers, become U+FFFD, a `##` CI log command is broken,
 and every ASCII punctuation character is backslash-escaped, so that no table cell, link,
 emphasis, code span or HTML can form from it; a terminal shows the backslashes. Each such
 text is cut at 1,000 characters, ending with `...`, and at most 100 findings are listed
@@ -340,7 +345,7 @@ every rule.
 | `owasp-llm-2026` | LLM03:2026 Excessive Agency | all | Access to directories outside the project is more than a project task needs. |
 | `owasp-asi-2026` | ASI03 Identity & Privilege Abuse | all | Wider file system access widens what a misused agent reaches. |
 | `nist-ai-rmf-1.0` | MEASURE-2.7 Security and resilience are evaluated | all | Records a security-relevant property of the configuration, an input to evaluating its security. |
-| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a weakness that could let a third party alter the system's use or outputs. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 
 ### `attestation`
 
@@ -351,7 +356,7 @@ every rule.
 | `owasp-asi-2026` | ASI04 Agentic Supply Chain Vulnerabilities | all | An unverified extension is part of the agent tooling's supply chain. |
 | `mitre-atlas-2026.10` | AML.T0010.001 Supply Chain Compromise: Software | all | An extension without verified identity could be a compromised software package. |
 | `nist-ai-rmf-1.0` | MANAGE-3.1 Third-party AI risks are monitored and controlled | all | Records a third-party component whose identity, version or resolution is not established. |
-| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a weakness that could let a third party alter the system's use or outputs. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 | `iso-iec-42001-2023` | A.10.3 Suppliers are managed | all | Records a supplied component whose identity, version or resolution is not established. |
 | `cwe` | CWE-345 Insufficient Verification of Data Authenticity | all | The extension's identity and publisher are not verified. |
 
@@ -362,7 +367,7 @@ every rule.
 | `owasp-asi-2026` | ASI03 Identity & Privilege Abuse | all | No declared authentication identifies the agent's callers, or the client to the agent it calls. |
 | `owasp-asi-2026` | ASI07 Insecure Inter-Agent Communication | all | Agent-to-agent communication has no declared authentication. |
 | `nist-ai-rmf-1.0` | MEASURE-2.7 Security and resilience are evaluated | all | Records a security-relevant property of the configuration, an input to evaluating its security. |
-| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a weakness that could let a third party alter the system's use or outputs. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 | `cwe` | CWE-306 Missing Authentication for Critical Function | all | An agent card that declares no authentication requirement can leave the agent's functions unauthenticated; kept from the earlier SARIF rules, it does not hold for client findings, which record only the client's own configuration. |
 
 ### `auto_approval`
@@ -374,7 +379,7 @@ every rule.
 | `owasp-asi-2026` | ASI02 Tool Misuse & Exploitation | all | The tools can be used, or misused, without a human check. |
 | `mitre-atlas-2026.10` | AML.T0053 AI Agent Tool Invocation | all | Whoever steers the agent can invoke these tools without approval. |
 | `nist-ai-rmf-1.0` | MEASURE-2.7 Security and resilience are evaluated | all | Records a security-relevant property of the configuration, an input to evaluating its security. |
-| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a weakness that could let a third party alter the system's use or outputs. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 
 ### `bidi_override`
 
@@ -385,7 +390,7 @@ every rule.
 | `owasp-asi-2026` | ASI01 Agent Goal Hijack | all | Such text can redirect the agent's goal without a reviewer noticing. |
 | `mitre-atlas-2026.10` | AML.T0068 LLM Prompt Obfuscation | all | Hiding or disguising instruction text from human review is what this technique describes. |
 | `nist-ai-rmf-1.0` | MEASURE-2.7 Security and resilience are evaluated | all | Records a security-relevant property of the configuration, an input to evaluating its security. |
-| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a weakness that could let a third party alter the system's use or outputs. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 | `cwe` | CWE-451 User Interface (UI) Misrepresentation of Critical Information | all | The file can display differently from what the agent processes. |
 | `cwe` | CWE-1427 Improper Neutralization of Input Used for LLM Prompting | all | Instruction text reaches the model with characters that are not neutralized. |
 
@@ -409,7 +414,7 @@ every rule.
 | `owasp-asi-2026` | ASI05 Unexpected Code Execution (RCE) | all | Loading the model executes repository code. |
 | `mitre-atlas-2026.10` | AML.T0011.000 User Execution: Unsafe AI Artifacts | all | Configuration that makes loading run repository code is an unsafe artifact as the technique defines one. |
 | `nist-ai-rmf-1.0` | MANAGE-3.2 Pre-trained models are monitored | all | Records how safely a pre-trained model loads, or whether its weights are verified. |
-| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a weakness that could let a third party alter the system's use or outputs. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 | `cwe` | CWE-494 Download of Code Without Integrity Check | all | Loading runs code fetched from the model repository without an integrity check. |
 | `cwe` | CWE-829 Inclusion of Functionality from Untrusted Control Sphere | all | Loading includes code from the model repository, outside the project's control. |
 
@@ -428,7 +433,7 @@ every rule.
 | `owasp-asi-2026` | ASI05 Unexpected Code Execution (RCE) | all | The command runs automatically whenever the agent needs a credential. |
 | `mitre-atlas-2026.10` | AML.T0142 Event Triggered Execution | all | A command that runs on an agent event is a mechanism for automatic code execution. |
 | `nist-ai-rmf-1.0` | MEASURE-2.7 Security and resilience are evaluated | all | Records a security-relevant property of the configuration, an input to evaluating its security. |
-| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a weakness that could let a third party alter the system's use or outputs. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 
 ### `custom_code`
 
@@ -440,7 +445,7 @@ every rule.
 | `owasp-asi-2026` | ASI05 Unexpected Code Execution (RCE) | all | Loading the model executes its custom code. |
 | `mitre-atlas-2026.10` | AML.T0011.000 User Execution: Unsafe AI Artifacts | all | Executable logic bundled with a model is an unsafe artifact as the technique defines one. |
 | `nist-ai-rmf-1.0` | MANAGE-3.2 Pre-trained models are monitored | all | Records how safely a pre-trained model loads, or whether its weights are verified. |
-| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a weakness that could let a third party alter the system's use or outputs. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 | `cwe` | CWE-829 Inclusion of Functionality from Untrusted Control Sphere | all | Loading runs modules from the model repository, outside the project's control. |
 
 ### `data_integrity`
@@ -454,7 +459,7 @@ every rule.
 | `owasp-asi-2026` | ASI06 Memory & Context Poisoning | all | Retrieved content enters the agent's context. |
 | `mitre-atlas-2026.10` | AML.T0070 RAG Poisoning | all | Content unprotected in transit or unfiltered at ingestion is a precondition for poisoning retrieval. |
 | `nist-ai-rmf-1.0` | MEASURE-2.7 Security and resilience are evaluated | all | Records a security-relevant property of the configuration, an input to evaluating its security. |
-| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a weakness that could let a third party alter the system's use or outputs. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 | `cwe` | CWE-319 Cleartext Transmission of Sensitive Information | critical and high | The retrieval endpoint or locator uses an unencrypted transport. |
 
 ### `detection_method`
@@ -462,8 +467,8 @@ every rule.
 | Framework | Entry | Severities | Rationale |
 | --- | --- | --- | --- |
 | `nist-ai-rmf-1.0` | GOVERN-1.6 AI systems are inventoried | all | Records an agent SDK use found in code with no declared deployment. |
-| `eu-ai-act-2024` | Art. 11 Technical documentation of the system and its elements (Annex IV) | all | Records an element that the system's technical documentation does not describe. |
-| `iso-iec-42001-2023` | A.4.2 Resources of the AI system are documented | all | Records a resource that the documentation of the AI system leaves out. |
+| `eu-ai-act-2024` | Art. 11 Technical documentation of the system and its elements (Annex IV) | all | Records an element of the system that the inventory does not show as declared. |
+| `iso-iec-42001-2023` | A.4.2 Resources of the AI system are documented | all | Records a resource of the AI system that the inventory does not show as declared. |
 
 ### `directional_marks`
 
@@ -474,7 +479,7 @@ every rule.
 | `owasp-asi-2026` | ASI01 Agent Goal Hijack | all | Such text can redirect the agent's goal without a reviewer noticing. |
 | `mitre-atlas-2026.10` | AML.T0068 LLM Prompt Obfuscation | all | Hiding or disguising instruction text from human review is what this technique describes. |
 | `nist-ai-rmf-1.0` | MEASURE-2.7 Security and resilience are evaluated | all | Records a security-relevant property of the configuration, an input to evaluating its security. |
-| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a weakness that could let a third party alter the system's use or outputs. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 
 ### `endpoint_identity`
 
@@ -482,7 +487,7 @@ every rule.
 | --- | --- | --- | --- |
 | `owasp-asi-2026` | ASI07 Insecure Inter-Agent Communication | all | The peer an MCP endpoint connects to cannot be identified from its declaration. |
 | `nist-ai-rmf-1.0` | MEASURE-2.7 Security and resilience are evaluated | all | Records a security-relevant property of the configuration, an input to evaluating its security. |
-| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a weakness that could let a third party alter the system's use or outputs. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 
 ### `hidden_markup`
 
@@ -493,7 +498,7 @@ every rule.
 | `owasp-asi-2026` | ASI01 Agent Goal Hijack | all | Such text can redirect the agent's goal without a reviewer noticing. |
 | `mitre-atlas-2026.10` | AML.T0068 LLM Prompt Obfuscation | all | Hiding or disguising instruction text from human review is what this technique describes. |
 | `nist-ai-rmf-1.0` | MEASURE-2.7 Security and resilience are evaluated | all | Records a security-relevant property of the configuration, an input to evaluating its security. |
-| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a weakness that could let a third party alter the system's use or outputs. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 
 ### `hook_commands`
 
@@ -502,7 +507,7 @@ every rule.
 | `owasp-asi-2026` | ASI05 Unexpected Code Execution (RCE) | all | Commands run automatically on agent events. |
 | `mitre-atlas-2026.10` | AML.T0142 Event Triggered Execution | all | Hooks that run commands on agent events are the mechanism this technique abuses. |
 | `nist-ai-rmf-1.0` | MEASURE-2.7 Security and resilience are evaluated | all | Records a security-relevant property of the configuration, an input to evaluating its security. |
-| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a weakness that could let a third party alter the system's use or outputs. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 
 ### `instruction_layering`
 
@@ -522,7 +527,7 @@ every rule.
 | `owasp-asi-2026` | ASI04 Agentic Supply Chain Vulnerabilities | all | The model artifact is part of the agent's supply chain. |
 | `mitre-atlas-2026.10` | AML.T0011.000 User Execution: Unsafe AI Artifacts | all | A file presented as SafeTensors that was not validated may be an unsafe artifact. |
 | `nist-ai-rmf-1.0` | MANAGE-3.2 Pre-trained models are monitored | all | Records how safely a pre-trained model loads, or whether its weights are verified. |
-| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a weakness that could let a third party alter the system's use or outputs. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 
 ### `invisible_characters`
 
@@ -533,7 +538,7 @@ every rule.
 | `owasp-asi-2026` | ASI01 Agent Goal Hijack | all | Such text can redirect the agent's goal without a reviewer noticing. |
 | `mitre-atlas-2026.10` | AML.T0068 LLM Prompt Obfuscation | all | Hiding or disguising instruction text from human review is what this technique describes. |
 | `nist-ai-rmf-1.0` | MEASURE-2.7 Security and resilience are evaluated | all | Records a security-relevant property of the configuration, an input to evaluating its security. |
-| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a weakness that could let a third party alter the system's use or outputs. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 | `cwe` | CWE-451 User Interface (UI) Misrepresentation of Critical Information | all | The file can display differently from what the agent processes. |
 | `cwe` | CWE-1427 Improper Neutralization of Input Used for LLM Prompting | all | Instruction text reaches the model with characters that are not neutralized. |
 
@@ -543,7 +548,7 @@ every rule.
 | --- | --- | --- | --- |
 | `owasp-asi-2026` | ASI05 Unexpected Code Execution (RCE) | all | The launch widens what code the server runs or how far it reaches: host privileges, code-loading options, command fields or a shell. |
 | `nist-ai-rmf-1.0` | MEASURE-2.7 Security and resilience are evaluated | all | Records a security-relevant property of the configuration, an input to evaluating its security. |
-| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a weakness that could let a third party alter the system's use or outputs. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 
 ### `launcher_identity`
 
@@ -554,7 +559,7 @@ every rule.
 | `owasp-asi-2026` | ASI04 Agentic Supply Chain Vulnerabilities | all | An agent tool of unknown identity is a supply chain gap. |
 | `mitre-atlas-2026.10` | AML.T0010.005 Supply Chain Compromise: AI Agent Tool | all | A tool whose identity and pin are unknown could be compromised without detection. |
 | `nist-ai-rmf-1.0` | MEASURE-2.7 Security and resilience are evaluated | all | Records a security-relevant property of the configuration, an input to evaluating its security. |
-| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a weakness that could let a third party alter the system's use or outputs. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 
 ### `local_process`
 
@@ -563,7 +568,7 @@ every rule.
 | `owasp-asi-2026` | ASI07 Insecure Inter-Agent Communication | all | The agent exchanges messages with a tool server process whose executable is not verified. |
 | `mitre-atlas-2026.10` | AML.T0010.005 Supply Chain Compromise: AI Agent Tool | all | An unverified tool executable could be a compromised agent tool without detection. |
 | `nist-ai-rmf-1.0` | MEASURE-2.7 Security and resilience are evaluated | all | Records a security-relevant property of the configuration, an input to evaluating its security. |
-| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a weakness that could let a third party alter the system's use or outputs. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 
 ### `lockfile_resolution_mismatch`
 
@@ -574,7 +579,7 @@ every rule.
 | `owasp-asi-2026` | ASI04 Agentic Supply Chain Vulnerabilities | all | The agent's dependency resolution does not match its declaration. |
 | `mitre-atlas-2026.10` | AML.T0010.001 Supply Chain Compromise: Software | all | A lockfile record that resolves to another package can substitute a dependency. |
 | `nist-ai-rmf-1.0` | MANAGE-3.1 Third-party AI risks are monitored and controlled | all | Records a third-party component whose identity, version or resolution is not established. |
-| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a weakness that could let a third party alter the system's use or outputs. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 | `iso-iec-42001-2023` | A.10.3 Suppliers are managed | all | Records a supplied component whose identity, version or resolution is not established. |
 
 ### `lockfile_unread`
@@ -591,7 +596,7 @@ every rule.
 | `owasp-asi-2026` | ASI04 Agentic Supply Chain Vulnerabilities | all | MCP servers that the project declares are admitted without a per-server review. |
 | `mitre-atlas-2026.10` | AML.T0010.005 Supply Chain Compromise: AI Agent Tool | all | A compromised server added to the project's server file would start without approval. |
 | `nist-ai-rmf-1.0` | MEASURE-2.7 Security and resilience are evaluated | all | Records a security-relevant property of the configuration, an input to evaluating its security. |
-| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a weakness that could let a third party alter the system's use or outputs. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 
 ### `missing_lockfile_integrity`
 
@@ -602,7 +607,7 @@ every rule.
 | `owasp-asi-2026` | ASI04 Agentic Supply Chain Vulnerabilities | all | The agent's dependency is installed without an integrity check. |
 | `mitre-atlas-2026.10` | AML.T0010.001 Supply Chain Compromise: Software | all | A download that is not checked can be substituted. |
 | `nist-ai-rmf-1.0` | MANAGE-3.1 Third-party AI risks are monitored and controlled | all | Records a third-party component whose identity, version or resolution is not established. |
-| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a weakness that could let a third party alter the system's use or outputs. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 | `iso-iec-42001-2023` | A.10.3 Suppliers are managed | all | Records a supplied component whose identity, version or resolution is not established. |
 | `cwe` | CWE-494 Download of Code Without Integrity Check | all | Without an integrity value, the downloaded package is not checked. |
 
@@ -615,7 +620,7 @@ every rule.
 | `owasp-asi-2026` | ASI04 Agentic Supply Chain Vulnerabilities | all | The image the agent runs can change without review. |
 | `mitre-atlas-2026.10` | AML.T0010.004 Supply Chain Compromise: Container Registry | all | Pushing other content under an existing tag is how this technique replaces an image. |
 | `nist-ai-rmf-1.0` | MANAGE-3.1 Third-party AI risks are monitored and controlled | all | Records a third-party component whose identity, version or resolution is not established. |
-| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a weakness that could let a third party alter the system's use or outputs. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 | `iso-iec-42001-2023` | A.10.3 Suppliers are managed | all | Records a supplied component whose identity, version or resolution is not established. |
 | `cwe` | CWE-829 Inclusion of Functionality from Untrusted Control Sphere | all | The tag can be moved to other image content outside the project's control. |
 
@@ -628,7 +633,7 @@ every rule.
 | `owasp-asi-2026` | ASI04 Agentic Supply Chain Vulnerabilities | high | The agent's dependency comes from a remote source that can change. |
 | `mitre-atlas-2026.10` | AML.T0010.001 Supply Chain Compromise: Software | high | A package from a remote source that can change is a software supply chain entry point. |
 | `nist-ai-rmf-1.0` | MANAGE-3.1 Third-party AI risks are monitored and controlled | high | Records a third-party component whose identity, version or resolution is not established. |
-| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | high | Records a weakness that could let a third party alter the system's use or outputs. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | high | Records a property of the system that bears on its robustness and cybersecurity. |
 | `iso-iec-42001-2023` | A.10.3 Suppliers are managed | high | Records a supplied component whose identity, version or resolution is not established. |
 | `cwe` | CWE-829 Inclusion of Functionality from Untrusted Control Sphere | high | The package comes from a git reference or plain HTTP source that can change. |
 
@@ -652,7 +657,7 @@ every rule.
 | `owasp-asi-2026` | ASI04 Agentic Supply Chain Vulnerabilities | all | The agent tool's packages come from a source outside the default registry. |
 | `mitre-atlas-2026.10` | AML.T0010.005 Supply Chain Compromise: AI Agent Tool | all | A tool package resolved through another registry can be substituted there. |
 | `nist-ai-rmf-1.0` | MANAGE-3.1 Third-party AI risks are monitored and controlled | all | Records a third-party component whose identity, version or resolution is not established. |
-| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a weakness that could let a third party alter the system's use or outputs. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 | `iso-iec-42001-2023` | A.10.3 Suppliers are managed | all | Records a supplied component whose identity, version or resolution is not established. |
 
 ### `permission_scope`
@@ -666,7 +671,7 @@ every rule.
 | `mitre-atlas-2026.10` | AML.T0053 AI Agent Tool Invocation | all | The agent can invoke tools without a prompt or beyond a resource scope. |
 | `mitre-atlas-2026.10` | AML.T0105 Escape to Host | high | Skipping permission prompts or disabling the sandbox lets tool calls act on the host unchecked. |
 | `nist-ai-rmf-1.0` | MEASURE-2.7 Security and resilience are evaluated | all | Records a security-relevant property of the configuration, an input to evaluating its security. |
-| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a weakness that could let a third party alter the system's use or outputs. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 | `cwe` | CWE-250 Execution with Unnecessary Privileges | all | The agent runs with permissions beyond what a task needs. |
 
 ### `plugin_sources`
@@ -697,8 +702,8 @@ every rule.
 | `owasp-llm-2026` | LLM09:2026 Vector and Embedding Weaknesses | all | A vector store is referenced without a declared configuration. |
 | `owasp-asi-2026` | ASI06 Memory & Context Poisoning | all | An undeclared retrieval source can feed the agent's context. |
 | `nist-ai-rmf-1.0` | GOVERN-1.6 AI systems are inventoried | all | Records a retrieval source found only in code or in environment variable names. |
-| `eu-ai-act-2024` | Art. 11 Technical documentation of the system and its elements (Annex IV) | all | Records an element that the system's technical documentation does not describe. |
-| `iso-iec-42001-2023` | A.4.2 Resources of the AI system are documented | all | Records a resource that the documentation of the AI system leaves out. |
+| `eu-ai-act-2024` | Art. 11 Technical documentation of the system and its elements (Annex IV) | all | Records an element of the system that the inventory does not show as declared. |
+| `iso-iec-42001-2023` | A.4.2 Resources of the AI system are documented | all | Records a resource of the AI system that the inventory does not show as declared. |
 | `iso-iec-42001-2023` | A.7.5 Data provenance is recorded | all | The provenance of data from this source is not recorded. |
 
 ### `registry_origin`
@@ -716,10 +721,10 @@ every rule.
 
 | Framework | Entry | Severities | Rationale |
 | --- | --- | --- | --- |
-| `owasp-asi-2026` | ASI04 Agentic Supply Chain Vulnerabilities | all | A component that the agent used at run time never went through the inventory's review. |
-| `nist-ai-rmf-1.0` | GOVERN-1.6 AI systems are inventoried | all | Telemetry shows an AI component that the inventory does not list. |
-| `eu-ai-act-2024` | Art. 11 Technical documentation of the system and its elements (Annex IV) | all | Records an element that the system's technical documentation does not describe. |
-| `iso-iec-42001-2023` | A.4.2 Resources of the AI system are documented | all | Records a resource that the documentation of the AI system leaves out. |
+| `owasp-asi-2026` | ASI04 Agentic Supply Chain Vulnerabilities | all | The agent's telemetry reports a component that the inventory does not show as declared, so the inventory's review cannot be shown to cover it. |
+| `nist-ai-rmf-1.0` | GOVERN-1.6 AI systems are inventoried | all | The agent's telemetry reports an AI component that the inventory does not show as listed. |
+| `eu-ai-act-2024` | Art. 11 Technical documentation of the system and its elements (Annex IV) | all | Records an element of the system that the inventory does not show as declared. |
+| `iso-iec-42001-2023` | A.4.2 Resources of the AI system are documented | all | Records a resource of the AI system that the inventory does not show as declared. |
 
 ### `serialization_format`
 
@@ -731,7 +736,7 @@ every rule.
 | `owasp-asi-2026` | ASI05 Unexpected Code Execution (RCE) | all | Loading the model, or rendering its chat template, can execute code. |
 | `mitre-atlas-2026.10` | AML.T0011.000 User Execution: Unsafe AI Artifacts | all | Serialized models that run code when loaded, and chat templates that reach Python internals, are unsafe artifacts as the technique defines them. |
 | `nist-ai-rmf-1.0` | MANAGE-3.2 Pre-trained models are monitored | all | Records how safely a pre-trained model loads, or whether its weights are verified. |
-| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a weakness that could let a third party alter the system's use or outputs. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 | `cwe` | CWE-502 Deserialization of Untrusted Data | critical | Pickle-based formats run code when deserialized; kept from the earlier SARIF rules, it does not hold for chat template findings, which record a template engine weakness. |
 | `cwe` | CWE-1336 Improper Neutralization of Special Elements Used in a Template Engine | high | Kept on high findings, where the earlier SARIF rules put it: a chat template that reaches Python internals is a template engine weakness, but the collectors record this category only at critical. |
 
@@ -744,7 +749,7 @@ every rule.
 | `owasp-asi-2026` | ASI04 Agentic Supply Chain Vulnerabilities | all | The model artifact is part of the agent's supply chain. |
 | `mitre-atlas-2026.10` | AML.T0011.000 User Execution: Unsafe AI Artifacts | all | An artifact whose loading safety is unknown may be unsafe. |
 | `nist-ai-rmf-1.0` | MANAGE-3.2 Pre-trained models are monitored | all | Records how safely a pre-trained model loads, or whether its weights are verified. |
-| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a weakness that could let a third party alter the system's use or outputs. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 | `cwe` | CWE-502 Deserialization of Untrusted Data | all | The model may use a format that runs code when deserialized. |
 
 ### `shadowscan-heuristic`
@@ -756,8 +761,8 @@ No reference: no entry was defensible for this category.
 | Framework | Entry | Severities | Rationale |
 | --- | --- | --- | --- |
 | `nist-ai-rmf-1.0` | GOVERN-1.6 AI systems are inventoried | all | A discovery report found an AI component that the inventory it was given does not list. |
-| `eu-ai-act-2024` | Art. 11 Technical documentation of the system and its elements (Annex IV) | all | Records an element that the system's technical documentation does not describe. |
-| `iso-iec-42001-2023` | A.4.2 Resources of the AI system are documented | all | Records a resource that the documentation of the AI system leaves out. |
+| `eu-ai-act-2024` | Art. 11 Technical documentation of the system and its elements (Annex IV) | all | Records an element of the system that the inventory does not show as declared. |
+| `iso-iec-42001-2023` | A.4.2 Resources of the AI system are documented | all | Records a resource of the AI system that the inventory does not show as declared. |
 
 ### `signing_status`
 
@@ -768,7 +773,7 @@ No reference: no entry was defensible for this category.
 | `owasp-asi-2026` | ASI04 Agentic Supply Chain Vulnerabilities | all | The model artifact is part of the agent's supply chain. |
 | `mitre-atlas-2026.10` | AML.T0010.003 Supply Chain Compromise: Model Repository | all | Weights without a verified signature or pin could be replaced in a model repository undetected. |
 | `nist-ai-rmf-1.0` | MANAGE-3.2 Pre-trained models are monitored | all | Records how safely a pre-trained model loads, or whether its weights are verified. |
-| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a weakness that could let a third party alter the system's use or outputs. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 | `cwe` | CWE-345 Insufficient Verification of Data Authenticity | all | The model's weights are not bound to a verified signature or digest pin. |
 
 ### `tag_characters`
@@ -780,7 +785,7 @@ No reference: no entry was defensible for this category.
 | `owasp-asi-2026` | ASI01 Agent Goal Hijack | all | Such text can redirect the agent's goal without a reviewer noticing. |
 | `mitre-atlas-2026.10` | AML.T0068 LLM Prompt Obfuscation | all | Hiding or disguising instruction text from human review is what this technique describes. |
 | `nist-ai-rmf-1.0` | MEASURE-2.7 Security and resilience are evaluated | all | Records a security-relevant property of the configuration, an input to evaluating its security. |
-| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a weakness that could let a third party alter the system's use or outputs. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 | `cwe` | CWE-451 User Interface (UI) Misrepresentation of Critical Information | all | The file can display differently from what the agent processes. |
 | `cwe` | CWE-1427 Improper Neutralization of Input Used for LLM Prompting | all | Instruction text reaches the model with characters that are not neutralized. |
 
@@ -796,7 +801,7 @@ No reference: no entry was defensible for this category.
 | --- | --- | --- | --- |
 | `owasp-asi-2026` | ASI07 Insecure Inter-Agent Communication | all | Communication with an MCP server or A2A agent is not shown to be encrypted, or carries its credential in the URL; kept from the earlier SARIF rules, it does not hold for low findings on retrieval locators, which name data sources, not agents. |
 | `nist-ai-rmf-1.0` | MEASURE-2.7 Security and resilience are evaluated | all | Records a security-relevant property of the configuration, an input to evaluating its security. |
-| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a weakness that could let a third party alter the system's use or outputs. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 | `cwe` | CWE-319 Cleartext Transmission of Sensitive Information | critical and high | An endpoint declared over plain HTTP or WebSocket transmits in cleartext; kept from the earlier SARIF rules, it does not hold for an endpoint URL that uses HTTPS but embeds credentials, or whose transport is unknown rather than unencrypted. |
 
 ### `version_pinning`
@@ -808,6 +813,6 @@ No reference: no entry was defensible for this category.
 | `owasp-asi-2026` | ASI04 Agentic Supply Chain Vulnerabilities | all | The agent's packages, servers or images can change without review. |
 | `mitre-atlas-2026.10` | AML.T0109 AI Supply Chain Rug Pull | all | An unpinned reference takes the next published version, which a rug pull relies on. |
 | `nist-ai-rmf-1.0` | MANAGE-3.1 Third-party AI risks are monitored and controlled | all | Records a third-party component whose identity, version or resolution is not established. |
-| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a weakness that could let a third party alter the system's use or outputs. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 | `iso-iec-42001-2023` | A.10.3 Suppliers are managed | all | Records a supplied component whose identity, version or resolution is not established. |
 | `cwe` | CWE-829 Inclusion of Functionality from Untrusted Control Sphere | all | What runs can change under a publisher's control without a change to the repository. |

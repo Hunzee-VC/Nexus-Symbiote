@@ -27,6 +27,7 @@ ESCAPES = [
     "{{ self.__init__.__globals__.__builtins__ }}",
     "{{ ''['__class__'] }}",
     "{{ x|attr('\\x5f\\x5fclass\\x5f\\x5f') }}",
+    "{{ ''['__cl\\\nass__'] }}",
 ]
 BENIGN = (
     "{% for message in messages %}<|{{ message['role'] }}|>{{ message['content'] }}"
@@ -399,6 +400,7 @@ def test_records_are_identical_wherever_the_project_is_checked_out(tmp_path):
 def test_checking_large_templates_scales_linearly(tmp_path):
     # Near-misses of every escape shape, which a backtracking pattern could make quadratic.
     unit = ".__" + "a" * 40 + " ['__" + "b" * 40 + "'" + "attr " * 4 + ". " * 8
+    unit += "\\N{" + "A" * 99 + " \\\\ \\x5 \\u005 \\U0000005 '_\\x5f" + "c" * 40 + "_ "
     roots: dict[int, Path] = {}
     for scale in (1, 4):
         root = tmp_path / str(scale)
@@ -481,3 +483,102 @@ def test_an_in_root_linked_template_is_read_through_its_target(tmp_path):
     (component,) = result.components
     assert component.serialization_safety == SerializationSafety.UNSAFE_TEMPLATE_INJECTION
     assert _template_findings(component) == [f"{DETAIL}m/chat_template.jinja."]
+
+
+@pytest.mark.parametrize(
+    ("link", "target"),
+    [("../../shared/extra", "shared/extra"), ("templates", "m/m/templates")],
+    ids=["elsewhere", "beside"],
+)
+def test_a_linked_template_directory_is_read_through_the_link(tmp_path, link, target):
+    # The walk lists a linked directory under its target's name; a loader opens the link.
+    directory = tmp_path / "m" / "m"
+    _safetensors(directory / "model.safetensors")
+    _template(tmp_path / target, "tool_use.jinja", ESCAPES[0])
+    _template(tmp_path / target, "notes.txt", "not a template")
+    (directory / "additional_chat_templates").symlink_to(link)
+    result = ModelScanner().scan(tmp_path)
+    assert not result.scan_failures and not result.surfaces_excluded
+    (component,) = result.components
+    assert component.serialization_safety == SerializationSafety.UNSAFE_TEMPLATE_INJECTION
+    source = "m/m/additional_chat_templates/tool_use.jinja"
+    assert _template_findings(component) == [f"{DETAIL}{source}."]
+    assert [item["source"] for item in component.properties["chat_templates"]] == [source]
+
+
+def test_a_linked_template_directory_that_leaves_the_root_is_a_failure(tmp_path):
+    root = tmp_path / "project"
+    _safetensors(root / "m" / "model.safetensors")
+    _template(tmp_path / "outside", "tool_use.jinja", ESCAPES[0])
+    (root / "m" / "additional_chat_templates").symlink_to("../../outside")
+    result = ModelScanner().scan(root)
+    assert any(
+        failure.startswith("m/additional_chat_templates: ") for failure in result.scan_failures
+    )
+
+
+def test_an_empty_template_directory_records_nothing(tmp_path):
+    _safetensors(tmp_path / "m" / "model.safetensors")
+    (tmp_path / "m" / "additional_chat_templates" / "nested").mkdir(parents=True)
+    _template(tmp_path / "m" / "additional_chat_templates" / "nested", "t.jinja", ESCAPES[0])
+    component = _model(tmp_path)
+    assert component.serialization_safety == SerializationSafety.SAFE
+    assert "chat_templates" not in component.properties
+
+
+VARIANT = (
+    "{variant}: case variant of {path} is the active file on case-insensitive file systems "
+    "and is not inventoried"
+)
+
+
+@pytest.mark.parametrize(
+    ("variant", "path"),
+    [
+        ("Chat_Template.jinja", "chat_template.jinja"),
+        ("CHAT_TEMPLATE.JINJA2", "chat_template.jinja2"),
+        ("Tokenizer_Config.json#chat_template", "tokenizer_config.json"),
+        ("Config.json#trust_remote_code", "config.json"),
+        ("Tokenizer.json#x", "tokenizer.json"),
+        ("Additional_Chat_Templates/tool_use.jinja", "additional_chat_templates"),
+    ],
+)
+def test_a_case_variant_of_a_model_file_is_a_failure(tmp_path, variant, path):
+    # Case-insensitive file systems open the variant when a loader asks for the exact name.
+    _safetensors(tmp_path / "m" / "model.safetensors")
+    _template(tmp_path / "m", variant, ESCAPES[0])
+    result = ModelScanner().scan(tmp_path)
+    name = variant.partition("#")[0].partition("/")[0]
+    assert result.scan_failures == [VARIANT.format(variant=f"m/{name}", path=f"m/{path}")]
+
+
+def test_a_case_variant_of_a_linked_template_directory_is_a_failure(tmp_path):
+    _safetensors(tmp_path / "m" / "model.safetensors")
+    _template(tmp_path / "shared", "tool_use.jinja", ESCAPES[0])
+    (tmp_path / "m" / "Additional_Chat_Templates").symlink_to("../shared")
+    result = ModelScanner().scan(tmp_path)
+    assert result.scan_failures == [
+        VARIANT.format(variant="m/Additional_Chat_Templates", path="m/additional_chat_templates")
+    ]
+
+
+def test_another_spelling_beside_the_exact_name_is_not_read_or_reported(tmp_path):
+    _safetensors(tmp_path / "m" / "model.safetensors")
+    _template(tmp_path / "m", "chat_template.jinja", BENIGN)
+    _template(tmp_path / "m", "Chat_Template.jinja", ESCAPES[0])
+    component = _model(tmp_path)
+    assert component.serialization_safety == SerializationSafety.SAFE
+    assert [item["source"] for item in component.properties["chat_templates"]] == [
+        "m/chat_template.jinja"
+    ]
+
+
+def test_a_case_variant_fails_the_scan_gate(runner, tmp_path):
+    project = tmp_path / "project"
+    _safetensors(project / "m" / "model.safetensors")
+    _template(project / "m", "tokenizer_config.json#chat_template", BENIGN)
+    _template(project / "m", "Chat_Template.jinja", ESCAPES[0])
+    output = tmp_path / "agentbom.json"
+    result = runner.invoke(main, ["scan", str(project), "--no-project-policy", "-o", str(output)])
+    assert result.exit_code == 1, result.output
+    assert "case variant of m/chat_template.jinja" in result.output

@@ -67,9 +67,10 @@ report is written, and the command runs offline.
   HTML.
 
 The command exits 0 when the report was produced, whatever it says. `--fail-under
-PERCENT` (a decimal number from 0 to 100) is an opt-in gate: the command then exits 1,
-and lists the missing elements on standard error, when the ratio below is under
-`PERCENT`. The ratio is compared exactly, not as the rounded figure. An inventory that
+PERCENT` (a decimal number from 0 to 100) is an opt-in gate: the report then states
+the gate's verdict (a `Gate:` line after the `Overall:` line in text, a `**Gate:**`
+line in Markdown, the `gate` object in JSON), and the command exits 1, and lists the
+missing elements on standard error, when the ratio below is under `PERCENT`. The ratio is compared exactly, not as the rounded figure. An inventory that
 cannot be read, that is nested too deeply to export, or whose CycloneDX export fails
 its schema or consistency checks exits 1 without a report; an invalid option, or an
 output path that names the inventory itself, exits 2.
@@ -387,8 +388,13 @@ relationships are conditional repository associations, so the export carries non
 them; its one model is a local weight file, so its name and SHA-256 digest are present
 and nothing else about it is; its retrieval source is not marked as a dataset; and its
 registry entry, a container image, is the one infrastructure component. With
-`--fail-under 50` the same
-report is followed by this on standard error, and the command exits 1:
+`--fail-under 50` the report gains one line after its `Overall:` line:
+
+```text
+Gate: failed: 12 of 39 present (30.7%), below the required 50%
+```
+
+and is followed by this on standard error, and the command exits 1:
 
 ```text
 Coverage gate failed: 11 of 39 present (28.2%), below the required 50%

@@ -63,9 +63,11 @@ A way around a limit that its entry does not describe is worth a
   gates fail. A skill checked out with its own `.git`, including a Git submodule,
   whose `.git` is a file, or one whose script left a `__pycache__` beside it, fails
   them until that entry is removed.
-- **Case variants.** When a fixed path such as `CLAUDE.md`, `.mcp.json` or
-  `.claude/settings.json` is absent, a file whose name differs only by case or
-  Unicode normalization is a failure, because case-insensitive file systems open
+- **Case variants.** When a fixed path such as `CLAUDE.md`, `.mcp.json`,
+  `.claude/settings.json` or a model directory's configuration, tokenizer or chat
+  template file or `additional_chat_templates` directory is absent, a file or
+  directory whose name differs only by case or Unicode normalization is a failure,
+  because case-insensitive file systems open
   it. When both exist, only the exact name is read, except for instruction files:
   another spelling of a fixed instruction path, such as `claude.md` beside
   `CLAUDE.md`, and of `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` or `.cursorrules` below
@@ -199,12 +201,25 @@ A way around a limit that its entry does not describe is worth a
   `websocket_client` of the MCP SDK, `MCPServerStdio`, `MCPServerSse` and
   `MCPServerStreamableHttp` of the OpenAI Agents SDK, `MCPServerStdio`,
   `MCPServerSSE`, `MCPServerHTTP` and `MCPServerStreamableHTTP` of PydanticAI, and
-  LangChain's `MultiServerMCPClient`, used outside an annotation; in TypeScript and
+  LangChain's `MultiServerMCPClient`, used outside an annotation; a class among
+  them also as an attribute of any value, such as a module a parameter or another
+  name holds, and a function as an attribute of any name the file imports; in
+  TypeScript and
   JavaScript, the SDK's `StdioClientTransport`, `SSEClientTransport`,
-  `StreamableHTTPClientTransport` and `WebSocketClientTransport`. The command, its
+  `StreamableHTTPClientTransport` and `WebSocketClientTransport`. A Python file that
+  imports one of these by name from its package and does not use it outside an
+  annotation is a gap too, because another module can import it from that file,
+  as from a package `__init__.py` that re-exports it. A Python file that imports
+  one by name from any other module, its own project's included, or uses its name
+  after a star import of another module, is a gap whether or not it uses it, so a
+  local class of the same name is a gap too. These names are searched for, so such
+  a file is read even when it does not name `mcp`. The command, its
   package and pin are not inventoried even when they are literal; declare such a
   server in a client file to have it inventoried. A launcher reached only through
-  `getattr`, `globals()` or code in a string, and the clients of other frameworks,
+  `getattr`, `globals()` or code in a string, a launcher function such as
+  `sse_client` reached as an attribute of a value the file did not import, a star
+  import of its package that a file passes on without using a launcher, and the
+  clients of other frameworks,
   leave no gap; the collector records some of those only as a code-detected client.
   User-level client settings in your home directory are not read either.
 - **Some client files are only detected.** Zed `context_servers`, opencode `mcp`,
@@ -220,18 +235,36 @@ A way around a limit that its entry does not describe is worth a
   gaps: the low-level `Server`, a constructor given `tools=` or `**` arguments, a
   server passed to a helper, an aliased or subclassed factory,
   `FastMCP.from_openapi`, decorators on a server imported from another module, a
-  qualified, module-alias or star import, and an import spelled only with
-  compatibility characters. A dynamic import (`importlib.import_module`,
-  `__import__` or `pkgutil.resolve_name`) whose literal arguments name `mcp`,
-  `mcp.server` or `fastmcp`, or a submodule of the last two, is a gap, and so is one
-  that names a client module: `mcp.client`, `agents.mcp`, `pydantic_ai.mcp`,
-  `langchain_mcp_adapters` or a submodule. A literal is a string or an f-string
-  without placeholders, and a relative name counts once resolved against a literal
-  package or `__import__` globals. A module name computed at run time, and other
-  import machinery such as `importlib.util.find_spec` or `runpy`, are not followed
-  and leave no gap.
+  qualified, module-alias or star import, an import spelled only with
+  compatibility characters, a server class imported by name and not used
+  outside an annotation, which another module can import from that file, a
+  `FastMCP` or `MCPServer` imported by name from any other module, another
+  submodule of `mcp` or `fastmcp` and its own project's included, or used by its
+  name after a star import of one, whether or not it is used, and a `FastMCP` or
+  `MCPServer` attribute of any value. `MCPServer` imported from `agents.mcp` or
+  `pydantic_ai.mcp`, a client base class there, is not a gap. So a
+  server built from a class a project module re-exports is a gap on the file that
+  builds it, even when the re-exporting module's own server is inventoried. Any
+  call whose first argument, or `name` keyword, is a literal that names `mcp`,
+  `mcp.server` or `fastmcp`, or a submodule of the last two, is a gap whatever the
+  callee, so a loader passed as an argument, bound by a `match` capture, read from
+  a container or returned by a function is covered, and so is one that names a
+  client module: `mcp.client`, `agents.mcp`, `pydantic_ai.mcp`,
+  `langchain_mcp_adapters` or a submodule. The literal may be in any argument
+  position, a keyword or an element of a list, tuple or set argument, so
+  `functools.partial`, `map` and a thread target are covered too. A call to another
+  function with such a literal is a gap as well, except `logging.getLogger` and a
+  server class imported from its own module, such as `FastMCP("mcp")`. A literal is a string or an
+  f-string without placeholders. A dynamic import (`importlib.import_module`,
+  `__import__` or `pkgutil.resolve_name`, or a name bound to one of them by an
+  assignment, an unpacking, a `for`, comprehension or `with ... as` target, an
+  import alias or a parameter default) counts on any literal argument, and a
+  relative name counts once resolved against a literal package or `__import__`
+  globals. A module name computed at run time, a relative name given to a loader
+  no such binding shows, and a loader reached through `getattr`, `globals()` or
+  code in a string are not followed and leave no gap.
 - **Python files without a reference are not examined.** A file that names neither
-  `mcp` nor a supported agent framework is not parsed.
+  `mcp`, a supported agent framework nor an MCP launcher or server class is not parsed.
 - **Unusual source encodings fail.** A Python file whose encoding declaration names
   an unknown codec, or one that does not read ASCII as ASCII, such as `utf-7` or
   UTF-16, is a failure. TypeScript and JavaScript files are read as UTF-8 unless
@@ -329,6 +362,20 @@ A way around a limit that its entry does not describe is worth a
   read. A skill declaration (`.md`, `.mdc`, `.markdown`, `.txt`, `.yaml`, `.yml`,
   `.json`, `.toml`) above the `file-bytes` limit is a failure; a larger script or
   other resource is streamed and digested.
+- **Binary skill resources are checked only for runs and clusters of hidden
+  characters.** A skill or command resource that is not UTF-8 is checked as an
+  agent's reader decodes it: as UTF-16 or UTF-32 after that byte-order mark,
+  otherwise as UTF-8 with U+FFFD for each invalid sequence. When such a file also
+  holds a NUL byte and no byte-order mark, it is treated as binary, such as an image,
+  and only runs of four or more hidden characters are reported, together with every
+  plane-14 character (U+E0000 to U+E0FFF: tag characters, the variation selector
+  supplement and the unassigned ones) once 16 of them lie within 4,096 characters,
+  whatever separates them. Random bytes form a plane-14 character about once per MiB,
+  so a count over the whole file would report large binaries. Not reported in such a
+  file: hidden characters outside plane 14 that are not in a run of four, such as
+  zero-width or bidirectional characters each separated by another byte, plane-14
+  characters spread so that no 4,096 characters hold 16 of them, and a UTF-16 or
+  UTF-32 file without a byte-order mark.
 - **Hidden-character detection is character-based.** Lookalike letters are not
   detected, and neither are control characters such as ESC, spaces other than
   U+0020, such as U+00A0 and U+3000, or private-use characters. HTML and Markdown
@@ -357,7 +404,16 @@ A way around a limit that its entry does not describe is worth a
   digested after the redaction, so that their digests cannot confirm a guess either.
   Without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, a change only to a value the
   redaction removes, such as an MCP server's environment value, a token, or a URL
-  path on the same host in a `notify` command, raises no alert.
+  path, query or userinfo on the same host in a `notify` command, raises no alert;
+  such a record carries a low `completeness` finding. The redaction ends a URL or
+  an assigned value at a shell operator (`;`, `|`, `&`, `$`, `` ` ``, parentheses,
+  braces, `<`, `>` or a line break), and starts a new URL at each later scheme
+  such as `https://`, so a command or operator glued to one without white space, and
+  a host glued to one after an operator or a scheme, as in
+  `--webhooks=https://a.example/n,https://b.example`, do alert. Other text glued
+  to a URL without an operator or another scheme stays part of its redacted path;
+  without the key a URL whose authority
+  parsers read differently, such as one with a backslash, is a failure.
 - **Codex settings are interpreted in part.** `.codex/config.toml` is digested
   whole after the redaction, so a new `notify` command or another changed setting
   raises an alert, unless only a value the redaction removes changed and the scans
@@ -683,11 +739,13 @@ A way around a limit that its entry does not describe is worth a
   span reports no port, or a server's endpoint states none and its scheme has no
   default port, an endpoint is compared by host alone.
 - **What a span leaves out narrows what it reports.** A span that leaves out a tool or
-  agent name, an endpoint or a port reports less, without failing the gate; a tool,
-  model, agent or endpoint identifier, an operation name, an MCP method or an MCP
-  transport that is present but cannot be read fails it. A trace cannot attribute
-  stdio MCP activity to a configured server, and skills, data sources, memory stores
-  and prompts are listed for information only.
+  agent name, a server address or a port reports less, without failing the gate; a
+  span that reports a server address is compared only with the tools served there,
+  even when it leaves out its transport. A tool, model, agent or endpoint identifier,
+  an operation name, an MCP method or an MCP transport that is present but cannot be
+  read fails the gate. A trace cannot attribute pipe or unix-socket MCP activity to a
+  configured server, and skills, data sources, memory stores and prompts are listed
+  for information only.
 - **Remote tools are undeclared until recorded.** A static scan records only the
   tools that a client configuration declares for a remote MCP server, not the tools
   the server serves, so calls to its other tools are undeclared until an inventory
@@ -695,7 +753,8 @@ A way around a limit that its entry does not describe is worth a
   compares one inventory.
 - **Not everything is read.** Span events, links, log records, span names, scope
   attributes and the attributes after the first 128 of a span or resource are not
-  read, so content recorded on span events is not counted.
+  read, so content recorded on span events is not counted. A span or resource with
+  more than 128 attributes fails the gate.
 - **Fixed bounds and memory.** At most 16 files, 64 MiB per file, 1,000,000 spans
   and 100,000 distinct identifiers; `--limit` does not change them. A one-object file
   is parsed whole and can need about 2 GB for 64 MiB; prefer JSON Lines for large

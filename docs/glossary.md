@@ -126,10 +126,12 @@ With it, a scan records an HMAC over the MCP, A2A, RAG and IDE settings values t
 inventory does not export, so `diff` and `validate --project` detect changes to
 them. Without it, only unkeyed digests are recorded. An MCP record with unbound
 values then carries a low `completeness` finding that names the key, and so does an
-A2A or RAG record with an unbound URL path, tenant or redacted value; an IDE agent
-record carries none, although a change only to a value the redaction removes from
-`.codex/config.toml`, `.cursor/cli.json` or the Antigravity, xAI and Copilot
-settings files passes `diff`. The key never enters an inventory; use one key for a
+A2A or RAG record with an unbound URL path, tenant or redacted value, and an IDE
+agent record whose `.codex/config.toml`, `.cursor/cli.json` or Antigravity, xAI or
+Copilot settings digest leaves out a value the redaction removes, such as a token,
+an environment value or a URL path on the same host; a change only to such a value
+passes `diff`. Each URL in such a file keeps its host in the digest, also when it is
+glued to the text before it after a shell operator or another URL scheme. The key never enters an inventory; use one key for a
 baseline and every scan compared with it
 ([source binding](verification-source-binding.md)).
 

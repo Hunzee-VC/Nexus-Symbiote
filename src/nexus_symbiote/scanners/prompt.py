@@ -78,6 +78,26 @@ _FLAG_SEQUENCE = re.compile(
 _MARKDOWN_COMMENT = re.compile(r"^[ \t]{0,3}\[(?://|comment|#)\]:[ \t]*(?:#|<>)", re.M)
 # Characters of a large text file counted at once when no newline ends a segment sooner.
 _MAX_SEGMENT = 1 << 20
+# In a file with a NUL byte that is not UTF-8, which is binary, only runs this long count:
+# random bytes form a hidden character now and then, but not runs of them, and text
+# hidden in such characters takes one character per byte.
+_BINARY_RUN = 4
+_HIDDEN_RUN = re.compile(f"(?:{_HIDDEN.pattern}){{{_BINARY_RUN},}}")
+# Plane-14 characters, which tag and variation selector encodings of hidden text use,
+# all count in a binary file once this many of them lie within a window of this many
+# characters, whatever separates them. Random bytes form one about once per MiB, so a
+# count over the whole file would grow with its size; hidden text needs one per letter.
+_BINARY_PLANE_14 = 16
+_BINARY_PLANE_14_WINDOW = 4096
+_PLANE_14 = re.compile("[\U000e0000-\U000e0fff]")
+# Byte-order marks after which readers decode UTF-32 or UTF-16; UTF-32 LE first, since
+# its mark starts with that of UTF-16 LE.
+_BYTE_ORDER_MARKS = (
+    (codecs.BOM_UTF32_LE, "utf-32"),
+    (codecs.BOM_UTF32_BE, "utf-32"),
+    (codecs.BOM_UTF16_LE, "utf-16"),
+    (codecs.BOM_UTF16_BE, "utf-16"),
+)
 
 
 def _pictographic(char: str) -> bool:
@@ -171,42 +191,101 @@ def _hidden_counts(content: str, *, at_start: bool) -> tuple[dict[str, int], int
 
 
 class _HiddenCharacterStream:
-    """The hidden-character counts of UTF-8 text read in chunks.
+    """The hidden-character counts of a file's text, read in chunks.
+
+    The text is decoded as an agent's reader decodes it: as UTF-32 or UTF-16 after
+    that byte-order mark, otherwise as UTF-8 with U+FFFD for an invalid sequence, so a
+    stray byte or a UTF-16 file does not hide what the rest of it says. When the bytes
+    are not UTF-8 and hold a NUL byte, without such a mark, the file is binary and only
+    runs of ``_BINARY_RUN`` or more hidden characters count, and every plane-14 hidden
+    character once ``_BINARY_PLANE_14`` of them lie within ``_BINARY_PLANE_14_WINDOW``
+    characters.
 
     The text is counted in segments that end after a newline, which no emoji or flag
     sequence crosses, so the counts equal those of the whole text. A segment that
     reaches ``_MAX_SEGMENT`` characters without one is cut there; a cut can only add
-    findings, never hide one.
+    findings, never hide one, except that it can split a run in a binary file.
     """
 
     def __init__(self) -> None:
-        self._decoder = codecs.getincrementaldecoder("utf-8")()
+        self._decoder: codecs.IncrementalDecoder | None = None
+        self._utf8 = True
+        self._strict: codecs.IncrementalDecoder | None = None
+        self._nul = False
         self._pending = ""
         self._at_start = True
-        self.counts: dict[str, int] = {}
-        self.tags = 0
-        self.is_text = True
+        self._counts: dict[str, int] = {}
+        self._tags = 0
+        self._run_counts: dict[str, int] = {}
+        self._run_tags = 0
+        self._offset = 0
+        self._plane_14: deque[int] = deque(maxlen=_BINARY_PLANE_14)
+        self._dense_plane_14 = False
+
+    @property
+    def binary(self) -> bool:
+        """Bytes that are not UTF-8, hold a NUL byte and declare no other encoding."""
+        return self._nul and self._strict is None
+
+    @property
+    def counts(self) -> dict[str, int]:
+        if not self.binary:
+            return self._counts
+        if not self._dense_plane_14:
+            return self._run_counts
+        plane_14 = {char: n for char, n in self._counts.items() if _PLANE_14.match(char)}
+        return {**self._run_counts, **plane_14}
+
+    @property
+    def tags(self) -> int:
+        if not self.binary:
+            return self._tags
+        return self._tags if self._dense_plane_14 else self._run_tags
 
     def feed(self, chunk: bytes, *, final: bool = False) -> None:
-        if not self.is_text:
-            return
-        try:
-            decoded = self._decoder.decode(chunk, final)
-        except UnicodeDecodeError:
-            self.is_text = False
-            return
-        text = self._pending + decoded
+        if self._decoder is None:
+            if not chunk and not final:
+                return
+            encoding = next(
+                (name for mark, name in _BYTE_ORDER_MARKS if chunk.startswith(mark)), None
+            )
+            self._decoder = codecs.getincrementaldecoder(encoding or "utf-8")("replace")
+            self._utf8 = encoding is None
+            if self._utf8:
+                self._strict = codecs.getincrementaldecoder("utf-8")()
+        if self._utf8:
+            self._nul = self._nul or b"\0" in chunk
+        if self._strict is not None:
+            try:
+                self._strict.decode(chunk, final)
+            except UnicodeDecodeError:
+                self._strict = None
+        text = self._pending + self._decoder.decode(chunk, final)
         end = len(text) if final else text.rfind("\n", len(self._pending)) + 1
         if not end and len(text) >= _MAX_SEGMENT:
             end = len(text)
         if not end:
             self._pending = text
             return
-        counts, tags = _hidden_counts(text[:end], at_start=self._at_start)
-        self._pending, self._at_start = text[end:], False
+        segment = text[:end]
+        counts, tags = _hidden_counts(segment, at_start=self._at_start)
+        self._tags += tags
         for char, count in counts.items():
-            self.counts[char] = self.counts.get(char, 0) + count
-        self.tags += tags
+            self._counts[char] = self._counts.get(char, 0) + count
+        if counts or tags:
+            runs = "\n".join(_HIDDEN_RUN.findall(segment))
+            counts, tags = _hidden_counts(runs, at_start=False)
+            self._run_tags += tags
+            for char, count in counts.items():
+                self._run_counts[char] = self._run_counts.get(char, 0) + count
+            for match in _PLANE_14.finditer(segment):
+                self._plane_14.append(self._offset + match.start())
+                if len(self._plane_14) == _BINARY_PLANE_14 and (
+                    self._plane_14[-1] - self._plane_14[0] < _BINARY_PLANE_14_WINDOW
+                ):
+                    self._dense_plane_14 = True
+        self._offset += end
+        self._pending, self._at_start = text[end:], False
 
 
 def _hidden_character_risks(
@@ -908,7 +987,12 @@ class PromptScanner(Scanner):
             if text_file:
                 result.scan_failures.append(f"{relative}: invalid UTF-8 skill declaration")
                 return None
-            return hash_bytes(content), []
+            # An agent's reader still decodes such a file; check the text it would read.
+            stream = _HiddenCharacterStream()
+            stream.feed(content, final=True)
+            return hash_bytes(content), _hidden_character_risks(
+                stream.counts, stream.tags, relative
+            )
         risks = detect_invisible_characters(text, relative)
         if path.suffix.lower() in _MARKUP_SUFFIXES:
             risks.extend(detect_hidden_markup(text, relative))
@@ -928,8 +1012,9 @@ class PromptScanner(Scanner):
         except (OSError, CollectionError):
             return None
         text.feed(b"", final=True)
-        risks = _hidden_character_risks(text.counts, text.tags, relative) if text.is_text else []
-        return f"sha256:{digest.hexdigest()}", risks
+        return f"sha256:{digest.hexdigest()}", _hidden_character_risks(
+            text.counts, text.tags, relative
+        )
 
     def _scan_instruction_file(
         self, path: Path, rel_path: str, prompt_type: str, raw: bytes, text: str

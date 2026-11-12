@@ -96,8 +96,10 @@ Every command prints text taken from an inventory, a checkout or a live server, 
 names, paths, references and descriptions, literally and inert, in a terminal and in a
 CI log:
 
-- control, format and line-break characters are replaced with U+FFFD, so such text
-  cannot move the cursor, rewrite earlier output or start a new line;
+- control, format and line-break characters, and every other default-ignorable code
+  point (Unicode's Default_Ignorable_Code_Point, such as variation selectors and blank
+  fillers like U+3164), are replaced with U+FFFD, so such text cannot move the cursor,
+  rewrite earlier output, start a new line or carry text a reader cannot see;
 - a `##` that would introduce a CI log command anywhere in a line (GitHub Actions'
   legacy `##[command]`, Azure Pipelines' `##vso[`, TeamCity's `##teamcity[`) is
   followed by U+FFFD;
@@ -146,7 +148,7 @@ What exit status 1 means for each gate:
 | `verify-live` | A stdio server could not be observed completely (a run with no stdio server observes nothing), or a server's served tools, declarations or identity differ from the inventory; with `--record`, such drift fails unless `--accept-drift` is given. |
 | `discover-mcp` | The observation is incomplete; with `--record`, nothing is written. |
 | `advisories` | An advisory was found (unless `--no-fail-on-advisory`), or not every package in scope was looked up (`coverage` is `partial` or `none`); with `--dry-run`, only when the report lists an error. |
-| `trace-diff` | With the default `--fail-on undeclared`: the traces report a tool, model, agent or MCP endpoint that the inventory does not declare, or one whose identifier could not be read, or a span whose operation name, MCP method or MCP transport could not be read, or no span carries a GenAI or MCP attribute of its own. An inventory or trace file that cannot be read always exits 1. |
+| `trace-diff` | With the default `--fail-on undeclared`: the traces report a tool, model, agent or MCP endpoint that the inventory does not declare, or one whose identifier could not be read, or a span whose operation name, MCP method or MCP transport could not be read, or a span or resource has more than 128 attributes, or no span carries a GenAI or MCP attribute of its own. An inventory or trace file that cannot be read always exits 1. |
 | `export-inventory` | The inventory holds no repository agent or more than one, its agent's identity is not declared and `--include-unnamed` is absent, or its name or owner cannot be written so that ShadowScan reads it back exactly; nothing is written. |
 
 `--report-only` on `scan` and `import-shadowscan` reports collection failures and
@@ -781,7 +783,7 @@ nexus-symbiote trace-diff [OPTIONS] INVENTORY TRACE_FILE...
 | `-o`, `--output` `PATH` | Write the evidence document to this file. |
 | `--json-output` | Print the evidence document as JSON instead of a summary. |
 | `--sarif` `SARIF_PATH` | Also write SARIF 2.1.0 results for undeclared runtime use to this file. |
-| `--fail-on` `undeclared\|none` | `undeclared` (default): exit 1 when the traces report a tool, model, agent or MCP endpoint that the inventory does not declare or whose identifier cannot be read, or a span whose operation, MCP method or MCP transport cannot be read, or when no span carries GenAI or MCP semantics. `none`: report only. |
+| `--fail-on` `undeclared\|none` | `undeclared` (default): exit 1 when the traces report a tool, model, agent or MCP endpoint that the inventory does not declare or whose identifier cannot be read, or a span whose operation, MCP method or MCP transport cannot be read, or a span or resource with more than 128 attributes, or when no span carries GenAI or MCP semantics. `none`: report only. |
 
 `INVENTORY` is a native AgentBOM. Each `TRACE_FILE` is an OTLP/JSON trace export the
 operator already collected: one `ExportTraceServiceRequest` object, or JSON Lines with

@@ -312,8 +312,8 @@ def _nested(tmp_path: Path, depth: int) -> Path:
 
 
 def test_nesting_at_the_depth_limit_gets_the_fixed_refusal(runner, tmp_path):
-    # The deepest nesting the strict parse accepted used to fail one call deeper, in the content
-    # digest, as "internal error (RecursionError)". Bisection probes the depth where export ends.
+    # The strict parse refuses at the boundary, so export ends there with the fixed refusal and
+    # never with "internal error (RecursionError)". Bisection probes the depth where it ends.
     def exported(depth: int) -> bool:
         output = tmp_path / f"approved-{depth}.json"
         result = runner.invoke(main, _args(_nested(tmp_path, depth), output))

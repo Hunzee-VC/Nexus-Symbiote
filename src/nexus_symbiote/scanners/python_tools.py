@@ -664,6 +664,29 @@ def _report_imported_receivers(tree: ast.Module, path: Path, result: ScanResult)
         )
 
 
+def _report_unused_factories(
+    nodes: list[ast.AST], factories: dict[str, ast.ImportFrom], path: Path, result: ScanResult
+) -> None:
+    """A server class imported and not used outside an annotation is passed on.
+
+    Another module can import it from this one and build servers the collector does
+    not see there, because that import does not name the SDK.
+    """
+    if not factories:
+        return
+    annotations = _annotation_names(nodes)
+    used = {
+        node.id
+        for node in nodes
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node not in annotations
+    }
+    if set(factories) - used:
+        result.surfaces_excluded.append(
+            f"{path.as_posix()}: MCP server class imported without a use here; servers built "
+            "from it elsewhere not inventoried"
+        )
+
+
 def collect_python_tools(
     tree: ast.Module, nodes: list[ast.AST], source: str, path: Path, result: ScanResult
 ) -> None:
@@ -694,6 +717,7 @@ def collect_python_tools(
         if stmt.module is not None and (stmt.module, a.name) in _AGENT_FACTORIES
     }
     _report_import_scope(imports, nodes, path, result)
+    _report_unused_factories(nodes, factories, path, result)
     if not factories and not decorators and not agent_factories:
         _report_imported_receivers(tree, path, result)
         return

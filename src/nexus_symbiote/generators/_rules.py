@@ -223,9 +223,10 @@ RULES: dict[str, RuleInfo] = {
         "An MCP server declares both a launch command and an endpoint or a remote transport type.",
     ),
     "runtime_undeclared": RuleInfo(
-        "Runtime component not in the inventory",
-        "A tool, model, agent or MCP endpoint appears in the agent's runtime telemetry but "
-        "not in the inventory.",
+        "Runtime component not matched to the inventory",
+        "The agent's runtime telemetry reports a tool, model, agent or MCP endpoint that no "
+        "inventory entry matches, or whose identifier could not be read, so that it could not "
+        "be compared with the inventory.",
     ),
 }
 

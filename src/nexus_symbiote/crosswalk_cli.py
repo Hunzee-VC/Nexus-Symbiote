@@ -8,8 +8,10 @@ categories whose findings reference no entry. It is a report, not a gate: exit s
 says only that the report was written.
 
 What a reference means is fixed text from the catalog (``crosswalk.MEANING``) in every
-report. Inventory text appears in JSON as strings, the finding detail neutralized as on a
-terminal; in Markdown every piece of it is escaped so that no renderer reads it as markup.
+report. Inventory text appears in JSON as strings: the finding detail neutralized as on a
+terminal, the category and component reference exactly as recorded, so that consumers can
+match them and must escape them; in Markdown every piece of it is escaped so that no
+renderer reads it as markup.
 """
 
 from __future__ import annotations

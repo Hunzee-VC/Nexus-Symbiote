@@ -252,7 +252,7 @@ Statements in the reviews that were wrong or had become stale by 12 November 202
 | "Runtime observation: nobody ships it" | k8s-aibom inventories running Kubernetes workloads and agent-bom proxies MCP traffic. SymBiote's addition is the declared-versus-reported comparison against a verified inventory. |
 | "eBPF malware" (in the disambiguation line) | Unnecessary detail with an inaccurate label; "the Linux malware of the same name" is accurate. |
 | Rankings (#1 on coverage; 3rd, 4th, 5th, 8th, 9th of 11 or 12) and head-to-head benchmark numbers | Dropped: they contradicted each other, were judgments rather than measurements, or compared tools run below their supported mode. L4 replaces them with a reproducible round. |
-| "SymBiote itself has not been benchmarked" | Two self-authored regression corpora (18 security cases, 10 inventory cases) have run in CI since v0.1.0; what is missing is a comparative, third-party round. |
+| "SymBiote itself has not been benchmarked" | Two self-authored regression corpora have run in CI since v0.1.0, with 18 security and 10 inventory cases then and 22 security cases now; what is missing is a comparative, third-party round. |
 
 ## Landscape
 

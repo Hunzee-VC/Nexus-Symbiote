@@ -224,35 +224,94 @@ def _broad_grants(allowed: list[str]) -> list[str]:
     return sorted(classes)
 
 
-def _projection(value: Any, depth: int = 0, *, env: bool = False) -> Any:
-    """Settings as an unkeyed digest may cover them: redacted text, no env values."""
+# Text is redacted piece by piece between these shell operators, which are kept, so a
+# URL ends at the first of them: a command, a host or an operator glued to a URL or to a
+# credential assignment stays covered while the URL's path and the value are withheld.
+# A piece is also cut before each URL scheme after its first one, so every URL keeps its
+# own host whatever separates it from the text before it.
+_SHELL_OPERATORS = re.compile(r"([;|&$`(){}<>\n]+)")
+_SCHEME_CHARACTERS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+.-")
+# A URL authority that URL parsers read differently: urlsplit takes the host after the
+# last "@", WHATWG parsers end the authority at a backslash and, for special schemes,
+# skip any number of slashes, so the redaction could keep a host the client never uses.
+_URL_AUTHORITY = re.compile(r"(?<![a-zA-Z0-9+.-])([a-zA-Z0-9+.-]+)://([^/?#\s\"'<>]*)")
+_SPECIAL_SCHEMES = frozenset({"http", "https", "ws", "wss", "ftp"})
+
+
+class AmbiguousURLError(ValueError):
+    """A settings URL whose host the redaction cannot keep as clients read it."""
+
+
+def _ambiguous_authority(text: str) -> bool:
+    return any(
+        "\\" in authority or (not authority and scheme.lower() in _SPECIAL_SCHEMES)
+        for scheme, authority in _URL_AUTHORITY.findall(text)
+    )
+
+
+def _url_pieces(text: str) -> list[str]:
+    """``text`` cut before each URL scheme, in linear time.
+
+    Cutting before the first scheme too keeps the host of a URL assigned to a
+    credential-named option (``--token-url=URL``) out of the assignment the redaction
+    removes whole; userinfo, path and query stay redacted.
+    """
+    cuts: list[int] = []
+    floor = 0
+    index = text.find("://")
+    while index != -1:
+        start = index
+        while start > floor and text[start - 1] in _SCHEME_CHARACTERS:
+            start -= 1
+        while start < index and not ("a" <= text[start].lower() <= "z"):
+            start += 1
+        if start < index:
+            cuts.append(start)
+        floor = index + 3
+        index = text.find("://", floor)
+    bounds = [0, *cuts, len(text)]
+    parts = [text[begin:end] for begin, end in zip(bounds, bounds[1:], strict=False)]
+    return [part for part in parts if part] or [text]
+
+
+def _projected_text(value: str, *, unkeyed: bool) -> str:
+    pieces = _SHELL_OPERATORS.split(value)
+    for index in range(0, len(pieces), 2):
+        parts = _url_pieces(pieces[index])
+        if unkeyed and any(_ambiguous_authority(part) for part in parts):
+            raise AmbiguousURLError("a URL authority is ambiguous")
+        # A white space ends a redacted URL, so no host can absorb the next part's text.
+        pieces[index] = " ".join(redact_text(part) for part in parts)
+    return "".join(pieces)
+
+
+def _projection(value: Any, depth: int = 0, *, env: bool = False, unkeyed: bool = True) -> Any:
+    """Settings as a redacted `settings_hashes` digest covers them.
+
+    The standard redaction is applied to the text between shell operators, cut again
+    before each URL scheme, and
+    environment variables keep their names only, so the digest cannot confirm a guess
+    of a value the redaction removes, and does not change with one; only the keyed
+    binding covers those values. ``unkeyed`` raises ``AmbiguousURLError`` for a URL
+    whose authority URL parsers read differently, since its redacted origin could hide a
+    change of host that no keyed binding covers.
+    """
     if depth > _MAX_SETTINGS_DEPTH:
         raise ValueError("settings nested too deeply")
     if isinstance(value, dict):
         if env:
-            return sorted(redact_text(str(key)) for key in value)
+            return sorted(_projected_text(str(key), unkeyed=unkeyed) for key in value)
         return {
-            redact_text(str(key)): _projection(item, depth + 1, env=key == "env")
+            _projected_text(str(key), unkeyed=unkeyed): _projection(
+                item, depth + 1, env=key == "env", unkeyed=unkeyed
+            )
             for key, item in value.items()
         }
     if isinstance(value, list):
-        return [_projection(item, depth + 1) for item in value]
+        return [_projection(item, depth + 1, unkeyed=unkeyed) for item in value]
     if isinstance(value, str):
-        return redact_text(value)
+        return _projected_text(value, unkeyed=unkeyed)
     return value
-
-
-def _settings_digest(data: dict[str, Any], *, redacted: bool) -> str:
-    """The RFC 8785 digest of one settings file, as `settings_hashes` records it.
-
-    A redacted digest covers the file after the standard redaction and with
-    environment variable names only, so it cannot confirm a guess of a value the
-    redaction removes, and does not change with one; only the keyed binding covers
-    those values. Otherwise the digest covers the file as read, so any changed value
-    changes it.
-    """
-    projected: dict[str, Any] = _projection(data) if redacted else data
-    return hash_canonical(projected)
 
 
 def _hook_commands(value: Any, depth: int = 0) -> int:
@@ -391,7 +450,7 @@ class IDEAgentScanner(Scanner):
             data = self._read_jsonc(files, relative, result)
             if data is not None:
                 documents[relative] = data
-        self._bind_settings(documents, result, properties)
+        self._bind_settings(ide_type, documents, result, risks, properties)
         mode = self._extract_permission_mode(settings or {}, ide_type, result)
         if ide_type == "codex" and mode is None:
             mode = properties.get("approval_policy")
@@ -643,7 +702,11 @@ class IDEAgentScanner(Scanner):
 
     @staticmethod
     def _bind_settings(
-        documents: dict[str, dict[str, Any]], result: ScanResult, properties: dict[str, Any]
+        ide_type: str,
+        documents: dict[str, dict[str, Any]],
+        result: ScanResult,
+        risks: list[RiskAssessment],
+        properties: dict[str, Any],
     ) -> None:
         """Digest each settings file into `settings_hashes`; bind their values with the key.
 
@@ -653,23 +716,50 @@ class IDEAgentScanner(Scanner):
         HMAC under the key covers every file as read, so the inventory never carries an
         unkeyed digest of those values. A file that has no RFC 8785 form, such as TOML
         with a date, is a failure that names it, and leaves the record's values unbound.
+        Without the key, so is a redacted file that holds a URL whose authority URL parsers
+        read differently, and a redacted digest that leaves out a value is a low
+        completeness finding.
         """
         if not documents:
             return
         keyed = bool(os.environ.get(SOURCE_BINDING_KEY_ENV))
         hashes: dict[str, str] = {}
+        withheld: list[str] = []
         for relative, data in documents.items():
+            redacted = keyed or relative in _REDACTED_DIGESTS
             try:
-                digest = _settings_digest(data, redacted=keyed or relative in _REDACTED_DIGESTS)
+                projected = _projection(data, unkeyed=not keyed) if redacted else data
+                digest = hash_canonical(projected)
                 if keyed:
                     # The keyed binding covers the file as read, not only its projection.
                     canonical_json(data)
+                elif projected != data:
+                    withheld.append(relative)
+            except AmbiguousURLError:
+                result.scan_failures.append(
+                    f"{relative}: a URL authority is ambiguous, so its host cannot be bound"
+                )
             except (TypeError, ValueError, RecursionError):
                 result.scan_failures.append(f"{relative}: settings cannot be canonicalized")
             else:
                 hashes[relative] = digest
         if hashes:
             properties["settings_hashes"] = hashes
+        if withheld:
+            risks.append(
+                RiskAssessment(
+                    severity=RiskSeverity.LOW,
+                    category="completeness",
+                    detail=(
+                        f"IDE agent '{ide_type}' settings values not bound in this inventory: "
+                        f"the redacted values of {', '.join(withheld)}."
+                    ),
+                    recommendation=(
+                        f"Set {SOURCE_BINDING_KEY_ENV} during collection to detect changes to "
+                        "these values."
+                    ),
+                )
+            )
         if len(hashes) < len(documents):
             properties["source_values_bound"] = False
             return

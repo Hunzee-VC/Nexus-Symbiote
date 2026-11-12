@@ -72,7 +72,7 @@ _FIELDS = {
     "model": ("provider", "model"),
     "prompt": ("name",),
     "skill": ("name",),
-    "tool": ("name", "host", "port"),
+    "tool": ("name", "host", "port", "transport"),
 }
 _DETAILS = {
     "agent": "versions",
@@ -93,6 +93,18 @@ _NAMED_TYPES = {
     "memory-store": "memory-store",
     "prompt-template": "prompt",
 }
+SARIF_HELP = (
+    "The result comes from the agent's own telemetry, not from the inventory: its "
+    "instrumentation reported the use (assurance reported), which was not observed or "
+    "verified. Status undeclared means that no inventory entry matches the reported name "
+    "and endpoint; status unidentified means that an identifier could not be read, so "
+    "whether the inventory declares the component is unknown. A missing span proves "
+    "nothing, and a result does not establish exploitability."
+)
+SARIF_HELP_URI = (
+    "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/trace-evidence.md#sarif"
+)
+_LOCAL_TRANSPORTS = ("pipe", "unix")
 _DEFAULT_PORTS = {"http": 80, "https": 443, "ws": 80, "wss": 443}
 _TRIM = " \t\r\n"
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
@@ -176,26 +188,27 @@ class Observations:
         if span.start is not None:
             self.first = span.start if self.first is None else min(self.first, span.start)
             self.last = span.start if self.last is None else max(self.last, span.start)
-        host: str | None = None
-        port: str | None = None
+        transport = values.get("network.transport")
+        address = values.get("server.address")
+        local = transport if transport in _LOCAL_TRANSPORTS else None
+        # A tool call that reports a server address is compared only with the tools served
+        # there, whatever the span's kind or transport: the address may name another server.
+        host: Identifier | None = None
+        port: Identifier | None = None
+        if address is not None and local is None:
+            host, port = _host(address), values.get("server.port")
         if method is not None and span.kind == SPAN_KIND_CLIENT:
-            transport = values.get("network.transport")
-            address = values.get("server.address")
-            if transport == "pipe":
+            if local is not None:
                 self.mcp_clients["stdio"] += 1
-            elif transport in ("tcp", "quic") and address is not None:
+            elif isinstance(transport, Unreadable) and address is not None:
+                self.mcp_clients["unattributed"] += 1
+                unclassified = True
+            elif host is not None:
                 self.mcp_clients["attributed"] += 1
-                reported = values.get("server.port")
-                endpoint = (_host(address), reported)
                 version = values.get("mcp.protocol.version")
-                self._observe(span, names, "mcp-endpoint", endpoint, version)
-                if isinstance(endpoint[0], str):
-                    host = endpoint[0]
-                    port = reported if isinstance(reported, str) else None
+                self._observe(span, names, "mcp-endpoint", (host, port), version)
             else:
                 self.mcp_clients["unattributed"] += 1
-                if isinstance(transport, Unreadable) and address is not None:
-                    unclassified = True
         if unclassified:
             self.unclassified += 1
         if operation == "execute_tool" or method == "tools/call":
@@ -204,7 +217,7 @@ class Observations:
                 self.without_identifier["tool"] += 1
             else:
                 kind = values.get("gen_ai.tool.type")
-                self._observe(span, names, "tool", (tool, host, port), kind)
+                self._observe(span, names, "tool", (tool, host, port, local), kind)
         requested = values.get("gen_ai.request.model")
         response = values.get("gen_ai.response.model")
         if requested is not None or response is not None:
@@ -277,7 +290,10 @@ def _identity(kind: str, values: Values) -> dict[str, Any]:
     }
     shown = {key: None if isinstance(value, Unreadable) else value for key, value in named.items()}
     if kind == "tool":
+        local = shown["transport"]
         shown = {"name": shown["name"], "endpoint": _endpoint_text(shown["host"], shown["port"])}
+        if local is not None:
+            shown["transport"] = local
     entry: dict[str, Any] = {"kind": kind, **shown}
     if unreadable:
         entry["unreadable"] = unreadable
@@ -341,6 +357,7 @@ class _Inventory:
     def __init__(self, bom: AIBOM) -> None:
         groups: dict[str, dict[Any, list[AnyComponent]]] = defaultdict(lambda: defaultdict(list))
         endpoints: dict[str, tuple[str, int | None]] = {}
+        remote_only: set[str] = set()
         tools: list[tuple[str, ToolComponent]] = []
         self.declared: list[tuple[str, AnyComponent]] = []
         for component in bom.components:
@@ -348,6 +365,9 @@ class _Inventory:
             if isinstance(component, MCPServerComponent):
                 self.declared.append(("mcp-server", component))
                 endpoint = _endpoint(component.endpoint_url)
+                local = component.command is not None or _trimmed(component.transport) == "stdio"
+                if endpoint is not None and not local:
+                    remote_only.add(component.bom_ref)
                 if endpoint is not None:
                     host, port = endpoints[component.bom_ref] = endpoint
                     groups["servers_on"][host].append(component)
@@ -386,6 +406,8 @@ class _Inventory:
             elif component.component_type.value in _NAMED_TYPES and name is not None:
                 groups[_NAMED_TYPES[component.component_type.value]][name].append(component)
         for name, tool in tools:
+            if tool.mcp_server_ref not in remote_only:
+                groups["tools_local"][name].append(tool)
             served = endpoints.get(tool.mcp_server_ref or "")
             if served is not None:
                 host, port = served
@@ -406,7 +428,10 @@ class _Inventory:
         """The candidate lists for one item, each with the basis a match on it has."""
         texts = [_text(value) for value in values]
         if kind == "tool":
-            name, host, port = texts
+            name, host, port, local = texts
+            if local is not None:
+                # A pipe or unix socket cannot reach a server that has only a remote endpoint.
+                return [(self._get("tools_local", name), "name")]
             if host is None:
                 return [(self._get("tools", name), "name")]
             # A call to a reported endpoint matches only tools that a server there declares:
@@ -580,6 +605,13 @@ def _gate(
                 f"{'it reports' if unclassified == 1 else 'they report'} cannot be compared "
                 "with the inventory"
             )
+        over = coverage["attribute_lists_over_bound"]
+        if over:
+            reasons.append(
+                f"{over} attribute {'list has' if over == 1 else 'lists have'} more than "
+                f"{MAX_ATTRIBUTES} entries, so what the entries after the first {MAX_ATTRIBUTES} "
+                "report cannot be compared with the inventory"
+            )
         if not coverage["genai_or_mcp_spans"]:
             reasons.append(
                 "no span carries GenAI or MCP semantics, so these traces cannot show undeclared use"
@@ -665,7 +697,12 @@ def describe(entry: Mapping[str, Any]) -> str:
     kind = entry["kind"]
     if kind == "tool":
         endpoint = entry.get("endpoint")
-        return f"tool {shown('name')}" + (f" on MCP endpoint {endpoint}" if endpoint else "")
+        if "host" in unreadable:
+            endpoint = shown("host")
+        if "port" in unreadable:
+            endpoint = f"{endpoint} port {shown('port')}"
+        text = f"tool {shown('name')}" + (f" on MCP endpoint {endpoint}" if endpoint else "")
+        return text + (f" over {entry['transport']}" if entry.get("transport") else "")
     if kind == "model":
         stated = entry.get("provider") is not None or "provider" in unreadable
         return f"model {shown('model')}" + (f" from provider {shown('provider')}" if stated else "")
@@ -736,16 +773,16 @@ def coverage_notes(document: Mapping[str, Any]) -> list[tuple[str, str]]:
         notes.append(
             (
                 "note",
-                f"MCP client spans over stdio: {clients['stdio']}. A trace cannot attribute "
-                "stdio activity to a configured server.",
+                f"MCP client spans over a pipe or unix socket: {clients['stdio']}. A trace "
+                "cannot attribute local activity to a configured server.",
             )
         )
     if clients["unattributed"]:
         notes.append(
             (
                 "note",
-                "MCP client spans without a tcp or quic server address: "
-                f"{clients['unattributed']}. Their endpoint is not attributed.",
+                "MCP client spans without a server address, or whose transport could not be "
+                f"read: {clients['unattributed']}. Their endpoint is not attributed.",
             )
         )
     if any(missing.values()):
@@ -870,7 +907,15 @@ def sarif_document(document: Mapping[str, Any], anchor: str) -> dict[str, Any]:
                         "name": "nexus-symbiote",
                         "version": __version__,
                         "informationUri": "https://github.com/Hunzee-VC/Nexus-Symbiote",
-                        "rules": [SARIFGenerator._rule(rule_id, CATEGORY, severity)]
+                        "rules": [
+                            SARIFGenerator._rule(
+                                rule_id,
+                                CATEGORY,
+                                severity,
+                                help_text=SARIF_HELP,
+                                help_uri=SARIF_HELP_URI,
+                            )
+                        ]
                         if results
                         else [],
                     }

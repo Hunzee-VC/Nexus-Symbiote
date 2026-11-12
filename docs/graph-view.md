@@ -191,8 +191,9 @@ text:
 - Every inventory string is passed through one function: long text is cut (labels at
   28 characters, with the text up to 2,000 characters in the node's `<title>`; details
   at 2,000), so a long name costs no more than a short one; control, line-break,
-  bidirectional and invisible characters become U+FFFD and a `##[` CI log command is
-  broken; and the result is HTML-escaped, quotes included. Cutting only drops the end
+  bidirectional and invisible characters, including every default-ignorable code point
+  such as variation selectors and blank fillers, become U+FFFD and a `##[` CI log
+  command is broken; and the result is HTML-escaped, quotes included. Cutting only drops the end
   of the text and adds an ellipsis, so it cannot form what the next step removes. The
   text appears only as element text or as the value of an `aria-label`
   or `data-name` attribute, never in a script, a style, a URL, an id, a class or an

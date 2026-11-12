@@ -359,6 +359,29 @@ def test_json_neutralizes_details_and_keeps_identifiers_exact(runner, tmp_path):
     assert json.loads(written.read_text(encoding="utf-8")) == json.loads(result.stdout)
 
 
+def test_json_keeps_categories_exact_and_the_guide_says_which_fields_are_neutralized(
+    runner, tmp_path
+):
+    hostile = "\x1b[2J\n::error::forged\u202e"
+    inventory = _write(
+        tmp_path / "bom.json",
+        MCPServerComponent(
+            bom_ref="ref" + hostile, name="n", risks=[_risk("pinning" + hostile, HIGH, hostile)]
+        ),
+    )
+    (finding,) = _json(runner, inventory)["findings"]
+    assert finding["category"] == "pinning" + hostile
+    assert finding["component_ref"] == "ref" + hostile
+    assert finding["detail"] == neutralize(hostile)
+    guide = " ".join(PAGE.read_text(encoding="utf-8").split())
+    assert (
+        "Only in `detail` are control, bidirectional and invisible characters replaced as on "
+        "a terminal; `category` and `component_ref` are kept exactly as the inventory records "
+        "them" in guide
+    )
+    assert "Treat them as untrusted: escape them before you print them" in guide
+
+
 def test_long_text_is_cut_and_long_entry_lists_are_counted(runner, tmp_path):
     count = MAX_MARKDOWN_FINDINGS + 7
     inventory = _write(

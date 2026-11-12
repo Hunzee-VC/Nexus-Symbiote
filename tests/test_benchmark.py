@@ -148,3 +148,9 @@ def test_benchmark_revision_comes_from_the_workflow_or_a_tracked_checkout(tmp_pa
     monkeypatch.setattr(benchmark, "nexus_symbiote", installed)
     identity = benchmark._source_identity()
     assert identity["git_sha"] is None and identity["revision_source"] is None
+
+
+def test_the_roadmap_states_the_current_security_case_count():
+    manifest, _digest = benchmark.load_manifest(benchmark.DEFAULT_MANIFEST)
+    roadmap = (Path(__file__).parents[1] / "ROADMAP.md").read_text(encoding="utf-8")
+    assert f"and {len(manifest['cases'])} security cases now" in roadmap

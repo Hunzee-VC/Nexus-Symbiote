@@ -268,7 +268,14 @@ class SARIFGenerator(Generator):
         return document
 
     @staticmethod
-    def _rule(rule_id: str, category: str, severity: RiskSeverity) -> dict[str, Any]:
+    def _rule(
+        rule_id: str,
+        category: str,
+        severity: RiskSeverity,
+        *,
+        help_text: str = GENERIC_HELP,
+        help_uri: str = HELP_URI,
+    ) -> dict[str, Any]:
         info = RULES.get(category)
         if info is None:
             label = plain_text(category.replace("_", " ").replace("-", " "), 120)
@@ -282,8 +289,8 @@ class SARIFGenerator(Generator):
             "id": rule_id,
             "shortDescription": {"text": f"{title} ({severity.value})"},
             "fullDescription": {"text": description},
-            "help": {"text": f"{description} {GENERIC_HELP}"},
-            "helpUri": HELP_URI,
+            "help": {"text": f"{description} {help_text}"},
+            "helpUri": help_uri,
             "defaultConfiguration": {"level": SEVERITY_TO_SARIF[severity]},
             "properties": {
                 "security-severity": SECURITY_SEVERITY[severity],

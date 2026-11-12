@@ -102,17 +102,22 @@ are counted, because operators often do not know that their traces hold message 
 tool-call content. Every other attribute, span names, span events, links, status,
 instrumentation scopes and log records are not read.
 
-An MCP client span (span kind `CLIENT` with `mcp.method.name`) names a remote endpoint
-only when `network.transport` is `tcp` or `quic` and `server.address` is set; the host
-is compared in lower case. A client span with `network.transport` `pipe` is stdio: a
-trace cannot attribute it to a configured server, so it is counted as unattributed
-stdio activity. Server spans never name an endpoint.
+An MCP client span (span kind `CLIENT` with `mcp.method.name`) that sets
+`server.address` names a remote endpoint when it leaves `network.transport` out or sets
+it to any readable value other than `pipe` or `unix`; a transport that is present but
+unreadable names no endpoint and fails the gate as an unclassified span; the host is
+compared in lower case. A client span with `network.transport` `pipe` or `unix` is local
+activity: a trace cannot attribute it to a configured server, so it is counted under
+`mcp_client_spans.stdio`. A client span without `server.address` is counted as
+unattributed. Spans of other kinds never name an endpoint item, but a tool call on any
+span that sets `server.address`, other than over `pipe` or `unix`, is compared only with
+the tools served at that address.
 
 ## What is extracted
 
 | Kind | From | Identity |
 |---|---|---|
-| `tool` | `execute_tool` spans and MCP `tools/call` spans | `name`, and `endpoint` (`host:port`, or `host` when no port was reported) when the span is a remote MCP client span |
+| `tool` | `execute_tool` spans and MCP `tools/call` spans | `name`, and `endpoint` (`host:port`, or `host` when no port was reported) when the span sets `server.address` and its transport is not `pipe` or `unix`; `transport` (`pipe` or `unix`) when it is one of those |
 | `model` | Spans with `gen_ai.request.model` or `gen_ai.response.model` | `provider` and `model`, the requested name or, without one, the response name; a different response name is listed under `resolved_models` |
 | `agent` | `create_agent` and `invoke_agent` spans | `id` and `name` |
 | `mcp-endpoint` | Remote MCP client spans | `host` and `port` |
@@ -131,7 +136,7 @@ Every rule is an exact comparison after trimming; nothing is matched by similari
 
 | Kind | Candidates in the inventory | Basis of a match |
 |---|---|---|
-| `tool` | `tool` components with the same `name`. When the span names a remote endpoint, only the tools of MCP servers at that endpoint: servers whose `endpoint_url` has the same host and port or, when none has, the same host and no port; without a reported port, servers on the host. The same name declared on another server does not match, so a call to a server that shadows another server's tool is undeclared | `name-and-endpoint` (host and port compared), `name-and-host` (one side states no port) or `name` |
+| `tool` | `tool` components with the same `name`. When the span names a remote endpoint, only the tools of MCP servers at that endpoint: servers whose `endpoint_url` has the same host and port or, when none has, the same host and no port; without a reported port, servers on the host. The same name declared on another server does not match, so a call to a server that shadows another server's tool is undeclared. Over `pipe` or `unix`, tools of servers that have only a remote endpoint (an `endpoint_url`, no `command` and a transport other than `stdio`) do not match | `name-and-endpoint` (host and port compared), `name-and-host` (one side states no port) or `name` |
 | `model` | `model` components whose `name` or `requested_alias` is the model name, case-sensitive; when both sides state a provider they must agree, compared without regard to case | `name-and-provider` or `name` |
 | `mcp-endpoint` | `mcp-server` components whose `endpoint_url` has the same host and port, with the scheme's default port (80 for `http` and `ws`, 443 for `https` and `wss`); when none does, servers on the host whose endpoint states no port. Without a reported port, every server on the host | `host-and-port`, or `host` (one side states no port) |
 | `agent` | `agent` components with the same `name`, other than the repository agent inferred without an `agent.yaml` (named `repository`). When the span reports an id and the [agent manifest](agent-manifest.md) declares one, the ids decide: the inventory derives the agent's reference from its declared id | `id` or `name` |
@@ -197,7 +202,7 @@ untrusted: escape it before you place it in HTML, Markdown or a shell command.
 
 | `--fail-on` | Exit 1 when |
 |---|---|
-| `undeclared` (default) | A tool, model, agent or MCP endpoint is `undeclared` or `unidentified`, a span cannot be classified (`spans_unclassified`), or no span carries a GenAI or MCP attribute of its own, so that traces from a pipeline that lost its GenAI instrumentation cannot pass |
+| `undeclared` (default) | A tool, model, agent or MCP endpoint is `undeclared` or `unidentified`, a span cannot be classified (`spans_unclassified`), a span or resource has more than 128 attributes (`attribute_lists_over_bound`), or no span carries a GenAI or MCP attribute of its own, so that traces from a pipeline that lost its GenAI instrumentation cannot pass |
 | `none` | Never for a gate reason; the evidence and summary still list everything |
 
 A trace file or inventory that cannot be read, a malformed structure and a bound that is
@@ -208,8 +213,11 @@ that names the inventory, a trace file or the other output, is a usage error (ex
 
 `--sarif` writes SARIF 2.1.0 with one result per undeclared or unidentified tool, model,
 agent or MCP endpoint: category `runtime_undeclared`, rule
-`nexus_symbiote/runtime_undeclared/high`, level `error`, assurance `reported` in its
-properties. Unobserved declarations and informational identifiers are not findings and
+`nexus_symbiote/runtime_undeclared/high`, level `error`, assurance `reported` and the
+status `undeclared` or `unidentified` in its properties. The rule's text holds for both
+statuses: its help says that the result comes from the agent's own telemetry, not from
+the inventory, and that an unidentified component may or may not be declared, and it
+links to this section. Unobserved declarations and informational identifiers are not findings and
 are not emitted. Text from the traces is neutralized as the inventory's SARIF export
 neutralizes inventory text, and results are anchored to the inventory's path relative
 to the working directory, or to `.nexus-symbiote.yaml` when the inventory lies outside
@@ -241,13 +249,15 @@ component references. Share them as you would share the inventory.
 | Spans in all files | 1,000,000 | The run is refused |
 | Distinct identifiers recorded in all files: each item, and each service, tool type, resolved model, agent version or protocol version recorded for it | 100,000 | The run is refused |
 | Characters in one identifier | 512 | The value is not used and is counted under `unreadable_identifiers`; an item that it would identify is `unidentified`, and a span that it would classify counts under `spans_unclassified` |
-| Attributes read per span or resource | 128 | The rest are not read; counted under `attribute_lists_over_bound` |
+| Attributes read per span or resource | 128 | The rest are not read; counted under `attribute_lists_over_bound`, which fails the gate |
 | Candidates listed per ambiguous item | 10 | Counted under `candidates_omitted` |
 | Undeclared and unidentified items in the summary | 20 | Counted; the evidence document lists them all |
 
 Attributes after the first 128 of a span or resource are not read, even when they name
-a tool: the gate does not fail on them, because only the instrumentation, which can
-also leave a span out entirely, decides how many attributes a span carries.
+a tool, so a list longer than that fails the gate with `--fail-on undeclared`: what its
+later entries report cannot be compared with the inventory. OpenTelemetry SDKs keep at
+most 128 attributes per span by default (`OTEL_SPAN_ATTRIBUTE_COUNT_LIMIT`), so a
+producer with default limits never reaches the bound.
 
 A file in the one-object form is parsed whole, and parsed JSON takes far more memory
 than its bytes: about 12 times the file's size for typical spans (about 500 MB for a
@@ -278,7 +288,7 @@ Trace evidence: runtime use reported by the agent's own instrumentation; a missi
   Undeclared: model 'gpt-4o-mini' from provider 'openai' (1 span)
   Undeclared: tool 'search_tickets' on MCP endpoint mcp.example.com:443 (1 span)
   Note: Spans with message, prompt or tool-call content attributes: 2. Protect these trace files.
-  Note: MCP client spans over stdio: 1. A trace cannot attribute stdio activity to a configured server.
+  Note: MCP client spans over a pipe or unix socket: 1. A trace cannot attribute local activity to a configured server.
 Trace gate failed: 3 reported tool, model, agent or MCP endpoint items are not declared in the inventory
 ```
 

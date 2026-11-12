@@ -388,3 +388,27 @@ def test_the_finding_catalog_no_longer_lists_uncatalogued_categories():
     assert "generic rule" in section
     assert "`launcher_identity`" not in section
     assert "framework-crosswalk.md" in section
+
+
+def test_rationales_claim_no_weakness_or_documentation_gap_that_findings_do_not_record():
+    # Art. 15 is attached to findings that record an unknown or an ordinary property, and
+    # Art. 11 and A.4.2 to findings that record only what the inventory does not declare.
+    for category, reference in _all_references():
+        text = reference.rationale
+        if (reference.framework, reference.entry) == ("eu-ai-act-2024", "Art. 15"):
+            assert "weakness" not in text, category
+        if (reference.framework, reference.entry) in {
+            ("eu-ai-act-2024", "Art. 11"),
+            ("iso-iec-42001-2023", "A.4.2"),
+        }:
+            assert "documentation" not in text and "inventory" in text, category
+
+
+def test_runtime_references_hold_for_unidentified_items_too():
+    # trace-diff writes unidentified items, which may be declared, under the same category.
+    texts = [reference.rationale for reference in CROSSWALK[RUNTIME_CATEGORY]]
+    texts.append(RULES[RUNTIME_CATEGORY].description)
+    for text in texts:
+        assert "does not list" not in text and "not in the inventory" not in text
+        assert "used at run time" not in text and "never went through" not in text
+    assert "could not be read" in RULES[RUNTIME_CATEGORY].description

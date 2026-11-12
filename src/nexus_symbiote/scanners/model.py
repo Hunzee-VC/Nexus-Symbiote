@@ -441,6 +441,13 @@ def safetensors_fingerprint(
     return metadata
 
 
+def _report_variants(files: ConfinedCollection, path: Path) -> None:
+    """Fail each other spelling of an absent fixed name, which case-insensitive hosts open."""
+    for variant in files.case_variants(path):
+        if not files.excluded(variant):
+            files.report_case_variant(variant, path)
+
+
 class ModelTree:
     """Root-relative files from one confined walk, indexed by directory."""
 
@@ -1133,6 +1140,7 @@ class ModelScanner(Scanner):
         for name in MODEL_CONFIG_FILES:
             path = model_dir / name
             if path not in tree.paths:
+                _report_variants(files, path)
                 continue
             self._read.add(path)
             raw = files.read_bytes(path)
@@ -1183,16 +1191,19 @@ class ModelScanner(Scanner):
         for name in CHAT_TEMPLATE_FILES:
             if model_dir / name in tree.paths:
                 self._template_file(files, model_dir / name, templates, escapes)
-        for path in tree.children.get(model_dir / CHAT_TEMPLATE_DIRECTORY, ()):
+            else:
+                _report_variants(files, model_dir / name)
+        for path in self._template_directory(files, model_dir):
             if path.suffix == ".jinja":
                 self._template_file(files, path, templates, escapes)
 
-        tokenizer_files = [
-            (model_dir / name, digest)
-            for name in TOKENIZER_FILES
-            if model_dir / name in tree.paths
-            and (digest := self._digest(files, model_dir / name)) is not None
-        ]
+        tokenizer_files: list[tuple[Path, str]] = []
+        for name in TOKENIZER_FILES:
+            path = model_dir / name
+            if path not in tree.paths:
+                _report_variants(files, path)
+            elif (digest := self._digest(files, path)) is not None:
+                tokenizer_files.append((path, digest))
         custom_code = None
         if declared_in:
             python_files = [
@@ -1221,6 +1232,24 @@ class ModelScanner(Scanner):
             base_model=base_model,
             template_escapes=escapes,
         )
+
+    def _template_directory(self, files: ConfinedCollection, model_dir: Path) -> list[Path]:
+        """The files of ``additional_chat_templates`` under the names a loader opens.
+
+        The walk lists a directory symlink's files under its target's name only, so
+        they are looked up through the link, where a read follows it.
+        """
+        directory = model_dir / CHAT_TEMPLATE_DIRECTORY
+        listed = self._tree.children.get(directory)
+        if listed is not None:
+            return listed
+        if not files.is_directory(directory):
+            _report_variants(files, directory)
+            return []
+        target = files.link_target(directory)
+        if target is None:
+            return []
+        return [directory / path.name for path in self._tree.children.get(Path(target), ())]
 
     @staticmethod
     def _config_templates(

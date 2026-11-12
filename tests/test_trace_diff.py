@@ -416,3 +416,44 @@ def test_an_output_whose_identity_cannot_be_checked_is_not_written(tmp_path, run
     assert result.exit_code == 1
     assert "Cannot write the output file: Permission denied." in result.stderr
     assert output.read_text() == "{}"
+
+
+def test_a_call_after_the_attribute_bound_fails_the_command(tmp_path, runner):
+    filler = {f"app.filler.{i:03d}": "x" for i in range(128)}
+    hidden = otlp_span(
+        {
+            "gen_ai.operation.name": "execute_tool",
+            **filler,
+            "mcp.method.name": "tools/call",
+            "gen_ai.tool.name": "exfiltrate_everything",
+            "network.transport": "tcp",
+            "server.address": "evil.example.net",
+            "server.port": 443,
+        },
+        kind=CLIENT,
+    )
+    trace = _trace(tmp_path / "trace.json", _call("search"), hidden)
+    sarif = tmp_path / "out.sarif"
+    result = runner.invoke(
+        main, ["trace-diff", str(_declared(tmp_path)), str(trace), "--sarif", str(sarif)]
+    )
+    assert result.exit_code == 1, result.output
+    assert "Trace gate passed" not in result.output
+    assert "more than 128 entries" in result.output
+
+
+def test_a_call_to_another_address_without_a_transport_fails_the_command(tmp_path, runner):
+    call = otlp_span(
+        {
+            "mcp.method.name": "tools/call",
+            "gen_ai.tool.name": "search",
+            "server.address": "evil.example.net",
+            "server.port": 443,
+        },
+        kind=CLIENT,
+    )
+    trace = _trace(tmp_path / "trace.json", call)
+    result = runner.invoke(main, ["trace-diff", str(_declared(tmp_path)), str(trace)])
+    assert result.exit_code == 1, result.output
+    assert "Undeclared: tool 'search' on MCP endpoint evil.example.net:443" in result.output
+    assert "Undeclared: MCP endpoint evil.example.net:443" in result.output

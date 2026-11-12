@@ -530,9 +530,9 @@ def _nested(tmp_path: Path, depth: int) -> Path:
 
 
 def test_nesting_at_the_depth_limit_is_refused_never_raised(tmp_path):
-    # The content digest canonicalizes the document one call deeper than the strict parse, so
-    # the deepest nesting the parse accepted used to escape as a bare RecursionError. Bisection
-    # must probe that depth: it is where acceptance ends.
+    # The strict parse refuses at the boundary: it canonicalizes at the same depth as the
+    # content digest. Bisection probes the depth where acceptance ends, where a digest one
+    # call deeper once escaped as a bare RecursionError.
     def refusal(depth: int) -> str | None:
         try:
             read_native_inventory(_nested(tmp_path, depth))
@@ -561,6 +561,8 @@ def test_a_digest_too_deep_for_the_stack_is_refused_as_the_parse_refuses_it(tmp_
     assert str(refused.value) == (
         "It is not strict UTF-8 JSON; duplicate keys and nonfinite numbers are refused."
     )
+    assert refused.value.__cause__ is not None
+    assert refused.value.__cause__.args == (NESTED_TOO_DEEPLY,)
 
 
 def test_export_time_is_linear_in_the_number_of_agents(tmp_path):

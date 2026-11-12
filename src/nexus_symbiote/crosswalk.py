@@ -282,14 +282,14 @@ _EVALUATION = (
     "Records a security-relevant property of the configuration, an input to evaluating its "
     "security."
 )
-_RESILIENCE = "Records a weakness that could let a third party alter the system's use or outputs."
+_RESILIENCE = "Records a property of the system that bears on its robustness and cybersecurity."
 _THIRD_PARTY = (
     "Records a third-party component whose identity, version or resolution is not established."
 )
 _SUPPLIER = "Records a supplied component whose identity, version or resolution is not established."
 _PRETRAINED = "Records how safely a pre-trained model loads, or whether its weights are verified."
-_DOCUMENTATION = "Records an element that the system's technical documentation does not describe."
-_RESOURCES = "Records a resource that the documentation of the AI system leaves out."
+_DOCUMENTATION = "Records an element of the system that the inventory does not show as declared."
+_RESOURCES = "Records a resource of the AI system that the inventory does not show as declared."
 _HIDDEN_PROMPT = (
     "Instruction text that reads differently to a reviewer than to the model can carry "
     "injected instructions."
@@ -968,13 +968,14 @@ CROSSWALK: dict[str, tuple[Reference, ...]] = {
         _ref(
             OWASP_ASI_2026,
             "ASI04",
-            "A component that the agent used at run time never went through the inventory's "
-            "review.",
+            "The agent's telemetry reports a component that the inventory does not show as "
+            "declared, so the inventory's review cannot be shown to cover it.",
         ),
         _ref(
             NIST_AI_RMF,
             "GOVERN-1.6",
-            "Telemetry shows an AI component that the inventory does not list.",
+            "The agent's telemetry reports an AI component that the inventory does not show "
+            "as listed.",
         ),
         _ref(EU_AI_ACT, "Art. 11", _DOCUMENTATION),
         _ref(ISO_42001, "A.4.2", _RESOURCES),

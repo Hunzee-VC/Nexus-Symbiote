@@ -133,7 +133,7 @@ Messages and recommendations are one line of plain text: control, bidirectional 
 | `prompt_size` | Large instruction file | none | LLM01:2025 | LLM01:2026 | ASI01 | none | MEASURE-2.7 |
 | `rag_discovery` | Undeclared retrieval source | none | LLM08:2025 | LLM09:2026 | ASI06 | none | GOVERN-1.6 |
 | `registry_origin` | Non-default package registry | none | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0010.001 | MANAGE-3.1 |
-| `runtime_undeclared` | Runtime component not in the inventory | none | none | none | ASI04 | none | GOVERN-1.6 |
+| `runtime_undeclared` | Runtime component not matched to the inventory | none | none | none | ASI04 | none | GOVERN-1.6 |
 | `serialization_format` | Unsafe model serialization | CWE-502 (critical findings), CWE-1336 (high findings) | LLM03:2025 | LLM04:2026 | ASI04, ASI05 | AML.T0011.000 | MANAGE-3.2 |
 | `serialization_format_unknown` | Unknown model serialization safety | CWE-502 | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0011.000 | MANAGE-3.2 |
 | `shadowscan-heuristic` | Imported discovery risk | none | none | none | none | none | none |
