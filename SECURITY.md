@@ -1,5 +1,7 @@
 # Security policy
 
+Nexus SymBiote is an Agent Bill of Materials toolkit. It is not related to Symbiote, the Linux malware of the same name reported in 2022.
+
 Nexus SymBiote is alpha security tooling. Inventory, signature verification, and policy decisions have different meanings. A successful scan or low risk score does not establish that an agent, model, dataset, or tool is benign.
 
 ## Reporting a vulnerability

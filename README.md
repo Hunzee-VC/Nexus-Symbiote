@@ -26,6 +26,8 @@
   <a href="#project-status"><b>Status</b></a>
 </p>
 
+> Not related to Symbiote, the Linux malware of the same name reported in 2022.
+
 Nexus SymBiote generates an **Agent Bill of Materials (AgentBOM)** — an evidence-backed inventory of the MCP servers, models, instructions, retrieval sources, A2A cards, IDE settings and container images an AI agent is assembled from. It reads a project **without running it**, flags supply-chain risk, fails CI on drift in what it records, and exports to CycloneDX 1.7, SPDX 3.0.1, SARIF and VEX.
 
 ```bash
