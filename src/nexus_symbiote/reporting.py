@@ -184,7 +184,10 @@ def risk_report_lines(
                     f"Top findings ({TOP_FINDINGS} of {len(findings)}; --json-output lists all):"
                 )
             lines.append((heading, "bold"))
-            lines.extend((_finding_line("  - ", f), None) for f in findings[:TOP_FINDINGS])
+            for finding in findings[:TOP_FINDINGS]:
+                lines.append((_finding_line("  - ", finding), None))
+                if finding.get("fingerprint"):
+                    lines.append((safe_line("    fingerprint: ", finding["fingerprint"]), None))
     lines.append(("Gate: PASSED", "green") if passed else ("Gate: FAILED", "red"))
     listed = [] if passed else [str(failure) for failure in failures]
     lines.extend(gate_reason_lines(document, listed))
@@ -203,6 +206,20 @@ def risk_report_lines(
                 "yellow",
             )
         )
+    for stale in document.get("suppressions_stale") or []:
+        if isinstance(stale, Mapping):
+            lines.append(
+                (
+                    safe_line(
+                        "  - suppression no longer matches: ",
+                        stale.get("category"),
+                        " on ",
+                        stale.get("component_ref"),
+                        " (the finding changed; review it and copy its new fingerprint)",
+                    ),
+                    "yellow",
+                )
+            )
     return lines
 
 
