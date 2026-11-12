@@ -359,7 +359,8 @@ def test_the_digest_readers_read_a_versionless_document_alike(document):
     from datetime import UTC, datetime
 
     from nexus_symbiote.attestation import build_statement
-    from nexus_symbiote.core.content_digest import inventory_content_digest, inventory_digests
+    from nexus_symbiote.core.content_digest import inventory_content_digest
+    from nexus_symbiote.core.inventory_digests import inventory_digests
 
     raw = json.dumps(document).encode()
     digests = inventory_digests(raw)

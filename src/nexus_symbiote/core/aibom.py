@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 from nexus_symbiote import __version__
 from nexus_symbiote.core.canonical import NAMESPACE, json_text
+from nexus_symbiote.core.content_digest import inventory_content_digest
 from nexus_symbiote.core.enums import ComponentType
 from nexus_symbiote.core.models import (
     MAX_REFERENCE_CHARS,
@@ -352,8 +353,6 @@ def prepare(bom: AIBOM) -> AIBOM:
     if bom.metadata.tool_version is None:
         bom.metadata.tool_version = __version__
     if bom.metadata.serial_number is None:
-        from nexus_symbiote.core.content_digest import inventory_content_digest
-
         try:
             digest = inventory_content_digest(native_document(bom))
         except (ValueError, RecursionError):

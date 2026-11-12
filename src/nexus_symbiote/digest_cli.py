@@ -63,7 +63,8 @@ def digest_command(inventory_path: Path, json_output: bool) -> None:
     JSON), and the command exits 1.
     """
     from nexus_symbiote.core.aibom import NativeFormatError, read_native_bytes
-    from nexus_symbiote.core.content_digest import INVENTORY_CONTENT_PROFILE, inventory_digests
+    from nexus_symbiote.core.content_digest import INVENTORY_CONTENT_PROFILE
+    from nexus_symbiote.core.inventory_digests import inventory_digests
 
     try:
         digests = inventory_digests(read_native_bytes(inventory_path))

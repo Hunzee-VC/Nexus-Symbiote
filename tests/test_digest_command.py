@@ -18,11 +18,13 @@ from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM, MAX_NATIVE_BYTES, NativeFormatError
 from nexus_symbiote.core.content_digest import (
     INVENTORY_CONTENT_PROFILE,
+    inventory_content_digest,
+)
+from nexus_symbiote.core.inventory_digests import (
     NO_CONTENT_DIGEST,
     OUTSIDE_SNAPSHOT_BUDGET,
     TOO_DEEP_FOR_CONTENT_DIGEST,
     InventoryDigests,
-    inventory_content_digest,
     inventory_digests,
 )
 from nexus_symbiote.digest_cli import UNAVAILABLE
