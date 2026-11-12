@@ -20,6 +20,7 @@ from nexus_symbiote.core.hashing import (
     normalize_digest,
     open_regular_file,
     pathname_identity,
+    tool_definition_extensions,
 )
 from nexus_symbiote.core.models import (
     AnyComponent,
@@ -254,6 +255,9 @@ class IntegrityValidator:
         byte_budget: int | None = None,
     ) -> None:
         # Digest pins arrive with the Sigstore entries of a loaded policy set.
+        self._sigstore_policies: list[SigstoreArtifactPolicy] = [
+            p for p in signature_policies if isinstance(p, SigstoreArtifactPolicy)
+        ]
         self._signature_policies: dict[Path, ArtifactPolicy] = {
             p.artifact_path.resolve(): p for p in policy_entries(signature_policies)
         }
@@ -338,6 +342,33 @@ class IntegrityValidator:
                         issue.severity = "info"
                         issue.detail = "Imported discovery claim without local evidence: " + (
                             issue.detail
+                        )
+        if project_root is not None:
+            from nexus_symbiote.validators.completeness import (
+                discovery_producer_check,
+                discovery_signature_required,
+            )
+
+            if discovery_signature_required(False, project_root, self._sigstore_policies):
+                disc_status, disc_problems = discovery_producer_check(
+                    bom,
+                    project_root,
+                    self._sigstore_policies,
+                    exclude_paths=exclude_paths,
+                )
+                if disc_status == "verified":
+                    report.signatures_checked += 1
+                    report.signatures_verified += 1
+                elif disc_status == "failed":
+                    report.signatures_checked += 1
+                    for problem in disc_problems:
+                        report.issues.append(
+                            IntegrityIssue(
+                                "discovery-report",
+                                "discovery_signature_failed",
+                                problem,
+                                "error",
+                            )
                         )
         self._report_unused_policies(project_root, report)
         report.bytes_charged = self.byte_budget - self._digests.remaining
@@ -494,8 +525,21 @@ class IntegrityValidator:
             return
         try:
             algorithm, expected = normalize_digest(comp.definition_hash, "sha256")
+            extensions = tool_definition_extensions(
+                {
+                    "title": comp.properties.get("mcp_title", comp.properties.get("title")),
+                    "outputSchema": comp.properties.get(
+                        "mcp_output_schema", comp.properties.get("output_schema")
+                    ),
+                    "_meta": comp.properties.get("mcp_meta", comp.properties.get("meta")),
+                }
+            )
             recomputed = hash_tool_definition(
-                comp.name, comp.description_text, comp.input_schema, comp.annotations
+                comp.name,
+                comp.description_text,
+                comp.input_schema,
+                comp.annotations,
+                **extensions,
             )
             raw_hash = f"{algorithm}:{expected}"
             if recomputed != (comp.redacted_definition_hash or raw_hash):
