@@ -20,18 +20,17 @@ from typing import Any
 from urllib.parse import quote
 
 from nexus_symbiote import __version__
-from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote.core.aibom import AIBOM, prepare
+from nexus_symbiote.core.canonical import content_digest
 from nexus_symbiote.core.enums import RiskSeverity
 from nexus_symbiote.core.models import AnyComponent, CompletenessClaim
 from nexus_symbiote.generators._common import (
     OMITTED_IMPORTED_FINDINGS,
     PROJECTION_SCANNERS,
-    content_digest,
     coverage_aggregate,
     imported_discovery_component,
-    prepare,
 )
-from nexus_symbiote.generators._rules import GENERIC_HELP, RULES
+from nexus_symbiote.generators._rules import GENERIC_HELP, RULES, rule_tags
 from nexus_symbiote.generators.base import Generator
 from nexus_symbiote.generators.validation import require_valid
 from nexus_symbiote.utils.terminal import UNSAFE_TEXT
@@ -174,17 +173,20 @@ class SARIFGenerator(Generator):
         return self._anchor, "anchor"
 
     def generate(self, bom: AIBOM) -> dict[str, Any]:
+        from nexus_symbiote.validators.risk import effective_component_risks
+
         prepare(bom)
         by_ref = {component.bom_ref: component for component in bom.components}
         findings: dict[tuple[str, str], dict[str, Any]] = {}
         rules: dict[str, dict[str, Any]] = {}
         omitted = 0
         for comp in sorted(bom.components, key=lambda c: c.bom_ref):
+            comp_risks = effective_component_risks(comp)
             if imported_discovery_component(comp):
-                omitted += len(getattr(comp, "risks", []))
+                omitted += len(comp_risks)
                 continue
             risks = sorted(
-                getattr(comp, "risks", []),
+                comp_risks,
                 key=lambda r: (r.category, r.detail, SEVERITY_ORDER[r.severity]),
             )
             for risk in risks:
@@ -269,7 +271,14 @@ class SARIFGenerator(Generator):
         return document
 
     @staticmethod
-    def _rule(rule_id: str, category: str, severity: RiskSeverity) -> dict[str, Any]:
+    def _rule(
+        rule_id: str,
+        category: str,
+        severity: RiskSeverity,
+        *,
+        help_text: str = GENERIC_HELP,
+        help_uri: str = HELP_URI,
+    ) -> dict[str, Any]:
         info = RULES.get(category)
         if info is None:
             label = plain_text(category.replace("_", " ").replace("-", " "), 120)
@@ -277,13 +286,14 @@ class SARIFGenerator(Generator):
             description = f"Inventory findings of category '{label}'."
             tags = ["security"]
         else:
-            title, description, tags = info.title, info.description, info.tags(severity)
+            title, description = info.title, info.description
+            tags = rule_tags(category, severity)
         return {
             "id": rule_id,
             "shortDescription": {"text": f"{title} ({severity.value})"},
             "fullDescription": {"text": description},
-            "help": {"text": f"{description} {GENERIC_HELP}"},
-            "helpUri": HELP_URI,
+            "help": {"text": f"{description} {help_text}"},
+            "helpUri": help_uri,
             "defaultConfiguration": {"level": SEVERITY_TO_SARIF[severity]},
             "properties": {
                 "security-severity": SECURITY_SEVERITY[severity],

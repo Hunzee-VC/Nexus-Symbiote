@@ -500,7 +500,7 @@ class A2AServerComponent(ComponentBase):
     endpoint_url: str | None = None
     supported_protocols: list[str] = Field(default_factory=list)
     skills_declared: list[str] = Field(default_factory=list)
-    authentication_required: bool | None = None
+    authentication_required: StrictBool | None = None
     capabilities: CapabilityDeclaration | None = None
     risks: list[RiskAssessment] = Field(default_factory=list)
 
@@ -541,6 +541,53 @@ class VerifiedExtensionComponent(ComponentBase):
     risks: list[RiskAssessment] = Field(default_factory=list)
 
 
+class DiscoveryVerification(InventoryModel):
+    """How imported ShadowScan discovery evidence was authenticated at import.
+
+    The record binds the imported report to its exact bytes (``report_digest``),
+    its normalized content (``report_content_digest``), and whatever
+    repository/commit/time the report itself carries. The current ShadowScan
+    report format carries no repository or commit, so both read ``"unknown"``
+    there — never a fabricated value — and ``report_time`` is the report's own
+    ``finished_at`` (else ``started_at``), or ``"unknown"``. Import time is not
+    recorded: ``metadata.timestamp`` is set only when a caller supplies one. A
+    ``verified`` record names the signer identity and issuer whose Sigstore
+    bundle was checked over the exact report bytes; ``unverified`` means no such
+    check ran at import.
+    """
+
+    status: Literal["verified", "unverified", "not-applicable"] = "unverified"
+    method: Literal["sigstore", "none"] = "none"
+    report_digest: str | None = Field(
+        default=None,
+        pattern=r"^sha256:[0-9a-f]{64}$",
+        description="SHA-256 of the exact imported report bytes",
+    )
+    report_content_digest: str | None = Field(
+        default=None,
+        pattern=r"^sha256:[0-9a-f]{64}$",
+        description="SHA-256 of the RFC 8785 canonical report without run-event fields",
+    )
+    signer_identity: str | None = Field(
+        default=None, description="Sigstore identity that signed the report, when verified"
+    )
+    issuer: str | None = Field(
+        default=None, description="OIDC issuer of the report signer, when verified"
+    )
+    repository: str = Field(
+        default="unknown",
+        description="Repository the report claims, or 'unknown' when it carries none",
+    )
+    commit: str = Field(
+        default="unknown",
+        description="Commit the report claims, or 'unknown' when it carries none",
+    )
+    report_time: str = Field(
+        default="unknown",
+        description="Report's own finished_at (else started_at), or 'unknown'",
+    )
+
+
 class CompletenessClaim(InventoryModel):
     """What was actually scanned and what was excluded."""
 
@@ -577,6 +624,21 @@ class CompletenessClaim(InventoryModel):
     )
     source_unmapped_count: StrictInt = Field(default=0, ge=0)
     source_unmapped_indexes: list[Annotated[StrictInt, Field(ge=0)]] = Field(default_factory=list)
+    source_report_path: str | None = Field(
+        default=None,
+        description=(
+            "POSIX path of the imported report relative to the scan root, or only its file "
+            "name when imported from outside a root; never an absolute local path"
+        ),
+    )
+    discovery_verification: DiscoveryVerification | None = Field(
+        default=None,
+        description=(
+            "Signature-verification outcome for the imported discovery report, "
+            "with its digest and repo/commit/time binding; absent on BOMs written "
+            "before this record existed"
+        ),
+    )
 
     scanner_status: dict[str, str] = Field(default_factory=dict)
 

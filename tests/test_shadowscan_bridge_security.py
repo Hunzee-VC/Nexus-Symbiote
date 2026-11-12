@@ -73,7 +73,15 @@ def test_cli_bom_preserves_uncertainty_and_confines_sensitive_data(tmp_path):
     path, out = tmp_path / "report.json", tmp_path / "bom.json"
     path.write_text(json.dumps(_report()))
     result = CliRunner().invoke(
-        main, ["import-shadowscan", str(path), "-o", str(out), "--report-only"]
+        main,
+        [
+            "import-shadowscan",
+            str(path),
+            "-o",
+            str(out),
+            "--report-only",
+            "--allow-unsigned-discovery",
+        ],
     )
     assert result.exit_code == 0, result.output
     assert "CANARY" not in out.read_text()
@@ -116,7 +124,15 @@ def test_verify_discovery_checks_exact_bytes_without_claiming_authenticity(tmp_p
     runner = CliRunner()
     assert (
         runner.invoke(
-            main, ["import-shadowscan", str(report), "-o", str(bom), "--report-only"]
+            main,
+            [
+                "import-shadowscan",
+                str(report),
+                "-o",
+                str(bom),
+                "--report-only",
+                "--allow-unsigned-discovery",
+            ],
         ).exit_code
         == 0
     )
@@ -178,7 +194,7 @@ def test_verify_artifact_signature_policy_is_required(tmp_path, monkeypatch):
     assert runner.invoke(main, args).exit_code != 0
     calls = []
 
-    def verify(actual_digest, content, identity, issuer):
+    def verify(actual_digest, content, identity, issuer, trust_root=None, trust_root_sha256=None):
         calls.append((actual_digest, content, identity, issuer))
         return VerificationResult(True)
 
@@ -263,6 +279,7 @@ def test_portable_import_preserves_native_coverage_and_provenance(tmp_path, fmt)
             "-o",
             str(output),
             "--report-only",
+            "--allow-unsigned-discovery",
         ],
     )
     assert result.exit_code == 0, result.output
@@ -336,7 +353,9 @@ def test_import_ignores_supplier_policy(tmp_path, use_parent):
     gated = runner.invoke(main, [*args, str(output)])
     assert gated.exit_code == 1 and "Imported claims" in gated.output
     exploratory = tmp_path / "exploratory.json"
-    result = runner.invoke(main, [*args, str(exploratory), "--report-only"])
+    result = runner.invoke(
+        main, [*args, str(exploratory), "--report-only", "--allow-unsigned-discovery"]
+    )
     assert result.exit_code == 0, result.output
     for path in (output, exploratory):
         inventory = AIBOM.load(path)
@@ -350,7 +369,15 @@ def test_verify_direct_projection_rejects_copied_digest_and_ignored_fields(tmp_p
     runner = CliRunner()
     assert (
         runner.invoke(
-            main, ["import-shadowscan", str(report), "-o", str(target), "--report-only"]
+            main,
+            [
+                "import-shadowscan",
+                str(report),
+                "-o",
+                str(target),
+                "--report-only",
+                "--allow-unsigned-discovery",
+            ],
         ).exit_code
         == 0
     )
@@ -385,7 +412,15 @@ def test_report_signer_is_external_policy_and_applies_to_exact_report(tmp_path, 
     runner = CliRunner()
     assert (
         runner.invoke(
-            main, ["import-shadowscan", str(report), "-o", str(target), "--report-only"]
+            main,
+            [
+                "import-shadowscan",
+                str(report),
+                "-o",
+                str(target),
+                "--report-only",
+                "--allow-unsigned-discovery",
+            ],
         ).exit_code
         == 0
     )
@@ -399,7 +434,7 @@ def test_report_signer_is_external_policy_and_applies_to_exact_report(tmp_path, 
 
     calls = []
 
-    def check(digest, payload, signer, issuer):
+    def check(digest, payload, signer, issuer, trust_root=None, trust_root_sha256=None):
         calls.append((digest, payload, signer, issuer))
         return VerificationResult(calls[-1] == (expected, b"test-bundle", "operator", "authority"))
 
@@ -424,11 +459,19 @@ def test_report_signer_is_external_policy_and_applies_to_exact_report(tmp_path, 
     assert runner.invoke(main, signed).exit_code != 0 and len(calls) == 3
 
 
-def test_offline_production_sigstore_policy_on_upstream_release_fixture():
+def test_offline_production_sigstore_policy_on_upstream_release_fixture(tmp_path, monkeypatch):
     from pathlib import Path
 
     pytest.importorskip("sigstore")
     from nexus_symbiote.utils.crypto import verify_sigstore_digest
+
+    # Verification now checks (and creates, mode 0700) the sigstore-python TUF
+    # cache first; keep that inside tmp_path so the test never depends on the
+    # ambient user cache being private. sigstore-python seeds the fresh cache
+    # offline from its embedded production root, so the verification is still
+    # against the real production trust root.
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
 
     # Official sigstore-python release fixture. The expected identity and digest
     # below are independent policy inputs, never extracted from the bundle.

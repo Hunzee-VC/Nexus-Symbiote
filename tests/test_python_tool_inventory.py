@@ -270,11 +270,15 @@ def test_ordinary_server_use_and_other_frameworks_are_not_gaps(tmp_path):
         "from pydantic_ai import Agent\nfrom pydantic_ai.mcp import MCPServerStdio\n"
         "agent = Agent('model')\n@agent.tool\ndef lookup(): pass\n",
     )
-    # An agent framework's tool is an SDK tool, never an MCP registration gap.
+    # An agent framework's tool is an SDK tool, never an MCP registration gap; the
+    # only gap is the launcher the file imports and passes on.
     assert [(tool.name, tool.properties["framework"]) for tool in tools] == [
         ("lookup", "pydantic-ai")
     ]
-    assert not result.surfaces_excluded
+    assert result.surfaces_excluded == [
+        "pkg/server.py: MCP launcher imported without a use here; servers started or "
+        "reached through it elsewhere not inventoried"
+    ]
 
 
 def test_references_survive_inserted_lines_and_edits_change_the_digest(tmp_path):

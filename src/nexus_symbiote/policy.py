@@ -54,15 +54,17 @@ class ScanPolicy(PolicySection):
 
 
 class Suppression(PolicySection):
-    """Accept one finding category on one component, for a stated reason and period.
+    """Accept one reviewed finding on one component, for a stated reason and period.
 
-    Matching is exact: one component reference and one category, no wildcards. An
-    expired entry no longer suppresses anything and fails the risk gate until it is
-    renewed or removed.
+    Matching is exact: one component reference, one category and the fingerprint of
+    the finding as it was reviewed, no wildcards. A finding whose severity, detail or
+    component content digest has changed since no longer matches. An expired entry no longer suppresses
+    anything and fails the risk gate until it is renewed or removed.
     """
 
     component_ref: str = Field(min_length=1, max_length=MAX_REFERENCE_CHARS)
     category: str = Field(min_length=1, max_length=256)
+    fingerprint: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     reason: str = Field(min_length=1, max_length=2000)
     owner: str = Field(min_length=1, max_length=256)
     expires: date
@@ -91,8 +93,8 @@ class Suppression(PolicySection):
 
     def label(self) -> str:
         return (
-            f"{self.category} on {self.component_ref} until {self.expires.isoformat()} "
-            f"(owner {self.owner})"
+            f"{self.category} on {self.component_ref} ({self.fingerprint}) "
+            f"until {self.expires.isoformat()} (owner {self.owner})"
         )
 
 
@@ -114,9 +116,11 @@ class RiskPolicy(PolicySection):
             raise ValueError("warn_threshold cannot exceed fail_threshold")
         if any(not c.strip() for c in self.ignore_categories):
             raise ValueError("ignore_categories must contain nonempty exact category names")
-        keys = [(entry.component_ref, entry.category) for entry in self.suppressions]
+        keys = [
+            (entry.component_ref, entry.category, entry.fingerprint) for entry in self.suppressions
+        ]
         if len(keys) != len(set(keys)):
-            raise ValueError("each component_ref and category may be suppressed only once")
+            raise ValueError("each finding may be suppressed only once")
         return self
 
 
@@ -155,16 +159,35 @@ def find_policy_path(project_root: Path) -> Path | None:
     belongs to whoever controls that directory, not to the project. Both file names
     at once are refused: either could silently shadow the other.
     """
+    from nexus_symbiote.utils.confined import fold_name
+
     current = project_root.resolve()
     if current.is_file():
         current = current.parent
+    try:
+        entries = sorted(os.listdir(current))
+    except OSError:
+        return None
+    folded_targets = {fold_name(name): name for name in POLICY_FILE_NAMES}
     found: list[Path] = []
-    for name in POLICY_FILE_NAMES:
-        candidate = current / name
+    variants: list[tuple[str, str]] = []
+    for entry in entries:
+        canonical = folded_targets.get(fold_name(entry))
+        if canonical is None:
+            continue
+        candidate = current / entry
         if candidate.is_symlink():
             raise PolicyError(f"policy must not be a symlink: {candidate}")
-        if candidate.exists():
-            found.append(candidate)
+        if entry in POLICY_FILE_NAMES:
+            if candidate.exists():
+                found.append(candidate)
+        else:
+            variants.append((entry, canonical))
+    if variants:
+        variant_name, canonical = variants[0]
+        raise PolicyError(
+            f"case-variant policy file {variant_name} in {current}; rename it to {canonical}"
+        )
     if len(found) > 1:
         raise PolicyError(
             f"both {POLICY_FILE_NAMES[0]} and {POLICY_FILE_NAMES[1]} exist in {current}; "
@@ -336,10 +359,12 @@ risk:
   warn_threshold: 25.0  # must not exceed fail_threshold
   fail_on_severity: "critical"  # critical, high, medium, low, info or none
   ignore_categories: []  # whole categories, everywhere; prefer suppressions
-  # Accept one finding category on one component, with a reason, owner and expiry:
+  # Accept one reviewed finding, with a reason, owner and expiry. Copy component_ref,
+  # category and fingerprint from `risk --json-output`; a changed finding no longer matches.
   # suppressions:
   #   - component_ref: "model:tests/fixtures/firmware.bin"
   #     category: "serialization_format"
+  #     fingerprint: "sha256:<64 hex digits from the finding>"
   #     reason: "Test fixture, never loaded"
   #     owner: "security@example.test"
   #     expires: 2027-01-31

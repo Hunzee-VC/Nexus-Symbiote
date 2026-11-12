@@ -30,10 +30,31 @@ def canonical_json(data: Any) -> str:
     return rfc8785.dumps(data).decode("utf-8")
 
 
+_BOM_PREFIXES = (
+    b"\xef\xbb\xbf",
+    b"\xff\xfe\x00\x00",
+    b"\x00\x00\xfe\xff",
+    b"\xff\xfe",
+    b"\xfe\xff",
+)
+
+
 def parse_json_strict(text: str | bytes, *, max_bytes: int = 4 * 1024 * 1024) -> Any:
-    """Parse bounded I-JSON, rejecting duplicate keys and invalid numbers."""
-    if len(text if isinstance(text, bytes) else text.encode("utf-8")) > max_bytes:
-        raise ValueError("JSON exceeds the configured byte limit")
+    """Parse bounded UTF-8 I-JSON, rejecting BOMs, duplicate keys and invalid numbers."""
+    if isinstance(text, bytes):
+        if len(text) > max_bytes:
+            raise ValueError("JSON exceeds the configured byte limit")
+        if text.startswith(_BOM_PREFIXES):
+            raise ValueError("Byte-order marks are not permitted in strict I-JSON")
+        decoded = text.decode("utf-8")
+    elif isinstance(text, str):
+        if text.startswith("\ufeff"):
+            raise ValueError("Byte-order marks are not permitted in strict I-JSON")
+        if len(text.encode("utf-8")) > max_bytes:
+            raise ValueError("JSON exceeds the configured byte limit")
+        decoded = text
+    else:
+        raise TypeError("JSON input must be str or bytes")
 
     def object_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
         result: dict[str, Any] = {}
@@ -46,7 +67,7 @@ def parse_json_strict(text: str | bytes, *, max_bytes: int = 4 * 1024 * 1024) ->
     def reject_constant(value: str) -> None:
         raise ValueError(f"Nonfinite JSON number: {value}")
 
-    result = json.loads(text, object_pairs_hook=object_pairs, parse_constant=reject_constant)
+    result = json.loads(decoded, object_pairs_hook=object_pairs, parse_constant=reject_constant)
     canonical_json(result)
     return result
 
@@ -320,8 +341,10 @@ _SEMVER = re.compile(
 )
 _NPM_PIN = re.compile(rf"({_NPM_NAME})@(.+)")
 _OCI_NAME = r"(?:[A-Za-z0-9][A-Za-z0-9.-]*(?::[0-9]+)?/)?[a-z0-9][a-z0-9._/-]*"
-_OCI_DIGEST = re.compile(rf"{_OCI_NAME}@sha256:([0-9a-fA-F]{{64}})")
-_OCI_TAG = re.compile(rf"{_OCI_NAME}:([A-Za-z0-9_][A-Za-z0-9_.-]{{0,127}})")
+_OCI_TAG_CHARS = r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}"
+_OCI_DIGEST = re.compile(rf"{_OCI_NAME}(?::{_OCI_TAG_CHARS})?@sha256:([0-9a-fA-F]{{64}})")
+_OCI_COLON_DIGEST = re.compile(rf"{_OCI_NAME}:sha256:([0-9a-fA-F]{{64}})")
+_OCI_TAG = re.compile(rf"{_OCI_NAME}:({_OCI_TAG_CHARS})")
 
 
 def _python_version_pin(reference: str) -> str | None:
@@ -347,7 +370,7 @@ def _python_version_pin(reference: str) -> str | None:
 
 
 def _oci_version_pin(reference: str) -> str | None:
-    immutable = _OCI_DIGEST.fullmatch(reference)
+    immutable = _OCI_DIGEST.fullmatch(reference) or _OCI_COLON_DIGEST.fullmatch(reference)
     if immutable:
         return "sha256:" + immutable.group(1).lower()
     tagged = _OCI_TAG.fullmatch(reference)
@@ -356,6 +379,8 @@ def _oci_version_pin(reference: str) -> str | None:
     version = tagged.group(1)
     if _SEMVER.fullmatch(version):
         return version
+    if "." not in version:
+        return None
     try:
         Version(version)
     except InvalidVersion:

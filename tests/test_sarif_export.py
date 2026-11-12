@@ -17,6 +17,7 @@ from click.testing import CliRunner
 from nexus_symbiote import modes
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote.core.canonical import content_digest
 from nexus_symbiote.core.enums import RiskSeverity
 from nexus_symbiote.core.models import (
     CompletenessClaim,
@@ -26,7 +27,6 @@ from nexus_symbiote.core.models import (
     RiskAssessment,
     ToolComponent,
 )
-from nexus_symbiote.generators._common import content_digest
 from nexus_symbiote.generators.sarif import SARIFGenerator, plain_text
 from nexus_symbiote.generators.validation import validate_sarif
 from nexus_symbiote.scanner_catalog import BUILTIN_SCANNER_NAMES

@@ -1,0 +1,147 @@
+{
+  "description": "Inline JSON configurations passed as one MCP launch argument. The scan budget once failed them closed: brace expansion reads JSON objects as brace lists.",
+  "spaced": {
+    "cfg": {
+      "token0": {
+        "url0": "timeout",
+        "port1": null,
+        "mode2": {
+          "name0": {
+            "token0": null,
+            "url1": [
+              "timeout",
+              "retries",
+              "url"
+            ],
+            "token2": "timeout"
+          },
+          "mode1": {
+            "enabled0": null,
+            "mode1": "host",
+            "level2": "host"
+          },
+          "port2": {
+            "timeout0": "port",
+            "port1": 8359,
+            "token2": [
+              "mode",
+              "timeout",
+              "retries",
+              "name"
+            ],
+            "name3": [
+              "level",
+              "level",
+              "port",
+              "url"
+            ],
+            "enabled4": null
+          },
+          "path3": [
+            "path",
+            "enabled",
+            "url",
+            "path"
+          ],
+          "mode4": {
+            "enabled0": true,
+            "enabled1": [
+              "url",
+              "host",
+              "timeout"
+            ]
+          }
+        }
+      },
+      "level1": true
+    }
+  },
+  "compact": {
+    "cfg": {
+      "url0": {
+        "host0": 2556,
+        "enabled1": {
+          "timeout0": 1001,
+          "retries1": null,
+          "level2": {
+            "timeout0": "https://api.example.com/v1"
+          },
+          "timeout3": {
+            "path0": true
+          },
+          "timeout4": true
+        },
+        "timeout2": "https://api.example.com/v1",
+        "level3": true,
+        "port4": 1779
+      },
+      "level1": "https://api.example.com/v1",
+      "path2": {
+        "name0": {
+          "enabled0": {
+            "retries0": 7412,
+            "mode1": null
+          },
+          "path1": {
+            "timeout0": "https://api.example.com/v1",
+            "enabled1": null,
+            "level2": "https://api.example.com/v1"
+          },
+          "enabled2": {
+            "path0": "https://api.example.com/v1",
+            "retries1": null
+          },
+          "timeout3": {
+            "url0": true,
+            "token1": "token"
+          },
+          "retries4": {
+            "port0": "host"
+          }
+        },
+        "name1": "https://api.example.com/v1",
+        "url2": {
+          "level0": {
+            "name0": "https://api.example.com/v1",
+            "path1": "timeout"
+          }
+        },
+        "path3": {
+          "level0": true
+        }
+      },
+      "port3": {
+        "port0": "mode",
+        "retries1": true,
+        "level2": {
+          "name0": true,
+          "url1": "path",
+          "token2": {
+            "level0": [
+              "enabled",
+              "host",
+              "mode"
+            ],
+            "host1": null,
+            "mode2": null
+          },
+          "path3": null,
+          "level4": true
+        }
+      },
+      "host4": {
+        "retries0": {
+          "host0": 3549,
+          "token1": {
+            "host0": "https://api.example.com/v1"
+          }
+        },
+        "level1": {
+          "enabled0": "https://api.example.com/v1"
+        },
+        "url2": null,
+        "token3": "https://api.example.com/v1"
+      }
+    }
+  }
+}

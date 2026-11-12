@@ -281,6 +281,14 @@ skip:
   define but another supported dialect does, such as `const` in draft-04, or
   `minContains` and `maxContains` before 2019-09 (draft-04's boolean
   `exclusiveMinimum` and `exclusiveMaximum` are draft-04 keywords and apply);
+- in any dialect, a keyword that only drafts before draft-04 define:
+  `divisibleBy`, `disallow`, `extends`, `requires`, `maxDecimal`,
+  `minimumCanEqual` and `maximumCanEqual`, and an `optional` whose value is not
+  `true` (drafts 01 and 02 require every property not marked `"optional": true`);
+- in 2019-09, an `unevaluatedItems` that applies where a `contains` does, in the
+  same subschema or through `allOf`, `anyOf`, `oneOf`, `not`, `if`, `then`,
+  `else`, `dependentSchemas`, `$ref` or `$recursiveRef`: jsonschema would treat
+  the items `contains` matched as evaluated, as only 2020-12 specifies;
 - in draft-04 to draft-07, an assertion next to `$ref`;
 - a subschema whose `$schema` differs from the root's, where evaluation would
   switch dialect, draft-03 included;

@@ -73,6 +73,7 @@ sigstore = [
     # Imported directly by utils/crypto.py, not only through sigstore.
     "sigstore-models>=0.0.6,<0.1",
     "tuf>=7,<8",
+    "platformdirs>=4.2,<5",
 ]
 all = [
     "nexus-symbiote[cyclonedx,sigstore]",

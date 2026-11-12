@@ -4,22 +4,17 @@ from __future__ import annotations
 
 import base64
 import binascii
-import hashlib
-import json
 import re
-import uuid
-from datetime import UTC, datetime
 from typing import Any, Literal
 
-from nexus_symbiote import __version__
-from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote.core.aibom import AIBOM, native_document
+from nexus_symbiote.core.canonical import content_digest, json_text
 from nexus_symbiote.core.enums import ComponentType
 from nexus_symbiote.core.hashing import extract_version_pin, parse_json_strict
 from nexus_symbiote.core.models import AnyComponent, CompletenessClaim, RegistryEntryComponent
 from nexus_symbiote.generators.package_identifiers import package_identifier
 from nexus_symbiote.utils.confined import DEFAULT_EXCLUDES
 
-NAMESPACE = uuid.UUID("ccaa2a43-8ba9-58e6-8f22-f8793a2039d5")
 # The confined collector never reads these trees, so excluding them again narrows nothing.
 BUILTIN_EXCLUSIONS = frozenset({*DEFAULT_EXCLUDES, *(f"**/{name}" for name in DEFAULT_EXCLUDES)})
 # The collector universe of the standard projections. A collector added later still
@@ -48,45 +43,6 @@ HASH_ALGORITHMS = {
     "blake3": ("BLAKE3", 64),
 }
 _SRI = re.compile(r"(sha256|sha384|sha512)-([A-Za-z0-9+/]+={0,2})")
-
-
-def json_text(value: Any) -> str:
-    """Deterministic UTF-8 JSON representation; not a claim of RFC 8785 canonicalization."""
-    return json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
-    )
-
-
-def content_digest(value: Any) -> str:
-    return "sha256:" + hashlib.sha256(json_text(value).encode("utf-8")).hexdigest()
-
-
-def prepare(bom: AIBOM) -> AIBOM:
-    """Fill missing export metadata once; never reset an existing observation timestamp."""
-    if bom.metadata.timestamp is None:
-        bom.metadata.timestamp = datetime.now(UTC)
-    if bom.metadata.timestamp.tzinfo is None:
-        raise ValueError("export timestamps must include a timezone")
-    if bom.metadata.tool_version is None:
-        bom.metadata.tool_version = __version__
-    if bom.metadata.serial_number is None:
-        body = native_document(bom)
-        bom.metadata.serial_number = "urn:uuid:" + str(uuid.uuid5(NAMESPACE, content_digest(body)))
-    ids = [c.bom_ref for c in bom.components]
-    if len(ids) != len(set(ids)):
-        raise ValueError("duplicate component references")
-    known = set(ids)
-    for edge in bom.dependencies:
-        if edge.source_ref not in known or edge.target_ref not in known:
-            raise ValueError("dependency references an unknown component")
-    return bom
-
-
-def native_document(bom: AIBOM) -> dict[str, Any]:
-    document = bom.model_dump(mode="json", exclude_none=True)
-    document["components"] = sorted(document["components"], key=lambda c: c["bom_ref"])
-    document["dependencies"] = sorted(document["dependencies"], key=json_text)
-    return document
 
 
 def native_components(native: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -427,4 +383,4 @@ def recover_native(properties: list[dict[str, Any]]) -> tuple[AIBOM, dict[str, A
         raise ValueError("embedded native document must be a JSON object")
     if props["nexus-symbiote:documentDigest"] != content_digest(document):
         raise ValueError("embedded native document digest mismatch")
-    return AIBOM.model_validate(document), document
+    return AIBOM.from_document(document), document

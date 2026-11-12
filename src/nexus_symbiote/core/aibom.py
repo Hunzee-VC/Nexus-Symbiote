@@ -5,13 +5,14 @@ from __future__ import annotations
 import errno
 import json
 import uuid
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from nexus_symbiote import __version__
+from nexus_symbiote.core.canonical import NAMESPACE, json_text
+from nexus_symbiote.core.content_digest import inventory_content_digest
 from nexus_symbiote.core.enums import ComponentType
 from nexus_symbiote.core.models import (
     MAX_REFERENCE_CHARS,
@@ -59,6 +60,20 @@ class NativeFormatError(ValueError):
     """A native AgentBOM document cannot be read; the message never quotes its content."""
 
 
+NO_CONTENT_SERIAL = (
+    "Inventory not written. Its serial number is derived from its content digest, which "
+    "cannot be computed: the inventory records a value outside the I-JSON range, such as "
+    "a lone surrogate, or nests too deeply."
+)
+
+
+class ContentSerialError(ValueError):
+    """The serial number cannot be derived because the content digest is undefined."""
+
+    def __init__(self) -> None:
+        super().__init__(NO_CONTENT_SERIAL)
+
+
 def _open_failure(exc: OSError) -> str:
     """Why a native document could not be opened, without the operating system's text."""
     if exc.errno in {errno.ELOOP, errno.ENOTDIR}:
@@ -75,6 +90,37 @@ def _open_failure(exc: OSError) -> str:
     if exc.errno in {errno.EACCES, errno.EPERM}:
         return "It cannot be read: permission denied."
     return "It cannot be opened for reading."
+
+
+def read_native_bytes(path: Path) -> bytes:
+    """The bytes of a native document, read once without following links or blocking.
+
+    At most ``MAX_NATIVE_BYTES``; every failure is a ``NativeFormatError``.
+    """
+    from nexus_symbiote.core.hashing import open_regular_file
+
+    try:
+        with open_regular_file(path) as stream:
+            raw = stream.read(MAX_NATIVE_BYTES + 1)
+    except OSError as exc:
+        raise NativeFormatError(_open_failure(exc)) from exc
+    if len(raw) > MAX_NATIVE_BYTES:
+        raise NativeFormatError(
+            f"It exceeds the {MAX_NATIVE_BYTES // (1024 * 1024)} MiB native inventory limit."
+        )
+    return raw
+
+
+def parse_native_bytes(raw: bytes) -> Any:
+    """The JSON value of a native document's bytes: strict UTF-8 I-JSON or a NativeFormatError."""
+    from nexus_symbiote.core.hashing import parse_json_strict
+
+    try:
+        return parse_json_strict(raw, max_bytes=MAX_NATIVE_BYTES)
+    except (UnicodeError, ValueError, RecursionError) as exc:
+        raise NativeFormatError(
+            "It is not strict UTF-8 JSON; duplicate keys and nonfinite numbers are refused."
+        ) from exc
 
 
 class DependencyEdge(BaseModel):
@@ -110,7 +156,8 @@ class AIBOM(BaseModel):
         """Read a metadata object that declares no spec_version as format 1.0.0.
 
         Objects built in process pass an AIBOMMetadata instance, or none, and keep the
-        format this build writes.
+        format this build writes. A document without metadata looks the same as such an
+        object here, so documents are read with ``from_document``.
         """
         if isinstance(data, dict):
             metadata = data.get("metadata")
@@ -170,16 +217,20 @@ class AIBOM(BaseModel):
         return results
 
     def finalize(self) -> None:
-        if self.metadata.timestamp is None:
-            self.metadata.timestamp = datetime.now(UTC)
+        """Fill the deterministic tool stamp only.
+
+        The serial number and the observation timestamp are export concerns
+        owned by :func:`prepare`: the
+        serial is a content-derived uuid5, and no wall-clock timestamp is
+        stamped here, so two exports of the same inventory are identical.
+        A timestamp set explicitly by a caller is preserved untouched.
+        """
         if self.metadata.tool_version is None:
             self.metadata.tool_version = __version__
-        if self.metadata.serial_number is None:
-            self.metadata.serial_number = f"urn:uuid:{uuid.uuid4()}"
 
     def to_dict(self) -> dict[str, Any]:
-        self.finalize()
-        return self.model_dump(mode="json", exclude_none=True)
+        prepare(self)
+        return native_document(self)
 
     def to_json(self, indent: int = 2) -> str:
         return json.dumps(self.to_dict(), indent=indent, default=str)
@@ -190,10 +241,20 @@ class AIBOM(BaseModel):
         Indented output is preferred; a document that only fits without indentation is
         written compactly rather than being written in a form ``load`` rejects.
         """
-        text = self.to_json()
+        from nexus_symbiote.core.hashing import canonical_json
+
+        payload = self.to_dict()
+        try:
+            canonical_json(payload)
+        except (TypeError, ValueError) as exc:
+            raise NativeFormatError(
+                "The inventory contains values outside strict I-JSON (such as nonfinite "
+                "numbers or integers outside IEEE-754 exact range) that native readers reject."
+            ) from exc
+        text = json.dumps(payload, indent=2, default=str)
         if len(text.encode("utf-8")) <= MAX_NATIVE_BYTES:
             return text
-        text = json.dumps(self.to_dict(), separators=(",", ":"))
+        text = json.dumps(payload, separators=(",", ":"))
         if len(text.encode("utf-8")) <= MAX_NATIVE_BYTES:
             return text
         raise NativeFormatError(
@@ -208,31 +269,43 @@ class AIBOM(BaseModel):
         write_output_file(path, self.to_native_json())
 
     @classmethod
+    def from_document(cls, data: Any) -> AIBOM:
+        """Read a parsed native document; one that declares no format version, with or
+        without a metadata object, is read as format 1.0.0, as ``load`` reads it.
+
+        Raises ``ValidationError`` when the document does not match the schema.
+        """
+        if isinstance(data, dict) and "metadata" not in data:
+            data = {**data, "metadata": {}}
+        return cls.model_validate(data)
+
+    @classmethod
     def load(cls, path: Path) -> AIBOM:
         """Read a native document without following links or blocking on special files.
 
         Every failure is a ``NativeFormatError`` whose message names the class of
         problem and never quotes the document.
         """
-        from nexus_symbiote.core.hashing import open_regular_file, parse_json_strict
+        return cls.load_with_bytes(path)[0]
 
-        try:
-            with open_regular_file(path) as stream:
-                raw = stream.read(MAX_NATIVE_BYTES + 1)
-        except OSError as exc:
-            raise NativeFormatError(_open_failure(exc)) from exc
-        if len(raw) > MAX_NATIVE_BYTES:
-            raise NativeFormatError(
-                f"It exceeds the {MAX_NATIVE_BYTES // (1024 * 1024)} MiB native inventory limit."
-            )
-        try:
-            data = parse_json_strict(raw.decode("utf-8"), max_bytes=MAX_NATIVE_BYTES)
-        except (UnicodeError, ValueError, RecursionError) as exc:
-            raise NativeFormatError(
-                "It is not strict UTF-8 JSON; duplicate keys and nonfinite numbers are refused."
-            ) from exc
-        if isinstance(data, dict) and "metadata" not in data:
-            data = {**data, "metadata": {}}
+    @classmethod
+    def load_with_bytes(cls, path: Path) -> tuple[AIBOM, bytes]:
+        """Read like ``load`` and also return the bytes that were read.
+
+        A digest of those bytes binds exactly the document that was validated, never a
+        second read of a path that may have changed in between.
+        """
+        raw = read_native_bytes(path)
+        return cls.from_native(parse_native_bytes(raw)), raw
+
+    @classmethod
+    def from_native(cls, data: Any) -> AIBOM:
+        """Validate a parsed native document as ``load`` does, without changing ``data``.
+
+        A document that declares no format version is read as format 1.0.0, with or
+        without a metadata object (``from_document``); every failure is a
+        ``NativeFormatError``.
+        """
         metadata = data.get("metadata") if isinstance(data, dict) else None
         if isinstance(metadata, dict) and "spec_version" in metadata:
             try:
@@ -240,7 +313,7 @@ class AIBOM(BaseModel):
             except UnsupportedSpecVersionError as exc:
                 raise NativeFormatError(str(exc)) from exc
         try:
-            return cls.model_validate(data)
+            return cls.from_document(data)
         except (ValidationError, RecursionError) as exc:
             raise NativeFormatError("It does not match the native AgentBOM schema.") from exc
 
@@ -266,3 +339,47 @@ class AIBOM(BaseModel):
                 else None
             ),
         }
+
+
+def prepare(bom: AIBOM) -> AIBOM:
+    """Fill missing export metadata once; never reset an existing observation timestamp.
+
+    A missing serial number becomes the uuid5, in ``core.canonical.NAMESPACE``, of the
+    inventory content digest (``core.content_digest``) of the native document: the
+    collection time, the observation times and the location an imported report was
+    read from are not content, so collecting the same inventory at another time or
+    from another checkout keeps the same serial, and anyone can recompute it from the
+    native file with ``nexus-symbiote digest``. Two documents that differ only in
+    those fields therefore share a serial by design. No wall-clock timestamp is
+    stamped here, so two exports of the same inventory are byte-identical; a
+    timestamp set explicitly by a caller (``SOURCE_DATE_EPOCH``) is preserved.
+    Formats whose schema requires a timestamp (SPDX ``CreationInfo.created``) supply
+    it at render time when the inventory has none.
+
+    Raises ``ContentSerialError`` when the content digest is undefined for the inventory.
+    """
+    if bom.metadata.timestamp is not None and bom.metadata.timestamp.tzinfo is None:
+        raise ValueError("export timestamps must include a timezone")
+    if bom.metadata.tool_version is None:
+        bom.metadata.tool_version = __version__
+    if bom.metadata.serial_number is None:
+        try:
+            digest = inventory_content_digest(native_document(bom))
+        except (ValueError, RecursionError):
+            raise ContentSerialError from None
+        bom.metadata.serial_number = "urn:uuid:" + str(uuid.uuid5(NAMESPACE, digest))
+    ids = [c.bom_ref for c in bom.components]
+    if len(ids) != len(set(ids)):
+        raise ValueError("duplicate component references")
+    known = set(ids)
+    for edge in bom.dependencies:
+        if edge.source_ref not in known or edge.target_ref not in known:
+            raise ValueError("dependency references an unknown component")
+    return bom
+
+
+def native_document(bom: AIBOM) -> dict[str, Any]:
+    document = bom.model_dump(mode="json", exclude_none=True)
+    document["components"] = sorted(document["components"], key=lambda c: c["bom_ref"])
+    document["dependencies"] = sorted(document["dependencies"], key=json_text)
+    return document

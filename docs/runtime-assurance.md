@@ -200,8 +200,13 @@ Any other dialect is refused. A constraint that evaluation would skip makes the
 schema invalid rather than approved but unenforced: a keyword that the declared
 dialect's specification does not define, such as draft-07 `dependencies` in a
 schema without `$schema`, `const` in a draft-04 schema or `maxContains` in a
-draft-07 schema; an assertion next to `$ref` in draft-04 to draft-07, which ignore
-the siblings of `$ref`; a subschema with its own `$schema` or base URI (`$id`, or
+draft-07 schema; a keyword that only drafts before draft-04 define (`divisibleBy`,
+`disallow`, `extends`, `requires`, `maxDecimal`, `minimumCanEqual`,
+`maximumCanEqual`), and an `optional` whose value is not `true`, in any dialect; a
+2019-09 `unevaluatedItems` that applies where a `contains` does, because
+jsonschema would treat the items `contains` matched as evaluated; an assertion
+next to `$ref` in draft-04 to draft-07, which ignore the siblings of `$ref`; a
+subschema with its own `$schema` or base URI (`$id`, or
 `id` in draft-04); and a reference that is not a JSON Pointer within the schema,
 such as `https://tools.example.test/run#/x` or an anchor. `format` is an
 annotation and is never asserted. `pattern` and `patternProperties` have ECMA-262

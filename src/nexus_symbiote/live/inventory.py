@@ -21,6 +21,7 @@ from nexus_symbiote.core.hashing import (
     TOOL_DEFINITION_HASH_VERSION,
     hash_canonical,
     hash_tool_definition,
+    tool_definition_extensions,
 )
 from nexus_symbiote.core.models import (
     ClaimEvidence,
@@ -72,7 +73,11 @@ def observation_inventory(result: DiscoveryResult, *, server_ref: str | None = N
         description = descriptor.get("description", "")
         annotations = descriptor.get("annotations") or {}
         display_hash = hash_tool_definition(
-            observed.name, description, descriptor["inputSchema"], annotations
+            observed.name,
+            description,
+            descriptor["inputSchema"],
+            annotations,
+            **tool_definition_extensions(descriptor),
         )
         tools.append(
             ToolComponent(

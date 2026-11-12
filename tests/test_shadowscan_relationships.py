@@ -81,7 +81,15 @@ def test_direct_import_scan_and_projection_verification_preserve_edges(tmp_path)
     direct, scanned = tmp_path / "direct.json", tmp_path / "scanned.json"
     runner = CliRunner()
     imported = runner.invoke(
-        main, ["import-shadowscan", str(report), "-o", str(direct), "--report-only"]
+        main,
+        [
+            "import-shadowscan",
+            str(report),
+            "-o",
+            str(direct),
+            "--report-only",
+            "--allow-unsigned-discovery",
+        ],
     )
     assert imported.exit_code == 0, imported.output
     checked = runner.invoke(main, ["verify-discovery", str(direct), str(report), "--projection"])
