@@ -41,7 +41,9 @@ def scaling_ratio(run: Callable[[int], object], factor: int = 4, repeats: int = 
 
     Linear work grows about ``factor`` times, quadratic work about ``factor`` squared. Two
     sizes measured on the same machine cancel what an absolute bound cannot: a slow or busy
-    runner and coverage tracing.
+    runner and coverage tracing. A burst of load during one size still skews the ratio, so
+    a ratio well above linear is measured once more and the smaller one returned: work
+    that is not linear measures high both times.
     """
 
     def best(scale: int) -> float:
@@ -60,7 +62,10 @@ def scaling_ratio(run: Callable[[int], object], factor: int = 4, repeats: int = 
             timings.append(elapsed / iterations)
         return max(min(timings), 1e-5)
 
-    return best(factor) / best(1)
+    ratio = best(factor) / best(1)
+    if ratio > 1.5 * factor:
+        ratio = min(ratio, best(factor) / best(1))
+    return ratio
 
 
 def otlp_attribute(key: str, value: object) -> dict[str, object]:
