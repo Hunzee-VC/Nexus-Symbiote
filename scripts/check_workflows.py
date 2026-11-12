@@ -8,7 +8,11 @@ that need them, a job time limit and checkouts without persisted credentials; sc
 cannot cancel each other. In the gating workflows no job continues on error, a step may only
 when a later step that runs reads its outcome, and each verification job still runs the
 command that makes it a gate: outside a shell comment, in a job and a step that only a
-reviewed condition can skip, and without discarding the command's exit status.
+reviewed condition can skip, and without discarding the command's exit status. A gate command
+must run as its own command line under errexit, in a reviewed shell and the checkout's root:
+not quoted, in a condition, negated, chained with && or ||, in the background, after set +e,
+set -n, cd, trap, exit, eval or hash (however invoked), nor in a step whose shell or working
+directory is changed.
 """
 
 from __future__ import annotations
@@ -153,6 +157,53 @@ DISCARDED = re.compile(
     r"|(?<![&|<>])&[\s'\")}]*$"
 )
 HEREDOC = re.compile(r"<<(-?)[ \t]*(['\"]?)([A-Za-z_][\w.-]*)\2")
+HEREDOC_END = re.compile(r"[\s;&|()<>]|$")
+# Required entries that are data the gate checks rather than a command it runs: they only
+# have to appear, outside a comment, in a step whose shell and directory are reviewed.
+REQUIRED_TEXT: dict[str, dict[str, frozenset[str]]] = {
+    "ci.yml": {
+        "action": frozenset({"symbiote-injected-annotation", "$EVIDENCE/hostile.json"}),
+        "action-annotations": frozenset({"symbiote-injected-annotation", "set-output"}),
+    },
+}
+# The shells a gate step may run in, as (errexit, pipefail). GitHub runs a step without a
+# shell as `bash -e {0}` and `shell: bash` as `bash --noprofile --norc -eo pipefail {0}`.
+SHELLS: dict[str | None, tuple[bool, bool]] = {
+    None: (True, False),
+    "bash -e {0}": (True, False),
+    "bash": (True, True),
+    "bash --noprofile --norc -eo pipefail {0}": (True, True),
+}
+PYTHON = re.compile(r"python(?:\d+(?:\.\d+)?)?")
+ASSIGNMENT = re.compile(r"[A-Za-z_]\w*=")
+REDIRECT = re.compile(r"&>>?|[<>]>?[&|]?")
+# Builtins after which a later command is no longer a gate: they move the shell, replace or
+# end it, install a trap that can rewrite its status, or define commands.
+UNSAFE_BUILTINS = frozenset(
+    {
+        "cd",
+        "pushd",
+        "popd",
+        "trap",
+        "exec",
+        "exit",
+        "return",
+        "eval",
+        "source",
+        ".",
+        "alias",
+        "hash",
+        "enable",
+    }
+)
+# Builtins that can rebind a variable other than by a plain NAME=value assignment.
+BINDING_BUILTINS = frozenset(
+    {"export", "declare", "typeset", "local", "readonly", "read", "mapfile", "readarray"}
+    | {"unset", "getopts", "let"}
+)
+VARIABLE = re.compile(r"\$\{(\w+)\}|\$(\w+)")
+DEFAULT_ASSIGNMENT = re.compile(r"\$\{(\w+):?=")
+UNSUPPORTED = frozenset({"case", "select", "function", "coproc"})
 
 
 def _triggers(document: dict[Any, Any]) -> set[str]:
@@ -335,9 +386,659 @@ def _discards_status(lines: list[tuple[str, str]], command: str) -> bool:
     return False
 
 
-def _gate_issues(path: Path, name: str, job: dict[str, Any]) -> list[str]:
+class _ShellSyntaxError(ValueError):
+    """Shell source this checker does not read; a gate in it does not count."""
+
+
+Token = tuple[str, Any]
+
+
+def _lex(script: str) -> list[Token]:
+    """Words, operators, redirections and here-documents of a shell script, without comments.
+
+    A word's value drops its quotes and keeps expansions as written.
+    """
+    return _scan(script, 0, nested=False)[0]
+
+
+def _scan(script: str, index: int, nested: bool) -> tuple[list[Token], int]:
+    """Tokens from ``index`` to the end, or when nested, to the ")" that closes a substitution.
+
+    Returns the tokens and the index after the last character read.
+    """
+    tokens: list[Token] = []
+    pending: list[tuple[str, bool, list[str]]] = []
+    word: list[str] | None = None
+    depth = 0
+
+    def finish() -> None:
+        nonlocal word
+        if word is not None:
+            if nested and word == ["case"]:
+                raise _ShellSyntaxError("case inside a substitution")
+            tokens.append(("word", "".join(word)))
+            word = None
+
+    def substitution(start: int) -> int:
+        end = _scan(script, start, nested=True)[1]
+        if pending and "\n" in script[start:end]:
+            raise _ShellSyntaxError("here-document around a multi-line substitution")
+        return end
+
+    while index < len(script):
+        char = script[index]
+        if char == "\\":
+            if script[index + 1 : index + 2] != "\n":
+                word = [*(word or []), script[index + 1 : index + 2]]
+            index += 2
+        elif char == "$" and script[index + 1 : index + 2] == "'":
+            end = _ansi_c_quoted(script, index + 1)
+            word = [*(word or []), script[index + 2 : end - 1]]
+            index = end
+        elif char == "'":
+            end = script.find("'", index + 1)
+            if end < 0:
+                raise _ShellSyntaxError("unterminated quote")
+            word = [*(word or []), script[index + 1 : end]]
+            index = end + 1
+        elif char == '"':
+            end = _double_quoted(script, index)
+            word = [*(word or []), script[index + 1 : end - 1]]
+            index = end
+        elif char == "$" and script[index + 1 : index + 2] == "(":
+            end = substitution(index + 2)
+            word = [*(word or []), script[index:end]]
+            index = end
+        elif char == "$" and script[index + 1 : index + 2] == "{":
+            end = _balanced(script, index + 1)
+            word = [*(word or []), script[index:end]]
+            index = end
+        elif char == "`":
+            end = _backquoted(script, index)
+            word = [*(word or []), script[index:end]]
+            index = end
+        elif char == "(" and word is not None and "".join(word).endswith("="):
+            end = substitution(index + 1)
+            word.append(script[index:end])
+            index = end
+        elif char in " \t":
+            finish()
+            index += 1
+        elif char == "#" and word is None:
+            end = script.find("\n", index)
+            index = len(script) if end < 0 else end
+        elif char == "\n":
+            finish()
+            tokens.append(("op", "\n"))
+            index += 1
+            for delimiter, tabs, document in pending:
+                lines = []
+                while index < len(script):
+                    end = script.find("\n", index)
+                    end = len(script) if end < 0 else end
+                    line = script[index:end]
+                    index = end + 1
+                    if (line.lstrip("\t") if tabs else line) == delimiter:
+                        break
+                    lines.append(line)
+                else:
+                    raise _ShellSyntaxError("unterminated here-document")
+                document.append("\n".join(lines))
+            pending = []
+        elif char in "<>" or script.startswith("&>", index):
+            if word is not None and "".join(word).isdigit():
+                word = None
+            finish()
+            if script.startswith("<<<", index):
+                tokens.append(("redirect", "<<<"))
+                index += 3
+            elif script.startswith("<<", index):
+                heredoc = HEREDOC.match(script, index)
+                if heredoc is None or not HEREDOC_END.match(script, heredoc.end()):
+                    raise _ShellSyntaxError("unreadable here-document")
+                body: list[str] = []
+                tokens.append(("heredoc", body))
+                pending.append((heredoc[3], bool(heredoc[1]), body))
+                index = heredoc.end()
+            elif (redirect := REDIRECT.match(script, index)) is not None:
+                tokens.append(("redirect", redirect[0]))
+                index = redirect.end()
+            else:
+                raise _ShellSyntaxError("unreadable redirection")
+        elif char in ";&|()":
+            finish()
+            if nested and char == ")" and depth == 0:
+                if pending:
+                    raise _ShellSyntaxError("unterminated here-document")
+                return tokens, index + 1
+            depth += {"(": 1, ")": -1}.get(char, 0)
+            pair = script[index : index + 2]
+            operator = pair if pair in ("&&", "||", ";;", "|&") else char
+            tokens.append(("op", operator))
+            index += len(operator)
+        else:
+            word = [*(word or []), char]
+            index += 1
+    if nested:
+        raise _ShellSyntaxError("unbalanced expansion")
+    finish()
+    if pending:
+        raise _ShellSyntaxError("unterminated here-document")
+    return tokens, index
+
+
+def _ansi_c_quoted(script: str, start: int) -> int:
+    """The index after the $'...' string whose quote is at ``start``."""
+    index = start + 1
+    while index < len(script):
+        if script[index] == "\\":
+            index += 2
+        elif script[index] == "'":
+            return index + 1
+        else:
+            index += 1
+    raise _ShellSyntaxError("unterminated quote")
+
+
+def _double_quoted(script: str, start: int) -> int:
+    """The index after the double-quoted string that starts at ``start``."""
+    index = start + 1
+    while index < len(script):
+        char = script[index]
+        if char == "\\":
+            index += 2
+        elif char == '"':
+            return index + 1
+        elif char == "$" and script[index + 1 : index + 2] == "(":
+            index = _scan(script, index + 2, nested=True)[1]
+        elif char == "$" and script[index + 1 : index + 2] == "{":
+            index = _balanced(script, index + 1)
+        elif char == "`":
+            index = _backquoted(script, index)
+        else:
+            index += 1
+    raise _ShellSyntaxError("unterminated quote")
+
+
+def _backquoted(script: str, start: int) -> int:
+    index = start + 1
+    while index < len(script):
+        if script[index] == "\\":
+            index += 2
+        elif script[index] == "`":
+            return index + 1
+        else:
+            index += 1
+    raise _ShellSyntaxError("unterminated command substitution")
+
+
+def _balanced(script: str, start: int) -> int:
+    """The index after the "{" at ``start`` and everything up to its partner."""
+    depth = 0
+    index = start
+    while index < len(script):
+        char = script[index]
+        if char == "\\":
+            index += 2
+            continue
+        if char == '"':
+            index = _double_quoted(script, index)
+            continue
+        if char == "$" and script[index + 1 : index + 2] == "(":
+            index = _scan(script, index + 2, nested=True)[1]
+            continue
+        if char == "`":
+            index = _backquoted(script, index)
+            continue
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return index + 1
+        index += 1
+    raise _ShellSyntaxError("unbalanced expansion")
+
+
+class _Command:
+    """A simple command's words and here-documents, or a compound command's body."""
+
+    def __init__(
+        self, body: list[_Item] | None = None, kind: str = "simple", binds: str = ""
+    ) -> None:
+        self.words: list[str] = []
+        self.documents: list[str] = []
+        self.body = body
+        self.kind = kind
+        self.binds = binds
+
+
+class _Item:
+    """An and-or list: pipelines (negated or not) joined by && or ||."""
+
+    def __init__(self, pipeline: tuple[bool, list[_Command]]) -> None:
+        self.pipelines = [pipeline]
+        self.operators: list[str] = []
+        self.background = False
+
+
+class _Parser:
+    def __init__(self, tokens: list[Token]) -> None:
+        self.tokens = tokens
+        self.index = 0
+
+    def peek(self) -> Token | None:
+        return self.tokens[self.index] if self.index < len(self.tokens) else None
+
+    def at(self, kind: str, *values: Any) -> bool:
+        token = self.peek()
+        return token is not None and token[0] == kind and (not values or token[1] in values)
+
+    def skip_newlines(self) -> None:
+        while self.at("op", "\n"):
+            self.index += 1
+
+    def script(self) -> list[_Item]:
+        items, _ = self.items(frozenset())
+        return items
+
+    def items(self, ends: frozenset[str]) -> tuple[list[_Item], str]:
+        items: list[_Item] = []
+        while True:
+            token = self.peek()
+            if token is None:
+                if ends:
+                    raise _ShellSyntaxError("unterminated compound command")
+                return items, ""
+            if self.at("op", "\n", ";"):
+                self.index += 1
+                continue
+            if (token[0] == "op" and token[1] == ")" and ")" in ends) or (
+                token[0] == "word" and token[1] in ends
+            ):
+                self.index += 1
+                return items, str(token[1])
+            item = self.and_or()
+            items.append(item)
+            if self.at("op", "&"):
+                item.background = True
+                self.index += 1
+            elif self.at("op", "\n", ";"):
+                self.index += 1
+            elif not (self.peek() is None or self.at("op", ")") or self.at("word", *ends)):
+                raise _ShellSyntaxError("unexpected operator")
+
+    def and_or(self) -> _Item:
+        item = _Item(self.pipeline())
+        while self.at("op", "&&", "||"):
+            item.operators.append(str(self.tokens[self.index][1]))
+            self.index += 1
+            self.skip_newlines()
+            item.pipelines.append(self.pipeline())
+        return item
+
+    def pipeline(self) -> tuple[bool, list[_Command]]:
+        negated = False
+        while self.at("word", "!"):
+            negated = True
+            self.index += 1
+        commands = [self.command()]
+        while self.at("op", "|", "|&"):
+            self.index += 1
+            self.skip_newlines()
+            commands.append(self.command())
+        return negated, commands
+
+    def command(self) -> _Command:
+        token = self.peek()
+        if token is None:
+            raise _ShellSyntaxError("missing command")
+        body: list[_Item] = []
+        kind = str(token[1])
+        binds = ""
+        if token == ("op", "("):
+            self.index += 1
+            body, _ = self.items(frozenset({")"}))
+        elif token[0] == "op":
+            raise _ShellSyntaxError("unexpected operator")
+        elif token[1] in UNSUPPORTED:
+            raise _ShellSyntaxError(f"unsupported {token[1]}")
+        elif token[1] == "if":
+            self.index += 1
+            while True:
+                body += self.items(frozenset({"then"}))[0]
+                part, end = self.items(frozenset({"elif", "else", "fi"}))
+                body += part
+                if end == "else":
+                    body += self.items(frozenset({"fi"}))[0]
+                if end != "elif":
+                    break
+        elif token[1] in ("while", "until"):
+            self.index += 1
+            body = self.items(frozenset({"do"}))[0] + self.items(frozenset({"done"}))[0]
+        elif token[1] == "for":
+            self.index += 1
+            if not self.at("word"):
+                raise _ShellSyntaxError("unreadable for loop")
+            binds = str(self.tokens[self.index][1])
+            self.index += 1
+            while self.at("word"):
+                self.index += 1
+            while self.at("op", "\n", ";"):
+                self.index += 1
+            if not self.at("word", "do"):
+                raise _ShellSyntaxError("unreadable for loop")
+            self.index += 1
+            body = self.items(frozenset({"done"}))[0]
+        elif token[1] == "{":
+            self.index += 1
+            body = self.items(frozenset({"}"}))[0]
+        else:
+            return self.simple()
+        while self.redirections(_Command()):
+            pass
+        return _Command(body=body, kind=kind, binds=binds)
+
+    def redirections(self, command: _Command) -> bool:
+        token = self.peek()
+        if token is None or token[0] not in ("redirect", "heredoc"):
+            return False
+        self.index += 1
+        if token[0] == "heredoc":
+            command.documents.append("".join(token[1]))
+        elif self.at("word"):
+            self.index += 1
+        else:
+            raise _ShellSyntaxError("redirection without a target")
+        return True
+
+    def simple(self) -> _Command:
+        command = _Command()
+        start = self.index
+        while self.peek() is not None and not self.at("op"):
+            if not self.redirections(command):
+                command.words.append(str(self.tokens[self.index][1]))
+                self.index += 1
+        if self.index == start or (command.words and self.at("op", "(")):
+            raise _ShellSyntaxError("unsupported command")
+        return command
+
+
+def _commands(items: list[_Item]) -> Iterator[tuple[_Command, bool]]:
+    """Every simple command, and whether it stands alone at the top of the script."""
+    for item in items:
+        alone = len(item.pipelines) == 1 and len(item.pipelines[0][1]) == 1
+        alone = alone and not item.pipelines[0][0] and not item.background
+        for _, commands in item.pipelines:
+            for command in commands:
+                if command.body is None:
+                    yield command, alone
+                else:
+                    yield from ((nested, False) for nested, _ in _commands(command.body))
+
+
+def _loop_variables(items: list[_Item]) -> Iterator[str]:
+    """The variables that for loops anywhere in these items assign."""
+    for item in items:
+        for _, commands in item.pipelines:
+            for command in commands:
+                if command.body is not None:
+                    if command.binds:
+                        yield command.binds
+                    yield from _loop_variables(command.body)
+
+
+def _options(args: list[str], errexit: bool, pipefail: bool) -> tuple[bool, bool, int, bool, bool]:
+    """Apply set-style options; the new errexit and pipefail, the next index, -c and -n."""
+    index = 0
+    command = False
+    noexec = False
+    while index < len(args) and args[index][:1] in ("-", "+") and args[index] not in ("-", "--"):
+        option = args[index]
+        index += 1
+        if option.startswith("--"):
+            continue
+        for letter in option[1:]:
+            if letter == "c":
+                command = True
+            elif letter == "n":
+                noexec = noexec or option[0] == "-"
+            elif letter == "e":
+                errexit = option[0] == "-"
+            elif letter == "o" and index < len(args):
+                name = args[index]
+                index += 1
+                if name == "errexit":
+                    errexit = option[0] == "-"
+                elif name == "pipefail":
+                    pipefail = option[0] == "-"
+                elif name == "noexec":
+                    noexec = noexec or option[0] == "-"
+    return errexit, pipefail, index, command, noexec
+
+
+def _shopt(args: list[str], errexit: bool, pipefail: bool) -> tuple[bool, bool]:
+    """Apply `shopt -s -o` or `shopt -u -o` to errexit and pipefail."""
+    letters = ""
+    index = 0
+    while index < len(args) and args[index].startswith("-") and args[index] != "--":
+        letters += args[index][1:]
+        index += 1
+    index += index < len(args) and args[index] == "--"
+    if "o" not in letters or not ({"s", "u"} & set(letters)):
+        return errexit, pipefail
+    enabled = "s" in letters
+    for name in args[index:]:
+        if name == "errexit":
+            errexit = enabled
+        elif name == "pipefail":
+            pipefail = enabled
+    return errexit, pipefail
+
+
+def _unwrapped(words: list[str]) -> list[str]:
+    """A command's words without the `builtin`, `command` and `time` that only prefix it."""
+    while words:
+        if words[0] == "builtin":
+            words = words[1:]
+            if words and words[0] == "--":
+                words = words[1:]
+        elif words[0] in ("command", "time"):
+            words = words[1:]
+            while words and words[0].startswith("-"):
+                if words[0] == "--":
+                    words = words[1:]
+                    break
+                if {"v", "V"} & set(words[0]):
+                    return []
+                words = words[1:]
+        else:
+            break
+    return words
+
+
+def _resolve(word: str, variables: dict[str, str]) -> str:
+    return VARIABLE.sub(lambda match: variables.get(match[1] or match[2], match[0]), word)
+
+
+def _may_name_a_builtin(program: str) -> bool:
+    """Whether a command name, as resolved, can still expand to the name of a builtin."""
+    if "$" not in program and "`" not in program:
+        return False
+    literal = VARIABLE.sub("", program)
+    return "$" in literal or "`" in literal or "/" not in literal
+
+
+class _Gate:
+    """A command whose failure fails the step: its program, arguments and here-documents."""
+
+    def __init__(self, program: str, args: list[str], documents: list[str]) -> None:
+        self.program = program
+        self.args = args
+        self.documents = documents
+
+    def runs(self, required: str) -> bool:
+        """Whether this command runs the required command, or passes it what it needs."""
+        if " ".join([self.program, *self.args]).startswith(required):
+            return True
+        if PYTHON.fullmatch(self.program.rsplit("/", 1)[-1]) is None:
+            return False
+        script = None
+        index = 0
+        while index < len(self.args):
+            arg = self.args[index]
+            index += 1
+            if not arg.startswith("-") or arg == "-":
+                script = arg
+                break
+            if arg == "--":
+                script = self.args[index] if index < len(self.args) else None
+                break
+            if arg.startswith("--"):
+                if arg.partition("=")[0] != "--check-hash-based-pycs":
+                    return False
+                index += "=" not in arg
+                continue
+            letters = arg[1:]
+            if "c" in letters.split("W")[0].split("X")[0]:
+                return False
+            if "m" in letters.split("W")[0].split("X")[0]:
+                break
+            value = re.search(r"[WX](.*)", letters)
+            index += value is not None and not value[1]
+        if required.endswith(".py"):
+            return script is not None and (script == required or script.endswith("/" + required))
+        return required in " ".join(self.args) or any(required in d for d in self.documents)
+
+
+def _gates(script: str, errexit: bool, pipefail: bool) -> list[_Gate]:
+    """The commands of a shell script whose failure fails it.
+
+    Such a command stands alone on its line, at the top of the script and under errexit,
+    unless it is a pipeline's last command or pipefail is on; a following "|| exit N" for a
+    nonzero N keeps it. A script this checker cannot read has none.
+    """
+    try:
+        items = _Parser(_lex(script)).script()
+    except _ShellSyntaxError:
+        return []
+    gates: list[_Gate] = []
+    variables: dict[str, str] = {}
+    trusted = True
+    for item in items:
+        if trusted and errexit and not item.background:
+            gates.extend(_item_gates(item, pipefail, variables))
+        for name in _loop_variables([item]):
+            variables.pop(name, None)
+        for command, alone in _commands([item]):
+            words = command.words
+            for word in words:
+                for match in DEFAULT_ASSIGNMENT.finditer(word):
+                    variables.pop(match[1], None)
+            start = next((i for i, w in enumerate(words) if not ASSIGNMENT.match(w)), len(words))
+            for assignment in words[:start]:
+                name, _, value = assignment.partition("=")
+                if alone and start == len(words):
+                    variables[name] = value
+                else:
+                    variables.pop(name, None)
+            words = _unwrapped(words[start:])
+            if not words:
+                continue
+            program, args = _resolve(words[0], variables), words[1:]
+            if _may_name_a_builtin(program):
+                trusted = False
+            elif program == "set":
+                enabled, piped, _, _, noexec = _options(args, errexit, pipefail)
+                errexit = enabled if alone else errexit and enabled
+                pipefail = piped if alone else pipefail and piped
+                trusted = trusted and not noexec
+            elif program == "shopt":
+                enabled, piped = _shopt(args, errexit, pipefail)
+                errexit = enabled if alone else errexit and enabled
+                pipefail = piped if alone else pipefail and piped
+            elif program in BINDING_BUILTINS or (program == "printf" and "-v" in args):
+                variables.clear()
+            elif program in UNSAFE_BUILTINS and not _fails(program, args):
+                trusted = False
+    return gates
+
+
+def _fails(program: str, args: list[str]) -> bool:
+    """`exit N` with a literal nonzero N, or `exec` that only redirects: both safe."""
+    if program == "exec":
+        return not args
+    return program == "exit" and len(args) == 1 and args[0].isdigit() and int(args[0]) != 0
+
+
+def _exits_with_failure(pipeline: tuple[bool, list[_Command]]) -> bool:
+    negated, commands = pipeline
+    if negated or len(commands) != 1:
+        return False
+    command = commands[0]
+    if command.body is not None:
+        if (
+            command.kind not in ("{", "(")
+            or not command.body
+            or command.body[-1].background
+            or command.body[-1].operators
+        ):
+            return False
+        return _exits_with_failure(command.body[-1].pipelines[0])
+    return command.words[:1] == ["exit"] and _fails("exit", command.words[1:])
+
+
+def _item_gates(item: _Item, pipefail: bool, variables: dict[str, str]) -> list[_Gate]:
+    if item.operators and not (item.operators == ["||"] and _exits_with_failure(item.pipelines[1])):
+        return []
+    negated, commands = item.pipelines[0]
+    if negated:
+        return []
+    gates: list[_Gate] = []
+    for index, command in enumerate(commands):
+        if command.body is not None or (index < len(commands) - 1 and not pipefail):
+            continue
+        words = command.words
+        while words and ASSIGNMENT.match(words[0]):
+            words = words[1:]
+        if words and words[0] == "timeout":
+            words = words[1:]
+            while words and words[0].startswith("-"):
+                words = words[1:]
+            words = words[1:]
+        if not words:
+            continue
+        program = _resolve(words[0], variables)
+        gate = _Gate(program, words[1:], command.documents)
+        gates.append(gate)
+        if gate.program.rsplit("/", 1)[-1] in ("bash", "sh"):
+            errexit, piped, script, inline, noexec = _options(gate.args, False, False)
+            if inline and not noexec and script < len(gate.args):
+                gates.extend(_gates(gate.args[script], errexit, piped))
+    return gates
+
+
+def _run_setting(
+    key: str, step: dict[str, Any], job: dict[str, Any], defaults: Any
+) -> tuple[Any, str]:
+    """A step's shell or working directory, and where it was set; unreadable defaults fail."""
+    if key in step:
+        return step[key], "step"
+    for source, value in (("job defaults", job.get("defaults")), ("workflow defaults", defaults)):
+        if value is None:
+            continue
+        run = value.get("run", {}) if isinstance(value, dict) else None
+        if not isinstance(run, dict):
+            return "unreadable", source
+        if key in run:
+            return run[key], source
+    return None, ""
+
+
+def _gate_issues(path: Path, name: str, job: dict[str, Any], defaults: Any) -> list[str]:
     """A required job's gate commands must run, unskippable, and keep their exit status."""
     commands = REQUIRED_COMMANDS.get(path.name, {}).get(name, ())
+    text_only = REQUIRED_TEXT.get(path.name, {}).get(name, frozenset())
     errors = []
     condition = _condition(job)
     reviewed_job = REVIEWED_JOB_CONDITIONS.get(path.name, {}).get(name)
@@ -345,22 +1046,53 @@ def _gate_issues(path: Path, name: str, job: dict[str, Any]) -> list[str]:
         errors.append(f"{path}: required job {name} may be skipped (if: {condition})")
     reviewed = REVIEWED_STEP_CONDITIONS.get(path.name, {})
     found: set[str] = set()
+    unstructured: set[str] = set()
     for step in _steps(job):
         lines = _step_lines(step)
         text = "\n".join(f"{line}\n{documents}" for line, documents in lines)
+        present = [command for command in commands if command in text]
+        if not present:
+            continue
         condition = _condition(step)
         skippable = (
             frozenset()
             if condition is None or condition in ALWAYS_RUNS
             else frozenset(commands) - reviewed.get(condition, frozenset())
         )
-        for command in (command for command in commands if command in text):
-            found.add(command)
+        uses: str = step["uses"] if isinstance(step.get("uses"), str) else ""
+        run = step.get("run")
+        gates: list[_Gate] = []
+        if isinstance(run, str):
+            shell, source = _run_setting("shell", step, job, defaults)
+            directory, where = _run_setting("working-directory", step, job, defaults)
+            flags = SHELLS.get(shell) if isinstance(shell, str) or shell is None else None
+            if flags is None:
+                errors.append(f"{path}: {name} runs its gate under the {source} shell {shell!r}")
+            elif directory is not None:
+                errors.append(
+                    f"{path}: {name} runs its gate in the {where} directory {directory!r}"
+                )
+            else:
+                gates = _gates(run, *flags)
+        for command in present:
             if command in skippable:
                 errors.append(f"{path}: {name} may skip {command} (if: {condition})")
             if _discards_status(lines, command):
                 errors.append(f"{path}: {name} discards the exit status of {command}")
-    errors.extend(f"{path}: {name} no longer runs {c}" for c in commands if c not in found)
+            if command in text_only or command in uses or any(g.runs(command) for g in gates):
+                found.add(command)
+            else:
+                unstructured.add(command)
+    for command in commands:
+        if command in found:
+            continue
+        if command in unstructured:
+            errors.append(
+                f"{path}: {name} does not run {command} as a command of its own whose"
+                " failure fails the step"
+            )
+        else:
+            errors.append(f"{path}: {name} no longer runs {command}")
     return errors
 
 
@@ -421,7 +1153,7 @@ def _workflow_issues(path: Path, document: dict[Any, Any]) -> list[str]:
                 options = step.get("with")
                 if not isinstance(options, dict) or options.get("persist-credentials") is not False:
                     errors.append(f"{path}: {name} must check out with persist-credentials: false")
-        errors.extend(_gate_issues(path, str(name), job))
+        errors.extend(_gate_issues(path, str(name), job, document.get("defaults")))
     for name in REQUIRED_COMMANDS.get(path.name, {}):
         if name not in jobs:
             errors.append(f"{path}: required job {name} is missing")
