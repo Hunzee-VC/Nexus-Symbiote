@@ -19,9 +19,9 @@ The [known limitations](known-limitations.md) list those surfaces.
 
 ## The trust anchor is the baseline
 
-A baseline is an unsigned JSON file. `diff` cannot tell a reviewed baseline from one
-the change under review wrote, so the gate is only as strong as the place the
-baseline comes from.
+`baseline` writes an unsigned JSON file, and `diff` checks no signature. `diff`
+alone cannot tell a reviewed baseline from one the change under review wrote, so the
+gate is only as strong as the place the baseline comes from.
 
 - **Keep the baseline out of the pull request's reach.** Read it from the protected
   base branch (for example `git show "$BASE_SHA:.nexus-symbiote/reviewed.json"`), or
@@ -34,6 +34,14 @@ baseline comes from.
 - **Decide who may change it.** Updating the baseline approves everything in it.
   Change it only in a reviewed pull request to the protected branch, and require
   code-owner review for that path.
+- **Verify its attestation before `diff`.** A reviewer can sign the baseline with
+  `attest --purpose reviewed`, and the job can check it with `verify-attestation`,
+  using a public key taken from outside the checkout, before it runs `diff`; see
+  [gate a pull request on an attested baseline](inventory-attestation.md#gate-a-pull-request-on-an-attested-baseline).
+  That establishes that a key holder you trust signed exactly that file for that
+  purpose. It does not retire older attested baselines: an older file the same keys
+  signed still verifies, so bound its age with `--max-age-days` and keep attested
+  baselines where the change under review cannot choose among them.
 - **Protect the gate itself.** On the `pull_request` event the workflow file comes
   from the pull request, so an author can edit `--fail-on-alert` away. Require the
   workflow through an organization ruleset, or run the comparison in a
@@ -110,7 +118,7 @@ then notes, then the added, removed and modified components and relationships.
 | MCP endpoint, transport, launch command, launcher package or static source binding changed | critical |
 | Tool definition, input schema, description or annotations changed | critical |
 | Security field changed (for example capabilities, authorizations, claims, endpoints, A2A card URL, package URL, provider, source URI, signing identity or key reference, permission mode, version pin), a `*_ref` or `*_refs` field changed, declared autonomy level changed, trust tier or signing status downgraded, a digest removed or changed | high |
-| Trust tier or signing status raised | medium: a snapshot is unsigned, so a raised label is a claim to review |
+| Trust tier or signing status raised | medium: a snapshot is written unsigned, so a raised label is a claim to review |
 | Risk findings added | the highest added severity, at least medium |
 | Risk findings removed; any other field changed, including snapshot metadata such as the producer's `tool_name` or `tool_vendor` | medium |
 | Relationship added | medium; high for `invokes`, `delegates-to` and `acts-as-identity` |

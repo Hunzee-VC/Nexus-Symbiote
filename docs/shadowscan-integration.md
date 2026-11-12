@@ -345,6 +345,7 @@ nexus-symbiote export-inventory reviewed.json --format shadowscan-simple \
 The file approves only the project that ShadowScan's code connectors report for
 the repository at that resource, registered under the agent's reference, which the
 `id` in `agent.yaml` determines. Keep it where the change under review cannot
-write, and sign it. See
+write, sign it with `attest`, and check the signature with `verify-attestation`
+before ShadowScan reads it, because ShadowScan checks none. See
 [Approve agents for ShadowScan reconciliation](shadowscan-inventory-export.md) for
 the binding rules, the prefix to use and what the file does not establish.

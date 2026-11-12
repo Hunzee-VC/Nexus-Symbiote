@@ -28,8 +28,12 @@ A way around a limit that its entry does not describe is worth a
 - [A2A and RAG](#a2a-and-rag)
 - [ShadowScan](#shadowscan)
 - [Signatures](#signatures)
+- [Attestations](#attestations)
 - [Exports](#exports)
 - [Gates and drift](#gates-and-drift)
+- [Trace evidence](#trace-evidence)
+- [Graph view](#graph-view)
+- [G7 minimum elements](#g7-minimum-elements)
 - [Live mode](#live-mode)
 - [Runtime gateway](#runtime-gateway)
 - [GitHub Action](#github-action)
@@ -325,20 +329,23 @@ A way around a limit that its entry does not describe is worth a
   redaction removes, such as an MCP server's environment value, a token, or a URL
   path on the same host in a `notify` command, raises no alert.
 - **Codex settings are interpreted in part.** `.codex/config.toml` is digested
-  whole, so a changed setting such as a `notify` command raises an alert, but only
-  `approval_policy`, `sandbox_mode` and the `mcp_servers` table are interpreted. A
-  value that the digest or the keyed binding covers and that RFC 8785 JSON cannot
-  represent, such as a TOML date or time, `nan`, `inf` or an integer of magnitude
-  2^53 or more, is a failure.
+  whole after the redaction, so a new `notify` command or another changed setting
+  raises an alert, unless only a value the redaction removes changed and the scans
+  ran without the key (see the previous entry). Only `approval_policy`,
+  `sandbox_mode` and the `mcp_servers` table are interpreted. A value that the
+  digest or the keyed binding covers and that RFC 8785 JSON cannot represent, such
+  as a TOML date or time, `nan`, `inf` or an integer of magnitude 2^53 or more, is a
+  failure.
 - **Other IDE agents' settings are digested, not interpreted.** For Cursor, Windsurf
   and Cline, a permission mode is read only from an `agent.permissionMode` key in
   their settings files, a convention their vendors do not document; for Codex, from
   that key in `.codex/config.json` or from `approval_policy`. No mode is read for
   Copilot, Gemini CLI, Antigravity or xAI. Files such as `.cursor/cli.json`,
   `.antigravity/settings.json`, `.xai/config.json` and
-  `.github/copilot-extensions.json` are digested, so a change raises the same high
-  alert as other settings changes, but their permissions are not read: widening the
-  Cursor CLI allow list from `Shell(ls)` to `Shell(*)` adds no finding.
+  `.github/copilot-extensions.json` are digested after the redaction, as
+  `.codex/config.toml` is, so a changed setting raises the same high alert, but their
+  permissions are not read: widening the Cursor CLI allow list from `Shell(ls)` to
+  `Shell(*)` adds no finding.
 - **Other settings files are not recorded.** A file the `ide_agents` collector does
   not recognize, such as `.vscode/settings.json`, or a host's user or managed
   settings outside the project, is neither digested nor a gap, so a change to it
@@ -445,6 +452,21 @@ A way around a limit that its entry does not describe is worth a
   findings get new ids on every run, and `diff` reports them as removed and added.
   Set `SHADOWSCAN_IDENTITY_KEY` for every ShadowScan run; see
   [compare discovery across reruns](shadowscan-integration.md#compare-discovery-across-reruns).
+- **`export-inventory` approves only the repository's root project.** Components,
+  nested projects, agents that ShadowScan reports per source file, remote MCP servers
+  and A2A cards stay findings that ShadowScan reconciles on their own; see
+  [what the file approves](shadowscan-inventory-export.md#what-the-file-approves).
+- **The resource prefix is not checked.** The inventory does not record ShadowScan's
+  labels, so a prefix that names another repository approves that repository's
+  project, and one that names nothing approves nothing.
+- **ShadowScan approves a location, not content.** A later change under the bound
+  resource stays approved there; compare content with `diff` against the reviewed
+  baseline.
+- **The exported file is unsigned, and its format is pinned.** `export-inventory`
+  signs nothing and ShadowScan checks no signature on an inventory file: sign the
+  exact bytes with `attest`, check them with `verify-attestation` before ShadowScan
+  reads the file, and keep the file outside the checkout ShadowScan scans. The format
+  was checked against ShadowScan 999bef1 (0.1.4) only.
 
 ## Signatures
 
@@ -460,6 +482,33 @@ A way around a limit that its entry does not describe is worth a
   cache, so it uses the root embedded in its hash-locked `sigstore` package. A
   bundle that relies on a key Sigstore introduced later fails until you update the
   Action pin.
+
+## Attestations
+
+- **An attestation does not prove freshness.** An older file that the same keys
+  attested for the same purpose still verifies. Bound it with `--max-age-days`,
+  record `--source-revision`, and keep attested baselines where the change under
+  review cannot choose among them; see
+  [inventory attestation](inventory-attestation.md#limits).
+- **No revocation, transparency log or keyless signing.** Retire a key by removing it
+  from every trusted set. The commands sign with Ed25519 PEM keys only.
+- **The purpose is signed, not bound to a key.** Any trusted key can sign either
+  purpose; trust separate keys for `generated` and `reviewed`.
+- **The trusted-key placement check is a heuristic.** It refuses a key inside a git
+  working tree that holds the subject, the envelope or the current directory, also
+  under another name for that tree directory, and a key file with other hard links.
+  It does not authenticate a key, check its owner or permissions, recognize a
+  checkout without a `.git` entry, or follow a key copied or mounted out of the
+  checkout, such as one reached through `docker run -v "$PWD/keys:/keys"`.
+- **Verification and use are separate reads.** Run `verify-attestation` and `diff`
+  where the change under review cannot write between the two.
+- **The verifying build must read the inventory's format.** An attestation of a
+  native inventory in a format version that build cannot read fails with
+  `subject-not-inventory`, even for its exact bytes. An inventory nested more than
+  256 levels deep is attested by its bytes only, so `--match content` is unavailable
+  for it.
+- **The GitHub Action neither signs nor verifies attestations.** Run the commands in
+  a workflow step.
 
 ## Exports
 
@@ -491,6 +540,25 @@ A way around a limit that its entry does not describe is worth a
   requirement lists, in a RAG source, or anywhere in a card collected with
   `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, it is a scan failure instead. Both fail
   closed.
+- **SARIF locations depend on the working directory.** With `SOURCE_DATE_EPOCH`, native
+  JSON, CycloneDX and SPDX are byte-identical for the same inputs, but SARIF
+  locations are relative to the working directory when the scanned directory lies
+  below it, so two SARIF files match only when the scanned directory lies at the same
+  path below the working directory in both scans, or below it in neither; see
+  [reproducible inventories](reproducible-inventories.md#byte-identical-files-with-source_date_epoch).
+- **Framework references are this project's statement.** No framework owner published
+  or reviewed the crosswalk, and NIST AI RMF, EU AI Act, ISO/IEC 42001 and CWE
+  identifiers were checked against secondary sources only. A reference never says
+  that an attack happened, that a control fails or that an obligation applies; see
+  [framework crosswalk](framework-crosswalk.md#limits).
+- **Some SARIF tags do not hold for every finding of their rule.** CWE-319 and ASI07
+  on `transport_security`, CWE-502 on `serialization_format` and CWE-306 on
+  `authentication` were kept from the earlier rules so that existing filters still
+  match; the crosswalk's limits name the findings each one does not hold for. Medium
+  `nonregistry_source` findings have no framework reference.
+- **`crosswalk` applies only the built-in policy and does not name its inventory.**
+  Keep the report with the inventory it was made from. Its Markdown escapes markup,
+  not a renderer's text filters, such as GitHub mentions and emoji codes.
 
 ## Gates and drift
 
@@ -507,9 +575,15 @@ A way around a limit that its entry does not describe is worth a
   printed as a warning. Pass `--no-project-policy` in CI; there is no
   operator-owned policy file. See
   [what `policy_weakened` reports](policy-reference.md#what-policy_weakened-reports).
-- **A baseline is unsigned.** `diff` cannot tell a reviewed baseline from one the
-  change under review wrote. Read it from the protected branch; see
-  [the trust anchor is the baseline](drift-gate.md#the-trust-anchor-is-the-baseline).
+- **A baseline is written unsigned.** `baseline` and `scan` do not sign, and `diff`
+  checks no signature, so `diff` alone cannot tell a reviewed baseline from one the
+  change under review wrote. Read it from the protected branch. To check also that
+  trusted keys signed exactly that file, attest it with `attest --purpose reviewed`
+  and check it with `verify-attestation` before `diff`; an older attested baseline
+  still verifies, so this does not replace reading the baseline from where the change
+  under review cannot choose it; see
+  [the trust anchor is the baseline](drift-gate.md#the-trust-anchor-is-the-baseline)
+  and [inventory attestation](inventory-attestation.md).
 - **Inventories from 0.1.0 need a new baseline.** They record absolute paths, a
   path-derived agent reference, native format 1.0.0 and older MCP bindings. On an
   unchanged project, `diff --fail-on-alert` against a 0.1.0 baseline fails with high
@@ -517,8 +591,98 @@ A way around a limit that its entry does not describe is worth a
   baseline with this release at the commit the old one was reviewed at; see
   [take both snapshots the same way](drift-gate.md#take-both-snapshots-the-same-way).
 - **Both snapshots need the same binding key.** With a different key, every MCP,
-  A2A, RAG and IDE settings binding changes and alerts, and IDE settings digests
-  differ between a keyed and an unkeyed scan.
+  A2A, RAG and IDE settings binding changes and alerts, and the digests of the IDE
+  settings files digested as read differ between a keyed and an unkeyed scan.
+- **A content digest names content, not a producer.** Two inventories of the same
+  content, a forged copy of a genuine one included, have the same content digest.
+  List order is content, so a native document recovered from a CycloneDX or SPDX
+  export, which sorts components and dependencies, has another content digest than
+  the native file; see [reproducible inventories](reproducible-inventories.md#limits).
+- **Some readable inventories have no digests.** A document without a `metadata`
+  object or a `components` list has no content digest, and one larger or deeper than
+  a runtime snapshot binds has no canonical digest; `digest` prints `unavailable`
+  for the missing one and exits 1.
+- **A malformed `SOURCE_DATE_EPOCH` stops collection.** `scan`, `baseline` and
+  `import-shadowscan` exit 2 when it is set to anything but 1 to 12 ASCII digits
+  naming an instant up to 9999-12-31T23:59:59Z, an empty value included. Unset it to
+  record the clock.
+
+## Trace evidence
+
+- **Telemetry is self-reported.** `trace-diff` reads what the agent's own
+  instrumentation exported, which can omit, sample or forge spans. Exit 0 means only
+  that nothing undeclared appeared in the traces read, and a missing span proves
+  nothing; see [trace evidence](trace-evidence.md#trust-model-reported-not-observed).
+- **Names, not identities.** Tools, models, agents and MCP endpoints are matched by
+  name and by reported host and port, compared as text after trimming: nothing is
+  resolved by DNS, Unicode is not normalized, and providers have no aliases. When a
+  span reports no port, or a server's endpoint states none and its scheme has no
+  default port, an endpoint is compared by host alone.
+- **What a span leaves out narrows what it reports.** A span that leaves out a tool or
+  agent name, an endpoint or a port reports less, without failing the gate; a tool,
+  model, agent or endpoint identifier, an operation name, an MCP method or an MCP
+  transport that is present but cannot be read fails it. A trace cannot attribute
+  stdio MCP activity to a configured server, and skills, data sources, memory stores
+  and prompts are listed for information only.
+- **Remote tools are undeclared until recorded.** A static scan records only the
+  tools that a client configuration declares for a remote MCP server, not the tools
+  the server serves, so calls to its other tools are undeclared until an inventory
+  records them, for example one that `discover-mcp --record` writes. Each run
+  compares one inventory.
+- **Not everything is read.** Span events, links, log records, span names, scope
+  attributes and the attributes after the first 128 of a span or resource are not
+  read, so content recorded on span events is not counted.
+- **Fixed bounds and memory.** At most 16 files, 64 MiB per file, 1,000,000 spans
+  and 100,000 distinct identifiers; `--limit` does not change them. A one-object file
+  is parsed whole and can need about 2 GB for 64 MiB; prefer JSON Lines for large
+  exports.
+
+## Graph view
+
+- **Risk classes restate recorded evidence.** They come from declared or name-inferred
+  capabilities, side effects and egress domains, an MCP endpoint, an MCP environment
+  name withheld as `[redacted-N]`, a model's serialization safety or
+  `trust_remote_code`, two Claude Code starting modes and Codex
+  `approval_policy = "never"`. A class does not establish what a
+  component does at run time, and its absence establishes nothing: a component whose
+  record holds nothing the rules read is unclassified, which is unknown, not safe; see
+  [risk classes](graph-view.md#risk-classes).
+- **Some permission settings are not read.** Claude Code's unscoped allow rules,
+  which the collector records only in the text of a finding, Codex `sandbox_mode`
+  and the `agent.permissionMode` of other hosts leave an IDE agent unclassified, so
+  `permissions.allow: ["Bash", "Edit"]` does not make it a sink.
+- **Exposure paths show potential reach.** A path is the shortest chain of recorded
+  associations from an agent or IDE agent to a risky component. It does not show that
+  the agent can invoke the component, that a credential reaches it or that an exploit
+  is possible. At most 200 agents are searched and 200 paths kept, and the view
+  reports how many were left out.
+- **Large inventories make large pages.** `--max-nodes` bounds components, not edges,
+  and the HTML page renders every detail when it is written, so a large or dense
+  inventory gives a page that a browser opens slowly. Use `--focus` or
+  `--format json` for such inventories.
+
+## G7 minimum elements
+
+- **Coverage, not compliance.** The G7 elements are non-binding. `minimum-elements`
+  measures what the CycloneDX export carries in standard fields and verifies no
+  value: a present element is a value recorded in an inventory that is written
+  unsigned and can be edited; see [limits](minimum-elements.md#limits).
+- **Secondary verification.** Element names and their order were checked against four
+  independent enumerations, not the primary document, and each rule paraphrases the
+  element's definition.
+- **One export, one projection.** Only the CycloneDX 1.7 export of projection
+  `cyclonedx-1.7/2` is evaluated, not the SPDX export.
+- **This build cannot reach every element.** Four assessable elements have no
+  CycloneDX 1.7 field, others have a field this projection does not write, and eleven
+  need producer input; see
+  [what a future projection could carry](minimum-elements.md#what-a-future-projection-could-carry).
+- **Relationships are exported in part.** Only unconditional `depends-on` and
+  `provides-tool` relationships reach the export's `dependencies`, so for a scanned
+  repository SBOM dependency relationship is present only when `scan` collected tools
+  from MCP server source, and is then marked partial.
+- **Memory grows with the inventory.** The export is generated and schema-validated
+  in memory, about 11 KiB per component: an inventory near the 16 MiB bound can need
+  about 2.6 GiB.
 
 ## Live mode
 

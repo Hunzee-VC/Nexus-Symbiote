@@ -420,9 +420,9 @@ have no dedicated CycloneDX 1.7 field; SPDX 3.0.1 has fields for the first three
   agree, not from the primary PDF, and the definitions behind each rule are
   paraphrases. When the document can be read, the catalog should move to primary
   verification, and a changed reading is a new edition.
-- **Present means recorded.** Nothing is verified: an inventory is an unsigned file
-  that can be edited, and the report reflects what it says. `validate --project`
-  reconciles an inventory with its checkout.
+- **Present means recorded.** Nothing is verified: an inventory is written unsigned
+  and can be edited, the command checks no attestation, and the report reflects what
+  the inventory says. `validate --project` reconciles an inventory with its checkout.
 - **One export is evaluated.** Only the CycloneDX 1.7 export this build writes is
   read; the SPDX export, which points every licence at `NoAssertionLicense`, is not.
   The report is tied to the projection it names (`cyclonedx-1.7/2`).

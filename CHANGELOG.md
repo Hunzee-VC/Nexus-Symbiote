@@ -4,10 +4,18 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ## [Unreleased]
 
-Closes detection gaps listed under 0.1.0's known limitations and others found in review, makes inventories comparable across checkouts, and makes every gate say why it failed. Record baselines again after upgrading, as *Upgrading* below describes: the native format, paths, the inferred agent reference and many records change. [Known limitations](docs/known-limitations.md) lists what is still not collected, compared or verified.
+Closes detection gaps listed under 0.1.0's known limitations and others found in review, makes inventories comparable across checkouts and reproducible, and makes every gate say why it failed. New commands sign and verify inventories, compare them with the use an agent's own traces report, report their G7 AI SBOM minimum-element coverage, map their findings to security frameworks, draw them as a graph and export the reviewed agent to Nexus-ShadowScan. Record baselines again after upgrading, as *Upgrading* below describes: the native format, paths, the inferred agent reference and many records change. [Known limitations](docs/known-limitations.md) lists what is still not collected, compared or verified.
 
 ### Security
 
+- Digest every IDE settings file the `ide_agents` collector recognizes, now also `.cursor/cli.json`, the Antigravity, xAI and Copilot settings and all of `.codex/config.toml`, so a widened Cursor CLI allow list or a new Codex `notify` command is a high drift alert. These files are digested after redaction: their digests cannot confirm a guess of a redacted value, such as a token, and without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` a change only to a redacted value does not alert.
+- Report the unassigned default-ignorable code points U+2065 and U+FFF0 to U+FFF8 as high `invisible_characters`, and U+E0080 to U+E00FF and U+E01F0 to U+E0FFF as critical `tag_characters`, in every text file the `prompt` collector reads, and neutralize them in terminal output.
+- Check the Hugging Face chat templates in a model's configuration, `chat_template.jinja`, `chat_template.jinja2` and `additional_chat_templates/*.jinja` for the sandbox-escape shapes GGUF templates are checked for: a match is a critical `serialization_format` finding on every model in the directory, and a model that would be rated `safe` is rated `unsafe-template-injection`; a template larger than `file-bytes` is a coverage gap.
+- Report a `.git`, `node_modules`, `__pycache__`, `.venv` or `venv` entry inside a skill, command, rule, instruction or subagent directory as a coverage gap instead of skipping it silently; the entry is still not collected.
+- Collect nested `GEMINI.md` and `.cursorrules` files, and follow the `@path` imports of nested `GEMINI.md` files.
+- Inventory MCP servers in `.js`, `.mjs`, `.cjs`, `.jsx`, `.mts`, `.cts` and `.tsx` files, and servers built through a namespace import, as `.ts` servers are; SDK uses the analysis cannot follow, such as `require`, `import()`, a default import, a re-export or an `npm:`, `jsr:` or URL specifier, are coverage gaps instead of silent skips ([TypeScript inventory](docs/typescript-inventory.md#gaps)).
+- Report application code that starts or reaches an MCP server, such as `StdioServerParameters`, `MCPServerStdio`, `MultiServerMCPClient` or `StdioClientTransport`, and a Python dynamic import of an MCP module by a literal name, as coverage gaps; declare such a server in an MCP client file to have it inventoried.
+- `verify-attestation` refuses a trusted key inside a git working tree that holds the subject, the envelope or the current directory, also under another name for that tree, and a key file with other hard links. This catches a key the change under review could supply by its path in the checkout; it does not authenticate the key.
 - Classify MCP launchers behind wrappers such as `sh -c` and for more package runners such as `pnpm dlx` and `uv run --with`; a known runner that cannot be classified, inline code or a nested launch is a high `launcher_identity` finding and a coverage gap.
 - Withhold an MCP package identity whose registry is redirected, for example by `.npmrc`, and count an MCP container image as pinned only by digest.
 - Read MCP servers from the files of eleven clients and from `.mcp.json`-style files in any subdirectory; without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, MCP and RAG values that only the key binds cannot alert, and raise a low `completeness` finding.
@@ -33,6 +41,9 @@ Closes detection gaps listed under 0.1.0's known limitations and others found in
 
 ### Changed
 
+- **Breaking:** `scan`, `baseline` and `import-shadowscan` exit 2 before collecting when `SOURCE_DATE_EPOCH` is set to anything but 1 to 12 ASCII digits naming an instant up to 9999-12-31T23:59:59Z (253402300799), an empty value included; unset it, or set it to a whole number of seconds such as the commit time.
+- **Breaking:** more inputs are coverage gaps, which fail the default gates: a `.git`, `node_modules`, `__pycache__`, `.venv` or `venv` entry in an agent configuration directory, an MCP server that application code starts or reaches, and MCP SDK uses the source analysis cannot follow. Remove such an entry; the other gaps remain as long as the code does, and declaring a server that code starts in an MCP client file inventories it without clearing the gap.
+- **Breaking:** IDE agent records also digest `.cursor/cli.json`, `.codex/config.toml` and the Antigravity, xAI and Copilot settings files, so `diff --fail-on-alert` against a baseline an earlier build recorded alerts on a project that has one; record the baseline again.
 - **Breaking:** write native format 1.1.0, with paths relative to the scan root and a repository agent reference that no longer depends on the checkout; most records bind more evidence, so a 0.1.0 inventory still loads but no longer reconciles or compares cleanly.
 - **Breaking:** `diff --fail-on-alert` also alerts when a component disappears or a relationship is added or removed ([drift gate](docs/drift-gate.md)).
 - **Breaking:** SARIF rule ids are `nexus_symbiote/<category>/<severity>`, so GitHub code scanning re-creates every alert once, and again when a finding's severity changes; dismissals do not carry over ([details](docs/fingerprint-migration.md#sarif-rule-identifiers)).
@@ -43,6 +54,8 @@ Closes detection gaps listed under 0.1.0's known limitations and others found in
 - **Breaking:** every command refuses a signer policy inside the scanned project, and `verify-live` requires `--project` and a launch policy outside the repository.
 - **Breaking:** the MCP stdio note moves from category `transport_security` to `local_process`.
 - **Breaking:** dependency floors rise to click 8.2.1, pydantic 2.12, packaging 24.2 and jsonschema 4.25; the `yaml` extra is gone, `dev` is now a dependency group, and the unused `rich` dependency is dropped.
+- Give every finding category, and `runtime_undeclared`, its own SARIF rule title and description, and tag each rule from the [framework crosswalk](docs/framework-crosswalk.md#sarif-tags) with the CWE, OWASP Top 10 for LLM Applications 2025 and 2026, OWASP Top 10 for Agentic Applications, MITRE ATLAS and NIST AI RMF entries its findings bear on; 0.1.0 rules carried no tags. EU AI Act and ISO/IEC 42001 references are not tags; the `crosswalk` report gives them.
+- The release workflow's evidence scan runs with `SOURCE_DATE_EPOCH` set to the commit time, so the published `project.cdx.json` records that time and a serial number derived from its content, instead of the scan time and a random one.
 - Raise default limits to 100,000 directory entries and 64 GiB per model file ([collection limits](docs/collection-limits.md)).
 - Export CycloneDX and SPDX through projection 2, which makes the repository agent CycloneDX `metadata.component` and mints SPDX `urn:uuid` identifiers; 0.1.0 exports still recover ([standard exports](docs/standard-exports.md)).
 
@@ -63,6 +76,17 @@ Closes detection gaps listed under 0.1.0's known limitations and others found in
 
 ### Added
 
+- `digest`, which prints an inventory's file SHA-256, the canonical digest a signed runtime snapshot binds, and a content digest (`nexus-symbiote/inventory-content/v1`) that leaves out only the serial number and collection times; equal digests say nothing about who produced either file.
+- `SOURCE_DATE_EPOCH` for `scan`, `baseline` and `import-shadowscan`: they record that instant and a serial number derived from the content digest, so the same inputs give byte-identical native JSON, CycloneDX and SPDX. Gates keep using the clock.
+- `attest` and `verify-attestation`, which sign a file's exact bytes for a stated purpose (`generated` or `reviewed`) as a DSSE envelope over an in-toto Statement v1 with Ed25519 keys from `runtime keygen`, and verify it offline against a threshold of trusted keys, an optional age limit, and the bytes or, for a native inventory, its content digest.
+- `trace-diff`, which compares the tools, models, agents and MCP endpoints that OpenTelemetry GenAI and MCP traces (OTLP/JSON) report with an inventory and exits 1 on undeclared or unreadable ones. Content attributes are never read, and the evidence it writes (`nexus-symbiote/trace-evidence/v1`, optional SARIF) is `reported`, which never raises a component's assurance.
+- `crosswalk`, which maps an inventory's findings to entries of the OWASP Top 10 for LLM Applications 2025 and 2026, the OWASP Top 10 for Agentic Applications, MITRE ATLAS 2026.10, the NIST AI RMF, the EU AI Act, ISO/IEC 42001 and CWE, as JSON or escaped Markdown; a reference is a reading aid, not a compliance verdict.
+- `minimum-elements`, which reports which of the 50 G7 AI SBOM minimum elements an inventory's CycloneDX export carries in standard fields and how to supply the rest, with the ratio's denominator and an opt-in `--fail-under` gate; coverage is not compliance.
+- `graph`, a self-contained HTML page or JSON document of an inventory's components, recorded associations, findings, risk classes and shortest exposure paths; classes and paths restate recorded evidence, not runtime behavior.
+- `export-inventory --format shadowscan-simple`, which writes the reviewed repository agent as a Nexus-ShadowScan approved inventory bound to the repository's root project.
+- A synthetic OpenTelemetry trace of the demo agent, `examples/traces/demo-agent.otlp.json`, and a walkthrough step that compares it with the demo inventory.
+- Guides to [reproducible inventories](docs/reproducible-inventories.md), [inventory attestation](docs/inventory-attestation.md), [trace evidence](docs/trace-evidence.md), the [framework crosswalk](docs/framework-crosswalk.md), the [G7 minimum elements](docs/minimum-elements.md), the [graph view](docs/graph-view.md) and [approving agents for ShadowScan](docs/shadowscan-inventory-export.md).
+- Library functions that read an inventory once and return the bytes they validated (`AIBOM.load_with_bytes`, `read_native_bytes`, `parse_native_bytes`, `AIBOM.from_native`), compute its digests (`nexus_symbiote.core.content_digest`) and sign or verify inventory attestations (`nexus_symbiote.attestation`).
 - `--limit` and `NEXUS_SYMBIOTE_LIMITS`, and `risk.suppressions` with a reason, owner and expiry ([policy reference](docs/policy-reference.md)).
 - `scan --check`, `validate --json-output` and `--skip-integrity`, `summary --json-output`, `risk --no-score-threshold`, `--require-discovery-signature` and `--debug`.
 - Action inputs `reviewed-baseline` (a drift gate), `validate-integrity`, `limits`, `artifact-name`, `sarif-category` and `upload-artifact`, and outputs `result`, `gates`, `validation-passed`, `drift-passed` and `drift-alerts`.
@@ -78,6 +102,7 @@ Closes detection gaps listed under 0.1.0's known limitations and others found in
 3. In the Action, use `risk-check: 'false'` to skip the risk gate, give each Action step in one run its own `artifact-name` and `sarif-category`, and install Python in later steps that used the Action's.
 4. In scripts, read results from standard output, gate on `risk --json-output`, add `--no-fail-on-advisory` where `advisories` must exit 0, and pass `--project` to `verify-live`.
 5. Keep signer and launch policies outside the scanned repository, and re-apply the GitHub code scanning dismissals that still hold.
+6. Where a CI job exports `SOURCE_DATE_EPOCH`, make it a whole number of seconds or unset it before `scan`, `baseline` and `import-shadowscan`.
 
 ## [0.1.0] - 2026-11-08
 

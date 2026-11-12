@@ -73,19 +73,24 @@ change them. See [collection limits](collection-limits.md).
 | [`runtime register`](#runtime-register) | offline | Make a newly issued runtime snapshot current in a gateway state store |
 | [`attest`](#attest) | offline | Sign a file's exact bytes, usually an inventory or a baseline, for a stated purpose |
 | [`verify-attestation`](#verify-attestation) | offline | Check that trusted keys attested a file's bytes or inventory content for a purpose |
+| [`trace-diff`](#trace-diff) | offline | Compare the runtime use that OpenTelemetry traces report with an AgentBOM |
 | [`discover-mcp`](#discover-mcp) | **live** | List the tools an HTTPS MCP server serves, without calling them |
 | [`advisories`](#advisories) | **live** | Query OSV for advisories affecting exact PyPI and npm package versions |
 | [`verify-live`](#verify-live) | **live** | Compare an AgentBOM with the tools that operator-pinned stdio servers serve |
-| [`trace-diff`](#trace-diff) | offline | Compare the runtime use that OpenTelemetry traces report with an AgentBOM |
 
 ## Output and CI logs
 
 Results go to standard output: the reports of `validate`, `risk`, `diff`, `summary`,
-`blast-radius` and `minimum-elements`, the inventory that `scan` and `vex` print without `-o`, and every
-`--json-output` document. Progress, notes, warnings and errors go to standard error.
-`scan` writes its progress and its gate verdict there too, so that standard output can
-carry the inventory: `nexus-symbiote summary bom.json > summary.txt` keeps the summary,
-and `2>/dev/null` hides only diagnostics.
+`blast-radius`, `digest`, `trace-diff` and `verify-attestation`, the JSON line that
+`attest` prints, the inventory that `scan` and `vex` print and the reports that
+`crosswalk`, `minimum-elements` and `graph --format json` print without `-o`, and every
+`--json-output` document. Progress, notes, warnings and errors go to standard error,
+and so do the coverage gate verdict of `minimum-elements`, everything that
+`export-inventory` prints, such as the inventory's digests, and the summary that
+`graph` prints after it writes a file. `scan` writes its progress and its gate verdict
+there too, so that standard output can carry the inventory:
+`nexus-symbiote summary bom.json > summary.txt` keeps the summary, and `2>/dev/null`
+hides only diagnostics.
 
 Every command prints text taken from an inventory, a checkout or a live server, such as
 names, paths, references and descriptions, literally and inert, in a terminal and in a
@@ -102,16 +107,17 @@ CI log:
 
 `crosswalk --format markdown` writes such text Markdown-escaped instead of literally:
 every ASCII punctuation character in it follows a backslash, after the replacements
-above.
+above. `minimum-elements --format markdown` writes the component references it takes
+from the inventory as Markdown code spans, after the same replacements.
 
-The JSON that `scan`, `vex`, `crosswalk`, `discover-mcp`, `advisories` and `minimum-elements` print without `-o`, the
-JSON that every `runtime` command prints, such as the identities of the snapshot that
-`runtime register` made current, the candidate inventory that `verify-live --record`
-prints, and the `--json-output`
-documents of `validate`, `risk`, `diff`, `summary`, `blast-radius` and `verify-live`,
-write a `[` that follows such a `##` as `\u005b`; the document parses to exactly the
-same value. Files written with `-o` are not changed.
-`digest --json-output`, `attest`, `verify-attestation --json-output` and `graph --format json` print their JSON the same way.
+The JSON that `scan`, `vex`, `crosswalk`, `discover-mcp`, `advisories`,
+`minimum-elements` and `graph --format json` print without `-o`, the JSON that
+`attest`, `verify-attestation --json-output` and every `runtime` command print, such as
+the identities of the snapshot that `runtime register` made current, the candidate
+inventory that `verify-live --record` prints, and the `--json-output` documents of
+`validate`, `risk`, `diff`, `summary`, `blast-radius`, `digest`, `trace-diff` and
+`verify-live`, write a `[` that follows such a `##` as `\u005b`; the document parses to
+exactly the same value. Files written with `-o` are not changed.
 
 Colors are used only on a terminal, and `NO_COLOR` turns them off.
 
@@ -131,6 +137,7 @@ What exit status 1 means for each gate:
 | `validate` | Completeness, integrity (including integrity that is only unknown), the discovery producer check, the minimum assurance level or the dependency graph failed. |
 | `risk` | The risk gate failed, or `--project` reconciliation failed. |
 | `diff` | `--fail-on-alert` was given and the diff reports a security alert. |
+| `digest` | The file is a valid native inventory, but its canonical or content digest is undefined: the other values are printed, and the missing one as `unavailable` (`null` with `--json-output`). |
 | `graph` | The inventory's graph is invalid, `--focus` names no component, or the view would hold more components than `--max-nodes`. |
 | `minimum-elements` | `--fail-under` was given and fewer than that percentage of the assessable elements are present, or the inventory's CycloneDX export fails its checks. |
 | `baseline` | The scan gate failed, under the project policy or the built-in one. |
@@ -238,6 +245,8 @@ catch a misplaced policy; they do not authenticate it.
 | `runtime digest` | `kind` and `digest`. |
 | `runtime key-id` | `key_id`. |
 | `runtime register` | `registered`, `tenant`, `deployment_id`, `agent_id`, `serial` and `digest`. |
+| `attest` | One line: `out`, `subject_sha256`, `subject_format`, `content_digest` (native inventories only), `purpose`, `signers` (key IDs) and `signed`. |
+| `verify-attestation --json-output` | `attestation_verified`, `purpose`, `signers`, `match`, `subject_sha256` (the file passed), `attested_sha256` (the file that was signed), `subject_format`, `signed_at`, and, when recorded, `spec_version`, `content_digest`, `content_profile` and `source_revision`. |
 | `trace-diff --json-output` | The trace evidence, also written by `-o`: `format` (`nexus-symbiote/trace-evidence/v1`), `assurance` (always `reported`), `limitations`, `inputs`, `coverage`, `observed`, `reconciliation` and `gate`; see [trace evidence](trace-evidence.md#the-evidence-document). |
 
 ## Pre-commit hooks

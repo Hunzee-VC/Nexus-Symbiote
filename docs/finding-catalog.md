@@ -98,6 +98,15 @@ which characters count as hidden.
 - **Drift alerts** rate changes between two inventories. A finding added between
   them is one alert among others; [what the alerts mean](drift-gate.md#what-the-alerts-mean)
   rates every change `diff` reports.
+- **`trace-diff` results** compare traces with an inventory and are not written into
+  it: `risk` does not score them, and `ignore_categories` and suppressions do not
+  apply to them. Undeclared and unidentified items fail the trace gate of `trace-diff`
+  itself, and `--sarif` reports them under `runtime_undeclared`
+  ([trace evidence](trace-evidence.md#exit-codes-and-the-gate)).
+- **Risk classes, framework references and minimum-element statuses**, which `graph`,
+  `crosswalk` and `minimum-elements` report, are views of an inventory's records and
+  findings, not findings: no other gate reads them, and only
+  `minimum-elements --fail-under` gates on one of them.
 
 ## SARIF rules
 
@@ -107,8 +116,10 @@ finding whose severity changes moves to another rule
 components imported from a ShadowScan report are left out of SARIF. Every category
 on this page has a rule in the catalog that
 [standard exports](standard-exports.md#sarif-for-github-code-scanning) lists, with
-its title and taxonomy tags, and so has `runtime_undeclared`, the category for a
-component that runtime telemetry shows and the inventory does not list. The
+its title and taxonomy tags, and so has `runtime_undeclared`, the category under which
+`trace-diff --sarif` writes a tool, model, agent or MCP endpoint that the agent's own
+telemetry reports and the inventory does not declare, or whose identifier cannot be
+read ([trace evidence](trace-evidence.md#sarif)). The
 [framework crosswalk](framework-crosswalk.md) gives the rationale for each tag and the
 category's EU AI Act and ISO/IEC 42001 references. A category outside the catalog,
 such as one that an edited inventory records, gets a generic rule titled after the

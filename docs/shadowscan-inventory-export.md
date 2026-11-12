@@ -212,7 +212,8 @@ The exported file is an approval list: whoever can change it approves findings.
 - Sign the file, for example with `nexus-symbiote attest`, which signs a file's
   exact bytes, and check the signature with `nexus-symbiote verify-attestation`
   before ShadowScan reads the file: ShadowScan checks no signature on an inventory
-  file, and `export-inventory` signs nothing.
+  file, and `export-inventory` signs nothing. A file that is not a native inventory
+  is attested by its bytes only; see [inventory attestation](inventory-attestation.md).
 - Replace the previous export instead of adding a new one beside it. Two files that
   bind the same resource approve nothing.
 

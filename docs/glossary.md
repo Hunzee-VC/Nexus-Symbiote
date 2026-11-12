@@ -25,6 +25,15 @@ is not a separate artifact.
 An inventory is an AgentBOM, or the components it lists. A snapshot is an inventory
 saved at one time so that a later one can be compared with it.
 
+### Content digest
+
+The SHA-256 of an inventory's RFC 8785 canonical JSON without the fields that record
+the collection event: its serial number and collection times. Two collections of the
+same content have the same content digest, wherever and whenever each was taken;
+equal digests say nothing about who produced either file. `digest` prints it under the
+profile `nexus-symbiote/inventory-content/v1`
+([reproducible inventories](reproducible-inventories.md#the-content-digest)).
+
 ### Component
 
 One record in an inventory: an agent, MCP server or client, tool, model, prompt,
@@ -68,6 +77,13 @@ Each layer reports coverage in its own words:
 | `risk` (`coverage_status`) | `reported` (complete coverage of a nonempty inventory), `partial` or `unknown` |
 | CycloneDX, SPDX and SARIF exports | `incomplete`, or `unknown` (`noAssertion` in SPDX); never complete |
 | `advisories` | `complete`, `partial` or `none` |
+| `crosswalk` (`coverage_status`) | The words `risk` uses |
+| `graph` (`coverage`) | `status`: `incomplete` or `unknown`, as in the exports; `collection`: the words `validate` uses |
+
+`minimum-elements` and `trace-diff` use the word for something else. The `coverage` of
+`minimum-elements` counts G7 elements, not collected surfaces: how many are `present`
+out of the `assessable` ones, with a `percent`. The `coverage` of the trace evidence
+counts what was read from the traces, such as files and spans.
 
 ## Evidence
 
@@ -83,6 +99,15 @@ identity verified, and an inventory's own `verified` labels are not trusted. The
 levels: approved configuration, a signed runtime approval, and mediated execution,
 a gateway decision.
 
+### Reported
+
+What an agent's own telemetry states. `trace-diff` labels the tools, models, agents
+and MCP endpoints that OpenTelemetry traces name as `reported`, a fourth kind of
+evidence beside declared, observed and verified. The instrumentation can omit, sample
+or forge spans, so reported use never raises a component's assurance, and a missing
+span proves nothing
+([trace evidence](trace-evidence.md#trust-model-reported-not-observed)).
+
 ### Trust tier
 
 Who stands behind a component: `internal-verified`, `internal-unverified`,
@@ -96,10 +121,23 @@ inventory a tier is a claim, and `diff` rates a raised tier as a medium alert.
 `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, an operator secret of at least 32 characters.
 With it, a scan records an HMAC over the MCP, A2A, RAG and IDE settings values the
 inventory does not export, so `diff` and `validate --project` detect changes to
-them. Without it, only unkeyed structure digests are recorded, and records with
-unbound values carry a low `completeness` finding. The key never enters an
-inventory; use one key for a baseline and every scan compared with it
+them. Without it, only unkeyed digests are recorded. An MCP record with unbound
+values then carries a low `completeness` finding that names the key, and so does an
+A2A or RAG record with an unbound URL path, tenant or redacted value; an IDE agent
+record carries none, although a change only to a value the redaction removes from
+`.codex/config.toml`, `.cursor/cli.json` or the Antigravity, xAI and Copilot
+settings files passes `diff`. The key never enters an inventory; use one key for a
+baseline and every scan compared with it
 ([source binding](verification-source-binding.md)).
+
+### Inventory attestation
+
+A DSSE envelope that `attest` writes: an in-toto Statement v1, signed with Ed25519,
+that binds a file's SHA-256 and, for a native inventory, its content digest to a
+purpose, `generated` or `reviewed`. `verify-attestation` checks it against keys the
+operator trusts. It establishes who signed which bytes or content for which purpose;
+it does not make the inventory accurate or complete, or show that it is the newest
+one ([inventory attestation](inventory-attestation.md#what-an-attestation-establishes)).
 
 ### Supplied inventory, reconciliation
 
@@ -139,18 +177,22 @@ threshold of 50.
 
 A check whose failure makes a command exit 1: the scan gate of `scan` and
 `baseline`, the completeness and integrity checks of `validate`, the risk gate of
-`risk`, and the drift gate of `diff --fail-on-alert`. The GitHub Action reports each
-as `collection`, `completeness`, `integrity`, `risk` and `drift`. By default the
-scan, `validate` and `risk` gates fail on unknown or incomplete coverage, and the
-drift gate fails when coverage regresses.
+`risk`, the drift gate of `diff --fail-on-alert`, the trace gate of `trace-diff`,
+which `--fail-on none` turns off, and the coverage gate of `minimum-elements`, which
+only `--fail-under` turns on. The GitHub Action runs all but the trace and coverage
+gates and reports them as `collection`, `completeness`, `integrity`, `risk` and
+`drift`. By default the scan, `validate` and `risk` gates fail on unknown or
+incomplete coverage, and the drift gate fails when coverage regresses.
 
 ### Baseline, candidate
 
 A baseline is a reviewed snapshot that later snapshots, the candidates, are compared
 with by `diff`. The `baseline` command writes one only when the scan gate passes,
-under the built-in policy too. A baseline is unsigned: the gate is only as strong
-as the place it is read from
-([trust anchor](drift-gate.md#the-trust-anchor-is-the-baseline)).
+under the built-in policy too. A baseline is written unsigned and `diff` checks no
+signature, so the gate is only as strong as the place the baseline is read from
+([trust anchor](drift-gate.md#the-trust-anchor-is-the-baseline)). Verifying an
+[inventory attestation](#inventory-attestation) of it first shows that trusted keys
+signed exactly that file, not that it is the newest one they signed.
 
 ### Policy kinds
 
@@ -164,3 +206,36 @@ as the place it is read from
 Collection limits and the binding key are operator settings, not policies: nothing
 in a checkout can change them. Runtime contracts and gateway configuration are
 described in the [runtime contract reference](runtime-contract-reference.md).
+
+## Reports and views
+
+### Risk class, exposure path
+
+A risk class (`code-exec`, `write-capable`, `exfil-capable`, `network-egress` or
+`secret-access`) restates recorded evidence about what one component may do, with the
+field that produced it. The `graph` view computes classes and never writes them to the
+inventory. A component whose record holds nothing the rules read is unclassified:
+unknown, not safe. An exposure path is the shortest chain of recorded associations
+from an agent or IDE agent to a component with a `code-exec`, `write-capable`,
+`exfil-capable` or `secret-access` class or a high or critical finding: potential
+reach, not proof that the agent can invoke the component
+([graph view](graph-view.md#risk-classes)).
+
+### Framework crosswalk, reference
+
+The catalog that ties each finding category to entries of framework editions: the
+OWASP Top 10 for LLM Applications 2025 and 2026, the OWASP Top 10 for Agentic
+Applications, MITRE ATLAS, the NIST AI RMF, the EU AI Act, ISO/IEC 42001 and CWE. A
+reference means that a finding records a precondition, a weakness or evidence relevant
+to an entry, never that an attack happened, that a control fails or that an obligation
+applies. SARIF rule tags come from it, and `crosswalk` applies it to an inventory's
+findings ([framework crosswalk](framework-crosswalk.md#what-a-reference-means)).
+
+### Minimum element
+
+One of the 50 elements of the G7 "Software Bill of Materials for AI – Minimum
+Elements" (12 May 2026). `minimum-elements` reports whether an inventory's CycloneDX
+export carries each one in a standard field: present, missing, explicit unknown, needs
+producer input or not applicable. Coverage is shown with its denominator and is not
+compliance: the elements are non-binding, and a present element is recorded, not
+verified ([G7 minimum elements](minimum-elements.md#how-each-element-is-evaluated)).
