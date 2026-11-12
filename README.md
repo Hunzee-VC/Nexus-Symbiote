@@ -193,7 +193,7 @@ A scan is an inventory, not a verdict. It does not show that a model is benign, 
 
 ### Install a verified release
 
-Requires Python 3.11 to 3.14 on Linux, git, curl and the [GitHub CLI](https://cli.github.com/) signed in with `gh auth login`. Releases are built from `main` by the [release workflow](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/.github/workflows/release.yml) and published to PyPI through OIDC trusted publishing with build attestations. The block resolves the `v0.1.0` tag to its commit, downloads the exact wheel, verifies its attestation against that commit, and only then installs the hash-locked runtime from the same commit and the wheel, without resolving anything else:
+Requires Python 3.11 to 3.14 on Linux, git, curl and the [GitHub CLI](https://cli.github.com/) signed in with `gh auth login`. Releases are built from `main` by the [release workflow](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/.github/workflows/release.yml) and published to PyPI through OIDC trusted publishing with build attestations. (`0.1.0` is the latest published PyPI release while `0.2.0` is in preparation on `main`; to run `0.2.0` before publication, use [Install from reviewed source](#install-from-reviewed-source).) The block resolves the `v0.1.0` tag to its commit, downloads the exact wheel, verifies its attestation against that commit, and only then installs the hash-locked runtime from the same commit and the wheel, without resolving anything else:
 
 ```bash
 (
@@ -251,7 +251,9 @@ export NEXUS_SYMBIOTE_SOURCE_BINDING_KEY="$AGENTBOM_BINDING_KEY"
 mkdir -p .nexus-symbiote
 nexus-symbiote baseline . --no-project-policy -o .nexus-symbiote/reviewed.json
 
-# In the pull-request job: read the baseline from the base commit, never from the pull request.
+# In the pull-request job (with fetch-depth: 0 or the base commit fetched): read the
+# baseline from the base commit, never from the pull request.
+BASE_SHA="${BASE_SHA:-origin/main}"
 git show "$BASE_SHA:.nexus-symbiote/reviewed.json" > "$RUNNER_TEMP/reviewed.json"
 nexus-symbiote scan . --no-project-policy -o "$RUNNER_TEMP/agentbom.json"
 nexus-symbiote diff "$RUNNER_TEMP/reviewed.json" "$RUNNER_TEMP/agentbom.json" --fail-on-alert
@@ -317,11 +319,14 @@ The Action refuses a policy inside the workspace, a path that passes through a s
 
 #### Protect the gate
 
-On `pull_request`, GitHub runs the workflow file of the pull request's merge commit, so the pull request under review can change these inputs, switch a gate off or delete the step, and pass. Make the gate one the pull request cannot edit. In an organization, require the workflow through an organization ruleset (*Require workflows to pass before merging*), which pins it to a file and ref the pull request cannot change. Otherwise, run it on `pull_request_target`, which takes the workflow from the base branch, with read-only permissions, no secrets and the pull request's head checked out as data:
+On `pull_request`, GitHub runs the workflow file of the pull request's merge commit, so the pull request under review can change these inputs, switch a gate off or delete the step unless workflow edits are restricted. Make the gate one the pull request cannot weaken:
+
+1. **In a GitHub organization (recommended):** require the workflow through an organization ruleset (*Require workflows to pass before merging*), which pins the gate to a reusable workflow file and ref outside the pull request's reach.
+2. **In any repository:** run on `pull_request` with read-only permissions, stage the baseline from `github.event.pull_request.base.sha` into `$RUNNER_TEMP`, require a mandatory `CODEOWNERS` review from security owners for `.github/` and `.nexus-symbiote/reviewed.json`, and configure branch protection to require that check to pass:
 
 ```yaml
 name: Agent inventory gate
-on: pull_request_target
+on: pull_request
 permissions:
   contents: read
 jobs:
@@ -331,7 +336,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
       - name: Stage the reviewed baseline from the base branch
         env:
@@ -347,7 +351,7 @@ jobs:
           reviewed-baseline: ${{ runner.temp }}/reviewed.json
 ```
 
-This is safe only because no step runs code from the checkout: the Action reads it as data. Add no build, install or test step and no secret to such a job, and require code-owner review for `.github/`. Without a secret, the job collects without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, so approve the baseline it stages without the key too: a keyed baseline would alert on every binding, and changes to values that only the key binds pass this gate.
+Avoid checking out `github.event.pull_request.head.sha` inside a `pull_request_target` workflow ("pwn request" hazard): `pull_request_target` runs in the base repository's security context, where adding any build, test, cache or secret step later turns an untrusted fork checkout into secret exfiltration or repository compromise. On `pull_request`, same-repository pull requests can supply `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` from repository secrets; fork pull requests receive no secrets, so collect fork baselines without the key or run keyed comparisons only on trusted branches.
 
 ### Pre-commit hooks
 
@@ -379,7 +383,7 @@ Every path is relative to the project root. Each collector also bounds what it r
 | --- | --- |
 | `mcp` | At the root: `.mcp.json`, `mcp.json`, `claude_desktop_config.json`, `.claude/mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`, `.gemini/settings.json`, `.roo/mcp.json`, `.kiro/settings/mcp.json`, `.amazonq/mcp.json`, `.windsurf/mcp.json`, `.cline/mcp.json` and `.codex/config.toml`. At any depth: files named `.mcp.json`, `mcp.json`, `mcp-config.json`, `mcp_config.json`, `mcp-servers.json`, `claude_desktop_config.json` and `cline_mcp_settings.json`. The root resolver settings that apply to launchers: `.npmrc`, `bunfig.toml`, `.yarnrc.yml`, `.yarnrc`, `.env.yarn`, `uv.toml` and `pyproject.toml`. Python, TypeScript and JavaScript source that names an MCP SDK or a supported agent framework |
 | `model` | `.safetensors`, `.gguf`, `.ggml`, `.onnx`, Keras (`.h5`, `.hdf5`, `.keras`), `.tflite`, `.mlmodel`, `.pte`, `saved_model.pb` and pickle-family files ([full list](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/model-integrity.md#model-files-and-references)), with ONNX external data, SavedModel variables, shard indexes, configuration, tokenizer files, chat templates and declared custom code |
-| `prompt` | At the root: `CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `AGENTS.override.md`, `.github/AGENTS.md`, `GEMINI.md`, `CODEX.md`, `codex.md`, `.codex/instructions.md`, `.github/copilot-instructions.md`, `.cursorrules`, `.clinerules` (a file or a directory), `.windsurfrules`, `system_prompt.md` and `system_prompt.txt`. At any depth: `CLAUDE.md` and `AGENTS.md`. Every file under `.claude/rules`, `.cursor/rules`, `.windsurf/rules`, `.roo/rules`, `.kiro/steering`, `.github/instructions`, `.github/prompts`, `.claude/output-styles`, `.claude/agents` and `.github/agents`, and under the skill and command directories `.claude/skills`, `.claude/commands`, `skills`, `.agents/skills`, `.github/skills`, `.cursor/skills`, `.gemini/skills`, `.cursor/commands` and `.gemini/commands`, including a skill's bundled scripts. Files that the root `CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md` and `GEMINI.md` import with `@path` |
+| `prompt` | At the root: `CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `AGENTS.override.md`, `.github/AGENTS.md`, `GEMINI.md`, `CODEX.md`, `codex.md`, `.codex/instructions.md`, `.github/copilot-instructions.md`, `.cursorrules`, `.clinerules` (a file or a directory), `.windsurfrules`, `system_prompt.md` and `system_prompt.txt`. At any depth: `CLAUDE.md` and `AGENTS.md`. Every file under `.claude/rules`, `.cursor/rules`, `.windsurf/rules`, `.roo/rules`, `.kiro/steering`, `.github/instructions`, `.github/prompts`, `.claude/output-styles`, `.claude/agents` and `.github/agents`, and under the skill and command directories `.claude/skills`, `.claude/commands`, `skills`, `.agents/skills`, `.github/skills`, `.cursor/skills`, `.gemini/skills`, `.cursor/commands` and `.gemini/commands`, including a skill's bundled scripts. Files that any collected `CLAUDE.md` (root or nested) or the root `.claude/CLAUDE.md`, `CLAUDE.local.md` and `GEMINI.md` import with `@path` |
 | `rag` | At any depth: `rag_config.json`, `rag_config.yaml`, `rag_config.yml`, `retrieval_config.json`, `vector_store_config.json`, `kb_config.json` and `knowledge_base.json`. At the root: `.env`, `.env.local` and `.env.example`, for key names only. Python files, for vector-store imports |
 | `registry` | At the root only: `package.json` with one lockfile (`npm-shrinkwrap.json` or `package-lock.json`, `pnpm-lock.yaml` or `yarn.lock`); `requirements*.txt`; `pyproject.toml`, with `uv.lock` or `poetry.lock`; `Dockerfile`, `Dockerfile.agent` and `Containerfile`; and the Compose files and override files Compose reads by default. [What it reads](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/registry-collector.md#what-it-reads) gives the fields |
 | `a2a` | `agent.json` and `agent-card.json` in any `.well-known` directory and in the root, and `a2a/agent.json`. At the root, client configuration in `a2a.json`, `a2a.yaml`, `a2a.yml` or `a2a_config.json`. Python files outside directories named `tests`, `test`, `dist`, `build`, `docs`, `benchmarks` or `examples`, for SDK references |
@@ -439,4 +443,4 @@ If you use Nexus SymBiote in research or tooling, cite it with the metadata in [
 
 ## License
 
-[MIT](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/LICENSE). Copyright (c) 2026 Emmanuel Dahunsi (AISecNomad). The vendored schemas under `src/nexus_symbiote/generators/schemas/vendor/` keep their upstream licenses: the CycloneDX schemas are Apache-2.0 ([license](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/src/nexus_symbiote/generators/schemas/vendor/LICENSE-APACHE-2.0.txt)), and the SPDX 3.0.1 schema and context come from the SPDX Specification, which is Community-Spec-1.0 with CC-BY-3.0 for pre-existing portions ([license](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/src/nexus_symbiote/generators/schemas/vendor/LICENSE-SPDX-3.0.1.txt)). The [notice](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/src/nexus_symbiote/generators/schemas/vendor/NOTICE.txt) gives their sources, so the distribution's license expression is `MIT AND Apache-2.0 AND Community-Spec-1.0`.
+[MIT](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/LICENSE). Copyright (c) 2026 Emmanuel Dahunsi (AISecNomad). The vendored schemas under `src/nexus_symbiote/generators/schemas/vendor/` keep their upstream licenses: the CycloneDX schemas are Apache-2.0 ([license](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/src/nexus_symbiote/generators/schemas/vendor/LICENSE-APACHE-2.0.txt)), and the SPDX 3.0.1 schema and context come from the SPDX Specification, which is Community-Spec-1.0 with CC-BY-3.0 for pre-existing portions ([license](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/src/nexus_symbiote/generators/schemas/vendor/LICENSE-SPDX-3.0.1.txt)). The [notice](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/src/nexus_symbiote/generators/schemas/vendor/NOTICE.txt) gives their sources, so the distribution's license expression is `MIT AND Apache-2.0 AND Community-Spec-1.0 AND CC-BY-3.0`.

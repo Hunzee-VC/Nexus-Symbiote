@@ -6,21 +6,23 @@ Agent Bill of Materials (AgentBOM) generator and validator for AI agent supply c
 
 ```
 src/nexus_symbiote/
-  core/        — Domain models (Pydantic v2), enums, AIBOM container, RFC 8785 JCS hashing
-  scanners/    — Component discovery (MCP, model weights, prompts, RAG, registry, A2A, IDE agents, ShadowScan reports)
-  generators/  — Exports: native JSON, CycloneDX 1.7, SPDX 3.0, SARIF, VEX
+  core/        — Domain models (Pydantic v2), evidence/authority records, enums, AIBOM container, RFC 8785 JCS hashing
+  scanners/    — Component discovery (MCP, MCP launch/live wire, model weights, prompts, RAG, registry, A2A, IDE agents, ShadowScan reports)
+  generators/  — Exports & PURL projection: native JSON, CycloneDX 1.7, SPDX 3.0.1, SARIF 2.1.0, VEX
   validators/  — Completeness, integrity, and risk scoring
   diff/        — AIBOM version comparison and the snapshot alert gate
-  live/        — Opt-in observations through independently pinned local MCP launchers
-  utils/       — Confined bounded reads, Sigstore/artifact verification, file hash utilities, terminal-output neutralization
-  runtime.py   — Signed, operation-bound authorization for integrations that mediate tool calls
-  runtime_validation.py, runtime_cli.py — Offline schema validation worker; `runtime` commands
+  live/        — Opt-in observations and pinned stdio execution (`inventory.py`, `session.py`, `stdio.py`, `verify.py`)
+  utils/       — Confined `openat` reads (`confined.py`), Sigstore/Ed25519 verification (`crypto.py`), safe output writes (`files.py`), JSONC/model-header parsers, secret redaction, terminal neutralization
+  runtime.py   — Signed, operation-bound authorization gateway (`canonical_arguments=True` by default)
+  runtime_validation.py, runtime_cli.py — Isolated offline schema validation worker; `runtime` commands
   policy.py, signature_policy.py       — Caller-selected policy and operator signer policy
+  limits.py                            — Operator-controlled collection bounds (`--limit`, `NEXUS_SYMBIOTE_LIMITS`)
   graph.py, lineage.py                 — Repository association graph, blast radius, lineage
   advisories.py                        — Explicit, bounded OSV queries for exact package identities
   modes.py                             — Offline by default; live mode is opt-in
+  reporting.py                         — Neutralized text and JSON gate reporting
   scanner_catalog.py                   — Built-in collector universe for coverage checks
-  cli.py, live_cli.py, supply_chain_cli.py — Click CLI entrypoints
+  cli.py, analysis_cli.py, live_cli.py, supply_chain_cli.py — Click CLI entrypoints
 ```
 
 ## Build and test
@@ -48,6 +50,6 @@ make check            # offline subset of the required CI checks
 - Every scanner extends `scanners/base.py:Scanner` and returns `ScanResult`
 - Risk assessments use `RiskSeverity` enum: critical > high > medium > low > info
 - Trust tiers: internal-verified > internal-unverified > third-party-signed > third-party-unsigned > untrusted-public > unknown
-- Tests live in `tests/` and use pytest
-- Ruff for linting (line-length 100), mypy strict mode
+- Tests live in `tests/` and use pytest (`conftest.py` isolates environment/HOME, blocks outbound non-loopback sockets, and enforces `--strict-skips` in CI)
+- Ruff for linting (line-length 100), mypy strict mode (`mypy src/nexus_symbiote scripts`)
 - No comments unless the why is non-obvious

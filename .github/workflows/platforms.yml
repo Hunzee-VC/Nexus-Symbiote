@@ -5,6 +5,8 @@ name: Platform smoke
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   schedule:
     - cron: "29 3 * * 4"
   workflow_dispatch:
@@ -33,5 +35,10 @@ jobs:
           tests/test_action_signature_policy.py
           tests/test_discovery_signature_gate.py
           tests/test_confined_integrity.py
+          tests/test_confined_links_and_variants.py
+          tests/test_confined_bounds.py
           tests/test_output_confinement.py
           tests/test_prompt_confined_reads.py
+          tests/test_prompt_surfaces.py
+          tests/test_ide_settings_binding.py
+          tests/test_a2a_collection.py

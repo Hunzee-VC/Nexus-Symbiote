@@ -47,9 +47,17 @@ def scaling_ratio(run: Callable[[int], object], factor: int = 4, repeats: int = 
     def best(scale: int) -> float:
         timings = []
         for _ in range(repeats):
+            iterations = 1
             started = time.process_time()
             run(scale)
-            timings.append(time.process_time() - started)
-        return max(min(timings), 1e-3)
+            elapsed = time.process_time() - started
+            while elapsed < 2e-3 and iterations < 32:
+                iterations *= 2
+                started = time.process_time()
+                for _ in range(iterations):
+                    run(scale)
+                elapsed = time.process_time() - started
+            timings.append(elapsed / iterations)
+        return max(min(timings), 1e-5)
 
     return best(factor) / best(1)

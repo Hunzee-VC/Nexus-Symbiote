@@ -16,7 +16,10 @@ inputs:
     description: Output path within the workspace
     default: nexus-symbiote-aibom.json
   scanners:
-    description: Comma-separated scanner names including shadowscan, a2a, ide_agents; empty means all
+    description: >-
+      Comma-separated scanner names including shadowscan, a2a, ide_agents; empty means all.
+      Selecting a subset requires validate to be 'false', because completeness requires all
+      built-in collectors
     default: ""
   validate:
     description: >-

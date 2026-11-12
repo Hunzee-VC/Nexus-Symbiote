@@ -4,6 +4,8 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-12
+
 Closes detection gaps listed under 0.1.0's known limitations and others found in review, makes inventories comparable across checkouts, and makes every gate say why it failed. Record baselines again after upgrading, as *Upgrading* below describes: the native format, paths, the inferred agent reference and many records change. [Known limitations](docs/known-limitations.md) lists what is still not collected, compared or verified.
 
 ### Security
@@ -26,8 +28,9 @@ Closes detection gaps listed under 0.1.0's known limitations and others found in
 - Treat `uv run` of a URL or standard input, Windows names with trailing dots such as `npx.cmd.`, and package installs (`pip`, `gem`, `cargo`, `conda`) as unknown launchers, and withhold an MCP package identity when the server's environment moves or replaces the runner's configuration.
 - Withhold token-shaped MCP field, header and environment names from inventories and exports.
 - Follow the `@path` imports of nested `CLAUDE.md` files, and treat an A2A card module that is too large to parse or spelled with compatibility characters as a coverage gap.
-- In the runtime gateway with `canonical_arguments=True`, validate and resolve the scope of the arguments the executor receives, and deny schemas that use keywords only drafts before draft-04 define.
-- Measure the PyPI soak from the first trusted CI run when a commit has no push run, treat an unreported ruleset bypass as unknown, and reject workflow gate steps that never run.
+- In the runtime gateway, default `canonical_arguments=True` so `resolve_scope` and `execute` receive the exact RFC 8785 canonical JSON value the approval binds, reject out-of-range integral floats in all modes, enforce `rlimit(RLIMIT_NOFILE)` and environment scrubbing in validation workers, and reject schemas that use keywords only drafts before draft-04 define.
+- Measure the PyPI soak from the first trusted CI run when a commit has no push run, treat an unreported ruleset bypass as unknown, reject workflow gate steps that never run, and harden the release distribution attestation loop for Bash 3.2 `set -e` compatibility.
+- Enforce descriptor-pinned `openat`/`fstat` symlink and case-variant confinement on directory opens, validate Sigstore bundle structural size and OID multiplicity before Pydantic parsing, require explicit registry agreement on PURL exports, and propagate intrinsic model risks across `risk`, `diff`, SARIF and VEX.
 
 ### Changed
 

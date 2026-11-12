@@ -6,15 +6,15 @@ Nexus SymBiote is an early alpha focused on Agent Bill of Materials (AgentBOM) g
 
 - [x] Add a pinned CodeQL workflow for main and pull requests. Hosted analysis runs, and its high and critical policy is part of the required `Verified CI` check.
 - [x] Apply branch protection, private vulnerability reporting and secret scanning on GitHub (applied by 2026-11-06; see [repository controls](docs/repository-controls.md#operator-prerequisites)).
-- [ ] Apply the release-tag ruleset before the first `v*` tag, and turn off administrator bypass on the `testpypi` and `pypi` environments.
-- [ ] Close the [known limitations of 0.1.0](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/v0.1.0/SECURITY.md#known-limitations-in-010) in 0.1.1: record Claude Code settings beyond the permission mode (hooks, deny and ask rules, helpers) without exposing secrets, check skill, command and nested instruction files for hidden characters, inventory skill scripts and subagents, report unsupported MCP server forms and name-excluded agent files as coverage gaps, bound the TypeScript and comment-stripping analysis time, handle surrogates and deep nesting in exports, and let the Action run more than once per workflow.
-- [ ] Public release of a reviewed 0.1.x (or 0.2.0) with signed provenance and PyPI trusted publishing.
-- [ ] Decide which collectors, export formats and runtime adapters are supported for 0.1.x and which stay experimental. The project has a single maintainer, so a smaller supported surface is easier to keep correct.
+- [ ] Enforce the release-tag ruleset for every `v*` tag, and keep administrator bypass turned off on the `testpypi` and `pypi` environments.
+- [x] Close the [known limitations of 0.1.0](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/v0.1.0/SECURITY.md#known-limitations-in-010) in 0.2.0: record Claude Code settings beyond the permission mode (hooks, deny and ask rules, helpers) without exposing secrets, check skill, command and nested instruction files for hidden characters, inventory skill scripts and subagents, report unsupported MCP server forms and name-excluded agent files as coverage gaps, bound the TypeScript and comment-stripping analysis time, handle surrogates and deep nesting in exports, and let the Action run more than once per workflow.
+- [ ] Publish the reviewed 0.2.0 release with signed provenance and PyPI trusted publishing.
+- [ ] Decide which collectors, export formats and runtime adapters are supported past 0.2.x and which stay experimental. The project has a single maintainer, so a smaller supported surface is easier to keep correct.
 - [ ] Expand security regression corpus and document known false-positive/negative classes.
 - [ ] Deeper verification and BOM adapters for popular agent frameworks (LangGraph, CrewAI, OpenAI Agents SDK, Google ADK, etc.) and MCP configurations, with Nexus-ShadowScan as the primary discovery scanner.
 - [ ] Stronger live-observation path documentation and operator guidance for isolated workers.
 - [ ] Example repositories and end-to-end tutorials that combine Nexus-ShadowScan discovery with SymBiote inventory and policy.
-- [ ] Record a short terminal demo of the [offline walkthrough](examples/README.md) and link it from the README once v0.1.0 is tagged.
+- [ ] Record a short terminal demo of the [offline walkthrough](examples/README.md) and link it from the README.
 
 ## Medium term
 

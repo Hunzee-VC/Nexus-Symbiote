@@ -222,13 +222,19 @@ class Config:
             if reviewed
             else None
         )
+        validate = _boolean(env.get("SYMBIOTE_VALIDATE", "true"), "validate")
+        if validate and scanners and set(scanners) != SCANNERS:
+            raise InputError(
+                "scanners subset requires validate to be false, because completeness "
+                "requires all built-in collectors"
+            )
         return cls(
             workspace,
             project,
             output,
             fmt,
             scanners,
-            _boolean(env.get("SYMBIOTE_VALIDATE", "true"), "validate"),
+            validate,
             _boolean(env.get("SYMBIOTE_RISK_CHECK", "true"), "risk-check"),
             threshold,
             _boolean(env.get("SYMBIOTE_SARIF", "false"), "sarif-upload"),

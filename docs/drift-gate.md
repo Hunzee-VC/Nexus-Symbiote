@@ -33,11 +33,12 @@ baseline comes from.
   Change it only in a reviewed pull request to the protected branch, and require
   code-owner review for that path.
 - **Protect the gate itself.** On the `pull_request` event the workflow file comes
-  from the pull request, so an author can edit `--fail-on-alert` away. Require the
-  workflow through an organization ruleset, or run the comparison in a
-  `pull_request_target` job that reads the pull request as data, as the README's
-  [protect the gate](../README.md#protect-the-gate) shows, and require code-owner
-  review of `.github/`.
+  from the pull request, so an author can edit `--fail-on-alert` away unless workflow
+  edits are gated. Require the workflow through an organization ruleset (*Require
+  workflows to pass before merging*), and require `CODEOWNERS` review of `.github/`
+  and `.nexus-symbiote/reviewed.json`, as the README's
+  [protect the gate](../README.md#protect-the-gate) shows. Avoid checking out an
+  untrusted pull request head inside a `pull_request_target` workflow.
 
 ## Take both snapshots the same way
 
@@ -56,6 +57,7 @@ pull request, and compares it with a scan of the pull-request checkout:
 
 ```bash
 export NEXUS_SYMBIOTE_SOURCE_BINDING_KEY="$AGENTBOM_BINDING_KEY"
+BASE_SHA="${BASE_SHA:-origin/main}"
 git show "$BASE_SHA:.nexus-symbiote/reviewed.json" > "$RUNNER_TEMP/reviewed.json"
 nexus-symbiote scan . --no-project-policy -o "$RUNNER_TEMP/agentbom.json"
 nexus-symbiote diff "$RUNNER_TEMP/reviewed.json" "$RUNNER_TEMP/agentbom.json" --fail-on-alert
@@ -71,8 +73,8 @@ request with itself, and that gate can never fail.
   of 32 or more characters for the baseline and every candidate scan. Without it, the
   values described above cannot alert; with a different key, every MCP, A2A, RAG and
   IDE settings binding changes and alerts, and IDE settings digests differ between a
-  keyed and an unkeyed scan. A `pull_request_target` job holds no secret, so it scans
-  without the key: approve the baseline it reads without the key too. See
+  keyed and an unkeyed scan. Fork `pull_request` jobs receive no secrets, so collect
+  fork baselines without the key or run keyed comparisons on trusted branches. See
   [source binding](verification-source-binding.md).
 - **Paths are root-relative.** Recorded paths are relative to the scan root, so a
   snapshot taken in `/Users/alice/agent` compares with one taken in
@@ -102,10 +104,10 @@ then notes, then the added, removed and modified components and relationships.
 
 | Change | Rating |
 | --- | --- |
-| Component added | medium |
+| Component added | at least medium, or the highest effective finding severity on the added component (for example critical for an executable model format) |
 | Component removed | high for MCP servers and clients, tools, models, instruction and skill files, guardrails, IDE agents and extensions, A2A clients and servers, and for any record that carried integrity evidence (file, content, definition or schema digest, exact package URL, version pin, lockfile integrity, static source binding); medium otherwise. Confirm it was deleted, not moved where no collector reads it |
 | MCP endpoint, transport, launch command, launcher package or static source binding changed | critical |
-| Tool definition, input schema, description or annotations changed | critical |
+| Tool definition, input schema, description or annotations changed; model serialization safety changed to an unsafe execution or template format | critical |
 | Security field changed (for example capabilities, authorizations, claims, endpoints, A2A card URL, package URL, provider, source URI, signing identity or key reference, permission mode, version pin), a `*_ref` or `*_refs` field changed, declared autonomy level changed, trust tier or signing status downgraded, a digest removed or changed | high |
 | Trust tier or signing status raised | medium: a snapshot is unsigned, so a raised label is a claim to review |
 | Risk findings added | the highest added severity, at least medium |
