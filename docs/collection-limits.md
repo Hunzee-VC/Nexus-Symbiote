@@ -85,6 +85,7 @@ The pre-commit hooks add their arguments after the command, so set
 | `source-scan-bytes` | 64 MiB | 64 GiB | Source text one collector reads while it looks for references, counted for each collector separately: the Python, TypeScript and JavaScript files the mcp collector searches for SDK and agent framework references, and the Python files the a2a and rag collectors search for SDK and vector-store imports. How many files a project has does not matter. | One failure names the file being read when the budget ran out and says the rest were not read; nothing after it is searched. The mcp collector refuses a single file larger than the whole budget as a failure of its own, without spending the budget. |
 | `syntax-bytes` | 256 KiB | 64 MiB | One file containing an MCP SDK or agent framework reference that the mcp collector parses. | That file is not parsed. |
 | `ts-nodes` | 20000 | 10000000 | Syntax nodes in one TypeScript MCP server file. | That file is not collected. |
+| `import-lookups` | 5000 | 1000000 | Memory files whose `@path` imports the prompt collector follows, and distinct import targets it looks up, together in one collection. A monorepo of 2,000 packages whose `CLAUDE.md` files each import three shared documents uses 2,003. | The imports of the file being followed, and of every file after it, are not inventoried. |
 
 ### Source files the mcp collector searches
 
@@ -185,12 +186,14 @@ the [README](../README.md) recommends.
 
 These bounds protect a format or the inventory rather than size a project, so
 they are not operator settings. Reaching one is also a scan failure or a refusal
-that names the file, except the listing bound in the first row, which only
-shortens a list of failures that are recorded anyway.
+that names the file, except the listing bounds in the first two rows, which only
+shorten lists whose content is recorded or bound anyway.
 
 | Bound | Value |
 |---|---|
 | Failures one collector lists from its walks, and from the mcp collector's source search, before one line for each reason sums up the rest | 1,000 lines or 65,536 characters |
+| Paths the prompt collector lists in the `imports` and `imported_by` properties of one collection; past it a list is replaced by `imports_count` and `imports_digest`, or by `imported_by_count`, which is not a failure because every imported file is still inventoried and the digest binds what each file imports | 262,144 characters |
+| `@path` import references in one memory or imported file | 1,000 |
 | Codec name in a Python encoding declaration | 64 characters |
 | MCP tool registrations in one TypeScript file | 1,000 |
 | TypeScript native parse time per file | 250 ms, in proportion to `syntax-bytes` above its default |

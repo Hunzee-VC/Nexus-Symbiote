@@ -383,4 +383,4 @@ def recover_native(properties: list[dict[str, Any]]) -> tuple[AIBOM, dict[str, A
         raise ValueError("embedded native document must be a JSON object")
     if props["nexus-symbiote:documentDigest"] != content_digest(document):
         raise ValueError("embedded native document digest mismatch")
-    return AIBOM.model_validate(document), document
+    return AIBOM.from_document(document), document

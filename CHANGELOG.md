@@ -66,6 +66,9 @@ Closes detection gaps listed under 0.1.0's known limitations and others found in
 - End unexpected errors with a one-line message instead of a traceback, and record a malformed `agent.yaml` as a scan failure.
 - Support macOS firmlink aliases in confined reads, and run the runtime validation worker there without the address-space limit Darwin refuses; Linux keeps every worker limit.
 - Correct the demo numbers in the README and the examples walkthrough; a test now checks them.
+- Make the prompt collector's `@path` import lookups an operator limit, `import-lookups` (5,000), whose failure says how to raise it, and stop failing a project whose import lists only outgrow the inventory's listing bound: those lists are counted and digested, and every imported file is still inventoried ([collection limits](docs/collection-limits.md)).
+- Tell a refused file from an absent one after a collector has listed 1,000 failures, so that, for example, a refused `npm-shrinkwrap.json` no longer lets `package-lock.json` stand in for it.
+- Read a native document without a `metadata` object as format 1.0.0 in `verify-discovery`, `verify-live`, `advisories` and recovery from standard exports, as `AIBOM.load` already did.
 
 ### Added
 
