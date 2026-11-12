@@ -163,16 +163,15 @@ The descriptor digest covers `name`, `description`, `inputSchema`,
 field, such as `icons`, fails closed until the digest profile is upgraded.
 Arguments are copied before checking; schema references cannot trigger network
 retrieval. Identities and validity are checked again immediately before execution.
-The executor receives the arguments as the caller sent them; the approval binds
-their RFC 8785 form, in which `1` and `1.0` are equal and key order does not
-count. The caller therefore chooses the key order and number spelling that the
-executor sees, which the approver of the canonical form never saw. When a backend
-depends on either, for example a command named by its first key or a strictly
-typed integer, construct the gateway with `canonical_arguments=True`: the executor
-then receives exactly the form the approval binds, with keys in RFC 8785 order and
-integral numbers below 10^21 as integers. Alternatively, reject non-canonical
-arguments in `resolve_scope`. Integers must lie between -(2^53 - 1) and
-2^53 - 1; pass larger values, such as 64-bit IDs, as strings.
+The executor and scope resolver receive the RFC 8785 canonical JSON value that
+the approval binds by default (`canonical_arguments=True`), with keys in RFC
+8785 order and integral floats between -(2^53 - 1) and 2^53 - 1 converted to
+integers, eliminating parser-differential ambiguities between approval digesting
+and backend execution. If a backend explicitly requires the caller's original
+key order or float-vs-integer Python type, construct the gateway with
+`canonical_arguments=False` and enforce argument canonicality in
+`resolve_scope`. Integers and integral floats must lie between -(2^53 - 1) and
+2^53 - 1 in all modes; pass larger values, such as 64-bit IDs, as strings.
 
 Schema validity does not bound validation cost. Approved tool schemas and hostile
 arguments are checked in disposable isolated Python workers with a 256 MiB

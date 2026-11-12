@@ -9,9 +9,11 @@ for any reason other than the host's file system, or, outside CI, a missing pip,
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
 import signal
+import socket
 import threading
 from collections.abc import Callable, Iterator
 from types import FrameType, ModuleType
@@ -164,6 +166,35 @@ def _isolated_environment(
     monkeypatch.setenv("HOME", str(home))
     for name in PRIVATE_DIRECTORIES:
         monkeypatch.setenv(name, str(home / name.lower()))
+
+    def _is_loopback_target(address: Any) -> bool:
+        if not isinstance(address, tuple) or not address:
+            return True
+        host = address[0]
+        if not isinstance(host, str):
+            return True
+        if host.lower() == "localhost":
+            return True
+        try:
+            return ipaddress.ip_address(host.split("%", 1)[0]).is_loopback
+        except ValueError:
+            return False
+
+    orig_connect = socket.socket.connect
+    orig_connect_ex = socket.socket.connect_ex
+
+    def _guarded_connect(sock: socket.socket, address: Any) -> Any:
+        if modes.current() != modes.Mode.OFFLINE and not _is_loopback_target(address):
+            raise OSError("test suite blocked outbound non-loopback socket connection")
+        return orig_connect(sock, address)
+
+    def _guarded_connect_ex(sock: socket.socket, address: Any) -> int:
+        if modes.current() != modes.Mode.OFFLINE and not _is_loopback_target(address):
+            raise OSError("test suite blocked outbound non-loopback socket connection")
+        return orig_connect_ex(sock, address)
+
+    monkeypatch.setattr(socket.socket, "connect", _guarded_connect)
+    monkeypatch.setattr(socket.socket, "connect_ex", _guarded_connect_ex)
     # Collection limits are process state (the root --limit option sets them): every test
     # starts at the defaults, and what a test leaves in force never reaches the next one.
     with limits.applied(limits.DEFAULTS):

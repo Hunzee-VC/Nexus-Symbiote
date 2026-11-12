@@ -878,10 +878,12 @@ A way around a limit that its entry does not describe is worth a
   ECMA-262 and Python read differently, such as a backreference to an optional
   group, makes the schema invalid and the call is denied with `schema-invalid`. A
   pattern valid only without the `u` flag is read with code-point semantics.
-- **The executor sees the caller's argument form.** By default the executor receives
-  the arguments in the key order and number spelling the caller sent, while the
-  approval binds their RFC 8785 form. Construct the gateway with
-  `canonical_arguments=True` for backends that depend on either.
+- **Canonical arguments are enabled by default.** By default (`canonical_arguments=True`),
+  `resolve_scope` and `execute` receive the exact RFC 8785 canonical JSON value the
+  approval binds (keys in RFC 8785 order and integral floats in `[-(2^53 - 1), 2^53 - 1]`
+  converted to integers). Setting `canonical_arguments=False` forwards the caller's
+  key order and float/int distinction while still rejecting integral floats outside
+  `[-(2^53 - 1), 2^53 - 1]`.
 - **macOS workers have no memory limit.** Schema validation workers run with a
   256 MiB address-space limit, which macOS refuses, so workers there run without it.
 
@@ -889,11 +891,14 @@ A way around a limit that its entry does not describe is worth a
 
 - **A pull request can change its own gate.** On `pull_request`, GitHub runs the
   workflow file of the pull request's merge commit, so a pull request can change the
-  Action's inputs, switch a gate off or delete the step, and its run passes. The
-  Action warns about each switched-off gate and reports every gate in its `gates`
-  and `result` outputs, but cannot tell which workflow file a reviewer approved.
-  Protect the gate with a workflow that an organization ruleset requires, or with a
-  `pull_request_target` job, as the [README](../README.md#protect-the-gate) shows.
+  Action's inputs, switch a gate off or delete the step unless workflow edits are
+  gated. The Action warns about each switched-off gate and reports every gate in its
+  `gates` and `result` outputs, but cannot tell which workflow file a reviewer
+  approved. Protect the gate with a workflow that an organization ruleset requires
+  and `CODEOWNERS` review on `.github/`, as the [README](../README.md#protect-the-gate)
+  shows, and avoid checking out untrusted pull request heads in `pull_request_target`
+  workflows. Selecting a subset of `scanners` requires `validate: 'false'`, because
+  completeness requires all built-in collectors.
 - **Earlier steps in the job are trusted.** A step that runs untrusted code before
   the Action can change the runner's Python or rewrite files under `RUNNER_TEMP`
   before the Action reads them. Write the signer policy and the reviewed baseline

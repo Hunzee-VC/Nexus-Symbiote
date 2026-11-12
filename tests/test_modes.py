@@ -100,7 +100,8 @@ def test_guard_is_removed_after_the_block_even_when_it_raises():
         subprocess.Popen._execute_child,  # type: ignore[attr-defined]
         os.system,
     )
-    assert "connect" not in vars(socket.socket)
+    # The suite's own guard against outbound connections may already wrap connect.
+    connect = vars(socket.socket).get("connect")
 
     def failing_body() -> None:
         with modes.enforce(modes.Mode.OFFLINE):
@@ -110,7 +111,7 @@ def test_guard_is_removed_after_the_block_even_when_it_raises():
     with pytest.raises(RuntimeError):
         failing_body()
     assert modes.current() is None
-    assert "connect" not in vars(socket.socket)
+    assert vars(socket.socket).get("connect") is connect
     assert (
         socket.getaddrinfo,
         _socket.getaddrinfo,

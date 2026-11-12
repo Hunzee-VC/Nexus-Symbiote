@@ -155,7 +155,9 @@ Keep the policy outside the checkout: the commands refuse a policy file inside
 the scanned project, also under another name for the project directory such as a
 case variant or a bind mount (compared by device and inode), or one with other
 hard links, and they resolve the project path first, so a symlinked `--project`
-path works for every command. Every entry must name a file beneath the project.
+path works for every command. Every entry must name a file beneath the project,
+spelled as its directory spells it: another case is refused on every file system,
+also where file names fold case.
 An entry that names neither a collected model weight file nor the ShadowScan
 report makes the `model` collector fail, and `validate --project` reports it as
 the integrity error `unused_policy_entry` even when the completeness check does

@@ -234,7 +234,7 @@ def load_signature_policies(policy_path: Path, project_root: Path) -> SignatureP
                 raise SignaturePolicyError(
                     "Policy artifact or bundle is unavailable beneath the project root"
                 ) from None
-            # Another name for the same file, such as a case variant, is a duplicate too.
+            # Another name for the same file, such as a hard link, is a duplicate too.
             same_file = files.path_identity(artifact)
             if same_file is None or same_file in identities:
                 raise SignaturePolicyError("Duplicate artifact in signature policy")
