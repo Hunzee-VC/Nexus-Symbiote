@@ -56,6 +56,7 @@ change them. See [collection limits](collection-limits.md).
 | [`summary`](#summary) | offline | Print component and risk counts |
 | [`digest`](#digest) | offline | Print the digest of an AgentBOM's bytes, its canonical digest and its run-independent content digest |
 | [`blast-radius`](#blast-radius) | offline | List agents and components associated with one component |
+| [`graph`](#graph) | offline | Write a self-contained HTML or JSON view of an inventory's associations, risk classes and exposure paths |
 | [`baseline`](#baseline) | offline | Write an unsigned snapshot only if the scan gate passes |
 | [`vex`](#vex) | offline | Export findings as a VEX document with status `in_triage` |
 | [`verify-artifact`](#verify-artifact) | offline | Check a file's SHA-256, and optionally its Sigstore bundle |
@@ -102,7 +103,7 @@ prints, and the `--json-output`
 documents of `validate`, `risk`, `diff`, `summary`, `blast-radius` and `verify-live`,
 write a `[` that follows such a `##` as `\u005b`; the document parses to exactly the
 same value. Files written with `-o` are not changed.
-`attest` and `verify-attestation --json-output` print their JSON the same way.
+`digest --json-output`, `attest`, `verify-attestation --json-output` and `graph --format json` print their JSON the same way.
 
 Colors are used only on a terminal, and `NO_COLOR` turns them off.
 
@@ -122,6 +123,7 @@ What exit status 1 means for each gate:
 | `validate` | Completeness, integrity (including integrity that is only unknown), the discovery producer check, the minimum assurance level or the dependency graph failed. |
 | `risk` | The risk gate failed, or `--project` reconciliation failed. |
 | `diff` | `--fail-on-alert` was given and the diff reports a security alert. |
+| `graph` | The inventory's graph is invalid, `--focus` names no component, or the view would hold more components than `--max-nodes`. |
 | `baseline` | The scan gate failed, under the project policy or the built-in one. |
 | `verify-artifact`, `verify-discovery` | The digest, signature or projection does not match. |
 | `verify-attestation` | Too few trusted keys signed the attestation, or it does not cover the file's bytes or content, the purpose or the age limit, or an input could not be read. |
@@ -213,6 +215,7 @@ catch a misplaced policy; they do not authenticate it.
 | `summary --json-output` | `total_components`, `component_types`, `total_dependencies`, `total_risks`, `risk_breakdown` and the inventory's `completeness` claim. |
 | `blast-radius --json-output` | `subject`, `affected_agents`, `dependent_components`, `reachable_components`, `declared_principals`, `scope`, `effective_authority`, `linked` and `limitations`. |
 | `digest --json-output` | `file_sha256`, `canonical_digest`, `content_digest`, `content_profile`, `spec_version` and `components`, in that order; a digest that is undefined for the inventory is `null`. |
+| `graph --format json` | `format` (`nexus-symbiote/graph-view/v1`), `inventory`, `focus`, `coverage`, `limitations`, `nodes` (each with its risk classes, `basis`, `assessed`, findings summary and facts), `edges` and `exposure` (sources, sinks and ranked `paths`, with omitted counts); see [graph view](graph-view.md#the-json-document). |
 | `discover-mcp` | The observation: `endpoint`, `protocol_version` and `requested_protocol_version`, `collector_id`, `collection_id`, `observed_at`, `completed_at`, `client_info`, `user_agent`, `session_established`, `session_digest`, `server_info`, `server_capabilities`, `instructions` and `instructions_hash`, `declaration_hash` and `identity_hash` with their profiles, `tools` (each with its redacted `descriptor`, `definition_hash`, `fingerprint` and `lints`), `prompts`, `resource_templates`, `failures`, `complete`, `pages_observed`, `bytes_observed` and `coverage`, which names what was not observed. With `--record`, a native AgentBOM instead. |
 | `advisories` | `components_checked`, `components_skipped` and `components_excluded`, with the `skipped` and `excluded` entries and their reasons; `queries` (the ecosystem, name and version of each package in scope); `advisories`; `errors`; `coverage` (`complete`, `partial` or `none`) and `complete`; `dry_run`; `checked_at`, `tool_version` and `inventory_sha256`; `scope` and `sent_to_osv`. |
 | `verify-live --json-output` | `complete`, `servers_checked`, `servers_reachable`, `servers_skipped`, `has_drift`, `inputs` (the SHA-256 of the inventory and of the launch policy) and `results`: per MCP server, `server`, `server_ref`, `status` (`verified`, `failed` or `not-verifiable`), `reachable`, `reason`, `error`, `transport`, `protocol_version`, `launcher_sha256`, `rug_pull_detected`, `live_schema_hash`, `declaration_hash` and `declaration_status`, `identity_hash` and `identity_status`, and `tools` (each tool's `name`, `definition_hash` and `status`: `match`, `changed`, `new` or `unverifiable`). |
@@ -408,6 +411,32 @@ nexus-symbiote discover-mcp [OPTIONS] ENDPOINT
 | `--client-version` `TEXT` | `clientInfo` version sent in `initialize` (default: the tool version). |
 | `--user-agent` `TEXT` | `User-Agent` header to send; none is sent by default. |
 | `--raw-descriptors` `PATH` | Also write the unredacted server info, capabilities, instructions, tool descriptors, prompts and resource templates to this new file (mode 0600) for review; only the bearer token and session ID are masked. |
+
+### `graph`
+
+Write a view of an inventory's associations, risk classes and exposure paths.
+
+```text
+nexus-symbiote graph [OPTIONS] INVENTORY
+```
+
+| Option | Description |
+|---|---|
+| `-o`, `--output` `PATH` | Write the view to this file; required for HTML. JSON goes to standard output without it. |
+| `--format` `html\|json` | A self-contained HTML page (default), or the view as a JSON document. |
+| `--focus` `REF` | Show only this component's potential blast radius: it, what depends on it, and what it and the components of type `agent` among those reach. |
+| `--max-nodes` `INTEGER RANGE` | Fail rather than show more components than this (default: 2000, at most 20000). |
+
+Exposure paths are the shortest recorded paths from agents and IDE agents to
+components with a `code-exec`, `exfil-capable`, `write-capable` or `secret-access`
+risk class or a high or critical finding: at most 200 agents are searched and 200
+paths kept, and the view reports how many were left out. Edges are static repository
+associations; runtime use and effective authority are not observed. The HTML file
+loads nothing from outside, pins its one style block and one script with a
+Content-Security-Policy hash, and shows inventory text only escaped. A graph larger
+than `--max-nodes` fails with exit status 1 instead of being cut. The output may not
+be the inventory itself. [Graph view](graph-view.md) gives the risk-class rules, the
+ranking and the JSON document.
 
 ### `import-shadowscan`
 

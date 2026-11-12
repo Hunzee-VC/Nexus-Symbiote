@@ -23,6 +23,7 @@ from nexus_symbiote.digest_cli import (
     source_date_epoch,
 )
 from nexus_symbiote.graph import validate_graph
+from nexus_symbiote.graph_cli import register_graph_commands
 from nexus_symbiote.live_cli import register_live_commands
 from nexus_symbiote.policy import Policy
 from nexus_symbiote.reporting import (
@@ -1475,6 +1476,7 @@ register_live_commands(main)
 register_supply_chain_commands(main)
 register_digest_commands(main)
 register_attestation_commands(main)
+register_graph_commands(main)
 
 if __name__ == "__main__":
     main()
