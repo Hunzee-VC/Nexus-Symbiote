@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -12,7 +14,12 @@ from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.collection import is_imported
 from nexus_symbiote.core.coverage import CoverageStatus, assess_coverage
 from nexus_symbiote.core.enums import RiskSeverity, SerializationSafety
-from nexus_symbiote.core.models import AgentComponent, ModelComponent, RiskAssessment
+from nexus_symbiote.core.models import (
+    AgentComponent,
+    ComponentBase,
+    ModelComponent,
+    RiskAssessment,
+)
 from nexus_symbiote.scanner_catalog import BUILTIN_SCANNER_NAMES
 
 if TYPE_CHECKING:
@@ -65,6 +72,46 @@ def _intrinsic_model_risks(component: ModelComponent) -> list[RiskAssessment]:
     return risks
 
 
+_CONTENT_DIGEST_FIELDS = ("content_hash", "definition_hash", "schema_hash")
+
+
+def component_content_digest(component: ComponentBase) -> str | None:
+    """The unkeyed digest of the component's reviewed bytes, when a collector recorded one.
+
+    Detail texts carry counts, not content, so without this a finding whose payload
+    changed at the same count would keep its fingerprint.
+    """
+    for name in _CONTENT_DIGEST_FIELDS:
+        value = getattr(component, name, None)
+        if isinstance(value, str) and value:
+            return value
+    return component.hashes.get("sha256") or None
+
+
+def finding_fingerprint(
+    component_ref: str,
+    category: str,
+    severity: RiskSeverity,
+    detail: str,
+    content: str | None = None,
+) -> str:
+    """The digest a suppression names, so it covers the finding as it was reviewed.
+
+    The fields are hashed as ASCII JSON with sorted keys rather than RFC 8785 text:
+    a detail can quote a lone surrogate from the checkout, which RFC 8785 cannot
+    encode, and ASCII escaping keeps it distinct from any other string.
+    """
+    document = {
+        "component_ref": component_ref,
+        "category": category,
+        "severity": severity.value,
+        "detail": detail,
+        "content": content,
+    }
+    text = json.dumps(document, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(text.encode("ascii")).hexdigest()
+
+
 @dataclass
 class RiskFinding:
     component_ref: str
@@ -75,12 +122,27 @@ class RiskFinding:
     recommendation: str | None = None
     references: list[str] = field(default_factory=list)
     score: float = 0.0
+    fingerprint: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.fingerprint:
+            self.fingerprint = finding_fingerprint(
+                self.component_ref, self.category, self.severity, self.detail
+            )
 
 
 @dataclass
 class SuppressedFinding:
     finding: RiskFinding
     suppression: Suppression
+
+
+@dataclass
+class StaleSuppression:
+    """A suppression whose component and category still have a finding it no longer names."""
+
+    suppression: Suppression
+    current_fingerprints: list[str]
 
 
 @dataclass
@@ -100,6 +162,7 @@ class RiskReport:
     suppressed: list[SuppressedFinding] = field(default_factory=list)
     suppressions_expired: list[Suppression] = field(default_factory=list)
     suppressions_unused: list[Suppression] = field(default_factory=list)
+    suppressions_stale: list[StaleSuppression] = field(default_factory=list)
     gate: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -118,6 +181,7 @@ class RiskReport:
                     "severity": item.finding.severity.value,
                     "category": item.finding.category,
                     "detail": item.finding.detail,
+                    "fingerprint": item.finding.fingerprint,
                     "reason": item.suppression.reason,
                     "owner": item.suppression.owner,
                     "expires": item.suppression.expires.isoformat(),
@@ -126,6 +190,13 @@ class RiskReport:
             ],
             "suppressions_expired": [_suppression_dict(s) for s in self.suppressions_expired],
             "suppressions_unused": [_suppression_dict(s) for s in self.suppressions_unused],
+            "suppressions_stale": [
+                {
+                    **_suppression_dict(item.suppression),
+                    "current_fingerprints": item.current_fingerprints,
+                }
+                for item in self.suppressions_stale
+            ],
             "warning_threshold_exceeded": self.warning_threshold_exceeded,
             "total_components": self.total_components,
             "components_with_risks": self.components_with_risks,
@@ -140,6 +211,7 @@ class RiskReport:
                     "detail": f.detail,
                     "recommendation": f.recommendation,
                     "score": round(f.score, 2),
+                    "fingerprint": f.fingerprint,
                 }
                 for f in self.findings
             ],
@@ -150,6 +222,7 @@ def _suppression_dict(suppression: Suppression) -> dict[str, str]:
     return {
         "component_ref": suppression.component_ref,
         "category": suppression.category,
+        "fingerprint": suppression.fingerprint,
         "reason": suppression.reason,
         "owner": suppression.owner,
         "expires": suppression.expires.isoformat(),
@@ -225,8 +298,10 @@ class RiskScorer:
                 f"{len(gaps) - MAX_REPORTED_COVERAGE_GAPS} further coverage gaps omitted"
             )
         today = self.today or datetime.now(UTC).date()
-        active = {(s.component_ref, s.category): s for s in self.suppressions}
-        used: set[tuple[str, str]] = set()
+        active = {(s.component_ref, s.category, s.fingerprint): s for s in self.suppressions}
+        suppressed_pairs = {(s.component_ref, s.category) for s in self.suppressions}
+        used: set[tuple[str, str, str]] = set()
+        unmatched: dict[tuple[str, str], list[str]] = {}
         components_with_risks: set[str] = set()
         category_scores: dict[str, float] = {}
 
@@ -238,6 +313,7 @@ class RiskScorer:
             )
             if not risks:
                 continue
+            content = component_content_digest(comp)
             for risk in risks:
                 if risk.category in self.ignore_categories:
                     report.ignored_findings += 1
@@ -254,13 +330,21 @@ class RiskScorer:
                     recommendation=risk.recommendation,
                     references=list(risk.references),
                     score=weight,
+                    fingerprint=finding_fingerprint(
+                        comp.bom_ref, risk.category, sev, risk.detail, content
+                    ),
                 )
-                suppression = active.get((comp.bom_ref, risk.category))
+                key = (comp.bom_ref, risk.category, finding.fingerprint)
+                suppression = active.get(key)
                 if suppression is not None:
-                    used.add((comp.bom_ref, risk.category))
+                    used.add(key)
                     if suppression.expires >= today:
                         report.suppressed.append(SuppressedFinding(finding, suppression))
                         continue
+                elif (comp.bom_ref, risk.category) in suppressed_pairs:
+                    unmatched.setdefault((comp.bom_ref, risk.category), []).append(
+                        finding.fingerprint
+                    )
                 components_with_risks.add(comp.bom_ref)
                 report.findings.append(finding)
 
@@ -314,7 +398,11 @@ class RiskScorer:
                     f"suppression of {suppression.category} on {suppression.component_ref} "
                     f"expired on {suppression.expires.isoformat()}"
                 )
-            elif (suppression.component_ref, suppression.category) not in used:
+            elif (suppression.component_ref, suppression.category, suppression.fingerprint) in used:
+                continue
+            elif current := unmatched.get((suppression.component_ref, suppression.category)):
+                report.suppressions_stale.append(StaleSuppression(suppression, sorted(current)))
+            else:
                 report.suppressions_unused.append(suppression)
         report.findings.sort(key=lambda f: self.weights.get(f.severity, 0.0), reverse=True)
 
