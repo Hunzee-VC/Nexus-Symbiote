@@ -37,6 +37,8 @@ MODULE_FLOORS: dict[str, tuple[int, int | None]] = {
     "nexus_symbiote/policy.py": (90, 82),
     "nexus_symbiote/utils/secrets.py": (90, 85),
     "nexus_symbiote/utils/terminal.py": (95, None),
+    "nexus_symbiote/attestation.py": (98, 98),
+    "nexus_symbiote/attestation_cli.py": (98, 98),
     # Measured at 87% of statements and 86% of branches when scripts/ joined the report.
     "scripts/run_action.py": (75, 65),
     "nexus_symbiote/core/content_digest.py": (98, 98),

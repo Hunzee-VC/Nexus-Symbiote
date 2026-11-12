@@ -67,6 +67,8 @@ change them. See [collection limits](collection-limits.md).
 | [`runtime digest`](#runtime-digest) | offline | Print the digest a runtime contract, approval or revocation list binds |
 | [`runtime key-id`](#runtime-key-id) | offline | Print the key ID of an Ed25519 public key |
 | [`runtime register`](#runtime-register) | offline | Make a newly issued runtime snapshot current in a gateway state store |
+| [`attest`](#attest) | offline | Sign a file's exact bytes, usually an inventory or a baseline, for a stated purpose |
+| [`verify-attestation`](#verify-attestation) | offline | Check that trusted keys attested a file's bytes or inventory content for a purpose |
 | [`discover-mcp`](#discover-mcp) | **live** | List the tools an HTTPS MCP server serves, without calling them |
 | [`advisories`](#advisories) | **live** | Query OSV for advisories affecting exact PyPI and npm package versions |
 | [`verify-live`](#verify-live) | **live** | Compare an AgentBOM with the tools that operator-pinned stdio servers serve |
@@ -100,6 +102,7 @@ prints, and the `--json-output`
 documents of `validate`, `risk`, `diff`, `summary`, `blast-radius` and `verify-live`,
 write a `[` that follows such a `##` as `\u005b`; the document parses to exactly the
 same value. Files written with `-o` are not changed.
+`attest` and `verify-attestation --json-output` print their JSON the same way.
 
 Colors are used only on a terminal, and `NO_COLOR` turns them off.
 
@@ -109,7 +112,7 @@ Colors are used only on a terminal, and `NO_COLOR` turns them off.
 |---|---|
 | `0` | The command completed and every requested gate passed. |
 | `1` | A gate or check failed (risk gate, integrity, digest or signature mismatch, `diff --fail-on-alert`, incomplete collection or observation), the input could not be read or parsed, `import-shadowscan` ran without `--report-only`, or an unexpected internal error occurred. |
-| `2` | Usage error: an unknown command or option, a missing argument or file, a `PROJECT_PATH` of `scan` or `baseline` or a `--project` of `validate`, `risk`, `verify-artifact` or `verify-live` that is a file, a `verify-live` launch policy kept where the [launch policy](#launch-policy) rules forbid, an invalid value (including a malformed `verify-artifact --sha256` and an incomplete `--bundle`, `--signer-identity` and `--issuer` set), a relative project path that a symbolic link leads outside the working directory, an invalid `NEXUS_SYMBIOTE_MODE` or collection limit, a `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` shorter than 32 characters, a malformed `SOURCE_DATE_EPOCH` for `scan`, `baseline` or `import-shadowscan`, or a live command run without live mode (`advisories --dry-run` contacts nothing and runs in either mode). |
+| `2` | Usage error: an unknown command or option, a missing argument or file, a `PROJECT_PATH` of `scan` or `baseline` or a `--project` of `validate`, `risk`, `verify-artifact` or `verify-live` that is a file, a `verify-live` launch policy kept where the [launch policy](#launch-policy) rules forbid, a `verify-attestation` `--trusted-key` kept where the [trusted-key rule](#verify-attestation) forbids, an invalid value (including a malformed `verify-artifact --sha256` and an incomplete `--bundle`, `--signer-identity` and `--issuer` set), a relative project path that a symbolic link leads outside the working directory, an invalid `NEXUS_SYMBIOTE_MODE` or collection limit, a `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` shorter than 32 characters, a malformed `SOURCE_DATE_EPOCH` for `scan`, `baseline` or `import-shadowscan`, or a live command run without live mode (`advisories --dry-run` contacts nothing and runs in either mode). |
 
 What exit status 1 means for each gate:
 
@@ -121,6 +124,7 @@ What exit status 1 means for each gate:
 | `diff` | `--fail-on-alert` was given and the diff reports a security alert. |
 | `baseline` | The scan gate failed, under the project policy or the built-in one. |
 | `verify-artifact`, `verify-discovery` | The digest, signature or projection does not match. |
+| `verify-attestation` | Too few trusted keys signed the attestation, or it does not cover the file's bytes or content, the purpose or the age limit, or an input could not be read. |
 | `verify-live` | A stdio server could not be observed completely (a run with no stdio server observes nothing), or a server's served tools, declarations or identity differ from the inventory; with `--record`, such drift fails unless `--accept-drift` is given. |
 | `discover-mcp` | The observation is incomplete; with `--record`, nothing is written. |
 | `advisories` | An advisory was found (unless `--no-fail-on-advisory`), or not every package in scope was looked up (`coverage` is `partial` or `none`); with `--dry-run`, only when the report lists an error. |
@@ -274,6 +278,32 @@ nothing up, so `coverage` is `none`, and it exits 1 only when a package in scope
 no exact identity or more than 500 packages would be sent. A report keeps at most
 10,000 advisories per package and 20,000 in total; beyond that, lookups end with an
 error and `coverage` is `partial`.
+
+### `attest`
+
+Sign the exact bytes of SUBJECT for one purpose; an explicit operator step.
+
+```text
+nexus-symbiote attest [OPTIONS] SUBJECT
+```
+
+| Option | Description |
+|---|---|
+| `--key` `FILE` | Ed25519 private key PEM that only its owner can read; repeat for each signer. (required, repeatable) |
+| `--purpose` `generated\|reviewed` | generated: you produced SUBJECT; reviewed: you reviewed SUBJECT as a baseline. (required) |
+| `--out` `PATH` | Envelope file to create with mode 0600; must not exist. (required) |
+| `--passphrase-file` `PATH` | Passphrase for encrypted private keys, on the first line of this file, which only its owner may read. |
+| `--source-revision` `TEXT` | Git commit ID SUBJECT was produced from, 40 or 64 lowercase hexadecimal characters; recorded as your claim and never checked. |
+
+SUBJECT is read once, as a regular file reached without symbolic links, at most
+64 MiB. The attestation is a DSSE envelope over an in-toto statement that binds the
+SHA-256 of those bytes, the purpose, the signing time in whole seconds and, for a native
+inventory this build reads, its format version and content digest. The command prints
+one JSON line with `out`, `subject_sha256`, `subject_format`, `content_digest` (native
+inventories only), `purpose`, `signers` (key IDs) and `signed`. Each `--key` must be a
+different key, and an `--out` that names SUBJECT is a usage error. The attestation
+records who signed and why; it does not establish that the file is accurate, complete
+or safe. See [inventory attestation](inventory-attestation.md).
 
 ### `baseline`
 
@@ -649,6 +679,39 @@ nexus-symbiote verify-artifact [OPTIONS] ARTIFACT_PATH
 
 A malformed `--sha256`, or a `--bundle`, `--signer-identity` and `--issuer` set that
 is incomplete, is a usage error (exit 2).
+
+### `verify-attestation`
+
+Verify that trusted keys attested SUBJECT for a purpose; exit 1 when they did not.
+
+```text
+nexus-symbiote verify-attestation [OPTIONS] SUBJECT ENVELOPE
+```
+
+| Option | Description |
+|---|---|
+| `--trusted-key` `FILE` | Trusted Ed25519 public key PEM; repeat to build the ring. It must lie outside every git working tree that holds SUBJECT, ENVELOPE or the current directory, which catches misplacement but does not authenticate the key. (required, repeatable) |
+| `--purpose` `generated\|reviewed` | Purpose the attestation must have been signed for. Any trusted key can sign either purpose, so trust only keys that may sign for this one. (required) |
+| `--threshold` `INTEGER RANGE` | Minimum number of distinct trusted keys that must have signed, at most the number of distinct trusted keys (default: 1). |
+| `--match` `bytes\|content` | bytes (default): SUBJECT is the attested file. content: SUBJECT is a native inventory with the attested content digest, such as a later collection of the same content. |
+| `--max-age-days` `INTEGER RANGE` | Refuse an attestation signed more than this many days ago (1 to 36500). |
+| `--json-output` | Print the verified facts as JSON. |
+
+A verified attestation is printed as plain lines, or with `--json-output` as a JSON
+object with `attestation_verified`, `purpose`, `signers`, `match`, `subject_sha256` (the
+file passed), `attested_sha256` (the file that was signed), `subject_format`,
+`signed_at`, and, when recorded, `spec_version`, `content_digest`, `content_profile` and
+`source_revision`. A failure prints `attestation verification failed:`, a fixed message
+and a reason code from [inventory attestation](inventory-attestation.md#reason-codes),
+and exits 1; nothing from SUBJECT, ENVELOPE or a key is printed. A `--trusted-key` file
+inside a git working tree that holds SUBJECT, ENVELOPE or the current directory, also
+under another name for the tree directory itself, or one with other hard links, is a
+usage error, as is a `--threshold` above the number of distinct trusted keys. A mount of
+a directory or file inside the tree gives the key a location outside it and is not
+detected ([trusted keys](inventory-attestation.md#trusted-keys)). Verification
+establishes who signed which bytes or content for which purpose and when, by the
+signer's clock; it does not establish that SUBJECT is accurate, complete or safe, or that
+it is the newest file the signers attested.
 
 ### `verify-discovery`
 

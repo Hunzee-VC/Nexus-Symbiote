@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 import click
 
 from nexus_symbiote import __version__, limits, modes
+from nexus_symbiote.attestation_cli import register_attestation_commands
 from nexus_symbiote.core.aibom import AIBOM, NativeFormatError
 from nexus_symbiote.core.enums import AssuranceLevel
 from nexus_symbiote.core.models import AIBOMMetadata, CompletenessClaim
@@ -1473,6 +1474,7 @@ register_runtime_commands(main)
 register_live_commands(main)
 register_supply_chain_commands(main)
 register_digest_commands(main)
+register_attestation_commands(main)
 
 if __name__ == "__main__":
     main()

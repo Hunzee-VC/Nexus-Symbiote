@@ -364,6 +364,28 @@ def test_every_static_command_runs_under_the_offline_guard(tmp_path):
     )
     verified = run("runtime", "verify", str(signed), "--kind", "trust", "--public-key", str(public))
     assert json.loads(verified)["contract_verified"] is True
+    attested = tmp_path / "bom.att.json"
+    run(
+        "attest",
+        str(native),
+        "--key",
+        str(private),
+        "--purpose",
+        "reviewed",
+        "--out",
+        str(attested),
+    )
+    checked = run(
+        "verify-attestation",
+        str(native),
+        str(attested),
+        "--trusted-key",
+        str(public),
+        "--purpose",
+        "reviewed",
+        "--json-output",
+    )
+    assert json.loads(checked)["attestation_verified"] is True
 
 
 def test_documented_offline_demo_collects_every_surface(tmp_path):
