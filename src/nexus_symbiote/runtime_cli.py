@@ -182,6 +182,7 @@ def _unlink_created(path: Path) -> None:
             if stat.S_ISREG(info.st_mode):
                 os.unlink(relative.name, dir_fd=parent)
     except (OSError, ValueError):
+        # Best-effort cleanup: the caller re-raises the failure that led here.
         pass
 
 
