@@ -374,7 +374,8 @@ def test_traces_that_cannot_show_or_classify_use_fail_the_command(
     trace.write_text(json.dumps(otlp_export(otlp_span(attributes), resource=resource)))
     result = runner.invoke(main, ["trace-diff", str(inventory), str(trace)])
     assert result.exit_code == 1, result.output
-    assert result.stdout.splitlines()[-1].startswith(f"Trace gate failed: {reason}")
+    last = result.stdout.splitlines()[-1]
+    assert last.startswith("Trace gate failed: ") and reason in last
 
 
 def test_the_summary_lists_a_bounded_number_of_items_and_counts_the_rest(tmp_path, runner):

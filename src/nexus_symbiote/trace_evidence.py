@@ -211,8 +211,10 @@ class Observations:
                 self.mcp_clients["unattributed"] += 1
         if unclassified:
             self.unclassified += 1
-        if operation == "execute_tool" or method == "tools/call":
-            tool = values.get("gen_ai.tool.name")
+        # A span that names a tool reports a call to it whatever it calls its operation:
+        # instrumentation may omit the operation name or use a value of its own.
+        tool = values.get("gen_ai.tool.name")
+        if tool is not None or operation == "execute_tool" or method == "tools/call":
             if tool is None:
                 self.without_identifier["tool"] += 1
             else:
@@ -234,10 +236,14 @@ class Observations:
             )
             model = requested if requested is not None else response
             self._observe(span, names, "model", (provider, model), resolved)
-        if operation in ("create_agent", "invoke_agent"):
-            ident = values.get("gen_ai.agent.id")
-            name = values.get("gen_ai.agent.name")
-            if ident is None and name is None:
+        ident = values.get("gen_ai.agent.id")
+        name = values.get("gen_ai.agent.name")
+        named = ident is not None or name is not None
+        # Spans of other known operations may carry the name of the agent they run in, so
+        # only an operation name outside the convention makes a named agent a report.
+        custom = isinstance(operation, str) and operation not in GENAI_OPERATIONS
+        if operation in ("create_agent", "invoke_agent") or (custom and named):
+            if not named:
                 self.without_identifier["agent"] += 1
             else:
                 version = values.get("gen_ai.agent.version")

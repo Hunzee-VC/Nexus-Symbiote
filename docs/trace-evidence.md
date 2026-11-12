@@ -64,10 +64,10 @@ attributes; a span's own value wins:
 | Attribute | Used for |
 |---|---|
 | `gen_ai.operation.name`, `mcp.method.name` | What the span is: a tool call (`execute_tool` or `tools/call`), an agent operation (`create_agent` or `invoke_agent`), an MCP client call |
-| `gen_ai.tool.name`, `gen_ai.tool.type` | The tool a tool call names, and its type |
+| `gen_ai.tool.name`, `gen_ai.tool.type` | The tool a span names, and its type. A span that names a tool is read as a call to it whatever its operation name or MCP method is, so a missing or custom operation name cannot hide the call |
 | `gen_ai.request.model`, `gen_ai.response.model` | The model requested, and the model that answered |
 | `gen_ai.provider.name`, legacy `gen_ai.system` | The model's provider; `gen_ai.system` is used, and counted, only when `gen_ai.provider.name` is absent |
-| `gen_ai.agent.id`, `gen_ai.agent.name`, `gen_ai.agent.version` | The agent an agent operation names |
+| `gen_ai.agent.id`, `gen_ai.agent.name`, `gen_ai.agent.version` | The agent an agent operation names. A span whose `gen_ai.operation.name` is not a value of the convention and that names an agent is read as an agent operation; a span of another known operation, such as `chat`, may carry the name of the agent it runs in and is not |
 | `network.transport`, `server.address`, `server.port`, `mcp.protocol.version` | The remote endpoint of an MCP client call |
 | `gen_ai.skill.name`, `gen_ai.data_source.id`, `gen_ai.memory.store.id`, `gen_ai.prompt.name` | Identifiers reported for information |
 | `service.name` (resource attributes only) | Which service reported each item |

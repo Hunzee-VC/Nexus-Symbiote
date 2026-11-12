@@ -825,12 +825,16 @@ def test_a_span_whose_operation_method_or_transport_cannot_be_read_fails_the_gat
     ]
     evidence = _evidence(tmp_path, components, otlp_span(attributes, kind=CLIENT))
     assert [e for e in evidence["reconciliation"]["matched"] if e["kind"] == "tool"] == []
-    undeclared = [
-        {"kind": "tool", "name": "search", "endpoint": "evil.example:443", "span_count": 1}
+    # The tool the span names is reported whatever became of its operation or method.
+    address = attributes.get("server.address")
+    assert evidence["reconciliation"]["undeclared"] == [
+        {
+            "kind": "tool",
+            "name": attributes["gen_ai.tool.name"],
+            "endpoint": f"{address}:443" if address else None,
+            "span_count": 1,
+        }
     ]
-    assert evidence["reconciliation"]["undeclared"] == (
-        undeclared if attributes.get("server.address") == "evil.example" else []
-    )
     assert evidence["coverage"]["spans_unclassified"] == 1
     assert evidence["gate"]["reasons"][-1] == (
         "1 span has an operation name, MCP method or MCP transport that could not be read, so "
@@ -845,6 +849,41 @@ def test_a_span_whose_operation_method_or_transport_cannot_be_read_fails_the_gat
     assert validate_sarif(sarif) == []
     notifications = sarif["runs"][0]["invocations"][0]["toolExecutionNotifications"]
     assert {"level": "warning", "message": {"text": note}} in notifications
+
+
+@pytest.mark.parametrize(
+    "attributes",
+    [
+        {"gen_ai.tool.name": "delete_all"},
+        {"gen_ai.operation.name": "run_tool", "gen_ai.tool.name": "delete_all"},
+        {"gen_ai.operation.name": "EXECUTE_TOOL", "gen_ai.tool.name": "delete_all"},
+        {"gen_ai.operation.name": "chat", "gen_ai.tool.name": "delete_all"},
+        {"mcp.method.name": "TOOLS/CALL", "gen_ai.tool.name": "delete_all"},
+    ],
+)
+def test_a_tool_named_under_any_operation_is_reported(tmp_path, attributes):
+    evidence = _evidence(tmp_path, [_declared_tool("tool:s", "search")], otlp_span(attributes))
+    assert _entries(evidence, "undeclared") == [
+        {"kind": "tool", "name": "delete_all", "endpoint": None, "span_count": 1}
+    ]
+    assert evidence["gate"]["passed"] is False
+
+
+@pytest.mark.parametrize("operation", ["run_agent", "INVOKE_AGENT"])
+def test_an_agent_named_under_an_operation_outside_the_convention_is_reported(tmp_path, operation):
+    attributes = {"gen_ai.operation.name": operation, "gen_ai.agent.name": "shadow-planner"}
+    evidence = _evidence(tmp_path, [_agent("agent:p", "planner")], otlp_span(attributes))
+    assert [(e["kind"], e["name"]) for e in _entries(evidence, "undeclared")] == [
+        ("agent", "shadow-planner")
+    ]
+    assert evidence["gate"]["passed"] is False
+
+
+def test_a_declared_tool_named_under_another_operation_still_matches(tmp_path):
+    span = otlp_span({"gen_ai.operation.name": "run_tool", "gen_ai.tool.name": "search"})
+    evidence = _evidence(tmp_path, [_declared_tool("tool:s", "search")], span)
+    assert [e["inventory_ref"] for e in _entries(evidence, "matched")] == ["tool:s"]
+    assert evidence["gate"]["passed"] is True
 
 
 def test_unreadable_details_and_transports_that_attribute_nothing_are_only_counted(tmp_path):
