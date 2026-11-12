@@ -482,6 +482,14 @@ _DISPLAY_ENVIRONMENT = _names(
 _RELOCATED = "environment relocates resolver configuration into the project"
 _SEARCHED = "PATH may search the project for the runner"
 _REPLACED = "environment replaces or constrains the launched package"
+# bash imports BASH_FUNC_<name>%% (and the older BASH_FUNC_<name>()) as a function that
+# replaces the program <name> in every bash the launch starts, the package runner included.
+_EXPORTED_FUNCTION = "BASH_FUNC_"
+_FUNCTION_REPLACED = "environment defines a shell function that can replace the launched program"
+# A non-interactive bash sources BASH_ENV before its script; a file that may lie in the
+# project can define a function that replaces the runner. ENV is read only interactively.
+_STARTUP_ENVIRONMENT = "BASH_ENV"
+_STARTUP_IN_PROJECT = "environment names a shell startup file that may lie in the project"
 _WINDOWS_ROOT = re.compile(r"[A-Za-z]:[\\/]|[\\/]")
 _LOCATOR = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s,;\"']+")
 _NPM_PURL_NAME = re.compile(r"(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*")
@@ -764,7 +772,12 @@ def _runner_environment(
     for variable, value in environment if family else ():
         name = variable.upper()
         windows = name in _WINDOWS_LOCATION_ENVIRONMENT
-        if name == "PATH":
+        if name.startswith(_EXPORTED_FUNCTION):
+            reasons.append(_FUNCTION_REPLACED)
+        elif name == _STARTUP_ENVIRONMENT:
+            if not _absolute(value):
+                reasons.append(_STARTUP_IN_PROJECT)
+        elif name == "PATH":
             if not _absolute_list(value):
                 sources.append((_environment_label(variable), value))
                 reasons.append(_SEARCHED)
@@ -1431,6 +1444,7 @@ class MCPScanner(Scanner):
             variable
             for variable in (*env, *(variable for variable, _ in launch.environment))
             if variable.upper() in _CODE_LOADING_ENVIRONMENT
+            or variable.upper().startswith(_EXPORTED_FUNCTION)
             or _npm_key(variable) in _NPM_CODE_SETTINGS
         ]
         if loading:

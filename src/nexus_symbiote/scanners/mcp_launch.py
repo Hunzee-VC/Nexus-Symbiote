@@ -743,8 +743,11 @@ _DENO_RUN = _table(
 )
 _SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh", "ash", "mksh", "fish"})
 # bash long options that take the next word; other long options are flags.
-_SHELL_LONG_VALUES = frozenset({"--rcfile", "--init-file"})
+_SHELL_STARTUP_FILES = frozenset({"--rcfile", "--init-file"})
 _AMBIGUOUS_SHELL = "shell options before the script are ambiguous"
+# An interactive (-i) bash sources the named file before the script, and a function or
+# alias defined there replaces any program the script names, the package runner included.
+_STARTUP_FILE = "interactive shell runs a named startup file before the script"
 # fish reads its options with getopt "+hPilNnvc:C:p:d:f:D:o:" and unique long prefixes.
 _FISH_FLAGS = frozenset("hPilNnv")
 _FISH_FLAG_RUN = re.compile("[hPilNnv]*")
@@ -867,6 +870,8 @@ def _shell_script(
         return _fish_script(words, start, budget)
     index = start
     inline = False
+    interactive = False
+    startup = False
     while index < len(words):
         word = words[index]
         _spend(budget, word)
@@ -879,10 +884,13 @@ def _shell_script(
             # zsh reads a lone "+" as the end of options, other shells as an empty option.
             return None, [], _AMBIGUOUS_SHELL
         if word.startswith("--"):
-            index += 1 if word in _SHELL_LONG_VALUES else 0
+            if word in _SHELL_STARTUP_FILES:
+                startup = True
+                index += 1
             continue
         letters = word[1:]
         inline = inline or "c" in letters
+        interactive = interactive or (word[0] == "-" and "i" in letters)
         valued = "oO" if name == "bash" else "o"
         takes = sum(letters.count(letter) for letter in valued)
         if takes:
@@ -897,6 +905,8 @@ def _shell_script(
             return None, [], _AMBIGUOUS_SHELL
         if name == "zsh" and "b" in letters:
             break
+    if startup and interactive:
+        return None, [], _STARTUP_FILE
     if not inline:
         return None, [], None
     if index >= len(words):
@@ -1239,6 +1249,12 @@ _CMD_VARIABLE = re.compile(r"%[^%\s]*%|![^!\s]*!")
 _PLAIN_VARIABLE = re.compile(r"\$[A-Za-z_][A-Za-z0-9_]*")
 _SEQUENCE = re.compile(r"(-?\d{1,3}|[A-Za-z])\.\.(-?\d{1,3}|[A-Za-z])")
 MAX_READINGS = 64
+# Default operands nested deeper than this make a word unreadable rather than read in part.
+MAX_EXPANSION_DEPTH = 8
+_EXPANSION_SYNTAX = re.compile(r"\$\{|\}")
+_BRACE_SYNTAX = re.compile(r"[{},]")
+# The longest text a {x..y} sequence can hold: -999..-999.
+_MAX_SEQUENCE_TEXT = 10
 
 
 def _rewritten(word: str, budget: list[int]) -> list[list[str]] | None:
@@ -1248,7 +1264,7 @@ def _rewritten(word: str, budget: list[int]) -> list[list[str]] | None:
     !VAR! are empty or anything; a parameter expansion is empty, anything, or its
     default operand; brace lists and sequences become separate words; a pattern stays a
     pattern, which the program vocabulary is matched against. None when the readings
-    would exceed MAX_READINGS.
+    would exceed MAX_READINGS or default operands nest deeper than MAX_EXPANSION_DEPTH.
     """
     readings = [word]
     for variant in (
@@ -1257,28 +1273,39 @@ def _rewritten(word: str, budget: list[int]) -> list[list[str]] | None:
     ):
         if variant not in readings:
             readings.append(variant)
-    expanded: list[str] = []
+    expanded: dict[str, None] = {}
     for reading in readings:
         _spend(budget, reading)
-        for variant in _variables(reading):
-            if variant not in expanded:
-                expanded.append(variant)
+        variants = _variables(reading, budget)
+        if variants is None:
+            return None
+        expanded.update(dict.fromkeys(variants))
         if len(expanded) > MAX_READINGS:
             return None
-    sequences: list[list[str]] = []
+    sequences: dict[tuple[str, ...], None] = {}
     for reading in expanded:
         _spend(budget, reading)
-        words = _braces(_BRACKET.sub("?", reading))
+        words = _braces(_brackets(reading), budget)
         if words is None:
             return None
-        if words not in sequences:
-            sequences.append(words)
+        sequences[tuple(words)] = None
         if len(sequences) > MAX_READINGS:
             return None
-    return sequences
+    return [list(words) for words in sequences]
 
 
-def _variables(text: str) -> list[str]:
+def _brackets(text: str) -> str:
+    """``text`` with each bracket expression read as one character, ``?``.
+
+    A bracket expression ends at a ``]``, so none starts after the last one. Matching
+    only up to it keeps every attempt to one that succeeds, in linear time, instead of
+    one failed scan to the end of the word for each ``[`` after it.
+    """
+    end = text.rfind("]") + 1
+    return _BRACKET.sub("?", text[:end]) + text[end:]
+
+
+def _variables(text: str, budget: list[int]) -> list[str] | None:
     """``text`` with each expansion empty, as anything (NUL) and as its default operand."""
     results = [text]
     for pattern in (_CMD_VARIABLE, _PLAIN_VARIABLE):
@@ -1287,59 +1314,110 @@ def _variables(text: str) -> list[str]:
             for result in results
             for variant in (pattern.sub("", result), pattern.sub("\x00", result))
         ]
-    final: list[str] = []
+    final: dict[str, None] = {}
     for result in results:
-        for variant in _parameters(result):
-            if variant not in final:
-                final.append(variant)
+        variants = _parameters(result, MAX_READINGS + 1, budget)
+        if variants is None:
+            return None
+        for variant in variants:
+            final[variant] = None
             if len(final) > MAX_READINGS:
-                return final
-    return final
+                return list(final)
+    return list(final)
 
 
-def _parameters(text: str) -> list[str]:
-    """``text`` with each ${...} empty, as anything (NUL) or as its default operand."""
-    start = text.find("${")
-    if start < 0:
+def _parameters(text: str, limit: int, budget: list[int], depth: int = 0) -> list[str] | None:
+    """The first ``limit`` readings of ``text`` with each ${...} empty, anything or its default.
+
+    Readings come in the order of the choices, the first expansion varying slowest. One
+    pass finds the expansions, each charged to ``budget``, and each reading is built once,
+    so the work is linear in ``text`` and ``limit``. None when default operands nest
+    deeper than MAX_EXPANSION_DEPTH.
+    """
+    if depth > MAX_EXPANSION_DEPTH:
+        return None
+    pieces: list[str] = []
+    choices: list[list[str]] = []
+    position = 0
+    while True:
+        start = text.find("${", position)
+        end = _expansion_end(text, start) if start >= 0 else -1
+        if end < 0:
+            break
+        _spend(budget)
+        inner = text[start + 2 : end]
+        found = re.match(r"[A-Za-z_][A-Za-z0-9_]*(:?[-=+?])(.*)", inner, re.DOTALL)
+        replaced = re.match(r"[A-Za-z_][A-Za-z0-9_]*/[/#%]?[^/]*/(.*)", inner, re.DOTALL)
+        operand: str | None = None
+        if found is not None and found.group(1)[-1] in "-=+":
+            operand = found.group(2)
+        elif replaced is not None:
+            # ${NAME/pattern/text} may become text, or a value holding it.
+            operand = replaced.group(1)
+        options = ["", "\x00"]
+        if operand is not None:
+            nested = _parameters(operand, 4, budget, depth + 1)
+            if nested is None:
+                return None
+            options.extend(nested)
+        pieces.append(text[position:start])
+        choices.append(options)
+        position = end + 1
+    tail = text[position:]
+    if not choices:
         return [text]
-    depth = 0
-    end = -1
-    for index in range(start, len(text)):
-        if text.startswith("${", index):
-            depth += 1
-        elif text[index] == "}":
-            depth -= 1
-            if depth == 0:
-                end = index
-                break
-    if end < 0:
-        return [text]
-    inner = text[start + 2 : end]
-    found = re.match(r"[A-Za-z_][A-Za-z0-9_]*(:?[-=+?])(.*)", inner, re.DOTALL)
-    replaced = re.match(r"[A-Za-z_][A-Za-z0-9_]*/[/#%]?[^/]*/(.*)", inner, re.DOTALL)
-    choices = ["", "\x00"]
-    if found is not None and found.group(1)[-1] in "-=+":
-        choices.extend(_parameters(found.group(2))[:4])
-    elif replaced is not None:
-        # ${NAME/pattern/text} may become text, or a value holding it.
-        choices.extend(_parameters(replaced.group(1))[:4])
-    head, tail = text[:start], text[end + 1 :]
+    total = 1
+    for options in choices:
+        total = min(total * len(options), limit)
+    # Only the last expansions vary among the first ``total`` readings; each earlier one
+    # takes its first choice in all of them, so that text is joined once.
+    varying = 0
+    span = 1
+    while span < total:
+        varying += 1
+        span *= len(choices[-varying])
+    fixed = len(choices) - varying
+    head = "".join(
+        piece + options[0] for piece, options in zip(pieces[:fixed], choices[:fixed], strict=True)
+    )
     results: list[str] = []
-    for choice in choices:
-        for rest in _parameters(tail):
-            results.append(head + choice + rest)
-            if len(results) > MAX_READINGS:
-                return results
+    for index in range(total):
+        picked: list[str] = []
+        for options in reversed(choices[fixed:]):
+            index, digit = divmod(index, len(options))
+            picked.append(options[digit])
+        picked.reverse()
+        varied = "".join(part for pair in zip(pieces[fixed:], picked, strict=True) for part in pair)
+        results.append(head + varied + tail)
     return results
 
 
-def _braces(text: str) -> list[str] | None:
-    """The words bash brace expansion makes of ``text``; None past MAX_READINGS."""
+def _expansion_end(text: str, start: int) -> int:
+    """The index of the } that closes the ${ at ``start``, or -1."""
+    depth = 0
+    for match in _EXPANSION_SYNTAX.finditer(text, start):
+        if match.group() == "}":
+            depth -= 1
+            if depth == 0:
+                return match.start()
+        else:
+            depth += 1
+    return -1
+
+
+def _braces(text: str, budget: list[int]) -> list[str] | None:
+    """The words bash brace expansion makes of ``text``; None past MAX_READINGS.
+
+    Each search for a group is charged to ``budget`` for the characters it examines, so
+    a word that keeps expanding exhausts the budget instead of costing its length for
+    every one of up to MAX_READINGS words in each of MAX_READINGS rounds.
+    """
     words = [text]
     for _ in range(MAX_READINGS):
         changed: list[str] = []
         expanded = False
         for word in words:
+            _spend(budget, word)
             group = _brace_group(word)
             if group is None:
                 changed.append(word)
@@ -1356,22 +1434,32 @@ def _braces(text: str) -> list[str] | None:
 
 
 def _brace_group(word: str) -> tuple[int, int, list[str]] | None:
-    """The first {a,b} or {x..y} group of a word, with its items."""
-    start = word.find("{")
-    while start >= 0:
-        depth = 0
-        for index in range(start, len(word)):
-            if word[index] == "{":
-                depth += 1
-            elif word[index] == "}":
-                depth -= 1
-                if depth == 0:
-                    inner = word[start + 1 : index]
-                    items = _brace_items(inner)
-                    if items is not None:
-                        return start, index, items
-                    break
-        start = word.find("{", start + 1)
+    """The first {a,b} or {x..y} group of a word, with its items, in one pass.
+
+    Each { is paired with the } that closes it; a pair is a candidate when a comma sits
+    directly inside it or it is short enough to be a sequence. The first candidate,
+    by where it opens, whose items read is the group.
+    """
+    open_groups: list[list[int]] = []
+    candidates: list[tuple[int, int]] = []
+    # No group opens before the first { or closes after the last }.
+    for match in _BRACE_SYNTAX.finditer(word, max(word.find("{"), 0), word.rfind("}") + 1):
+        index = match.start()
+        char = word[index]
+        if char == "{":
+            open_groups.append([index, 0])
+        elif not open_groups:
+            continue
+        elif char == ",":
+            open_groups[-1][1] = 1
+        else:
+            start, comma = open_groups.pop()
+            if comma or index - start - 1 <= _MAX_SEQUENCE_TEXT:
+                candidates.append((start, index))
+    for start, end in sorted(candidates):
+        items = _brace_items(word[start + 1 : end])
+        if items is not None:
+            return start, end, items
     return None
 
 

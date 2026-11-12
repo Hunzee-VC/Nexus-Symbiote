@@ -104,6 +104,11 @@ A way around a limit that its entry does not describe is worth a
   program word and no `%`, `!`, `"`, `^` or unusual whitespace. Anything else is an
   inline shell script: a gap. So `sh -c "npx -y pkg@1.2.3 $HOME/data"` is a gap;
   pass such values as separate arguments or through `env`.
+- **Shell startup code is a gap.** An interactive shell (`-i`) given `--rcfile` or
+  `--init-file`, a `BASH_FUNC_<name>%%` exported function in the server's
+  environment, and a `BASH_ENV` that is not an absolute path run code before the
+  script that can replace the runner it names, so the launcher is unknown. An
+  absolute `BASH_ENV` and `ENV` stay a medium code-loading finding.
 - **A runner named by a path is classified by its name.** `./tools/npx`,
   `${workspaceFolder}/tools/npx` or a `PATH` entry in the project can run checkout
   code that the record attributes to the registry package. On Windows, an
