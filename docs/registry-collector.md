@@ -16,6 +16,44 @@ All paths are relative to the scan root, and the inventory records them that way
 
 A name is matched in its normal form, as PEP 503 normalises a PyPI name, so `llama.index.core`, `LLAMA_INDEX_CORE` and `llama-index-core` are one package with one component. An npm dependency declared as an alias, `"app-utils": "npm:@anthropic-ai/sdk@0.30.1"`, is classified and recorded by the package it installs, with the alias in the `npm_alias` property; a lockfile record whose `name` is an AI package also brings the dependency into the inventory. The same image named in several files is one component whose `source_paths` property lists them all.
 
+The collector also reads the project's [registry and index settings](#registry-and-index-settings), which can send a package to another registry or index.
+
+## Registry and index settings
+
+A project file can send a package manager to a registry or index other than the default one, where a package of the same name and version need not be the public one. For every inventoried npm package that is fetched from a registry, and every inventoried PyPI package that is not declared only by URL, the collector reads these settings from the project root:
+
+| Ecosystem | File | Settings |
+| --- | --- | --- |
+| npm | `.npmrc`, which npm, pnpm, Yarn 1 and Bun read | `registry`, `@scope:registry`, and `scope`, whose registry npm uses for every package whose own scope has no registry; pnpm, Yarn 1 and Bun ignore `scope`. It is read with the MCP collector's reader: top-level settings only, as npm reads them, and never an authentication setting |
+| npm | `.yarnrc` (Yarn 1) | `registry` and `@scope:registry` |
+| npm | `.yarnrc.yml` (Yarn 2 and later) | `npmRegistryServer` and `npmScopes.<scope>.npmRegistryServer` |
+| npm | `bunfig.toml` (Bun) | `registry` and `scopes` in `[install]`, each a URL or a table with a `url` |
+| PyPI | Root `requirements*.txt` files | `--index-url` (also `-i` and `--pypi-url`), `--extra-index-url` and `--find-links` (`-f`) on an option line. pip ignores them on a requirement line, and so does the collector |
+| PyPI | `pip.conf` and `pip.ini` | `index-url` (also `pypi-url`), `extra-index-url` and `find-links` in any section, read as pip's configparser reads the file, with `_` for `-` and a leading `--` accepted and an empty value ignored, as pip does. pip reads such a file when `PIP_CONFIG_FILE` names it or when the project root is the virtual environment it runs in |
+| PyPI | `pyproject.toml` and `uv.toml` | uv's `index-url`, `extra-index-url`, `find-links` and every index that is not `explicit` (`[[tool.uv.index]]`, or `[[index]]` in `uv.toml`), also in uv's `pip` table; every `[[tool.poetry.source]]` except an `explicit` one; every `[[tool.pdm.source]]` |
+
+Each setting that points elsewhere is listed on the package in its `package_sources` property, as `<file>:<setting>=<origin>`. The package gets a low `registry_origin` finding and no `package_url`, because its name and version no longer identify what is installed, and a PyPI package that no lockfile resolves loses the `registry_uri` that assumed PyPI. For this project:
+
+```text
+package.json   {"dependencies": {"openai": "4.0.0"}}
+.npmrc         registry=https://deploy:s3cret@npm.example.com/repository/npm/
+```
+
+the `openai` entry that `nexus-symbiote scan . --scanner registry --report-only -o agentbom.json` writes has no `package_url` and records:
+
+```json
+"package_sources": [
+  ".npmrc:registry=https://npm.example.com"
+]
+```
+
+with the finding "npm package 'openai' may resolve from a registry that the project configures (.npmrc:registry), not the default npm registry; its name and version do not establish identity."
+
+- **Which settings apply.** An npm package takes, from each file, the registry of its own scope. A package without one takes the file's default registry, except that npm takes, from `.npmrc`, the registry of the scope that `scope` names when that scope has one; pnpm, Yarn 1 and Bun ignore `scope`. Which package manager installs is not known, so every file counts, and in `.npmrc` both the `scope` registry and the default one count; an empty setting selects nothing, as npm reads it. npm fills in a `scope` such as `${NPM_SCOPE}` from the environment, so it may name any scope: when the file gives some scope a registry other than the default one, the package records `.npmrc:scope=[unresolved]`. A PyPI setting applies to every PyPI package of the project: pip applies index options and its configuration to every package of the run that reads them, uv, Poetry and PDM apply their indexes and sources to every package they resolve, and which files one install reads is not known. An explicit uv index or Poetry source serves only the packages that name it, which are [gaps](#coverage-gaps) already.
+- **What is not a redirect.** The default registries, `https://registry.npmjs.org/` and `https://registry.yarnpkg.com/` for npm and `https://pypi.org/simple/` for PyPI, with or without the final `/` and port 443, and with their scheme and host in any case of their ASCII letters. Every other value is one, including plain `http://`, another path on a default host, a host that only starts with a default one and a host with a letter from another script, such as a dotless `ı`, that Unicode case folding would equate with an ASCII one.
+- **What is exported.** Only a value's origins: scheme, host and port, never user information, a path, a query or a token. A value that depends on the environment, such as `${NPM_REGISTRY}`, is `[unresolved]`, a path is `[local]`, a value longer than 4,096 characters is `[not parsed]`, and a host that cannot be read without ambiguity is `[redacted]`. A package lists at most 32 sources and then one entry that counts the rest, and its finding names at most eight settings.
+- **When the files are read.** `.npmrc`, `.yarnrc`, `.yarnrc.yml` and `bunfig.toml` are read only when an inventoried npm package is fetched from a registry, and `pip.conf`, `pip.ini` and `uv.toml` only when an inventoried PyPI package is declared other than by URL, so a project without such a package never fails on them.
+
 ## Coverage gaps
 
 These make the collector partial, so `scan`, `validate` and `risk` fail by default. Gaps never name the value that caused them, which can hold a credential.
@@ -42,8 +80,10 @@ These make the collector partial, so `scan`, `validate` and `risk` fail by defau
 | `<compose file>: dockerfile_inline <Dockerfile gap>` | An inline Dockerfile has one of the Dockerfile gaps the README lists |
 | `<compose file>: YAML merge key cycle not followed` | A mapping merges itself |
 | `<file>: image reference not parsed` | An image that matches the catalog is not a valid image reference |
+| `.npmrc: a setting name depends on the environment; registries not resolved` | A `.npmrc` setting name holds `${...}`, which npm fills in from the environment, so it can be any registry setting |
+| `pip.conf: not read as pip reads it; index settings not resolved`, and the same for `pip.ini` | configparser, and so pip, refuses the file: text before the first section, a line that is neither a section nor a `key = value` or `key: value` setting, or a section or setting given twice |
 
-The requirements-file and Dockerfile gaps are listed in the [README](../README.md#registry-gaps-in-requirements-files-and-dockerfiles). A file that cannot be read or parsed, such as invalid TOML, JSON or YAML, a Compose file with a repeated key, a key tagged `!!binary` or with a tag outside YAML's own `tag:yaml.org,2002:` types, or a non-mapping service, or a requirement that packaging cannot parse, is a collection failure, which fails the collector.
+The requirements-file and Dockerfile gaps are listed in the [README](../README.md#registry-gaps-in-requirements-files-and-dockerfiles). A file that cannot be read or parsed, such as invalid TOML, JSON or YAML, a Compose file with a repeated key, a key tagged `!!binary` or with a tag outside YAML's own `tag:yaml.org,2002:` types, or a non-mapping service, or a requirement that packaging cannot parse, is a collection failure, which fails the collector. So is a [registry or index settings](#registry-and-index-settings) file that cannot be read, such as a `.npmrc` that is a symbolic link out of the project, a FIFO, not UTF-8 or larger than `file-bytes`, a `bunfig.toml` or `uv.toml` that is not valid TOML, a `.yarnrc.yml` that is not a YAML mapping, and a Poetry or PDM source list that is not a list of tables each with a `url` (`pyproject.toml: invalid Poetry source`, `pyproject.toml: invalid PDM source`); a Poetry source named `PyPI` needs no `url`.
 
 ## Findings
 
@@ -55,7 +95,7 @@ The requirements-file and Dockerfile gaps are listed in the [README](../README.m
 | `package_alias` | low | An npm dependency installs a package under another name |
 | `missing_lockfile_integrity` | medium | An `npm-shrinkwrap.json` or `package-lock.json` record has no integrity value. An integrity value with only SHA-1, in any npm, pnpm or Yarn lockfile, is a collection failure |
 | `lockfile_resolution_mismatch` | high | An npm, pnpm or Yarn record's tarball URL names another package or version than the record |
-| `registry_origin` | low | An `npm-shrinkwrap.json` or `package-lock.json` record resolves from a registry other than `registry.npmjs.org` and `registry.yarnpkg.com` |
+| `registry_origin` | low | An `npm-shrinkwrap.json` or `package-lock.json` record resolves from a registry other than `registry.npmjs.org` and `registry.yarnpkg.com`; or a project setting sends the package to another registry or index ([registry and index settings](#registry-and-index-settings)) |
 | `lockfile_unread` | low | `Pipfile.lock` or `pdm.lock` (PyPI), or `bun.lock` or `bun.lockb` (npm) exists: the package manager resolves the package from a file the collector does not read. Coverage stays complete, because the declarations are read |
 | `version_pinning`, `mutable_image_tag` | high, medium | An image has no digest Docker pulls, which is `sha256`, `sha384` or `sha512` in lower-case hex of that algorithm's length: high without a tag or with `latest`, medium with another tag |
 
@@ -67,8 +107,8 @@ The rating of a PyPI package follows from all of its declarations, in every file
 | --- | --- | --- | --- |
 | `bom_ref` | `registry:pypi/<normal name>` | `registry:npm/<name in package.json>` | `registry:docker/<reference as written>` |
 | `name` | PEP 503 normal name | The package npm installs: the alias target for an alias | The reference as written |
-| `package_url` | `pkg:pypi/...` only when every exact pin names the same version, every other declaration admits it, and nothing is a URL, untranslated or in conflict; or the version a `uv.lock` or `poetry.lock` record resolves, unless a declaration of the package is a URL | `pkg:npm/...` from a consistent npm, pnpm or Yarn lockfile record, with `repository_url` when it resolves from another registry, or from an exact spec without a record | `pkg:oci/...` with `repository_url` and `tag` when the reference has a digest Docker pulls |
-| `registry_uri` | `https://pypi.org`; the URL origin when every declaration is a URL with that origin; none when declarations mix a URL with others, or a uv, PDM or Poetry source or override replaces the package; the index origin a `uv.lock` or `poetry.lock` record names | The lockfile record's origin | `https://docker.io`, or `https://` and the registry host |
+| `package_url` | `pkg:pypi/...` only when every exact pin names the same version, every other declaration admits it, and nothing is a URL, untranslated or in conflict; or the version a `uv.lock` or `poetry.lock` record resolves, unless a declaration of the package is a URL. None when a project setting redirects the package | `pkg:npm/...` from a consistent npm, pnpm or Yarn lockfile record, with `repository_url` when it resolves from another registry, or from an exact spec without a record. None when a project setting redirects the package | `pkg:oci/...` with `repository_url` and `tag` when the reference has a digest Docker pulls |
+| `registry_uri` | `https://pypi.org`; the URL origin when every declaration is a URL with that origin; none when declarations mix a URL with others, a uv, PDM or Poetry source or override replaces the package, or a project setting redirects it; the index origin a `uv.lock` or `poetry.lock` record names | The lockfile record's origin | `https://docker.io`, or `https://` and the registry host |
 | `registry_type` | `pypi` | `npm` | `docker-hub` for Docker Hub, `oci` for another registry, none for a reference kept as written because of a substitution or quotes |
 
 PyPI components record their hash pins as `requirement_hashes`, so a changed or removed `--hash` value is drift. Components a lockfile resolves keep the digest of the whole lockfile in `lockfile_sha256`: it is the only drift signal for the transitive dependencies the collector does not inventory. Images record their normalised repository, such as `docker.io/library/ollama`, as `image_repository`.
@@ -79,8 +119,8 @@ PyPI components record their hash pins as `requirement_hashes`, so a changed or 
 | --- | --- | --- |
 | Root `requirements*.txt` files | 4 MiB of text together | Collection failure |
 | Option text with a quote or backslash, on one requirement line | 16 KiB | `option line not parsed` gap |
-| `pyproject.toml` | 256 KiB | Collection failure |
-| A dotted key or table name in `pyproject.toml`, `uv.lock` or `poetry.lock` | 16 dots, quoted parts included | Collection failure |
+| `pyproject.toml`, `bunfig.toml` and `uv.toml` | 256 KiB each | Collection failure |
+| A dotted key or table name in `pyproject.toml`, `bunfig.toml`, `uv.toml`, `uv.lock` or `poetry.lock` | 16 dots, quoted parts included | Collection failure |
 | `uv.lock` or `poetry.lock` | 10,000 packages | Collection failure |
 | `pnpm-lock.yaml` | 1,000,000 YAML tokens, and no anchors, aliases or tags | Collection failure |
 | `yarn.lock` | 100,000 lines | Collection failure |
@@ -88,6 +128,8 @@ PyPI components record their hash pins as `requirement_hashes`, so a changed or 
 | A Compose build `context` or `dockerfile` | 4,096 characters, Linux's `PATH_MAX` | `build context not followed` gap, even for a path that names the project root |
 | npm `overrides`, `resolutions` and `pnpm.overrides` together | 10,000 entries, nested 32 deep | `dependency override not translated` gap, also for every inventoried npm package |
 | An image reference | 520 characters, docker/distribution's limit | `image reference not parsed` gap when it matches the catalog |
+| The value of one registry or index setting | 4,096 characters | Still a redirect, recorded as `[not parsed]` without its origins |
+| Package sources listed on one package, and settings named in its finding | 32 and 8 | One more entry, or the end of the detail, counts the rest |
 
 ## AI package catalog
 
@@ -110,7 +152,8 @@ These declare or change what is installed but are not read, and leave no gap. Re
 
 - Manifests outside the project root: workspace members (a gap when `workspaces`, a `pnpm-workspace.yaml` or `[tool.uv.workspace]` lists them), other `package.json` files, `requirements*.txt` files in subdirectories and pip-tools `*.in` files.
 - `setup.py`, `setup.cfg` and dependencies declared dynamic in `pyproject.toml`; conda `environment.yml`; `[tool.hatch.envs]` environments.
-- Index and registry choices: `--index-url`, `--extra-index-url`, `--find-links` and `--trusted-host` in requirements files, `[[tool.uv.index]]`, Poetry and PDM sources, and `.npmrc`. Packages from another index are recorded as PyPI packages unless a uv or Poetry source names them or a `uv.lock` or `poetry.lock` record gives their index.
+- Registry and index settings outside the project root, such as user and global `.npmrc`, pip and uv configuration, in the environment, such as `npm_config_registry`, `PIP_INDEX_URL` and `UV_INDEX_URL`, or on a command line; `pnpm-workspace.yaml` settings are a gap.
+- Settings that change how a registry is reached without naming another, such as `--trusted-host`, `strict-ssl=false`, proxies and certificate settings, and uv's `allow-insecure-host`.
 - `bundleDependencies`, which npm installs from `dependencies` anyway.
 - Kubernetes manifests, Helm charts and `.devcontainer` configuration.
 - Compose provider services (`provider:`), including `type: model`; Compose files that `COMPOSE_FILE` selects when it is set in the environment Compose runs in rather than in `.env`, or that `-f` or `--env-file` select.

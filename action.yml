@@ -16,7 +16,10 @@ inputs:
     description: Output path within the workspace
     default: nexus-symbiote-aibom.json
   scanners:
-    description: Comma-separated scanner names including shadowscan, a2a, ide_agents; empty means all
+    description: >-
+      Comma-separated scanner names including shadowscan, a2a, ide_agents; empty means all.
+      A list that leaves any collector out makes coverage partial, so the validate and
+      risk-check gates fail whenever they are on. Leave it empty in a workflow that gates
     default: ""
   validate:
     description: >-
@@ -69,10 +72,17 @@ inputs:
       from the checked-out code. Its artifact and bundle paths are relative to scan-path. The
       Action refuses relative paths, any path that passes through a symlink (including a
       symlinked RUNNER_TEMP or parent directory), hard links, non-regular and oversized files, and
-      passes one snapshot to collection and validation. Signatures verify offline against the
+      passes one snapshot to collection, validation and the risk gate. Signatures verify offline against the
       Sigstore trust root shipped in the Action's hash-locked sigstore package, never a runner
       cache. Empty means no signer policy
     default: ""
+  allow-unsigned-discovery:
+    description: >-
+      'true' accepts ShadowScan discovery evidence whose producer signature was not verified,
+      passing --allow-unsigned-discovery to validate and risk; the acceptance is printed as a
+      warning. With 'false', such evidence fails the completeness and risk gates in CI, unless
+      validate is 'true' and signature-policy names the report and verifies its producer
+    default: "false"
   limits:
     description: >-
       Raised collection limits as NAME=VALUE pairs separated by commas, passed to the CLI as
@@ -117,7 +127,7 @@ outputs:
     description: Number of drift alerts against reviewed-baseline; empty when no comparison ran
     value: ${{ steps.scan.outputs.drift_alerts }}
   signature-policy-digest:
-    description: SHA-256 of the signer policy bytes used for collection and validation, as sha256:<hex>; empty without a policy
+    description: SHA-256 of the signer policy bytes used for collection, validation and risk, as sha256:<hex>; empty without a policy
     value: ${{ steps.scan.outputs.signature_policy_digest }}
 runs:
   using: composite
@@ -159,6 +169,7 @@ runs:
         SYMBIOTE_UPLOAD_ARTIFACT: ${{ inputs.upload-artifact }}
         SYMBIOTE_SIGNATURE_POLICY: ${{ inputs.signature-policy }}
         SYMBIOTE_LIMITS: ${{ inputs.limits }}
+        SYMBIOTE_ALLOW_UNSIGNED_DISCOVERY: ${{ inputs.allow-unsigned-discovery }}
       run: '"$SYMBIOTE_ACTION_PYTHON" -I "$SYMBIOTE_ACTION_PATH/scripts/run_action.py"'
     - name: Upload SARIF
       if: always() && inputs.sarif-upload == 'true' && steps.scan.outputs.sarif_path != ''

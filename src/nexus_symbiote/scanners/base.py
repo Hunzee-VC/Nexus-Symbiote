@@ -15,7 +15,11 @@ from urllib.parse import urlsplit
 
 from nexus_symbiote import limits
 from nexus_symbiote.core.aibom import DependencyEdge
-from nexus_symbiote.core.models import AnyComponent, MCPClientComponent
+from nexus_symbiote.core.models import (
+    AnyComponent,
+    DiscoveryVerification,
+    MCPClientComponent,
+)
 from nexus_symbiote.limits import Bound
 from nexus_symbiote.utils.confined import BoundedRecords, ConfinedCollection
 
@@ -119,6 +123,7 @@ class ScanResult:
     source_projection_limitations: list[str] | None = None
     source_unmapped_count: int = 0
     source_unmapped_indexes: list[int] = field(default_factory=list)
+    discovery_verification: DiscoveryVerification | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.scan_failures, BoundedRecords):

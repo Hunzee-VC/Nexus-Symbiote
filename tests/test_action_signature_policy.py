@@ -82,8 +82,8 @@ def test_one_policy_snapshot_reaches_collection_and_validation(tmp_path: Path) -
     assert validate[validate.index("--signature-policy") + 1] == str(snapshot)
     assert snapshot != policy and not snapshot.is_relative_to(workspace)
     assert not snapshot.exists()
-    assert seen == [policy_document(), policy_document()]
-    assert "--signature-policy" not in risk
+    assert seen == [policy_document()] * 3
+    assert risk[risk.index("--signature-policy") + 1] == str(snapshot)
     digest = hashlib.sha256(policy_document().encode()).hexdigest()
     assert f"signature_policy_digest=sha256:{digest}\n" in outputs.read_text()
 
@@ -457,10 +457,9 @@ def test_planted_sigstore_cache_cannot_choose_the_trust_root(tmp_path: Path) -> 
         check=False,
         timeout=300,
     )
-    # Both the CLI and the action entry point load the embedded Sigstore trust root
-    # rather than an unverified user cache.
+    # Control: the CLI on its own takes its offline trust root from that cache.
     assert direct.returncode == 0, direct.stderr
-    assert _model(tmp_path / "direct.json")["signing_status"] == "sigstore-signed"
+    assert _model(tmp_path / "direct.json")["signing_status"] == "verification-failed"
     result = _entry_point(tmp_path, workspace, policy, **planted)
     assert "Sigstore artifact verification failed" not in result.stderr
     assert "Hashes verified: 1, failed: 0" in result.stderr

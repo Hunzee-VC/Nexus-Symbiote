@@ -107,7 +107,15 @@ def test_v1_projection_requires_its_original_importer_for_reverification(tmp_pat
     runner = CliRunner()
     assert (
         runner.invoke(
-            main, ["import-shadowscan", str(source), "-o", str(bom), "--report-only"]
+            main,
+            [
+                "import-shadowscan",
+                str(source),
+                "-o",
+                str(bom),
+                "--report-only",
+                "--allow-unsigned-discovery",
+            ],
         ).exit_code
         == 0
     )

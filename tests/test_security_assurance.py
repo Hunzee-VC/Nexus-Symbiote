@@ -18,6 +18,7 @@ from nexus_symbiote.core.models import (
 from nexus_symbiote.diff.differ import AIBOMDiffer
 from nexus_symbiote.scanner_catalog import BUILTIN_SCANNER_NAMES
 from nexus_symbiote.scanners.model import ModelScanner
+from nexus_symbiote.utils import crypto
 from nexus_symbiote.utils.crypto import verify_sigstore_bundle
 from nexus_symbiote.validators.integrity import IntegrityValidator
 from nexus_symbiote.validators.risk import RiskScorer
@@ -65,10 +66,11 @@ def test_sigstore_verifier_applies_identity_and_checks_artifact(
     class HashAlgorithm:
         SHA2_256 = "sha256"
 
+    roots: list[object] = []
+
     class Verifier:
-        @staticmethod
-        def production(offline: bool = False) -> "Verifier":
-            return Verifier()
+        def __init__(self, *, trusted_root: object) -> None:
+            roots.append(trusted_root)
 
         def verify_artifact(self, hashed: object, _bundle: object, _policy: object) -> None:
             if getattr(hashed, "digest", None) != expected_digest:
@@ -85,6 +87,28 @@ def test_sigstore_verifier_applies_identity_and_checks_artifact(
     verify_policy.Identity = Identity
     hashes.Hashed = Hashed
     models_common.HashAlgorithm = HashAlgorithm
+    # Verification now resolves the sigstore-python TUF cache first. Fake that
+    # resolver too, pointed inside tmp_path, so the test stays hermetic.
+    from urllib.parse import quote as _url_quote
+
+    cache = tmp_path / "cache"
+    monkeypatch.setenv("XDG_CACHE_HOME", str(cache))
+    internal = ModuleType("sigstore._internal")
+    tuf = ModuleType("sigstore._internal.tuf")
+    tuf.DEFAULT_TUF_URL = "https://tuf-repo-cdn.sigstore.dev"
+    tuf._get_dirs = lambda url: (
+        tmp_path / "meta",
+        cache / "sigstore-python" / "tuf" / _url_quote(url, safe=""),
+    )
+    utils = ModuleType("sigstore._utils")
+    utils.read_embedded = lambda name, url: b"embedded root"
+    pkg._internal = internal
+    pkg._utils = utils
+    internal.tuf = tuf
+    monkeypatch.setitem(sys.modules, "sigstore._utils", utils)
+    monkeypatch.setattr(crypto, "_trusted_root_from_bytes", lambda content: ("root", content))
+    monkeypatch.setitem(sys.modules, "sigstore._internal", internal)
+    monkeypatch.setitem(sys.modules, "sigstore._internal.tuf", tuf)
     monkeypatch.setitem(sys.modules, "sigstore", pkg)
     monkeypatch.setitem(sys.modules, "sigstore.models", models)
     monkeypatch.setitem(sys.modules, "sigstore.verify", verify)
@@ -94,6 +118,7 @@ def test_sigstore_verifier_applies_identity_and_checks_artifact(
     result = verify_sigstore_bundle(artifact, bundle, "trusted", "issuer")
     assert result.verified
     assert calls == [("trusted", "issuer")]
+    assert roots == [("root", b"embedded root")]
     artifact.write_bytes(b"changed")
     assert not verify_sigstore_bundle(artifact, bundle, "trusted", "issuer").verified
 

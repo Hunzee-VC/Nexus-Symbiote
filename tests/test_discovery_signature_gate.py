@@ -102,7 +102,10 @@ def test_required_signature_without_an_operator_entry_fails_validate_and_risk(tm
 def test_without_the_requirement_validation_is_unchanged(tmp_path, monkeypatch):
     calls = _verifier(monkeypatch)
     project, bom = _project(tmp_path, UNGATED)
-    result = _validate(bom, project)
+    # The BOM's evidence is unverified at import, so the unsigned gate needs
+    # the explicit acceptance here; what this test owns is that no producer
+    # check runs without the requirement.
+    result = _validate(bom, project, "--allow-unsigned-discovery")
     assert result.exit_code == 0, result.output
     assert "Discovery producer check" not in result.output and calls == []
 

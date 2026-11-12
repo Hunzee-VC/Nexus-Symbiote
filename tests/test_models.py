@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
+from nexus_symbiote.core.aibom import AIBOM, DependencyEdge, prepare
 from nexus_symbiote.core.enums import (
     AutonomyLevel,
     CapabilityClass,
@@ -261,12 +261,21 @@ class TestAIBOM:
         risks = bom.get_all_risks()
         assert len(risks) == 2
 
-    def test_finalize_sets_metadata(self):
+    def test_finalize_sets_tool_version_only(self):
+        # ARCH-F1: finalize() must not stamp a wall-clock timestamp or a
+        # random serial; both are export concerns owned by prepare().
         bom = AIBOM()
         bom.finalize()
-        assert bom.metadata.timestamp is not None
+        assert bom.metadata.tool_version is not None
+        assert bom.metadata.timestamp is None
+        assert bom.metadata.serial_number is None
+
+    def test_prepare_derives_deterministic_serial(self):
+        bom = AIBOM()
+        prepare(bom)
         assert bom.metadata.serial_number is not None
         assert bom.metadata.serial_number.startswith("urn:uuid:")
+        assert bom.metadata.timestamp is None
 
     def test_to_json_roundtrip(self):
         bom = AIBOM()
