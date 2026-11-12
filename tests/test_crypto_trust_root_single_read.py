@@ -190,3 +190,86 @@ def test_oversized_trust_root_fails_closed(tmp_path: Path, monkeypatch: pytest.M
     assert not pinned.verified
     assert pinned.error == "Explicit Sigstore trust root does not match the pinned SHA-256"
     assert loaded == []
+
+
+def test_cached_trust_root_replaced_after_check_is_not_loaded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("sigstore")
+    from sigstore._internal.tuf import DEFAULT_TUF_URL, _get_dirs
+    from sigstore_models.trustroot import v1 as trustroot_v1
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.delenv(TRUST_ROOT_ENV, raising=False)
+    monkeypatch.delenv(TRUST_ROOT_SHA256_ENV, raising=False)
+    pinned, planted = _trust_roots()
+    _metadata_dir, targets_dir = _get_dirs(DEFAULT_TUF_URL)
+    targets_dir.mkdir(parents=True)
+    for directory in (targets_dir, *targets_dir.parents):
+        if directory == tmp_path / "cache":
+            break
+        directory.chmod(0o700)
+    root = targets_dir / "trusted_root.json"
+    root.write_bytes(pinned)
+    root.chmod(0o600)
+    loaded = _capture_verifier(monkeypatch)
+    # Swap as soon as the last check of the file ends: a descriptor read, or an lstat.
+    swapped = _swap_after_first_read(monkeypatch, root, planted)
+    real_lstat = os.lstat
+
+    def lstat(path: Any, *args: Any, **kwargs: Any) -> os.stat_result:
+        result = real_lstat(path, *args, **kwargs)
+        if Path(path) == root and not swapped:
+            swapped.append(True)
+            replacement = root.with_name(root.name + ".planted")
+            replacement.write_bytes(planted)
+            replacement.chmod(0o600)
+            os.replace(replacement, root)
+        return result
+
+    monkeypatch.setattr(os, "lstat", lstat)
+
+    result = verify_sigstore_digest("0" * 64, b"{}", IDENTITY, ISSUER)
+
+    assert swapped, "the simulated replacement never ran"
+    if result.verified:
+        assert result.details is not None
+        assert result.details["trust_root_source"] == "cache"
+        assert len(loaded) == 1
+        assert loaded[0]._inner == trustroot_v1.TrustedRoot.from_json(pinned)
+    else:
+        assert loaded == []
+
+
+def test_cached_trust_root_is_loaded_from_the_checked_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("sigstore")
+    from sigstore._internal.tuf import DEFAULT_TUF_URL, _get_dirs
+    from sigstore.models import ClientTrustConfig, TrustedRoot
+    from sigstore_models.trustroot import v1 as trustroot_v1
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.delenv(TRUST_ROOT_ENV, raising=False)
+    monkeypatch.delenv(TRUST_ROOT_SHA256_ENV, raising=False)
+    pinned, _planted = _trust_roots()
+    loaded = _capture_verifier(monkeypatch)
+
+    def refuse(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("the cached trust root must not be re-read by path")
+
+    monkeypatch.setattr(TrustedRoot, "from_file", classmethod(refuse))
+    monkeypatch.setattr(ClientTrustConfig, "from_tuf", classmethod(refuse))
+    result = verify_sigstore_digest("0" * 64, b"{}", IDENTITY, ISSUER)
+    assert result.verified, result.error
+    assert result.details is not None
+    assert result.details["trust_root_source"] == "cache"
+    _metadata_dir, targets_dir = _get_dirs(DEFAULT_TUF_URL)
+    root = targets_dir / "trusted_root.json"
+    assert result.details["trust_root_path"] == str(root)
+    # A missing cache is seeded privately from the root embedded in sigstore-python.
+    assert root.read_bytes() == pinned
+    assert root.stat().st_mode & 0o077 == 0
+    assert loaded[0]._inner == trustroot_v1.TrustedRoot.from_json(pinned)
