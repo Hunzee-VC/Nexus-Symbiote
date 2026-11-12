@@ -193,13 +193,12 @@ def _timestamp(value: Any) -> datetime | None:
 def landed_at(
     metadata: Any, runs: list[Any], *, repo: str, branch: str, sha: str
 ) -> datetime | None:
-    """When the SHA reached the branch, or None when no trusted run of it shows that.
+    """When the SHA reached the branch, or None when no push run of it shows that.
 
     The commit time is whatever the committer's clock said, so the landing is the later of
-    that and the first trusted run. GitHub creates the push run as the commit lands; a
-    commit pushed with "[skip ci]" has none, and then its first dispatch on the branch,
-    which can only follow the landing, stands in. A dispatch names its ref only by name,
-    which a tag can share with the branch, so a push run wins when there is one.
+    that and the first push run, which GitHub creates as the commit lands. A dispatch names
+    its ref only by name, which a tag can share with the branch, so it cannot show that the
+    commit was on the branch: a commit pushed with "[skip ci]" has no landing time.
     """
     commit = metadata.get("commit") if isinstance(metadata, dict) else None
     details = commit.get("commit") if isinstance(commit, dict) else None
@@ -208,14 +207,14 @@ def landed_at(
     if committed is None:
         return None
     pushes: list[datetime] = []
-    others: list[datetime] = []
     for run in runs:
         if _trusted(run, repo=repo, branch=branch, sha=sha):
             created = _timestamp(run.get("created_at"))
             if created is None:
                 return None
-            (pushes if run["event"] == "push" else others).append(created)
-    first = min(pushes or others, default=None)
+            if run["event"] == "push":
+                pushes.append(created)
+    first = min(pushes, default=None)
     return None if first is None else max(committed, first)
 
 
@@ -415,21 +414,18 @@ def evaluate_environment(environment: Any, policies: Any, *, name: str, branch: 
     total = policies.get("total_count") if isinstance(policies, dict) else None
     if not isinstance(policy, dict):
         errors.append(f"the {name} environment accepts deployments from any branch")
-    elif policy.get("custom_branch_policies") is True:
-        if (
-            not isinstance(entries, list)
-            or type(total) is not int
-            or total != len(entries)
-            or len(entries) != 1
-            or not isinstance(entries[0], dict)
-            or entries[0].get("name") != branch
-            or entries[0].get("type", "branch") != "branch"
-        ):
-            errors.append(
-                f"the {name} environment accepts deployments from refs other than {branch}"
-            )
-    elif policy.get("protected_branches") is not True:
-        errors.append(f"the {name} environment accepts deployments from any branch")
+    elif (
+        # "Protected branches" admits every branch with a protection rule, not only this one.
+        policy.get("custom_branch_policies") is not True
+        or not isinstance(entries, list)
+        or type(total) is not int
+        or total != len(entries)
+        or len(entries) != 1
+        or not isinstance(entries[0], dict)
+        or entries[0].get("name") != branch
+        or entries[0].get("type", "branch") != "branch"
+    ):
+        errors.append(f"the {name} environment accepts deployments from refs other than {branch}")
     return errors
 
 

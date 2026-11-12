@@ -71,20 +71,23 @@ With `--publish testpypi` or `--publish pypi`, as the release workflow passes, i
 also requires an active ruleset that stops `refs/tags/v*` from being updated or
 deleted and that the checking token itself cannot bypass, and requires the named
 environment to have a required reviewer, administrator bypass turned off and
-deployments limited to `main`. GitHub returns a ruleset's bypass actors only to a
-caller that may edit the ruleset, so the release workflow's read-only token cannot
-tell whether an administrator, a team or an app may bypass it: the run prints a
-notice saying so, in its log and job summary, instead of treating the unseen list as
-empty. Only the
+deployments limited to `main` by a single branch policy (the *Protected branches*
+option admits every protected branch, so it is refused). GitHub returns a ruleset's
+bypass actors only to a caller that may edit the ruleset, so the release workflow's
+read-only token cannot tell whether an administrator, a team or an app may bypass
+it: the run prints a notice saying so, in its log and job summary, instead of
+treating the unseen list as empty. Only the
 [administrator check](#apply-the-outstanding-controls), run with
 `--verify-bypass-actors` and an administrator's token, verifies that the list is
 empty, and it fails when the list cannot be read. With
 `--publish pypi` it further requires the release commit to have been on `main` for
 24 hours, measured from the later of its commit time and the first `push` run GitHub
 created for it, unless the `SOAK_OVERRIDE` variable states a reason of at least 20
-characters, which is printed; and it requires the signed, annotated tag
-`v<version>` (the version in `pyproject.toml`) to point at the source commit with a
-signature GitHub reports as verified.
+characters, which is printed. A commit with no `push` run, such as one pushed with
+`[skip ci]`, has no landing time and needs that override: a `workflow_dispatch` run
+names its ref only by name, which a tag can share with the branch. It also requires
+the signed, annotated tag `v<version>` (the version in `pyproject.toml`) to point at
+the source commit with a signature GitHub reports as verified.
 
 Missing or truncated run, job, ruleset or environment data, an API failure,
 redirects and an unprotected branch fail closed; the one exception is the bypass list
@@ -170,9 +173,18 @@ triggers other than `push`, `pull_request`, `workflow_dispatch`, `schedule` and
 missing or writable top-level permissions, jobs without `timeout-minutes`, and
 checkouts that persist credentials. In `ci.yml` and `release.yml` it rejects
 `continue-on-error` and requires each verification job to still run the command
-that makes it a gate. The scheduled CodeQL workflow also analyzes the workflows with
-CodeQL's `actions` queries. All of these checks live in files a pull request can
-change; read changes to them line by line.
+that makes it a gate as a command of its own, under errexit, in `bash` (GitHub's
+default or `shell: bash`) and in the checkout's root: a gate command that is quoted,
+in an `if` or loop condition, negated, joined with `&&` or `||` (other than
+`|| exit 1`), in the background or in a pipeline without `pipefail`, that follows
+`set +e`, `set -n`, `shopt -u -o errexit`, `cd`, `trap`, `exit`, `eval` or `hash`
+(also through `builtin`, `command` or `time`, or a command name built from an expansion),
+or whose step, job or workflow sets another shell or a working directory, does not count.
+A `$VAR` command name counts only while a plain `VAR=value` line still binds it, and a
+script the checker reads differently from `bash` (a here-document delimiter that is
+partly quoted, or a `case` inside `$(...)`) has no gates. The scheduled CodeQL workflow also
+analyzes the workflows with CodeQL's `actions` queries. All of these checks live in
+files a pull request can change; read changes to them line by line.
 
 The OpenSSF Scorecard workflow publishes the repository's
 [Scorecard results](https://scorecard.dev/viewer/?uri=github.com/Hunzee-VC/Nexus-Symbiote)
