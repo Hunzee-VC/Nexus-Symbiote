@@ -262,21 +262,12 @@ def test_a_missing_sigstore_extra_fails_with_its_install_hint(tmp_path, monkeypa
     assert "signer policy verification failed" not in result.output
 
 
-def _another_name(project: Path, kind: str) -> str:
-    if kind == "hard link":
-        os.link(project / ".shadowscan/report.json", project / ".shadowscan/alias.json")
-        return ".shadowscan/alias.json"
-    if not (project / ".shadowscan/REPORT.json").is_file():
-        pytest.skip("the filesystem is case-sensitive")
-    return ".shadowscan/REPORT.json"
-
-
-@pytest.mark.parametrize("kind", ["hard link", "case variant"])
-def test_an_entry_naming_the_report_file_differently_still_requires_its_signer(
-    tmp_path, monkeypatch, kind
+def test_an_entry_naming_the_report_file_by_another_link_still_requires_its_signer(
+    tmp_path, monkeypatch
 ):
     project, bom = _project(tmp_path, GATED)
-    signers = str(_signers(tmp_path, artifact=_another_name(project, kind)))
+    os.link(project / ".shadowscan/report.json", project / ".shadowscan/alias.json")
+    signers = str(_signers(tmp_path, artifact=".shadowscan/alias.json"))
     calls = _verifier(monkeypatch)
     result = _validate(bom, project, "--signature-policy", signers)
     assert result.exit_code == 0, result.output
@@ -286,6 +277,18 @@ def test_an_entry_naming_the_report_file_differently_still_requires_its_signer(
     result = _validate(bom, project, "--signature-policy", signers)
     assert result.exit_code == 1 and len(calls) == 1
     assert "ShadowScan report signature or signer policy verification failed" in result.output
+
+
+def test_an_entry_naming_the_report_file_in_another_spelling_is_refused(tmp_path, monkeypatch):
+    # Where file names fold case this spelling reaches the report; a confined read
+    # still requires the spelling the directory holds, so the result is the same on
+    # every file system.
+    project, bom = _project(tmp_path, GATED)
+    signers = str(_signers(tmp_path, artifact=".shadowscan/REPORT.json"))
+    calls = _verifier(monkeypatch)
+    result = _validate(bom, project, "--signature-policy", signers)
+    assert result.exit_code == 1 and calls == []
+    assert "Policy artifact or bundle is unavailable beneath the project root" in result.output
 
 
 def _strip_discovery(doc: dict) -> None:
