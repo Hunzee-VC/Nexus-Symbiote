@@ -109,6 +109,13 @@ SPECS: dict[str, LimitSpec] = {
             10_000_000,
             "Syntax nodes in one TypeScript MCP server file.",
         ),
+        LimitSpec(
+            "import-lookups",
+            "count",
+            1_000_000,
+            "Memory and context files whose @path imports the prompt collector follows, "
+            "and distinct import targets it looks up, in one collection.",
+        ),
     )
 }
 
@@ -126,6 +133,7 @@ class CollectionLimits:
     source_scan_bytes: int = 64 * MIB
     syntax_bytes: int = 256 * KIB
     ts_nodes: int = 20_000
+    import_lookups: int = 5_000
 
     def value(self, name: str) -> int:
         value: int = getattr(self, SPECS[name].attribute)

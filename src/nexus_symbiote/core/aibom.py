@@ -110,7 +110,8 @@ class AIBOM(BaseModel):
         """Read a metadata object that declares no spec_version as format 1.0.0.
 
         Objects built in process pass an AIBOMMetadata instance, or none, and keep the
-        format this build writes.
+        format this build writes. A document without metadata looks the same as such an
+        object here, so documents are read with ``from_document``.
         """
         if isinstance(data, dict):
             metadata = data.get("metadata")
@@ -212,6 +213,17 @@ class AIBOM(BaseModel):
         write_output_file(path, self.to_native_json())
 
     @classmethod
+    def from_document(cls, data: Any) -> AIBOM:
+        """Read a parsed native document; one that declares no format version, with or
+        without a metadata object, is read as format 1.0.0, as ``load`` reads it.
+
+        Raises ``ValidationError`` when the document does not match the schema.
+        """
+        if isinstance(data, dict) and "metadata" not in data:
+            data = {**data, "metadata": {}}
+        return cls.model_validate(data)
+
+    @classmethod
     def load(cls, path: Path) -> AIBOM:
         """Read a native document without following links or blocking on special files.
 
@@ -235,8 +247,6 @@ class AIBOM(BaseModel):
             raise NativeFormatError(
                 "It is not strict UTF-8 JSON; duplicate keys and nonfinite numbers are refused."
             ) from exc
-        if isinstance(data, dict) and "metadata" not in data:
-            data = {**data, "metadata": {}}
         metadata = data.get("metadata") if isinstance(data, dict) else None
         if isinstance(metadata, dict) and "spec_version" in metadata:
             try:
@@ -244,7 +254,7 @@ class AIBOM(BaseModel):
             except UnsupportedSpecVersionError as exc:
                 raise NativeFormatError(str(exc)) from exc
         try:
-            return cls.model_validate(data)
+            return cls.from_document(data)
         except (ValidationError, RecursionError) as exc:
             raise NativeFormatError("It does not match the native AgentBOM schema.") from exc
 
