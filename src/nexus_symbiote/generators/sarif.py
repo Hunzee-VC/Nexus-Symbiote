@@ -31,7 +31,7 @@ from nexus_symbiote.generators._common import (
     imported_discovery_component,
     prepare,
 )
-from nexus_symbiote.generators._rules import GENERIC_HELP, RULES
+from nexus_symbiote.generators._rules import GENERIC_HELP, RULES, rule_tags
 from nexus_symbiote.generators.base import Generator
 from nexus_symbiote.generators.validation import require_valid
 from nexus_symbiote.utils.terminal import UNSAFE_TEXT
@@ -277,7 +277,8 @@ class SARIFGenerator(Generator):
             description = f"Inventory findings of category '{label}'."
             tags = ["security"]
         else:
-            title, description, tags = info.title, info.description, info.tags(severity)
+            title, description = info.title, info.description
+            tags = rule_tags(category, severity)
         return {
             "id": rule_id,
             "shortDescription": {"text": f"{title} ({severity.value})"},

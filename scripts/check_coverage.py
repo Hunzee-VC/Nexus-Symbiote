@@ -46,6 +46,8 @@ MODULE_FLOORS: dict[str, tuple[int, int | None]] = {
     "nexus_symbiote/risk_classes.py": (98, 98),
     "nexus_symbiote/graph_view.py": (98, 98),
     "nexus_symbiote/graph_cli.py": (98, 98),
+    "nexus_symbiote/crosswalk.py": (98, None),
+    "nexus_symbiote/crosswalk_cli.py": (98, 98),
 }
 COUNTS = (
     ("statement", "covered_lines", "num_statements"),

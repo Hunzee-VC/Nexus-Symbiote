@@ -104,14 +104,12 @@ which characters count as hidden.
 In SARIF output each finding's rule is `nexus_symbiote/<category>/<severity>`, so a
 finding whose severity changes moves to another rule
 ([migration](fingerprint-migration.md#sarif-rule-identifiers)). Findings on
-components imported from a ShadowScan report are left out of SARIF. Of the 44
-categories, 23 have a rule in the catalog that
+components imported from a ShadowScan report are left out of SARIF. Every category
+on this page has a rule in the catalog that
 [standard exports](standard-exports.md#sarif-for-github-code-scanning) lists, with
-its title, CWE and OWASP tags. The other 21 have no catalog entry and get a generic
-rule titled after the category and tagged only `security`: `additional_directories`,
-`auto_approval`, `credential_helper`, `custom_code`, `directional_marks`,
-`endpoint_identity`, `hidden_markup`, `hook_commands`, `invalid_safetensors`,
-`launch_context`, `launcher_identity`, `lockfile_resolution_mismatch`,
-`lockfile_unread`, `mcp_auto_approval`, `missing_lockfile_integrity`,
-`nonregistry_source`, `package_alias`, `package_source`, `plugin_sources`,
-`registry_origin` and `transport_ambiguity`.
+its title and taxonomy tags, and so has `runtime_undeclared`, the category for a
+component that runtime telemetry shows and the inventory does not list. The
+[framework crosswalk](framework-crosswalk.md) gives the rationale for each tag and the
+category's EU AI Act and ISO/IEC 42001 references. A category outside the catalog,
+such as one that an edited inventory records, gets a generic rule titled after the
+category and tagged only `security`.

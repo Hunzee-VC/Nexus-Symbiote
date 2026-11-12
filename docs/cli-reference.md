@@ -59,6 +59,7 @@ change them. See [collection limits](collection-limits.md).
 | [`graph`](#graph) | offline | Write a self-contained HTML or JSON view of an inventory's associations, risk classes and exposure paths |
 | [`baseline`](#baseline) | offline | Write an unsigned snapshot only if the scan gate passes |
 | [`vex`](#vex) | offline | Export findings as a VEX document with status `in_triage` |
+| [`crosswalk`](#crosswalk) | offline | Map findings to OWASP, MITRE ATLAS, NIST AI RMF, EU AI Act, ISO/IEC 42001 and CWE entries |
 | [`verify-artifact`](#verify-artifact) | offline | Check a file's SHA-256, and optionally its Sigstore bundle |
 | [`verify-discovery`](#verify-discovery) | offline | Check that a ShadowScan report's bytes match the digest a BOM records; with `--projection` or `--bundle`, also compare the BOM's imported components with the report |
 | [`init`](#init) | offline | Create a `.nexus-symbiote.yaml` policy file |
@@ -96,7 +97,11 @@ CI log:
   cannot become a `::command::` workflow command;
 - nothing is read as markup or emoji codes, and lines are never wrapped.
 
-The JSON that `scan`, `vex`, `discover-mcp` and `advisories` print without `-o`, the
+`crosswalk --format markdown` writes such text Markdown-escaped instead of literally:
+every ASCII punctuation character in it follows a backslash, after the replacements
+above.
+
+The JSON that `scan`, `vex`, `crosswalk`, `discover-mcp` and `advisories` print without `-o`, the
 JSON that every `runtime` command prints, such as the identities of the snapshot that
 `runtime register` made current, the candidate inventory that `verify-live --record`
 prints, and the `--json-output`
@@ -216,6 +221,7 @@ catch a misplaced policy; they do not authenticate it.
 | `blast-radius --json-output` | `subject`, `affected_agents`, `dependent_components`, `reachable_components`, `declared_principals`, `scope`, `effective_authority`, `linked` and `limitations`. |
 | `digest --json-output` | `file_sha256`, `canonical_digest`, `content_digest`, `content_profile`, `spec_version` and `components`, in that order; a digest that is undefined for the inventory is `null`. |
 | `graph --format json` | `format` (`nexus-symbiote/graph-view/v1`), `inventory`, `focus`, `coverage`, `limitations`, `nodes` (each with its risk classes, `basis`, `assessed`, findings summary and facts), `edges` and `exposure` (sources, sinks and ranked `paths`, with omitted counts); see [graph view](graph-view.md#the-json-document). |
+| `crosswalk` | Sorted keys: `format` (`nexus-symbiote/crosswalk/v1`); `meaning`; `policy_source` (`built-in`), `suppressed_findings` and `ignored_findings`; `coverage_status`; `findings`, each with `category`, `severity`, `component_ref` and a neutralized `detail`; `frameworks`, each with `framework`, `name`, `edition`, `source`, `verification`, `note`, `findings_with_reference`, `findings_without_reference` and `entries` (each with `entry`, `title`, `severity_counts`, the referencing `categories` with their `rationale`, and `findings`, positions in the `findings` list); `unmapped_categories`, each with `category`, `findings` and `in_catalog`. |
 | `discover-mcp` | The observation: `endpoint`, `protocol_version` and `requested_protocol_version`, `collector_id`, `collection_id`, `observed_at`, `completed_at`, `client_info`, `user_agent`, `session_established`, `session_digest`, `server_info`, `server_capabilities`, `instructions` and `instructions_hash`, `declaration_hash` and `identity_hash` with their profiles, `tools` (each with its redacted `descriptor`, `definition_hash`, `fingerprint` and `lints`), `prompts`, `resource_templates`, `failures`, `complete`, `pages_observed`, `bytes_observed` and `coverage`, which names what was not observed. With `--record`, a native AgentBOM instead. |
 | `advisories` | `components_checked`, `components_skipped` and `components_excluded`, with the `skipped` and `excluded` entries and their reasons; `queries` (the ecosystem, name and version of each package in scope); `advisories`; `errors`; `coverage` (`complete`, `partial` or `none`) and `complete`; `dry_run`; `checked_at`, `tool_version` and `inventory_sha256`; `scope` and `sent_to_osv`. |
 | `verify-live --json-output` | `complete`, `servers_checked`, `servers_reachable`, `servers_skipped`, `has_drift`, `inputs` (the SHA-256 of the inventory and of the launch policy) and `results`: per MCP server, `server`, `server_ref`, `status` (`verified`, `failed` or `not-verifiable`), `reachable`, `reason`, `error`, `transport`, `protocol_version`, `launcher_sha256`, `rug_pull_detected`, `live_schema_hash`, `declaration_hash` and `declaration_status`, `identity_hash` and `identity_status`, and `tools` (each tool's `name`, `definition_hash` and `status`: `match`, `changed`, `new` or `unverifiable`). |
@@ -336,6 +342,31 @@ nexus-symbiote blast-radius [OPTIONS] AIBOM_PATH COMPONENT_REF
 | Option | Description |
 |---|---|
 | `--json-output` | Output as JSON |
+
+### `crosswalk`
+
+Map findings to OWASP, MITRE ATLAS, NIST AI RMF, EU AI Act, ISO/IEC 42001 and CWE.
+
+```text
+nexus-symbiote crosswalk [OPTIONS] AIBOM_PATH
+```
+
+| Option | Description |
+|---|---|
+| `--framework` `NAME` | Report only this framework edition: `owasp-llm-2025`, `owasp-llm-2026`, `owasp-asi-2026`, `mitre-atlas-2026.10`, `nist-ai-rmf-1.0`, `eu-ai-act-2024`, `iso-iec-42001-2023` or `cwe`. Repeatable; default: every edition. |
+| `--format` `json` or `markdown` | Report format (default: `json`). |
+| `-o`, `--output` `PATH` | Write the report to this file instead of standard output. A path that names the inventory is a usage error. |
+
+The findings are those that `risk` scores under the built-in policy; no project policy
+is read. For each framework edition the report lists every entry that a finding
+references, with those findings, and the categories whose findings reference none. A
+reference means that a finding records a precondition, a weakness or evidence relevant
+to an entry, never that an attack happened, that a control fails or that an obligation
+applies. It is a report, not a gate: it exits 0 whatever the findings are, and 1 only
+when the inventory cannot be read or the report cannot be written. In Markdown, every
+ASCII punctuation character of inventory text is backslash-escaped, so a terminal shows
+the backslashes.
+[Framework crosswalk](framework-crosswalk.md) describes the report and the catalog.
 
 ### `diff`
 

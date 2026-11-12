@@ -96,33 +96,55 @@ Messages and recommendations are one line of plain text: control, bidirectional 
 
 `invocations[0].executionSuccessful` is `false` when the inventory records a collection failure or a failed collector. `toolExecutionNotifications` lists failures as errors, coverage gaps and collectors that did not run as warnings, and the coverage summary; at most 100 notifications are written. A run with more than 25,000 results, which GitHub does not keep in full, gets a warning. The run's `coverage` property is `incomplete` or `unknown`. Findings on components imported from a ShadowScan report are not this tool's findings: they are omitted, and the run property `nexus-symbiote:omittedImportedFindings` counts them.
 
-| Category | Rule title | CWE | OWASP |
-| --- | --- | --- | --- |
-| `version_pinning` | Unpinned version | CWE-829 | LLM03, ASI04 |
-| `mutable_image_tag` | Mutable image tag | CWE-829 | LLM03, ASI04 |
-| `transport_security` | Transport security | CWE-319 for high and critical findings | ASI07 |
-| `local_process` | Local MCP server process | none | ASI07 |
-| `authentication` | Missing authentication requirement | CWE-306 | ASI03, ASI07 |
-| `serialization_format` | Unsafe model serialization | CWE-502 for critical, CWE-1336 for high findings | LLM03, ASI04, ASI05 |
-| `serialization_format_unknown` | Unknown model serialization safety | CWE-502 | LLM03, ASI04 |
-| `signing_status` | Unsigned model artifact | CWE-345 | LLM03, ASI04 |
-| `code_execution` | Remote code execution enabled | CWE-494, CWE-829 | LLM03, ASI04, ASI05 |
-| `invisible_characters` | Invisible characters in instructions | CWE-451, CWE-1427 | LLM01, ASI01 |
-| `bidi_override` | Bidirectional override in instructions | CWE-451, CWE-1427 | LLM01, ASI01 |
-| `tag_characters` | Unicode tag characters in instructions | CWE-451, CWE-1427 | LLM01, ASI01 |
-| `prompt_size` | Large instruction file | none | LLM01, ASI01 |
-| `instruction_layering` | Layered instruction files | none | LLM01, ASI01 |
-| `permission_scope` | Unscoped agent permissions | CWE-250 | LLM06, ASI02, ASI03 |
-| `capability_scope` | Destructive tool capability | none | LLM06, ASI02 |
-| `data_integrity` | Retrieval source integrity | CWE-319 for high and critical findings | LLM04, LLM08, ASI06 |
-| `rag_discovery` | Undeclared retrieval source | none | LLM08, ASI06 |
-| `attestation` | Unattested extension | CWE-345 | LLM03, ASI04 |
-| `completeness` | Incomplete declaration | none | none |
-| `detection_method` | Code-detected reference | none | none |
-| `shadowscan-heuristic` | Imported discovery risk | none | none |
-| `shadowscan-inventory-unmatched` | Imported unmatched discovery | none | none |
+| Category | Rule title | CWE | OWASP LLM 2025 | OWASP LLM 2026 | OWASP Agentic | MITRE ATLAS | NIST AI RMF |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `additional_directories` | Access outside the project | none | LLM06:2025 | LLM03:2026 | ASI03 | none | MEASURE-2.7 |
+| `attestation` | Unattested extension | CWE-345 | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0010.001 | MANAGE-3.1 |
+| `authentication` | Missing authentication requirement | CWE-306 | none | none | ASI03, ASI07 | none | MEASURE-2.7 |
+| `auto_approval` | MCP tools without per-call approval | none | LLM06:2025 | LLM03:2026 | ASI02 | AML.T0053 | MEASURE-2.7 |
+| `bidi_override` | Bidirectional override in instructions | CWE-451, CWE-1427 | LLM01:2025 | LLM01:2026 | ASI01 | AML.T0068 | MEASURE-2.7 |
+| `capability_scope` | Destructive tool capability | none | LLM06:2025 | LLM03:2026 | ASI02 | AML.T0053 | MEASURE-2.7 |
+| `code_execution` | Remote code execution enabled | CWE-494, CWE-829 | LLM03:2025 | LLM04:2026 | ASI04, ASI05 | AML.T0011.000 | MANAGE-3.2 |
+| `completeness` | Incomplete declaration | none | none | none | none | none | GOVERN-1.6 |
+| `credential_helper` | Credential helper command | none | none | none | ASI03, ASI05 | AML.T0142 | MEASURE-2.7 |
+| `custom_code` | Custom model code | CWE-829 | LLM03:2025 | LLM04:2026 | ASI04, ASI05 | AML.T0011.000 | MANAGE-3.2 |
+| `data_integrity` | Retrieval source integrity | CWE-319 (critical and high findings) | LLM04:2025, LLM08:2025 | LLM05:2026, LLM09:2026 | ASI06 | AML.T0070 | MEASURE-2.7 |
+| `detection_method` | Code-detected reference | none | none | none | none | none | GOVERN-1.6 |
+| `directional_marks` | Directional marks in instructions | none | LLM01:2025 | LLM01:2026 | ASI01 | AML.T0068 | MEASURE-2.7 |
+| `endpoint_identity` | Unestablished endpoint identity | none | none | none | ASI07 | none | MEASURE-2.7 |
+| `hidden_markup` | Comments in instructions | none | LLM01:2025 | LLM01:2026 | ASI01 | AML.T0068 | MEASURE-2.7 |
+| `hook_commands` | Hook commands | none | none | none | ASI05 | AML.T0142 | MEASURE-2.7 |
+| `instruction_layering` | Layered instruction files | none | LLM01:2025 | LLM01:2026 | ASI01 | none | MEASURE-2.7 |
+| `invalid_safetensors` | Unverified SafeTensors structure | none | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0011.000 | MANAGE-3.2 |
+| `invisible_characters` | Invisible characters in instructions | CWE-451, CWE-1427 | LLM01:2025 | LLM01:2026 | ASI01 | AML.T0068 | MEASURE-2.7 |
+| `launch_context` | Widened MCP launch context | none | none | none | ASI05 | none | MEASURE-2.7 |
+| `launcher_identity` | Unknown MCP launcher identity | none | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0010.005 | MEASURE-2.7 |
+| `local_process` | Local MCP server process | none | none | none | ASI07 | AML.T0010.005 | MEASURE-2.7 |
+| `lockfile_resolution_mismatch` | Lockfile resolution mismatch | none | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0010.001 | MANAGE-3.1 |
+| `lockfile_unread` | Unread lockfile | none | none | none | none | none | GOVERN-1.6 |
+| `mcp_auto_approval` | Project MCP servers approved without a prompt | none | none | none | ASI04 | AML.T0010.005 | MEASURE-2.7 |
+| `missing_lockfile_integrity` | Lockfile record without integrity | CWE-494 | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0010.001 | MANAGE-3.1 |
+| `mutable_image_tag` | Mutable image tag | CWE-829 | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0010.004 | MANAGE-3.1 |
+| `nonregistry_source` | Package from outside a registry | CWE-829 (high findings) | LLM03:2025 (high findings) | LLM04:2026 (high findings) | ASI04 (high findings) | AML.T0010.001 (high findings) | MANAGE-3.1 (high findings) |
+| `package_alias` | Package alias | none | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0074 | MANAGE-3.1 |
+| `package_source` | Non-default MCP package source | none | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0010.005 | MANAGE-3.1 |
+| `permission_scope` | Unscoped agent permissions | CWE-250 | LLM06:2025 | LLM03:2026 | ASI02, ASI03 | AML.T0053, AML.T0105 (high findings) | MEASURE-2.7 |
+| `plugin_sources` | Plugin sources | none | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0010.005 | MANAGE-3.1 |
+| `prompt_size` | Large instruction file | none | LLM01:2025 | LLM01:2026 | ASI01 | none | MEASURE-2.7 |
+| `rag_discovery` | Undeclared retrieval source | none | LLM08:2025 | LLM09:2026 | ASI06 | none | GOVERN-1.6 |
+| `registry_origin` | Non-default package registry | none | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0010.001 | MANAGE-3.1 |
+| `runtime_undeclared` | Runtime component not in the inventory | none | none | none | ASI04 | none | GOVERN-1.6 |
+| `serialization_format` | Unsafe model serialization | CWE-502 (critical findings), CWE-1336 (high findings) | LLM03:2025 | LLM04:2026 | ASI04, ASI05 | AML.T0011.000 | MANAGE-3.2 |
+| `serialization_format_unknown` | Unknown model serialization safety | CWE-502 | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0011.000 | MANAGE-3.2 |
+| `shadowscan-heuristic` | Imported discovery risk | none | none | none | none | none | none |
+| `shadowscan-inventory-unmatched` | Imported unmatched discovery | none | none | none | none | none | GOVERN-1.6 |
+| `signing_status` | Unsigned model artifact | CWE-345 | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0010.003 | MANAGE-3.2 |
+| `tag_characters` | Unicode tag characters in instructions | CWE-451, CWE-1427 | LLM01:2025 | LLM01:2026 | ASI01 | AML.T0068 | MEASURE-2.7 |
+| `transport_ambiguity` | Ambiguous MCP transport | none | none | none | none | none | MEASURE-2.7 |
+| `transport_security` | Transport security | CWE-319 (critical and high findings) | none | none | ASI07 | none | MEASURE-2.7 |
+| `version_pinning` | Unpinned version | CWE-829 | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0109 | MANAGE-3.1 |
 
-`LLM` identifiers refer to the OWASP Top 10 for LLM Applications 2025 and `ASI` identifiers to the OWASP Top 10 for Agentic Applications. Tags use GitHub's `external/cwe/cwe-NNN` form and every rule is tagged `security`. A category outside the catalog, such as `launcher_identity`, gets a generic rule titled after the category and tagged only `security`; the [finding catalog](finding-catalog.md#sarif-rules) lists those categories. The mapping states which weakness a finding indicates; a finding is a declaration in the repository, not a confirmed vulnerability.
+Every rule is tagged `security`, then with each entry in its row, in lower case as GitHub normalizes tags: `external/cwe/cwe-NNN`, `external/owasp-llm-top-10-2025/llmNN`, `external/owasp-agentic-top-10/asiNN`, `external/owasp-llm-top-10-2026/llmNN`, `external/mitre-atlas/` with the technique, such as `aml.t0010.005`, and `external/nist-ai-rmf/` with the subcategory, such as `measure-2.7`. Every tag that a rule carried before the 2026, ATLAS and NIST tags were added is still there, in the same order, so a filter on it still matches. The categories that had no catalog entry had generic rules tagged only `security`; most of their rules now carry CWE, OWASP 2025 or Agentic tags as well, so a filter on such a tag also matches their findings. A few earlier tags do not hold for every finding of their rule and were kept so that the rules keep their tags; the framework crosswalk's [limits](framework-crosswalk.md#limits) list them. Every category in the [finding catalog](finding-catalog.md#sarif-rules) has a rule, and so has `runtime_undeclared`; a category outside the catalog, such as one that an edited inventory records, gets a generic rule titled after the category and tagged only `security`. The [framework crosswalk](framework-crosswalk.md) gives the rationale for each reference, the editions and their sources, and the EU AI Act and ISO/IEC 42001 references, which are not tags. A reference says what a finding records evidence of; a finding is a declaration in the repository, not a confirmed vulnerability.
 
 The exporter checks its output with a structural SARIF validator (required properties, levels, rule cross-references, relative locations and fingerprints). The OASIS SARIF JSON schema is not vendored, so output is not validated against it.
 

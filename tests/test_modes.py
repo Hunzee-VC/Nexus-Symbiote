@@ -346,6 +346,7 @@ def test_every_static_command_runs_under_the_offline_guard(tmp_path):
     run("blast-radius", str(native), agent, "--json-output")
     run("vex", str(native), "-o", str(tmp_path / "vex.json"))
     run("graph", str(native), "-o", str(tmp_path / "graph.html"))
+    run("crosswalk", str(native), "--format", "markdown", "-o", str(tmp_path / "crosswalk.md"))
     run("baseline", str(project), "-o", str(tmp_path / "baseline.json"), expect=(0, 1))
     run("verify-artifact", "system_prompt.md", "--project", str(project), "--sha256", digest)
     run("import-shadowscan", str(SHADOWSCAN_REPORT), "--report-only", "-o", str(imported))

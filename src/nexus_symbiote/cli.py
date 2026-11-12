@@ -17,6 +17,7 @@ from nexus_symbiote.attestation_cli import register_attestation_commands
 from nexus_symbiote.core.aibom import AIBOM, NativeFormatError
 from nexus_symbiote.core.enums import AssuranceLevel
 from nexus_symbiote.core.models import AIBOMMetadata, CompletenessClaim
+from nexus_symbiote.crosswalk_cli import register_crosswalk_commands
 from nexus_symbiote.digest_cli import (
     register_digest_commands,
     set_content_serial_number,
@@ -1477,6 +1478,7 @@ register_supply_chain_commands(main)
 register_digest_commands(main)
 register_attestation_commands(main)
 register_graph_commands(main)
+register_crosswalk_commands(main)
 
 if __name__ == "__main__":
     main()
