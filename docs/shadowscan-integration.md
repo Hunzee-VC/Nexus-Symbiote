@@ -346,7 +346,7 @@ and issuer in the BOM. Without `--bundle` the import records `unverified`;
 `--fail-on-unsigned-discovery`) unless `--allow-unsigned-discovery` is given.
 
 The signed mode also verifies the direct native projection. Use the same importer
-version. The comparison ignores JSON object key ordering and the BOM’s locally
+version. The comparison ignores JSON object key ordering and the BOM's locally
 generated timestamp and serial number. Source findings keep their declared
 assurance. Merged, enriched and portable BOMs require their own provenance, so
 `verify-discovery --bundle` rejects a `scan` BOM; use the CI check above for one.
