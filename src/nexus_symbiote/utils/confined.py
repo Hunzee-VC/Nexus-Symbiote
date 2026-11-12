@@ -716,10 +716,7 @@ class ConfinedCollection:
             if exc.errno in _LINK_ERRNOS and not self._has_exact_name(directory_fd, part):
                 raise FileNotFoundError(errno.ENOENT, "exact entry not found") from exc
             raise
-        if not self._has_exact_name(directory_fd, part):
-            os.close(child_fd)
-            raise FileNotFoundError(errno.ENOENT, "exact entry not found")
-        return child_fd
+        return self._exact_or_closed(child_fd, directory_fd, part)
 
     def _open_leaf_no_follow(self, directory_fd: int, name: str) -> int:
         try:
@@ -730,7 +727,15 @@ class ConfinedCollection:
             if exc.errno in _LINK_ERRNOS and not self._has_exact_name(directory_fd, name):
                 raise FileNotFoundError(errno.ENOENT, "exact entry not found") from exc
             raise
-        if not self._has_exact_name(directory_fd, name):
+        return self._exact_or_closed(fd, directory_fd, name)
+
+    def _exact_or_closed(self, fd: int, directory_fd: int, name: str) -> int:
+        try:
+            exact = self._has_exact_name(directory_fd, name)
+        except BaseException:
+            os.close(fd)
+            raise
+        if not exact:
             os.close(fd)
             raise FileNotFoundError(errno.ENOENT, "exact entry not found")
         return fd

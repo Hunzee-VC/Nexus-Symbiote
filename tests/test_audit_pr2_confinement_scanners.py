@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import errno
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -43,6 +45,35 @@ def test_confined_exact_name_blocks_case_variant_open(tmp_path: Path) -> None:
         assert collection.read_text(".mcp.json", missing_ok=True) is None
     result = MCPScanner().scan(tmp_path, config_only=True)
     assert any("case variant" in msg for msg in (*result.scan_failures, *result.surfaces_excluded))
+
+
+@pytest.mark.parametrize("relative", ["notes.txt", "nested/notes.txt"])
+def test_a_failed_exact_name_check_closes_what_it_opened(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative: str
+) -> None:
+    target = tmp_path / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("text", encoding="utf-8")
+    opened: list[int] = []
+    real_open = os.open
+
+    def recording_open(*args, **kwargs):
+        fd = real_open(*args, **kwargs)
+        opened.append(fd)
+        return fd
+
+    def unlistable(self: ConfinedCollection, directory_fd: int, name: str) -> bool:
+        raise PermissionError(errno.EACCES, "the directory cannot be listed")
+
+    with ConfinedCollection(tmp_path, []) as collection:
+        monkeypatch.setattr(os, "open", recording_open)
+        monkeypatch.setattr(ConfinedCollection, "_has_exact_name", unlistable)
+        assert collection.hash_file(relative) is None
+        monkeypatch.undo()
+        assert opened
+        for fd in opened:
+            with pytest.raises(OSError):
+                os.fstat(fd)
 
 
 def test_confined_default_excludes_and_policy_excludes_match_case_folded(tmp_path: Path) -> None:
