@@ -351,7 +351,8 @@ def test_what_is_listed_past_the_bound_does_not_depend_on_hash_order(tmp_path):
         for seed in ("1", "2", "3")
     }
     assert len(outputs) == 1
-    assert "imported_by_count" in outputs.pop()
+    (only,) = outputs
+    assert "imported_by_count" in only
 
 
 def test_scan_memory_grows_with_the_files_not_with_the_paths_they_reference(tmp_path):
