@@ -258,12 +258,17 @@ A way around a limit that its entry does not describe is worth a
   `CLAUDE.local.md`, `GEMINI.md` or `.cursorrules` below the root, `claude.md` in a
   subdirectory, and other hosts' conventions are neither inventoried nor checked
   for hidden characters. List such files in an [`agent.yaml`](agent-manifest.md).
-- **Imports are followed from root memory files only.** `@path` imports are followed
-  from the root `CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md` and `GEMINI.md`
-  to five hops. The imports of a nested `CLAUDE.md` that no root memory file
-  imports are not followed. An import that leaves the project root, names an
+- **Imports are followed from memory files only.** `@path` imports are followed
+  from the root `CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md` and `GEMINI.md`,
+  and from a `CLAUDE.md` at any depth, to five hops. The imports of other
+  instruction files, such as `AGENTS.md` or a rule file, are followed only when a
+  memory file imports them. An import that leaves the project root, names an
   excluded path or lies deeper than the `depth` limit is a gap, so write a path
-  alias such as `@/components` as code.
+  alias such as `@/components` as code. A project with more than the
+  [`import-lookups`](collection-limits.md#limits) limit of memory files and import
+  targets fails until the limit is raised. Past 262,144 characters of listed paths,
+  an `imports` list is replaced by `imports_count` and `imports_digest`, and an
+  `imported_by` list by `imported_by_count`; every file is still inventoried.
 - **Fixtures count.** A nested `CLAUDE.md` or `AGENTS.md` in test fixtures or vendored
   code is inventoried, and its findings count, like any other.
 - **Skill front matter is not interpreted.** Every file in the skill and command
@@ -370,10 +375,12 @@ A way around a limit that its entry does not describe is worth a
   only from `.well-known` directories and from `agent.json`, `agent-card.json` and
   `a2a/agent.json` in the root.
 - **Python import heuristics are shallow.** The a2a and rag collectors read only
-  Python files that name the SDK or a vector-store library, and skip one they cannot
-  read or parse or that exceeds 262,144 characters; for A2A, such a file that names
-  `AgentCard` is a gap. The A2A search skips `tests`, `test`, `dist`, `build`,
-  `docs`, `benchmarks` and `examples`.
+  Python files that name the SDK or a vector-store library. The rag collector skips
+  one it cannot read or parse or that exceeds 262,144 characters. The a2a
+  collector records one it cannot read as a failure, and skips one it cannot parse
+  or that exceeds 262,144 characters unless it names `AgentCard`, which is a gap.
+  The A2A search skips `tests`, `test`, `dist`, `build`, `docs`, `benchmarks` and
+  `examples`.
 
 ## ShadowScan
 

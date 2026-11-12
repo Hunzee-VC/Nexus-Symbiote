@@ -16,7 +16,7 @@ nexus-symbiote [--offline | --live] [--debug] [--limit NAME=VALUE]... [--version
 | `--offline` | Refuse name resolution, network connections and process creation (the default). |
 | `--live` | Allow the network and process steps of `discover-mcp`, `advisories` and `verify-live`. Every other command stays offline. |
 | `--debug` | Print where a collector or internal error was raised on standard error: its class and the files, lines and functions of its traceback, without its message, which can quote project or inventory text. Without it, an unexpected error ends the command with `Error: internal error (<error class>)` and exit status 1, and a collector error is recorded by its diagnostic code only. |
-| `--limit` `NAME=VALUE` | Set one [collection limit](collection-limits.md) for this command, such as `entries=200000` or `model-bytes=128GiB`. Repeatable; overrides `NEXUS_SYMBIOTE_LIMITS` for that name. |
+| `--limit` `NAME=VALUE` | Set one [collection limit](collection-limits.md) for this command, such as `entries=200000`, `model-bytes=128GiB` or `import-lookups=20000`. Repeatable; overrides `NEXUS_SYMBIOTE_LIMITS` for that name. |
 | `--version` | Print the version and exit. |
 | `--help` | Print help and exit. |
 

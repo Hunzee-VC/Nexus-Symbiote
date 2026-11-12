@@ -44,7 +44,7 @@ from nexus_symbiote.scanners.ts_tools import (
     is_server_source,
     source_text,
 )
-from nexus_symbiote.utils.confined import CollectionError, ConfinedCollection
+from nexus_symbiote.utils.confined import CollectionError, ConfinedCollection, recorded_count
 
 # Test, build output, documentation and example trees are not searched, so code
 # that only illustrates an SDK never fails the collector.
@@ -538,7 +538,11 @@ def _hidden_import(text: str, tree: ast.Module) -> str | None:
 
 
 def _outcome(result: ScanResult) -> tuple[int, int, int]:
-    return len(result.components), len(result.surfaces_excluded), len(result.scan_failures)
+    return (
+        len(result.components),
+        recorded_count(result.surfaces_excluded),
+        recorded_count(result.scan_failures),
+    )
 
 
 def collect_source_references(

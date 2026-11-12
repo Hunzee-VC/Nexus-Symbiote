@@ -733,7 +733,7 @@ class RegistryScanner(Scanner):
         found: list[tuple[str, bytes | None]] = []
         for names in self._NODE_LOCKFILES:
             for name in names:
-                before = len(result.scan_failures), len(result.surfaces_excluded)
+                before = files.failures_recorded, files.exclusions_recorded
                 # Parse and bind the same bounded bytes; a second open for hashing could
                 # associate a swapped lockfile with a previously parsed resolution.
                 raw = files.read_bytes(name, missing_ok=True)
@@ -741,7 +741,7 @@ class RegistryScanner(Scanner):
                     result.surfaces_scanned.append(name)
                     found.append((name, raw))
                     break
-                if (len(result.scan_failures), len(result.surfaces_excluded)) != before:
+                if (files.failures_recorded, files.exclusions_recorded) != before:
                     # Present but refused or excluded: the package manager still
                     # prefers it, so no other file stands in for it.
                     found.append((name, None))

@@ -15,10 +15,17 @@ from nexus_symbiote import limits
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.scanners.a2a import A2AScanner
+from nexus_symbiote.scanners.base import ScanResult
 from nexus_symbiote.scanners.ide_agents import IDEAgentScanner
 from nexus_symbiote.scanners.mcp import MCPScanner
 from nexus_symbiote.scanners.prompt import PromptScanner
-from nexus_symbiote.utils.confined import MAX_LISTED_FAILURE_CHARACTERS, MAX_LISTED_FAILURES
+from nexus_symbiote.scanners.registry import RegistryScanner
+from nexus_symbiote.utils.confined import (
+    MAX_LISTED_FAILURE_CHARACTERS,
+    MAX_LISTED_FAILURES,
+    BoundedRecords,
+    ConfinedCollection,
+)
 
 VARIANT = "is the active file on case-insensitive file systems and is not inventoried"
 NOT_UTF8 = "symlink target name is not valid UTF-8; not collected"
@@ -231,3 +238,50 @@ def test_a_collection_that_also_searches_source_states_the_total_bytes_set(tmp_p
     options = ("--limit", "total-bytes=2KiB", "--limit", "source-scan-bytes=1KiB")
     _, bom = _scan(project, tmp_path / "out.json", *options)
     assert stated in _failures(bom)
+
+
+def _filled() -> BoundedRecords:
+    return BoundedRecords(f"filler/{index:04d}: refused" for index in range(MAX_LISTED_FAILURES))
+
+
+def test_failures_past_the_listing_bounds_are_still_counted_as_recorded(tmp_path):
+    (tmp_path / "outside.json").write_text("{}")
+    (tmp_path / "root").mkdir()
+    (tmp_path / "root" / "config.json").symlink_to(tmp_path / "outside.json")
+    failures, exclusions = _filled(), BoundedRecords(noun="excluded surface")
+    for index in range(MAX_LISTED_FAILURES):
+        exclusions.append(f"gap/{index:04d}: not collected")
+    listed = len(failures)
+    with ConfinedCollection(
+        tmp_path / "root", failures, exclusions, exclude_paths=["private"]
+    ) as files:
+        recorded = files.failures_recorded, files.exclusions_recorded
+        assert files.read_bytes("config.json", missing_ok=True) is None
+        assert files.failures_recorded == recorded[0] + 1
+        # The same refusal again is recorded again, although it is listed once.
+        assert files.read_bytes("config.json", missing_ok=True) is None
+        assert files.failures_recorded == recorded[0] + 2
+        assert files.read_bytes("absent.json", missing_ok=True) is None
+        assert files.failures_recorded == recorded[0] + 2
+        assert files.excluded("private/notes.md")
+        assert files.exclusions_recorded == recorded[1] + 1
+    assert len(failures) == listed + 1
+    assert failures.recorded == recorded[0] + 2
+
+
+def test_a_refused_lockfile_past_the_listing_bounds_is_not_read_as_absent(tmp_path):
+    (tmp_path / "package.json").write_text('{"dependencies":{"openai":"^1.0.0"}}')
+    (tmp_path / "outside.json").write_text("{}")
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "package.json").write_text('{"dependencies":{"openai":"^1.0.0"}}')
+    lock = {"lockfileVersion": 3, "packages": {"node_modules/openai": {"version": "1.2.3"}}}
+    (root / "package-lock.json").write_text(json.dumps(lock))
+    # npm installs from npm-shrinkwrap.json in preference to package-lock.json.
+    (root / "npm-shrinkwrap.json").symlink_to(tmp_path / "outside.json")
+    scanner = RegistryScanner()
+    for failures in ([], list(_filled())):
+        result = ScanResult(scanner_name="registry", scan_failures=failures)
+        with scanner._collection(root, result):
+            npm, other = scanner._npm_lock(result)
+        assert (npm, other) == (None, None)
