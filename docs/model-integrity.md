@@ -52,7 +52,9 @@ parse, each such key must be an external-data entry it read or a name, and a
 file it cannot parse, or one beyond its limits, fails whenever the bytes
 `location` occur in it at all. A tensor's `data_location` is read as protobuf
 reads the enum: as a 32-bit value, where a later value that the enum does not
-define never replaces an earlier `EXTERNAL`.
+define never replaces an earlier `EXTERNAL`. A singular tensor field written more
+than once, such as a node attribute's tensor, which protobuf merges into one
+tensor, is a file the reader cannot parse.
 
 A file that many models bind costs one binding per model, so the bindings are
 bounded. A directory with more than 16 shard indexes binds none of them and
@@ -86,7 +88,7 @@ files when present, and records the digests on each model in the directory:
 | --- | --- |
 | `properties.config_files` | `config.json`, `model_config.json`, `adapter_config.json`, `tokenizer_config.json`, `generation_config.json`, `quantize_config.json`, `preprocessor_config.json`, `processor_config.json`, `chat_template.json`; each must be a JSON object |
 | `tokenizer_hash`, `properties.tokenizer_files` | `tokenizer.json`, `tokenizer.model`, `spiece.model`, `sentencepiece.bpe.model`, `vocab.json`, `vocab.txt`, `merges.txt`, `special_tokens_map.json`, `added_tokens.json` |
-| `chat_template_hash`, `properties.chat_templates` | `chat_template` in any of the configuration files, as a string or a list of named templates; `chat_template.jinja`, `chat_template.jinja2` and `additional_chat_templates/*.jinja`; the `tokenizer.chat_template` entries embedded in a GGUF file |
+| `chat_template_hash`, `properties.chat_templates` | `chat_template` in any of the configuration files, as a string or a list of named templates; `chat_template.jinja`, `chat_template.jinja2` and `additional_chat_templates/*.jinja`; the `tokenizer.chat_template` entries embedded in a GGUF file, with each key read up to its first NUL byte, as llama.cpp reads it |
 
 `tokenizer_hash` and `chat_template_hash` are manifest digests: the SHA-256 of
 the RFC 8785 JSON `{"files": [{"path": ..., "sha256": ...}]}` built from the
@@ -250,5 +252,6 @@ those listed above, and NumPy `.npy` and `.npz` arrays, are not inventoried. Saf
 tensor bytes are hashed but not inspected, so a payload that also parses as
 another format is not flagged. The chat template check is a heuristic for known
 sandbox-escape shapes, not a template analysis: a template that escapes the
-sandbox another way, such as a dunder name built by concatenating strings, or that
-instructs the model, passes it.
+sandbox another way, such as a dunder name whose leading and trailing underscores
+are each split across string pieces or that a filter such as `format` builds, or
+that instructs the model, passes it.
