@@ -46,9 +46,10 @@ are checked only when a scan reads the manifest.
 
 ## What it changes
 
-- **Identity.** Without `agent.yaml`, or without `id`, the repository agent is
-  `agent:repository:cdb4ee2aea69cc6a83331bbe` (derived as if `id` were `.`, "this
-  repository"), named `repository`, the same in every checkout.
+- **Identity.** Without `agent.yaml`, or without `id`, the repository agent's
+  reference is `agent:repository:cdb4ee2aea69cc6a83331bbe` (derived as if `id` were
+  `.`, "this repository"), the same in every checkout. It is named after the
+  manifest's `name`, or `repository` for the inferred agent.
   `id` gives it a reference of your own. Changing `id` replaces the agent, so
   `diff` reports it removed and added.
 - **Instructions.** A listed file that the `prompt` collector already reads, such
@@ -78,13 +79,14 @@ inventory, so the default gate fails and the evidence stays available for review
 | --- | --- |
 | `agent.yaml: does not conform to the agent manifest schema` | Not a YAML mapping, an unknown key, a missing `name`, a YAML anchor, alias or tag, or too many tokens. The inferred agent is recorded instead |
 | `agent.yaml: read refused (...)`, `agent.yaml: symlink target ...`, `agent.yaml: file-bytes limit of 1 MiB exceeded; ...` or `agent.yaml: invalid UTF-8` | A non-regular file, a symbolic link other than a relative one to a regular file in the project, a file over 1 MiB, or bytes that are not UTF-8. The inferred agent is recorded instead |
-| `agent.yaml#/instructions/N: must be a relative path beneath the repository` | An absolute path, a `..` component, a backslash or a NUL character |
+| `agent.yaml#/instructions/N: must be a relative path beneath the repository` or `agent.yaml#/models/KEY: must be a relative path beneath the repository` | An absolute path, a `..` component, a backslash or a NUL character |
 | `agent.yaml#/instructions/N: the declared instruction could not be collected safely` | Missing, a symbolic link other than a relative one to a regular file in the project, not a regular file, or larger than the `file-bytes` [collection limit](collection-limits.md) (4 MiB by default) |
-| `agent.yaml#/instructions/N: names a path inside a directory that collection never reads` | A path under `.git`, `node_modules`, `__pycache__`, `.venv` or `venv` |
+| `agent.yaml#/instructions/N: names a path inside a directory that collection never reads` or `agent.yaml#/models/KEY: names a path inside a directory that collection never reads` | A path under `.git`, `node_modules`, `__pycache__`, `.venv` or `venv` |
 | `agent.yaml#/instructions/N: instruction changed since scanner collection` | The file changed between collection and assembly |
 | `agent.yaml#/instructions/N: declared instruction is not UTF-8 text` | It cannot be checked for hidden characters |
 | `agent.yaml#/models/KEY: the declared local model has no collected model artifact` | No collected model at that path |
 | `agent.yaml#/models/KEY: the declared local model is unavailable` | The artifact can no longer be opened safely |
+| `agent.yaml: declares a component reference that is already in use` | A declared instruction or hosted model would take the reference of a different component already in the inventory |
 
 These failures name an entry by its position or its percent-encoded key, never by
 its text: that text comes from the checkout and need not name a file.
@@ -92,20 +94,22 @@ its text: that text comes from the checkout and need not name a file.
 `validate --project` and `risk --project` recollect the manifest and report any of
 these as "Local agent manifest could not be reconciled."
 
-The operator's `scan.exclude_paths` applies to `agent.yaml` and to every path it
-names. An excluded path is never read or hashed; it is recorded as a coverage gap
-(`PATH: excluded by collection policy`), so the default gate fails rather than
-silently narrowing what was inventoried.
+The project policy's `scan.exclude_paths` (in `.nexus-symbiote.yaml`, which
+`--no-project-policy` and the GitHub Action ignore) applies to `agent.yaml` and to
+every path it names. An excluded path is never read or hashed; it is recorded as a
+coverage gap (`PATH: excluded by collection policy`), so the default gate fails
+rather than silently narrowing what was inventoried.
 
 ## Trust
 
-`agent.yaml` is part of the checkout, so the change under review can edit it. It
-can rename the agent, change its `id`, and add or drop declared instructions and
-models; `diff` reports each of these against a reviewed baseline. It cannot make the
-scan read outside the project root, follow a symlink, raise a trust tier or an
-assurance level, or record a runtime observation: declared fields keep declared
-assurance and the agent's runtime autonomy and deployment stay unknown.
+`agent.yaml` is part of the checkout, so the change under review can edit it. It can
+rename the agent, change its `id`, and add or drop declared instructions and models;
+`diff` reports each of these against a reviewed baseline. It cannot make the scan
+read outside the project root, follow a symlink out of the project, raise a trust
+tier or an assurance level, or record a runtime observation: declared fields keep
+declared assurance and the agent's runtime autonomy and deployment stay unknown.
 
 A repository that already has an `agent.yaml` for another tool gets the
-"does not conform" failure. Excluding the file with an operator policy keeps it
-unread, at the cost of a recorded coverage gap.
+"does not conform" failure. Excluding the file in the project policy keeps it
+unread, at the cost of a recorded coverage gap; under `--no-project-policy` the
+file is read and the failure stays.

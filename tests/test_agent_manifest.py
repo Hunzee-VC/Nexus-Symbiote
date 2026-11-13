@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import struct
 from pathlib import Path
 
@@ -280,3 +281,32 @@ def test_the_inferred_agent_is_the_repository_whatever_its_checkout():
     assert expected == INFERRED_AGENT_REF
     for guide in (GUIDE, GUIDE.with_name("drift-gate.md")):
         assert f"`{INFERRED_AGENT_REF}`" in guide.read_text(), guide.name
+
+
+@pytest.mark.parametrize(
+    ("manifest", "files"),
+    [
+        ("instructions: [../outside.md]", {}),
+        ("instructions: [missing.md]", {}),
+        ("instructions: [node_modules/pkg/AGENTS.md]", {}),
+        ("instructions: [binary.md]", {"binary.md": b"\xff\xfe"}),
+        ("models: {m: {path: ../outside}}", {}),
+        ("models: {m: {path: node_modules/m}}", {}),
+        ("models: {m: {path: models}}", {}),
+        ("models: {planner: {provider: openai, requested_ref: gpt-4o}}", {}),
+    ],
+)
+def test_the_guide_documents_each_manifest_failure(tmp_path, manifest, files):
+    (tmp_path / "agent.yaml").write_text(f"name: x\n{manifest}\n")
+    for name, content in files.items():
+        (tmp_path / name).write_bytes(content)
+    # The reference a declared hosted model "planner" would take, held by another model.
+    taken = ModelComponent(bom_ref=f"model:{INFERRED_AGENT_REF}/hosted/planner", name="other")
+    failures: list[str] = []
+    assemble_repository_agent(AIBOM(components=[taken]), tmp_path, failures=failures)
+    assert failures
+    guide = GUIDE.read_text()
+    for failure in failures:
+        documented = re.sub(r"#/instructions/\d+", "#/instructions/N", failure)
+        documented = re.sub(r"#/models/[^:]+", "#/models/KEY", documented)
+        assert f"`{documented}`" in guide, documented
