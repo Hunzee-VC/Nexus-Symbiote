@@ -320,6 +320,12 @@ def fold_name(name: str) -> str:
     return folded.translate(_IGNORED_IN_NAMES).rstrip(". ")
 
 
+def _default_excluded(name: str) -> bool:
+    """Whether a path component is one of ``DEFAULT_EXCLUDES``, in any spelling a
+    case-insensitive file system treats as the same name."""
+    return name in DEFAULT_EXCLUDES or fold_name(name) in DEFAULT_EXCLUDES
+
+
 def _lexical_target(directory: Path, text: str) -> Path:
     """Resolve a link's text against its directory without following anything.
 
@@ -656,7 +662,7 @@ class ConfinedCollection:
         # Dependency caches, virtual environments and Git internals are outside
         # the documented static scope. The BOM records these patterns. Any
         # further omission within that scope is a blocking coverage gap.
-        if any(part in DEFAULT_EXCLUDES or fold_name(part) in DEFAULT_EXCLUDES for part in parts):
+        if any(_default_excluded(part) for part in parts):
             return True
         denied = bool(self._excluded) and any(
             parts[:index] in self._excluded for index in range(len(parts) + 1)
@@ -1033,9 +1039,10 @@ class ConfinedCollection:
         read it, and one to the root or to a directory that holds the walked one is a
         failure. ``directory_links`` collects the directory symlinks the walk met, and
         ``skipped`` the entries it neither entered nor yielded because their name is
-        one of ``DEFAULT_EXCLUDES``, which nothing records otherwise. Every other
-        symlink is a recorded failure. Past the collection's listing bounds, the
-        walk's per-entry failures end it as one line per reason.
+        one of ``DEFAULT_EXCLUDES``, in any spelling a case-insensitive file system
+        treats as that name, which nothing records otherwise. Every other symlink is
+        a recorded failure. Past the collection's listing bounds, the walk's
+        per-entry failures end it as one line per reason.
         """
         try:
             relative = self._relative(directory)
@@ -1094,7 +1101,7 @@ class ConfinedCollection:
                     continue
                 child = relative / name
                 if self.excluded(child):
-                    if scope.skipped is not None and name in DEFAULT_EXCLUDES:
+                    if scope.skipped is not None and _default_excluded(name):
                         scope.skipped.append(child)
                     continue
                 metadata = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)

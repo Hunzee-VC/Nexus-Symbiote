@@ -55,14 +55,17 @@ A way around a limit that its entry does not describe is worth a
   as a coverage gap, so excluding a file that fails collection turns the failure
   into a gap; the default gates still fail.
 - **Default exclusions match by name.** Any path component named `.git`,
-  `node_modules`, `__pycache__`, `.venv` or `venv` is skipped. These defaults are
+  `node_modules`, `__pycache__`, `.venv` or `venv` is skipped, and so is one whose
+  name differs from these only by case, Unicode normalization, ignored format
+  characters or trailing dots and spaces, such as `Venv` or `NODE_MODULES`, which
+  case-insensitive file systems treat as the same name. These defaults are
   listed under `exclusions` in the inventory but are not a gap, except inside a
   directory whose every file the `prompt` collector reads, such as a skill, command,
-  rule or subagent directory. There such an entry, such as `.claude/skills/venv` or
-  `.claude/agents/node_modules`, is a coverage gap that names it, so the default
-  gates fail. A skill checked out with its own `.git`, including a Git submodule,
-  whose `.git` is a file, or one whose script left a `__pycache__` beside it, fails
-  them until that entry is removed.
+  rule or subagent directory. There such an entry, such as `.claude/skills/venv`,
+  `.claude/skills/Venv` or `.claude/agents/node_modules`, is a coverage gap that
+  names it, so the default gates fail. A skill checked out with its own `.git`,
+  including a Git submodule, whose `.git` is a file, or one whose script left a
+  `__pycache__` beside it, fails them until that entry is removed.
 - **Case variants.** When a fixed path such as `CLAUDE.md`, `.mcp.json`,
   `.claude/settings.json` or a model directory's configuration, tokenizer or chat
   template file or `additional_chat_templates` directory is absent, a file or
