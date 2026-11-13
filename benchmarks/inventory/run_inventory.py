@@ -218,7 +218,12 @@ def run() -> dict:
                 elif name == "no_secret_in_bom":
                     ok = "SECRET_BENCH_MARKER" not in output.read_text()
                 elif name == "deceptive_localhost_flagged":
-                    ok = any(r.category == "transport_security" for s in servers for r in s.risks)
+                    ok = any(
+                        r.category == "transport_security"
+                        for s in servers
+                        if s.endpoint_url == "http://localhost.attacker.invalid"
+                        for r in s.risks
+                    )
                 elif name in {"unsafe_format", "safe_format", "unknown_format"}:
                     expected_format = {
                         "unsafe_format": "unsafe-code-execution",
@@ -229,11 +234,14 @@ def run() -> dict:
                         len(models) == 1 and models[0].serialization_safety.value == expected_format
                     )
                 elif name in {"unsigned", "signer_unverified"}:
+                    expected_status = {
+                        "unsigned": "signature-not-found",
+                        "signer_unverified": "signature-present-unverified",
+                    }[name]
                     ok = (
                         len(models) == 1
                         and not models[0].signing_identity
-                        and models[0].signing_status != "sigstore-signed"
-                        and models[0].assurance_level.value != "verified"
+                        and models[0].signing_status == expected_status
                     )
                 elif name == "critical_gate":
                     ok = critical_gate(RiskScorer().score(bom))

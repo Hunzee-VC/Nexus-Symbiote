@@ -5,6 +5,8 @@ import json
 import runpy
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -108,6 +110,53 @@ def test_unexpected_exclusion_is_unknown_and_fails_the_case(monkeypatch):
     assert not case["passed"] and case["coverage_incomplete"]
     assert case["unknown_negative_labels"] == 2
     assert case["relevant_mcp_exclusions"] == ["app/mcpserver_quickstart.py: unexpected omission"]
+    assert not report["passed"]
+
+
+@pytest.mark.parametrize(
+    ("forged", "valid"),
+    [
+        ("digest-pinned", "digest-pinned"),
+        ("signature-not-found", "signature-present-unverified"),
+    ],
+)
+def test_server_and_signing_controls_judge_the_component_they_name(monkeypatch, forged, valid):
+    """A risk on the other server, a verified status or the other unverified one fails them."""
+    namespace = runpy.run_path(str(ROOT / "benchmarks/inventory/run_inventory.py"))
+    mcp, model = namespace["MCPScanner"], namespace["ModelScanner"]
+    scan_servers, scan_models = mcp.scan, model.scan
+
+    def treated_as_loopback(self, path):
+        result = scan_servers(self, path)
+        for server in result.components:
+            if getattr(server, "endpoint_url", None) == "http://localhost.attacker.invalid":
+                server.risks = [r for r in server.risks if r.category != "transport_security"]
+        return result
+
+    def misreported(self, path):
+        result = scan_models(self, path)
+        status = forged if (path / "model.sig").exists() else valid
+        result.components = [
+            c.model_copy(update={"signing_status": status}) for c in result.components
+        ]
+        return result
+
+    monkeypatch.setattr(mcp, "scan", treated_as_loopback)
+    monkeypatch.setattr(model, "scan", misreported)
+    report = namespace["run"]()
+    cases = {row["case"]: row for row in report["cases"]}
+    assert cases["scoped-servers"]["checks"] == {
+        "distinct_scoped_edges": True,
+        "origin_only": True,
+        "no_secret_in_bom": True,
+        "deceptive_localhost_flagged": False,
+    }
+    assert cases["forged-signer-and-format"]["checks"]["signer_unverified"] is False
+    assert cases["valid-safe-tensor"]["checks"] == {"safe_format": True, "unsigned": False}
+    assert not any(
+        cases[case]["passed"]
+        for case in ("scoped-servers", "forged-signer-and-format", "valid-safe-tensor")
+    )
     assert not report["passed"]
 
 
