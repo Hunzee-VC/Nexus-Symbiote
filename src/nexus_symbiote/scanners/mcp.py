@@ -2189,16 +2189,28 @@ class MCPScanner(Scanner):
                 f"MCP server '{name}' endpoint URL embeds credentials: {safe_endpoint}",
                 "Supply the credential through a header or environment reference.",
             )
-        elif (
-            endpoint_url
-            and safe_endpoint != "[redacted]"
-            and not self._secure_endpoint(endpoint_url)
-        ):
+        elif endpoint_url and endpoint_gap is None and not self._secure_endpoint(endpoint_url):
+            # An origin withheld for a credential value is still a literal URL.
             add(
                 RiskSeverity.HIGH,
                 "transport_security",
                 f"MCP server '{name}' endpoint is not HTTPS: {safe_endpoint}",
                 "Use HTTPS for all remote MCP server connections.",
+            )
+        if any(
+            _has_userinfo(url)
+            or (self._endpoint(url)[1] is None and not self._secure_endpoint(url))
+            for url in endpoints
+            if url != endpoint_url
+        ):
+            # A client may connect to any of them: Gemini CLI prefers httpUrl to url.
+            add(
+                RiskSeverity.HIGH,
+                "transport_security",
+                f"MCP server '{name}' declares another endpoint that is not HTTPS or embeds "
+                "credentials.",
+                "Declare one HTTPS endpoint, with credentials in a header or environment "
+                "reference.",
             )
         if endpoint_url and endpoint_gap:
             dynamic = expands(endpoint_url)

@@ -382,6 +382,44 @@ def test_endpoint_with_user_information_is_named_accurately(tmp_path):
     assert "pw" not in finding.detail
 
 
+def test_plain_http_endpoint_withheld_for_a_header_value_is_still_not_https(tmp_path):
+    record, _ = single(
+        tmp_path,
+        {
+            "url": "http://attacker.example.net/mcp",
+            "headers": {"X-Api-Key": "attacker.example.net"},
+        },
+    )
+    assert record.endpoint_url == "[redacted]"
+    finding = next(r for r in record.risks if r.category == "transport_security")
+    assert finding.severity.value == "high"
+    assert finding.detail == "MCP server 's' endpoint is not HTTPS: [redacted]"
+
+
+@pytest.mark.parametrize(
+    "server",
+    [
+        {"url": "https://good.example/sse", "httpUrl": "http://evil.example/mcp"},
+        {"url": "https://good.example/mcp", "serverUrl": "https://user:pw@evil.example/mcp"},
+    ],
+)
+def test_every_declared_endpoint_is_checked_for_transport_security(tmp_path, server):
+    result = scan(tmp_path, {".gemini/settings.json": json.dumps({"mcpServers": {"s": server}})})
+    record = servers(result)["s"]
+    assert record.endpoint_url == "https://good.example"
+    [finding] = [r for r in record.risks if r.category == "transport_security"]
+    assert finding.severity.value == "high"
+    assert "another endpoint" in finding.detail and "evil" not in finding.detail
+
+
+def test_repeated_secure_endpoint_fields_add_no_transport_finding(tmp_path):
+    record, gaps = single(
+        tmp_path, {"url": "https://good.example/mcp", "httpUrl": "https://good.example/mcp"}
+    )
+    assert not any(r.category == "transport_security" for r in record.risks)
+    assert gaps == []
+
+
 @pytest.mark.parametrize(
     "args,high,medium",
     [
