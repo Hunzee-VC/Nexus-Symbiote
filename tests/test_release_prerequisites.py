@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 from datetime import UTC, datetime, timedelta
 from urllib.error import HTTPError
@@ -409,7 +410,20 @@ def test_without_a_trusted_run_the_soak_needs_a_stated_override(live, capsys):
     assert "Soak period waived by the publishing maintainer" in capsys.readouterr().out
 
 
-def test_a_stated_override_publishes_a_fresh_commit_and_is_logged(live, capsys):
+@pytest.mark.parametrize(
+    "error",
+    [http.client.IncompleteRead(b"partial"), http.client.RemoteDisconnected("closed"), TypeError()],
+)
+def test_a_broken_github_response_blocks_publication_without_a_traceback(live, capsys, error):
+    def broken(*_):
+        raise error
+
+    live.setattr(controls, "fetch_branch", broken)
+    assert controls.main() == 2
+    assert "could not be verified from GitHub" in capsys.readouterr().err
+
+
+def test_a_stated_override_publishes_a_fresh_commit_and_is_logged(live, capsys, tmp_path):
     live.setattr(
         controls,
         "fetch_branch",
@@ -417,9 +431,15 @@ def test_a_stated_override_publishes_a_fresh_commit_and_is_logged(live, capsys):
     )
     live.setattr(controls, "fetch_runs", lambda *_: [])
     live.setenv("SOAK_OVERRIDE", "Publishes the fix for an actively exploited gate bypass")
+    summary = tmp_path / "summary.md"
+    live.setenv("GITHUB_STEP_SUMMARY", str(summary))
     live.setattr("sys.argv", [*ARGV, "--publish", "pypi"])
     assert controls.main() == 0
-    assert "actively exploited gate bypass" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "actively exploited gate bypass" in out
+    assert "the stated soak waiver and the signed release tag" in out
+    assert "the 24-hour soak and" not in out
+    assert "the 24-hour soak was waived: Publishes the fix" in summary.read_text()
 
 
 @pytest.mark.parametrize(

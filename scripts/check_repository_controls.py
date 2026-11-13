@@ -15,6 +15,7 @@ not protect a GitHub branch.
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import re
@@ -500,6 +501,7 @@ def main() -> int:
     if args.verify_bypass_actors and not args.publish:
         parser.error("--verify-bypass-actors needs --publish")
     notices: list[str] = []
+    waiver: str | None = None
     try:
         if not _valid_sha(args.sha):
             raise ValueError("an exact source commit SHA is required")
@@ -531,15 +533,25 @@ def main() -> int:
                 else landed_at(metadata, runs, repo=args.repo, branch=args.branch, sha=args.sha)
             )
             override = os.environ.get("SOAK_OVERRIDE", "")
-            errors.extend(evaluate_soak(landed, datetime.now(UTC), override))
-            if not errors and override_reason(override):
-                print(
-                    f"Soak period waived by the publishing maintainer: {override_reason(override)}"
-                )
+            soak_errors = evaluate_soak(landed, datetime.now(UTC), override)
+            errors.extend(soak_errors)
+            waiver = override_reason(override) if not soak_errors else None
+            if waiver and not errors:
+                print(f"Soak period waived by the publishing maintainer: {waiver}")
+                notices.append(f"the 24-hour soak was waived: {waiver}")
             version = project_version()
             ref, tag = fetch_release_tag(args.repo, version, token)
             errors.extend(evaluate_release_tag(ref, tag, version=version, sha=args.sha))
-    except (HTTPError, URLError, OSError, ValueError, KeyError, RecursionError):
+    except (
+        HTTPError,
+        URLError,
+        http.client.HTTPException,
+        OSError,
+        ValueError,
+        KeyError,
+        TypeError,
+        RecursionError,
+    ):
         # Do not include response bodies, headers or credential-bearing error text.
         print(
             "Repository controls could not be verified from GitHub; publication is blocked.",
@@ -564,7 +576,8 @@ def main() -> int:
     if args.publish:
         checked += f", the release-tag ruleset and the {args.publish} environment"
     if args.publish == "pypi":
-        checked += ", the 24-hour soak and the signed release tag"
+        soak = "the stated soak waiver" if waiver else "the 24-hour soak"
+        checked += f", {soak} and the signed release tag"
     print(f"Repository controls verified: {checked}.")
     return 0
 

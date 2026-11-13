@@ -62,7 +62,7 @@ Dependabot proposes range changes in `pyproject.toml` only. Such a pull request 
 
 Every CI and release install of a lock uses `--require-hashes --only-binary=:all:` followed by `pip check`: a missing wheel stops the job instead of building a source distribution with unpinned build tools.
 
-`Dependency advisories` blocks on any OSV advisory for a pin of the CI or Action lock. If an advisory cannot be fixed in time and does not affect this project, add a waiver to `config/dependency-advisory-waivers.json` in a reviewed pull request: the advisory ID, the package and exact version, a reason of at least 20 characters, and an expiry at most 90 days ahead. The gate prints and records every waiver, fails on an expired or malformed one, and fails on a waiver that no longer matches an advisory of the version it names. If OSV is unreachable, the gate fails closed: re-run the job later; there is no bypass.
+`Dependency advisories` blocks on any OSV advisory for a pin of the CI or Action lock. If an advisory cannot be fixed in time and does not affect this project, add a waiver to `config/dependency-advisory-waivers.json` in a reviewed pull request, with exactly the keys `advisory_id`, `package`, `version` (the exact version), `reason` (at least 20 characters) and `expires` (a date at most 90 days ahead). The gate prints and records every waiver, fails on an expired or malformed one, and fails on a waiver that no longer matches an advisory of the version it names. If OSV is unreachable, the gate fails closed: re-run the job later; there is no bypass.
 
 ## Verified CI and coverage
 

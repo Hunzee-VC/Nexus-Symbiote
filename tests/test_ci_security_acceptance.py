@@ -233,6 +233,30 @@ def test_unlocked_runner_tools_are_reported_but_not_audited(tmp_path, monkeypatc
     assert {"name": "pip", "version": "99.0"} not in audited
 
 
+def test_a_failure_to_list_runner_tools_keeps_the_finished_audit(tmp_path, monkeypatch):
+    monkeypatch.setattr(advisories, "audit", lambda packages: report())
+
+    def unreadable():
+        raise OSError("site-packages is unreadable")
+
+    monkeypatch.setattr(advisories, "installed_packages", unreadable)
+    out = tmp_path / "report.json"
+    status = advisories.main(
+        [
+            "--lock",
+            str(ROOT / "requirements-action.lock"),
+            "--waivers",
+            str(tmp_path / "no-waivers.json"),
+            "--out",
+            str(out),
+        ]
+    )
+    written = json.loads(out.read_text())
+    assert status == 1
+    assert written["errors"] == ["installed distributions outside the locks unavailable"]
+    assert "advisories" in written and written["passed"] is False
+
+
 def sarif(score="7.5"):
     return {
         "version": "2.1.0",
