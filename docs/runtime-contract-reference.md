@@ -262,8 +262,9 @@ Profile `rfc8785-jcs-v2` is the inventory's tool fingerprint
 The digest is the RFC 8785 SHA-256 of that object. A served descriptor with any
 other top-level member, such as `icons` or `execution`, is refused
 (`descriptor-unsupported`) rather than approved without it, and so is a `title`
-that is not a string or an `outputSchema` or `_meta` that is not an object, which
-an inventory refuses too. `_meta` is covered, so a server that writes volatile
+or `description` that is not a string, an `outputSchema` or `_meta` that is not an
+object, which an inventory refuses too, and an `inputSchema` or `annotations` that is
+neither null nor an object, so that `false` or `[]` cannot pass for no annotations. `_meta` is covered, so a server that writes volatile
 data there, such as a timestamp, is denied until its grant is re-approved; strip
 such data in the description adapter only if your approval process reviews the
 descriptor the adapter returns.
@@ -345,8 +346,8 @@ raised by the integrator's adapters (`authenticate`, `describe`, `resolve_scope`
    call is denied later.
 4. Snapshot: signatures with the snapshot ring and quorum, validity window
    (`snapshot-*`), equality with the authenticated context (`context-mismatch`),
-   revocation of the snapshot and of any snapshot or trust-status signer
-   (`snapshot-revoked`, `signer-revoked`) and signer scopes. The snapshot then
+   revocation of the snapshot and of its signers (`snapshot-revoked`,
+   `signer-revoked`; trust-status signers were checked in step 3) and signer scopes. The snapshot then
    becomes the agent's current one: a lower serial for the same tenant,
    deployment and agent is denied from then on (`snapshot-superseded`), and the
    same serial with other content is a fork (`snapshot-fork`). This happens even
@@ -442,7 +443,7 @@ other code is permanent for the evidence presented.
 | `trust-superseded` | A newer trust status was recorded during authorization |
 | `context-mismatch` | Workload, deployment, tenant, agent or policy differs from the snapshot |
 | `snapshot-revoked` | Snapshot is revoked |
-| `signer-revoked` | A snapshot or trust-status signer is revoked |
+| `signer-revoked` | A snapshot signer is revoked |
 | `snapshot-superseded` | A newer snapshot is recorded for this agent |
 | `snapshot-fork` | Another snapshot with this serial was recorded for this agent |
 | `bom-required` | Snapshot verification requires its companion BOM |

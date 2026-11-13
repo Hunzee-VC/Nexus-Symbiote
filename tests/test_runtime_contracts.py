@@ -309,6 +309,24 @@ def test_changing_an_extended_descriptor_field_is_denied(tmp_path, change):
     assert values[-1] == []
 
 
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"annotations": False},
+        {"annotations": []},
+        {"annotations": 0},
+        {"annotations": ""},
+        {"inputSchema": []},
+        {"description": 7},
+        {"description": ["send"]},
+    ],
+)
+def test_a_descriptor_field_of_the_wrong_type_is_refused_not_hashed(change):
+    with pytest.raises(AuthorizationError) as refused:
+        tool_definition_digest({**DEFINITION, **change})
+    assert refused.value.reason == "descriptor-unsupported"
+
+
 def test_null_extended_fields_are_absent_and_base_fields_match_the_inventory_fingerprint():
     assert tool_definition_digest({**DEFINITION, "title": None}) == tool_definition_digest(
         DEFINITION

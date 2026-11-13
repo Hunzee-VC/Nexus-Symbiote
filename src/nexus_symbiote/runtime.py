@@ -21,7 +21,7 @@ import secrets
 import sqlite3
 import stat
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
-from contextlib import closing, contextmanager
+from contextlib import closing, contextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -134,7 +134,7 @@ REASONS: dict[str, str] = {
     "trust-superseded": "a newer trust status was recorded during authorization",
     "context-mismatch": "workload, deployment, tenant, agent or policy differs from the snapshot",
     "snapshot-revoked": "snapshot is revoked",
-    "signer-revoked": "a snapshot or trust-status signer is revoked",
+    "signer-revoked": "a snapshot signer is revoked",
     "snapshot-superseded": "a newer snapshot is recorded for this agent",
     "snapshot-fork": "another snapshot with this serial was recorded for this agent",
     "bom-required": "snapshot verification requires its companion BOM",
@@ -230,7 +230,12 @@ def strict_json(raw: str | bytes) -> Any:
         raise AuthorizationError("nonfinite JSON value", reason="json-invalid")
 
     try:
-        value = json.loads(raw, object_pairs_hook=pairs, parse_constant=invalid)
+        # json.loads would detect UTF-16 and UTF-32 in bytes and skip a byte-order mark,
+        # so a signed statement could take several encodings; only UTF-8 is accepted.
+        text = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+        if text.startswith("\ufeff"):
+            raise ValueError("byte-order mark")
+        value = json.loads(text, object_pairs_hook=pairs, parse_constant=invalid)
     except AuthorizationError:
         raise
     except (ValueError, RecursionError) as exc:
@@ -537,7 +542,9 @@ class Decision:
 
     It holds digests, serials, signer key IDs and the request labels, never argument
     values. ``server_id``, ``tool_name``, ``action`` and ``resource`` come from the
-    caller; treat them as untrusted text.
+    caller; treat them as untrusted text. For an admitted call the signer fields name
+    the keys that counted toward each threshold; a call denied after the snapshot's
+    signatures were verified names every key whose signature verified.
     """
 
     admitted: bool
@@ -678,7 +685,7 @@ def verify_contract(
     _validate_threshold(threshold)
     if not trusted_keys:
         raise AuthorizationError(
-            "positive threshold and purpose-specific trusted keys required",
+            "purpose-specific trusted keys required",
             reason="configuration-invalid",
         )
     try:
@@ -885,7 +892,17 @@ def tool_definition_digest(definition: Mapping[str, Any]) -> str:
             "served descriptor is outside the canonical JSON domain",
             reason="descriptor-not-json",
         ) from exc
+    description = definition.get("description", "")
+    input_schema, annotations = definition.get("inputSchema"), definition.get("annotations")
     try:
+        # The preimage equates an absent, null and empty annotations object, so another
+        # falsy value, such as false or [], would otherwise digest as no annotations.
+        if (
+            (description is not None and not isinstance(description, str))
+            or (input_schema is not None and not isinstance(input_schema, dict))
+            or (annotations is not None and not isinstance(annotations, dict))
+        ):
+            raise ValueError("invalid tool fields")
         extensions = tool_definition_extensions(definition)
     except ValueError as exc:
         raise AuthorizationError(
@@ -893,12 +910,9 @@ def tool_definition_digest(definition: Mapping[str, Any]) -> str:
             reason="descriptor-unsupported",
         ) from exc
     try:
+        # A null description keeps the digest it always had, which the inventory computes too.
         return hash_tool_definition(
-            name,
-            definition.get("description", ""),
-            definition.get("inputSchema"),
-            definition.get("annotations"),
-            **extensions,
+            name, definition.get("description", ""), input_schema, annotations, **extensions
         )
     except (TypeError, ValueError, RecursionError) as exc:
         raise AuthorizationError(
@@ -1062,7 +1076,7 @@ def _is_recorded(old: Sequence[Any] | None, serial: int, value: str) -> bool:
         )
     if value != old[1]:
         raise AuthorizationError(
-            "snapshot rollback/fork: another snapshot has this serial",
+            "snapshot fork: another snapshot has this serial",
             reason="snapshot-fork",
         )
     return True
@@ -1127,10 +1141,16 @@ class StateStore:
                 db.execute("BEGIN IMMEDIATE")
                 _migrate(db)
                 db.execute("COMMIT")
-        except sqlite3.Error as exc:
-            raise AuthorizationError(
-                "state database could not be initialized", reason="state-unavailable"
-            ) from exc
+        except BaseException as exc:
+            # Remove what this call created, so that initializing again is possible.
+            for suffix in ("", "-journal", "-wal", "-shm"):
+                with suppress(OSError):
+                    os.unlink(f"{path}{suffix}")
+            if isinstance(exc, sqlite3.Error):
+                raise AuthorizationError(
+                    "state database could not be initialized", reason="state-unavailable"
+                ) from exc
+            raise
         return cls(path)
 
     def _verify_store_id(self, db: sqlite3.Connection) -> None:
@@ -1207,18 +1227,18 @@ class StateStore:
         if current == (status.serial, head[2], revoked):
             return head
         if current is not None and status.serial < current[0]:
-            raise AuthorizationError("trust-status rollback/fork", reason="trust-rollback")
+            raise AuthorizationError("trust-status rollback", reason="trust-rollback")
         if current is not None and status.serial == current[0] and head[2] != current[1]:
-            raise AuthorizationError("trust-status rollback/fork", reason="trust-fork")
+            raise AuthorizationError("trust-status fork", reason="trust-fork")
         with self._transaction() as db:
             old = db.execute(
                 "SELECT serial, digest, revoked_signers FROM heads WHERE scope=?", (scope,)
             ).fetchone()
             if old:
                 if status.serial < old[0]:
-                    raise AuthorizationError("trust-status rollback/fork", reason="trust-rollback")
+                    raise AuthorizationError("trust-status rollback", reason="trust-rollback")
                 if status.serial == old[0] and head[2] != old[1]:
-                    raise AuthorizationError("trust-status rollback/fork", reason="trust-fork")
+                    raise AuthorizationError("trust-status fork", reason="trust-fork")
                 if old[2] is None:
                     if head[1:] != old[:2]:
                         raise AuthorizationError(
@@ -1465,8 +1485,8 @@ class ReferenceGateway(Generic[T]):
         """
         timestamp = self.clock()
         approved, signers = self._verify_snapshot(snapshot, timestamp)
-        statuses, trust_signers, _ = self._accept_trust(trust, approved.tenant, timestamp)
-        self._admit_snapshot(approved, signers, trust_signers, statuses, timestamp)
+        statuses, _, _ = self._accept_trust(trust, approved.tenant, timestamp)
+        self._admit_snapshot(approved, signers, statuses, timestamp)
         return approved
 
     def invoke(
@@ -1570,22 +1590,20 @@ class ReferenceGateway(Generic[T]):
         self,
         approved: ApprovedSnapshot,
         signers: set[str],
-        trust_signers: set[str],
         statuses: TrustStatus,
         timestamp: datetime,
-    ) -> str:
+    ) -> tuple[str, set[str]]:
+        """Admit a verified snapshot: its digest and the signers that count toward it.
+
+        The trust signers were checked for revocation when the trust status was accepted.
+        """
         snapshot_digest = digest(approved.model_dump(mode="json"))
         if snapshot_digest in statuses.revoked_snapshots:
             raise AuthorizationError("snapshot is revoked", reason="snapshot-revoked")
-        revoked = set(statuses.revoked_signers)
-        unrevoked_trust = trust_signers - revoked
-        unrevoked_snapshot = signers - revoked
-        if (
-            len(unrevoked_trust) < self.trust_threshold
-            or len(unrevoked_snapshot) < self.snapshot_threshold
-        ):
-            raise AuthorizationError("signer is revoked", reason="signer-revoked")
-        self._scoped(
+        unrevoked_snapshot = signers - set(statuses.revoked_signers)
+        if len(unrevoked_snapshot) < self.snapshot_threshold:
+            raise AuthorizationError("a snapshot signer is revoked", reason="signer-revoked")
+        counted = self._scoped(
             unrevoked_snapshot,
             self.snapshot_threshold,
             timestamp,
@@ -1597,7 +1615,7 @@ class ReferenceGateway(Generic[T]):
         # A newer authentic snapshot retires older ones as soon as it is seen, even
         # when the call that presented it is denied later.
         self.state.advance_snapshot(_snapshot_scope(approved), approved.serial, snapshot_digest)
-        return snapshot_digest
+        return snapshot_digest, counted
 
     def _authorize(
         self,
@@ -1639,12 +1657,12 @@ class ReferenceGateway(Generic[T]):
         )
         if context != expected:
             raise AuthorizationError(
-                "workload, deployment, tenant, or policy mismatch", reason="context-mismatch"
+                "workload, deployment, tenant, agent or policy mismatch", reason="context-mismatch"
             )
-        snapshot_digest = self._admit_snapshot(
-            approved, snapshot_signers, trust_signers, statuses, timestamp
+        snapshot_digest, counted = self._admit_snapshot(
+            approved, snapshot_signers, statuses, timestamp
         )
-        facts["snapshot_digest"] = snapshot_digest
+        facts.update(snapshot_digest=snapshot_digest, snapshot_signers=tuple(sorted(counted)))
         if bom_digest(bom) != approved.bom_digest:
             raise AuthorizationError(
                 "companion BOM does not match approved digest", reason="bom-mismatch"
