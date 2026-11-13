@@ -959,6 +959,11 @@ def _shell_script(
             if not word.startswith("--"):
                 # bash reads -login as --login; other shells read the letters l o g i n.
                 return None, [], _AMBIGUOUS_SHELL
+            if name == "zsh":
+                # zsh sets any option in GNU long form (--xtrace), ignoring case, - and _.
+                setting = option.replace("-", "").replace("_", "").lower()
+                interactive = interactive or setting == "interactive"
+                xtrace = xtrace or setting == "xtrace"
             continue
         letters = word[1:]
         inline = inline or "c" in letters
@@ -994,7 +999,8 @@ def _shell_script(
 
 
 def _names_option(setting: str, option: str) -> bool:
-    """Whether an -o value names ``option``, allowing the abbreviations ksh accepts."""
+    """Whether an -o value names ``option``: ksh accepts abbreviations, zsh ignores ``_``."""
+    setting = setting.replace("_", "")
     return len(setting) >= 3 and option.startswith(setting)
 
 

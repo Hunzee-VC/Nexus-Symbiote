@@ -98,6 +98,10 @@ def test_trace_options_and_prompts_count_as_code_loading_environment(tmp_path):
         ("sh", ["-xc", PINNED], {"PS4": "$((PATH=5))"}),
         ("sh", ["-o", "xtrace", "-c", PINNED], {"PS4": "$(./evil.sh)"}),
         ("bash", ["-c", PINNED], {"SHELLOPTS": "braceexpand:xtrace", "PS4": "`./evil.sh`"}),
+        # zsh sets any option in GNU long form and ignores case and underscores in names.
+        ("zsh", ["--xtrace", "-c", PINNED], {"PS4": "$(./evil.sh)"}),
+        ("zsh", ["--X-Trace", "-c", PINNED], {"PS4": "$(./evil.sh)"}),
+        ("zsh", ["-o", "x_trace", "-c", PINNED], {"PS4": "$(./evil.sh)"}),
     ],
 )
 def test_a_trace_prompt_with_tracing_on_is_unknown(tmp_path, command, args, env):
