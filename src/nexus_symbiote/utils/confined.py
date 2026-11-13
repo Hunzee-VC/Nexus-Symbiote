@@ -515,6 +515,7 @@ class ConfinedCollection:
         self._root_folds = False
         self._folded_excluded: set[tuple[str, ...]] | None = None
         self._variant_budget = self.max_entries
+        self._variants_stopped = False
         self._excluded: set[tuple[str, ...]] = set()
         self._invalid_policy = False
         root_text = str(self.root)
@@ -1418,6 +1419,7 @@ class ConfinedCollection:
     def _stop_variant_searches(self, at: Path) -> NoReturn:
         """Record the spent case-variant budget once; no later path is searched."""
         self._variant_budget = 0
+        self._variants_stopped = True
         self._fail(at, self._entry_bound.exceeded())
         raise _VariantSearchStoppedError
 
@@ -1437,14 +1439,20 @@ class ConfinedCollection:
 
         The search of a path stops when it has found ``_MAX_CASE_VARIANTS`` variants or
         meets more spellings of one name than that in a directory, which is a failure;
-        once the collection's budget is spent no further path is searched, and the one
-        failure recorded then covers them.
+        once the collection's budget is spent no further path is searched, and one
+        failure covers them: the search that spent it records it, or, when a listing
+        spent it exactly, the first search that finds nothing left.
         """
         try:
             relative = self._relative(path)
         except CollectionError:
             return []
-        if self._root_fd is None or not relative.parts or self._variant_budget <= 0:
+        if self._root_fd is None or not relative.parts:
+            return []
+        if self._variant_budget <= 0:
+            if not self._variants_stopped:
+                self._variants_stopped = True
+                self._fail(relative, self._entry_bound.exceeded())
             return []
         found: list[tuple[Path, Path]] = []
         parts = relative.parts

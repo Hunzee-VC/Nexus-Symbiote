@@ -337,6 +337,25 @@ def test_a_spent_variant_budget_is_one_failure_and_ends_every_later_search(tmp_p
     )
 
 
+@pytest.mark.parametrize("fillers", [3, 0])
+def test_a_variant_budget_spent_exactly_fails_the_next_search(tmp_path, fillers):
+    # Listing the root costs its entries and itself: 5 of 5 with three fillers, or
+    # 2 of 2 with B.md alone. The search that spends it all misses nothing, but
+    # every later one is refused and must say so.
+    (tmp_path / "B.md").write_text("x")
+    for index in range(fillers):
+        (tmp_path / f"f{index}").write_text("x")
+    failures: list[str] = []
+    with ConfinedCollection(tmp_path, failures, max_entries=fillers + 2) as files:
+        assert files.read_bytes("a.md", missing_ok=True) is None
+        assert failures == []
+        assert files.read_bytes("b.md", missing_ok=True) is None
+        assert files.case_variants("c.md") == []
+    assert failures == [
+        f"b.md: entries limit of {fillers + 2} exceeded; this limit is fixed for this input"
+    ]
+
+
 def test_failures_recorded_once_beside_those_the_caller_appends(tmp_path):
     failures = ["x.md: file unavailable during collection"]
     with ConfinedCollection(tmp_path, failures) as files:
