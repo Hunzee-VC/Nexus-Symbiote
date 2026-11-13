@@ -8,6 +8,9 @@ import tomllib
 from pathlib import Path
 
 import pytest
+import yaml
+from packaging.requirements import Requirement
+from packaging.specifiers import SpecifierSet
 from packaging.version import Version
 
 from tests.support import ROOT, load_script
@@ -55,6 +58,29 @@ def test_every_runtime_floor_is_the_version_the_floor_lock_tests():
         assert floor.versions(name) == {locks._lower_bound(requirement)}, name
     # The suite reads CliRunner's separate stderr, which needs click 8.2.
     assert floor.versions("click") == {Version("8.2.1")}
+
+
+def test_dependabot_never_proposes_a_tree_sitter_past_the_reviewed_range():
+    # tree-sitter 0.26 dropped the parse timeout that bounds untrusted TypeScript (#91), so
+    # no release from the declared upper bound on may be proposed, whatever it is numbered.
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    declared = next(
+        Requirement(entry)
+        for entry in pyproject["project"]["dependencies"]
+        if Requirement(entry).name == "tree-sitter"
+    )
+    bound = Version(next(spec.version for spec in declared.specifier if spec.operator == "<"))
+    config = yaml.safe_load((ROOT / ".github/dependabot.yml").read_text())
+    (pip,) = (update for update in config["updates"] if update["package-ecosystem"] == "pip")
+    ignored = [
+        SpecifierSet(versions)
+        for rule in pip["ignore"]
+        if rule["dependency-name"] == "tree-sitter"
+        for versions in rule["versions"]
+    ]
+    later = (f"{bound.major}.{bound.minor}.9", f"{bound.major}.{bound.minor + 1}.0", "99.0.0")
+    for candidate in (str(bound), *later):
+        assert any(Version(candidate) in versions for versions in ignored), candidate
 
 
 def test_a_range_change_without_regenerated_locks_fails(checkout):
