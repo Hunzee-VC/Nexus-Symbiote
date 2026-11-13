@@ -283,8 +283,8 @@ def test_a_refused_lockfile_past_the_listing_bounds_is_not_read_as_absent(tmp_pa
     for failures in ([], list(_filled())):
         result = ScanResult(scanner_name="registry", scan_failures=failures)
         with scanner._collection(root, result):
-            npm, other = scanner._npm_lock(result)
-        assert (npm, other) == (None, None)
+            npm, other, unread = scanner._npm_lock(result)
+        assert (npm, other, unread) == (None, None, True)
 
 
 def test_python_failures_past_the_listing_bound_stay_visible(tmp_path):

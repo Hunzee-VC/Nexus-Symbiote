@@ -3,6 +3,7 @@
 import base64
 import hashlib
 import json
+import sys
 
 import pytest
 
@@ -503,8 +504,10 @@ SHA512 = "sha512-" + base64.b64encode(b"w" * 64).decode()
 NPMJS_TARBALL = "https://registry.npmjs.org/openai/-/openai-4.52.0.tgz"
 
 
-def node_lock(lock_name, resolved=NPMJS_TARBALL, *, integrity=SHA512, version="4.52.0"):
-    """A pnpm or Yarn v1 lockfile resolving openai@^4.0.0 to one record."""
+def node_lock(
+    lock_name, resolved=NPMJS_TARBALL, *, integrity=SHA512, version="4.52.0", spec="^4.0.0"
+):
+    """A pnpm or Yarn v1 lockfile resolving openai@<spec> to one record."""
     if lock_name == "pnpm-lock.yaml":
         resolution = f"      integrity: {integrity}\n"
         if resolved is not None:
@@ -515,13 +518,13 @@ def node_lock(lock_name, resolved=NPMJS_TARBALL, *, integrity=SHA512, version="4
             "  .:\n"
             "    dependencies:\n"
             "      openai:\n"
-            "        specifier: ^4.0.0\n"
+            f"        specifier: '{spec}'\n"
             f"        version: {version}\n"
             "packages:\n"
             f"  openai@{version}:\n"
             "    resolution:\n" + resolution
         )
-    lines = ['"openai@^4.0.0":', f'  version "{version}"']
+    lines = [f'"openai@{spec}":', f'  version "{version}"']
     if resolved is not None:
         lines.append(f'  resolved "{resolved}"')
     lines.append(f"  integrity {integrity}")
@@ -595,7 +598,7 @@ def test_a_pnpm_or_yarn_tarball_naming_another_package_is_a_finding(tmp_path, lo
 @pytest.mark.parametrize("lock_name", ["pnpm-lock.yaml", "yarn.lock"])
 def test_an_exact_spec_a_pnpm_or_yarn_record_contradicts_is_a_failure(tmp_path, lock_name):
     (tmp_path / "package.json").write_text('{"dependencies":{"openai":"4.0.0"}}')
-    (tmp_path / lock_name).write_text(node_lock(lock_name))
+    (tmp_path / lock_name).write_text(node_lock(lock_name, spec="4.0.0"))
     result = RegistryScanner().scan(tmp_path)
     assert result.scan_failures == [
         f"{lock_name}: selected package version disagrees with package.json"
@@ -699,3 +702,170 @@ def test_an_alias_is_not_resolved_through_a_pnpm_or_yarn_record(tmp_path, lock_n
     assert alias.name == "openai" and alias.version == "^3.0.0"
     assert "package_resolution" not in alias.claims
     assert result.surfaces_excluded == [f"{lock_name}: aliased package identity is unresolved"]
+
+
+def berry_lock(resolution, *, spec="^4.0.0", version="4.52.0"):
+    """A Yarn Berry lockfile with one stanza for openai."""
+    return (
+        "__metadata:\n  version: 8\n  cacheKey: 10c0\n\n"
+        f'"openai@npm:{spec}":\n'
+        f"  version: {version}\n"
+        f'  resolution: "{resolution}"\n'
+        "  checksum: 10c0/abc\n"
+        "  languageName: node\n"
+        "  linkType: hard\n"
+    )
+
+
+@pytest.mark.parametrize("spec", ["^4.0.0", "4.52.0"])
+@pytest.mark.parametrize(
+    "resolution",
+    [
+        # Yarn fetches the tarball or repository the resolution names, whatever the
+        # record's version says.
+        "openai@https://evil.example/openai.tgz",
+        "openai@https://github.com/openai/openai-node.git#commit=" + "a" * 40,
+        "openai@npm:4.53.0",
+        "openai@npm:4.52.0::__archiveUrl=https%3A%2F%2Fevil.example%2Fopenai.tgz",
+    ],
+)
+def test_a_yarn_berry_resolution_other_than_the_registry_package_binds_nothing(
+    tmp_path, spec, resolution
+):
+    (tmp_path / "package.json").write_text(json.dumps({"dependencies": {"openai": spec}}))
+    (tmp_path / "yarn.lock").write_text(berry_lock(resolution, spec=spec))
+    result = RegistryScanner().scan(tmp_path)
+    assert result.scan_failures == []
+    assert result.surfaces_excluded == ["yarn.lock: local or non-registry resolution is unverified"]
+    comp = result.components[0]
+    assert comp.version == spec and comp.package_url is None
+    assert "package_resolution" not in comp.claims
+
+
+def test_a_yarn_berry_registry_resolution_is_bound(tmp_path):
+    (tmp_path / "package.json").write_text('{"dependencies":{"openai":"^4.0.0"}}')
+    (tmp_path / "yarn.lock").write_text(berry_lock("openai@npm:4.52.0"))
+    result = RegistryScanner().scan(tmp_path)
+    assert result.scan_failures == [] and result.surfaces_excluded == []
+    comp = result.components[0]
+    assert comp.version == "4.52.0" and comp.package_url == "pkg:npm/openai@4.52.0"
+    assert comp.properties["lockfile_record"] == "yarn.lock#/openai@npm:^4.0.0"
+
+
+@pytest.mark.parametrize("lock_name", ["pnpm-lock.yaml", "yarn.lock"])
+@pytest.mark.parametrize(
+    "spec",
+    ["github:openai/openai-node", "https://h.example/openai-4.52.0.tgz", "file:../openai"],
+)
+def test_a_pnpm_or_yarn_record_does_not_resolve_a_source_outside_the_registry(
+    tmp_path, lock_name, spec
+):
+    # npm installs what the source holds; a record of it is not a registry package.
+    (tmp_path / "package.json").write_text(json.dumps({"dependencies": {"openai": spec}}))
+    tarball = "https://codeload.github.com/openai/openai-node/tar.gz/" + "a" * 40
+    if lock_name == "pnpm-lock.yaml":
+        lock = (
+            "lockfileVersion: '9.0'\n"
+            "importers:\n"
+            "  .:\n"
+            "    dependencies:\n"
+            "      openai:\n"
+            f"        specifier: '{spec}'\n"
+            "        version: 4.52.0\n"
+            "packages:\n"
+            "  openai@4.52.0:\n"
+            f"    resolution: {{integrity: {SHA512}, tarball: '{tarball}'}}\n"
+        )
+    else:
+        lock = f'"openai@{spec}":\n  version "4.52.0"\n  resolved "{tarball}"\n'
+    (tmp_path / lock_name).write_text(lock)
+    result = RegistryScanner().scan(tmp_path)
+    assert result.scan_failures == []
+    comp = result.components[0]
+    assert comp.version != "4.52.0" and comp.package_url is None and comp.registry_uri is None
+    assert "package_resolution" not in comp.claims
+    assert [r.category for r in comp.risks] == ["nonregistry_source"]
+
+
+@pytest.mark.parametrize("lock_name", ["pnpm-lock.yaml", "yarn.lock"])
+def test_a_record_another_dependency_requires_is_not_bound(tmp_path, lock_name):
+    # package.json asks for ^4.0.0; the only openai record is the 3.x that another
+    # dependency requires, which the package manager does not install for this one.
+    (tmp_path / "package.json").write_text(
+        '{"dependencies":{"openai":"^4.0.0","some-wrapper":"^1.0.0"}}'
+    )
+    if lock_name == "pnpm-lock.yaml":
+        lock = (
+            "lockfileVersion: '9.0'\n"
+            "importers:\n"
+            "  .:\n"
+            "    dependencies:\n"
+            "      some-wrapper:\n"
+            "        specifier: ^1.0.0\n"
+            "        version: 1.0.0\n"
+            "packages:\n"
+            f"  openai@3.3.0:\n    resolution: {{integrity: {SHA512}}}\n"
+            f"  some-wrapper@1.0.0:\n    resolution: {{integrity: {SHA512}}}\n"
+        )
+    else:
+        lock = (
+            '"openai@^3.0.0":\n  version "3.3.0"\n'
+            '  resolved "https://registry.yarnpkg.com/openai/-/openai-3.3.0.tgz"\n'
+            f"  integrity {SHA512}\n\n"
+            '"some-wrapper@^1.0.0":\n  version "1.0.0"\n'
+            '  resolved "https://registry.yarnpkg.com/some-wrapper/-/some-wrapper-1.0.0.tgz"\n'
+            f"  integrity {SHA512}\n"
+            '  dependencies:\n    openai "^3.0.0"\n'
+        )
+    (tmp_path / lock_name).write_text(lock)
+    result = RegistryScanner().scan(tmp_path)
+    assert result.scan_failures == [] and result.surfaces_excluded == []
+    (comp,) = result.components
+    assert comp.version == "^4.0.0" and comp.package_url is None
+    assert "package_resolution" not in comp.claims
+    assert [r.category for r in comp.risks] == ["version_pinning"]
+
+
+@pytest.mark.parametrize(
+    "files",
+    [
+        {"package-lock.json": None, "yarn.lock": "garbage\n"},
+        {"package-lock.json": "{"},
+        {"package-lock.json": "symlink"},
+        {"pnpm-lock.yaml": "lockfileVersion: [\n"},
+        {"yarn.lock": "garbage\n"},
+    ],
+)
+def test_an_exact_spec_beside_a_lockfile_that_is_not_read_has_no_package_url(tmp_path, files):
+    # The lockfile installs the package from a record the collector did not read, so
+    # the version the spec names, and where it comes from, are in doubt.
+    (tmp_path / "package.json").write_text('{"dependencies":{"openai":"4.52.0"}}')
+    for name, content in files.items():
+        if content is None:
+            entry = npmjs(version="4.52.0", resolved="https://evil.example/openai.tgz")
+            (tmp_path / name).write_bytes(lock_bytes(entry))
+        elif content == "symlink":
+            (tmp_path.parent / "outside.json").write_bytes(lock_bytes(npmjs(version="4.52.0")))
+            (tmp_path / name).symlink_to(tmp_path.parent / "outside.json")
+        else:
+            (tmp_path / name).write_text(content)
+    result = RegistryScanner().scan(tmp_path)
+    assert result.scan_failures or result.surfaces_excluded
+    comp = result.components[0]
+    assert comp.version == "4.52.0" and comp.package_url is None
+
+
+def test_an_exact_spec_without_a_lockfile_names_the_public_package(tmp_path):
+    (tmp_path / "package.json").write_text('{"dependencies":{"openai":"4.52.0"}}')
+    result = RegistryScanner().scan(tmp_path)
+    assert result.scan_failures == [] and result.surfaces_excluded == []
+    assert result.components[0].package_url == "pkg:npm/openai@4.52.0"
+
+
+def test_a_missing_yaml_parser_is_a_pnpm_lockfile_failure(tmp_path, monkeypatch):
+    (tmp_path / "package.json").write_text('{"dependencies":{"openai":"^4.0.0"}}')
+    (tmp_path / "pnpm-lock.yaml").write_text(node_lock("pnpm-lock.yaml"))
+    monkeypatch.setitem(sys.modules, "yaml", None)
+    result = RegistryScanner().scan(tmp_path)
+    assert result.scan_failures == ["pnpm-lock.yaml: YAML parser unavailable"]
+    assert "package_resolution" not in result.components[0].claims
