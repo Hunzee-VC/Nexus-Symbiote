@@ -294,6 +294,32 @@ def test_git_source_pinned_by_full_commit_is_not_a_gap(tmp_path):
     assert server.launcher_package is None
 
 
+GIT = "git+https://github.com/acme/mcp.git"
+COMMIT = "0123456789abcdef0123456789abcdef01234567"
+
+
+@pytest.mark.parametrize(
+    "command,args,pinned",
+    [
+        # pip and uv read the commit after "@" and the fragment only for egg= and subdirectory=.
+        ("uvx", ["--from", f"{GIT}#{COMMIT}", "mcp"], False),
+        ("pipx", ["run", "--spec", f"{GIT}#{COMMIT}", "mcp"], False),
+        ("uvx", ["--from", f"mcp @ {GIT}#{COMMIT}", "mcp"], False),
+        ("uvx", ["--from", f"{GIT}@{COMMIT}#subdirectory=server", "mcp"], True),
+        ("uvx", ["--from", f"mcp @ {GIT}@{COMMIT}#egg=mcp", "mcp"], True),
+        # npm reads the commit after "#".
+        ("npx", [f"{GIT}#{COMMIT}"], True),
+    ],
+)
+def test_git_commit_is_read_where_each_installer_reads_it(tmp_path, command, args, pinned):
+    detail = gap_reason(tmp_path, {"command": command, "args": args})
+    if pinned:
+        server = scan_server(tmp_path, {"command": command, "args": args})
+        assert detail is None and server.version_pinned is True and server.version == COMMIT
+    else:
+        assert detail is not None and "git source without a full commit" in detail
+
+
 @pytest.mark.parametrize(
     "command,args",
     [("node", ["server.js"]), ("python", ["-m", "server"]), ("/opt/tools/my-server", [])],

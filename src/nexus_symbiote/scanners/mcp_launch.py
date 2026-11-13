@@ -396,12 +396,20 @@ def _combined(
     return index
 
 
-def _git(spec: str) -> Package:
-    """A git source is pinned only by a full 40-hexadecimal commit."""
+def _git(spec: str, *, python: bool = False) -> Package:
+    """A git source is pinned only by a full 40-hexadecimal commit.
+
+    npm names the commit after ``#``. pip and uv name it after the last ``@`` in the
+    path and read the fragment only for ``egg=`` and ``subdirectory=``.
+    """
     body = spec[4:] if spec.lower().startswith("git+") else spec
     reference = ""
     try:
-        if "#" in body:
+        if python:
+            body = body.partition("#")[0]
+            if "@" in urlsplit(body).path:
+                reference = urlsplit(body).path.rsplit("@", 1)[1]
+        elif "#" in body:
             body, _, reference = body.partition("#")
             reference = reference.removeprefix("commit=")
         elif "@" in urlsplit(body).path:
@@ -487,7 +495,7 @@ def python_spec(spec: str, *, shorthand: bool = False) -> Package:
         return Package("unknown", spec)
     lowered = spec.lower()
     if lowered.startswith("git+"):
-        return _git(spec)
+        return _git(spec, python=True)
     if "://" in spec and " @ " not in spec and "@ " not in spec:
         return Package("url", spec, origin=origin(spec))
     if _LOCAL_PATH.match(spec) or (_ARCHIVE.search(spec) and "://" not in spec):
@@ -510,7 +518,7 @@ def python_spec(spec: str, *, shorthand: bool = False) -> Package:
     if requirement.url:
         url = requirement.url
         if url.lower().startswith("git+"):
-            return _git(url)
+            return _git(url, python=True)
         return Package(
             "path" if url.lower().startswith("file:") else "url", spec, origin=origin(url)
         )
