@@ -74,7 +74,7 @@ INPUTS = re.compile(
     r"python=(?P<python>\S+) pyproject=sha256:(?P<digest>[0-9a-f]{64})$",
     re.M,
 )
-HASH = re.compile(r"--hash=sha256:([0-9a-f]{64})")
+HASH_LINE = re.compile(r"--hash=sha256:([0-9a-f]{64})(?: \\)?")
 SCOPES = {
     CI_LOCK: "every extra and the dev group, universal for CPython 3.11 and later.",
     ACTION_LOCK: (
@@ -158,9 +158,12 @@ def parse_lock(text: str, path: str = "lock") -> Lock:
             or requirement.extras
         ):
             raise LockError(f"{path}: {requirement.name} is not one exact pin")
-        hashes = frozenset(h for line in block for h in HASH.findall(line))
-        if not hashes or any(not line.startswith("--hash=") for line in block[1:]):
+        # pip accepts any hash it knows, so a line with another algorithm or an option
+        # would admit a file that the compared sha256 hashes do not name.
+        found = [HASH_LINE.fullmatch(line) for line in block[1:]]
+        if not found or any(match is None for match in found):
             raise LockError(f"{path}: {requirement.name} has no sha256 hash or an option")
+        hashes = frozenset(match[1] for match in found if match is not None)
         try:
             version = Version(clauses[0].version)
         except InvalidVersion as exc:

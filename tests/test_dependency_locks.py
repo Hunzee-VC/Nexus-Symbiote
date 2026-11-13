@@ -99,6 +99,26 @@ def test_a_floor_test_tool_must_match_its_ci_version(checkout):
         ("annotated-types==0.8.0\n", "no sha256 hash"),
         ("annotated-types==0.8.0 \\\n    --index-url https://example.invalid\n", "no sha256"),
         (
+            "annotated-types==0.8.0 \\\n    --hash=sha256:"
+            + "a" * 64
+            + " \\\n    --hash=sha512:"
+            + "b" * 128
+            + "\n",
+            "no sha256 hash or an option",
+        ),
+        (
+            "annotated-types==0.8.0 \\\n    --hash=sha256:"
+            + "a" * 64
+            + " \\\n    --hash=sha384:"
+            + "b" * 96
+            + "\n",
+            "no sha256 hash or an option",
+        ),
+        (
+            "annotated-types==0.8.0 \\\n    --hash=sha256:" + "a" * 64 + " --config-settings=x=y\n",
+            "no sha256 hash or an option",
+        ),
+        (
             "annotated-types @ https://example.invalid/a.whl \\\n    --hash=sha256:"
             + "a" * 64
             + "\n",
