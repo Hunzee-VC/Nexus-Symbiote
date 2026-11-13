@@ -15,6 +15,7 @@ import difflib
 import re
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, replace
 
 ENV_VAR = "NEXUS_SYMBIOTE_LIMITS"
@@ -107,7 +108,13 @@ SPECS: dict[str, LimitSpec] = {
             "ts-nodes",
             "count",
             10_000_000,
-            "Syntax nodes in one TypeScript MCP server file.",
+            "Syntax nodes in one TypeScript or JavaScript file the mcp collector parses.",
+        ),
+        LimitSpec(
+            "python-nodes",
+            "count",
+            10_000_000,
+            "Syntax nodes in one Python file the mcp collector parses.",
         ),
         LimitSpec(
             "import-lookups",
@@ -133,6 +140,7 @@ class CollectionLimits:
     source_scan_bytes: int = 64 * MIB
     syntax_bytes: int = 256 * KIB
     ts_nodes: int = 20_000
+    python_nodes: int = 200_000
     import_lookups: int = 5_000
 
     def value(self, name: str) -> int:
@@ -226,12 +234,14 @@ def resolve(options: Iterable[str], environ: Mapping[str, str]) -> CollectionLim
     return replace(DEFAULTS, **{SPECS[name].attribute: value for name, value in settings.items()})
 
 
-_current = DEFAULTS
+_current: ContextVar[CollectionLimits] = ContextVar(
+    "nexus_symbiote_collection_limits", default=DEFAULTS
+)
 
 
 def current() -> CollectionLimits:
-    """The limits in force for this process; collectors read them when they run."""
-    return _current
+    """The limits in force for this context; collectors read them when they run."""
+    return _current.get()
 
 
 def bound(name: str) -> Bound:
@@ -242,10 +252,8 @@ def bound(name: str) -> Bound:
 @contextmanager
 def applied(limits: CollectionLimits) -> Iterator[CollectionLimits]:
     """Use ``limits`` for the duration of one command, then restore the previous ones."""
-    global _current
-    previous = _current
-    _current = limits
+    token = _current.set(limits)
     try:
         yield limits
     finally:
-        _current = previous
+        _current.reset(token)

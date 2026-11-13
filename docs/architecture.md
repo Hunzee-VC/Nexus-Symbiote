@@ -19,14 +19,19 @@ cover.
 
 ```text
             operator inputs (trusted): command-line options and environment,
-        collection limits, signer policy, launch policy, binding key, live mode
+        collection limits, signer policy, launch policy, binding key, live mode,
+                           trusted attestation keys
                                       │
                                       v
- checkout ──> confined reader ──> 8 collectors ──> AgentBOM ──┬──> validate, risk
+ checkout ──> confined reader ──> 8 collectors ──> AgentBOM ──┬──> validate, risk, digest
  (untrusted)  utils/confined.py   scanners/        (native    ├──> diff, summary, blast-radius
-                                                    JSON)     └──> CycloneDX, SPDX, SARIF, VEX
+                                                    JSON)     ├──> graph, crosswalk, minimum-elements
+                                                              ├──> attest, export-inventory
+                                                              └──> CycloneDX, SPDX, SARIF, VEX
  supplied AgentBOM (untrusted) ───────────────────────────────┘
  ShadowScan report (untrusted) ──> import-shadowscan ──> AgentBOM of imported claims
+ attestation envelope (untrusted) + AgentBOM ──> verify-attestation
+ OpenTelemetry traces (untrusted) + AgentBOM ──> trace-diff ──> reported trace evidence
 ```
 
 Every command runs offline unless the operator selects live mode, which only three
@@ -86,6 +91,13 @@ built-in policy.
 | `policy.py`, `signature_policy.py` | The project policy a trusted checkout may supply, and the operator's signer policy, which is refused inside the scanned project |
 | `diff/differ.py` | Compare two inventories field by field and rate each change |
 | `graph.py`, `lineage.py` | Assemble the repository agent and answer `blast-radius`; `lineage.py` is a library helper that no command uses |
+| `risk_classes.py`, `graph_view.py`, `graph_cli.py` | Derive risk classes and exposure paths for display, never writing them to the inventory, and render the self-contained `graph` view ([graph view](graph-view.md)) |
+| `core/content_digest.py`, `digest_cli.py` | The inventory content digest and the `digest` command ([reproducible inventories](reproducible-inventories.md)) |
+| `attestation.py`, `attestation_cli.py` | Sign and verify inventory attestations, DSSE envelopes over in-toto statements with operator-held Ed25519 keys ([inventory attestation](inventory-attestation.md)) |
+| `otlp.py`, `trace_evidence.py`, `trace_cli.py` | Read OTLP/JSON traces within fixed bounds and an attribute allowlist, and reconcile what they report with an inventory as `reported` evidence ([trace evidence](trace-evidence.md)) |
+| `crosswalk.py`, `crosswalk_cli.py` | The framework crosswalk catalog that SARIF rule tags come from, and the `crosswalk` report ([framework crosswalk](framework-crosswalk.md)) |
+| `minimum_elements.py`, `minimum_elements_cli.py` | G7 AI SBOM minimum-element coverage of an inventory's CycloneDX export ([G7 minimum elements](minimum-elements.md)) |
+| `inventory_export.py`, `inventory_export_cli.py` | Export the reviewed repository agent as a ShadowScan simple-list inventory ([ShadowScan approval](shadowscan-inventory-export.md)) |
 | `generators/` | Project the native inventory to CycloneDX 1.7, SPDX 3.0.1, SARIF 2.1.0 and CycloneDX VEX, and recover a native inventory from a CycloneDX or SPDX export |
 | `scanners/live_mcp.py`, `live/`, `advisories.py` | Live observation and OSV queries; see [offline and live modes](offline-and-live-modes.md) |
 | `runtime.py`, `runtime_validation.py`, `live/session.py` | Signed runtime contracts, the reference gateway, schema validation in a separate worker process, and the pinned stdio session |
@@ -97,12 +109,12 @@ built-in policy.
 | --- | --- | --- | --- |
 | Checkout | Every file under the scan root, with its name, size and links | Hostile | Descriptor-relative reads with `O_NOFOLLOW` on every path component; only a relative symlink to a regular file or directory inside the root is read through its target; [collection limits](collection-limits.md) that fail closed and name the limit; strict JSON (duplicate keys and non-finite numbers refused) and YAML (anchors, aliases and tags refused, except in Compose files, whose aliases and merge keys are followed within fixed bounds); static parsing only; the offline guard; problems recorded as gaps or failures |
 | Project policy | `.nexus-symbiote.yaml` at the scan root, or at the `--project` root | Trusted only for your own checkout | Read from that root only, strict schema, every relaxation listed in `policy_weakened`; `--no-project-policy` ignores it; it cannot select live mode or change a collection limit ([policy reference](policy-reference.md)) |
-| Operator inputs | Options, environment variables, the Action's inputs, signer and launch policies, the binding key | Trusted | Signer and launch policies are refused inside the scanned project; the binding key never enters the inventory |
-| Supplied inventories and reports | Native AgentBOMs, ShadowScan reports, exports passed to recovery | Hostile | Bounded strict loading (16 MiB, regular files, no symbolic links); format-version check; reconciliation with a fresh collection under `--project`; digest checks on embedded native documents; imported claims kept apart from local evidence |
+| Operator inputs | Options, environment variables, the Action's inputs, signer and launch policies, the binding key, trusted attestation keys | Trusted | Signer and launch policies are refused inside the scanned project; the binding key never enters the inventory; a trusted attestation key inside a git working tree that holds the subject, the envelope or the current directory is refused ([trusted keys](inventory-attestation.md#trusted-keys)) |
+| Supplied inventories and reports | Native AgentBOMs, ShadowScan reports, exports passed to recovery, attestation envelopes, OpenTelemetry trace files | Hostile | Bounded strict loading of regular files without symbolic links (16 MiB for an inventory or a ShadowScan report, 64 MiB for an export passed to recovery or a trace file, 2 MiB for an attestation envelope); format-version check; reconciliation with a fresh collection under `--project`; digest checks on embedded native documents; imported claims kept apart from local evidence; attestation signatures checked before the payload is parsed; trace files read within fixed bounds, with content attributes never read and telemetry kept `reported` |
 | Network peers | Remote MCP servers and OSV, in live mode | Hostile | HTTPS only, to the origins the operator approves with `--allowed-origin` or to the OSV API; resolution pinned to public addresses, no redirects or proxies, bounded responses; tools are never called |
 | Pinned launchers | Executables a `verify-live` launch policy names | Trusted bytes, untrusted behavior | SHA-256 pin checked on a private copy, no inherited environment (only a default `PATH`), private working directory, process-group termination; run them in an external sandbox ([launch policy](cli-reference.md#launch-policy)) |
 | Runtime callers | Tool calls, contracts and evidence given to the gateway | Hostile | Ed25519 DSSE envelopes, one key ring per purpose, signer quorums, revocation in signed trust statuses, supersession, rollback protection and one-use approvals in the state store, schema validation in a bounded worker ([runtime contract reference](runtime-contract-reference.md)) |
-| Output | Terminal, CI log, files | Not applicable | Untrusted text made inert and never at the start of a line; the Action relays child output inside a `stop-commands` block and writes its outputs before collection starts; files written atomically and never through a symbolic link ([output and CI logs](cli-reference.md#output-and-ci-logs)) |
+| Output | Terminal, CI log, files, the `graph` HTML page and Markdown reports | Not applicable | Untrusted text made inert and never at the start of a line; the Action relays child output inside a `stop-commands` block and writes its outputs before collection starts; files written atomically and never through a symbolic link ([output and CI logs](cli-reference.md#output-and-ci-logs)); the `graph` page HTML-escapes every inventory string and runs only its own style block and script, pinned by Content-Security-Policy hashes ([graph view](graph-view.md#how-the-page-is-made-safe-to-open)); `crosswalk` Markdown backslash-escapes inventory text, and `minimum-elements` Markdown quotes it as code spans |
 
 Paths inside the scan root are recorded relative to it, so an inventory does not
 depend on where the checkout lives. A record is labeled with how it was

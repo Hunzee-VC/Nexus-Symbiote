@@ -57,7 +57,7 @@ are checked only when a scan reads the manifest.
   inventoried as `prompt:manifest:<digest of its path>` with its SHA-256 and the same
   hidden-character checks the collector applies to instruction files. This is how
   instruction files the collector does not read, such as `docs/agents/rules.md` or a
-  nested `GEMINI.md`, enter the inventory. `surfaces_scanned` lists `agent.yaml`
+  nested `CLAUDE.local.md`, enter the inventory. `surfaces_scanned` lists `agent.yaml`
   once it is read, and each file inventoried only because the manifest declares it.
 - **Local models.** A `path` must match a model artifact the `model` collector
   recorded: the file itself, or a file directly in that directory. The manifest adds

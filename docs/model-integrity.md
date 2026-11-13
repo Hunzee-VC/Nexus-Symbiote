@@ -26,8 +26,8 @@ The serialization rating is:
 | Rating | When |
 | --- | --- |
 | `unsafe-code-execution` | A pickle-family name, rated on the name alone, even when the file cannot be read; or content recognized as a binary or text-protocol pickle, or a ZIP archive whose first member is a pickle (as `torch.save` writes it), under any other model suffix |
-| `safe` | A SafeTensors file whose header is UTF-8 JSON with string metadata, known dtypes and tensor spans that index the whole data region; the scan and `validate` use the same validator |
-| `unsafe-template-injection` | A GGUF file whose embedded chat template reaches Python internals through dunder attributes or the `attr` filter, as Jinja2 sandbox escapes such as CVE-2024-34359 do |
+| `safe` | A SafeTensors file whose header is UTF-8 JSON with string metadata, known dtypes and tensor spans that index the whole data region, in a directory that configures no chat template that reaches Python internals; the scan and `validate` check the header with the same validator, and `validate` compares the templates only through its completeness check |
+| `unsafe-template-injection` | A GGUF file whose embedded chat template reaches Python internals through dunder attributes or the `attr` filter, as Jinja2 sandbox escapes such as CVE-2024-34359 do, or a SafeTensors file that would be `safe` in a directory whose Hugging Face chat template does |
 | `unknown` | Everything else, including ONNX, GGUF, Keras, HDF5, SavedModel, TFLite, Core ML and ExecuTorch files, and a SafeTensors header over the 1 MiB inspection limit |
 
 ## Files bound to the weights
@@ -93,6 +93,11 @@ the RFC 8785 JSON `{"files": [{"path": ..., "sha256": ...}]}` built from the
 recorded list, sorted by path (for a chat template, the path is the source,
 such as `tokenizer_config.json#chat_template`).
 
+An `additional_chat_templates` symlink to a directory in the project is read
+through the link, under the names a loader opens. When one of these files or that
+directory is absent, another spelling of its name that differs only by case or
+Unicode normalization is a failure, because case-insensitive file systems open it.
+
 Every model records these digests for its directory, so one scan records at
 most twice the `entries` limit of them across its models (200,000 by default),
 counting each configuration file,
@@ -115,6 +120,24 @@ In `diff`, a change to `tokenizer_hash` or `chat_template_hash` is a high alert,
 and a change to a bound weight file, a configuration file or custom code is a
 medium `properties changed` alert.
 
+Every chat template that `properties.chat_templates` lists is checked for the
+attribute access that Jinja2 sandbox escapes use: a dunder attribute, named or
+subscripted, a dunder name as a string such as an `attribute=` argument, or the
+`attr` filter. The template is matched as Jinja reads it, with Unicode whitespace
+between tokens and string escapes such as `\x5f` decoded, and a backslash before a
+line break in a string removed. A Hugging Face template
+that matches gives every
+model in its directory a critical `serialization_format` finding that names up to
+three matching templates and counts the rest, and a model that would otherwise be
+rated `safe` is rated `unsafe-template-injection`. A model rated `unknown` or
+`unsafe-code-execution` keeps its rating and the findings that come with it, such as
+`invalid_safetensors` for a SafeTensors file that does not validate, so a suppression
+of the template finding does not accept them. `validate` checks each model file's own
+structure again, not its directory's templates: its completeness check, on by
+default, and `risk --project` compare the rating and the finding with a new
+collection. A template file larger than the `file-bytes` limit is digested but not
+checked, and is a coverage gap in `surfaces_excluded`.
+
 A GGUF file whose metadata exceeds the reader's bounds (65,536 keys, 16 MiB
 strings, 2,097,152 array items, 128 MiB of metadata, or the 16,000,000
 structure units one scan may spend on ONNX and GGUF files) keeps the rating
@@ -132,7 +155,9 @@ Keep the policy outside the checkout: the commands refuse a policy file inside
 the scanned project, also under another name for the project directory such as a
 case variant or a bind mount (compared by device and inode), or one with other
 hard links, and they resolve the project path first, so a symlinked `--project`
-path works for every command. Every entry must name a file beneath the project.
+path works for every command. Every entry must name a file beneath the project,
+spelled as its directory spells it: another case is refused on every file system,
+also where file names fold case.
 An entry that names neither a collected model weight file nor the ShadowScan
 report makes the `model` collector fail, and `validate --project` reports it as
 the integrity error `unused_policy_entry` even when the completeness check does
@@ -223,6 +248,7 @@ structural validator: Keras Lambda layers, SavedModel operations and custom
 TensorRT or TFLite operators are not inspected. Pickles under names other than
 those listed above, and NumPy `.npy` and `.npz` arrays, are not inventoried. SafeTensors
 tensor bytes are hashed but not inspected, so a payload that also parses as
-another format is not flagged. The GGUF template check is a heuristic for known
-sandbox-escape shapes, not a template analysis, and Hugging Face chat templates
-are digested but not inspected.
+another format is not flagged. The chat template check is a heuristic for known
+sandbox-escape shapes, not a template analysis: a template that escapes the
+sandbox another way, such as a dunder name built by concatenating strings, or that
+instructs the model, passes it.

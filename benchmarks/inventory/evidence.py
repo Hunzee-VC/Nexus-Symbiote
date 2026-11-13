@@ -26,6 +26,7 @@ def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+# Historical predicate URI prefix retained so published release benchmark attestations verify unchanged.
 PREDICATE_TYPE = "https://github.com/aisecnomad/nexus-symbiote/benchmark/inventory/v1"
 # Seeded by whichever tool created the environment (venv, virtualenv, uv) at its own
 # version, never imported by the scanner and pinned by no lock: comparing them would fail
@@ -95,6 +96,8 @@ def check(directory: Path, *, compare_installation: bool = False) -> None:
 
 def _check_statement(statement: bytes, directory: Path, *, compare_installation: bool) -> None:
     body = parse_json_strict(statement)
+    if not isinstance(body, dict):
+        raise ValueError("statement does not bind these benchmark results")
     results = read_regular_text(directory / "results.json").encode("utf-8")
     if (
         body.get("_type") != "https://in-toto.io/Statement/v1"
@@ -104,7 +107,9 @@ def _check_statement(statement: bytes, directory: Path, *, compare_installation:
         raise ValueError("statement does not bind these benchmark results")
     if not compare_installation:
         return
-    predicate = body.get("predicate", {})
+    predicate = body.get("predicate")
+    if not isinstance(predicate, dict):
+        raise ValueError("statement predicate must be a JSON object")
     if predicate.get("materialsSha256") != materials():
         raise ValueError("installed scanner or benchmark differs from the recorded materials")
     if predicate.get("packageVersions") != installed_versions():

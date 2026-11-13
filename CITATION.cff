@@ -11,11 +11,11 @@ repository-code: https://github.com/Hunzee-VC/Nexus-Symbiote
 repository-artifact: https://pypi.org/project/nexus-symbiote/
 url: https://github.com/Hunzee-VC/Nexus-Symbiote
 # The code's licence. The distributions also bundle CycloneDX schemas (Apache-2.0) and
-# SPDX schemas (Community-Spec-1.0); see src/nexus_symbiote/generators/schemas/vendor/NOTICE.txt.
+# SPDX schemas (Community-Spec-1.0 AND CC-BY-3.0); see src/nexus_symbiote/generators/schemas/vendor/NOTICE.txt.
 license: MIT
 # scripts/check_repository_hygiene.py requires this version to match pyproject.toml.
-version: 0.1.0
-date-released: "2026-11-08"
+version: 0.2.0
+date-released: "2026-11-12"
 keywords:
   - aibom
   - agent-bill-of-materials

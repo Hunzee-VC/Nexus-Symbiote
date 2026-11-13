@@ -27,7 +27,7 @@ Reference material: exact behavior, fields and limits.
 | Page | Covers |
 | --- | --- |
 | [CLI reference](cli-reference.md) | Every command, option and exit code, kept in sync with the CLI by a test |
-| [Glossary](glossary.md) | AgentBOM and AIBOM, collectors, gaps and failures, assurance levels, the binding key, baselines, gates and the kinds of policy |
+| [Glossary](glossary.md) | AgentBOM and AIBOM, the content digest, collectors, gaps and failures, assurance levels and reported evidence, the binding key, attestations, baselines, gates, the kinds of policy, risk classes and exposure paths, framework references and minimum elements |
 | [Finding catalog](finding-catalog.md) | Every finding category: its severity, the collector that raises it, what it means, what to do, and how findings affect the gates |
 | [Known limitations](known-limitations.md) | What each collector, gate, export and integration does not record or verify, by surface, and what to do about each limit |
 | [Policy reference](policy-reference.md) | Every `.nexus-symbiote.yaml` setting, targeted suppressions, and what `policy_weakened` reports |
@@ -35,10 +35,14 @@ Reference material: exact behavior, fields and limits.
 | [AgentBOM schemas](../schemas/README.md) | The native AgentBOM JSON Schema, the deployment-profile schema and a minimal example |
 | [Agent manifest](agent-manifest.md) | The optional `agent.yaml`: its fields, what it adds to the inventory, its failures and its trust limits |
 | [Standard exports](standard-exports.md) | What CycloneDX, SPDX, SARIF and VEX output carry, the extension property names, projection versions and the SARIF rule catalog |
+| [G7 AI SBOM minimum elements](minimum-elements.md) | Which of the 50 G7 AI SBOM minimum elements an inventory's CycloneDX export carries, how each element is evaluated, and how to supply a missing one; coverage, not compliance |
+| [Framework crosswalk](framework-crosswalk.md) | Which OWASP, MITRE ATLAS, NIST AI RMF, EU AI Act, ISO/IEC 42001 and CWE entries each finding category bears on and why, what a reference means and does not mean, the `crosswalk` report, and the SARIF tags taken from it |
+| [Reproducible inventories](reproducible-inventories.md) | What can differ between two collections of one project, the content digest and what equal digests do and do not establish, the serial number derived from it, and recording a collection time with `SOURCE_DATE_EPOCH` while keeping output byte-identical |
+| [Graph view](graph-view.md) | What `nexus-symbiote graph` shows and does not show, the risk-class rules, exposure-path ranking and caps, and how the HTML file is made safe to open |
 | [Source binding](verification-source-binding.md) | How MCP, A2A, RAG and IDE settings records are bound to their configuration, with and without the binding key, and reconciled with a project |
-| [TypeScript inventory](typescript-inventory.md) | Static collection of MCP tool registrations from TypeScript servers, and its limits |
+| [TypeScript inventory](typescript-inventory.md) | Static collection of MCP tool registrations from TypeScript and JavaScript servers, the SDK forms that are recorded as gaps, those that leave none, and its limits |
 | [Model integrity](model-integrity.md) | What the model collector binds by digest, the operator signature policy (Sigstore entries and digest pins) and the signing evidence it records |
-| [Registry collector](registry-collector.md) | Which packages and images the registry collector inventories, what it reads, its gaps, findings and limits |
+| [Registry collector](registry-collector.md) | Which packages and images the registry collector inventories, what it reads, which project settings redirect a package to another registry or index, its gaps, findings and limits |
 | [Lockfile evidence](npm-lockfile-evidence.md) | What the registry collector records from npm, pnpm, Yarn, uv and Poetry lockfiles |
 | [Deployment evidence](deployment-evidence.md) | The optional deployment profile and its scoped authority claims |
 | [Runtime contract reference](runtime-contract-reference.md) | Signed runtime contracts: envelope, fields, digests, order of checks, reason codes, state store, key lifecycle and what an integrator must build |
@@ -51,11 +55,14 @@ Reference material: exact behavior, fields and limits.
 
 | Guide | When you need to |
 | --- | --- |
-| [Examples walkthrough](../examples/README.md) | Inventory, validate, export, diff and import on a synthetic agent, offline |
+| [Examples walkthrough](../examples/README.md) | Inventory, validate, export, diff, import and compare with a trace on a synthetic agent, offline |
 | [Scanning a public agent](tutorials/scanning-a-public-agent.md) | Run the full workflow on a real repository and wire it into CI |
 | [Gate drift in CI](drift-gate.md) | Keep the reviewed baseline out of the pull request's reach, take comparable snapshots, and read each alert |
+| [Inventory attestation](inventory-attestation.md) | Sign a reviewed baseline or a generated inventory, verify it in CI before `diff`, and check the envelope with other DSSE tooling |
+| [Trace evidence](trace-evidence.md) | Compare an inventory with the runtime use that an agent's OpenTelemetry traces report: what is read and never read, the `reported` trust level, matching rules, evidence format, gate and limits |
 | [Offline and live modes](offline-and-live-modes.md#how) | Observe a live MCP server, query advisories, or verify pinned launchers |
 | [ShadowScan integration](shadowscan-integration.md) | Import and verify Nexus-ShadowScan discovery reports |
+| [Approve agents for ShadowScan reconciliation](shadowscan-inventory-export.md) | Export the reviewed repository agent as an approved inventory ShadowScan's `--inventory` accepts, choose the resource prefix, and keep the file out of the reviewed change's reach |
 | [Runtime assurance](runtime-assurance.md) | Sign snapshots and approvals, and mediate tool calls through a gateway |
 | [Operational guidance](operational-guidance.md) | Practices that keep a deployment inside the documented guarantees |
 
@@ -81,7 +88,7 @@ Reference material: exact behavior, fields and limits.
 | Record | Contents |
 | --- | --- |
 | [Changelog](../CHANGELOG.md) | Notable changes, including breaking ones |
-| [Roadmap](../ROADMAP.md) | Near-term priorities and explicit non-goals |
+| [Roadmap](../ROADMAP.md) | What was delivered against the external reviews, the plan with its acceptance tests, a scorecard, and decisions and non-goals |
 | [Closed-PR audit, 2026-11-02](audits/closed-pr-review-2026-11-02.md) | Disposition of every closed pull request up to #73, and what reached the supported package |
 | [Pull-request, branch and issue review, 2026-11-03](audits/closed-pr-review-2026-11-03.md) | Pull requests #74–#116, every branch, and the issues still open on 2026-11-03 |
 

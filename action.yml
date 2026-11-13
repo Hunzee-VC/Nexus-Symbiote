@@ -16,7 +16,11 @@ inputs:
     description: Output path within the workspace
     default: nexus-symbiote-aibom.json
   scanners:
-    description: Comma-separated scanner names including shadowscan, a2a, ide_agents; empty means all
+    description: >-
+      Comma-separated scanner names including shadowscan, a2a, ide_agents; empty means all.
+      A list that leaves any collector out makes coverage partial, so the validate and
+      risk-check gates fail whenever they are on, and the Action refuses such a list while
+      validate is 'true'. Leave it empty in a workflow that gates
     default: ""
   validate:
     description: >-

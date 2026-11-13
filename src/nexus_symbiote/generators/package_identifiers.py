@@ -15,6 +15,11 @@ from packaging.version import InvalidVersion, Version
 from nexus_symbiote.core.hashing import extract_version_pin
 from nexus_symbiote.core.models import AnyComponent, RegistryEntryComponent
 
+_DEFAULT_REGISTRIES: dict[str, frozenset[str]] = {
+    "pypi": frozenset({"https://pypi.org", "https://files.pythonhosted.org"}),
+    "npm": frozenset({"https://registry.npmjs.org", "https://registry.yarnpkg.com"}),
+}
+
 
 @dataclass(frozen=True)
 class PackageIdentifierProjection:
@@ -85,12 +90,21 @@ def _agrees_with_component(package: PackageURL, component: RegistryEntryComponen
     qualifiers = package.qualifiers if isinstance(package.qualifiers, dict) else None
     if qualifiers is None:
         return False
-    if package.type in {"pypi", "npm"} and (
-        set(qualifiers) - {"repository_url"}
-        or qualifiers.get("repository_url", component.registry_uri) != component.registry_uri
-    ):
+    if package.type in {"pypi", "npm"}:
         # The registry a package was resolved from is part of its identity.
-        return False
+        if set(qualifiers) - {"repository_url"}:
+            return False
+        if "repository_url" in qualifiers:
+            if (
+                component.registry_uri is None
+                or qualifiers["repository_url"] != component.registry_uri
+            ):
+                return False
+        elif (
+            component.registry_uri is not None
+            and component.registry_uri not in _DEFAULT_REGISTRIES[package.type]
+        ):
+            return False
     if package.type == "oci":
         return _oci_agrees(package, qualifiers, component)
     if package.type == "pypi":
@@ -118,6 +132,8 @@ def _agrees_with_component(package: PackageURL, component: RegistryEntryComponen
                     return False
             elif Version(expected) != Version(package.version):
                 return False
+        elif package.version is not None:
+            return False
     elif package.type == "npm":
         if re.fullmatch(r"[a-z0-9][a-z0-9._-]*", package.name) is None or (
             package.namespace is not None
@@ -136,6 +152,8 @@ def _agrees_with_component(package: PackageURL, component: RegistryEntryComponen
             expected = extract_version_pin(name + "@" + component.version, ecosystem="npm")
             if expected is None or package.version != expected:
                 return False
+        elif package.version is not None:
+            return False
     else:
         return False
     return True
@@ -156,8 +174,8 @@ def _oci_agrees(
         package.name == reference.path.rsplit("/", 1)[-1]
         and package.version == reference.digest
         and not set(qualifiers) - {"repository_url", "tag"}
-        and qualifiers.get("repository_url", reference.repository) == reference.repository
-        and qualifiers.get("tag", reference.tag) == reference.tag
+        and qualifiers.get("repository_url") == reference.repository
+        and qualifiers.get("tag") == reference.tag
     )
 
 

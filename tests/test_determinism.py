@@ -16,7 +16,13 @@ from typing import Any
 from click.testing import CliRunner
 
 from nexus_symbiote.cli import main
-from nexus_symbiote.core.aibom import AIBOM, DependencyEdge, native_document, prepare
+from nexus_symbiote.core.aibom import (
+    AIBOM,
+    NO_CONTENT_SERIAL,
+    DependencyEdge,
+    native_document,
+    prepare,
+)
 from nexus_symbiote.core.canonical import NAMESPACE
 from nexus_symbiote.core.enums import RiskSeverity
 from nexus_symbiote.core.models import (
@@ -246,15 +252,17 @@ def test_cli_scan_spdx_twice_identical_except_created(tmp_path: Path) -> None:
     assert _without_created(json.loads(first)) == _without_created(json.loads(second))
 
 
-def test_a_lone_surrogate_from_the_checkout_does_not_block_the_export(tmp_path):
-    from click.testing import CliRunner
-
-    from nexus_symbiote.cli import main
-
+def test_a_lone_surrogate_from_the_checkout_stops_the_export_without_a_crash(tmp_path):
+    # The serial is the uuid5 of the inventory content digest, which RFC 8785 leaves
+    # undefined for a lone surrogate, so the scan fails closed with the documented error
+    # ("Malformed input stops some exports" in docs/known-limitations.md), never with an
+    # internal error or an export refusal, and writes nothing.
     project = tmp_path / "project"
     project.mkdir()
     (project / "package.json").write_bytes(b'{"dependencies":{"openai":"\\ud800"}}')
     out = tmp_path / "bom.json"
     result = CliRunner().invoke(main, ["scan", str(project), "--no-project-policy", "-o", str(out)])
     assert "internal error" not in result.output and "cannot be exported" not in result.output
-    assert json.loads(out.read_text())["metadata"]["serial_number"].startswith("urn:uuid:")
+    assert result.exit_code == 1
+    assert result.stderr.endswith(f"Error: {NO_CONTENT_SERIAL}\n")
+    assert not out.exists()

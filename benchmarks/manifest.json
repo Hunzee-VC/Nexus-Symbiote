@@ -128,6 +128,66 @@
       "parameters": {}
     },
     {
+      "id": "prompt-unassigned-u2065",
+      "kind": "hidden_unicode",
+      "task": "detection",
+      "truth": true,
+      "rationale": "An unassigned default-ignorable code point (U+2065) renders as nothing in instruction content.",
+      "directory": "fixtures/prompt-unassigned-u2065",
+      "references": [
+        {
+          "path": "project/CLAUDE.md",
+          "sha256": "dbe971bbc31a65179b32c87d992063df3af9442cb8d8992f50da4d0633823728"
+        }
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "prompt-unassigned-fff0-fff8",
+      "kind": "hidden_unicode",
+      "task": "detection",
+      "truth": true,
+      "rationale": "Unassigned default-ignorable code points (U+FFF0, U+FFF8) render as nothing in instruction content.",
+      "directory": "fixtures/prompt-unassigned-fff0-fff8",
+      "references": [
+        {
+          "path": "project/CLAUDE.md",
+          "sha256": "4882c1a08909988a001a002c9993aafd3d984f7af7698d23a9c3f281a5665374"
+        }
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "prompt-unassigned-e0080-e00ff",
+      "kind": "hidden_unicode",
+      "task": "detection",
+      "truth": true,
+      "rationale": "Text encoded in unassigned plane-14 code points (U+E0080 to U+E00FF), as tag smuggling encodes it, is hidden in instruction content.",
+      "directory": "fixtures/prompt-unassigned-e0080-e00ff",
+      "references": [
+        {
+          "path": "project/CLAUDE.md",
+          "sha256": "ed0dcf0ed82e3886c7c7220d0f8540120410d0c7dbece41e9a86239420c75cad"
+        }
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "prompt-unassigned-e01f0-e0fff",
+      "kind": "hidden_unicode",
+      "task": "detection",
+      "truth": true,
+      "rationale": "Unassigned plane-14 default-ignorable code points (U+E01F0 to U+E0FFF) render as nothing in instruction content.",
+      "directory": "fixtures/prompt-unassigned-e01f0-e0fff",
+      "references": [
+        {
+          "path": "project/CLAUDE.md",
+          "sha256": "0c48f326101bdb89f06e9f3d55d1aa51df0561da5f2e68a85904f18dae8fa671"
+        }
+      ],
+      "parameters": {}
+    },
+    {
       "id": "mcp-floating-latest",
       "kind": "mcp_pinning",
       "task": "detection",

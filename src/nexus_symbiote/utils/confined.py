@@ -272,14 +272,22 @@ class _Unlisted:
 
 class _WalkScope:
     """One ``iter_files`` walk: its top directory, the directories it walks through
-    symlinks, the list that collects the directory symlinks it met, and the failures
-    it met past the collection's listing bounds."""
+    symlinks, the lists that collect the directory symlinks it met and the entries it
+    skipped by a default-excluded name, and the failures it met past the collection's
+    listing bounds."""
 
-    def __init__(self, top: Path, links: list[Path] | None, unlisted: _Unlisted) -> None:
+    def __init__(
+        self,
+        top: Path,
+        links: list[Path] | None,
+        unlisted: _Unlisted,
+        skipped: list[Path] | None = None,
+    ) -> None:
         self.top = top
         self.walked = {top}
         self.links = links
         self.unlisted = unlisted
+        self.skipped = skipped
 
     def covers(self, target: Path) -> bool:
         """Whether the walk reaches ``target`` already, under its own name."""
@@ -306,6 +314,8 @@ def fold_name(name: str) -> str:
     Case and Unicode normalisation are folded, as on APFS, HFS+ and NTFS; so are the
     format characters HFS+ ignores and the trailing dots and spaces Windows drops.
     """
+    if name.isascii():
+        return name.lower().rstrip(". ")
     folded = unicodedata.normalize("NFD", unicodedata.normalize("NFD", name).casefold())
     return folded.translate(_IGNORED_IN_NAMES).rstrip(". ")
 
@@ -494,6 +504,10 @@ class ConfinedCollection:
         self._root_fd: int | None = None
         self._links: dict[str, str] = {}
         self._listings: dict[Path, dict[str, list[tuple[str, str]]] | None] = {}
+        self._exact_names: dict[tuple[int, int], tuple[tuple[int, int], frozenset[str]]] = {}
+        self._case_sensitive_dirs: set[tuple[int, int]] = set()
+        self._root_folds = False
+        self._folded_excluded: set[tuple[str, ...]] | None = None
         self._variant_budget = self.max_entries
         self._excluded: set[tuple[str, ...]] = set()
         self._invalid_policy = False
@@ -518,9 +532,37 @@ class ConfinedCollection:
             return self
         try:
             self._root_fd = open_directory_nofollow(self._requested_root)
+            self._root_folds = self._detect_root_folding()
         except OSError:
             self._fail(".", "root unavailable or contains a symlink")
         return self
+
+    def _detect_root_folding(self) -> bool:
+        """Whether the root's file system folds case on directory lookups."""
+        if self._root_fd is None:
+            return False
+        try:
+            root_stat = os.fstat(self._root_fd)
+        except OSError:
+            return False
+        for candidate in (self.root, *self.root.parents):
+            name = candidate.name
+            if not name:
+                break
+            swapped = name.swapcase()
+            if swapped == name:
+                continue
+            try:
+                exact = os.stat(candidate, follow_symlinks=False)
+                if exact.st_dev != root_stat.st_dev:
+                    break
+                alt = os.stat(candidate.parent / swapped, follow_symlinks=False)
+                return (alt.st_dev, alt.st_ino) == (exact.st_dev, exact.st_ino)
+            except FileNotFoundError:
+                return False
+            except OSError:
+                continue
+        return False
 
     def __exit__(self, *args: object) -> None:
         if self._root_fd is not None:
@@ -614,14 +656,100 @@ class ConfinedCollection:
         # Dependency caches, virtual environments and Git internals are outside
         # the documented static scope. The BOM records these patterns. Any
         # further omission within that scope is a blocking coverage gap.
-        if any(part in DEFAULT_EXCLUDES for part in parts):
+        if any(part in DEFAULT_EXCLUDES or fold_name(part) in DEFAULT_EXCLUDES for part in parts):
             return True
         denied = bool(self._excluded) and any(
             parts[:index] in self._excluded for index in range(len(parts) + 1)
         )
+        if not denied and self._excluded and self._root_folds:
+            if self._folded_excluded is None:
+                self._folded_excluded = {
+                    tuple(fold_name(item) for item in entry) for entry in self._excluded
+                }
+            folded = tuple(fold_name(part) for part in parts)
+            denied = any(
+                folded[:index] in self._folded_excluded for index in range(len(folded) + 1)
+            )
         if denied:
             self._exclusion_log.add(f"{relative}: excluded by collection policy")
         return denied
+
+    def _has_exact_name(self, directory_fd: int, name: str) -> bool:
+        """Whether ``directory_fd`` holds an entry whose exact spelling is ``name``."""
+        info = os.fstat(directory_fd)
+        dir_key = (info.st_dev, info.st_ino)
+        simple_ascii = name.isascii() and not name.endswith((".", " "))
+        if simple_ascii and dir_key in self._case_sensitive_dirs:
+            return True
+        if simple_ascii:
+            swapped = name.swapcase()
+            if swapped != name:
+                try:
+                    os.stat(swapped, dir_fd=directory_fd, follow_symlinks=False)
+                except FileNotFoundError:
+                    self._case_sensitive_dirs.add(dir_key)
+                    return True
+                except OSError:
+                    # Any other failure decides nothing; the listing below does.
+                    pass
+        stamp = (info.st_mtime_ns, info.st_ctime_ns)
+        cached = self._exact_names.get(dir_key)
+        if cached is None or cached[0] != stamp:
+            dup_fd = os.dup(directory_fd)
+            try:
+                with os.scandir(dup_fd) as stream:
+                    names = frozenset(entry.name for entry in stream)
+            finally:
+                os.close(dup_fd)
+            cached = (stamp, names)
+            self._exact_names[dir_key] = cached
+        return name in cached[1]
+
+    def _open_dir_part(self, directory_fd: int, part: str) -> int:
+        try:
+            child_fd = os.open(
+                part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory_fd
+            )
+        except FileNotFoundError:
+            raise
+        except OSError as exc:
+            if exc.errno in _LINK_ERRNOS and not self._has_exact_name(directory_fd, part):
+                raise FileNotFoundError(errno.ENOENT, "exact entry not found") from exc
+            raise
+        try:
+            exact = self._has_exact_name(directory_fd, part)
+        except BaseException:
+            os.close(child_fd)
+            raise
+        if not exact:
+            os.close(child_fd)
+            raise FileNotFoundError(errno.ENOENT, "exact entry not found")
+        return child_fd
+
+    def _open_leaf_no_follow(self, directory_fd: int, name: str) -> int:
+        try:
+            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory_fd)
+        except FileNotFoundError:
+            raise
+        except OSError as exc:
+            if exc.errno in _LINK_ERRNOS and not self._has_exact_name(directory_fd, name):
+                raise FileNotFoundError(errno.ENOENT, "exact entry not found") from exc
+            raise
+        try:
+            exact = self._has_exact_name(directory_fd, name)
+        except BaseException:
+            os.close(fd)
+            raise
+        if not exact:
+            os.close(fd)
+            raise FileNotFoundError(errno.ENOENT, "exact entry not found")
+        return fd
+
+    def _stat_exact_no_follow(self, directory_fd: int, name: str) -> os.stat_result:
+        info = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        if not self._has_exact_name(directory_fd, name):
+            raise FileNotFoundError(errno.ENOENT, "exact entry not found")
+        return info
 
     def _open_parent(self, relative: Path) -> int:
         if self._root_fd is None:
@@ -629,7 +757,7 @@ class ConfinedCollection:
         fd = os.dup(self._root_fd)
         try:
             for part in relative.parts[:-1]:
-                next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                next_fd = self._open_dir_part(fd, part)
                 os.close(fd)
                 fd = next_fd
             return fd
@@ -729,9 +857,7 @@ class ConfinedCollection:
                 raise CollectionError("file excluded by policy")
             parent = self._open_parent(relative)
             try:
-                fd = os.open(
-                    relative.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent
-                )
+                fd = self._open_leaf_no_follow(parent, relative.name)
             finally:
                 os.close(parent)
             try:
@@ -776,7 +902,7 @@ class ConfinedCollection:
                 return None
             parent = self._open_parent(relative)
             try:
-                info = os.stat(relative.name, dir_fd=parent, follow_symlinks=False)
+                info = self._stat_exact_no_follow(parent, relative.name)
             finally:
                 os.close(parent)
         except (OSError, CollectionError):
@@ -802,9 +928,7 @@ class ConfinedCollection:
                 return None
             parent = self._open_parent(relative)
             try:
-                fd = os.open(
-                    relative.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent
-                )
+                fd = self._open_leaf_no_follow(parent, relative.name)
             finally:
                 os.close(parent)
             try:
@@ -892,7 +1016,11 @@ class ConfinedCollection:
         self._entries_exhausted = True
 
     def iter_files(
-        self, directory: str | Path = ".", *, directory_links: list[Path] | None = None
+        self,
+        directory: str | Path = ".",
+        *,
+        directory_links: list[Path] | None = None,
+        skipped: list[Path] | None = None,
     ) -> Iterator[Path]:
         """Yield root-relative file paths, never through more than one symlink.
 
@@ -903,9 +1031,11 @@ class ConfinedCollection:
         under its own name; one to a directory elsewhere beneath the root is walked
         once under its target's name, as a host reading the walked directory would
         read it, and one to the root or to a directory that holds the walked one is a
-        failure. ``directory_links`` collects the directory symlinks the walk met.
-        Every other symlink is a recorded failure. Past the collection's listing
-        bounds, the walk's per-entry failures end it as one line per reason.
+        failure. ``directory_links`` collects the directory symlinks the walk met, and
+        ``skipped`` the entries it neither entered nor yielded because their name is
+        one of ``DEFAULT_EXCLUDES``, which nothing records otherwise. Every other
+        symlink is a recorded failure. Past the collection's listing bounds, the
+        walk's per-entry failures end it as one line per reason.
         """
         try:
             relative = self._relative(directory)
@@ -928,7 +1058,7 @@ class ConfinedCollection:
             return
         # Each walk ends with its own summary lines, so a caller comparing the failure
         # count before and after a walk sees every walk that met a failure.
-        scope = _WalkScope(walked, directory_links, _Unlisted())
+        scope = _WalkScope(walked, directory_links, _Unlisted(), skipped)
         try:
             yield from self._walk(fd, walked, 0, self._entry_budget, scope)
         finally:
@@ -964,6 +1094,8 @@ class ConfinedCollection:
                     continue
                 child = relative / name
                 if self.excluded(child):
+                    if scope.skipped is not None and name in DEFAULT_EXCLUDES:
+                        scope.skipped.append(child)
                     continue
                 metadata = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
                 if stat.S_ISLNK(metadata.st_mode):
@@ -1074,9 +1206,7 @@ class ConfinedCollection:
     def _open_no_follow(self, relative: Path) -> int:
         parent = self._open_parent(relative)
         try:
-            return os.open(
-                relative.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent
-            )
+            return self._open_leaf_no_follow(parent, relative.name)
         finally:
             os.close(parent)
 
@@ -1139,7 +1269,7 @@ class ConfinedCollection:
         fd = os.dup(self._root_fd)
         try:
             for part in relative.parts:
-                next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                next_fd = self._open_dir_part(fd, part)
                 os.close(fd)
                 fd = next_fd
             return fd
@@ -1170,7 +1300,7 @@ class ConfinedCollection:
         fd = os.dup(self._root_fd)
         try:
             for index, part in enumerate(relative.parts):
-                info = os.stat(part, dir_fd=fd, follow_symlinks=False)
+                info = self._stat_exact_no_follow(fd, part)
                 if stat.S_ISLNK(info.st_mode):
                     text = os.readlink(part, dir_fd=fd)
                     target = _lexical_target(Path(*relative.parts[:index]), text)
@@ -1185,7 +1315,7 @@ class ConfinedCollection:
                     return target, len(relative.parts) - index - 1
                 if index + 1 == len(relative.parts) or not stat.S_ISDIR(info.st_mode):
                     return None
-                next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                next_fd = self._open_dir_part(fd, part)
                 os.close(fd)
                 fd = next_fd
             return None
@@ -1221,7 +1351,7 @@ class ConfinedCollection:
         try:
             parent = self._open_parent(target)
             try:
-                info = os.stat(target.name, dir_fd=parent, follow_symlinks=False)
+                info = self._stat_exact_no_follow(parent, target.name)
             finally:
                 os.close(parent)
         except FileNotFoundError as exc:

@@ -26,6 +26,8 @@
   <a href="#project-status"><b>Status</b></a>
 </p>
 
+> Not related to Symbiote, the Linux malware of the same name reported in 2022.
+
 Nexus SymBiote generates an **Agent Bill of Materials (AgentBOM)** — an evidence-backed inventory of the MCP servers, models, instructions, retrieval sources, A2A cards, IDE settings and container images an AI agent is assembled from. It reads a project **without running it**, flags supply-chain risk, fails CI on drift in what it records, and exports to CycloneDX 1.7, SPDX 3.0.1, SARIF and VEX.
 
 ```bash
@@ -88,7 +90,7 @@ nexus-symbiote validate demo.aibom.json --project examples/demo-agent --no-proje
   --signature-policy signers.json
 ```
 
-`validate` now exits 0. The four low findings go away when `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` is set, as in [Gate drift in CI](#gate-drift-in-ci). The [examples walkthrough](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/examples/README.md) adds drift detection, exports and a ShadowScan import, all offline.
+`validate` now exits 0. The four low findings go away when `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` is set, as in [Gate drift in CI](#gate-drift-in-ci). The [examples walkthrough](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/examples/README.md) adds drift detection, exports, a ShadowScan import and a comparison with a synthetic runtime trace, all offline.
 
 ## Why
 
@@ -105,7 +107,7 @@ An agent's behavior depends on its configuration as much as its code — MCP ser
 | Executable model files | Pickle checkpoint; a `.safetensors` file that is not one | Format classification without loading; SafeTensors header validation |
 | Unsigned weights | Model file with no artifact-bound signature | `UNKNOWN` integrity until your [signer policy](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/model-integrity.md#operator-signature-policy) verifies it |
 | Hidden instructions | Bidi or zero-width characters in `CLAUDE.md`; text in an HTML comment | [Hidden-character](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/security-model.md#known-false-positive-and-false-negative-classes) findings in every text file the `prompt` collector reads, and hidden-comment findings in its Markdown and suffix-less files |
-| Over-broad permissions | Claude Code in `bypassPermissions` mode, granted `Bash(*)`, or given a hook command | Permission and hook findings; a digest of each JSON settings file, so any change to one is a drift alert |
+| Over-broad permissions | Claude Code in `bypassPermissions` mode, granted `Bash(*)`, or given a hook command | Permission and hook findings; a digest of each settings file the collector recognizes, so a changed setting is a drift alert. In Codex `config.toml`, `.cursor/cli.json` and the Antigravity, xAI and Copilot files, a change only to a value the redaction removes, such as a token or a URL path, alerts only with the [binding key](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/verification-source-binding.md#ide-agent-settings); a command or operator glued to such a value, and a host glued to it after an operator or another URL scheme, alert without it |
 | Credential exposure | Tokens in MCP env blocks or connection strings | Variable names, never values; known secret patterns redacted |
 
 Every row has limits, listed by surface in the [known limitations](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/known-limitations.md). The trust model, design principles and offline-by-default enforcement are in the [security model](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/security-model.md).
@@ -150,9 +152,9 @@ Eight built-in collectors read the project's configuration and artifacts, and th
 | Model weights, with their configuration, tokenizer and custom code | `model` | SHA-256 of every weight file, serialization safety, SafeTensors structure, signature status |
 | Instruction, rule, skill, command and subagent files | `prompt` | Content digests; hidden-character and hidden-comment findings |
 | RAG configuration, root `.env` key names, vector-store imports | `rag` | Retrieval sources: store, index and embedding identities, URI origins, control states |
-| Package manifests and lockfiles, Dockerfiles, Compose files | `registry` | Packages and images in the [AI package catalog](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/registry-collector.md#ai-package-catalog), pins, lockfile integrity, image digests |
+| Package manifests and lockfiles, Dockerfiles, Compose files | `registry` | Packages and images in the [AI package catalog](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/registry-collector.md#ai-package-catalog), pins, lockfile integrity, image digests, project settings that redirect a package to another registry or index |
 | A2A agent cards, client configuration, SDK references | `a2a` | Endpoint and interface origins, security schemes and scopes, card signatures (recorded, not verified) |
-| Settings of Claude Code, Codex, Cursor, Gemini CLI, Windsurf, Cline, Copilot and others | `ide_agents` | Configured agents, permission modes, blanket grants, hooks, a digest of each JSON settings file |
+| Settings of Claude Code, Codex, Cursor, Gemini CLI, Windsurf, Cline, Copilot and others | `ide_agents` | Configured agents, permission modes, blanket grants, hooks, a digest of each settings file it recognizes |
 | [Nexus-ShadowScan](https://github.com/Hunzee-VC/Nexus-ShadowScan) reports | `shadowscan` | Imported discovery claims, kept separate from local evidence; CI can require a signed report |
 
 The [collector reference](#collector-reference) lists every path each collector reads, the coding-agent settings that raise findings, and the registry collector's gaps in requirements files and Dockerfiles. The [registry collector](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/registry-collector.md) and [model integrity](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/model-integrity.md) pages describe those two collectors in full. An optional [`agent.yaml` manifest](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/agent-manifest.md) at the project root names the agent and declares further instruction files and models.
@@ -164,12 +166,17 @@ The [collector reference](#collector-reference) lists every path each collector 
 | `validate` | Did every collector finish without reporting a gap? Do hashes, signatures and source bindings still match? |
 | `risk` | What are the findings, and does the score or worst severity cross your [policy](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/policy-reference.md)? |
 | `diff` | What changed in the recorded inventory since the reviewed snapshot, and how much does each [change](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/drift-gate.md#what-the-alerts-mean) matter? |
+| `digest` | Do two inventories record the same content, wherever and whenever each was collected? Equal digests say nothing about who produced either file ([reproducible inventories](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/reproducible-inventories.md#the-content-digest)) |
+| `verify-attestation` | Did keys you trust sign exactly this inventory, or its content, for this purpose? Not whether it is accurate, complete or the newest one ([inventory attestation](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/inventory-attestation.md#what-an-attestation-establishes)) |
+| `trace-diff` | Do the agent's own OpenTelemetry traces report a tool, model, agent or MCP endpoint that the inventory does not declare? Traces are [reported evidence](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/trace-evidence.md#trust-model-reported-not-observed): a missing span proves nothing |
+| `minimum-elements` | Which of the 50 [G7 AI SBOM minimum elements](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/minimum-elements.md) does an inventory's CycloneDX export carry, and how do you supply the rest? Coverage, not compliance |
+| `crosswalk` | Which OWASP, MITRE ATLAS, NIST AI RMF, EU AI Act, ISO/IEC 42001 and CWE entries do the findings bear on? A [reading aid](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/framework-crosswalk.md#what-a-reference-means), not a compliance verdict |
 | `verify-artifact`, `verify-discovery` | Do these bytes match a trusted digest, Sigstore identity or ShadowScan report? |
 | `blast-radius` | Which agents and components are associated with a compromised component? |
 | `runtime keygen/sign/verify/digest/key-id/register` | Are signed [runtime contracts](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/runtime-contract-reference.md) valid, current and canonical? `register` retires older snapshots; only the gateway checks revocation and approval bindings |
 | `discover-mcp`, `verify-live`, `advisories` | What does a running server actually serve? Do exact versions have known advisories? *(live mode)* |
 
-Each check sees only what the collectors record: surfaces they do not support are neither gaps nor compared ([known limitations](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/known-limitations.md)). The [CLI reference](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/cli-reference.md) documents every command and option.
+Each check sees only what the collectors record, and `trace-diff` also what the traces report: surfaces the collectors do not support are neither gaps nor compared ([known limitations](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/known-limitations.md)). The [CLI reference](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/cli-reference.md) documents every command and option.
 
 ### What it produces
 
@@ -180,6 +187,11 @@ Each check sees only what the collectors record: surfaces they do not support ar
 | SPDX 3.0.1 | `scan -f spdx` | SPDX tooling; validated against the pinned official schema |
 | SARIF 2.1.0 | `scan -f sarif` | GitHub code scanning and other SARIF viewers |
 | CycloneDX VEX | `vex` | Findings marked `in_triage`, with no exploitability claim |
+| Graph view | `graph agentbom.json -o graph.html` | A self-contained offline page of components, associations, risk classes and exposure paths, or JSON with `--format json` ([graph view](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/graph-view.md)) |
+| Framework crosswalk | `crosswalk agentbom.json --format markdown` | Findings grouped by the OWASP, MITRE ATLAS, NIST AI RMF, EU AI Act, ISO/IEC 42001 and CWE entries they bear on, as Markdown or JSON ([framework crosswalk](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/framework-crosswalk.md)) |
+| Attestation envelope | `attest agentbom.json --key reviewer.pem --purpose reviewed --out agentbom.json.att` | A DSSE envelope over an in-toto Statement v1 that signs the file's exact bytes, checked offline with `verify-attestation` ([inventory attestation](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/inventory-attestation.md)) |
+| Trace evidence | `trace-diff agentbom.json traces.json -o trace-evidence.json` | Declared versus reported runtime use as JSON, and SARIF with `--sarif`; it never raises a component's assurance ([trace evidence](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/trace-evidence.md)) |
+| ShadowScan simple list | `export-inventory agentbom.json --format shadowscan-simple --resource-prefix PREFIX -o approved.json` | ShadowScan's `--inventory`: the reviewed repository agent, approved for the repository's root project only ([ShadowScan approval](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/shadowscan-inventory-export.md)) |
 
 Standard exports embed the native inventory in a digest-bound extension; keep it to recover full semantics. Without it, a consumer never sees a conditional edge as an unconditional relationship, and sees coverage as `incomplete` or `unknown`, never `complete`. [Standard exports](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/standard-exports.md) maps every field, including SARIF rules and what VEX can express. Exports written by builds before 0.1.0 may need to be regenerated; see [fingerprint migration](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/fingerprint-migration.md).
 
@@ -193,7 +205,7 @@ A scan is an inventory, not a verdict. It does not show that a model is benign, 
 
 ### Install a verified release
 
-Requires Python 3.11 to 3.14 on Linux, git, curl and the [GitHub CLI](https://cli.github.com/) signed in with `gh auth login`. Releases are built from `main` by the [release workflow](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/.github/workflows/release.yml) and published to PyPI through OIDC trusted publishing with build attestations. The block resolves the `v0.1.0` tag to its commit, downloads the exact wheel, verifies its attestation against that commit, and only then installs the hash-locked runtime from the same commit and the wheel, without resolving anything else:
+Requires Python 3.11 to 3.14 on Linux, git, curl and the [GitHub CLI](https://cli.github.com/) signed in with `gh auth login`. Releases are built from `main` by the [release workflow](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/.github/workflows/release.yml) and published to PyPI through OIDC trusted publishing with build attestations. (`0.1.0` is the latest published PyPI release while `0.2.0` is in preparation on `main`; to run `0.2.0` before publication, use [Install from reviewed source](#install-from-reviewed-source).) The block resolves the `v0.1.0` tag to its commit, downloads the exact wheel, verifies its attestation against that commit, and only then installs the hash-locked runtime from the same commit and the wheel, without resolving anything else:
 
 ```bash
 (
@@ -241,7 +253,7 @@ The [public-agent tutorial](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/mai
 
 ### Gate drift in CI
 
-Approve a baseline once, on the protected branch, then compare every pull request with it. The baseline is unsigned, so read it from a place the pull request cannot change, and take both snapshots the same way:
+Approve a baseline once, on the protected branch, then compare every pull request with it. `baseline` writes an unsigned file and `diff` checks no signature, so read it from a place the pull request cannot change, and take both snapshots the same way:
 
 ```bash
 # One secret of 32 or more characters, the same for the baseline and every later scan.
@@ -251,7 +263,9 @@ export NEXUS_SYMBIOTE_SOURCE_BINDING_KEY="$AGENTBOM_BINDING_KEY"
 mkdir -p .nexus-symbiote
 nexus-symbiote baseline . --no-project-policy -o .nexus-symbiote/reviewed.json
 
-# In the pull-request job: read the baseline from the base commit, never from the pull request.
+# In the pull-request job (with fetch-depth: 0 or the base commit fetched): read the
+# baseline from the base commit, never from the pull request.
+BASE_SHA="${BASE_SHA:-origin/main}"
 git show "$BASE_SHA:.nexus-symbiote/reviewed.json" > "$RUNNER_TEMP/reviewed.json"
 nexus-symbiote scan . --no-project-policy -o "$RUNNER_TEMP/agentbom.json"
 nexus-symbiote diff "$RUNNER_TEMP/reviewed.json" "$RUNNER_TEMP/agentbom.json" --fail-on-alert
@@ -259,8 +273,9 @@ nexus-symbiote diff "$RUNNER_TEMP/reviewed.json" "$RUNNER_TEMP/agentbom.json" --
 
 - **What fails.** `--fail-on-alert` fails on any change to the recorded inventory rated medium or higher, including a removed component and a coverage regression. An added source file that changes no component does not alert.
 - **Same policy, same key.** `--no-project-policy` keeps a policy file in the checkout from narrowing either snapshot. A different binding key, or a key on one side only, changes every binding and alerts.
-- **Without the key, values pass.** The inventory then records MCP launch arguments, environment values and endpoint paths only as redacted positions, so a served directory widened from `./notes` to `/`, a changed environment value or a same-host endpoint path passes, and so does an [A2A or RAG](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/known-limitations.md#a2a-and-rag) path changed on the same host that keeps its depth. Each such record carries a low `completeness` finding that names the key. See [source binding](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/verification-source-binding.md).
+- **Without the key, values pass.** The inventory then records MCP launch arguments, environment values and endpoint paths only as redacted positions, so a served directory widened from `./notes` to `/`, a changed environment value or a same-host endpoint path passes, and so does an [A2A or RAG](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/known-limitations.md#a2a-and-rag) path changed on the same host that keeps its depth. Each such record carries a low `completeness` finding that names the key. A token or other value the redaction removes from `.codex/config.toml`, `.cursor/cli.json` or the Antigravity, xAI and Copilot settings passes too, and the IDE agent record carries the same finding. See [source binding](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/verification-source-binding.md).
 - **Paths are project-relative**, so a baseline recorded in one checkout compares cleanly with a scan of another. Inventories written by 0.1.0 hold absolute paths: record the baseline again after upgrading.
+- **Sign the reviewed baseline.** To check that a reviewer you trust approved exactly that file, sign it with `attest --purpose reviewed` and run `verify-attestation` with the reviewer's public key, taken from outside the checkout, before `diff`; see [gate a pull request on an attested baseline](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/inventory-attestation.md#gate-a-pull-request-on-an-attested-baseline). An attestation does not show that the baseline is the newest one: bound its age with `--max-age-days`.
 
 Run the comparison in a job the pull request cannot edit; see [Protect the gate](#protect-the-gate). The gate cannot alert on what the collectors do not record; the [known limitations](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/known-limitations.md) list what that is. [Gate drift in CI](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/drift-gate.md) explains where the baseline must come from and what each alert means.
 
@@ -318,11 +333,14 @@ The Action refuses a policy inside the workspace, a path that passes through a s
 
 #### Protect the gate
 
-On `pull_request`, GitHub runs the workflow file of the pull request's merge commit, so the pull request under review can change these inputs, switch a gate off or delete the step, and pass. Make the gate one the pull request cannot edit. In an organization, require the workflow through an organization ruleset (*Require workflows to pass before merging*), which pins it to a file and ref the pull request cannot change. Otherwise, run it on `pull_request_target`, which takes the workflow from the base branch, with read-only permissions, no secrets and the pull request's head checked out as data:
+On `pull_request`, GitHub runs the workflow file of the pull request's merge commit, so the pull request under review can change these inputs, switch a gate off or delete the step unless workflow edits are restricted. Make the gate one the pull request cannot weaken:
+
+1. **In a GitHub organization (recommended):** require the workflow through an organization ruleset (*Require workflows to pass before merging*), which pins the gate to a reusable workflow file and ref outside the pull request's reach.
+2. **In any repository:** run on `pull_request` with read-only permissions, stage the baseline from `github.event.pull_request.base.sha` into `$RUNNER_TEMP`, require a mandatory `CODEOWNERS` review from security owners for `.github/` and `.nexus-symbiote/reviewed.json`, and configure branch protection to require that check to pass:
 
 ```yaml
 name: Agent inventory gate
-on: pull_request_target
+on: pull_request
 permissions:
   contents: read
 jobs:
@@ -332,7 +350,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
       - name: Stage the reviewed baseline from the base branch
         env:
@@ -348,7 +365,7 @@ jobs:
           reviewed-baseline: ${{ runner.temp }}/reviewed.json
 ```
 
-This is safe only because no step runs code from the checkout: the Action reads it as data. Add no build, install or test step and no secret to such a job, and require code-owner review for `.github/`. Without a secret, the job collects without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, so approve the baseline it stages without the key too: a keyed baseline would alert on every binding, and changes to values that only the key binds pass this gate.
+Avoid checking out `github.event.pull_request.head.sha` inside a `pull_request_target` workflow ("pwn request" hazard): `pull_request_target` runs in the base repository's security context, where adding any build, test, cache or secret step later turns an untrusted fork checkout into secret exfiltration or repository compromise. On `pull_request`, same-repository pull requests can supply `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` from repository secrets; fork pull requests receive no secrets, so collect fork baselines without the key or run keyed comparisons only on trusted branches.
 
 ### Pre-commit hooks
 
@@ -366,7 +383,7 @@ A project policy, `.nexus-symbiote.yaml`, is read only from the project you scan
 | --- | --- |
 | `0` | The command completed and every requested gate passed |
 | `1` | A gate or check failed (risk, integrity, drift, incomplete collection), an input could not be read, or an internal error occurred |
-| `2` | Usage error, including an invalid collection limit, a binding key shorter than 32 characters, and a live command run in offline mode (`advisories --dry-run` contacts nothing and runs in either mode) |
+| `2` | Usage error, including an invalid collection limit, a binding key shorter than 32 characters, a malformed `SOURCE_DATE_EPOCH`, and a live command run in offline mode (`advisories --dry-run` contacts nothing and runs in either mode) |
 
 The [CLI reference](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/cli-reference.md#exit-codes) says when each command exits 1.
 
@@ -378,18 +395,18 @@ Every path is relative to the project root. Each collector also bounds what it r
 
 | Collector | Reads |
 | --- | --- |
-| `mcp` | At the root: `.mcp.json`, `mcp.json`, `claude_desktop_config.json`, `.claude/mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`, `.gemini/settings.json`, `.roo/mcp.json`, `.kiro/settings/mcp.json`, `.amazonq/mcp.json`, `.windsurf/mcp.json`, `.cline/mcp.json` and `.codex/config.toml`. At any depth: files named `.mcp.json`, `mcp.json`, `mcp-config.json`, `mcp_config.json`, `mcp-servers.json`, `claude_desktop_config.json` and `cline_mcp_settings.json`. The root resolver settings that apply to launchers: `.npmrc`, `bunfig.toml`, `.yarnrc.yml`, `.yarnrc`, `.env.yarn`, `uv.toml` and `pyproject.toml`. Python, TypeScript and JavaScript source that names an MCP SDK or a supported agent framework |
+| `mcp` | At the root: `.mcp.json`, `mcp.json`, `claude_desktop_config.json`, `.claude/mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`, `.gemini/settings.json`, `.roo/mcp.json`, `.kiro/settings/mcp.json`, `.amazonq/mcp.json`, `.windsurf/mcp.json`, `.cline/mcp.json` and `.codex/config.toml`. At any depth: files named `.mcp.json`, `mcp.json`, `mcp-config.json`, `mcp_config.json`, `mcp-servers.json`, `claude_desktop_config.json` and `cline_mcp_settings.json`. The root resolver settings that apply to launchers: `.npmrc`, `bunfig.toml`, `.yarnrc.yml`, `.yarnrc`, `.env.yarn`, `uv.toml` and `pyproject.toml`. Python files, and TypeScript and JavaScript files (`.ts`, `.mts`, `.cts`, `.tsx`, `.js`, `.mjs`, `.cjs` and `.jsx`), that name an MCP SDK or, in Python, a supported agent framework, outside directories named `tests`, `test`, `dist`, `build`, `docs`, `benchmarks` or `examples` ([which files](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/collection-limits.md#source-files-the-mcp-collector-searches)) |
 | `model` | `.safetensors`, `.gguf`, `.ggml`, `.onnx`, Keras (`.h5`, `.hdf5`, `.keras`), `.tflite`, `.mlmodel`, `.pte`, `saved_model.pb` and pickle-family files ([full list](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/model-integrity.md#model-files-and-references)), with ONNX external data, SavedModel variables, shard indexes, configuration, tokenizer files, chat templates and declared custom code |
-| `prompt` | At the root: `CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `AGENTS.override.md`, `.github/AGENTS.md`, `GEMINI.md`, `CODEX.md`, `codex.md`, `.codex/instructions.md`, `.github/copilot-instructions.md`, `.cursorrules`, `.clinerules` (a file or a directory), `.windsurfrules`, `system_prompt.md` and `system_prompt.txt`. At any depth: `CLAUDE.md` and `AGENTS.md`. Every file under `.claude/rules`, `.cursor/rules`, `.windsurf/rules`, `.roo/rules`, `.kiro/steering`, `.github/instructions`, `.github/prompts`, `.claude/output-styles`, `.claude/agents` and `.github/agents`, and under the skill and command directories `.claude/skills`, `.claude/commands`, `skills`, `.agents/skills`, `.github/skills`, `.cursor/skills`, `.gemini/skills`, `.cursor/commands` and `.gemini/commands`, including a skill's bundled scripts. Files that the root `CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md` and `GEMINI.md`, or a `CLAUDE.md` at any depth, import with `@path` |
+| `prompt` | At the root: `CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `AGENTS.override.md`, `.github/AGENTS.md`, `GEMINI.md`, `CODEX.md`, `codex.md`, `.codex/instructions.md`, `.github/copilot-instructions.md`, `.cursorrules`, `.clinerules` (a file or a directory), `.windsurfrules`, `system_prompt.md` and `system_prompt.txt`. At any depth: `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` and `.cursorrules`; another spelling of one of them, such as `pkg/claude.md`, is a collection failure unless a subagent, rule, prompt, skill or command directory inventories it. Every file under `.claude/rules`, `.cursor/rules`, `.windsurf/rules`, `.roo/rules`, `.kiro/steering`, `.github/instructions`, `.github/prompts`, `.claude/output-styles`, `.claude/agents` and `.github/agents`, and under the skill and command directories `.claude/skills`, `.claude/commands`, `skills`, `.agents/skills`, `.github/skills`, `.cursor/skills`, `.gemini/skills`, `.cursor/commands` and `.gemini/commands`, including a skill's bundled scripts. Files that the root `CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md` and `GEMINI.md`, and every nested `CLAUDE.md` and `GEMINI.md`, import with `@path`, to five hops |
 | `rag` | At any depth: `rag_config.json`, `rag_config.yaml`, `rag_config.yml`, `retrieval_config.json`, `vector_store_config.json`, `kb_config.json` and `knowledge_base.json`. At the root: `.env`, `.env.local` and `.env.example`, for key names only. Python files, for vector-store imports |
-| `registry` | At the root only: `package.json` with one lockfile (`npm-shrinkwrap.json` or `package-lock.json`, `pnpm-lock.yaml` or `yarn.lock`); `requirements*.txt`; `pyproject.toml`, with `uv.lock` or `poetry.lock`; `Dockerfile`, `Dockerfile.agent` and `Containerfile`; and the Compose files and override files Compose reads by default. [What it reads](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/registry-collector.md#what-it-reads) gives the fields |
+| `registry` | At the root only: `package.json` with one lockfile (`npm-shrinkwrap.json` or `package-lock.json`, `pnpm-lock.yaml` or `yarn.lock`); `requirements*.txt`; `pyproject.toml`, with `uv.lock` or `poetry.lock`; `Dockerfile`, `Dockerfile.agent` and `Containerfile`; and the Compose files and override files Compose reads by default. For inventoried packages, also the registry and index settings of the root `.npmrc`, `.yarnrc`, `.yarnrc.yml`, `bunfig.toml`, `pip.conf`, `pip.ini` and `uv.toml`, and those in requirements files and `pyproject.toml` ([registry and index settings](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/registry-collector.md#registry-and-index-settings)). [What it reads](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/registry-collector.md#what-it-reads) gives the fields |
 | `a2a` | `agent.json` and `agent-card.json` in any `.well-known` directory and in the root, and `a2a/agent.json`. At the root, client configuration in `a2a.json`, `a2a.yaml`, `a2a.yml` or `a2a_config.json`. Python files outside directories named `tests`, `test`, `dist`, `build`, `docs`, `benchmarks` or `examples`, for SDK references |
-| `ide_agents` | Marker files and settings of Claude Code (also `.claude` settings in subdirectories, and plugin manifests), Codex (`.codex/config.toml`), Cursor (including `.cursor/hooks.json`), Gemini CLI (`.gemini/settings.json`), Windsurf, Cline, Copilot and others; `.vscode/extensions.json`, for recommended AI extensions |
+| `ide_agents` | Marker files and settings of Claude Code (also `.claude` settings in subdirectories, and plugin manifests), Codex (`.codex/config.toml`), Cursor (including `.cursor/hooks.json` and `.cursor/cli.json`), Gemini CLI (`.gemini/settings.json`), Windsurf, Cline, Copilot (`.github/copilot-extensions.json`), Antigravity and xAI; `.vscode/extensions.json`, for recommended AI extensions |
 | `shadowscan` | A report at `.shadowscan/report.json`, `shadowscan-report.json` or `shadowscan.json`; reports at more than one of them are a failure |
 
 ### Coding-agent settings
 
-For Claude Code, `ide_agents` records the permission mode (`bypassPermissions` is a high finding, `acceptEdits` medium), blanket grants in its allow list, how many allow, ask and deny rules and hook handlers it declares, and findings for hook commands, `apiKeyHelper`, MCP auto-approval, plugins and additional directories. It does not record the rules or hook commands themselves. For Codex it records the approval and sandbox settings, for Cursor its hook commands, and for Cursor, Windsurf, Cline and Codex an `agent.permissionMode` key in their JSON settings. The MCP servers that Codex and Gemini CLI settings declare are inventoried by the `mcp` collector. [Instructions and IDE settings](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/known-limitations.md#instructions-and-ide-settings) lists what this leaves out.
+For Claude Code, `ide_agents` records the permission mode (`bypassPermissions` is a high finding, `acceptEdits` medium), blanket grants in its allow list, how many allow, ask and deny rules and hook handlers it declares, and findings for hook commands, `apiKeyHelper`, MCP auto-approval, plugins and additional directories. It does not record the rules or hook commands themselves. For Codex it records the approval and sandbox settings, for Cursor its hook commands, and for Cursor, Windsurf, Cline and Codex an `agent.permissionMode` key in their JSON settings. The MCP servers that Codex and Gemini CLI settings declare are inventoried by the `mcp` collector. Every settings file `ide_agents` recognizes is bound by a digest, so a changed value is a high `diff` alert; for Codex `config.toml`, `.cursor/cli.json` and the Antigravity, xAI and Copilot files, a change only to a value the redaction removes, such as a token, an MCP environment value or a URL path on the same host, alerts only with `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, and the record then carries a low `completeness` finding, while a host glued to such a URL after a shell operator or another URL scheme still alerts; without the key, a URL whose host URL parsers read differently, such as one with a backslash in its authority, is a collection failure. [Instructions and IDE settings](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/known-limitations.md#instructions-and-ide-settings) lists what this leaves out.
 
 ### Registry gaps in requirements files and Dockerfiles
 
@@ -415,8 +432,15 @@ The [documentation hub](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/do
 | Write a project policy or suppress a finding | [Policy reference](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/policy-reference.md) |
 | Raise a collection limit | [Collection limits](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/collection-limits.md) |
 | Keep a drift baseline out of a pull request's reach | [Gate drift in CI](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/drift-gate.md) |
+| Sign a reviewed baseline and verify it before `diff` | [Inventory attestation](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/inventory-attestation.md) |
+| Make two collections of one project compare equal, or byte-identical | [Reproducible inventories](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/reproducible-inventories.md) |
+| Compare what an agent's traces report with its inventory | [Trace evidence](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/trace-evidence.md) |
+| Trace the recorded paths from agents to risky components | [Graph view](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/graph-view.md) |
 | Map exports to CycloneDX, SPDX, SARIF and VEX fields | [Standard exports](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/standard-exports.md) |
+| Check which G7 AI SBOM minimum elements an export carries | [G7 AI SBOM minimum elements](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/minimum-elements.md) |
+| Relate findings to OWASP, MITRE ATLAS, NIST AI RMF, EU AI Act, ISO/IEC 42001 and CWE | [Framework crosswalk](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/framework-crosswalk.md) |
 | Import Nexus-ShadowScan discovery | [ShadowScan integration](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/shadowscan-integration.md) |
+| Approve the reviewed agent in ShadowScan's reconciliation | [Approve agents for ShadowScan](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/shadowscan-inventory-export.md) |
 | Mediate tool calls with signed contracts | [Runtime assurance](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/runtime-assurance.md) · [Runtime contract reference](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/runtime-contract-reference.md) |
 | Release or verify a release | [Releasing](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/releasing.md) · [Repository controls](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/repository-controls.md) |
 
@@ -440,4 +464,4 @@ If you use Nexus SymBiote in research or tooling, cite it with the metadata in [
 
 ## License
 
-[MIT](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/LICENSE). Copyright (c) 2026 Emmanuel Dahunsi (AISecNomad). The vendored schemas under `src/nexus_symbiote/generators/schemas/vendor/` keep their upstream licenses: the CycloneDX schemas are Apache-2.0 ([license](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/src/nexus_symbiote/generators/schemas/vendor/LICENSE-APACHE-2.0.txt)), and the SPDX 3.0.1 schema and context come from the SPDX Specification, which is Community-Spec-1.0 with CC-BY-3.0 for pre-existing portions ([license](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/src/nexus_symbiote/generators/schemas/vendor/LICENSE-SPDX-3.0.1.txt)). The [notice](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/src/nexus_symbiote/generators/schemas/vendor/NOTICE.txt) gives their sources, so the distribution's license expression is `MIT AND Apache-2.0 AND Community-Spec-1.0`.
+[MIT](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/LICENSE). Copyright (c) 2026 Emmanuel Dahunsi (AISecNomad). The vendored schemas under `src/nexus_symbiote/generators/schemas/vendor/` keep their upstream licenses: the CycloneDX schemas are Apache-2.0 ([license](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/src/nexus_symbiote/generators/schemas/vendor/LICENSE-APACHE-2.0.txt)), and the SPDX 3.0.1 schema and context come from the SPDX Specification, which is Community-Spec-1.0 with CC-BY-3.0 for pre-existing portions ([license](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/src/nexus_symbiote/generators/schemas/vendor/LICENSE-SPDX-3.0.1.txt)). The [notice](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/src/nexus_symbiote/generators/schemas/vendor/NOTICE.txt) gives their sources, so the distribution's license expression is `MIT AND Apache-2.0 AND Community-Spec-1.0 AND CC-BY-3.0`.

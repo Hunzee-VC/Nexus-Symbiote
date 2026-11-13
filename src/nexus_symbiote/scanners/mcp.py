@@ -20,7 +20,7 @@ import os
 import posixpath
 import re
 import tomllib
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -503,7 +503,9 @@ _TRACE_EXPANSION = re.compile(r"[$`]")
 _PROC = re.compile(r"/+(?:proc|dev/+fd)(?:/|$)")
 _PARENT = re.compile(r"(?:^|/)\.\.(?:/|$)")
 _WINDOWS_ROOT = re.compile(r"[A-Za-z]:[\\/]|[\\/]")
-_LOCATOR = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s,;\"']+")
+_SCHEME_LETTERS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+_SCHEME_CHARACTERS = _SCHEME_LETTERS | frozenset("0123456789+.-")
+_LOCATOR_STOPS = frozenset(",;\"'")
 _NPM_PURL_NAME = re.compile(r"(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*")
 _CONTEXT_HIGH = {
     "privileged": "privileged mode",
@@ -536,11 +538,40 @@ def _declared_transport(config: dict[str, Any]) -> str | None:
     return _TRANSPORT_TYPES.get(declared.strip().lower().replace("_", "-"))
 
 
+def _locators(value: str) -> list[str]:
+    """Each ``scheme://rest`` locator in a value, left to right, in time linear in its length.
+
+    A scheme is an ASCII letter followed by letters, digits, ``+``, ``.`` and ``-``, and
+    the rest runs to white space or one of ``,;"'``: the matches that
+    ``re.findall(r"[A-Za-z][A-Za-z0-9+.-]*://[^\\s,;\"']+", value)`` returns. That
+    expression takes time quadratic in a long run of scheme characters, and a project
+    file such as .npmrc can hold one.
+    """
+    found: list[str] = []
+    position = 0
+    while (mark := value.find("://", position)) >= 0:
+        start = mark
+        while start > position and value[start - 1] in _SCHEME_CHARACTERS:
+            start -= 1
+        while start < mark and value[start] not in _SCHEME_LETTERS:
+            start += 1
+        end = mark + 3
+        if start < mark:
+            while end < len(value) and not (value[end].isspace() or value[end] in _LOCATOR_STOPS):
+                end += 1
+        if end > mark + 3:
+            found.append(value[start:end])
+            position = end
+        else:
+            position = mark + 1
+    return found
+
+
 def _origin_label(value: str) -> list[str]:
     """Exported locations of a package source value: origins, never paths or credentials."""
     if expands(value):
         return ["[unresolved]"]
-    found = [origin(match) or "[redacted]" for match in _LOCATOR.findall(value)]
+    found = [origin(match) or "[redacted]" for match in _locators(value)]
     if found:
         return sorted(set(found))
     return ["[local]"] if value.strip() else []
@@ -719,12 +750,17 @@ _YARN_SOURCE_SETTINGS = _names(
     " unsafeHttpWhitelist checksumBehavior enableOfflineMode injectEnvironmentFiles"
     " packageExtensions"
 )
+_BUN_IDENTITY_SETTINGS = frozenset({"preload", "run.preload"})
+_BUN_CODE_SETTINGS = frozenset({"run.shell"})
+_BUN_SOURCE_SETTINGS = frozenset({"install.ca", "install.cafile"})
+_DENO_SOURCE_SETTINGS = frozenset({"importMap", "imports", "scopes"})
 _RESOLVER_FILES = {
     "npm": (".npmrc",),
-    "deno": (".npmrc",),
+    "deno": (".npmrc", "deno.json", "deno.jsonc"),
     "bun": (".npmrc", "bunfig.toml"),
     "yarn": (".yarnrc.yml", ".yarnrc", ".env.yarn"),
     "uv-project": ("uv.toml", "pyproject.toml"),
+    "uv-tool": ("uv.toml", "pyproject.toml"),
 }
 # Setting names exported in clear: fixed vocabularies, never a name taken from input.
 _KNOWN_SETTINGS = (
@@ -734,6 +770,10 @@ _KNOWN_SETTINGS = (
     | _NPM_CODE_SETTINGS
     | _YARN_CODE_SETTINGS
     | _YARN_SOURCE_SETTINGS
+    | _BUN_IDENTITY_SETTINGS
+    | _BUN_CODE_SETTINGS
+    | _BUN_SOURCE_SETTINGS
+    | _DENO_SOURCE_SETTINGS
     | frozenset(_UV_SETTINGS)
     | {"registry", "npmRegistryServer", "offline", "prefer-offline", "strict-ssl", "environment"}
 )
@@ -943,6 +983,14 @@ def _file_setting(path: str, family: str, key: str, value: str, launched: set[st
             "enableOfflineMode": "false",
         }
         return "inert" if relaxed.get(key) == value else "source"
+    if path == "bunfig.toml":
+        if key in _BUN_IDENTITY_SETTINGS:
+            return "identity"
+        if key in _BUN_CODE_SETTINGS:
+            return "code"
+        return "source" if key in _BUN_SOURCE_SETTINGS else "inert"
+    if path in {"deno.json", "deno.jsonc"}:
+        return "source" if key in _DENO_SOURCE_SETTINGS else "inert"
     if path in {"uv.toml", "pyproject.toml"}:
         return "source" if not key.startswith("sources.") or key[8:] in launched else "inert"
     return "unresolved" if path == ".env.yarn" else "inert"
@@ -1104,14 +1152,67 @@ class _Resolvers:
                 if key in _YARN_CODE_SETTINGS or key in _YARN_SOURCE_SETTINGS
             ]
             return _ResolverFile(tuple(entries))
+        if path in {"deno.json", "deno.jsonc"}:
+            text = self._text(path)
+            if text is None:
+                return _ResolverFile()
+            try:
+                data = _load_jsonc(text)
+            except (ValueError, RecursionError):
+                self._result.scan_failures.append(f"{path}: invalid JSON or duplicate keys")
+                return _ResolverFile()
+            if not isinstance(data, dict):
+                return _ResolverFile()
+            deno_entries: list[tuple[str, str]] = []
+            import_map = data.get("importMap")
+            if isinstance(import_map, str) and import_map:
+                deno_entries.append(("importMap", import_map))
+            imports = data.get("imports")
+            if isinstance(imports, dict):
+                for target in imports.values():
+                    if isinstance(target, str):
+                        deno_entries.append(("imports", target))
+            scopes = data.get("scopes")
+            if isinstance(scopes, dict) and scopes:
+                deno_entries.append(("scopes", json.dumps(scopes, sort_keys=True, default=str)))
+            return _ResolverFile(tuple(deno_entries))
         settings = self._toml(path)
         if path == "bunfig.toml":
             install = settings.get("install")
-            return _ResolverFile(
-                tuple(
-                    _registries(install if isinstance(install, dict) else {}, "registry", "scopes")
+            install_map = install if isinstance(install, dict) else {}
+            bun_entries = _registries(install_map, "registry", "scopes")
+            for ca_key in ("ca", "cafile"):
+                if ca_key in install_map and install_map[ca_key]:
+                    bun_entries.append(
+                        (
+                            f"install.{ca_key}",
+                            install_map[ca_key]
+                            if isinstance(install_map[ca_key], str)
+                            else json.dumps(install_map[ca_key], default=str),
+                        )
+                    )
+            if settings.get("preload"):
+                bun_entries.append(
+                    (
+                        "preload",
+                        settings["preload"]
+                        if isinstance(settings["preload"], str)
+                        else json.dumps(settings["preload"], default=str),
+                    )
                 )
-            )
+            run_cfg = settings.get("run")
+            if isinstance(run_cfg, dict):
+                for run_key in ("preload", "shell"):
+                    if run_cfg.get(run_key):
+                        bun_entries.append(
+                            (
+                                f"run.{run_key}",
+                                run_cfg[run_key]
+                                if isinstance(run_cfg[run_key], str)
+                                else json.dumps(run_cfg[run_key], default=str),
+                            )
+                        )
+            return _ResolverFile(tuple(bun_entries))
         if path == "pyproject.toml":
             tool = settings.get("tool")
             uv = tool.get("uv") if isinstance(tool, dict) else None
@@ -1134,6 +1235,41 @@ class _ResolverView:
         self.code = 0
         # The package manager's own environment settings were read here.
         self.environment = False
+
+
+def npm_registry_settings(
+    settings: Mapping[str, str], package: str, default: str, scope: str | None = None
+) -> list[str]:
+    """The settings that may name the registry npm fetches a package from.
+
+    A setting for the package's own scope wins. npm then uses the registry of a
+    configured ``scope`` for a package whose own scope has none, unscoped packages
+    included (npm-registry-fetch), and otherwise the file's default registry setting.
+    npm fills in ``${...}`` in a ``scope`` from the environment, so such a scope may
+    name any scope: ``scope`` itself is then returned, with the default registry
+    setting, which applies when the scope it names has no registry. A caller passes
+    such a scope only when the file has a registry setting for some scope
+    (:func:`npm_scope_registry`).
+    """
+    own = package.split("/", 1)[0] if package.startswith("@") else None
+    if own is not None and f"{own}:{default}" in settings:
+        return [f"{own}:{default}"]
+    found: list[str] = []
+    if scope and expands(scope):
+        found.append("scope")
+    elif scope:
+        fallback = f"{scope if scope.startswith('@') else '@' + scope}:registry"
+        if fallback in settings:
+            return [fallback]
+    if default in settings:
+        found.append(default)
+    return found
+
+
+def npm_scope_registry(key: str) -> bool:
+    """Whether an .npmrc key is one a ``scope`` setting can select: npm looks up
+    ``@<scope>:registry`` exactly, whatever characters the scope holds."""
+    return key.startswith("@") and key.endswith(":registry")
 
 
 def _registry_url(value: Any) -> str | None:
@@ -1753,14 +1889,16 @@ class MCPScanner(Scanner):
             # replace what the runner fetches; their names are not visible here.
             view.unresolved.append("environment-file")
         launched = {str(package.name) for package in packages}
-        npm_environment: dict[str, str] = {}
+        # The label and value of a `scope` from the environment, which wins over .npmrc.
+        environment_scope: tuple[str, str] | None = None
         if family == "npm":
             view.environment = True
             for variable, value in environment:
                 key = _npm_key(variable)
                 if key is None or value == "":
                     continue
-                npm_environment[key] = value
+                if key == "scope":
+                    environment_scope = (_environment_label(variable), value)
                 kind = _npm_setting(key, value)
                 if kind == "identity":
                     view.identity.append(f"npm {key} setting from the environment")
@@ -1792,44 +1930,41 @@ class MCPScanner(Scanner):
                 view.names.append(label)
                 kind = _file_setting(path, family, key, value, launched)
                 if kind == "identity":
-                    view.identity.append(
-                        f"npm {key} setting from {path}"
-                        if path == ".npmrc"
-                        else f"{path} {key} replaces or extends yarn"
-                    )
+                    if path == ".npmrc":
+                        view.identity.append(f"npm {key} setting from {path}")
+                    elif path == "bunfig.toml":
+                        view.identity.append(f"{path} {key} preloads local code")
+                    else:
+                        view.identity.append(f"{path} {key} replaces or extends yarn")
                 elif kind == "code":
                     view.code += 1
                 elif kind == "source":
                     view.sources.append((label, value))
                 elif kind == "unresolved":
                     view.unresolved.append(label)
-            if path in {"uv.toml", "pyproject.toml", ".env.yarn"}:
+            if path in {"uv.toml", "pyproject.toml", ".env.yarn", "deno.json", "deno.jsonc"}:
                 continue
             default = "npmRegistryServer" if path == ".yarnrc.yml" else "registry"
-            # npm uses the registry of a configured `scope` for a package whose own
-            # scope has none, unscoped packages included (npm-registry-fetch).
-            selected_scope = (
-                npm_environment.get("scope") or settings.get("scope") if path == ".npmrc" else None
+            scope_label, scope = (
+                environment_scope or (f"{path}:scope", settings.get("scope", ""))
+                if path == ".npmrc"
+                else ("", "")
             )
-            fallback = (
-                f"{selected_scope if selected_scope.startswith('@') else '@' + selected_scope}"
-                ":registry"
-                if selected_scope
-                else None
-            )
+            if expands(scope) and not any(npm_scope_registry(key) for key in settings):
+                # Whatever scope the environment names, no setting here is its registry.
+                scope = ""
             for package in packages:
                 name = package.name or ""
-                scope = name.split("/", 1)[0] if name.startswith("@") else None
-                scoped = f"{scope}:{default}" if scope else None
-                if scoped in settings:
-                    selected = scoped
-                elif fallback in settings:
-                    selected = fallback
-                else:
-                    selected = default
-                if selected in settings:
+                chosen = npm_registry_settings(settings, name, default, scope)
+                if launch.launcher not in {"npx", "npm exec"}:
+                    # pnpm and Bun ignore `scope` and take the default registry, so for a
+                    # launcher other than npm's both settings count.
+                    chosen += npm_registry_settings(settings, name, default)
+                for selected in dict.fromkeys(chosen):
                     view.sources.append(
-                        (f"{path}:{_setting_name(selected, launched)}", settings[selected])
+                        (scope_label, scope)
+                        if selected == "scope"
+                        else (f"{path}:{_setting_name(selected, launched)}", settings[selected])
                     )
         return view
 

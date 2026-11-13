@@ -16,7 +16,7 @@ from datetime import datetime
 from typing import Any
 
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
-from nexus_symbiote.core.enums import ComponentType, TrustTier
+from nexus_symbiote.core.enums import ComponentType, SerializationSafety, TrustTier
 from nexus_symbiote.core.hashing import TOOL_DEFINITION_HASH_VERSION, canonical_json
 from nexus_symbiote.core.models import (
     AnyComponent,
@@ -476,14 +476,19 @@ class AIBOMDiffer:
         old_refs = set(old_map.keys())
         new_refs = set(new_map.keys())
 
+        from nexus_symbiote.validators.risk import effective_component_risks
+
         for ref in sorted(new_refs - old_refs):
             comp = new_map[ref]
+            added_severity = _max_severity(
+                ("medium", *(r.severity.value for r in effective_component_risks(comp)))
+            )
             change = ComponentChange(
                 bom_ref=ref,
                 name=comp.name,
                 change_type="added",
                 component_type=comp.component_type.value,
-                severity="medium",
+                severity=added_severity,
                 details=[f"New {comp.component_type.value} component added."],
             )
             report.components_added.append(change)
@@ -692,10 +697,14 @@ class AIBOMDiffer:
         old_safety = getattr(old, "serialization_safety", None)
         new_safety = getattr(new, "serialization_safety", None)
         if old_safety and new_safety and old_safety != new_safety:
+            unsafe_target = new_safety in {
+                SerializationSafety.UNSAFE_CODE_EXECUTION,
+                SerializationSafety.UNSAFE_TEMPLATE_INJECTION,
+            }
             modifications.append(
                 {
                     "detail": f"Serialization safety changed: {old_safety.value} → {new_safety.value}",
-                    "severity": "high",
+                    "severity": "critical" if unsafe_target else "high",
                 }
             )
 
@@ -1039,28 +1048,57 @@ class AIBOMDiffer:
                     "content digest.",
                 )
 
-        if old.source_report_format != new.source_report_format and None not in (
-            old.source_report_format,
-            new.source_report_format,
-        ):
-            message = (
-                f"ShadowScan report format changed from {old.source_report_format} to "
-                f"{new.source_report_format}."
-            )
-            if new.source_report_format == "shadowscan-json":
-                improvement("source_report_format", message)
-            else:
-                regression("source_report_format", message)
+        same_import_state = (old.source_report_digest is None) == (new.source_report_digest is None)
+        if old.source_report_format != new.source_report_format:
+            if None not in (old.source_report_format, new.source_report_format):
+                message = (
+                    f"ShadowScan report format changed from {old.source_report_format} to "
+                    f"{new.source_report_format}."
+                )
+                if new.source_report_format == "shadowscan-json":
+                    improvement("source_report_format", message)
+                else:
+                    regression("source_report_format", message)
+            elif same_import_state:
+                if new.source_report_format is None:
+                    regression(
+                        "source_report_format",
+                        f"ShadowScan report format is no longer recorded (was {old.source_report_format}).",
+                    )
+                else:
+                    improvement(
+                        "source_report_format",
+                        f"ShadowScan report format is now recorded as {new.source_report_format}.",
+                    )
 
         before_status, after_status = old.source_report_status, new.source_report_status
-        if before_status != after_status and None not in (before_status, after_status):
-            message = f"ShadowScan source status changed from {before_status} to {after_status}."
-            if _SOURCE_STATUS_RANK.get(str(after_status), 3) < _SOURCE_STATUS_RANK.get(
-                str(before_status), 3
-            ):
-                improvement("source_report_status", message)
-            else:
-                regression("source_report_status", message)
+        if before_status != after_status:
+            if None not in (before_status, after_status):
+                message = (
+                    f"ShadowScan source status changed from {before_status} to {after_status}."
+                )
+                if _SOURCE_STATUS_RANK.get(str(after_status), 3) < _SOURCE_STATUS_RANK.get(
+                    str(before_status), 3
+                ):
+                    improvement("source_report_status", message)
+                else:
+                    regression("source_report_status", message)
+            elif same_import_state:
+                if after_status is None:
+                    regression(
+                        "source_report_status",
+                        f"ShadowScan source status is no longer recorded (was {before_status}).",
+                    )
+                elif after_status == "complete":
+                    improvement(
+                        "source_report_status",
+                        "ShadowScan source status is now recorded as complete.",
+                    )
+                else:
+                    regression(
+                        "source_report_status",
+                        f"ShadowScan source status is now {after_status} (was unrecorded).",
+                    )
 
         if new.source_unmapped_count > old.source_unmapped_count:
             regression(
@@ -1346,7 +1384,7 @@ class AIBOMDiffer:
         for change in report.components_added:
             report.security_alerts.append(
                 {
-                    "severity": "medium",
+                    "severity": change.severity,
                     "component": change.bom_ref,
                     "alert": (
                         f"New component '{change.name}' "

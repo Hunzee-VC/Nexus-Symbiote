@@ -66,12 +66,22 @@ def test_case_variant_of_a_fixed_path_is_a_failure_naming_both_paths(tmp_path, v
 
 
 def test_both_codex_spellings_are_read_without_a_case_variant_failure(tmp_path):
-    _write(tmp_path, "codex.md", "lower")
-    assert not PromptScanner().scan(tmp_path).scan_failures
-    _write(tmp_path, "CODEX.md", "upper")
-    result = PromptScanner().scan(tmp_path)
-    assert not result.scan_failures
-    assert {"prompt:CODEX.md", "prompt:codex.md"} <= set(_components(result))
+    lower_root = tmp_path / "lower"
+    _write(lower_root, "codex.md", "lower")
+    lower_result = PromptScanner().scan(lower_root)
+    assert not lower_result.scan_failures
+    assert "prompt:codex.md" in _components(lower_result)
+    if (lower_root / "CODEX.md").exists():
+        upper_root = tmp_path / "upper"
+        _write(upper_root, "CODEX.md", "upper")
+        upper_result = PromptScanner().scan(upper_root)
+        assert not upper_result.scan_failures
+        assert "prompt:CODEX.md" in _components(upper_result)
+    else:
+        _write(lower_root, "CODEX.md", "upper")
+        result = PromptScanner().scan(lower_root)
+        assert not result.scan_failures
+        assert {"prompt:CODEX.md", "prompt:codex.md"} <= set(_components(result))
 
 
 def test_in_root_symlinked_instruction_file_is_read_through_its_target(tmp_path):

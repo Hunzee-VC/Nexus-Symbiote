@@ -258,14 +258,14 @@ jobs:
           set -euo pipefail
           shopt -s nullglob dotglob
           bundles=(attestation/*)
-          (( ${#bundles[@]} == 1 ))
-          test -s "${bundles[0]}"
+          (( ${#bundles[@]} == 1 )) || exit 1
+          test -s "${bundles[0]}" || exit 1
           wheels=(dist/*.whl)
           sdists=(dist/*.tar.gz)
           everything=(dist/*)
-          (( ${#wheels[@]} == 1 && ${#sdists[@]} == 1 && ${#everything[@]} == 2 ))
+          (( ${#wheels[@]} == 1 && ${#sdists[@]} == 1 && ${#everything[@]} == 2 )) || exit 1
           for artifact in "${everything[@]}"; do
-            [[ -f "$artifact" && ! -L "$artifact" ]]
+            [[ -f "$artifact" && ! -L "$artifact" ]] || exit 1
           done
           for artifact in "${wheels[@]}" "${sdists[@]}"; do
             gh attestation verify "$artifact" \

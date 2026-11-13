@@ -285,3 +285,40 @@ def test_a_refused_lockfile_past_the_listing_bounds_is_not_read_as_absent(tmp_pa
         with scanner._collection(root, result):
             npm, other = scanner._npm_lock(result)
         assert (npm, other) == (None, None)
+
+
+def test_python_failures_past_the_listing_bound_stay_visible(tmp_path):
+    # The Python analysis records its failures after the source search's bounded block;
+    # past the listing bound they are still summed up by reason, the python-nodes limit
+    # included.
+    project = tmp_path / "project"
+    for index in range(MAX_LISTED_FAILURES + 5):
+        broken = project / "pkg" / f"m{index:04d}.py"
+        broken.parent.mkdir(parents=True, exist_ok=True)
+        broken.write_text("import mcp\n(\n")
+    (project / "pkg" / "zz_server.py").write_text("import mcp\n" + "x\n" * 200)
+    with limits.applied(replace(limits.DEFAULTS, python_nodes=100)):
+        failures = MCPScanner().scan(project).scan_failures
+    # One line for each reason past the bound: the syntax failures, then the limit.
+    assert len(failures) == MAX_LISTED_FAILURES + 2
+    assert failures[-2] == "pkg/m1000.py: invalid Python syntax (and 4 more not listed)"
+    assert failures[-1] == (
+        "pkg/zz_server.py: python-nodes limit of 100 exceeded; raise it with --limit python-nodes=N"
+    )
+    assert _counted(failures) == MAX_LISTED_FAILURES + 6
+
+
+def test_nested_instruction_variants_past_the_listing_bound_stay_visible(tmp_path):
+    project = tmp_path / "project"
+    for index in range(MAX_LISTED_FAILURES + 5):
+        package = project / f"p{index:04d}"
+        package.mkdir(parents=True)
+        (package / "claude.md").write_text("lower\n")
+    if (project / "p0000" / "CLAUDE.md").exists():
+        pytest.skip("file system folds case")
+    failures = PromptScanner().scan(project).scan_failures
+    listed = _listed(failures)
+    assert len(listed) <= MAX_LISTED_FAILURES
+    assert len(failures) > len(listed)
+    assert _counted(failures) == MAX_LISTED_FAILURES + 5
+    assert all(VARIANT in failure for failure in failures)

@@ -13,15 +13,21 @@ from typing import TYPE_CHECKING, Any
 import click
 
 from nexus_symbiote import __version__, limits, modes
-from nexus_symbiote.core.aibom import AIBOM, NativeFormatError
+from nexus_symbiote.attestation_cli import register_attestation_commands
+from nexus_symbiote.core.aibom import AIBOM, ContentSerialError, NativeFormatError, prepare
 from nexus_symbiote.core.enums import AssuranceLevel
 from nexus_symbiote.core.models import (
     AIBOMMetadata,
     CompletenessClaim,
     DiscoveryVerification,
 )
+from nexus_symbiote.crosswalk_cli import register_crosswalk_commands
+from nexus_symbiote.digest_cli import register_digest_commands, source_date_epoch
 from nexus_symbiote.graph import validate_graph
+from nexus_symbiote.graph_cli import register_graph_commands
+from nexus_symbiote.inventory_export_cli import register_inventory_export_commands
 from nexus_symbiote.live_cli import register_live_commands
+from nexus_symbiote.minimum_elements_cli import register_minimum_elements_commands
 from nexus_symbiote.policy import Policy
 from nexus_symbiote.reporting import (
     ReportLine,
@@ -33,6 +39,7 @@ from nexus_symbiote.reporting import (
 )
 from nexus_symbiote.runtime_cli import register_runtime_commands
 from nexus_symbiote.supply_chain_cli import STAGED_INVENTORY, register_supply_chain_commands
+from nexus_symbiote.trace_cli import register_trace_commands
 from nexus_symbiote.utils.files import write_output_file
 from nexus_symbiote.utils.terminal import (
     echo_line,
@@ -650,6 +657,7 @@ def scan(
     if check_only and output:
         raise click.UsageError("--check writes no inventory; drop -o/--output or --check")
     _require_binding_key()
+    collected_at = source_date_epoch()
     root = _project_root(project_path, label="PROJECT_PATH")
     if not root.is_dir():
         raise click.ClickException(f"{neutralize(project_path)} is not a directory")
@@ -677,9 +685,9 @@ def scan(
         raise click.BadParameter("Unknown output format", param_hint="--format")
     echo_line("Scanning ", root, err=True)
     # The policy file always sits in the scan root; record it relative to that root.
-    # No finalize() here: rendering owns the export metadata. The generators
-    # derive the serial deterministically from content via prepare(), and no
-    # wall-clock timestamp is stamped, so two scans of the same project are
+    # No finalize() here: rendering owns the export metadata. prepare() derives the
+    # serial from the inventory content digest, and the only collection time recorded
+    # is the one SOURCE_DATE_EPOCH pins, so two scans of the same project are
     # byte-identical.
     aibom = AIBOM(
         metadata=AIBOMMetadata(
@@ -690,6 +698,7 @@ def scan(
                 else policy_source
             ),
             policy_weakened=policy_weakened,
+            timestamp=collected_at,
         )
     )
     surfaces_scanned: list[str] = []
@@ -838,6 +847,8 @@ def scan(
             )
         try:
             out_data = _render_aibom(aibom, output_format, root)
+        except ContentSerialError as exc:
+            raise click.ClickException(str(exc)) from exc
         except (ValueError, RecursionError) as exc:
             # Export checks quote inventory values; name the format, never the values.
             if _debug_enabled():
@@ -942,6 +953,7 @@ def import_shadowscan(
     ):
         raise click.UsageError("--bundle, --signer-identity and --issuer must be supplied together")
 
+    collected_at = source_date_epoch()
     importer = ShadowScanImporter()
     try:
         imported = importer.read_report(Path(report_path))
@@ -967,11 +979,16 @@ def import_shadowscan(
             ) from exc
 
     aibom = imported.to_native_bom()
+    aibom.metadata.timestamp = collected_at
 
     if output_format == "sarif":
         raise click.ClickException(
             "SARIF cannot preserve imported discovery coverage; use native JSON, CycloneDX or SPDX."
         )
+    try:
+        prepare(aibom)
+    except ContentSerialError as exc:
+        raise click.ClickException(str(exc)) from exc
     if output_format == "cyclonedx":
         from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
 
@@ -1779,6 +1796,13 @@ def init(force: bool, path: str) -> None:
 register_runtime_commands(main)
 register_live_commands(main)
 register_supply_chain_commands(main)
+register_digest_commands(main)
+register_attestation_commands(main)
+register_graph_commands(main)
+register_crosswalk_commands(main)
+register_trace_commands(main)
+register_inventory_export_commands(main)
+register_minimum_elements_commands(main)
 
 if __name__ == "__main__":
     main()
