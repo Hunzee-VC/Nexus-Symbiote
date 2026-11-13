@@ -1891,8 +1891,10 @@ def _unwrap(tokens: list[str], launch: Launch) -> list[str] | None:
     if name == "wsl":
         return _unwrap_wsl(rest, launch)
     if name in {"exec", "nohup"} and rest:
-        launch.wrappers.append(name)
-        return rest
+        command = _exec_operands(name, rest, launch)
+        if command is not None:
+            launch.wrappers.append(name)
+        return command
     if name == "eval":
         # Behind a reader that keeps quoting (wsl, env -S), what eval reads is not established.
         reread = not any(wrapper in {"wsl", "env"} for wrapper in launch.wrappers)
@@ -1918,6 +1920,26 @@ def _unwrap(tokens: list[str], launch: Launch) -> list[str] | None:
         launch.wrappers.append(name)
         return rest[separator + 1 :]
     return None
+
+
+def _exec_operands(name: str, rest: list[str], launch: Launch) -> list[str] | None:
+    """The command after ``nohup [--]``, or after the shell builtin's ``exec [-cl] [-a name]``."""
+    index = 0
+    while index < len(rest) and rest[index].startswith("-") and rest[index] != "-":
+        word = rest[index]
+        index += 1
+        if word == "--":
+            break
+        named = re.fullmatch(r"-[cl]*(a.*)?", word, re.S) if name == "exec" else None
+        if named is None:
+            launch.fail(f"unrecognised {name} option")
+            return None
+        if named.group(1) == "a":
+            index += 1
+    if index >= len(rest):
+        launch.fail(f"{name} without a command")
+        return None
+    return rest[index:]
 
 
 def _unwrap_env(rest: list[str], launch: Launch) -> list[str] | None:
@@ -1973,7 +1995,7 @@ def _script_words(words: list[str], launch: Launch) -> list[str] | None:
         launch.environment.append((name, value))
         words = words[1:]
     if words and words[0] == "exec":
-        words = words[1:]
+        return _exec_operands("exec", words[1:], launch)
     return words or None
 
 

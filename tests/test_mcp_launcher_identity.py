@@ -500,7 +500,6 @@ EVIL = ["npx", "-y", "evil-mcp@latest"]
         ("node", ["node_modules/pnpm/bin/pnpm.cjs", "dlx", "evil"], "arguments start pnpm"),
         ("node", ["wrapper.js", *EVIL], "arguments start npx"),
         ("bash", ["start.sh", *EVIL], "arguments start npx"),
-        ("exec", ["-a", "name", *EVIL], "arguments start npx"),
         ("node", ["-e", "require('child_process').spawnSync('npx')"], "inline node code"),
         ("python3", ["-c", "import subprocess"], "inline python code"),
         ("uv", ["run", "python", "-c", "import subprocess"], "inline python code"),
@@ -843,6 +842,38 @@ def test_runner_names_followed_by_their_own_options_alone_are_not_a_launch(tmp_p
 )
 def test_pinned_and_local_forms_near_the_new_rules_stay_classified(tmp_path, server):
     assert gap_reason(tmp_path, server) is None
+
+
+@pytest.mark.parametrize(
+    "command,args",
+    [
+        ("exec", ["-a", "name", "npx", "-y", "pkg@1.2.3"]),
+        ("exec", ["-cl", "--", "npx", "-y", "pkg@1.2.3"]),
+        ("exec", ["-aname", "npx", "-y", "pkg@1.2.3"]),
+        ("nohup", ["--", "npx", "-y", "pkg@1.2.3"]),
+        ("sh", ["-c", "exec -a name npx -y pkg@1.2.3"]),
+    ],
+)
+def test_exec_and_nohup_options_are_not_the_command(tmp_path, command, args):
+    assert gap_reason(tmp_path, {"command": command, "args": args}) is None
+    server = scan_server(tmp_path, {"command": command, "args": args})
+    assert server.properties["launcher"] == "npx"
+    assert server.launcher_package == "npm:pkg" and server.version_pinned is True
+
+
+@pytest.mark.parametrize(
+    "command,args,reason",
+    [
+        ("exec", ["-a", "name", *EVIL], "version_pinning"),
+        ("nohup", ["-p", *EVIL], "unrecognised nohup option"),
+        ("exec", ["-x", *EVIL], "unrecognised exec option"),
+        ("exec", ["-a", "name"], "exec without a command"),
+    ],
+)
+def test_exec_and_nohup_never_hide_the_runner(tmp_path, command, args, reason):
+    server = scan_server(tmp_path, {"command": command, "args": args})
+    assert server.version_pinned is False
+    assert any(reason in r.detail or reason == r.category for r in server.risks)
 
 
 def test_npm_command_resolution_follows_npm_aliases_and_prefixes():
