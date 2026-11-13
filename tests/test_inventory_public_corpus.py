@@ -312,3 +312,41 @@ def test_the_installation_comparison_ignores_what_created_the_environment(tmp_pa
     environment(("click", "8.4.0"), ("nexus-symbiote", "0.2.0"))
     with pytest.raises(ValueError, match="distributions differ"):
         module.check(archive, compare_installation=True)
+
+
+def _evidence_module(monkeypatch, name):
+    monkeypatch.syspath_prepend(str(ROOT / "benchmarks/inventory"))
+    spec = importlib.util.spec_from_file_location(name, ROOT / "benchmarks/inventory/evidence.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_a_shadowed_distribution_is_not_the_one_recorded(monkeypatch):
+    from email.message import Message
+    from types import SimpleNamespace
+
+    module = _evidence_module(monkeypatch, "inventory_evidence_shadowed")
+
+    def distributions():
+        # sys.path order: the first copy is the one Python imports.
+        for version in ("8.5.0", "8.4.0"):
+            metadata = Message()
+            metadata["Name"] = "click"
+            yield SimpleNamespace(metadata=metadata, version=version)
+
+    monkeypatch.setattr(module, "distributions", distributions)
+    assert module.installed_versions() == {"click": "8.5.0"}
+
+
+def test_prepare_says_why_it_refuses_and_writes_nothing(tmp_path, monkeypatch):
+    module = _evidence_module(monkeypatch, "inventory_evidence_refusals")
+    monkeypatch.setattr(module, "run", lambda: {"passed": False, "corpus_version": 3})
+    with pytest.raises(ValueError, match=r"^benchmark failed$"):
+        module.prepare(tmp_path / "failed")
+    snapshots = iter([{"corpus/manifest.json": "a"}, {"corpus/manifest.json": "b"}])
+    monkeypatch.setattr(module, "materials", lambda: next(snapshots))
+    monkeypatch.setattr(module, "run", lambda: {"passed": True, "corpus_version": 3})
+    with pytest.raises(ValueError, match=r"^material changed during the run$"):
+        module.prepare(tmp_path / "changed")
+    assert list(tmp_path.iterdir()) == []
