@@ -57,18 +57,6 @@ def score_tools(
     }
 
 
-def relevant_mcp_exclusions(case: dict, exclusions: list[str]) -> list[str]:
-    """Only ignore absent config when labels explicitly concern application source."""
-    return sorted(
-        reason
-        for reason in exclusions
-        if not (
-            case.get("inventory_scope") == "source"
-            and reason == "mcp-config (no config files found)"
-        )
-    )
-
-
 def label_bounds(scores: dict) -> dict:
     """Bound recall and specificity over explicit labels when collection is incomplete.
 
@@ -255,7 +243,7 @@ def run() -> dict:
                     raise ValueError(f"Unknown benchmark assertion {name}")
                 checks[name] = ok
             misses, extras = sorted(expected - predicted), sorted(predicted - expected)
-            relevant_exclusions = relevant_mcp_exclusions(case, mcp_exclusions)
+            relevant_exclusions = sorted(mcp_exclusions)
             has_tool_labels = bool(case["tools"] or case["decoys"])
             incomplete = bool(failures or (has_tool_labels and relevant_exclusions))
             scores = score_tools(

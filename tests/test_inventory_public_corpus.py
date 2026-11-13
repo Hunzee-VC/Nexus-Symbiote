@@ -93,7 +93,12 @@ def test_only_adjudicated_negatives_enter_confusion_counts():
         score(set(), ["tool", "tool"], [])
 
 
-def test_unexpected_exclusion_is_unknown_and_fails_the_case(monkeypatch):
+# The collector records an absent config as scanned; reported as excluded, it is a gap too.
+@pytest.mark.parametrize(
+    "reason",
+    ["app/mcpserver_quickstart.py: unexpected omission", "mcp-config (no config files found)"],
+)
+def test_unexpected_exclusion_is_unknown_and_fails_the_case(monkeypatch, reason):
     namespace = runpy.run_path(str(ROOT / "benchmarks/inventory/run_inventory.py"))
     scanner = namespace["MCPScanner"]
     original = scanner.scan
@@ -101,7 +106,7 @@ def test_unexpected_exclusion_is_unknown_and_fails_the_case(monkeypatch):
     def incomplete(self, path):
         result = original(self, path)
         if (path / "app/mcpserver_quickstart.py").exists():
-            result.surfaces_excluded.append("app/mcpserver_quickstart.py: unexpected omission")
+            result.surfaces_excluded.append(reason)
         return result
 
     monkeypatch.setattr(scanner, "scan", incomplete)
@@ -109,7 +114,7 @@ def test_unexpected_exclusion_is_unknown_and_fails_the_case(monkeypatch):
     case = next(row for row in report["cases"] if row["case"] == "python-sdk-quickstart")
     assert not case["passed"] and case["coverage_incomplete"]
     assert case["unknown_negative_labels"] == 2
-    assert case["relevant_mcp_exclusions"] == ["app/mcpserver_quickstart.py: unexpected omission"]
+    assert case["relevant_mcp_exclusions"] == [reason]
     assert not report["passed"]
 
 
