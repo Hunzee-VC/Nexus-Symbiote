@@ -1785,6 +1785,9 @@ def _command_words(command: str, args: list[str]) -> tuple[list[str] | None, str
         if close < 0:
             return None, _NOT_SIMPLE
         tail = stripped[close + 1 :]
+        if tail[:1] and not tail[0].isspace():
+            # A shell joins text after the closing quote to the quoted word: "np"x is npx.
+            return None, _NOT_SIMPLE
         words = _split_script(tail) if tail.strip() else []
         return (None, _NOT_SIMPLE) if words is None else ([stripped[1:close], *words], "")
     if not any(char.isspace() for char in stripped):
