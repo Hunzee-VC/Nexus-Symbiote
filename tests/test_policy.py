@@ -112,6 +112,7 @@ class TestPolicyModel:
         'version: "2.0"',
         "risk: {}\nrisk: {}",
         'scan: {exclude_paths: ["../escape"]}',
+        "validation: {require_integrity: false}",
     ],
 )
 def test_invalid_settings_fail_closed(tmp_path, text):
@@ -177,6 +178,19 @@ def test_a_stricter_fail_threshold_alone_is_accepted(tmp_path):
         "risk: {fail_threshold: 20, warn_threshold: 30}\n"
     )
     with pytest.raises(PolicyError, match=r"risk \(warn_threshold cannot exceed fail_threshold\)"):
+        load_policy(tmp_path)
+
+
+def test_a_project_root_that_cannot_be_listed_is_not_taken_to_have_no_policy(tmp_path, monkeypatch):
+    import os
+
+    (tmp_path / ".nexus-symbiote.yaml").write_text('risk: {fail_on_severity: "medium"}\n')
+
+    def unlistable(path):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(os, "listdir", unlistable)
+    with pytest.raises(PolicyError, match="cannot be listed: Permission denied"):
         load_policy(tmp_path)
 
 

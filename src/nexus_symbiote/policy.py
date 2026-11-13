@@ -58,8 +58,8 @@ class Suppression(PolicySection):
 
     Matching is exact: one component reference, one category and the fingerprint of
     the finding as it was reviewed, no wildcards. A finding whose severity, detail or
-    component content digest has changed since no longer matches. An expired entry no longer suppresses
-    anything and fails the risk gate until it is renewed or removed.
+    component content digest has changed since no longer matches. An expired entry no
+    longer suppresses anything and fails the risk gate until it is renewed or removed.
     """
 
     component_ref: str = Field(min_length=1, max_length=MAX_REFERENCE_CHARS)
@@ -138,9 +138,8 @@ class OutputPolicy(PolicySection):
 
 
 class Policy(PolicySection):
-    model_config = ConfigDict(
-        extra="forbid", populate_by_name=True, strict=True, allow_inf_nan=False
-    )
+    # Only the documented key `validate` names that section in a policy file.
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
     version: Literal["1.0"] = "1.0"
     scan: ScanPolicy = Field(default_factory=ScanPolicy)
     risk: RiskPolicy = Field(default_factory=RiskPolicy)
@@ -166,8 +165,11 @@ def find_policy_path(project_root: Path) -> Path | None:
         current = current.parent
     try:
         entries = sorted(os.listdir(current))
-    except OSError:
+    except (FileNotFoundError, NotADirectoryError):
         return None
+    except OSError as exc:
+        # A directory that cannot be listed may hold a policy, so it is not "no policy".
+        raise PolicyError(f"project root {current} cannot be listed: {exc.strerror}") from None
     folded_targets = {fold_name(name): name for name in POLICY_FILE_NAMES}
     found: list[Path] = []
     variants: list[tuple[str, str]] = []
@@ -220,7 +222,7 @@ def nearest_policy_file(start: Path) -> Path | None:
     inventory written to a shared directory, belongs to whoever controls that directory.
     """
     for directory in (start, *start.parents):
-        for name in (".nexus-symbiote.yaml", ".nexus-symbiote.yml"):
+        for name in POLICY_FILE_NAMES:
             candidate = directory / name
             try:
                 if candidate.is_symlink() or candidate.exists():
@@ -300,7 +302,7 @@ def parse_yaml_mapping(text: str) -> dict[str, Any]:
     try:
         data = yaml.load(text, Loader=UniqueLoader)  # noqa: S506 - subclass of SafeLoader with unique-key enforcement
         if not isinstance(data, dict):
-            raise PolicyError("configuration must be a nonempty YAML mapping")
+            raise PolicyError("configuration must be a YAML mapping")
         return data
     # OverflowError: PyYAML's YAML 1.1 base-60 float overflows from 175 parts on.
     except (yaml.YAMLError, RecursionError, OverflowError) as exc:
