@@ -772,7 +772,6 @@ _DENO_RUN = _table(
     ),
 )
 _SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh", "ash", "mksh", "fish"})
-# bash long options that take the next word; other long options are flags.
 # bash's long options, which it also reads after a single dash: -rcfile is --rcfile.
 _BASH_LONG_OPTIONS = _set(
     "debug debugger dump-po-strings dump-strings help init-file login noediting noprofile"
@@ -2448,7 +2447,8 @@ def _python_runner(
     elif position < len(rest):
         program = rest[position]
         if "://" in program or program == "-":
-            # uv run downloads and runs a script named by URL, or reads one from stdin.
+            # uv run downloads and runs a script named by URL, or reads one from stdin; both
+            # are recorded as a URL source, standard input as one without an origin.
             launch.packages.insert(0, Package("url", program, origin=origin(program)))
         else:
             _start(rest[position:], launch)
