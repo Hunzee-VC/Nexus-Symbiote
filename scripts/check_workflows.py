@@ -123,6 +123,9 @@ REQUIRED_COMMANDS: dict[str, dict[str, tuple[str, ...]]] = {
             "$EVIDENCE/hostile.json",
         ),
         "action-annotations": ("gh api --paginate", "symbiote-injected-annotation", "set-output"),
+        # The one check branch protection requires: it must still fail on a prerequisite
+        # that did not succeed.
+        "verified": ("sys.exit(bool(failed))",),
     },
     "release.yml": {
         "build": (
@@ -130,10 +133,12 @@ REQUIRED_COMMANDS: dict[str, dict[str, tuple[str, ...]]] = {
             "--publish",
             "scripts/check_dependency_advisories.py",
             "python -m pytest",
+            "--strict-skips",
             "scripts/check_security_regressions.py",
             "scripts/check_wheel_security.py",
         ),
         "compatibility": ("scripts/check_installed_wheel.py",),
+        "verify": ("gh attestation verify",),
     },
 }
 # A gate job or step runs by default, with success() or with always(). Besides those, the
@@ -165,6 +170,9 @@ REQUIRED_TEXT: dict[str, dict[str, frozenset[str]]] = {
         "action": frozenset({"symbiote-injected-annotation", "$EVIDENCE/hostile.json"}),
         "action-annotations": frozenset({"symbiote-injected-annotation", "set-output"}),
     },
+    # Called once per distribution inside a loop, which the gate reader does not follow;
+    # tests/test_release_provenance.py runs the loop.
+    "release.yml": {"verify": frozenset({"gh attestation verify"})},
 }
 # The shells a gate step may run in, as (errexit, pipefail). GitHub runs a step without a
 # shell as `bash -e {0}` and `shell: bash` as `bash --noprofile --norc -eo pipefail {0}`.
@@ -175,6 +183,17 @@ SHELLS: dict[str | None, tuple[bool, bool]] = {
     "bash --noprofile --norc -eo pipefail {0}": (True, True),
 }
 PYTHON = re.compile(r"python(?:\d+(?:\.\d+)?)?")
+# Python options that print and exit before the script runs, or keep the process alive and
+# discard its status.
+PYTHON_EXITS = frozenset("h?Vi")
+# The timeout options that leave the command's status intact, alone or with a value.
+TIMEOUT_FLAGS = frozenset({"--foreground", "--preserve-status", "-v", "--verbose"})
+TIMEOUT_VALUED = frozenset({"-k", "--kill-after", "-s", "--signal"})
+# Bash long options that only change start-up; any other may print and exit.
+BASH_LONG_OPTIONS = frozenset({"--noprofile", "--norc", "--posix"})
+# Shell options after which a later command may not run: noexec reads without executing,
+# onecmd exits after one command.
+NOEXEC_NAMES = frozenset({"noexec", "onecmd"})
 ASSIGNMENT = re.compile(r"[A-Za-z_]\w*=")
 REDIRECT = re.compile(r"&>>?|[<>]>?[&|]?")
 # Builtins after which a later command is no longer a gate: they move the shell, replace or
@@ -797,11 +816,12 @@ def _options(args: list[str], errexit: bool, pipefail: bool) -> tuple[bool, bool
         option = args[index]
         index += 1
         if option.startswith("--"):
+            noexec = noexec or option not in BASH_LONG_OPTIONS
             continue
         for letter in option[1:]:
             if letter == "c":
                 command = True
-            elif letter == "n":
+            elif letter in "ntD":
                 noexec = noexec or option[0] == "-"
             elif letter == "e":
                 errexit = option[0] == "-"
@@ -812,28 +832,31 @@ def _options(args: list[str], errexit: bool, pipefail: bool) -> tuple[bool, bool
                     errexit = option[0] == "-"
                 elif name == "pipefail":
                     pipefail = option[0] == "-"
-                elif name == "noexec":
+                elif name in NOEXEC_NAMES:
                     noexec = noexec or option[0] == "-"
     return errexit, pipefail, index, command, noexec
 
 
-def _shopt(args: list[str], errexit: bool, pipefail: bool) -> tuple[bool, bool]:
-    """Apply `shopt -s -o` or `shopt -u -o` to errexit and pipefail."""
+def _shopt(args: list[str], errexit: bool, pipefail: bool) -> tuple[bool, bool, bool]:
+    """Apply `shopt -s -o` or `shopt -u -o`: the new errexit and pipefail, and noexec."""
     letters = ""
     index = 0
+    noexec = False
     while index < len(args) and args[index].startswith("-") and args[index] != "--":
         letters += args[index][1:]
         index += 1
     index += index < len(args) and args[index] == "--"
     if "o" not in letters or not ({"s", "u"} & set(letters)):
-        return errexit, pipefail
+        return errexit, pipefail, noexec
     enabled = "s" in letters
     for name in args[index:]:
         if name == "errexit":
             errexit = enabled
         elif name == "pipefail":
             pipefail = enabled
-    return errexit, pipefail
+        elif name in NOEXEC_NAMES:
+            noexec = noexec or enabled
+    return errexit, pipefail, noexec
 
 
 def _unwrapped(words: list[str]) -> list[str]:
@@ -863,6 +886,8 @@ def _resolve(word: str, variables: dict[str, str]) -> str:
 
 def _may_name_a_builtin(program: str) -> bool:
     """Whether a command name, as resolved, can still expand to the name of a builtin."""
+    if "{" in VARIABLE.sub("", program):
+        return True
     if "$" not in program and "`" not in program:
         return False
     literal = VARIABLE.sub("", program)
@@ -900,6 +925,8 @@ class _Gate:
                 index += "=" not in arg
                 continue
             letters = arg[1:]
+            if PYTHON_EXITS & set(letters.split("W")[0].split("X")[0]):
+                return False
             if "c" in letters.split("W")[0].split("X")[0]:
                 return False
             if "m" in letters.split("W")[0].split("X")[0]:
@@ -946,7 +973,11 @@ def _gates(script: str, errexit: bool, pipefail: bool) -> list[_Gate]:
             if not words:
                 continue
             program, args = _resolve(words[0], variables), words[1:]
-            if _may_name_a_builtin(program):
+            # A set or shopt whose options come from an expansion cannot be read.
+            expanded = program in ("set", "shopt") and any(
+                mark in arg for arg in args for mark in ("$", "`", "{")
+            )
+            if _may_name_a_builtin(program) or expanded:
                 trusted = False
             elif program == "set":
                 enabled, piped, _, _, noexec = _options(args, errexit, pipefail)
@@ -954,9 +985,10 @@ def _gates(script: str, errexit: bool, pipefail: bool) -> list[_Gate]:
                 pipefail = piped if alone else pipefail and piped
                 trusted = trusted and not noexec
             elif program == "shopt":
-                enabled, piped = _shopt(args, errexit, pipefail)
+                enabled, piped, noexec = _shopt(args, errexit, pipefail)
                 errexit = enabled if alone else errexit and enabled
                 pipefail = piped if alone else pipefail and piped
+                trusted = trusted and not noexec
             elif program in BINDING_BUILTINS or (program == "printf" and "-v" in args):
                 variables.clear()
             elif program in UNSAFE_BUILTINS and not _fails(program, args):
@@ -965,10 +997,15 @@ def _gates(script: str, errexit: bool, pipefail: bool) -> list[_Gate]:
 
 
 def _fails(program: str, args: list[str]) -> bool:
-    """`exit N` with a literal nonzero N, or `exec` that only redirects: both safe."""
+    """`exit N` with a literal N that is nonzero modulo 256, or `exec` that only redirects."""
     if program == "exec":
         return not args
-    return program == "exit" and len(args) == 1 and args[0].isdigit() and int(args[0]) != 0
+    return (
+        program == "exit"
+        and len(args) == 1
+        and re.fullmatch(r"[0-9]+", args[0]) is not None
+        and int(args[0]) % 256 != 0
+    )
 
 
 def _exits_with_failure(pipeline: tuple[bool, list[_Command]]) -> bool:
@@ -988,6 +1025,24 @@ def _exits_with_failure(pipeline: tuple[bool, list[_Command]]) -> bool:
     return command.words[:1] == ["exit"] and _fails("exit", command.words[1:])
 
 
+def _after_timeout(words: list[str]) -> list[str]:
+    """The command `timeout` runs, or none when an option may stop it from running."""
+    while words and words[0].startswith("-"):
+        option, equals, _ = words[0].partition("=")
+        if words[0] == "--":
+            words = words[1:]
+            break
+        if words[0] in TIMEOUT_FLAGS:
+            words = words[1:]
+        elif option in TIMEOUT_VALUED:
+            words = words[1:] if equals else words[2:]
+        elif option[:2] in ("-k", "-s") and not option.startswith("--"):
+            words = words[1:]
+        else:
+            return []
+    return words[1:]
+
+
 def _item_gates(item: _Item, pipefail: bool, variables: dict[str, str]) -> list[_Gate]:
     if item.operators and not (item.operators == ["||"] and _exits_with_failure(item.pipelines[1])):
         return []
@@ -1002,10 +1057,7 @@ def _item_gates(item: _Item, pipefail: bool, variables: dict[str, str]) -> list[
         while words and ASSIGNMENT.match(words[0]):
             words = words[1:]
         if words and words[0] == "timeout":
-            words = words[1:]
-            while words and words[0].startswith("-"):
-                words = words[1:]
-            words = words[1:]
+            words = _after_timeout(words[1:])
         if not words:
             continue
         program = _resolve(words[0], variables)
@@ -1188,7 +1240,12 @@ def check(path: Path) -> list[str]:
     document = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(document, dict):
         return [f"{path}: expected a mapping"]
-    if path.name not in {"action.yml", "action.yaml"}:
+    # GitHub runs every file in .github/workflows as a workflow, whatever it is called.
+    is_action = path.name in {"action.yml", "action.yaml"} and tuple(path.parent.parts[-2:]) != (
+        ".github",
+        "workflows",
+    )
+    if not is_action:
         errors.extend(_workflow_issues(path, document))
 
     def visit(value: object) -> None:

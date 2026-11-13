@@ -118,6 +118,7 @@ def ci_workflow():
         ("action", "sys.exit(bool(failures))"),
         ("action-annotations", "symbiote-injected-annotation"),
         ("action-annotations", "set-output"),
+        ("verified", "sys.exit(bool(failed))"),
     ],
 )
 def test_a_gate_job_hollowed_out_under_its_name_is_rejected(tmp_path, job, command):
@@ -128,6 +129,29 @@ def test_a_gate_job_hollowed_out_under_its_name_is_rejected(tmp_path, job, comma
     path = tmp_path / "ci.yml"
     path.write_text(yaml.safe_dump(workflow))
     assert any(f"{job} no longer runs {command}" in error for error in checker.check(path))
+
+
+@pytest.mark.parametrize(
+    "job,command",
+    [("build", "--strict-skips"), ("verify", "gh attestation verify")],
+)
+def test_a_release_gate_hollowed_out_under_its_name_is_rejected(tmp_path, job, command):
+    workflow = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())
+    for step in workflow["jobs"][job]["steps"]:
+        if command in step.get("run", ""):
+            step["run"] = step["run"].replace(command, "true")
+    path = tmp_path / "release.yml"
+    path.write_text(yaml.safe_dump(workflow))
+    assert any(f"{job} no longer runs {command}" in error for error in checker.check(path))
+
+
+def test_a_workflow_named_like_an_action_is_still_checked_as_a_workflow(repository, capsys):
+    (repository / ".github/workflows/action.yml").write_text(
+        SAFE.replace("on: pull_request", "on: pull_request_target")
+    )
+    status = checker.main()
+    assert status == 1
+    assert "triggers must be among" in capsys.readouterr().out
 
 
 def workflow_errors(tmp_path, name, change):
@@ -169,6 +193,8 @@ def condition(job, command, value):
         # The preflight's reviewed condition does not carry over to another gate.
         ("release.yml", "build", "python -m pytest", "inputs.publish != 'none'"),
         ("release.yml", "compatibility", "scripts/check_installed_wheel.py", False),
+        ("release.yml", "verify", "gh attestation verify", False),
+        ("ci.yml", "verified", "sys.exit(bool(failed))", False),
     ],
 )
 def test_a_gate_step_that_a_condition_can_skip_is_rejected(tmp_path, name, job, command, value):
@@ -526,6 +552,27 @@ LOCKS = "python scripts/check_locks.py"
         "python -uc scripts/check_locks.py",
         "python --version scripts/check_locks.py",
         f"bash -n -c '{LOCKS}'",
+        f"{LOCKS} || exit 256",
+        f"exit 256\n{LOCKS}",
+        f"exit 0256\n{LOCKS}",
+        "python -V scripts/check_locks.py",
+        "python -h scripts/check_locks.py",
+        "python -? scripts/check_locks.py",
+        "python -i scripts/check_locks.py",
+        f"timeout --help {LOCKS}",
+        f"timeout --version 5m {LOCKS}",
+        f"bash --version -e -c '{LOCKS}'",
+        f"bash --help -ec '{LOCKS}'",
+        f"bash -D -e -c '{LOCKS}'",
+        f"shopt -s -o noexec\n{LOCKS}",
+        f"shopt -so noexec\n{LOCKS}",
+        f"set -t\n{LOCKS}",
+        f"set -o onecmd\n{LOCKS}",
+        f"OPTS=+e\nset $OPTS\n{LOCKS}\necho done",
+        f"x=e\nset +$x\n{LOCKS}\necho done",
+        f"n=errexit\nset +o $n\n{LOCKS}\necho done",
+        f"{{set,+e}}\n{LOCKS}\necho done",
+        f"{{exit,0}}\n{LOCKS}",
     ],
 )
 def test_a_gate_command_that_does_not_stand_alone_is_rejected(tmp_path, script):
@@ -543,6 +590,9 @@ def test_a_gate_command_that_does_not_stand_alone_is_rejected(tmp_path, script):
         ('PY=python3\n"$PY" -I scripts/check_locks.py --strict', {}),
         (f"bash --noprofile --norc -e -o pipefail -c '\n  {LOCKS} | tee log\n'", {}),
         (f"timeout 5m {LOCKS}", {}),
+        (f"timeout --signal=INT --kill-after=30s 12m {LOCKS}", {}),
+        (f"timeout -k 5 -s TERM --preserve-status 5m {LOCKS}", {}),
+        (f"{LOCKS} || exit 257", {}),
         (f"if true; then echo ok; fi\n{LOCKS}", {}),
         (f"{LOCKS}", {"shell": "bash --noprofile --norc -eo pipefail {0}"}),
         (f"echo $'it\\'s'\n{LOCKS}", {}),
