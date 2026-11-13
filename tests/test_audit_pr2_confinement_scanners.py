@@ -66,25 +66,27 @@ def test_a_failed_exact_name_check_closes_what_it_opened(
         raise PermissionError(errno.EACCES, "the directory cannot be listed")
 
     with ConfinedCollection(tmp_path, []) as collection:
-        monkeypatch.setattr(os, "open", recording_open)
-        monkeypatch.setattr(ConfinedCollection, "_has_exact_name", unlistable)
-        assert collection.hash_file(relative) is None
-        monkeypatch.undo()
+        with monkeypatch.context() as patch:
+            patch.setattr(os, "open", recording_open)
+            patch.setattr(ConfinedCollection, "_has_exact_name", unlistable)
+            assert collection.hash_file(relative) is None
         assert opened
         for fd in opened:
             with pytest.raises(OSError):
                 os.fstat(fd)
 
 
-def test_confined_default_excludes_and_policy_excludes_match_case_folded(tmp_path: Path) -> None:
+def test_confined_default_excludes_and_policy_excludes_match_case_folded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ConfinedCollection, "_detect_root_folding", lambda self: True)
     git_variant = tmp_path / ".GIT"
     git_variant.mkdir()
     (git_variant / "config").write_text("secret", encoding="utf-8")
     failures: list[str] = []
     with ConfinedCollection(tmp_path, failures, exclude_paths=["BuildOut"]) as collection:
         assert collection.excluded(".GIT/config")
-        if (tmp_path / ".git").exists():
-            assert collection.excluded("buildout/artifact.json")
+        assert collection.excluded("buildout/artifact.json")
 
 
 def test_find_policy_path_rejects_case_variant_policy_filename(tmp_path: Path) -> None:
@@ -106,9 +108,7 @@ def test_find_policy_path_rejects_case_variant_policy_filename(tmp_path: Path) -
 def test_package_runners_refuse_local_scripts_interpreters_and_post_positional_flags(
     tmp_path: Path, config: dict[str, object]
 ) -> None:
-    case_dir = tmp_path / str(abs(hash(json.dumps(config, sort_keys=True))))
-    case_dir.mkdir(parents=True, exist_ok=True)
-    server, gaps = _scan_server(case_dir, config)
+    server, gaps = _scan_server(tmp_path, config)
     assert server.version_pinned is False
     assert server.package_url is None
     assert any(

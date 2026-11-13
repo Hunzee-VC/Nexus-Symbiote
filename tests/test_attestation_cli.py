@@ -383,8 +383,8 @@ def test_age_and_future_dates_are_refused(runner, setup):
         (lambda w: w.update(signatures2=[]), "envelope-invalid"),
         (lambda w: w["signatures"][0].update(keyid=w["signatures"][0]["keyid"].upper()), None),
         (
-            lambda w: w.update(
-                payload=base64.urlsafe_b64encode(base64.b64decode(w["payload"])).decode()
+            lambda w: w["signatures"][0].update(
+                sig=base64.urlsafe_b64encode(base64.b64decode(w["signatures"][0]["sig"])).decode()
             ),
             None,
         ),
