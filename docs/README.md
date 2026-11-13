@@ -64,6 +64,7 @@ Reference material: exact behavior, fields and limits.
 | [ShadowScan integration](shadowscan-integration.md) | Import and verify Nexus-ShadowScan discovery reports |
 | [Approve agents for ShadowScan reconciliation](shadowscan-inventory-export.md) | Export the reviewed repository agent as an approved inventory ShadowScan's `--inventory` accepts, choose the resource prefix, and keep the file out of the reviewed change's reach |
 | [Runtime assurance](runtime-assurance.md) | Sign snapshots and approvals, and mediate tool calls through a gateway |
+| [Operational guidance](operational-guidance.md) | Practices that keep a deployment inside the documented guarantees |
 
 ### Upgrade existing inventories
 
