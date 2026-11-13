@@ -32,10 +32,18 @@ MARKER = re.compile(r"^(?:<{7}|>{7}|\|{7})(?: .*)?$", re.M)
 SELF_BLOB = r"https://github\.com/{owner}/{repository}/(?:blob|tree)/main/([^\s()\"'<>?#]+)(?:\?[^\s()\"'<>#]*)?(?:#([^\s()\"'<>]+))?"
 SELF_RAW = r"https://raw\.githubusercontent\.com/{owner}/{repository}/main/([^\s()\"'<>?#]+)()"
 PROJECT_URL = re.compile(r"https://github\.com/([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)")
+# A slug may end in .git, as a clone URL does, or before the full stop of a sentence.
+_SLUG_END = r"(?:\.git)?(?![A-Za-z0-9_-])(?!\.[A-Za-z0-9])"
 # Anchored so a longer URL path cannot look like an owner: the project's own
 # PyPI URL ends in /p/<name>, and GitHub URLs are matched by PROJECT_URL.
-OWNER_SLUG = "(?<![A-Za-z0-9._/-])([A-Za-z0-9._-]+)/{0}(?![A-Za-z0-9._-])"
-OWNER_TEXT_SUFFIXES = frozenset({".md", ".yml", ".yaml", ".cff"})
+OWNER_SLUG = "(?<![A-Za-z0-9._/-])([A-Za-z0-9._-]+)/{0}" + _SLUG_END
+# The paths where an owner/repo slug follows a slash: the REST API, raw file URLs,
+# a github.com URL without its scheme, and badge services.
+EMBEDDED_SLUG = (
+    r"(?:\brepos|github\.com|githubusercontent\.com|/github/[a-z-]+)/([A-Za-z0-9._-]+)/{0}"
+    + _SLUG_END
+)
+OWNER_TEXT_SUFFIXES = frozenset({".md", ".yml", ".yaml", ".cff", ".toml"})
 # Tests and benchmark fixtures hold the characters the collectors must detect.
 HIDDEN_EXEMPT_PREFIXES = (Path("tests"), Path("benchmarks"))
 HIDDEN_SUFFIXES = frozenset({".py", ".md", ".toml", ".yml", ".yaml", ".cff", ".cfg", ".txt"})
@@ -223,12 +231,16 @@ def owner_issues(root: Path, files: list[Path]) -> list[str]:
             continue
         # The bare owner/repo slug is matched too: a transfer leaves it stale in
         # command examples, where it is an argument rather than a link.
-        slug = re.compile(OWNER_SLUG.format(re.escape(repository)), re.I)
-        owners = {match[1] for match in slug.finditer(text)}
+        name = re.escape(repository)
+        owners = {
+            match[1]
+            for pattern in (OWNER_SLUG, EMBEDDED_SLUG)
+            for match in re.finditer(pattern.format(name), text, re.I)
+        }
         owners.update(
             match[1]
             for match in PROJECT_URL.finditer(text)
-            if match[2].lower() == repository.lower()
+            if match[2].lower().rstrip(".").removesuffix(".git") == repository.lower()
         )
         stale = {value for value in owners if value.lower() != owner.lower()}
         errors.extend(

@@ -218,6 +218,50 @@ def test_stale_owner_slug_outside_a_url_is_reported(tmp_path):
     assert len(hygiene.owner_issues(tmp_path, [Path("docs.md")])) == 1
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "git clone https://github.com/old-owner/Widget.git\n",
+        "See https://github.com/old-owner/Widget.\n",
+        "    gh api repos/old-owner/Widget/branches/main/protection\n",
+        "![banner](https://raw.githubusercontent.com/old-owner/Widget/main/a.png)\n",
+        "[score](https://scorecard.dev/viewer/?uri=github.com/old-owner/Widget)\n",
+        "![license](https://img.shields.io/github/license/old-owner/Widget)\n",
+        "    --repo old-owner/Widget.git\n",
+    ],
+)
+def test_a_stale_owner_in_any_spelling_of_the_slug_is_reported(tmp_path, text):
+    _project(tmp_path)
+    tmp_path.joinpath("docs.md").write_text(text)
+    assert hygiene.owner_issues(tmp_path, [Path("docs.md")]) == [
+        "docs.md: links to old-owner/Widget instead of Canonical-Org/Widget"
+    ]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "[x](https://github.com/old-owner/Widget.gitx)\n",
+        "    python old-owner/Widget.py\n",
+        "git clone https://github.com/Canonical-Org/Widget.git\n",
+        "    gh api repos/Canonical-Org/Widget/rulesets\n",
+    ],
+)
+def test_other_names_and_the_canonical_slug_are_not_stale(tmp_path, text):
+    _project(tmp_path)
+    tmp_path.joinpath("docs.md").write_text(text)
+    assert hygiene.owner_issues(tmp_path, [Path("docs.md")]) == []
+
+
+def test_project_urls_other_than_the_homepage_are_checked(tmp_path):
+    _project(tmp_path)
+    with tmp_path.joinpath("pyproject.toml").open("a") as stream:
+        stream.write('Issues = "https://github.com/old-owner/Widget/issues"\n')
+    assert hygiene.owner_issues(tmp_path, [Path("pyproject.toml")]) == [
+        "pyproject.toml: links to old-owner/Widget instead of Canonical-Org/Widget"
+    ]
+
+
 def test_dated_audits_keep_the_owner_recorded_at_the_time(tmp_path):
     _project(tmp_path)
     audit = tmp_path / "docs" / "audits"
