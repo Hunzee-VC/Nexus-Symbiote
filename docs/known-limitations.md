@@ -601,7 +601,9 @@ A way around a limit that its entry does not describe is worth a
   such as self-hosted runners, set `XDG_CACHE_HOME` to an empty directory you own;
   on macOS, setting `HOME` alone is not enough when `XDG_CACHE_HOME` is set.
   The cached or explicit trust root is opened once without following symlinks, checked on
-  that descriptor, and verification uses exactly the bytes read. The unpinned cache is still
+  that descriptor, and verification uses exactly the bytes read, so no directory on its
+  path, including those above the cache such as a linked `~/.cache`, may be a symlink
+  (macOS's `/var`, `/tmp` and `/etc` links excepted). The unpinned cache is still
   trusted because it is private: a process running as your user can write a root there
   before verification starts, which only an explicit, pinned trust root rules out.
 - **The Action's trust root ages.** The Action gives its scans an empty private

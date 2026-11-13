@@ -180,6 +180,16 @@ def _current_uid() -> int | None:
     return None
 
 
+# What an operator can do about a shared cache entry, and about a shared explicit root.
+_CACHE_REMEDY = (
+    "point XDG_CACHE_HOME at a directory you own, or use an explicit trust root "
+    f"({TRUST_ROOT_ENV} or --trust-root)"
+)
+_EXPLICIT_REMEDY = (
+    f"or pin the trust root's SHA-256 ({TRUST_ROOT_SHA256_ENV} or --trust-root-sha256)"
+)
+
+
 def _owner_error(info: os.stat_result, path: Path, *, what: str) -> str | None:
     """Return an error when a trust entry is not owned by the current user."""
     uid = _current_uid()
@@ -188,16 +198,18 @@ def _owner_error(info: os.stat_result, path: Path, *, what: str) -> str | None:
     return None
 
 
-def _private_dir_error(path: Path, *, what: str) -> str | None:
+def _private_dir_error(path: Path, *, what: str, remedy: str) -> str | None:
     """Return an error unless a path is a user-owned private directory, not a symlink."""
     try:
         info = os.lstat(path)
     except OSError:
         return f"{what} {path} cannot be inspected"
-    return _private_dir_info_error(info, path, what=what)
+    return _private_dir_info_error(info, path, what=what, remedy=remedy)
 
 
-def _private_dir_info_error(info: os.stat_result, path: Path, *, what: str) -> str | None:
+def _private_dir_info_error(
+    info: os.stat_result, path: Path, *, what: str, remedy: str
+) -> str | None:
     if stat.S_ISLNK(info.st_mode):
         return f"{what} {path} must not be a symlink"
     if not stat.S_ISDIR(info.st_mode):
@@ -205,16 +217,12 @@ def _private_dir_info_error(info: os.stat_result, path: Path, *, what: str) -> s
     if (error := _owner_error(info, path, what=what)) is not None:
         return error
     if info.st_mode & 0o022:
-        return (
-            f"{what} {path} is group/world-writable; make it private, point "
-            "XDG_CACHE_HOME at a directory you own, or use an explicit trust root "
-            f"({TRUST_ROOT_ENV} or --trust-root)"
-        )
+        return f"{what} {path} is group/world-writable; make it private, {remedy}"
     return None
 
 
 def _private_file_info_error(
-    info: os.stat_result, parent_mode: int | None, path: Path, *, what: str
+    info: os.stat_result, parent_mode: int | None, path: Path, *, what: str, remedy: str
 ) -> str | None:
     """Return an error unless a trust file is user-owned and private.
 
@@ -230,9 +238,7 @@ def _private_file_info_error(
         if parent_mode is None or parent_mode & 0o011:
             return (
                 f"{what} {path} is group/world-writable and its directory lets "
-                "others reach it; make the file private, make its directory "
-                "private, or use an explicit trust root "
-                f"({TRUST_ROOT_ENV} or --trust-root)"
+                f"others reach it; make the file private, make its directory private, {remedy}"
             )
     return None
 
@@ -259,9 +265,10 @@ def _check_sigstore_cache_dirs() -> tuple[Path | None, str | None]:
     transparency logs. This checks the TUF targets directory and every ancestor
     up to the Sigstore cache directory and fails closed on any symlink, foreign
     owner, or group/world write bit; ``_read_sigstore_cache`` checks the file.
-    The cache home above the Sigstore directory is shared by other applications
-    and is not checked; on a shared machine point XDG_CACHE_HOME at a private
-    directory instead.
+    The ownership and mode of the cache home above the Sigstore directory, which
+    other applications share, are not checked; on a shared machine point
+    XDG_CACHE_HOME at a private directory instead. The cache is then opened
+    without following symlinks, so no directory on its path may be one.
 
     Returns (targets_dir, error); exactly one of them is set.
     """
@@ -288,7 +295,9 @@ def _check_sigstore_cache_dirs() -> tuple[Path | None, str | None]:
             return None, f"Cannot create the private Sigstore trust-root cache at {component}"
     current = targets_dir
     while True:
-        error = _private_dir_error(current, what="Sigstore trust-root cache directory")
+        error = _private_dir_error(
+            current, what="Sigstore trust-root cache directory", remedy=_CACHE_REMEDY
+        )
         if error is not None:
             return None, error
         if current == sigstore_dir:
@@ -330,6 +339,7 @@ def _read_sigstore_cache() -> tuple[Path | None, bytes | None, str | None]:
         private=True,
         what="Sigstore trusted root",
         dir_what="Sigstore trust-root cache directory",
+        remedy=_CACHE_REMEDY,
     )
     if content is None:
         return None, None, error or f"Sigstore trusted root {trusted_root} cannot be inspected"
@@ -340,44 +350,38 @@ def _seed_sigstore_cache(trusted_root: Path) -> str | None:
     """Create a missing cached trusted root from sigstore-python's embedded copy.
 
     The file is created exclusively and without following symlinks, so an
-    existing entry of any kind is left in place for the checked read to vet.
+    existing entry of any kind is left in place for the checked read to vet. A
+    file that could not be written whole, including when closing it fails, is
+    removed, so a later run does not read a truncated root.
     """
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
     failure = f"Cannot seed the Sigstore trusted root {trusted_root}"
     try:
         dir_fd = open_directory_nofollow(trusted_root.parent)
     except OSError:
-        return failure
+        return (
+            f"Cannot open the Sigstore trust-root cache directory {trusted_root.parent} "
+            "without following symlinks; no directory on its path may be a symlink"
+        )
     try:
         try:
             fd = os.open(trusted_root.name, flags, 0o600, dir_fd=dir_fd)
         except FileExistsError:
             return None
-        with os.fdopen(fd, "wb") as stream:
-            try:
+        try:
+            with os.fdopen(fd, "wb") as stream:
                 from sigstore._internal.tuf import DEFAULT_TUF_URL
                 from sigstore._utils import read_embedded
 
                 stream.write(read_embedded("trusted_root.json", DEFAULT_TUF_URL))
-            except Exception:
-                os.unlink(trusted_root.name, dir_fd=dir_fd)
-                return failure
+        except Exception:
+            os.unlink(trusted_root.name, dir_fd=dir_fd)
+            return failure
     except OSError:
         return failure
     finally:
         os.close(dir_fd)
     return None
-
-
-def _resolve_explicit_trust_root(
-    trust_root: str | Path | None, expected_sha256: str | None
-) -> tuple[Path | None, str | None, str | None]:
-    """Resolve and check an explicit trust root; see ``_read_explicit_trust_root``.
-
-    Returns (path, source, error); source is "flag" or "environment".
-    """
-    path, _content, source, error = _read_explicit_trust_root(trust_root, expected_sha256)
-    return path, source, error
 
 
 def _read_explicit_trust_root(
@@ -429,19 +433,12 @@ def _read_explicit_trust_root(
                 "Pinned Sigstore trust-root SHA-256 must be sha256:<64 lowercase hex characters>",
             )
     content, error = _read_checked_trust_root(path, private=expected is None)
-    if expected is not None:
-        if content is None or not hmac.compare_digest(
-            hashlib.sha256(content).hexdigest(), expected
-        ):
-            return (
-                None,
-                None,
-                None,
-                "Explicit Sigstore trust root does not match the pinned SHA-256",
-            )
-        return path, content, source, None
     if content is None:
         return None, None, None, error
+    if expected is not None and not hmac.compare_digest(
+        hashlib.sha256(content).hexdigest(), expected
+    ):
+        return None, None, None, "Explicit Sigstore trust root does not match the pinned SHA-256"
     return path, content, source, None
 
 
@@ -451,6 +448,7 @@ def _read_checked_trust_root(
     private: bool,
     what: str = "Explicit Sigstore trust root",
     dir_what: str = "Explicit Sigstore trust-root directory",
+    remedy: str = _EXPLICIT_REMEDY,
 ) -> tuple[bytes | None, str | None]:
     """Read a trust-root file once through a no-follow descriptor, bounded.
 
@@ -460,7 +458,9 @@ def _read_checked_trust_root(
     try:
         dir_fd = open_directory_nofollow(path.parent)
     except OSError:
-        fallback = _private_dir_error(path.parent, what=dir_what) if private else None
+        fallback = (
+            _private_dir_error(path.parent, what=dir_what, remedy=remedy) if private else None
+        )
         return None, fallback or f"{what} {path} cannot be inspected"
     try:
         try:
@@ -482,9 +482,13 @@ def _read_checked_trust_root(
                 return None, f"{what} {path} is not a regular file"
             if private:
                 dir_info = os.fstat(dir_fd)
-                error = _private_file_info_error(info, dir_info.st_mode, path, what=what)
+                error = _private_file_info_error(
+                    info, dir_info.st_mode, path, what=what, remedy=remedy
+                )
                 if error is None:
-                    error = _private_dir_info_error(dir_info, path.parent, what=dir_what)
+                    error = _private_dir_info_error(
+                        dir_info, path.parent, what=dir_what, remedy=remedy
+                    )
                 if error is not None:
                     return None, error
             if info.st_size > MAX_TRUST_ROOT_BYTES:
