@@ -365,7 +365,7 @@ jobs:
           reviewed-baseline: ${{ runner.temp }}/reviewed.json
 ```
 
-Avoid checking out `github.event.pull_request.head.sha` inside a `pull_request_target` workflow ("pwn request" hazard): `pull_request_target` runs in the base repository's security context, where adding any build, test, cache or secret step later turns an untrusted fork checkout into secret exfiltration or repository compromise. On `pull_request`, same-repository pull requests can supply `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` from repository secrets; fork pull requests receive no secrets, so collect fork baselines without the key or run keyed comparisons only on trusted branches.
+Avoid checking out `github.event.pull_request.head.sha` inside a `pull_request_target` workflow ("pwn request" hazard): `pull_request_target` runs in the base repository's security context, where adding any build, test, cache or secret step later turns an untrusted fork checkout into secret exfiltration or repository compromise. On `pull_request`, same-repository pull requests can supply `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` from repository secrets; fork pull requests receive no secrets, so a gate that also runs for forks needs a baseline recorded without the key, which cannot alert on the values only the key binds; otherwise run keyed comparisons only for same-repository pull requests and trusted branches.
 
 ### Pre-commit hooks
 

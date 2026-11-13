@@ -53,7 +53,7 @@ A scan failure such as `vendor: entries limit of 100000 exceeded; raise it with 
 
 ## ShadowScan import returns a failing status
 
-Standalone import remains partial even for a completed source scan. It writes evidence and normally exits nonzero. Use `--report-only` explicitly for inspection, with a fresh output path. The command ignores project policy beside the report and in parent directories. Malformed input is rejected; unsupported entries and lossy projections remain limitations.
+Standalone import remains partial even for a completed source scan. It writes evidence and normally exits nonzero. Use `--report-only` explicitly for inspection, with a fresh output path. In CI, unverified discovery evidence fails even with `--report-only`: verify the producer with `--bundle`, `--signer-identity` and `--issuer`, or accept the report explicitly with `--allow-unsigned-discovery`. The command ignores project policy beside the report and in parent directories. Malformed input is rejected; unsupported entries and lossy projections remain limitations.
 
 A matching source digest binds bytes, not the producer or the truth of the report. Producer verification needs an independently configured signer and issuer. See [ShadowScan integration](docs/shadowscan-integration.md).
 
@@ -61,7 +61,7 @@ A matching source digest binds bytes, not the producer or the truth of the repor
 
 Supply independent expected digests and signer policies; an adjacent signature file or supplier-provided trust label cannot establish verification. Check that the project still contains the exact recorded subject and that the inventory's supported schema and fingerprint versions match the verifier.
 
-The package validates exports against pinned vendored schemas. The `cyclonedx` extra adds independent CycloneDX library integration; it does not authenticate the producer or make a partial inventory complete. Inspect the selected-field loss report and preserve the native extension when downstream recovery is required.
+The package validates exports against pinned vendored schemas. The `cyclonedx` extra installs the CycloneDX Python library, which only the test suite uses to cross-check exports; the tool does not import it, so installing it changes no validation or output. Inspect the selected-field loss report and preserve the native extension when downstream recovery is required.
 
 ## Local development checks
 
