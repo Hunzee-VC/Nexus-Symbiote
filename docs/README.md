@@ -32,7 +32,7 @@ Reference material: exact behavior, fields and limits.
 | [Known limitations](known-limitations.md) | What each collector, gate, export and integration does not record or verify, by surface, and what to do about each limit |
 | [Policy reference](policy-reference.md) | Every `.nexus-symbiote.yaml` setting, targeted suppressions, and what `policy_weakened` reports |
 | [Collection limits](collection-limits.md) | Every bound on what a command reads from a project, its default, what happens when it is reached and how to raise it |
-| [AgentBOM schemas](../schemas/README.md) | The native AgentBOM JSON Schema, the deployment-profile schema and a minimal example |
+| [AgentBOM schemas](../schemas/README.md) | The native AgentBOM JSON Schema, the agent-manifest and deployment-profile schemas, and a minimal example |
 | [Agent manifest](agent-manifest.md) | The optional `agent.yaml`: its fields, what it adds to the inventory, its failures and its trust limits |
 | [Standard exports](standard-exports.md) | What CycloneDX, SPDX, SARIF and VEX output carry, the extension property names, projection versions and the SARIF rule catalog |
 | [G7 AI SBOM minimum elements](minimum-elements.md) | Which of the 50 G7 AI SBOM minimum elements an inventory's CycloneDX export carries, how each element is evaluated, and how to supply a missing one; coverage, not compliance |
