@@ -46,6 +46,29 @@ def test_the_repository_workflows_and_action_pass(monkeypatch, capsys):
     assert checker.main() == 0, capsys.readouterr().out
 
 
+def test_a_tree_without_workflows_fails_instead_of_passing(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    assert checker.main() == 1
+    assert "no workflow found" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        'PY=python3\nPY+=" -c pass"\n$PY scripts/check_locks.py',
+        "PY=python3\nPY[0]=echo\n$PY scripts/check_locks.py",
+    ],
+)
+def test_appending_to_or_indexing_a_command_variable_forgets_its_value(tmp_path, script):
+    errors = workflow_errors(tmp_path, "ci.yml", run_locks(script))
+    assert any(NOT_A_GATE in error for error in errors), errors
+
+
+def test_a_here_document_before_the_command_name_is_read(tmp_path):
+    script = "<<EOF cat\nnotes\nEOF\npython scripts/check_locks.py"
+    assert workflow_errors(tmp_path, "ci.yml", run_locks(script)) == []
+
+
 def test_a_reviewed_workflow_passes(repository, capsys):
     assert run_checker(repository, SAFE, capsys) == (0, "")
 

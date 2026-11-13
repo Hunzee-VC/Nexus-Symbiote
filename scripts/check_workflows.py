@@ -194,7 +194,9 @@ BASH_LONG_OPTIONS = frozenset({"--noprofile", "--norc", "--posix"})
 # Shell options after which a later command may not run: noexec reads without executing,
 # onecmd exits after one command.
 NOEXEC_NAMES = frozenset({"noexec", "onecmd"})
-ASSIGNMENT = re.compile(r"[A-Za-z_]\w*=")
+# NAME=value, and the forms that change a variable without giving it a known value:
+# NAME+=value and NAME[index]=value.
+ASSIGNMENT = re.compile(r"([A-Za-z_]\w*)(\[[^\]]*\])?(\+?)=")
 REDIRECT = re.compile(r"&>>?|[<>]>?[&|]?")
 # Builtins after which a later command is no longer a gate: they move the shell, replace or
 # end it, install a trap that can rewrite its status, or define commands.
@@ -720,6 +722,8 @@ class _Parser:
             body, _ = self.items(frozenset({")"}))
         elif token[0] == "op":
             raise _ShellSyntaxError("unexpected operator")
+        elif token[0] != "word":
+            return self.simple()
         elif token[1] in UNSUPPORTED:
             raise _ShellSyntaxError(f"unsupported {token[1]}")
         elif token[1] == "if":
@@ -964,11 +968,12 @@ def _gates(script: str, errexit: bool, pipefail: bool) -> list[_Gate]:
                     variables.pop(match[1], None)
             start = next((i for i, w in enumerate(words) if not ASSIGNMENT.match(w)), len(words))
             for assignment in words[:start]:
-                name, _, value = assignment.partition("=")
-                if alone and start == len(words):
-                    variables[name] = value
+                form = ASSIGNMENT.match(assignment)
+                assert form is not None
+                if alone and start == len(words) and not form[2] and not form[3]:
+                    variables[form[1]] = assignment[form.end() :]
                 else:
-                    variables.pop(name, None)
+                    variables.pop(form[1], None)
             words = _unwrapped(words[start:])
             if not words:
                 continue
@@ -1295,7 +1300,11 @@ def pin_comments(paths: list[Path]) -> list[str]:
 
 
 def targets(root: Path = Path()) -> list[Path]:
-    """Workflows, the root action, local actions and every action they reference."""
+    """Workflows, the root action, local actions and every action they reference.
+
+    GitHub runs workflows with either extension; checking only one would let an unpinned
+    or shell-injecting workflow through under the other.
+    """
     paths = [
         *(root / name for name in ("action.yml", "action.yaml") if (root / name).exists()),
         *sorted((root / WORKFLOWS).glob("*.yml")),
@@ -1309,11 +1318,12 @@ def targets(root: Path = Path()) -> list[Path]:
 def main() -> int:
     paths = targets()
     errors: list[str] = []
+    if not any(path.parent == WORKFLOWS for path in paths):
+        # Run from anywhere but the repository root, the checker would otherwise pass.
+        errors.append(f"no workflow found in {WORKFLOWS}; run the check from the repository root")
     pending = list(paths)
     checked: set[Path] = set()
     while pending:
-        # GitHub runs workflows with either extension; checking only one would let an
-        # unpinned or shell-injecting workflow through under the other.
         path = pending.pop(0)
         if path in checked:
             continue
@@ -1326,7 +1336,10 @@ def main() -> int:
                 directory / n for n in ("action.yml", "action.yaml") if (directory / n).is_file()
             ]
             if not found or ".." in directory.parts or directory.is_absolute():
-                errors.append(f"{path}: local action {reference} does not exist in the repository")
+                errors.append(
+                    f"{path}: local action {reference} does not exist in the repository"
+                    " or points outside it"
+                )
                 continue
             pending.extend(found)
     errors.extend(pin_comments(sorted(checked)))
