@@ -860,6 +860,38 @@ def test_npm_command_resolution_follows_npm_aliases_and_prefixes():
     assert npm_command("installTest") == "install-test"
 
 
+@pytest.mark.parametrize(
+    "command,args",
+    [
+        ("yarn", ["workspace", "app", "dlx", "evil-mcp@latest"]),
+        ("pnpm", ["recursive", "dlx", "evil-mcp@latest"]),
+        ("pnpm", ["m", "dlx", "evil-mcp@latest"]),
+    ],
+)
+def test_a_command_run_in_workspaces_is_classified_as_that_command(tmp_path, command, args):
+    server = scan_server(tmp_path, {"command": command, "args": args})
+    assert server.properties["launcher"] == f"{command} dlx"
+    assert server.properties["packages"][0]["identity"] == "npm:evil-mcp"
+    assert server.version_pinned is False
+
+
+@pytest.mark.parametrize(
+    "command,args,reason",
+    [
+        ("yarn", ["workspace", "app", "add", "evil-mcp"], "yarn subcommand fetches"),
+        ("yarn", ["workspaces", "foreach", "-A", "dlx", "evil-mcp"], "yarn workspaces runs"),
+        ("yarn", ["workspace", "app"], "unrecognised yarn invocation"),
+        ("pnpm", ["recursive", "add", "evil-mcp"], "pnpm subcommand fetches"),
+        ("pnpm", ["multi", "install"], "pnpm subcommand fetches"),
+        ("nice", ["yarn", "workspace", "app", "dlx", "evil-mcp"], "arguments start yarn"),
+        ("nice", ["pnpm", "m", "add", "evil-mcp"], "arguments start pnpm"),
+    ],
+)
+def test_workspace_commands_that_fetch_are_unknown(tmp_path, command, args, reason):
+    detail = gap_reason(tmp_path, {"command": command, "args": args})
+    assert detail is not None and reason in detail
+
+
 # Coverage tracing alone nearly reaches the bound, so the coverage job runs this untraced.
 @pytest.mark.no_cover
 def test_argument_scan_cost_is_bounded_by_characters_not_steps():

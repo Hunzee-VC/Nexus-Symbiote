@@ -2228,6 +2228,9 @@ _PNPM_FETCHES = _set(
     " self-update approve-builds link ln fetch dedupe remove rm uninstall un"
 )
 _YARN_FETCHES = _set("dlx create add install global up upgrade set plugin import")
+# Subcommands that run another one: in one workspace, or in each (pnpm m is pnpm recursive).
+_YARN_NESTED = _set("workspace workspaces")
+_PNPM_NESTED = _set("recursive multi m")
 _BUN_FETCHES = _set("x create c add a install i update upgrade link pm remove rm")
 
 
@@ -2277,6 +2280,13 @@ def _pnpm(name: str, rest: list[str], launch: Launch) -> None:
     if found is None:
         return
     subcommand, remainder, _ = found
+    while subcommand in _PNPM_NESTED:
+        # pnpm recursive runs the next command in the directory of each workspace package.
+        launch.relocated = True
+        found = _subcommand(remainder, _table(), launch)
+        if found is None:
+            return
+        subcommand, remainder, _ = found
     if subcommand == "dlx":
         launch.launcher = "pnpm dlx"
         _package_runner(remainder, launch, _PNPM_DLX, {"--package"})
@@ -2293,7 +2303,16 @@ def _yarn(name: str, rest: list[str], launch: Launch) -> None:
     if found is None:
         return
     subcommand, remainder, _ = found
-    if subcommand == "dlx":
+    while subcommand == "workspace":
+        # yarn workspace <name> <command> runs the command in that workspace's directory.
+        if len(remainder) < 2 or remainder[1].startswith("-"):
+            launch.fail("unrecognised yarn invocation")
+            return
+        launch.relocated = True
+        subcommand, remainder = remainder[1], remainder[2:]
+    if subcommand == "workspaces":
+        launch.fail("yarn workspaces runs a command in each workspace")
+    elif subcommand == "dlx":
         launch.launcher = "yarn dlx"
         _package_runner(remainder, launch, _YARN_DLX, {"-p", "--package"})
     elif subcommand in _YARN_FETCHES:
@@ -2948,11 +2967,11 @@ _STARTS: dict[str, _Starts] = {
             " --aggregate-output --color --no-color --use-stderr",
             "-C --dir -F --filter --filter-prod --reporter --loglevel --workspace-concurrency",
         ),
-        _PNPM_FETCHES.__contains__,
+        (_PNPM_FETCHES | _PNPM_NESTED).__contains__,
     ),
     "yarn": _Starts(
         _table("-s --silent --verbose --offline --prefer-offline", "--cwd"),
-        _YARN_FETCHES.__contains__,
+        (_YARN_FETCHES | _YARN_NESTED).__contains__,
     ),
     "bun": _Starts(
         _table(
