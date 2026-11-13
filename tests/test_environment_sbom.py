@@ -156,6 +156,36 @@ def test_cli_writes_a_file_from_pip_inspect(tmp_path):
     assert validate_cyclonedx(document) == []
 
 
+def test_a_local_version_is_percent_encoded_in_the_package_url():
+    inspect = json.loads(json.dumps(INSPECT))
+    inspect["installed"][1]["metadata"]["version"] = "8.3.0+local.1"
+    document = build_sbom(inspect, timestamp=datetime.now(UTC))
+    assert any(c["purl"].endswith("@8.3.0%2Blocal.1") for c in document["components"])
+    assert validate_cyclonedx(document) == []
+
+
+@pytest.mark.parametrize("epoch", ["", "soon", "-1", "1.5", "9" * 13])
+def test_a_malformed_source_date_epoch_is_refused(tmp_path, epoch):
+    source = tmp_path / "inspect.json"
+    source.write_text(json.dumps(INSPECT))
+    script = Path(__file__).resolve().parents[1] / "scripts" / "environment_sbom.py"
+    completed = subprocess.run(  # noqa: S603
+        [sys.executable, "-I", str(script), str(source), "--out", str(tmp_path / "o.json")],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+        env={
+            "PATH": "",
+            "SOURCE_DATE_EPOCH": epoch,
+            "PYTHONPATH": str(script.parents[1] / "src"),
+        },
+    )
+    assert completed.returncode == 1
+    assert "SOURCE_DATE_EPOCH must be a whole number of seconds" in completed.stderr
+    assert not (tmp_path / "o.json").exists()
+
+
 def test_every_installed_distribution_must_be_locked_at_its_version():
     from environment_sbom import locked_versions
 
@@ -179,6 +209,8 @@ def test_every_installed_distribution_must_be_locked_at_its_version():
         {"metadata": None},
         {"metadata": {"name": "x y", "version": "1"}},
         {"metadata": {"name": "a"}},
+        {"metadata": {"name": "a", "version": "1 2"}},
+        {"metadata": {"name": "a", "version": "1/../2"}},
     ],
 )
 def test_a_record_that_cannot_be_represented_fails_instead_of_vanishing(record):
