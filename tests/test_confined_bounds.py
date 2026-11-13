@@ -145,6 +145,28 @@ def test_stream_budget_names_the_bound_that_stopped_it(tmp_path):
     ]
 
 
+def test_a_file_that_does_not_fit_leaves_the_byte_budget_to_files_that_do(tmp_path):
+    # The mcp and a2a source searches stop at the first refused file once the budget
+    # is spent, so a file refused for its size must not mark it spent.
+    for name, size in (("a", 8), ("b", 5), ("c", 1), ("d", 4)):
+        (tmp_path / name).write_bytes(b"x" * size)
+    failures: list[str] = []
+    with ConfinedCollection(tmp_path, failures, max_total_bytes=10) as files:
+        assert files.read_bytes("a") == b"x" * 8
+        assert files.read_bytes("b") is None
+        assert files.hash_file("b") is None
+        assert not files.bytes_exhausted
+        assert files.read_bytes("c") == b"x"
+        with pytest.raises(ValueError), files.open_regular("d") as stream:
+            stream.read(16)
+        assert files.bytes_exhausted
+        assert files.read_bytes("c") is None
+    assert failures == [
+        f"{name}: total-bytes limit of 10 bytes exceeded; this limit is fixed for this input"
+        for name in ("b", "d", "c")
+    ]
+
+
 def test_overflowing_json_numbers_are_invalid_json(tmp_path):
     (tmp_path / "x.json").write_text('{"maximum": 1e400}')
     (tmp_path / "y.json").write_text('{"minimum": -1E999, "ok": 1e-400}')

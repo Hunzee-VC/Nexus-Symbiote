@@ -594,7 +594,10 @@ class ConfinedCollection:
 
     @property
     def bytes_exhausted(self) -> bool:
-        """Whether the collection's total byte budget is spent, so no further read succeeds."""
+        """Whether the collection's total byte budget is spent, so no further read succeeds.
+
+        A file refused because it does not fit in what remains does not spend it.
+        """
         return self._budget.exhausted
 
     def _fail(self, path: str | Path, reason: str, *, key: str | None = None) -> None:
@@ -801,7 +804,7 @@ class ConfinedCollection:
                 if before.st_size > limit.value:
                     raise LimitExceededError(limit)
                 if before.st_size > budget.remaining():
-                    raise budget.refuse()
+                    raise LimitExceededError(budget.bound)
                 chunks: list[bytes] = []
                 length = 0
                 while length <= limit.value:
@@ -946,7 +949,7 @@ class ConfinedCollection:
                 if before.st_size > limit.value:
                     raise LimitExceededError(limit)
                 if before.st_size > budget.remaining():
-                    raise budget.refuse()
+                    raise LimitExceededError(budget.bound)
                 digest = hashlib.sha256()
                 length = 0
                 while length <= limit.value:
