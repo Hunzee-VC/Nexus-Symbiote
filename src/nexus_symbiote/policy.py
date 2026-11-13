@@ -307,10 +307,6 @@ def parse_yaml_mapping(text: str) -> dict[str, Any]:
         raise PolicyError("invalid YAML document") from exc
 
 
-def _parse_policy(path: Path) -> Policy:
-    return _parse_policy_with_digest(path)[0]
-
-
 def _parse_policy_with_digest(path: Path) -> tuple[Policy, str]:
     from pydantic import ValidationError
 
@@ -318,10 +314,15 @@ def _parse_policy_with_digest(path: Path) -> tuple[Policy, str]:
         fd = os.open(
             path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
         )
-        with os.fdopen(fd, "rb") as stream:
-            info = os.fstat(stream.fileno())
+        try:
+            info = os.fstat(fd)
             if not stat.S_ISREG(info.st_mode) or info.st_size > 1024 * 1024:
                 raise PolicyError("policy must be a regular file no larger than 1 MiB")
+            stream = os.fdopen(fd, "rb")
+        except BaseException:
+            os.close(fd)
+            raise
+        with stream:
             raw = stream.read(1024 * 1024 + 1)
             if len(raw) > 1024 * 1024:
                 raise PolicyError("policy exceeds 1 MiB")
