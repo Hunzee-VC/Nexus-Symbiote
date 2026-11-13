@@ -14,7 +14,7 @@ This page collects the practices that keep a Nexus SymBiote deployment inside th
 
 - Run collection with the content author's privileges, not as root, on hosts with `fs.protected_hardlinks=1`. Extract untrusted archives with a tool that refuses link targets outside the destination.
 - For `verify-live`, execute the pinned launchers in an externally isolated worker with resource limits and restricted filesystem, identity and network access. Pins do not cover the interpreter, libraries or operating system.
-- Require the CI gate through an organization ruleset, or require code-owner review of `.github/` and the reviewed baseline, so a pull request cannot weaken its own check. See [protect the gate](../README.md#protect-the-gate).
+- Require the CI gate through an organization ruleset, or require code-owner review of `.github/` and the reviewed baseline, so a pull request cannot weaken its own check. See [protect the gate](drift-gate.md#protect-the-gate).
 - Sign the reviewed baseline with `attest --purpose reviewed` and check it with `verify-attestation`, using a public key from outside the checkout, before `diff`. An attestation does not show that a baseline is the newest one, so bound its age with `--max-age-days`. See [gate a pull request on an attested baseline](inventory-attestation.md#gate-a-pull-request-on-an-attested-baseline).
 - Review changes to instruction files, launcher commands and unrecognized surfaces by other means; the collectors record only the forms they support.
 - Prefer the verified install path in the README (attestation + exact commit lock) over a plain `pip install`.
