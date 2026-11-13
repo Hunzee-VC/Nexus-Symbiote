@@ -267,7 +267,7 @@
       "kind": "tool_drift",
       "task": "detection",
       "truth": true,
-      "rationale": "Compare the approved descriptor digest with the observed descriptor, preserving absent annotations.",
+      "rationale": "A changed description changes the definition digest, so it no longer matches the approved one.",
       "directory": "fixtures/tool-description-change",
       "references": [
         {
@@ -286,7 +286,7 @@
       "kind": "tool_drift",
       "task": "detection",
       "truth": false,
-      "rationale": "Compare the approved descriptor digest with the observed descriptor, preserving absent annotations.",
+      "rationale": "An unchanged descriptor with absent annotations keeps the approved definition digest.",
       "directory": "fixtures/tool-unchanged-no-annotations",
       "references": [
         {
@@ -305,12 +305,12 @@
       "kind": "tool_drift",
       "task": "detection",
       "truth": false,
-      "rationale": "Compare the approved descriptor digest with the observed descriptor, preserving absent annotations.",
+      "rationale": "Reordered keys, nested schema keys included, keep the RFC 8785 definition digest.",
       "directory": "fixtures/tool-key-order-only",
       "references": [
         {
           "path": "observed-tool.json",
-          "sha256": "f66abeefcd99312a5ae434f530241ff3f5d6668f2ffd922373429c25d8a405f7"
+          "sha256": "a8aa1ee7ab145060a553e4987efab5921bb7bd3c7bf78079b5806481bf2e4511"
         },
         {
           "path": "project/.mcp.json",
