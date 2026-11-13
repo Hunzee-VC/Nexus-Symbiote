@@ -4,6 +4,10 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ## [Unreleased]
 
+### Added
+
+- An [operational guidance](docs/operational-guidance.md) page that collects the operator and CI practices the documented guarantees depend on: ignoring project policy on untrusted checkouts, job timeouts, sandboxing, keeping operator-owned inputs out of a pull request's reach, and what is not implemented.
+
 ## [0.2.0] - 2026-11-12
 
 Closes detection gaps listed under 0.1.0's known limitations and others found in review, makes inventories comparable across checkouts and reproducible, and makes every gate say why it failed. New commands sign and verify inventories, compare them with the use an agent's own traces report, report their G7 AI SBOM minimum-element coverage, map their findings to security frameworks, draw them as a graph and export the reviewed agent to Nexus-ShadowScan. Record baselines again after upgrading, as *Upgrading* below describes: the native format, paths, the inferred agent reference and many records change. [Known limitations](docs/known-limitations.md) lists what is still not collected, compared or verified.
