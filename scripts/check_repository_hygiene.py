@@ -22,6 +22,12 @@ import yaml
 VENDOR = Path("src/nexus_symbiote/generators/schemas/vendor")
 MAX_FILE_BYTES = 2 * 1024 * 1024
 LINK = re.compile(r'!?\[[^\]\n]*\]\((<[^>\n]+>|[^)\s]+)(?:\s+"[^"\n]*")?\)')
+# The outer target of an image used as a link, [![alt](image)](target), and a reference
+# definition, [label]: target, which LINK does not reach.
+WRAPPED_LINK = re.compile(
+    r"\[!\[[^\]\n]*\]\([^)\n]*\)\]\((<[^>\n]+>|[^)\s]+)(?:\s+\"[^\"\n]*\")?\)"
+)
+REFERENCE_LINK = re.compile(r"^ {0,3}\[[^\]\n]+\]:[ \t]*(<[^>\n]+>|\S+)")
 HTML_LINK = re.compile(r"""<(?:a|img)\b[^>]*?\b(?:href|src)=["']([^"'\s]+)["']""", re.I)
 HTML_ANCHOR = re.compile(r"""<a\b[^>]*?\b(?:id|name)=["']([^"']+)["']""", re.I)
 HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$")
@@ -131,8 +137,7 @@ def source_issues(root: Path, files: list[Path]) -> list[str]:
         if relative.suffix != ".md":
             continue
         for line in prose_lines(text):
-            links = [match[1].strip("<>") for match in LINK.finditer(line)]
-            for link in [*links, *HTML_LINK.findall(line)]:
+            for link in _line_links(line):
                 parsed = urlsplit(link)
                 if parsed.scheme or parsed.netloc:
                     continue
@@ -283,6 +288,16 @@ def self_link_issues(root: Path, files: list[Path]) -> list[str]:
     return errors
 
 
+def _line_links(line: str) -> list[str]:
+    """Every link target on a line of prose: inline, image-wrapped, reference and HTML."""
+    links = [
+        match[1].strip("<>")
+        for pattern in (LINK, WRAPPED_LINK, REFERENCE_LINK)
+        for match in pattern.finditer(line)
+    ]
+    return [*links, *HTML_LINK.findall(line)]
+
+
 def readme_link_issues(root: Path) -> list[str]:
     """Reject relative links in the README that doubles as the package-index description.
 
@@ -298,8 +313,7 @@ def readme_link_issues(root: Path) -> list[str]:
         return ["package-index README could not be determined or read"]
     errors = []
     for line in prose_lines(text):
-        links = [match[1].strip("<>") for match in LINK.finditer(line)]
-        for link in [*links, *HTML_LINK.findall(line)]:
+        for link in _line_links(line):
             parsed = urlsplit(link)
             if not parsed.scheme and not parsed.netloc and parsed.path:
                 errors.append(

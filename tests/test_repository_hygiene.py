@@ -38,6 +38,15 @@ def test_local_links_resolve_from_document_and_ignore_examples_and_web(tmp_path)
     assert len(hygiene.source_issues(tmp_path, [Path("docs/guide.md")])) == 2
 
 
+def test_image_wrapped_and_reference_links_are_checked_too(tmp_path):
+    (tmp_path / "docs").mkdir()
+    doc = tmp_path / "docs" / "guide.md"
+    doc.write_text("[![badge](../README.md)](missing.md)\n[ref]: also-missing.md\n")
+    (tmp_path / "README.md").write_text("# Anchor\n")
+    issues = hygiene.source_issues(tmp_path, [Path("docs/guide.md")])
+    assert len(issues) == 2 and all("missing" in issue for issue in issues)
+
+
 def test_heading_anchors_follow_github_slugs():
     text = (
         "# Install from `source`\n## Why: offline, by default\n## FAQ\n## FAQ\n"
@@ -110,6 +119,9 @@ def test_package_index_readme_links_must_be_absolute(tmp_path, readme):
     page.write_text('[docs](docs/guide.md) <img src="banner.jpg"> ![logo](img/logo.png)\n')
     issues = hygiene.readme_link_issues(tmp_path)
     assert len(issues) == 3 and all("package index" in issue for issue in issues)
+    page.write_text("[![logo](https://example.invalid/l.png)](docs/guide.md)\n[ref]: docs/a.md\n")
+    issues = hygiene.readme_link_issues(tmp_path)
+    assert len(issues) == 2 and all("package index" in issue for issue in issues)
 
 
 def test_undeclared_package_index_readme_fails_closed(tmp_path):
