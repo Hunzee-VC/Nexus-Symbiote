@@ -5,7 +5,8 @@
     "commit": "194cc86e3ae6400958555bd4116849d822d69263",
     "path": "src/filesystem/server.ts",
     "label_source": "src/filesystem/__tests__/server-tools.test.ts#L28-L43",
-    "blob_sha1": "a5127f8dbff059342467c2709020fbe1b6543e34"
+    "blob_sha1": "a5127f8dbff059342467c2709020fbe1b6543e34",
+    "license_file": "upstream/LICENSE"
   },
   "cases": [
     {

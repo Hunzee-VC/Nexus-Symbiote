@@ -16,7 +16,8 @@ Tool confusion counts include only explicit expected tools and explicit decoys. 
 
 The MCP collector records an absent config as a scanned surface, not an exclusion, so a source-only case needs no config. Any MCP exclusion makes a labeled case's collection incomplete. The registration-decoys case intentionally contains two ambiguous registrations; the manifest records those exact expected exclusions and their rationale. The case can pass as a control when those omissions are reported exactly, but its missing labels remain unknown. An additional unexpected exclusion fails the case. A passing regression control therefore does not mean all labels were scored or that collection was complete.
 
-Each case and the aggregate report include `tool_counts` and/or `label_bounds`.
+Each case includes `tool_counts` and `label_bounds`; the aggregate report includes
+`counts` and `label_bounds`.
 The recall interval treats every unobserved positive label first as missed, then
 as detected; the specificity interval treats every unobserved negative first as
 incorrectly detected, then as correctly absent. Each interval includes its full
@@ -29,8 +30,8 @@ deployments. The release statement binds the new results to the corpus and scann
 materials, and the release workflow attests the archive that holds them.
 
 The manifest's `version` identifies the corpus and labels, not the result wire
-format; it is unchanged because the cases and labels are unchanged. The additional
-result fields are additive. Consumers that reject unknown JSON fields must update
+format; it changes only when cases or labels change. Result fields may be added
+without changing it. Consumers that reject unknown JSON fields must update
 their parser. New result bytes require a new evidence statement and signature;
 previously signed results remain verifiable using their original statement.
 
@@ -66,10 +67,10 @@ python benchmarks/inventory/evidence.py verify run --identity "$EXPECTED_SIGNER"
 
 The statement binds the output, the corpus, the runner, and every file of the installed
 scanner package, its vendored schemas included. It records the Python version and the
-version of every installed distribution. Add `--compare-installation` to require the
-local scanner, fixtures, runner and installed distributions to match. Publish
-`results.json`, `statement.json`, and the signature bundle together.
-
+version of every installed distribution except pip, setuptools and wheel. Add
+`--compare-installation` to require the local scanner, fixtures, runner and installed
+distributions to match. Publish `results.json`, `statement.json`, and the signature
+bundle together.
 
 The harness calls installed static MCP and model collectors directly with their
 confined collection boundary. It does not execute repository code or apply the
@@ -77,7 +78,8 @@ fixture's project policy to the benchmark runner. Policy rejection is a separate
 CLI control. Tool TP/FP/FN/TN count literal expected tools and explicit decoys;
 model format, signature uncertainty, scoping and secret redaction are reported
 separately as controls. A collection failure makes the case fail and remains
-visible. Run the command above to inspect results for each case and its excluded labels.
+visible. Run `python benchmarks/inventory/run_inventory.py` to inspect results for each
+case and its excluded labels.
 
 ## Verify a release candidate's inventory benchmark
 
@@ -104,7 +106,8 @@ Compare the candidate wheel against `wheel.sha256` before using the results for
 that distribution. The archive has no Sigstore bundle of its own; once its
 attestation verifies, check that the statement binds the results, and, in an
 environment where that wheel is installed with `requirements-action.lock`, that it
-binds that installation:
+binds that installation. Run the check from a checkout of `RELEASE_COMMIT`: the corpus
+and runner it compares are read from that checkout's `benchmarks/inventory`.
 
 ```sh
 mkdir inventory && tar -xzf inventory-benchmark.tar.gz -C inventory

@@ -1,4 +1,7 @@
-"""Run the versioned, labeled inventory cases locally with the public CLI."""
+"""Run the versioned, labeled inventory cases locally against the installed collectors.
+
+The public CLI runs only the coverage-gate and policy controls.
+"""
 
 import hashlib
 import json
