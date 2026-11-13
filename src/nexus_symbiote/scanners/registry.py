@@ -263,7 +263,8 @@ _TAG = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}")
 _DIGEST = re.compile(r"[A-Za-z][A-Za-z0-9]*(?:[-_+.][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,}")
 _IPV6 = re.compile(r"\[[0-9A-Fa-f:.]+\]")
 _PULLED_DIGEST = re.compile(r"sha256:[0-9a-f]{64}|sha384:[0-9a-f]{96}|sha512:[0-9a-f]{128}")
-# docker/distribution's limit on a repository name.
+# docker/distribution's longest reference: a 255-character name, a 128-character tag
+# and a sha512 digest, with their separators.
 _LONGEST_IMAGE = 255 + 1 + 128 + 1 + 135
 
 
@@ -3240,7 +3241,7 @@ class RegistryScanner(Scanner):
         unresolved: set[str] = set()
         models: set[str] = set()
 
-        def collect(image: str, filename: str, gaps: Iterable[str]) -> None:
+        def collect(image: str, filename: str, gaps: list[str]) -> None:
             files = found.setdefault(image, [])
             if filename not in files:
                 files.append(filename)
