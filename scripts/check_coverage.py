@@ -42,8 +42,9 @@ MODULE_FLOORS: dict[str, tuple[int, int | None]] = {
     # Measured at 100% of statements and branches when the G7 minimum-element report was added.
     "nexus_symbiote/minimum_elements.py": (98, 98),
     "nexus_symbiote/minimum_elements_cli.py": (98, 98),
-    # Measured at 87% of statements and 86% of branches when scripts/ joined the report.
-    "scripts/run_action.py": (75, 65),
+    # Measured at 87% of statements and 86% of branches when scripts/ joined the report,
+    # and at 95% and 91% on 2026-11-12.
+    "scripts/run_action.py": (90, 86),
     "nexus_symbiote/core/content_digest.py": (98, 98),
     "nexus_symbiote/core/inventory_digests.py": (98, 98),
     "nexus_symbiote/digest_cli.py": (98, 98),

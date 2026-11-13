@@ -16,10 +16,14 @@ def main() -> None:
     git = shutil.which("git")
     if git is None:
         raise ValueError("git executable is unavailable")
-    checkout = subprocess.check_output([git, "rev-parse", "HEAD"], text=True).strip()  # noqa: S603
+    checkout = subprocess.check_output(  # noqa: S603 - resolved git, fixed arguments
+        [git, "rev-parse", "HEAD"], text=True, timeout=60
+    ).strip()
     if re.fullmatch(r"[0-9a-f]{40}", sha) is None or sha != checkout:
         raise ValueError("candidate source must match the workflow's exact commit SHA")
-    subprocess.run([git, "diff", "--exit-code", "HEAD", "--"], check=True, capture_output=True)  # noqa: S603
+    subprocess.run(  # noqa: S603 - resolved git, fixed arguments
+        [git, "diff", "--exit-code", "HEAD", "--"], check=True, capture_output=True, timeout=120
+    )
     source = {
         "schema_version": 1,
         "source_sha": sha,

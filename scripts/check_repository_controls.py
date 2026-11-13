@@ -90,7 +90,9 @@ def _fetch(repo: str, path: str, token: str) -> Any:
     if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo) is None:
         raise ValueError("repository must be owner/name")
     if not token or any(c in token for c in "\r\n"):
-        raise ValueError("a GitHub token with repository contents-read access is required")
+        raise ValueError(
+            "a GitHub token with repository contents-read and Actions-read access is required"
+        )
     request = Request(
         f"https://api.github.com/repos/{repo}/{path}",
         headers={
@@ -103,7 +105,7 @@ def _fetch(repo: str, path: str, token: str) -> Any:
     with build_opener(_NoRedirect()).open(request, timeout=15) as response:  # noqa: S310 - fixed HTTPS API origin
         raw = response.read(MAX_RESPONSE_BYTES + 1)
     if len(raw) > MAX_RESPONSE_BYTES:
-        raise ValueError("GitHub branch response exceeds the size limit")
+        raise ValueError("GitHub response exceeds the size limit")
     return json.loads(raw)
 
 

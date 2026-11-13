@@ -60,13 +60,18 @@ UV_RESOLUTION_ENV = frozenset(
         "UV_INDEX",
         "UV_INDEX_STRATEGY",
         "UV_INDEX_URL",
+        "UV_INSECURE_HOST",
+        "UV_KEYRING_PROVIDER",
         "UV_NO_BINARY",
         "UV_NO_SOURCES",
         "UV_ONLY_BINARY",
+        "UV_OFFLINE",
         "UV_OVERRIDE",
         "UV_PRERELEASE",
+        "UV_PROJECT",
         "UV_RESOLUTION",
         "UV_TORCH_BACKEND",
+        "UV_WORKING_DIR",
     }
 )
 INPUTS = re.compile(
@@ -219,7 +224,12 @@ def dev_requirements(pyproject: Mapping[str, Any]) -> list[Requirement]:
 
 
 def _lower_bound(requirement: Requirement) -> Version | None:
-    bounds = [Version(c.version) for c in requirement.specifier if c.operator in {">=", "==", "~="}]
+    # A wildcard such as ==1.* names no single version, so it is no bound to test.
+    bounds = [
+        Version(c.version)
+        for c in requirement.specifier
+        if c.operator in {">=", "==", "~="} and not c.version.endswith(".*")
+    ]
     return max(bounds) if bounds else None
 
 
@@ -420,7 +430,9 @@ def regenerate(root: Path, cutoff: str | None, upgrade: bool) -> None:
         )
         ci = read_lock(tmp, CI_LOCK)
         _pins_file(tmp / "ci-pins.txt", ci)
-        (tmp / "build.in").write_text("\n".join(pyproject["build-system"]["requires"]) + "\n")
+        (tmp / "build.in").write_text(
+            "\n".join(pyproject["build-system"]["requires"]) + "\n", encoding="utf-8"
+        )
         compile_(
             [
                 "pyproject.toml",
@@ -480,8 +492,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--upgrade", action="store_true", help="upgrade every CI pin as well")
     parser.add_argument("--exclude-newer", help="upload cut-off, for example 2026-11-03T00:00:00Z")
     args = parser.parse_args(argv)
-    if args.upgrade and not args.regenerate:
-        parser.error("--upgrade needs --regenerate")
+    if (args.upgrade or args.exclude_newer) and not args.regenerate:
+        parser.error("--upgrade and --exclude-newer need --regenerate")
     if args.regenerate:
         try:
             regenerate(ROOT, args.exclude_newer, args.upgrade)

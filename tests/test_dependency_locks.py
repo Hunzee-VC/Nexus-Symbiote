@@ -33,6 +33,17 @@ def test_the_committed_locks_agree_with_pyproject_and_each_other():
     assert locks.check(ROOT) == []
 
 
+def test_a_wildcard_floor_is_reported_as_no_bound_instead_of_crashing(checkout):
+    edit(checkout / "pyproject.toml", '"click>=8.2.1,<9"', '"click==8.*"')
+    assert "pyproject.toml: click declares no lower bound to test" in locks.check(checkout)
+
+
+def test_regeneration_options_need_regenerate(capsys):
+    with pytest.raises(SystemExit):
+        locks.main(["--exclude-newer", "2026-11-03T00:00:00Z"])
+    assert "need --regenerate" in capsys.readouterr().err
+
+
 def test_every_runtime_floor_is_the_version_the_floor_lock_tests():
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text())
     floor = locks.read_lock(ROOT, locks.FLOOR_LOCK)
