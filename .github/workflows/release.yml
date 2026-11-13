@@ -96,7 +96,7 @@ jobs:
       - run: python -m pytest --strict-skips
       - name: Enforce committed security regression contracts
         run: python scripts/check_security_regressions.py --out evidence/security-regressions.json
-      - name: Retain candidate security reports on failure
+      - name: Retain candidate security reports, including on failure
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -130,8 +130,8 @@ jobs:
           --lock requirements-action.lock --out evidence/environment.cdx.json
       - name: Package the installed wheel's inventory benchmark
         run: |
-          # Evidence below is derived from dist/; fail closed unless it still holds
-          # exactly the bytes that were uploaded before any test or install ran.
+          # Evidence below is derived from dist/; fail closed unless the staged files still
+          # hold the bytes that were uploaded before any test or install ran.
           sha256sum --strict -c "$RUNNER_TEMP/distributions.sha256"
           "$RUNNER_TEMP/release-smoke/bin/python" benchmarks/inventory/evidence.py prepare "$RUNNER_TEMP/inventory-benchmark"
           sha256sum dist/*.whl > "$RUNNER_TEMP/inventory-benchmark/wheel.sha256"

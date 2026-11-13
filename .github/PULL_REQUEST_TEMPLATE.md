@@ -38,7 +38,7 @@ that wrote it. See "AI-assisted contributions" in CONTRIBUTING.md. -->
 
 - [ ] Trust boundary and abuse case stated
 - [ ] Regression test fails on the vulnerable behavior
-- [ ] Security regression corpus reviewed (`scripts/benchmark_security.py`)
+- [ ] Security regression corpus reviewed (`benchmarks/manifest.json`, run with `scripts/benchmark_security.py`)
 - [ ] No new network access, executable discovery, or credential collection without design and tests
 
 ## Limitations

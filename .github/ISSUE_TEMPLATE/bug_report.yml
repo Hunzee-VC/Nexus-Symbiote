@@ -49,7 +49,7 @@ body:
     attributes:
       label: Nexus SymBiote version
       description: Output of `nexus-symbiote --version`
-      placeholder: "0.1.0"
+      placeholder: "nexus-symbiote, version 0.2.0"
     validations:
       required: true
 
