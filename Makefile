@@ -54,7 +54,7 @@ hygiene: ## Check tracked source, links, versions and vendor digests
 # ── Testing ──────────────────────────────────────────────────
 
 .PHONY: test
-test: ## Run the test suite; a skip other than a host file-system one fails it
+test: ## Run the test suite; a skip other than a host file-system one (or a missing pip outside CI) fails it
 	python -m pytest --strict-skips
 
 .PHONY: test-verbose
@@ -62,7 +62,7 @@ test-verbose: ## Run the test suite with verbose output
 	python -m pytest -vv --durations=20 --strict-skips
 
 .PHONY: test-floor
-test-floor: ## Run the suite on Python 3.11 with every dependency at its declared floor
+test-floor: ## Run the suite on Python 3.11 with each runtime dependency at its declared floor, without the locked_only tests
 	@set -eu; floor_dir="$$(mktemp -d)"; \
 	trap 'rm -rf "$$floor_dir"' EXIT; \
 	$(PYTHON_FLOOR) -m venv "$$floor_dir"; \
@@ -81,7 +81,10 @@ security-regressions: ## Run the committed security regression contracts
 	PYTHONPATH=src python scripts/check_security_regressions.py --out security-regressions.json
 
 .PHONY: check
-check: quality coverage security-regressions clean-dist build check-dist ## Run the offline subset of the required CI checks
+check: quality coverage security-regressions ## Run the offline subset of the required CI checks
+	$(MAKE) clean-dist
+	$(MAKE) build
+	$(MAKE) check-dist
 
 # ── Build ────────────────────────────────────────────────────
 
@@ -94,7 +97,9 @@ check-dist: ## Validate built distributions with twine
 	python -m twine check --strict dist/*
 
 .PHONY: wheel-smoke
-wheel-smoke: build ## Check the exact wheel in a temporary locked environment
+wheel-smoke: ## Build afresh and check the exact wheel in a temporary locked environment
+	$(MAKE) clean-dist
+	$(MAKE) build
 	@set -eu; smoke_dir="$$(mktemp -d)"; \
 	trap 'rm -rf "$$smoke_dir"' EXIT; \
 	python -m venv "$$smoke_dir"; \
@@ -112,8 +117,8 @@ clean-dist: ## Remove built distributions so check-dist inspects only a fresh bu
 clean: ## Remove build artifacts and caches
 	rm -rf build/ dist/ *.egg-info src/*.egg-info
 	find src tests scripts -type d -name __pycache__ -prune -exec rm -rf {} +
-	rm -rf .coverage .mypy_cache .pytest_cache .ruff_cache
-	rm -f coverage.json security-regressions.json
+	rm -rf .coverage .coverage.* htmlcov .hypothesis .mypy_cache .pytest_cache .ruff_cache
+	rm -f coverage.json security-regressions.json benchmark-results.json
 
 # ── Help ─────────────────────────────────────────────────────
 
