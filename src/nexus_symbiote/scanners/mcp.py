@@ -203,7 +203,9 @@ def without_js_comments(text: str) -> str:
     while position < size:
         if 0 <= block < position:
             block = text.find("/*", position)
-        if block >= 0:
+        # The first "*/" after an earlier opener is also the first after a later one
+        # that precedes it, so each stretch of text is searched for a close only once.
+        if block >= 0 and close < block + 2:
             close = text.find("*/", block + 2)
             if close < 0:
                 block = -1

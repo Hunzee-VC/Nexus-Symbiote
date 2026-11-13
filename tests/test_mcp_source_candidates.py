@@ -492,12 +492,38 @@ def test_the_repository_itself_passes_the_mcp_collector():
         " \n" * 131_072,
         "a\n" * 131_072,
         "/*/" * 87_381,
+        "//\n" * 43_690 + "/*" + "x" * 131_068 + "*/",
     ],
 )
 def test_comment_stripping_is_linear_at_the_syntax_limit(text):
     started = time.monotonic()
     without_js_comments(text)
     assert time.monotonic() - started < 5
+
+
+class _SearchCountingText(str):
+    searched = 0
+
+    def find(self, sub, start=None, end=None):  # type: ignore[override]
+        begin = 0 if start is None else start
+        found = super().find(sub, begin, len(self) if end is None else end)
+        self.searched += (len(self) if found < 0 else found + len(sub)) - begin
+        return found
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "//\n" * 4_000 + "/*" + "x" * 12_000 + "*/",
+        "// /*\n" * 2_000 + "x" * 12_000 + "*/",
+    ],
+)
+def test_comment_stripping_searches_for_each_block_close_once(text):
+    # Every whole-line comment before a long block comment once searched the block
+    # for its close again, so the work grew with the product of the two.
+    counted = _SearchCountingText(text)
+    assert without_js_comments(counted) == OLD_STRIPPER.sub("", text)
+    assert counted.searched <= 4 * len(text)
 
 
 @settings(max_examples=3_000, deadline=None)
