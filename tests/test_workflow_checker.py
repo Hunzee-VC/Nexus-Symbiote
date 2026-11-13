@@ -106,6 +106,13 @@ def test_one_commit_cannot_carry_two_version_labels(repository, capsys):
     assert status == 1 and "is labelled" in output
 
 
+def test_a_pin_the_version_check_cannot_read_is_rejected(repository, capsys):
+    pin = CHECKOUT.split(" #", 1)[0]
+    workflow = SAFE + f"      - {{uses: {pin}, with: {{persist-credentials: false}}}}\n"
+    status, output = run_checker(repository, workflow, capsys)
+    assert status == 1 and "write each pinned uses on a line of its own" in output
+
+
 def test_a_local_action_is_checked_like_any_other(repository, capsys):
     action = repository / ".github/actions/setup"
     action.mkdir(parents=True)

@@ -1228,16 +1228,21 @@ def _workflow_issues(path: Path, document: dict[Any, Any]) -> list[str]:
     return errors
 
 
-def local_actions(document: Any) -> Iterator[str]:
-    """Every `uses: ./path` reference in a workflow or action."""
+def _uses_values(document: Any) -> Iterator[str]:
+    """Every string `uses` value in a workflow or action."""
     if isinstance(document, dict):
         for key, child in document.items():
-            if key == "uses" and isinstance(child, str) and child.startswith("./"):
+            if key == "uses" and isinstance(child, str):
                 yield child
-            yield from local_actions(child)
+            yield from _uses_values(child)
     elif isinstance(document, list):
         for child in document:
-            yield from local_actions(child)
+            yield from _uses_values(child)
+
+
+def local_actions(document: Any) -> Iterator[str]:
+    """Every `uses: ./path` reference in a workflow or action."""
+    return (value for value in _uses_values(document) if value.startswith("./"))
 
 
 def check(path: Path) -> list[str]:
@@ -1275,10 +1280,19 @@ def pin_comments(paths: list[Path]) -> list[str]:
     errors: list[str] = []
     seen: dict[str, tuple[str, Path]] = {}
     for path in paths:
-        for line in path.read_text(encoding="utf-8").splitlines():
-            match = USES_LINE.match(line)
-            if match is None or match[1].startswith("./") or not PIN.fullmatch(match[1]):
-                continue
+        text = path.read_text(encoding="utf-8")
+        # The comment is read line by line, so a pin in any other YAML spelling, such as a
+        # flow mapping, would escape this check; the parsed file says how many there are.
+        parsed = sum(
+            1
+            for value in _uses_values(yaml.safe_load(text))
+            if not value.startswith("./") and PIN.fullmatch(value)
+        )
+        lines = [USES_LINE.match(line) for line in text.splitlines()]
+        read = [m for m in lines if m and not m[1].startswith("./") and PIN.fullmatch(m[1])]
+        if len(read) != parsed:
+            errors.append(f"{path}: write each pinned uses on a line of its own, as uses: <pin>")
+        for match in read:
             reference, comment = match[1], match[2] or ""
             version = VERSION.fullmatch(comment)
             if version is None:
