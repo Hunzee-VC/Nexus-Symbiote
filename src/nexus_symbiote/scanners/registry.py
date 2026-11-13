@@ -2041,8 +2041,13 @@ class RegistryScanner(Scanner):
             mutable = any(
                 d.requirement is not None
                 and d.requirement.url
-                and re.match(r"(?:git|hg|svn|bzr)\+", d.requirement.url, re.I)
-                and not _vcs_pinned(d.requirement.url)
+                and (
+                    d.requirement.url.lower().startswith("http://")
+                    or (
+                        re.match(r"(?:git|hg|svn|bzr)\+", d.requirement.url, re.I) is not None
+                        and not _vcs_pinned(d.requirement.url)
+                    )
+                )
                 for d in urls
             )
             risks.append(

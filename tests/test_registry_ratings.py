@@ -65,6 +65,11 @@ def test_a_url_declaration_behind_a_pin_is_a_finding_and_no_package_url(tmp_path
             "medium",
             "https://files.example",
         ),
+        (
+            "openai @ http://files.example/openai-1.0.0-py3-none-any.whl",
+            "high",
+            "http://files.example",
+        ),
     ],
 )
 def test_a_url_or_vcs_declaration_names_its_origin(tmp_path, line, severity, origin):
