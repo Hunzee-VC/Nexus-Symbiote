@@ -82,14 +82,15 @@ _NODE_PRELOAD = frozenset({"-r", "--require", "--import", "--loader", "--experim
 # Node options that take a value as the next word (node --help); the value is never the script.
 _NODE_VALUES = _NODE_PRELOAD | _set(
     "--allow-fs-read --allow-fs-write --build-snapshot-config -C --conditions --cpu-prof-dir"
-    " --cpu-prof-interval --cpu-prof-name --diagnostic-dir --disable-proto --disable-warning"
-    " --dns-result-order --env-file --env-file-if-exists --experimental-config-file"
-    " --experimental-default-type --experimental-sea-config --experimental-test-isolation"
-    " --heap-prof-dir --heap-prof-interval --heap-prof-name --heapsnapshot-near-heap-limit"
-    " --heapsnapshot-signal --icu-data-dir --input-type --inspect-publish-uid"
-    " --localstorage-file --max-http-header-size --max-old-space-size-percentage"
-    " --network-family-autoselection-attempt-timeout --openssl-config --redirect-warnings"
-    " --report-filename --report-signal --run --secure-heap --secure-heap-min --snapshot-blob"
+    " --cpu-prof-interval --cpu-prof-name --debug-port --diagnostic-dir --disable-proto"
+    " --disable-warning --dns-result-order --env-file --env-file-if-exists"
+    " --experimental-config-file --experimental-default-type --experimental-sea-config"
+    " --experimental-test-isolation --heap-prof-dir --heap-prof-interval --heap-prof-name"
+    " --heapsnapshot-near-heap-limit --heapsnapshot-signal --icu-data-dir --input-type"
+    " --inspect-port --inspect-publish-uid --localstorage-file --max-http-header-size"
+    " --max-old-space-size-percentage --network-family-autoselection-attempt-timeout"
+    " --openssl-config --redirect-warnings --report-dir --report-directory --report-filename"
+    " --report-signal --run --secure-heap --secure-heap-min --security-revert --snapshot-blob"
     " --test-concurrency --test-coverage-branches --test-coverage-exclude"
     " --test-coverage-functions --test-coverage-include --test-coverage-lines"
     " --test-name-pattern --test-reporter --test-reporter-destination --test-shard"
@@ -98,11 +99,27 @@ _NODE_VALUES = _NODE_PRELOAD | _set(
     " --unhandled-rejections --use-largepages --v8-pool-size --watch-kill-signal --watch-path"
 )
 _INLINE_SOURCES = ("data:", "http:", "https:")
-# Rarely used interpreters: inline code flags anywhere before the script file.
+# Rarely used interpreters: inline code flags anywhere before the script file, alone, at
+# the end of a cluster, or with the code attached after a run of options that take none.
 _INLINE_FLAGS = {
-    "ruby": re.compile(r"-[a-zA-Z]*e"),
-    "perl": re.compile(r"-[a-zA-Z]*[eE]"),
-    "php": re.compile(r"-[rBRE]|--(?:run|process-begin|process-code|process-end)(?:=.*)?", re.S),
+    "ruby": re.compile(r"-[a-zA-Z]*e|-[acdlnpsSvwyhUW0-9]*e.+", re.S),
+    "perl": re.compile(r"-[a-zA-Z]*[eE]|-[acdfgnpsStTuUvwWXhl0-9]*[eE].+", re.S),
+    "php": re.compile(
+        r"-[aehilmnsvwH]*[rBRE].*|--(?:run|process-begin|process-code|process-end)(?:=.*)?", re.S
+    ),
+}
+# Their options that take the next word as a value when none is attached (ruby --help,
+# perl -h, php --help); the value is never the script.
+_INLINE_VALUES = {
+    "ruby": _set(
+        "-I -r -C -E --encoding --external-encoding --internal-encoding --enable --disable"
+        " --dump --parser --backtrace-limit --crash-report"
+    ),
+    "perl": _set("-I"),
+    "php": _set(
+        "-c -d -z -t -S --php-ini --define --zend-extension --docroot --server"
+        " --rf --rc --re --rz --ri"
+    ),
 }
 _SCRIPT_SUFFIX = re.compile(r"(?:-cli)?\.[cm]?js$|\.py$")
 # Python options that end a short-option cluster: inline code, a module, or a value.
@@ -1244,6 +1261,8 @@ def _interpreter_reason(
                     step = 2 if position + 1 == len(letters) else 1
         elif _INLINE_FLAGS[family].fullmatch(word):
             return _inline(family, launch)
+        elif option in _INLINE_VALUES[family] and not equals:
+            step = 2
         index += step
     return None
 
