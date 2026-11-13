@@ -1172,6 +1172,12 @@ class _Resolvers:
                 for target in imports.values():
                     if isinstance(target, str):
                         deno_entries.append(("imports", target))
+                    elif isinstance(target, list):
+                        # Import-map addresses may be an array of fallback
+                        # strings; every fallback is a redirect surface.
+                        for fallback in target:
+                            if isinstance(fallback, str):
+                                deno_entries.append(("imports", fallback))
             scopes = data.get("scopes")
             if isinstance(scopes, dict) and scopes:
                 deno_entries.append(("scopes", json.dumps(scopes, sort_keys=True, default=str)))
