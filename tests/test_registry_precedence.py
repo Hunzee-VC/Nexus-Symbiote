@@ -501,6 +501,14 @@ def test_invalid_dependency_groups_are_a_failure(tmp_path, body):
     ]
 
 
+@pytest.mark.parametrize("value", ['["torch>=2"]', '"torch>=2"', "1"])
+def test_optional_dependencies_that_are_not_a_table_are_a_failure(tmp_path, value):
+    _write(tmp_path, {"pyproject.toml": f"[project]\noptional-dependencies = {value}\n"})
+    assert RegistryScanner().scan(tmp_path).scan_failures == [
+        "pyproject.toml: invalid optional dependencies"
+    ]
+
+
 @pytest.mark.parametrize(
     "lockfiles,ecosystem",
     [

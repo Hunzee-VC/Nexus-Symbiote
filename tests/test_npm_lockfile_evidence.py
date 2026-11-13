@@ -869,3 +869,57 @@ def test_a_missing_yaml_parser_is_a_pnpm_lockfile_failure(tmp_path, monkeypatch)
     result = RegistryScanner().scan(tmp_path)
     assert result.scan_failures == ["pnpm-lock.yaml: YAML parser unavailable"]
     assert "package_resolution" not in result.components[0].claims
+
+
+PYPI_SOURCES = [
+    ("uv.lock", 'source = { registry = "https://pypi.org/simple" }'),
+    ("poetry.lock", ""),
+]
+
+
+@pytest.mark.parametrize(("lock_name", "source_toml"), PYPI_SOURCES)
+@pytest.mark.parametrize(
+    ("file", "declared"),
+    [
+        ("requirements.txt", "openai==1.0.0"),
+        ("requirements.txt", "openai>=2.0"),
+        ("pyproject.toml", "openai>=2.0"),
+        ("pyproject.toml", "openai==1.0.0; sys_platform == 'win32'"),
+    ],
+)
+def test_a_python_lock_version_a_declaration_does_not_admit_is_a_failure(
+    tmp_path, lock_name, source_toml, file, declared
+):
+    # As for npm: the lockfile is stale, or the file is not installed from it, so the
+    # version installed is unknown.
+    if file == "pyproject.toml":
+        (tmp_path / file).write_text(f'[project]\ndependencies = ["openai>=1", "{declared}"]\n')
+    else:
+        (tmp_path / file).write_text(declared + "\n")
+    (tmp_path / lock_name).write_text(
+        f'version = 1\n\n[[package]]\nname = "openai"\nversion = "1.2.3"\n{source_toml}\n'
+    )
+    result = RegistryScanner().scan(tmp_path)
+    assert result.scan_failures == [f"{lock_name}: selected package version disagrees with {file}"]
+    (comp,) = result.components
+    assert comp.version != "1.2.3" and comp.package_url is None
+    assert "package_resolution" not in comp.claims
+    assert "lockfile_record" not in comp.properties
+
+
+@pytest.mark.parametrize(("lock_name", "source_toml"), PYPI_SOURCES)
+def test_a_build_requirement_is_not_held_to_the_python_lock_version(
+    tmp_path, lock_name, source_toml
+):
+    # uv and Poetry resolve build requirements at build time; they lock none.
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\ndependencies = ["openai>=1"]\n'
+        '[build-system]\nrequires = ["setuptools", "openai==1.0.0"]\n'
+    )
+    (tmp_path / lock_name).write_text(
+        f'version = 1\n\n[[package]]\nname = "openai"\nversion = "1.2.3"\n{source_toml}\n'
+    )
+    result = RegistryScanner().scan(tmp_path)
+    assert result.scan_failures == []
+    (comp,) = result.components
+    assert comp.version == "1.2.3" and comp.package_url == "pkg:pypi/openai@1.2.3"

@@ -590,7 +590,7 @@ class _Package:
 
     declarations: list[_PipDeclaration] = field(default_factory=list)
     sources: set[str] = field(default_factory=set)
-    seen: set[str] = field(default_factory=set)
+    seen: set[tuple[str, str, str]] = field(default_factory=set)
     states: dict[tuple[str, str], _Declared] = field(default_factory=dict)
     conflict: bool = False
 
@@ -601,14 +601,16 @@ class _Package:
         first = not self.declarations
         self.declarations.append(declaration)
         requirement = declaration.requirement
+        # A text is compared once in each state, not only in the first that holds it.
+        key = (declaration.marker, declaration.group, declaration.reference)
         if (
             self.conflict
             or requirement is None
             or declaration.untranslated is not None
-            or declaration.reference in self.seen
+            or key in self.seen
         ):
             return
-        self.seen.add(declaration.reference)
+        self.seen.add(key)
         # Declarations under different markers apply to different environments
         # (uv writes platform splits that way), and so do different optional-
         # dependency groups (uv's cpu and cu121 extras), so only equal ones are
@@ -2562,7 +2564,7 @@ class RegistryScanner(Scanner):
                     d.requirement is not None and d.requirement.url for d in package.declarations
                 )
             }
-            self._resolve_python_lockfiles(components, result, from_urls)
+            self._resolve_python_lockfiles(components, result, from_urls, packages)
             indexed = [
                 component
                 for component, package in zip(components, packages.values(), strict=True)
@@ -2624,6 +2626,7 @@ class RegistryScanner(Scanner):
         components: list[RegistryEntryComponent],
         result: ScanResult,
         from_urls: set[str],
+        packages_declared: dict[str, _Package],
     ) -> None:
         files = self._confined()
         found_locks: list[tuple[str, str, bytes]] = []
@@ -2649,8 +2652,7 @@ class RegistryScanner(Scanner):
             lock_doc = tomllib.loads(text)
             packages = lock_doc.get("package", [])
             if (
-                not isinstance(lock_doc, dict)
-                or not isinstance(packages, list)
+                not isinstance(packages, list)
                 or len(packages) > 10_000
                 or not all(isinstance(item, dict) for item in packages)
             ):
@@ -2704,6 +2706,25 @@ class RegistryScanner(Scanner):
             )
             if pinned is None or pinned != resolved_version:
                 result.scan_failures.append(f"{lock_name}: selected package lacks an exact version")
+                continue
+            parsed = _parsed(resolved_version)
+            package = packages_declared.get(comp.name)
+            # uv and Poetry lock no build requirements; they are resolved at build time.
+            disagree = [
+                d.source
+                for d in (package.declarations if package is not None else ())
+                if d.requirement is not None
+                and d.group != "build-system"
+                and not _satisfies(d.requirement, resolved_version, parsed)
+            ]
+            if disagree:
+                # The lockfile is stale, or the file that declares it is not installed
+                # from it: which version is installed is unknown.
+                comp.package_url = None
+                result.scan_failures.append(
+                    f"{lock_name}: selected package version disagrees with "
+                    + ", ".join(dict.fromkeys(disagree))
+                )
                 continue
             registry_origin: str | None = "https://pypi.org"
             if isinstance(source, dict):
@@ -2912,6 +2933,8 @@ class RegistryScanner(Scanner):
         if isinstance(optional, dict):
             for extra, values in optional.items():
                 strings(values, str(extra), "pyproject.toml: invalid optional dependencies")
+        else:
+            failures["pyproject.toml: invalid optional dependencies"] = None
         build = data.get("build-system", {})
         strings(
             build.get("requires", []) if isinstance(build, dict) else None,
@@ -3594,12 +3617,12 @@ class RegistryScanner(Scanner):
 
     @staticmethod
     def _conflict(one: str, other: str) -> bool:
-        """Whether two declarations of a package conflict, as the collector decides it.
+        """Whether two declarations of a package in one group conflict, as the
+        collector decides it.
 
         Only declarations under the same markers are compared, and the extras a
-        requirement names are not.
-        A range and a pin that satisfies it, as pip-tools, uv and lock files write
-        them, do not conflict; two ranges are not compared.
+        requirement names are not. A range and a pin that satisfies it, as pip-tools,
+        uv and lock files write them, do not conflict; two ranges are not compared.
         """
         try:
             first, second = Requirement(one), Requirement(other)

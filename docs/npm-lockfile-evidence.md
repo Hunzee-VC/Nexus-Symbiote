@@ -62,7 +62,11 @@ version and the index origin of each AI package declared in `requirements*.txt` 
 `pyproject.toml`, the lockfile record's position, and the SHA-256 of the lockfile.
 Artifact digests in the lockfile are not recorded. With both lockfiles present, for
 a package with a local, git or URL source in the lockfile, or for one that a root
-file declares from a URL, no resolution is bound.
+file declares from a URL, no resolution is bound. A version that a declaration of
+the package does not admit, in any root file and under any marker or group, is a
+collection failure, as for npm: the lockfile is stale, or the file is not installed
+from it. `[build-system]` requires are not compared, because neither lockfile locks
+them.
 
 These are declared resolution claims with unknown trust. The collector does not
 fetch packages, establish their presence, verify registry ownership or publisher
