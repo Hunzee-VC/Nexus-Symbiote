@@ -518,7 +518,11 @@ def test_with_the_key_an_ambiguous_host_change_alerts_through_the_binding(
     after = before.replace("https://", "https://attacker.example\\@")
     run = _drift(runner, tmp_path, ".codex/config.toml", before, after, "ide_agents")
     assert run.exit_code == 1, run.output
-    assert "[HIGH] High change in 'codex': properties.static_value_binding changed." in run.output
+    # The redacted file withholds the ambiguous URL, so its digest changes as well.
+    assert (
+        "[HIGH] High change in 'codex': properties.settings_hashes changed.; "
+        "properties.static_value_binding changed." in run.output
+    )
 
 
 @pytest.mark.parametrize("url", ["https://llm.corp.example/v1", "file:///srv/models"])

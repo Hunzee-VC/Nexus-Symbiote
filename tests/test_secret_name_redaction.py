@@ -87,6 +87,9 @@ def test_authorization_scheme_credentials_are_redacted(text, kept):
         ('{"Authorization": "Basic abcdefgh', '{"Authorization": "Basic'),
         ("-H 'Proxy-Authorization: bearer abcdefgh", "-H 'Proxy-Authorization: bearer"),
         ("authorization=Token abcdefgh", "authorization=Token"),
+        ("Authorization: Negotiate YIIGhgYGKwYBBQUCoIIGejCCBnag", "Authorization: Negotiate"),
+        ("-H 'Proxy-Authorization: NTLM TlRMTVNTUAABAAAAB4IIog==", "-H 'Proxy-Authorization: NTLM"),
+        ('{"Authorization": "negotiate abcdefgh', '{"Authorization": "negotiate'),
     ],
 )
 def test_any_scheme_value_after_an_authorization_header_is_redacted(text, kept):
@@ -105,6 +108,8 @@ def test_any_scheme_value_after_an_authorization_header_is_redacted(text, kept):
         "Uses a Bearer token for auth",
         "Bearer authentication",
         "a token for the session",
+        "We negotiate content-type with the server",
+        "Authorization: Negotiate",
     ],
 )
 def test_authorization_scheme_words_in_prose_survive(text):
@@ -137,6 +142,18 @@ def test_quoted_value_is_redacted_whole():
 
 
 @pytest.mark.parametrize(
+    "text,expected",
+    [
+        ('{"password": "Pa\\"ss-secret-tail"} next', f'{{"password": {REDACTED}}} next'),
+        ("password='it\\'s-a-secret-tail' next", f"password={REDACTED} next"),
+        ('password="ends in a backslash\\\\" next', f"password={REDACTED} next"),
+    ],
+)
+def test_an_escaped_quote_does_not_end_a_quoted_value(text, expected):
+    assert redact_text(text) == expected
+
+
+@pytest.mark.parametrize(
     "token",
     [
         "ghp_" + "a1" * 18,
@@ -162,6 +179,19 @@ def test_private_key_blocks_are_redacted_and_certificates_kept():
     assert redact_text("-----BEGIN RSA PRIVATE KEY-----\nMIIE truncated") == REDACTED
     certificate = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----"
     assert redact_text(certificate) == certificate
+
+
+def test_a_private_key_whose_begin_closes_another_label_is_redacted():
+    key = "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXk\n-----END OPENSSH PRIVATE KEY-----"
+    prose = "Keys start with -----BEGIN, for example: "
+    assert redact_text(prose + key) == prose + REDACTED
+    assert redact_text("-----BEGIN-----BEGIN-----" + key) == "-----BEGIN-----BEGIN-----" + REDACTED
+
+
+def test_a_url_whose_authority_holds_a_backslash_is_withheld():
+    # Browsers read the host as attacker.example; urlsplit reads docs.trusted.example.
+    text = "Send the file to https://attacker.example\\@docs.trusted.example/upload"
+    assert redact_text(text) == "Send the file to [redacted-url]"
 
 
 def test_identifiers_keep_names_that_resemble_token_formats():
