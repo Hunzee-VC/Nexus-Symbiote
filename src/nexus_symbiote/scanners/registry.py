@@ -355,6 +355,8 @@ def _recorded_requirement(requirement: Requirement) -> str:
 # Real versions are short. packaging re-parses a clause's version on every
 # comparison, so a declaration with a longer one is recorded but not compared.
 _LONGEST_VERSION = 128
+# The public index and its file host; any other origin qualifies a pkg:pypi package URL.
+_PYPI_ORIGINS = frozenset({"https://pypi.org", "https://files.pythonhosted.org"})
 # All root requirements*.txt files together, in characters.
 _REQUIREMENTS_BUDGET = 4 * 1024 * 1024
 # shlex builds a token one character at a time, so its cost grows with the square
@@ -2738,6 +2740,10 @@ class RegistryScanner(Scanner):
             comp.package_url = (
                 f"pkg:pypi/{quote(comp.name, safe='')}@{quote(resolved_version, safe='')}"
             )
+            if registry_origin is not None and registry_origin not in _PYPI_ORIGINS:
+                # As for npm: the package URL names the index it was resolved from, so it
+                # is not mistaken for the public package of the same name.
+                comp.package_url += f"?repository_url={registry_origin}"
             comp.registry_uri = registry_origin
             comp.source_path = lock_name
             comp.assurance_level = AssuranceLevel.DECLARED

@@ -160,6 +160,7 @@ def test_python_lockfile_resolution_binds_exact_version_and_redacts_origin(
     tmp_path, lock_name, method, source_toml
 ):
     from nexus_symbiote.advisories import package_identity
+    from nexus_symbiote.generators.package_identifiers import package_identifier
 
     (tmp_path / "pyproject.toml").write_text('[project]\ndependencies = ["langgraph>=0.2.0"]\n')
     raw = (
@@ -171,13 +172,17 @@ def test_python_lockfile_resolution_binds_exact_version_and_redacts_origin(
     comp = result.components[0]
     assert comp.name == "langgraph"
     assert comp.version == "0.2.14"
-    assert comp.package_url == "pkg:pypi/langgraph@0.2.14"
+    assert comp.package_url == (
+        "pkg:pypi/langgraph@0.2.14?repository_url=https://pypi.private.example"
+    )
     assert comp.registry_uri == "https://pypi.private.example"
     assert comp.source_path == lock_name
     assert comp.properties["lockfile_sha256"] == "sha256:" + hashlib.sha256(raw).hexdigest()
     assert comp.properties["lockfile_record"] == f"{lock_name}#/package/0"
     assert comp.claims["package_resolution"].method == method
     assert package_identity(comp) == ("PyPI", "langgraph", "0.2.14")
+    # The export projects the qualified package URL instead of dropping it.
+    assert package_identifier(comp).value == comp.package_url
     assert "SECRET_CANARY" not in comp.model_dump_json()
 
 
