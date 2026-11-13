@@ -8,7 +8,8 @@ that need them, a job time limit and checkouts without persisted credentials; sc
 cannot cancel each other. In the gating workflows no job continues on error, a step may only
 when a later step that runs reads its outcome, and each verification job still runs the
 command that makes it a gate: outside a shell comment, in a job and a step that only a
-reviewed condition can skip, and without discarding the command's exit status. A gate command
+reviewed condition can skip and that does not continue on error, and without discarding the
+command's exit status. A gate command
 must run as its own command line under errexit, in a reviewed shell and the checkout's root:
 not quoted, in a condition, negated, chained with && or ||, in the background, after set +e,
 set -n, cd, trap, exit, eval or hash (however invoked), nor in a step whose shell or working
@@ -295,7 +296,7 @@ def _continues_unchecked(job: dict[str, Any]) -> bool:
     """A job that continues on error, or a step that does with no step reading its outcome.
 
     Only a later step sure to run counts: one with no condition beyond success() or
-    always(), or one whose condition reads that outcome.
+    always(), or one whose condition reads that outcome. A step's name is not a read.
     """
     if job.get("continue-on-error", False) is not False:
         return True
@@ -305,7 +306,7 @@ def _continues_unchecked(job: dict[str, Any]) -> bool:
             continue
         outcome = f"steps.{step.get('id')}.outcome"
         if not isinstance(step.get("id"), str) or not any(
-            outcome in json.dumps(later, default=str)
+            outcome in json.dumps({k: v for k, v in later.items() if k != "name"}, default=str)
             and (_condition(later) in (None, *ALWAYS_RUNS) or outcome in str(later["if"]))
             for later in steps[index + 1 :]
         ):
@@ -1104,6 +1105,7 @@ def _gate_issues(path: Path, name: str, job: dict[str, Any], defaults: Any) -> l
     reviewed = REVIEWED_STEP_CONDITIONS.get(path.name, {})
     found: set[str] = set()
     unstructured: set[str] = set()
+    continued: set[str] = set()
     for step in _steps(job):
         lines = _step_lines(step)
         text = "\n".join(f"{line}\n{documents}" for line, documents in lines)
@@ -1136,7 +1138,9 @@ def _gate_issues(path: Path, name: str, job: dict[str, Any], defaults: Any) -> l
                 errors.append(f"{path}: {name} may skip {command} (if: {condition})")
             if _discards_status(lines, command):
                 errors.append(f"{path}: {name} discards the exit status of {command}")
-            if command in text_only or command in uses or any(g.runs(command) for g in gates):
+            if step.get("continue-on-error", False) is not False:
+                continued.add(command)
+            elif command in text_only or command in uses or any(g.runs(command) for g in gates):
                 found.add(command)
             else:
                 unstructured.add(command)
@@ -1148,6 +1152,8 @@ def _gate_issues(path: Path, name: str, job: dict[str, Any], defaults: Any) -> l
                 f"{path}: {name} does not run {command} as a command of its own whose"
                 " failure fails the step"
             )
+        elif command in continued:
+            errors.append(f"{path}: {name} runs {command} only in a step that continues on error")
         else:
             errors.append(f"{path}: {name} no longer runs {command}")
     return errors

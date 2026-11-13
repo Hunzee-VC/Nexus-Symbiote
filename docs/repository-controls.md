@@ -173,7 +173,8 @@ triggers other than `push`, `pull_request`, `workflow_dispatch`, `schedule` and
 missing or writable top-level permissions, jobs without `timeout-minutes`, and
 checkouts that persist credentials, and it checks a file in `.github/workflows` as a
 workflow whatever its name. In `ci.yml` and `release.yml` it rejects `continue-on-error`
-on a job, and on a step unless a later step that runs reads that step's outcome, and
+on a job, and on a step unless a later step that runs reads that step's outcome (naming
+it in the later step's name does not count), and
 requires each verification job, `Verified CI` and the release attestation check among
 them, to still run the command
 that makes it a gate as a command of its own, under errexit, in `bash` (GitHub's
@@ -185,9 +186,10 @@ without `pipefail`, that follows `set +e`, `set -n`, `set -t`, `shopt -u -o erre
 `trap`, `exit`, `eval` or `hash` (also through `builtin`, `command` or `time`, or a
 command name built from an expansion, braces included), that runs under an option that
 prints and exits instead (`python -h`, `-V` or `-i`, `bash --version` or `-D`, a
-`timeout` option other than the reviewed ones), or whose step, job or workflow sets
-another shell or a working directory, does not count. A pin written in any form other
-than a `uses:` line of its own is rejected, because its version comment cannot be read.
+`timeout` option other than the reviewed ones), whose step continues on error, or whose
+step, job or workflow sets another shell or a working directory, does not count. A pin
+written in any form other than a `uses:` line of its own is rejected, because its version
+comment cannot be read.
 A `$VAR` command name counts only while a plain `VAR=value` line still binds it, and a
 script the checker reads differently from `bash` (a here-document delimiter that is
 partly quoted, or a `case` inside `$(...)`) has no gates. The scheduled CodeQL workflow also

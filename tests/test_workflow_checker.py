@@ -502,6 +502,41 @@ def test_the_action_jobs_outcome_assertions_must_run(tmp_path):
     assert any("action must not continue on error" in error for error in errors), errors
 
 
+def test_a_later_steps_name_does_not_read_an_outcome(tmp_path):
+    workflow = ci_workflow()
+    steps = workflow["jobs"]["codeql"]["steps"]
+    steps[-2].update({"id": "probe", "continue-on-error": True})
+    steps.append({"name": "Report (steps.probe.outcome)", "run": "true"})
+    path = tmp_path / "ci.yml"
+    path.write_text(yaml.safe_dump(workflow))
+    assert any("codeql must not continue on error" in error for error in checker.check(path))
+
+
+@pytest.mark.parametrize(
+    "name,job,command",
+    [
+        ("ci.yml", "test", "python -m pytest"),
+        ("ci.yml", "quality", "ruff check src tests scripts"),
+        ("release.yml", "verify", "gh attestation verify"),
+    ],
+)
+def test_a_gate_in_a_step_that_continues_on_error_does_not_count(tmp_path, name, job, command):
+    # A later step reads the outcome, so the step may continue on error, but its gate's
+    # failure would no longer fail the job.
+    def change(jobs):
+        steps = jobs[job]["steps"]
+        step = step_running(jobs[job], command)
+        step.update({"id": "gate", "continue-on-error": True})
+        steps.insert(
+            steps.index(step) + 1,
+            {"env": {"OUTCOME": "${{ steps.gate.outcome }}"}, "run": 'echo "$OUTCOME"'},
+        )
+
+    errors = workflow_errors(tmp_path, name, change)
+    assert f"{job} runs {command} only in a step that continues on error" in "\n".join(errors)
+    assert not any("must not continue on error" in error for error in errors), errors
+
+
 def run_locks(script, **step_changes):
     """Replace the quality job's lock check with `script` and the step settings given."""
 
