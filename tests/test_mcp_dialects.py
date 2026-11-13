@@ -392,6 +392,14 @@ def test_endpoint_with_user_information_is_named_accurately(tmp_path):
             [],
         ),
         (["run", "--mount", "type=bind,source=/,target=/host", "img"], ["host root mount"], []),
+        # docker reads --mount as CSV and lower-cases its keys and type.
+        (["run", "--mount", "Type=BIND,Source=/,Target=/h", "img"], ["host root mount"], []),
+        (["run", "--mount", '"type=bind","src=/","dst=/h"', "img"], ["host root mount"], []),
+        # Linux and Go's filepath.Clean read a leading "//" as "/".
+        (["run", "-v", "//.:/host", "img"], ["host root mount"], []),
+        (["run", "-v", "//etc/..:/host", "img"], ["host root mount"], []),
+        (["run", "--mount", "type=bind,source=//.,target=/h", "img"], ["host root mount"], []),
+        (["run", "-v", "//etc:/x", "img"], [], ["broad host directory mount"]),
         (["run", "--security-opt", "seccomp=unconfined", "img"], ["disabled confinement"], []),
         (["run", "--network", "host", "--pid=host", "img"], [], ["a host namespace"]),
         (

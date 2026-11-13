@@ -17,6 +17,7 @@ makes the launcher unknown, because an unrecognised wrapper (``nice``, ``sudo``,
 
 from __future__ import annotations
 
+import csv
 import fnmatch
 import posixpath
 import re
@@ -2534,8 +2535,13 @@ _BROAD = re.compile(
 
 def _host_source(spec: str, *, mount: bool) -> str | None:
     if mount:
-        fields = dict(part.partition("=")[::2] for part in spec.split(","))
-        if fields.get("type", "volume") != "bind":
+        # docker reads --mount as one CSV record and lower-cases each key and the type.
+        try:
+            parts = next(csv.reader([spec]), [])
+        except csv.Error:
+            parts = spec.split(",")
+        fields = {key.lower(): value for key, _, value in (part.partition("=") for part in parts)}
+        if fields.get("type", "volume").lower() != "bind":
             return None
         return fields.get("source") or fields.get("src") or None
     if ":" not in spec:
@@ -2578,8 +2584,9 @@ def _container_context(options: list[tuple[str, str | None]], launch: Launch) ->
                 continue
             launch.mark("host_mounts")
             normalized = source.rstrip("/\\") or ("/" if source.startswith("/") else "\\")
+            # normpath keeps a leading "//", which Linux and Go's filepath.Clean read as "/".
             canonical = (
-                posixpath.normpath(normalized)
+                posixpath.normpath("/" + normalized.lstrip("/"))
                 if normalized.startswith("/") and "\\" not in normalized
                 else normalized
             )
