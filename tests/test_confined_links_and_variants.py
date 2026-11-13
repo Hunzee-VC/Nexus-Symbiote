@@ -12,7 +12,12 @@ import pytest
 
 from nexus_symbiote.scanners.base import parse_python
 from nexus_symbiote.scanners.mcp import MCPScanner
-from nexus_symbiote.utils.confined import ConfinedCollection, fold_name
+from nexus_symbiote.utils.confined import (
+    CollectionError,
+    ConfinedCollection,
+    _lexical_target,
+    fold_name,
+)
 
 
 def _collect(root: Path) -> tuple[list[Path], list[str]]:
@@ -95,7 +100,23 @@ def test_read_through_a_link_into_a_further_link_is_refused(tmp_path):
     with ConfinedCollection(tmp_path, failures) as files:
         assert files.read_json("entry.json") is None
         assert files.in_root_target("entry.json") is None
-    assert failures == ["entry.json: symlink target is or passes through another symlink"]
+    assert failures == [
+        "entry.json: symlink target is or passes through another symlink or a non-directory"
+    ]
+
+
+def test_a_link_whose_target_passes_through_a_file_says_so(tmp_path):
+    (tmp_path / "a").write_text("x")
+    (tmp_path / "x.md").symlink_to("a/b.md")
+    failures: list[str] = []
+    with ConfinedCollection(tmp_path, failures) as files:
+        assert files.read_bytes("x.md") is None
+    assert failures == [
+        "x.md: symlink target is or passes through another symlink or a non-directory"
+    ]
+    # No POSIX system lets a symlink be created with empty text; refuse it as empty.
+    with pytest.raises(CollectionError, match="^symlink target is empty$"):
+        _lexical_target(Path(), "")
 
 
 def test_missing_fixed_path_reports_its_case_variants(tmp_path):
@@ -216,7 +237,8 @@ def test_case_variant_search_follows_one_link_only(tmp_path):
         assert files.case_variants(".claude/settings.json") == []
         assert files.read_json(".claude/settings.json", missing_ok=True) is None
     assert failures == [
-        ".claude/settings.json: symlink target is or passes through another symlink"
+        ".claude/settings.json: symlink target is or passes through another symlink "
+        "or a non-directory"
     ]
 
 

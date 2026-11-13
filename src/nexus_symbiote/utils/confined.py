@@ -335,7 +335,9 @@ def _lexical_target(directory: Path, text: str) -> Path:
     name that is not valid UTF-8 could be written to no inventory, so its link is
     refused, as a walk refuses such a name.
     """
-    if not text or os.path.isabs(text):
+    if not text:
+        raise _LinkRefusedError("symlink target is empty")
+    if os.path.isabs(text):
         raise _LinkRefusedError("symlink target is absolute")
     if _undecodable(text):
         raise _LinkRefusedError("symlink target name is not valid UTF-8; not collected")
@@ -847,7 +849,7 @@ class ConfinedCollection:
         try:
             return raw.decode("utf-8")
         except UnicodeDecodeError:
-            self._fail(path, "invalid UTF-8")
+            self._fail(self._relative(path), "invalid UTF-8")
             return None
 
     @contextmanager
@@ -860,11 +862,16 @@ class ConfinedCollection:
         explicit chunk size (at most four MiB). Collection-wide budget still
         applies. The trusted consumer must not bypass read() with fileno().
         """
-        relative = self._relative(path)
+        named: Path | str = str(path)
         limit = self._file_bound if max_bytes is None else _bound(max_bytes, "file-bytes")
+        reason = "stream refused (symlink, nonregular file or I/O error)"
         try:
-            if self.excluded(relative) or not relative.parts:
-                raise CollectionError("file excluded by policy")
+            relative = named = self._relative(path)
+            if self.excluded(relative):
+                reason = "stream refused (excluded by policy)"
+                raise CollectionError(reason)
+            if not relative.parts:
+                raise CollectionError("expected a regular file")
             parent = self._open_parent(relative)
             try:
                 fd = self._open_leaf_no_follow(parent, relative.name)
@@ -880,10 +887,10 @@ class ConfinedCollection:
                 os.close(fd)
                 raise
         except LimitExceededError as exc:
-            self._fail(relative, exc.bound.exceeded())
+            self._fail(named, exc.bound.exceeded())
             raise OSError("confined stream unavailable") from exc
         except (OSError, CollectionError) as exc:
-            self._fail(relative, "stream refused (symlink, nonregular file or I/O error)")
+            self._fail(named, reason)
             raise OSError("confined stream unavailable") from exc
         stream = _BoundedReader(fd, self, relative, limit, self._budget)
         try:
@@ -989,12 +996,12 @@ class ConfinedCollection:
                 parse_constant=_refuse_constant,
                 parse_float=_finite_float,
             )
-            if value is None:
-                raise CollectionError("null configuration")
-            return value
         except (ValueError, RecursionError):
-            self._fail(path, "invalid JSON or duplicate keys")
+            self._fail(self._relative(path), "invalid JSON or duplicate keys")
             return None
+        if value is None:
+            self._fail(self._relative(path), "JSON document is null")
+        return value
 
     def root_entries(self) -> list[str]:
         """Sorted names directly beneath the pinned root; nothing is opened or followed.
@@ -1051,7 +1058,9 @@ class ConfinedCollection:
         try:
             relative = self._relative(directory)
         except CollectionError:
-            self._fail(directory, "directory is outside collection root")
+            self._fail(
+                directory, "directory is outside collection root or not a plain relative path"
+            )
             return
         if self.excluded(relative) or self._root_fd is None:
             return
@@ -1068,7 +1077,9 @@ class ConfinedCollection:
             self._fail(relative, "directory unavailable or contains a symlink")
             return
         # Each walk ends with its own summary lines, so a caller comparing the failure
-        # count before and after a walk sees every walk that met a failure.
+        # count before and after a walk sees every walk that met a failure. Once the
+        # entry budget is spent, a later walk lists nothing and records nothing: the
+        # one failure that spent it names where collection stopped.
         scope = _WalkScope(walked, directory_links, _Unlisted(), skipped)
         try:
             yield from self._walk(fd, walked, 0, self._entry_budget, scope)
@@ -1178,7 +1189,7 @@ class ConfinedCollection:
 
         Returns the root-relative path that holds the bytes, which is ``path`` itself
         when no symlink is involved, or ``None`` when no such regular file exists.
-        Nothing is recorded.
+        No failure is recorded; a path excluded by policy is recorded as a coverage gap.
         """
         found = self.regular_file(path)
         return None if found is None else found[0]
@@ -1201,8 +1212,9 @@ class ConfinedCollection:
     def is_directory(self, path: str | Path) -> bool:
         """Whether ``path`` is a directory, reached through at most one in-root symlink.
 
-        Nothing is recorded: a caller that goes on to read or walk the path records
-        any refusal then.
+        No failure is recorded, though a path excluded by policy is recorded as a
+        coverage gap: a caller that goes on to read or walk the path records any
+        refusal then.
         """
         try:
             relative = self._relative(path)
@@ -1241,7 +1253,7 @@ class ConfinedCollection:
         except OSError as exc:
             if exc.errno in _LINK_ERRNOS:
                 raise _LinkRefusedError(
-                    "symlink target is or passes through another symlink"
+                    "symlink target is or passes through another symlink or a non-directory"
                 ) from exc
             raise
         self._links[relative.as_posix()] = target.as_posix()

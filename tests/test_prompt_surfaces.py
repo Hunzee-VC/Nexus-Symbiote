@@ -130,7 +130,7 @@ def test_symlinked_mcp_configuration_is_read_through_its_target(tmp_path):
     [
         ("../outside.md", "symlink target is outside the collection root"),
         ("missing.md", "symlink target is unavailable"),
-        ("chain.md", "symlink target is or passes through another symlink"),
+        ("chain.md", "symlink target is or passes through another symlink or a non-directory"),
         ("sub/../AGENTS.md", "symlink target is not a plain relative path"),
         ("node_modules/x.md", "symlink target is excluded from collection"),
     ],

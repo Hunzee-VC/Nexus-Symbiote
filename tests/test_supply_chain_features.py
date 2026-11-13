@@ -50,7 +50,7 @@ def test_tensor_metadata_is_confined_and_does_not_claim_weight_byte_integrity(tm
     assert safetensors_fingerprint(a, root=project) == safetensors_fingerprint(b, root=project)
     outside = tmp_path / "outside.safetensors"
     _tensor(outside)
-    with pytest.raises(ValueError):
+    with pytest.raises(OSError, match="confined stream unavailable"):
         safetensors_fingerprint(outside, root=project)
     (project / "link.safetensors").symlink_to(outside)
     with pytest.raises((OSError, ValueError)):

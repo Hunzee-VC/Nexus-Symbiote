@@ -186,6 +186,19 @@ def test_overflowing_json_numbers_are_invalid_json(tmp_path):
     ]
 
 
+def test_undecodable_and_unparsable_files_are_listed_once_under_the_root_relative_path(
+    tmp_path,
+):
+    (tmp_path / "bad.txt").write_bytes(b"\xff")
+    (tmp_path / "bad.json").write_text("{")
+    failures: list[str] = []
+    with ConfinedCollection(tmp_path, failures) as files:
+        for name in ("bad.txt", "bad.json"):
+            for spelling in (name, f"./{name}", tmp_path / name):
+                assert files.read_json(spelling) is None
+    assert failures == ["bad.txt: invalid UTF-8", "bad.json: invalid JSON or duplicate keys"]
+
+
 def test_policy_exclusion_checks_do_not_grow_with_the_number_of_entries(tmp_path):
     for index in range(300):
         (tmp_path / f"f{index}.py").write_text("")
@@ -516,3 +529,18 @@ def test_project_paths_with_a_symlinked_component_are_resolved_like_scan(tmp_pat
         ["verify-artifact", "model.bin", "--project", str(tmp_path / "alias"), "--sha256", digest],
     )
     assert result.exit_code == 0, result.output
+
+
+def test_a_null_document_and_an_unwalkable_directory_name_are_named_as_such(tmp_path):
+    (tmp_path / "x.json").write_text("null")
+    failures: list[str] = []
+    with ConfinedCollection(tmp_path, failures) as files:
+        assert files.read_json("x.json") is None
+        assert list(files.iter_files("../x")) == []
+        assert list(files.iter_files("a\x00b")) == []
+    unwalkable = "directory is outside collection root or not a plain relative path"
+    assert failures == [
+        "x.json: JSON document is null",
+        f"../x: {unwalkable}",
+        f"a\x00b: {unwalkable}",
+    ]
