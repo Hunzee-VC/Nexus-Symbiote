@@ -2,21 +2,15 @@
 
 from __future__ import annotations
 
-import importlib.util
 import subprocess
-import sys
 from pathlib import Path
 
 import yaml
 
+from tests.support import load_script
+
 ROOT = Path(__file__).resolve().parents[1]
-SPEC = importlib.util.spec_from_file_location(
-    "action_hardening_runner", ROOT / "scripts/run_action.py"
-)
-assert SPEC is not None and SPEC.loader is not None
-runner = importlib.util.module_from_spec(SPEC)
-sys.modules[SPEC.name] = runner
-SPEC.loader.exec_module(runner)
+runner = load_script("run_action")
 
 
 def action_steps() -> list[dict]:
@@ -24,7 +18,8 @@ def action_steps() -> list[dict]:
     return action["runs"]["steps"]
 
 
-def test_scan_inputs_are_data_not_shell(tmp_path: Path) -> None:
+def test_scan_inputs_are_data_not_shell(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
     step = next(step for step in action_steps() if step.get("id") == "scan")
     assert step["env"]["SYMBIOTE_SCAN_PATH"] == "${{ inputs.scan-path }}"
     assert "${{" not in step["run"]
@@ -51,7 +46,7 @@ def test_scan_inputs_are_data_not_shell(tmp_path: Path) -> None:
     assert runner.run(config, command=command) == 0
     assert len(calls) == 1
     assert calls[0][-2:] == ["--", str(tmp_path / payload)]
-    assert not (tmp_path / "PWNED").exists()
+    assert not (tmp_path / "PWNED").exists() and not Path("PWNED").exists()
 
 
 def test_validation_failure_is_not_suppressed(tmp_path: Path) -> None:

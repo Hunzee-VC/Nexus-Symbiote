@@ -2,8 +2,8 @@
 
 Every test starts without the ambient variables that the tool, the Action runner and the gate
 scripts read, with HOME and the XDG directories in a private temporary directory and the
-default collection limits, and must leave no operating mode enforced and no other limits. A test that runs longer than ``test_timeout`` seconds fails
-with its traceback. Every skip is listed with its reason; with ``--strict-skips`` (CI) a skip
+default collection limits, and must leave no operating mode enforced and no other limits. A
+test that runs longer than ``test_timeout`` seconds fails with its traceback. Every skip is listed with its reason; with ``--strict-skips`` (CI) a skip
 for any reason other than the host's file system, or, outside CI, a missing pip, fails the run.
 """
 
@@ -41,6 +41,7 @@ ISOLATED_NAMES = frozenset(
         "TTY_COMPATIBLE",
         "TTY_INTERACTIVE",
         "SOURCE_DATE_EPOCH",
+        "SOAK_OVERRIDE",
         # The unsigned-discovery gate fails closed when these say the run is automated;
         # a test that needs that sets one itself.
         "CI",
@@ -91,7 +92,10 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "--strict-skips",
         action="store_true",
-        help="fail the run when a test is skipped for a reason other than the host file system",
+        help=(
+            "fail the run when a test is skipped for a reason other than the host file system "
+            "(or, outside CI, a missing pip)"
+        ),
     )
 
 
@@ -171,6 +175,8 @@ def _isolated_environment(
         if not isinstance(address, tuple) or not address:
             return True
         host = address[0]
+        if isinstance(host, (bytes, bytearray)):
+            host = bytes(host).decode("ascii", "replace")
         if not isinstance(host, str):
             return True
         if host.lower() == "localhost":

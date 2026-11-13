@@ -14,7 +14,6 @@ from click.testing import CliRunner
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.models import A2AClientComponent, A2AServerComponent
 from nexus_symbiote.scanners.a2a import A2AScanner, _scope
-from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
 from nexus_symbiote.utils.secrets import REDACTED
 
 CARD: dict[str, Any] = {
@@ -24,11 +23,6 @@ CARD: dict[str, Any] = {
     "securitySchemes": {"bearer": {"type": "http", "scheme": "bearer"}},
     "security": [{"bearer": []}],
 }
-
-
-@pytest.fixture(autouse=True)
-def _no_ambient_key(monkeypatch):
-    monkeypatch.delenv(SOURCE_BINDING_KEY_ENV, raising=False)
 
 
 def _write(root: Path, relative: str, value: Any) -> None:
@@ -45,7 +39,7 @@ def _jws_header(header: dict[str, Any]) -> str:
     return base64.urlsafe_b64encode(json.dumps(header).encode()).decode().rstrip("=")
 
 
-def test_scope_token_shape_search_is_linear():
+def test_scope_beyond_the_length_bound_is_redacted_without_a_search():
     started = time.perf_counter()
     assert _scope("eyJ" * 400_000) == REDACTED
     assert _scope("a" + "eyJ" * 400_000) == REDACTED
@@ -96,7 +90,7 @@ def test_case_variant_card_path_is_a_failure(tmp_path, relative):
     )
 
 
-def test_generic_root_name_is_a_card_only_with_an_a2a_field(tmp_path):
+def test_generic_root_name_without_an_a2a_field_is_not_a_card(tmp_path):
     _write(tmp_path, "agent.json", {"name": "build-agent", "model": "gpt"})
     result = A2AScanner().scan(tmp_path)
     assert not result.scan_failures and not _servers(result)
@@ -276,13 +270,13 @@ def test_client_aliases_are_both_inventoried(tmp_path):
         tmp_path,
         "a2a.json",
         {
-            "clients": [],
+            "clients": [{"name": "a", "agentCardUrl": "https://a.example/card"}],
             "remoteAgents": [{"name": "x", "agentCardUrl": "http://evil.example/card"}],
         },
     )
     result = A2AScanner().scan(tmp_path)
-    (client,) = result.components
-    assert client.name == "x"
+    assert sorted(c.name for c in result.components) == ["a", "x"]
+    client = next(c for c in result.components if c.name == "x")
     assert any(r.category == "transport_security" for r in client.risks)
 
 
@@ -321,10 +315,10 @@ def test_overlong_names_are_failures_and_details_are_neutralised(tmp_path):
     _write(tmp_path, ".well-known/agent.json", {**CARD, "name": "n" * 300})
     result = A2AScanner().scan(tmp_path)
     assert result.scan_failures and not _servers(result)
-    _write(tmp_path, ".well-known/agent.json", {**CARD, "name": "a‮b\nc", "url": "http://x"})
+    _write(tmp_path, ".well-known/agent.json", {**CARD, "name": "a\u202eb\nc", "url": "http://x"})
     (server,) = _servers(A2AScanner().scan(tmp_path))
     transport = next(r for r in server.risks if r.category == "transport_security")
-    assert "‮" not in transport.detail and "\n" not in transport.detail
+    assert "\u202e" not in transport.detail and "\n" not in transport.detail
 
 
 def test_inventory_is_identical_when_scanned_at_two_locations(tmp_path):
