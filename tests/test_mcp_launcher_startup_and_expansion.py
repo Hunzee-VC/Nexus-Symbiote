@@ -439,6 +439,15 @@ def test_pattern_readings_are_charged_and_not_compiled_for_each():
     assert max(map(len, mcp_launch._PATTERNS), default=0) <= 2 * mcp_launch._LONGEST_PROGRAM + 2
 
 
+def test_the_scan_budget_does_not_depend_on_patterns_earlier_scans_compiled():
+    patterns = ["b*h", "b?sh", "ba*", "*ash", "d*h", "d?sh", "da*", "k*h", "k?h"]
+    args = [word for pattern in patterns for word in (pattern, "x")]
+    mcp_launch._PATTERNS.clear()
+    first = analyze("server", args).unknown
+    assert first == "arguments exceed the launcher scan limit"
+    assert analyze("server", args).unknown == first
+
+
 @pytest.mark.no_cover
 def test_commas_in_one_word_do_not_pay_for_other_words():
     expensive = [word.replace("?*", "") for word in _pattern_words(750)]

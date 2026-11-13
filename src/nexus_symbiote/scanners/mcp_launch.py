@@ -1387,11 +1387,15 @@ _PATTERN_CACHE = 1024
 
 
 def _pattern(text: str, budget: list[int] | None) -> re.Pattern[str]:
-    """The compiled pattern, charged when it is compiled; short patterns are kept."""
+    """The compiled pattern; short patterns are kept.
+
+    Every use is charged as a compile, so that the budget, and whether a scan runs out
+    of it, never depends on which patterns earlier scans left in the cache.
+    """
+    # Compiling costs about what reading 2 KB of words does.
+    _charge(budget, 32 + len(text) // 16)
     found = _PATTERNS.get(text)
     if found is None:
-        # Compiling costs about what reading 2 KB of words does.
-        _charge(budget, 32 + len(text) // 16)
         found = re.compile(fnmatch.translate(text))
         if len(text) <= 2 * _LONGEST_PROGRAM + 2:
             if len(_PATTERNS) >= _PATTERN_CACHE:
