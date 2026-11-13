@@ -254,4 +254,5 @@ manifests, lockfiles, Compose files and image references are in its
 the GGUF and ONNX bounds. A signature policy entry over either
 signature bound is refused with "Policy artifact or bundle is unavailable beneath
 the project root", which does not yet name the bound; a model artifact above
-5 GiB can be hashed under `model-bytes` but cannot be signer-verified.
+5 GiB can be hashed under `model-bytes` but cannot be verified by digest pin or
+signature.

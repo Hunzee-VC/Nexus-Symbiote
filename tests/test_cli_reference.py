@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Iterator
 from pathlib import Path
 
 import click
+import pytest
+from click.testing import CliRunner
 
 from nexus_symbiote import modes
 from nexus_symbiote.cli import main
+from nexus_symbiote.core.aibom import AIBOM
 
 REFERENCE = Path(__file__).resolve().parents[1] / "docs" / "cli-reference.md"
 
@@ -68,3 +72,24 @@ def test_command_table_marks_exactly_the_live_commands():
     documented = {name for name, _ in _commands(main)}
     assert {name for name, _ in rows} == documented
     assert {name for name, mode in rows if mode == "**live**"} == set(modes.LIVE_COMMANDS)
+
+
+@pytest.mark.parametrize(
+    ("row", "arguments"),
+    [
+        ("validate --json-output", ["validate", "{bom}", "--no-project-policy"]),
+        ("risk --json-output", ["risk", "{bom}", "--no-project-policy"]),
+        ("summary --json-output", ["summary", "{bom}"]),
+        ("diff --json-output", ["diff", "{bom}", "{bom}"]),
+    ],
+)
+def test_json_document_rows_name_every_top_level_key(tmp_path, row, arguments):
+    bom = tmp_path / "aibom.json"
+    AIBOM().save(bom)
+    result = CliRunner().invoke(
+        main, [argument.format(bom=bom) for argument in arguments] + ["--json-output"]
+    )
+    document = json.loads(result.stdout)
+    match = re.search(rf"^\| `{re.escape(row)}` \|(.*)$", REFERENCE.read_text(), re.M)
+    assert match is not None
+    assert sorted(key for key in document if f"`{key}`" not in match.group(1)) == []

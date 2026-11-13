@@ -117,8 +117,8 @@ then notes, then the added, removed and modified components and relationships.
 | --- | --- |
 | Component added | at least medium, or the highest effective finding severity on the added component (for example critical for an executable model format) |
 | Component removed | high for MCP servers and clients, tools, models, instruction and skill files, guardrails, IDE agents and extensions, A2A clients and servers, and for any record that carried integrity evidence (file, content, definition or schema digest, exact package URL, version pin, lockfile integrity, static source binding); medium otherwise. Confirm it was deleted, not moved where no collector reads it |
-| MCP endpoint, transport, launch command, launcher package or static source binding changed | critical |
-| Tool definition, input schema, description or annotations changed; model serialization safety changed to an unsafe execution or template format | critical |
+| MCP endpoint, transport, launch command, launcher package or static source binding changed; the served tool set, or the served instructions, prompts or resource templates, that a live observation recorded (`discover-mcp --record`, `verify-live --record`) changed | critical |
+| Tool definition, input schema, description or annotations changed; model serialization safety changed to an unsafe execution or template format; a model's `trust_remote_code` set to true | critical |
 | Security field changed (for example capabilities, authorizations, claims, endpoints, A2A card URL, package URL, provider, source URI, signing identity or key reference, permission mode, version pin), a `*_ref` or `*_refs` field changed, declared autonomy level changed, trust tier or signing status downgraded, a digest removed or changed | high |
 | Trust tier or signing status raised | medium: a snapshot is written unsigned, so a raised label is a claim to review |
 | Risk findings added | the highest added severity, at least medium |
@@ -150,4 +150,4 @@ additions as removals), and snapshots that disagree on absolute paths.
 
 `diff` exits 0 without `--fail-on-alert`, whatever it finds. With it, the command
 exits 1 when it reports any security alert, and 0 otherwise. An unreadable or
-invalid input is an error (exit 1).
+invalid input is an error (exit 1); a missing file is a usage error (exit 2).

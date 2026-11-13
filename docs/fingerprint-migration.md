@@ -55,7 +55,8 @@ alongside the declared version and, for an exact npm or PyPI version resolved
 from the default registry, `package_url`. Inventories written by 0.1.0
 identified only `npx`, `bunx`, `uvx`, `pipx` and `docker run` with a few
 options, recorded a version-tagged image as pinned (only a digest pins an image
-now) and carry static binding profile v2, which `validate --project` reports as
+now) and carry the static configuration digest profile
+`nexus-symbiote/mcp-static-config/v2`, which `validate --project` reports as
 unknown. Recollect the baseline and review the identity, the new findings and
 the `packages`, `package_sources` and `launch_context` properties before
 approving the new snapshot. Python server references no longer contain the
@@ -127,11 +128,12 @@ field.
 For historical CycloneDX exports that flattened all relationships into
 `dependsOn` and wrote no `conditional` flag, the Python API accepts
 `CycloneDXGenerator.recover(document, allow_legacy_relationships=True)`.
-Legacy mode accepts that exact historical edge projection only as a whole. It
-rejects a mixture of the historical and current edge projections, and it still
-checks every other public field, including the coverage composition, against
-the current projection. Re-export the recovered inventory to give standard
-consumers the corrected graph and flags.
+Legacy mode applies only to exports without a projection marker, and accepts
+that exact historical edge projection only as a whole. It rejects a mixture of
+the historical and current edge projections, and it still checks every other
+public field, including the coverage composition, against projection 1.
+Re-export the recovered inventory to give standard consumers the corrected
+graph and flags.
 
 Exports written by builds before 0.1.0 can fail recovery, because their
 standard fields match neither projection.
