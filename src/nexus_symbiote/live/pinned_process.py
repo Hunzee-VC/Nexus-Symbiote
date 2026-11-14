@@ -3,9 +3,9 @@
 ``live.stdio`` and ``live.session`` both copy the approved bytes and execute that
 private copy. One helper keeps the copy, the digest check and the termination from
 drifting apart. When the kernel allows a user and PID namespace, the launcher is
-pid 1 of that namespace and dies with every descendant. Ubuntu 24.04 runners often
-refuse the namespace; there the helper kills the descendant tree itself, so a
-``setsid`` child still does not outlive the session.
+pid 1 of that namespace and dies with every descendant. If the kernel refuses the
+namespace, launch fails before executing the pinned program. The operator can
+explicitly opt out, accepting best-effort cleanup that detached children can evade.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ def isolation_enabled() -> bool:
 
 @contextmanager
 def isolation_off() -> Iterator[None]:
-    """Run pinned launchers in the caller's PID namespace. Descendants can escape."""
+    """Explicitly accept a launch without kernel containment; descendants can escape."""
     token = _ISOLATION.set(False)
     try:
         yield
@@ -137,14 +137,20 @@ def _probe_namespace() -> bool:
 def isolated_argv(staged: Path) -> list[str]:
     """The argv that runs ``staged``.
 
-    A PID namespace is used when isolation is on and the kernel allows it. Otherwise
-    the staged launcher is executed directly and termination kills its descendants.
+    A PID namespace is required unless the operator explicitly opted out. A PPid
+    tree sweep cannot contain children that daemonize and are reparented.
     """
-    if not isolation_enabled() or not namespace_available():
+    if not isolation_enabled():
         return [str(staged)]
+    if not namespace_available():
+        raise PinnedProcessError(
+            "isolation-unavailable",
+            "kernel PID containment is unavailable; no launcher was executed. "
+            "Explicitly opt out only in an independently isolated worker",
+        )
     tool = _unshare_path()
     if tool is None:
-        return [str(staged)]
+        raise PinnedProcessError("isolation-unavailable", "PID namespace launcher is unavailable")
     # --kill-child delivers SIGKILL to the namespace init when unshare dies, and the
     # kernel then kills every process in that namespace, including setsid descendants.
     return [
@@ -246,20 +252,21 @@ def spawn_pinned(staged: Path, work: Path) -> subprocess.Popen[bytes]:
 
 
 def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
-    """Kill the launcher's session and, outside a PID namespace, its descendants.
+    """Kill the session, with best-effort descendant cleanup outside a PID namespace.
 
     Descendants are killed first, while their parent is still alive, so a ``setsid``
-    child is still visible in the process tree. The process group is killed after that.
+    child may still be visible. A daemonized child can be reparented and escape this
+    tree sweep, so it is never a substitute for kernel containment.
     """
     try:
         namespaced = proc.pid in _NAMESPACED
-        if isolation_enabled() and not namespaced:
+        if not namespaced:
             _kill_descendants(proc.pid)
         try:
             os.killpg(proc.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
-        if isolation_enabled() and not namespaced:
+        if not namespaced:
             _kill_descendants(proc.pid)
     finally:
         # A finished pid must not stay marked. The kernel can reuse it for a later

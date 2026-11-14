@@ -21,6 +21,9 @@ from nexus_symbiote.core.models import MCPServerComponent, ToolComponent
 from nexus_symbiote.live import stdio, verify
 from nexus_symbiote.live.verify import record_candidate, verify_mcp_servers
 
+pytestmark = pytest.mark.usefixtures("nonisolated_pinned_fixtures")
+
+
 TOOL = {"name": "weather", "description": "Read weather", "inputSchema": {"type": "object"}}
 HELLO = {
     "protocolVersion": "2025-06-18",

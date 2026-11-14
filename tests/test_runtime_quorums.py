@@ -8,6 +8,8 @@ from nexus_symbiote.runtime import AuthorizationError, ReferenceGateway, key_id,
 from tests.test_runtime_authorization import fixture
 from tests.test_runtime_stdio_session import launcher, signed_inputs
 
+pytestmark = pytest.mark.usefixtures("nonisolated_pinned_fixtures")
+
 
 def configured_gateway(gateway, **overrides):
     options = {

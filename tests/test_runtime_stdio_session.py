@@ -10,10 +10,13 @@ from pathlib import Path
 
 import pytest
 
+from nexus_symbiote.live.pinned_process import isolation_off
 from nexus_symbiote.live.session import PinnedStdioSession, invoke_pinned_stdio
 from nexus_symbiote.runtime import AuthorizationError, digest, sign_contract
 from nexus_symbiote.runtime_validation import MAX_ARGUMENT_BYTES
 from tests.test_runtime_authorization import DEFINITION, fixture
+
+pytestmark = pytest.mark.usefixtures("nonisolated_pinned_fixtures")
 
 
 def launcher(
@@ -190,7 +193,8 @@ def test_concurrent_replay_allows_only_one_call(tmp_path):
 
     def request():
         try:
-            invoke_pinned_stdio(values[0], values[1], command=str(path), sha256=pin, **kwargs)
+            with isolation_off():
+                invoke_pinned_stdio(values[0], values[1], command=str(path), sha256=pin, **kwargs)
             return "executed"
         except AuthorizationError as exc:
             assert "already been used" in str(exc)

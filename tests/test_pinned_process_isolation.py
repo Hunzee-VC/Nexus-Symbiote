@@ -1,8 +1,9 @@
-"""A setsid descendant of a pinned launcher dies with the session."""
+"""Default launches require kernel containment; explicit opt-out is best effort only."""
 
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import signal
 import subprocess
@@ -11,14 +12,18 @@ import time
 from pathlib import Path
 
 import pytest
+from click.testing import CliRunner
 
+from nexus_symbiote.cli import main
 from nexus_symbiote.live import pinned_process
 from nexus_symbiote.live.pinned_process import isolation_off
 from nexus_symbiote.live.session import PinnedStdioSession
-from nexus_symbiote.live.stdio import observe_pinned
+from nexus_symbiote.live.stdio import LaunchPolicyError, observe_pinned
+from nexus_symbiote.runtime import AuthorizationError
+from tests.test_pinned_stdio import command, inventory, launcher
 
 
-def _launcher(tmp_path: Path, marker: Path) -> tuple[Path, str]:
+def _launcher(tmp_path: Path, marker: Path, *, detached: bool = False) -> tuple[Path, str]:
     path = tmp_path / "launcher"
     path.write_text(
         f"""#!{sys.executable}
@@ -26,6 +31,8 @@ import json, os, sys, time
 marker = {str(marker)!r}
 if os.fork() == 0:
     os.setsid()
+    if {detached!r} and os.fork():
+        os._exit(0)
     open(marker, "w").write(os.readlink("/proc/self"))
     time.sleep(60)
     raise SystemExit
@@ -71,29 +78,54 @@ def _assert_dead(pid: int) -> None:
     raise AssertionError(f"process {pid} was still running")
 
 
-def test_observe_pinned_kills_a_setsid_descendant(tmp_path: Path) -> None:
+def test_observe_pinned_requires_containment_or_kills_its_descendants(tmp_path: Path) -> None:
     marker = tmp_path / "pid"
     command, digest = _launcher(tmp_path, marker)
+    if not pinned_process.namespace_available():
+        with pytest.raises(LaunchPolicyError) as denied:
+            observe_pinned(str(command), digest)
+        assert denied.value.reason == "isolation-unavailable"
+        assert not marker.exists()
+        return
     observe_pinned(str(command), digest)
     _assert_dead(_host_pid(marker))
 
 
-def test_a_pinned_session_kills_a_setsid_descendant(tmp_path: Path) -> None:
+def test_a_pinned_session_requires_containment_or_kills_its_descendants(tmp_path: Path) -> None:
     marker = tmp_path / "pid"
     command, digest = _launcher(tmp_path, marker)
-    with PinnedStdioSession(command=str(command), sha256=digest, server_id="server:mail"):
+    session = PinnedStdioSession(command=str(command), sha256=digest, server_id="server:mail")
+    if not pinned_process.namespace_available():
+        with pytest.raises(AuthorizationError, match="kernel PID containment"), session:
+            pass
+        assert not marker.exists()
+        return
+    with session:
         pass
     _assert_dead(_host_pid(marker))
 
 
-def test_setsid_descendant_dies_when_the_pid_namespace_is_refused(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("namespace_available", [False, True])
+def test_a_missing_namespace_or_launcher_never_starts_the_pinned_program(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, namespace_available: bool
 ) -> None:
-    monkeypatch.setattr(pinned_process, "namespace_available", lambda: False)
+    monkeypatch.setattr(pinned_process, "namespace_available", lambda: namespace_available)
+    if namespace_available:
+        monkeypatch.setattr(pinned_process, "_unshare_path", lambda: None)
+    starts = []
+
+    def refuse_start(*args, **kwargs):
+        starts.append(args)
+        raise AssertionError("the pinned program must not be started")
+
+    monkeypatch.setattr(pinned_process.subprocess, "Popen", refuse_start)
     marker = tmp_path / "pid"
     command, digest = _launcher(tmp_path, marker)
-    observe_pinned(str(command), digest)
-    _assert_dead(_host_pid(marker))
+    with pytest.raises(LaunchPolicyError) as denied:
+        observe_pinned(str(command), digest)
+    assert denied.value.reason == "isolation-unavailable"
+    assert starts == []
+    assert not marker.exists()
 
 
 def test_a_finished_pid_is_not_remembered_as_namespaced() -> None:
@@ -104,11 +136,29 @@ def test_a_finished_pid_is_not_remembered_as_namespaced() -> None:
     assert proc.pid not in pinned_process._NAMESPACED
 
 
-def test_without_isolation_a_setsid_descendant_survives(tmp_path: Path) -> None:
+def test_explicit_opt_out_cannot_contain_a_reparented_child(tmp_path: Path) -> None:
     marker = tmp_path / "pid"
-    command, digest = _launcher(tmp_path, marker)
+    command, digest = _launcher(tmp_path, marker, detached=True)
     with isolation_off():
         observe_pinned(str(command), digest)
     host = _host_pid(marker)
-    os.kill(host, 0)
-    os.kill(host, signal.SIGKILL)
+    try:
+        os.kill(host, 0)
+    finally:
+        try:
+            os.kill(host, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+def test_cli_requires_an_explicit_opt_out_when_the_namespace_is_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(pinned_process, "namespace_available", lambda: False)
+    arguments, _ = command(tmp_path, inventory(), launcher(tmp_path))
+    blocked = CliRunner().invoke(main, [*arguments, "--json-output"])
+    assert blocked.exit_code == 1, blocked.output
+    assert json.loads(blocked.stdout)["results"][0]["reason"] == "isolation-unavailable"
+    allowed = CliRunner().invoke(main, [*arguments, "--json-output", "--no-isolation"])
+    assert allowed.exit_code == 0, allowed.output
+    assert "kernel PID containment is disabled" in allowed.stderr
