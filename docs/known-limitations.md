@@ -173,7 +173,9 @@ A way around a limit that its entry does not describe is worth a
   unknown. Other locations and the runner's own namespace (`UV_*`, `PIP_*`,
   `YARN_*`, `BUN_*`, `DOCKER_*` and similar) are a medium `package_source`
   finding, and the package URL is withheld. Configuration names that look like
-  tokens or hold one after a prefix (`AWS_AKIA...`) are exported as `[redacted]`.
+  tokens or hold one after a prefix (`AWS_AKIA...`) are exported as `[redacted]`,
+  and a launcher package whose name or specifier looks like a token is withheld
+  (`[withheld]`, no package URL) with a medium `completeness` finding.
 - **Changed values need the binding key.** Launch arguments, environment and header
   values are exported only as redacted positions and names, and endpoint and
   package index URLs as origins. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, `diff`

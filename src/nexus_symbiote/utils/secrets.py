@@ -49,7 +49,9 @@ LONG_CREDENTIAL_LENGTH = 16
 # Formats distinctive enough to stand out inside a name (AWS_AKIA..., X_glpat-...).
 # Each stops at the end of its own run or matches the rest, so starting one after
 # every "_" or "-" keeps the scan linear. An AWS key id must end there, or
-# REGION_ASIAPACIFICSOUTHEAST1 would read as one.
+# REGION_ASIAPACIFICSOUTHEAST1 would read as one. The AI-vendor prefixes also open
+# ordinary names (pplx-7b-online, fw_config_loader), so each needs a body of at
+# least 20 characters in the vendor's own alphabet.
 _DISTINCT_SHAPES = (
     r"gh[oprsu]_[A-Za-z0-9]{36,}+|github_pat_\w{22,}+|glpat-[\w-]{20,}+"
     r"|xox[abeoprs]-[\w-]{10,}+|[rs]k_(?:live|test)_[A-Za-z0-9]{16,}+"
@@ -58,6 +60,9 @@ _DISTINCT_SHAPES = (
     r"|SG\.[\w-]{16,}+\.[\w-]{16,}+|dckr_pat_[\w-]{20,}+|shp(?:at|ss|ca|pa)_[0-9a-fA-F]{32}"
     r"|SK[0-9a-f]{32}(?![A-Za-z0-9])|dapi[0-9a-f]{32}|xapp-[\w-]{20,}+"
     r"|PMAK-[0-9a-f]{24}-[0-9a-f]{34}|dp\.pt\.\w{40,}+"
+    r"|pcsk_[A-Za-z0-9_]{20,}+|gsk_[A-Za-z0-9]{20,}+|r8_[A-Za-z0-9]{20,}+"
+    r"|pplx-[A-Za-z0-9]{20,}+|xai-[A-Za-z0-9]{20,}+|lsv2_(?:pt|sk)_[A-Za-z0-9_]{20,}+"
+    r"|tvly-[A-Za-z0-9-]{20,}+|fw_[A-Za-z0-9]{20,}+"
 )
 # A JWT can fail only at its first dot, so it starts only at a word boundary: started
 # after every "_" its first segment would be rescanned once per position.
