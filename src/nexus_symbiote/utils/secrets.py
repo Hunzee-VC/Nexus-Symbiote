@@ -7,6 +7,7 @@ import binascii
 import bisect
 import heapq
 import re
+import string
 from collections.abc import Iterable, Iterator, Mapping
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -51,6 +52,10 @@ _AUTHORIZATION_LOOKBACK = 40
 # A prose word after a scheme ("Bearer authentication") is shorter than this; a value
 # this long after Bearer, Token, Bot, ApiKey or Api-Key is redacted whatever its shape.
 LONG_CREDENTIAL_LENGTH = 16
+_ASCII_DIGITS = frozenset(string.digits)
+_ASCII_UPPER = frozenset(string.ascii_uppercase)
+_ASCII_LOWER = frozenset(string.ascii_lowercase)
+_CREDENTIAL_PUNCTUATION = frozenset("._~+/=-")
 # Formats distinctive enough to stand out inside a name (AWS_AKIA..., X_glpat-...).
 # Each stops at the end of its own run or matches the rest, so starting one after
 # every "_" or "-" keeps the scan linear. An AWS key id must end there, or
@@ -344,11 +349,19 @@ def _credential_like(token: str, scheme: str) -> bool:
             return b":" in base64.b64decode(padded, validate=True)
         except (binascii.Error, ValueError):
             return False
+    if len(token) >= LONG_CREDENTIAL_LENGTH:
+        return True
+    if token.isascii():
+        # Set checks run in C: a text of scheme words is one match per word.
+        return (
+            not _ASCII_DIGITS.isdisjoint(token)
+            or not _CREDENTIAL_PUNCTUATION.isdisjoint(token)
+            or (not _ASCII_UPPER.isdisjoint(token[1:]) and not _ASCII_LOWER.isdisjoint(token))
+        )
     return (
-        len(token) >= LONG_CREDENTIAL_LENGTH
-        or any(char.isdigit() for char in token)
+        any(char.isdigit() for char in token)
         or (any(char.isupper() for char in token[1:]) and any(char.islower() for char in token))
-        or any(char in "._~+/=-" for char in token)
+        or any(char in _CREDENTIAL_PUNCTUATION for char in token)
     )
 
 
