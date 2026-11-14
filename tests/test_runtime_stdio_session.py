@@ -259,9 +259,17 @@ def test_protocol_failure_kills_and_reaps_process(tmp_path, monkeypatch, mode):
 
 
 @pytest.mark.parametrize(
-    "failure", ["workload", "changed-workload", "scope", "endpoint", "revocation", "approval"]
+    ("failure", "reason"),
+    [
+        ("workload", "trust-tenant-mismatch"),
+        ("changed-workload", "identity-changed"),
+        ("scope", "scope-mismatch"),
+        ("endpoint", "endpoint-mismatch"),
+        ("revocation", "tool-revoked"),
+        ("approval", "approval-request-mismatch"),
+    ],
 )
-def test_gateway_gates_prevent_real_process_tool_calls(tmp_path, failure):
+def test_gateway_gates_prevent_real_process_tool_calls(tmp_path, failure, reason):
     values = list(fixture(tmp_path))
     gateway, call, _, snapshot, status, approval, _, human, trust_key, _ = values
     path, pin, log = launcher(tmp_path)
@@ -281,9 +289,17 @@ def test_gateway_gates_prevent_real_process_tool_calls(tmp_path, failure):
         status = status.model_copy(update={"revoked_tools": (snapshot.tools[0].definition_digest,)})
         kwargs["trust"] = sign_contract(status, "trust", (trust_key,))
     elif failure == "approval":
-        approval = approval.model_copy(update={"request_digest": "sha256:" + "0" * 64})
+        grant = snapshot.tools[0].model_copy(update={"endpoint_identity": "stdio+launcher:" + pin})
+        pinned = snapshot.model_copy(update={"tools": (grant,)})
+        approval = approval.model_copy(
+            update={
+                "snapshot_digest": digest(pinned.model_dump(mode="json")),
+                "request_digest": "sha256:" + "0" * 64,
+            }
+        )
         kwargs["approval"] = sign_contract(approval, "approval", (human,))
-    with pytest.raises(AuthorizationError):
+    with pytest.raises(AuthorizationError) as denied:
         invoke_pinned_stdio(gateway, call, command=str(path), sha256=pin, **kwargs)
+    assert denied.value.reason == reason
     records = [json.loads(line)[0] for line in log.read_text().splitlines()] if log.exists() else []
     assert "tools/call" not in records

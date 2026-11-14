@@ -238,7 +238,7 @@ def test_inventories_without_comparable_digests_keep_the_strict_comparison(
     assert bool(regenerated) is not metadata_alert
 
 
-def test_cyclonedx_rerun_keeps_projected_dependencies(tmp_path):
+def test_cyclonedx_rerun_keeps_projected_dependencies():
     data = json.loads(CYCLONEDX.read_text())
     first = ShadowScanImporter().parse_report(json.dumps(data)).to_native_bom()
     data["metadata"]["timestamp"] = "2026-11-02T00:10:00Z"

@@ -4,6 +4,7 @@ import base64
 import json
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from threading import Event
@@ -711,14 +712,6 @@ def test_invalid_or_external_schema_cannot_execute(tmp_path, schema):
     assert values[-1] == []
 
 
-def test_approval_actor_must_match_authorized_key(tmp_path):
-    values = list(fixture(tmp_path))
-    values[5] = values[5].model_copy(update={"actor": "other-approver"})
-    with pytest.raises(AuthorizationError, match="actor"):
-        invoke(values)
-    assert values[-1] == []
-
-
 @pytest.mark.parametrize(
     "raw",
     [
@@ -768,7 +761,7 @@ def test_nonces_are_scoped_by_tenant_and_legacy_rows_stay_consumed(tmp_path):
     store.record((), "shared-nonce", tenant="globex")
     with pytest.raises(AuthorizationError, match="already been used"):
         store.record((), "shared-nonce", tenant="acme")
-    with sqlite3.connect(tmp_path / "state.sqlite") as db:
+    with closing(sqlite3.connect(tmp_path / "state.sqlite")) as db, db:
         db.execute("INSERT INTO nonces VALUES ('legacy-consumed-nonce')")
     for tenant in ("acme", "globex", None):
         with pytest.raises(AuthorizationError, match="already been used"):

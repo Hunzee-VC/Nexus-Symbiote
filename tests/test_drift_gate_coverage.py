@@ -160,13 +160,13 @@ def test_the_same_tree_in_another_directory_keeps_its_repository_agent(tmp_path)
     shutil.copytree(first, second)
     _scan(first, tmp_path / "first.json")
     _scan(second, tmp_path / "second.json")
-    agents = [
-        [c for c in json.loads((tmp_path / name).read_text())["components"] if c["bom_ref"]]
+    scanned = [
+        json.loads((tmp_path / name).read_text())["components"]
         for name in ("first.json", "second.json")
     ]
     refs = [
         {(c["bom_ref"], c["name"]) for c in found if c["component_type"] == "agent"}
-        for found in agents
+        for found in scanned
     ]
     assert refs[0] == refs[1] == {(INFERRED_AGENT_REF, "repository")}
 

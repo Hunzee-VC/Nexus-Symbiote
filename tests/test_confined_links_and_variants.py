@@ -169,7 +169,7 @@ def test_names_fold_as_case_insensitive_file_systems_compare_them():
     "source", ["x = " + "-" * 100_000 + "1\n", "if a:\n    pass\n" + "elif a:\n    pass\n" * 20_000]
 )
 def test_parser_resource_failures_become_value_errors(source):
-    with pytest.raises((ValueError, SyntaxError)):
+    with pytest.raises(ValueError):
         parse_python(source)
 
 

@@ -141,7 +141,7 @@ def test_unsigned_import_records_unverified_with_digest_and_binding(tmp_path, mo
     assert _claim(out)["source_report_path"] == REPORT.name
 
 
-def test_report_binding_uses_fields_the_report_carries(tmp_path):
+def test_report_binding_uses_fields_the_report_carries():
     data = json.loads(json.dumps(MINIMAL))
     data["repository"] = "https://example.test/acme/repo"
     data["commit"] = "0123456789abcdef0123456789abcdef01234567"
@@ -153,7 +153,7 @@ def test_report_binding_uses_fields_the_report_carries(tmp_path):
     assert record.report_time == "2026-01-01T00:00:01Z"
 
 
-def test_cyclonedx_binding_uses_metadata_timestamp(tmp_path):
+def test_cyclonedx_binding_uses_metadata_timestamp():
     imported = ShadowScanImporter().parse_report(CYCLONEDX.read_bytes())
     record = imported.discovery_verification
     assert record is not None

@@ -56,7 +56,7 @@ def _scan(tmp_path: Path, monkeypatch, *components: PromptComponent) -> dict:
         args += ["--scanner", name]
     result = CliRunner().invoke(main, args)
     assert result.exit_code == 0, result.output
-    return json.loads(output.read_text())
+    return json.loads(output.read_text(encoding="utf-8"))
 
 
 def test_identical_duplicate_from_two_collectors_is_kept_once(tmp_path, monkeypatch):
@@ -111,7 +111,7 @@ def _scan_with_edge(tmp_path: Path, monkeypatch, edge: DependencyEdge) -> dict:
         ],
     )
     assert result.exit_code == 0, result.output
-    return json.loads(output.read_text())
+    return json.loads(output.read_text(encoding="utf-8"))
 
 
 def test_conflicting_duplicate_collector_is_not_reported_completed(tmp_path, monkeypatch):

@@ -37,8 +37,8 @@ def test_exception_payload_is_absent_from_console_and_saved_bom(
         ["scan", str(tmp_path), "--scanner", "prompt", "--no-project-policy", "-o", str(output)],
     )
     assert result.exit_code == 1
-    assert CANARY not in result.output + output.read_text()
-    coverage = json.loads(output.read_text())["metadata"]["completeness"]
+    assert CANARY not in result.output + output.read_text(encoding="utf-8")
+    coverage = json.loads(output.read_text(encoding="utf-8"))["metadata"]["completeness"]
     assert coverage["scanner_status"]["prompt"] == "failed"
     assert len(coverage["scan_failures"]) == 1
     assert coverage["scan_failures"][0].startswith("prompt: ")
@@ -58,9 +58,11 @@ def test_pydantic_input_values_are_absent_from_saved_failure(
         ["scan", str(tmp_path), "--scanner", "prompt", "--no-project-policy", "-o", str(output)],
     )
     assert result.exit_code == 1
-    assert CANARY not in result.output + output.read_text()
-    assert "scanner-validation-error" in output.read_text()
-    failures = json.loads(output.read_text())["metadata"]["completeness"]["scan_failures"]
+    assert CANARY not in result.output + output.read_text(encoding="utf-8")
+    assert "scanner-validation-error" in output.read_text(encoding="utf-8")
+    failures = json.loads(output.read_text(encoding="utf-8"))["metadata"]["completeness"][
+        "scan_failures"
+    ]
     assert "input_value" not in repr(failures)
 
 
@@ -81,7 +83,7 @@ def test_failure_boundary_does_not_evaluate_exception_text(
         ["scan", str(tmp_path), "--scanner", "prompt", "--no-project-policy", "-o", str(output)],
     )
     assert result.exit_code == 1
-    assert "scanner-internal-error" in output.read_text()
+    assert "scanner-internal-error" in output.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(
@@ -104,9 +106,11 @@ def test_invalid_model_config_retains_artifact_and_safe_failure_location(
         ["scan", str(tmp_path), "--scanner", "model", "--no-project-policy", "-o", str(output)],
     )
     assert result.exit_code == 1
-    assert CANARY not in result.output + output.read_text()
+    assert CANARY not in result.output + output.read_text(encoding="utf-8")
     assert (
-        json.loads(output.read_text())["metadata"]["completeness"]["scanner_status"]["model"]
+        json.loads(output.read_text(encoding="utf-8"))["metadata"]["completeness"][
+            "scanner_status"
+        ]["model"]
         == "failed"
     )
 

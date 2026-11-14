@@ -174,8 +174,13 @@ def test_threshold_requires_distinct_trusted_signers(tmp_path):
     )
     contract = write(tmp_path, "status.json", status)
     both, one = tmp_path / "both.json", tmp_path / "one.json"
-    assert run("sign", contract, "--kind", "trust", "--key", first, "--key", second, "--out", both)
-    assert run("sign", contract, "--kind", "trust", "--key", first, "--out", one)
+    assert (
+        run(
+            "sign", contract, "--kind", "trust", "--key", first, "--key", second, "--out", both
+        ).exit_code
+        == 0
+    )
+    assert run("sign", contract, "--kind", "trust", "--key", first, "--out", one).exit_code == 0
     ring = ["--public-key", first_pub, "--public-key", second_pub, "--threshold", "2"]
     accepted = run("verify", both, "--kind", "trust", *ring)
     assert accepted.exit_code == 0, accepted.output
@@ -265,7 +270,12 @@ def test_deeply_nested_inputs_end_without_a_traceback(tmp_path):
     snapshot_key, snapshot_pub = keypair(tmp_path, "snapshot")
     signed = tmp_path / "snapshot.dsse.json"
     contract = write(tmp_path, "snapshot.json", current_snapshot({}))
-    assert run("sign", contract, "--kind", "snapshot", "--key", snapshot_key, "--out", signed)
+    assert (
+        run(
+            "sign", contract, "--kind", "snapshot", "--key", snapshot_key, "--out", signed
+        ).exit_code
+        == 0
+    )
     result = run(
         "verify", signed, "--kind", "snapshot", "--public-key", snapshot_pub, "--bom", nested
     )

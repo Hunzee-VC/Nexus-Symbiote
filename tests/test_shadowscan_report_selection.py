@@ -142,7 +142,7 @@ def test_contradictory_cyclonedx_classification_stays_unmapped(entry_type, group
 
 
 @pytest.mark.parametrize("encoding", ["utf-16", "utf-32", "utf-16-le"])
-def test_reports_other_than_utf8_are_refused(tmp_path, encoding):
+def test_reports_other_than_utf8_are_refused(encoding):
     text = json.dumps(_report(title="café"))
     with pytest.raises(ValueError):
         ShadowScanImporter().parse_report(text.encode(encoding))
@@ -203,8 +203,12 @@ def test_dependency_edge_total_bound_fails_for_its_own_reason():
 
 def test_report_byte_bound(tmp_path):
     report = tmp_path / "report.json"
+    report.write_bytes(b" " * MAX_REPORT_BYTES)
+    with pytest.raises(ValueError) as within:
+        ShadowScanImporter().read_report(report)
+    assert "outside safe read limits" not in str(within.value)
     report.write_bytes(b" " * (MAX_REPORT_BYTES + 1))
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="outside safe read limits"):
         ShadowScanImporter().read_report(report)
 
 
