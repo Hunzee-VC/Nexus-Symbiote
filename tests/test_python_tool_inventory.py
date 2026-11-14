@@ -308,3 +308,24 @@ def test_helpers_of_the_same_file_are_judged_by_what_they_do_with_the_server(tmp
     )
     result, _ = scan(tmp_path, registering)
     assert result.surfaces_excluded
+
+
+@pytest.mark.parametrize(
+    "helper",
+    [
+        "def build(server):\n    server.add_tool(export_all)\nbuild(mcp)\n"
+        "def build(server):\n    return server.sse_app()\n",
+        "from elsewhere import register_all\n"
+        "def build(server):\n    return server.sse_app()\nbuild = register_all\nbuild(mcp)\n",
+        "from elsewhere import registering\n"
+        "@registering\ndef build(server):\n    return server.sse_app()\nbuild(mcp)\n",
+    ],
+)
+def test_a_helper_the_call_may_not_reach_is_not_judged_benign(tmp_path, helper):
+    result, tools = scan(
+        tmp_path, FASTMCP + "mcp = FastMCP('x')\n@mcp.tool()\ndef add(): pass\n" + helper
+    )
+    assert [tool.name for tool in tools] == ["add"]
+    assert "pkg/server.py: unsupported Python MCP binding or dynamic registration" in (
+        result.surfaces_excluded
+    )

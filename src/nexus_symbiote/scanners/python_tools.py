@@ -545,17 +545,24 @@ def _helper(function: ast.FunctionDef | ast.AsyncFunctionDef) -> _Helper:
 
 
 def _benign_helper_arguments(
-    tree: ast.Module, nodes: list[ast.AST], servers: dict[str, MCPServerComponent]
+    tree: ast.Module,
+    nodes: list[ast.AST],
+    servers: dict[str, MCPServerComponent],
+    bindings: Counter[str],
 ) -> set[ast.AST]:
     """Servers passed to a helper of this file that registers nothing on them.
 
-    Each helper is read once, however many calls pass it a server, so the work stays
+    Only an undecorated function whose name the file binds once is read, since a
+    call can otherwise reach another definition or what a decorator returned. Each
+    helper is read once, however many calls pass it a server, so the work stays
     linear in the size of the file.
     """
     functions = {
         stmt.name: stmt
         for stmt in tree.body
         if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and not stmt.decorator_list
+        and bindings[stmt.name] == 1
     }
     helpers: dict[str, _Helper] = {}
     benign: set[ast.AST] = set()
@@ -608,12 +615,13 @@ def _has_unsupported_registration(
     handled: set[ast.AST],
     servers: dict[str, MCPServerComponent],
     factories: dict[str, ast.ImportFrom],
+    bindings: Counter[str],
 ) -> bool:
     """Whether a recognised server or factory escapes the supported forms."""
     if calls - handled:
         return True
     factory_calls = {call.func for call in calls}
-    safe = _benign_helper_arguments(tree, nodes, servers) | _annotation_names(nodes)
+    safe = _benign_helper_arguments(tree, nodes, servers, bindings) | _annotation_names(nodes)
     for node in nodes:
         if (
             isinstance(node, ast.Attribute)
@@ -771,7 +779,7 @@ def collect_python_tools(
             result.components.append(server)
         elif isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
             _record_decorated_tools(stmt, servers, handled, path, source_digest, result)
-    if _has_unsupported_registration(tree, nodes, calls, handled, servers, factories) or (
+    if _has_unsupported_registration(tree, nodes, calls, handled, servers, factories, bindings) or (
         _imported_receivers(tree)
     ):
         result.surfaces_excluded.append(
