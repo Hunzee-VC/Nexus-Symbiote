@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import signal
 import subprocess
 import sys
 import time
@@ -31,7 +30,10 @@ import json, os, sys, time
 marker = {str(marker)!r}
 if os.fork() == 0:
     os.setsid()
-    if {detached!r} and os.fork():
+    if {detached!r}:
+        if os.fork() == 0:
+            open(marker, "w").write(os.readlink("/proc/self"))
+            time.sleep(60)
         os._exit(0)
     open(marker, "w").write(os.readlink("/proc/self"))
     time.sleep(60)
@@ -148,19 +150,24 @@ def test_a_forgotten_pid_is_swept_again_when_reused(monkeypatch: pytest.MonkeyPa
     assert swept == [proc.pid, proc.pid]
 
 
-def test_explicit_opt_out_cannot_contain_a_reparented_child(tmp_path: Path) -> None:
+def test_opt_out_kills_a_double_fork_and_a_refused_namespace_never_starts_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     marker = tmp_path / "pid"
     command, digest = _launcher(tmp_path, marker, detached=True)
     with isolation_off():
         observe_pinned(str(command), digest)
-    host = _host_pid(marker)
-    try:
-        os.kill(host, 0)
-    finally:
-        try:
-            os.kill(host, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+    _assert_dead(_host_pid(marker))
+
+    monkeypatch.setattr(pinned_process, "namespace_available", lambda: False)
+    off = tmp_path / "off"
+    off.mkdir()
+    blocked = off / "pid"
+    blocked_command, blocked_digest = _launcher(off, blocked, detached=True)
+    with pytest.raises(LaunchPolicyError) as denied:
+        observe_pinned(str(blocked_command), blocked_digest)
+    assert denied.value.reason == "isolation-unavailable"
+    assert not blocked.exists()
 
 
 def test_cli_requires_an_explicit_opt_out_when_the_namespace_is_unavailable(

@@ -164,8 +164,8 @@ def register_supply_chain_commands(main: click.Group) -> None:
         "--no-isolation",
         is_flag=True,
         help=(
-            "Explicitly allow execution without kernel PID containment. Detached children "
-            "may outlive best-effort cleanup. Printed as a warning."
+            "Explicitly allow execution without a PID namespace. The launcher is still a "
+            "child subreaper, so a double-fork is killed with the session. Printed as a warning."
         ),
     )
     def verify_live(
@@ -212,8 +212,8 @@ def register_supply_chain_commands(main: click.Group) -> None:
             raise click.ClickException("invalid BOM or operator launch policy") from None
         if no_isolation:
             click.echo(
-                "warning: --no-isolation: kernel PID containment is disabled; a "
-                "daemonized child can outlive best-effort cleanup.",
+                "warning: --no-isolation: kernel PID containment is disabled; the launcher "
+                "is a child subreaper, so a double-fork is still killed with the session.",
                 err=True,
             )
         with isolation_off() if no_isolation else contextlib.nullcontext():

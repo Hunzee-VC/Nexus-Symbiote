@@ -4,13 +4,15 @@
 private copy. One helper keeps the copy, the digest check and the termination from
 drifting apart. When the kernel allows a user and PID namespace, the launcher is
 pid 1 of that namespace and dies with every descendant. If the kernel refuses the
-namespace, launch fails before executing the pinned program. The operator can
-explicitly opt out, accepting best-effort cleanup that detached children can evade.
+namespace, launch fails before executing the pinned program. ``--no-isolation``
+still runs the launcher as a child subreaper, so a double-fork is killed with
+the session. That is not a PID or filesystem namespace.
 """
 
 from __future__ import annotations
 
 import contextvars
+import ctypes
 import hashlib
 import os
 import re
@@ -29,6 +31,7 @@ _ISOLATION: contextvars.ContextVar[bool] = contextvars.ContextVar(
 _LAUNCHER_BUDGET = 128 * 1024 * 1024
 _NAMESPACE_OK: bool | None = None
 _NAMESPACED: set[int] = set()
+_PR_SET_CHILD_SUBREAPER = 36
 
 
 class PinnedProcessError(OSError):
@@ -210,6 +213,19 @@ def _kill_descendants(root: int) -> None:
                 pass
 
 
+def _mark_child_subreaper() -> None:
+    """Become the reaper for this process's descendants. Runs in the child, before exec.
+
+    A double-fork calls ``setsid`` and then exits the intermediate process, so the
+    grandchild's parent would otherwise become pid 1 and leave the descendant tree.
+    The flag is kept across exec, so the pinned launcher reaps that grandchild and
+    the tree sweep still finds it. The pytest process is never marked.
+    """
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(_PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
+        os._exit(127)
+
+
 def _executable_image(staged: Path) -> bool:
     """True when the kernel can exec the file directly: ELF or a shebang script.
 
@@ -240,6 +256,8 @@ def spawn_pinned(staged: Path, work: Path) -> subprocess.Popen[bytes]:
             cwd=work,
             env={"PATH": os.defpath},
             start_new_session=True,
+            # Outside a PID namespace the launcher itself must reap a double-fork.
+            preexec_fn=None if namespaced else _mark_child_subreaper,
             bufsize=0,
         )
     except PinnedProcessError:
@@ -252,11 +270,11 @@ def spawn_pinned(staged: Path, work: Path) -> subprocess.Popen[bytes]:
 
 
 def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
-    """Kill the session, with best-effort descendant cleanup outside a PID namespace.
+    """Kill the session and, outside a PID namespace, every descendant of the launcher.
 
-    Descendants are killed first, while their parent is still alive, so a ``setsid``
-    child may still be visible. A daemonized child can be reparented and escape this
-    tree sweep, so it is never a substitute for kernel containment.
+    The launcher is a child subreaper on that path, so a double-fork is reparented to
+    it instead of pid 1 and the tree sweep still finds it. Descendants are killed
+    first, while that parent is alive.
     """
     try:
         namespaced = proc.pid in _NAMESPACED
