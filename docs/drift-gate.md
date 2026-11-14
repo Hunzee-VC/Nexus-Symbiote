@@ -46,9 +46,9 @@ gate is only as strong as the place the baseline comes from.
   from the pull request, so an author can edit `--fail-on-alert` away unless workflow
   edits are gated. Require the workflow through an organization ruleset (*Require
   workflows to pass before merging*), and require `CODEOWNERS` review of `.github/`
-  and `.nexus-symbiote/reviewed.json`, as the README's
-  [protect the gate](../README.md#protect-the-gate) shows. Avoid checking out an
-  untrusted pull request head inside a `pull_request_target` workflow.
+  and `.nexus-symbiote/reviewed.json`, as described in [Protect the gate](#protect-the-gate)
+  below. Avoid checking out an untrusted pull request head inside a `pull_request_target`
+  workflow.
 
 ## Take both snapshots the same way
 
@@ -151,3 +151,39 @@ additions as removals), and snapshots that disagree on absolute paths.
 `diff` exits 0 without `--fail-on-alert`, whatever it finds. With it, the command
 exits 1 when it reports any security alert, and 0 otherwise. An unreadable or
 invalid input is an error (exit 1); a missing file is a usage error (exit 2).
+
+## Protect the gate
+
+On `pull_request`, GitHub runs the workflow file of the pull request's merge commit, so the pull request under review can change these inputs, switch a gate off or delete the step unless workflow edits are restricted. Make the gate one the pull request cannot weaken:
+
+1. **In a GitHub organization (recommended):** require the workflow through an organization ruleset (*Require workflows to pass before merging*), which pins the gate to a reusable workflow file and ref outside the pull request's reach.
+2. **In any repository:** run on `pull_request` with read-only permissions, stage the baseline from `github.event.pull_request.base.sha` into `$RUNNER_TEMP`, require a mandatory `CODEOWNERS` review from security owners for `.github/` and `.nexus-symbiote/reviewed.json`, and configure branch protection to require that check to pass:
+
+```yaml
+name: Agent inventory gate
+on: pull_request
+permissions:
+  contents: read
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Stage the reviewed baseline from the base branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: >-
+          gh api -H 'Accept: application/vnd.github.raw'
+          "repos/$GITHUB_REPOSITORY/contents/.nexus-symbiote/reviewed.json?ref=$BASE_SHA"
+          > "$RUNNER_TEMP/reviewed.json"
+      - uses: Hunzee-VC/Nexus-Symbiote@<reviewed-40-character-commit-sha>
+        with:
+          scan-path: .
+          reviewed-baseline: ${{ runner.temp }}/reviewed.json
+```
+
+Avoid checking out `github.event.pull_request.head.sha` inside a `pull_request_target` workflow ("pwn request" hazard): `pull_request_target` runs in the base repository's security context, where adding any build, test, cache or secret step later turns an untrusted fork checkout into secret exfiltration or repository compromise. On `pull_request`, same-repository pull requests can supply `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` from repository secrets; fork pull requests receive no secrets, so a gate that also runs for forks needs a baseline recorded without the key, which cannot alert on the values only the key binds; otherwise run keyed comparisons only for same-repository pull requests and trusted branches.

@@ -11,6 +11,7 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 - The workflow checker closes ways a workflow change could pass it: `action.yml` files beside workflows, a gate in a step that continues on error, interpreter and shell options that run code, heredocs before the command, array assignments, and pinned actions whose version it cannot read. The lock checker requires every hash line to be a single SHA-256 hash.
 - `runtime` refuses ambiguous descriptors, non-UTF-8 or BOM-prefixed JSON and patterns Python cannot compile, and removes partial key and envelope files after a failure. A policy path that is not a regular file is refused before it is opened.
 - Collectors check every declared MCP endpoint for transport security, rate a PyPI package from a plain `http://` URL high, transport-check RAG locators written without a URL, recognise host-root and broad Docker mounts, and fail closed on a quoted command word glued to more text.
+- The CI, Action and floor locks pin `dnspython` 2.9.2 instead of 2.9.1, which advisory GHSA-vvf4-9x63-8xvv affects. `dnspython` is a transitive dependency of `email-validator`, and the Action installs it from `requirements-action.lock`. The locks' upload cut-off moves to 2026-11-07; every other CI and Action pin is unchanged, and the floor lock's unpinned transitive dependencies resolve again at that cut-off.
 
 ### Changed
 
@@ -27,9 +28,11 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 - Generators write `save` atomically and never through a link, recover 0.1.0 exports under the 0.1.0 package identifier rule, export MCP launcher package URLs only for a matching ecosystem, reject control characters and IDNA hosts in SPDX namespaces, and accept only well-formed CycloneDX BOM-Links.
 - `minimum-elements` treats blank fillers around a placeholder as the placeholder, and a format 1.0 agent named after its checkout as having no System name. An MCP server links to its image on any registry, a lineage loads again after a withdrawal, and remote-only tools stay out of local calls a trace cannot rule out.
 - The guides show the property names and severities `diff` reports, and tests that could not fail, or failed for a reason other than the one they name, now check the behaviour they describe.
+- The test suite's linear-time checks (`tests.support.scaling_ratio`) time each run with the cyclic garbage collector off, as `timeit` does. A full collection costs time in proportion to everything the test process holds, so late in the suite it made linear scans read as superlinear and failed the dependency-floor job on `main`.
 
 ### Added
 
+- A [collector reference](docs/collectors.md) and a [GitHub Action](docs/github-action.md) page. They hold the per-collector path lists, the coding-agent settings, the Action's gate semantics and the signer-policy setup that the README carried, so the README is now a short landing page. The *protect the gate* workflow moved to [Gate drift in CI](docs/drift-gate.md#protect-the-gate), and the requirements-file and Dockerfile gaps to the [registry collector](docs/registry-collector.md#requirements-files) page.
 - An [operational guidance](docs/operational-guidance.md) page that collects the operator and CI practices the documented guarantees depend on: ignoring project policy on untrusted checkouts, job timeouts, sandboxing, keeping operator-owned inputs out of a pull request's reach, and what is not implemented.
 - The repository hygiene check rejects invisible and bidirectional characters written literally in source, checks image-wrapped and reference-style links, and finds a stale owner in every spelling of the repository slug.
 

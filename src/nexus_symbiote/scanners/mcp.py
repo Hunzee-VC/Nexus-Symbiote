@@ -1185,6 +1185,13 @@ class _Resolvers:
                 for target in imports.values():
                     if isinstance(target, str):
                         deno_entries.append(("imports", target))
+                    elif isinstance(target, list):
+                        # The import-maps standard accepts only string addresses, but an
+                        # early draft allowed arrays of fallbacks: record each one, so such
+                        # an entry never leaves a launcher looking pinned.
+                        for fallback in target:
+                            if isinstance(fallback, str):
+                                deno_entries.append(("imports", fallback))
             scopes = data.get("scopes")
             if isinstance(scopes, dict) and scopes:
                 deno_entries.append(("scopes", json.dumps(scopes, sort_keys=True, default=str)))

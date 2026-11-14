@@ -25,6 +25,7 @@ from nexus_symbiote.core.hashing import (
     extract_version_pin,
     hash_tool_definition,
     parse_json_strict,
+    tool_definition_extensions,
 )
 from nexus_symbiote.core.models import (
     A2AServerComponent,
@@ -121,6 +122,56 @@ def test_extended_mcp_tool_fields_validate_and_preserve_unredacted_live_inventor
     assert observed_tool_properties(descriptor, observed_hash=fingerprint)["mcp_meta"] == {
         "tier": "finance"
     }
+
+
+def test_legacy_observation_tool_with_title_validates_without_hash_mismatch() -> None:
+    """Pre-0.2.0 live inventories stored a titled tool's display hash without
+    title/outputSchema/_meta while the fingerprint already bound them; the
+    validator must accept that legacy pairing, not report a false mismatch."""
+    descriptor = {
+        "name": "query_ledger",
+        "title": "Query Ledger",
+        "description": "Read ledger entries.",
+        "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}},
+        "outputSchema": {"type": "object", "properties": {"balance": {"type": "number"}}},
+        "_meta": {"tier": "finance"},
+        "annotations": {"readOnlyHint": True},
+    }
+    # Exactly what the pre-0.2.0 observation path stored: the live fingerprint
+    # (extensions bound) as definition_hash, the extension-free display hash
+    # as redacted_definition_hash.
+    fingerprint = hash_tool_definition(
+        "query_ledger",
+        "Read ledger entries.",
+        descriptor["inputSchema"],
+        descriptor["annotations"],
+        **tool_definition_extensions(descriptor),
+    )
+    display = hash_tool_definition(
+        "query_ledger",
+        "Read ledger entries.",
+        descriptor["inputSchema"],
+        descriptor["annotations"],
+    )
+    assert fingerprint != display
+    legacy_tool = ToolComponent(
+        bom_ref="tool:legacy-extended",
+        name="query_ledger",
+        description_text="Read ledger entries.",
+        input_schema=descriptor["inputSchema"],
+        annotations=descriptor["annotations"],
+        definition_hash=fingerprint,
+        definition_hash_version=TOOL_DEFINITION_HASH_VERSION,
+        redacted_definition_hash=display,
+        properties={
+            "mcp_title": "Query Ledger",
+            "mcp_output_schema": descriptor["outputSchema"],
+            "mcp_meta": descriptor["_meta"],
+        },
+    )
+    report = IntegrityValidator().validate(AIBOM(components=[legacy_tool]))
+    assert report.hashes_failed == 0
+    assert all(issue.category != "hash_mismatch" for issue in report.issues)
 
 
 def test_signed_discovery_report_satisfies_default_require_integrity_gate(

@@ -217,6 +217,13 @@ def test_a_failed_resolution_points_at_the_cutoff(monkeypatch, capsys):
     assert "--exclude-newer" in capsys.readouterr().err
 
 
+def _record_cutoff(checkout, cutoff):
+    """A cut-off that a fallback to seven days ago can never produce by coincidence."""
+    committed = locks.read_lock(checkout, locks.CI_LOCK).inputs["cutoff"]
+    edit(checkout / locks.CI_LOCK, f"exclude-newer={committed} ", f"exclude-newer={cutoff} ")
+    return cutoff
+
+
 def fake_uv(monkeypatch, *, fail_on=None):
     """Stand-in for uv pip compile: writes an unstamped lock where uv would, or fails."""
     calls = []
@@ -238,8 +245,8 @@ def fake_uv(monkeypatch, *, fail_on=None):
 
 
 def test_a_failed_resolution_leaves_every_lock_and_its_cutoff_as_it_was(checkout, monkeypatch):
+    recorded = _record_cutoff(checkout, "2001-02-03T00:00:00Z")
     before = {name: (checkout / name).read_bytes() for name in FILES}
-    cutoff = locks.read_lock(checkout, locks.CI_LOCK).inputs["cutoff"]
     calls = fake_uv(monkeypatch, fail_on="lowest-direct")
     with pytest.raises(locks.subprocess.CalledProcessError):
         locks.regenerate(checkout, None, False)
@@ -247,18 +254,18 @@ def test_a_failed_resolution_leaves_every_lock_and_its_cutoff_as_it_was(checkout
     # uv was handed the committed CI lock, so it keeps the reviewed pins.
     assert calls[0][1] == before[locks.CI_LOCK]
     assert "--exclude-newer" in calls[0][0]
-    assert calls[0][0][calls[0][0].index("--exclude-newer") + 1] == cutoff
+    assert calls[0][0][calls[0][0].index("--exclude-newer") + 1] == recorded
     assert {name: (checkout / name).read_bytes() for name in FILES} == before
     assert sorted(path.name for path in checkout.iterdir()) == sorted(FILES)
 
 
 def test_a_successful_resolution_replaces_all_three_locks_stamped(checkout, monkeypatch):
-    cutoff = locks.read_lock(checkout, locks.CI_LOCK).inputs["cutoff"]
+    recorded = _record_cutoff(checkout, "2001-02-03T00:00:00Z")
     fake_uv(monkeypatch)
     locks.regenerate(checkout, None, False)
     for name in (locks.CI_LOCK, locks.ACTION_LOCK, locks.FLOOR_LOCK):
         lock = locks.read_lock(checkout, name)
-        assert lock.inputs["cutoff"] == cutoff, name
+        assert lock.inputs["cutoff"] == recorded, name
         assert set(lock.pins) == {"attrs"}, name
     assert sorted(path.name for path in checkout.iterdir()) == sorted(FILES)
 

@@ -349,7 +349,7 @@ A way around a limit that its entry does not describe is worth a
 ## Instructions and IDE settings
 
 - **Instruction files under other names are not recorded.** The `prompt` collector
-  reads the fixed files the [README lists](../README.md#what-each-collector-reads),
+  reads the fixed files the [collector reference lists](collectors.md#what-each-collector-reads),
   `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` and `.cursorrules` in any subdirectory, and
   every file in the rule, prompt and subagent directories. Another spelling of a
   nested name, such as `claude.md` in a subdirectory, is a
@@ -925,7 +925,7 @@ A way around a limit that its entry does not describe is worth a
   gated. The Action warns about each switched-off gate and reports every gate in its
   `gates` and `result` outputs, but cannot tell which workflow file a reviewer
   approved. Protect the gate with a workflow that an organization ruleset requires
-  and `CODEOWNERS` review on `.github/`, as the [README](../README.md#protect-the-gate)
+  and `CODEOWNERS` review on `.github/`, as the [drift gate guide](drift-gate.md#protect-the-gate)
   shows, and avoid checking out untrusted pull request heads in `pull_request_target`
   workflows. Selecting a subset of `scanners` requires `validate: 'false'`, because
   completeness requires all built-in collectors.

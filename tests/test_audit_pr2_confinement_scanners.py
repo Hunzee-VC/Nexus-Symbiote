@@ -183,6 +183,24 @@ def test_deno_reads_deno_json_import_redirects(tmp_path: Path) -> None:
     assert any(s.startswith("deno.json:imports=") for s in server.properties["package_sources"])
 
 
+def test_deno_reads_deno_json_import_redirect_fallback_arrays(tmp_path: Path) -> None:
+    server, _ = _scan_server(
+        tmp_path,
+        {"command": "deno", "args": ["run", "npm:@acme/mcp@1.0.0"]},
+        {
+            "deno.json": json.dumps(
+                {"imports": {"@acme/mcp": ["npm:evil@9.9.9", "npm:other@1.0.0"]}}
+            )
+        },
+    )
+    assert server.launcher_package is None
+    assert server.package_url is None
+    # Fallback addresses are recorded as a redirect surface (values are
+    # redacted to [local] in package_sources); before the fix the array form
+    # recorded nothing at all.
+    assert any(s.startswith("deno.json:imports=") for s in server.properties["package_sources"])
+
+
 def test_cr_delimited_sse_completes_without_waiting_for_lf_or_eof() -> None:
     class KeepAliveCRStream:
         """Delivers one CR-delimited JSON-RPC SSE event, then blocks if polled again."""
