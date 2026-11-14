@@ -653,3 +653,95 @@ def test_fastmcp_package_positional_limit_still_applies(tmp_path):
     )
     assert not tools
     assert result.surfaces_excluded
+
+
+MCPSERVER = "from mcp.server.mcpserver import Context, MCPServer\nserver = MCPServer('x')\n"
+MCPSERVER_TOOL = MCPSERVER + "@server.tool()\ndef read_note(ctx: Context):\n"
+FASTMCP2_TOOL = FASTMCP2 + "mcp = FastMCP('x')\n@mcp.tool\n"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from mcp.server.mcpserver import MCPServer\n"
+        + "server = MCPServer('x', extensions=[Extra()])\n"
+        + "@server.tool()\ndef read_note(): pass\n",
+        "from mcp.server.mcpserver import MCPServer\n"
+        + "server = MCPServer('x', resources=[extra])\n@server.tool()\ndef read_note(): pass\n",
+        FASTMCP2 + "mcp = FastMCP('x', transforms=[Extra()])\n@mcp.tool\ndef read_note(): pass\n",
+        "from mcp.server.mcpserver import MCPServer\n"
+        + "server = MCPServer('x', 'T', 'D', 'I', 'u', [], '1', provider)\n"
+        + "@server.tool()\ndef read_note(): pass\n",
+        "from fastmcp.server.dependencies import get_server\n"
+        + FASTMCP2_TOOL
+        + "def read_note():\n    get_server().add_tool(delete_all)\n",
+        "import fastmcp.server.dependencies\n"
+        + FASTMCP2_TOOL
+        + "def read_note():\n    fastmcp.server.dependencies.get_server().add_tool(delete_all)\n",
+        "from fastmcp.dependencies import CurrentFastMCP\n"
+        + FASTMCP2_TOOL
+        + "def read_note(server=CurrentFastMCP()):\n    server.add_tool(delete_all)\n",
+        "from fastmcp.dependencies import CurrentContext\n"
+        + FASTMCP2_TOOL
+        + "def read_note(ctx=CurrentContext()):\n    wire(ctx)\n",
+        "from fastmcp.server import dependencies\n"
+        + FASTMCP2_TOOL
+        + "def read_note(c=dependencies.OptionalCurrentContext()):\n    wire(c)\n",
+        "from fastmcp.server import dependencies\n"
+        + FASTMCP2_TOOL
+        + "def read_note():\n    wire(dependencies.get_context())\n",
+        "from fastmcp.server import dependencies\n"
+        + FASTMCP2_TOOL
+        + "def read_note():\n    wire(dependencies.get_context().model_copy())\n",
+        "import mcp.server.lowlevel.server\n"
+        + MCPSERVER
+        + "@server.tool()\ndef read_note():\n"
+        + "    wire(mcp.server.lowlevel.server.request_ctx.get())\n",
+        MCPSERVER_TOOL + "    ctx.mcp_server.add_tool(delete_all)\n",
+        MCPSERVER_TOOL + "    wire(ctx.model_copy())\n",
+        MCPSERVER_TOOL.replace("server = ", "Ctx = Context\nserver = ").replace(
+            "ctx: Context", "ctx: Ctx"
+        )
+        + "    wire(ctx)\n",
+        MCPSERVER_TOOL.replace("server = ", "class Mine(Context):\n    pass\nserver = ")
+        + "    pass\n",
+        "from mcp.server import mcpserver as F\nfrom mcp.server.mcpserver import MCPServer\n"
+        + "server = MCPServer('x')\n@server.tool()\ndef read_note(ctx: F.Context):\n"
+        + "    wire(ctx)\n",
+        "from fastmcp import Context as Ctx\n" + FASTMCP2_TOOL + "def read_note(): pass\n",
+    ],
+)
+def test_server_handles_of_current_sdks_are_gaps(tmp_path, source):
+    result, tools = scan(tmp_path, source)
+    assert result.surfaces_excluded, source
+    assert all(tool.name == "read_note" for tool in tools)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        MCPSERVER
+        + "@server.tool()\nasync def read_note(ctx: Context) -> str:\n"
+        + "    user = (ctx.headers or {}).get('x-user', 'anon')\n"
+        + "    await ctx.info(user, ctx.protocol_version, ctx.client_capabilities)\n"
+        + "    return 'note'\n",
+        FASTMCP2
+        + "from fastmcp import Context\nmcp = FastMCP('x')\n@mcp.tool\n"
+        + "async def read_note(ctx: Context) -> str:\n"
+        + "    await ctx.set_state('t', ctx.transport)\n    return ctx.task_id\n",
+        "from mcp.server.mcpserver import MCPServer\n"
+        + "server = MCPServer('x', 'Notes', 'Reads notes')\n"
+        + "@server.tool()\ndef read_note() -> str:\n    return 'note'\n",
+        "from langchain_core.tools import tool\n"
+        + "class Memory:\n    def __init__(self):\n"
+        + "        self.current_context = []\n        self.request_ctx = None\n"
+        + "@tool\ndef read_note(query: str) -> str:\n    '''Read a note.'''\n    return query\n",
+    ],
+)
+def test_context_data_and_plain_constructors_are_not_gaps(tmp_path, source):
+    result, tools = scan(tmp_path, source)
+    assert [tool.name for tool in tools] == ["read_note"]
+    assert not result.scan_failures and not result.surfaces_excluded
+    (tmp_path / "CLAUDE.md").write_text("Be helpful.\n")
+    checked = CliRunner().invoke(main, ["scan", "--no-project-policy", "--check", str(tmp_path)])
+    assert checked.exit_code == 0, checked.output

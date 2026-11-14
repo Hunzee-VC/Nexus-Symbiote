@@ -184,25 +184,55 @@ def _reflective_access(
 
 # Constructor keywords that carry tools, or could, are registrations the
 # collector does not resolve. The SDK hands a lifespan the server, middleware
-# sees and rewrites tool lists, and transformations rename or hide tools.
+# sees and rewrites tool lists, transformations and transforms add, rename or hide
+# tools, and an extension's tools are added to the server.
 _REGISTERING_KEYWORDS = _names(
     "tools tool_serializer providers mount lifespan middleware tool_transformations"
+    " transforms extensions resources"
 )
 # Past the name and instructions, older `fastmcp` releases take keywords such as
-# `lifespan` positionally. The `mcp` SDK's FastMCP takes at most seven positionals,
-# none of them handed the server; `MCPServer` and later releases are unknown.
+# `lifespan` positionally. The `mcp` SDK's FastMCP and MCPServer take at most seven
+# positionals that are not handed the server; later `fastmcp` releases are unknown.
 _PLAIN_POSITIONALS = 2
-_SDK_POSITIONALS = {"mcp.server": 7, "mcp.server.fastmcp": 7, "mcp.server.fastmcp.server": 7}
+_SDK_POSITIONALS = {
+    "mcp.server": 7,
+    "mcp.server.fastmcp": 7,
+    "mcp.server.fastmcp.server": 7,
+    "mcp.server.mcpserver": 7,
+}
 # A request context hands handler and middleware code the server: `fastmcp` on a
-# context (`_fastmcp` in the `mcp` SDK), the context a middleware context holds, the
-# context variables the SDKs keep the current context in, and the request context.
-# Leading underscores are ignored.
-_SERVER_HANDLES = _names("fastmcp fastmcp_context current_context request_ctx")
-_REQUEST_CONTEXT = "request_context"
+# context (`_fastmcp` in the `mcp` SDK), `mcp_server` on an `MCPServer` context, the
+# context a middleware context holds, the context variables the SDKs keep the current
+# context in, and the request context. Leading underscores are ignored. Only
+# `fastmcp` counts in a file that imports from neither SDK; the others are common
+# names outside MCP.
+_SERVER_HANDLES = _names("fastmcp")
+_SDK_SERVER_HANDLES = _names(
+    "fastmcp_context current_context request_ctx request_context mcp_server"
+)
+# What `fastmcp` hands a handler the server or its context through: accessors and the
+# dependency defaults it injects into an unannotated parameter.
+_SDK_ACCESSORS = _names(
+    "get_server current_server fastmcp_request_ctx CurrentFastMCP CurrentContext"
+    " OptionalCurrentContext"
+)
 _SDK_ROOTS = _names("mcp fastmcp")
-# What a handler may read from a context without calling it; any other attribute read
-# could be a bound method, which holds the context in __self__.
-_CONTEXT_DATA = _names("request_id client_id session_id session")
+# What a handler may read from a context without calling it, and the methods it may
+# call. Any other attribute read could be a bound method, which holds the context in
+# __self__, and another method could return the context, as `model_copy` does.
+_CONTEXT_DATA = _names(
+    "request_id client_id session_id session headers protocol_version"
+    " client_capabilities transport task_id origin_request_id is_background_task"
+)
+_CONTEXT_METHODS = _names(
+    "debug info warning error log report_progress read_resource list_resources"
+    " get_prompt list_prompts elicit elicit_url sample list_roots get_state set_state"
+    " delete_state send_notification close_sse_stream close_standalone_sse_stream"
+    " notify_tools_changed notify_resources_changed notify_resource_updated"
+    " notify_prompts_changed send_tool_list_changed send_resource_list_changed"
+    " send_prompt_list_changed client_supports_extension client_extension_settings"
+    " enable_components disable_components reset_visibility"
+)
 
 _DECORATOR_IMPORTS = {
     ("langchain_core.tools", "tool"): "langchain",
@@ -1000,58 +1030,54 @@ def _scope(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> ast.AST | None:
     return owner
 
 
-def _context_types(nodes: list[ast.AST], modules: set[str]) -> set[str]:
-    """The SDK ``Context`` classes the file names, and classes it derives from them."""
-    types = {
-        a.asname or a.name
+def _sdk_imported(nodes: list[ast.AST]) -> list[tuple[str, str]]:
+    """What the file imports from ``mcp`` or ``fastmcp`` modules, and the names bound."""
+    return [
+        (a.name, a.asname or a.name)
         for node in nodes
         if isinstance(node, ast.ImportFrom) and not node.level and _sdk_module(node.module)
         for a in node.names
-        if a.name == "Context"
-    }
-    classes = sorted(
-        (node for node in nodes if isinstance(node, ast.ClassDef)),
-        key=lambda node: (node.lineno, node.col_offset),
-    )
-    for cls in classes:
-        if any(_names_context(base, types, modules) for base in cls.bases):
-            types.add(cls.name)
-    return types
+    ]
 
 
-def _names_context(annotation: ast.expr, types: set[str], modules: set[str]) -> bool:
+def _names_context(annotation: ast.expr, types: set[str], roots: set[str]) -> bool:
     for node in ast.walk(annotation):
         if isinstance(node, ast.Name) and node.id in types:
             return True
-        if isinstance(node, ast.Attribute) and node.attr == "Context" and _rooted_at(node, modules):
+        if isinstance(node, ast.Attribute) and node.attr == "Context" and _rooted_at(node, roots):
             return True
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             words = set(re.findall(r"[A-Za-z_]\w*", node.value))
-            if words & types or (modules and "Context" in words):
+            if words & types or ("Context" in words and words & roots):
                 return True
     return False
 
 
+def _reads_context(use: ast.Attribute, parents: dict[ast.AST, ast.AST]) -> bool:
+    """Whether reading ``use`` from a context, or calling it, cannot return the context."""
+    call = parents.get(use)
+    if isinstance(call, ast.Call) and call.func is use:
+        return use.attr in _CONTEXT_METHODS
+    return use.attr in _CONTEXT_DATA
+
+
 def _context_bindings(
-    nodes: list[ast.AST], parents: dict[ast.AST, ast.AST], modules: set[str]
+    nodes: list[ast.AST], parents: dict[ast.AST, ast.AST], roots: set[str]
 ) -> tuple[set[tuple[ast.AST | None, str]], bool]:
     """Parameters typed as an SDK context and names bound to ``get_context()``, by scope.
 
-    The second value is whether ``get_context`` is used other than to read from its
-    result or bind it to a name.
+    The second value is whether the SDK ``Context`` or ``get_context`` is used other
+    than to annotate a parameter, or to read from or bind the result of a call. An
+    alias, a subclass or a re-export of ``Context`` can type a parameter in a file the
+    analysis does not follow it into.
     """
-    types = _context_types(nodes, modules)
-    getters = {
-        a.asname or a.name
-        for node in nodes
-        if isinstance(node, ast.ImportFrom) and not node.level and _sdk_module(node.module)
-        for a in node.names
-        if a.name == "get_context"
-    }
+    imported = _sdk_imported(nodes)
+    types = {bound for name, bound in imported if name == "Context"}
+    getters = {bound for name, bound in imported if name == "get_context"}
+    annotations: set[ast.AST] = set()
     bound: set[tuple[ast.AST | None, str]] = set()
-    escaped = False
     for node in nodes:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and types:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
             arguments = node.args
             for arg in [
                 *arguments.posonlyargs,
@@ -1059,12 +1085,28 @@ def _context_bindings(
                 *arguments.kwonlyargs,
                 *(a for a in (arguments.vararg, arguments.kwarg) if a is not None),
             ]:
-                if arg.annotation is not None and _names_context(arg.annotation, types, modules):
+                if arg.annotation is None:
+                    continue
+                annotations.update(ast.walk(arg.annotation))
+                if _names_context(arg.annotation, types, roots):
                     bound.add((node, arg.arg))
-        elif (isinstance(node, ast.Name) and node.id in getters) or (
+    escaped = False
+    used: set[str] = set()
+    for node in nodes:
+        if isinstance(node, ast.Name) and node.id in types:
+            used.add(node.id)
+            escaped = escaped or node not in annotations
+        elif isinstance(node, ast.Constant) and node in annotations and isinstance(node.value, str):
+            used.update(re.findall(r"[A-Za-z_]\w*", node.value))
+        elif (
             isinstance(node, ast.Attribute)
-            and node.attr == "get_context"
-            and _rooted_at(node, modules)
+            and node.attr == "Context"
+            and _rooted_at(node, roots)
+            and node not in annotations
+        ):
+            escaped = True
+        elif (isinstance(node, ast.Name) and node.id in getters) or (
+            isinstance(node, ast.Attribute) and node.attr == "get_context"
         ):
             call = parents.get(node)
             use = parents.get(call) if isinstance(call, ast.Call) else None
@@ -1076,9 +1118,13 @@ def _context_bindings(
                     bound.add((_scope(use, parents), target.id))
                 else:
                     escaped = True
-            elif not (isinstance(use, ast.Attribute) and use.value is call):
+            elif not (
+                isinstance(use, ast.Attribute)
+                and use.value is call
+                and _reads_context(use, parents)
+            ):
                 escaped = True
-    return bound, escaped
+    return bound, escaped or bool(types - used)
 
 
 def _context_escapes(
@@ -1094,10 +1140,7 @@ def _context_escapes(
         scope = _scope(scope, parents)
     use = parents.get(name)
     if isinstance(use, ast.Attribute):
-        call = parents.get(use)
-        return use.attr.startswith("_") or not (
-            use.attr in _CONTEXT_DATA or (isinstance(call, ast.Call) and call.func is use)
-        )
+        return not _reads_context(use, parents)
     if isinstance(use, ast.Compare):
         return not all(isinstance(op, (ast.Is, ast.IsNot)) for op in use.ops)
     test: ast.AST = name
@@ -1106,6 +1149,13 @@ def _context_escapes(
     ):
         test, use = use, parents.get(use)
     return not (isinstance(use, (ast.If, ast.While, ast.IfExp, ast.Assert)) and use.test is test)
+
+
+def _names_handle(name: str, sdk_import: bool) -> bool:
+    bare = name.lstrip("_")
+    return bare in _SERVER_HANDLES or (
+        sdk_import and (bare in _SDK_SERVER_HANDLES or bare in _SDK_ACCESSORS)
+    )
 
 
 def _report_context_handles(
@@ -1117,11 +1167,10 @@ def _report_context_handles(
 ) -> None:
     """A server reached through a request context can be given tools from any handler.
 
-    ``request_context`` is common outside MCP, so it counts only in a file that imports
-    from ``mcp`` or ``fastmcp``. A chain of attributes of an SDK module, such as
-    ``mcp.server.fastmcp.exceptions``, is not a context. A context typed as one, or
-    returned by ``get_context()``, that is passed on, stored or returned can reach
-    code the collector does not read.
+    Handle names other than ``fastmcp`` are common outside MCP, so they count only in a
+    file that imports from ``mcp`` or ``fastmcp``. ``mcp.server.fastmcp`` is a module
+    path, not a context. A context typed as one, or returned by ``get_context()``, that
+    is passed on, stored or returned can reach code the collector does not read.
     """
     sdk_import = any(
         (isinstance(node, ast.Import) and any(_sdk_module(a.name) for a in node.names))
@@ -1132,22 +1181,20 @@ def _report_context_handles(
     handle = any(
         (
             isinstance(node, ast.Attribute)
-            and (
-                node.attr.lstrip("_") in _SERVER_HANDLES
-                or (sdk_import and node.attr.lstrip("_") == _REQUEST_CONTEXT)
-            )
-            and not _rooted_at(node, modules)
+            and _names_handle(node.attr, sdk_import)
+            and not (node.attr == "fastmcp" and _rooted_at(node, modules))
         )
         or (
             isinstance(node, ast.ImportFrom)
             and not node.level
             and _sdk_module(node.module)
-            and any(a.name.lstrip("_") in _SERVER_HANDLES for a in node.names)
+            and any(_names_handle(a.name, True) for a in node.names)
         )
         for node in nodes
     )
     if not handle and sdk_import:
-        bound, handle = _context_bindings(nodes, parents, modules)
+        roots = modules | {bound for _, bound in _sdk_imported(nodes)}
+        bound, handle = _context_bindings(nodes, parents, roots)
         names = {name for _, name in bound}
         handle = handle or any(
             isinstance(node, ast.Name)
