@@ -275,8 +275,9 @@ def _run(args: list[str], *, private: Path, limits: str = "") -> subprocess.Comp
     # Collection limits come only from the limits input, never from the job environment.
     env.pop(LIMITS_ENV, None)
     # The trust root is the one in the Action's hash-locked sigstore package, and these
-    # commands never run live, whatever the job sets. Collection needs no runner or
-    # OIDC token, so a defect in native parsing code could not use one.
+    # commands never run live, whatever the job sets. Remove these named runner and
+    # OIDC credential variables from children; other variables, including custom secrets
+    # and the source-binding key, can remain. This filtering is not a process sandbox.
     for name in WITHHELD_ENV:
         env.pop(name, None)
     if limits:
