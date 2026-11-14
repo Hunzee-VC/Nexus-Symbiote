@@ -79,7 +79,9 @@ def test_mcp_endpoint_substitution_after_scan(tmp_path):
         assert result.exit_code == expected_exit, result.output
         return json.loads(result.output)
 
-    assert not compare(snapshots[0], snapshots[1], "--fail-on-alert")["has_changes"]
+    identical = compare(snapshots[0], snapshots[1], "--fail-on-alert", expected_exit=1)
+    assert identical["has_changes"]
+    assert "unbound" in identical["components_modified"][0]["details"][0]
     changed = compare(snapshots[1], snapshots[2], "--no-fail-on-alert")
     assert compare(snapshots[1], snapshots[2], "--fail-on-alert", expected_exit=1) == changed
     assert changed["has_changes"]

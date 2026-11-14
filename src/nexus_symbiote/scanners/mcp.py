@@ -43,6 +43,7 @@ from nexus_symbiote.core.hashing import (
     tool_definition_extensions,
 )
 from nexus_symbiote.core.models import (
+    UNBOUND_VALUES_DETAIL,
     CapabilityDeclaration,
     MCPClientComponent,
     MCPServerComponent,
@@ -1755,10 +1756,7 @@ class MCPScanner(Scanner):
                 RiskAssessment(
                     severity=RiskSeverity.LOW,
                     category="completeness",
-                    detail=(
-                        f"MCP server '{name}' values not bound in this inventory: "
-                        f"{'; '.join(unbound)}."
-                    ),
+                    detail=f"MCP server '{name}' {UNBOUND_VALUES_DETAIL}: {'; '.join(unbound)}.",
                     recommendation=(
                         f"Set {SOURCE_BINDING_KEY_ENV} during collection to detect changes to "
                         "these values."

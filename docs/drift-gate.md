@@ -80,13 +80,16 @@ request with itself, and that gate can never fail.
   checkout from narrowing either snapshot. `baseline` accepts it, and
   `--signature-policy`, like `scan`.
 - **Use the same binding key for both.** Set one `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`
-  of 32 or more characters for the baseline and every candidate scan. Without it, the
-  values described above cannot alert; with a different key, every MCP, A2A, RAG and
-  IDE settings binding changes and alerts, and the digests of the IDE settings files
-  digested as read differ between a keyed and an unkeyed scan. Fork `pull_request`
-  jobs receive no secrets, so collect fork baselines without the key or run keyed
-  comparisons on trusted branches. See
-  [source binding](verification-source-binding.md).
+  of 32 or more characters for the baseline and every candidate scan. Without it,
+  `diff --fail-on-alert` fails on an MCP server whose launch arguments, environment
+  values or endpoint path were not bound, instead of reporting no change; the alert
+  does not name the value. With a different key, every MCP, A2A, RAG and IDE settings
+  binding changes and alerts, and the digests of the IDE settings files digested as
+  read differ between a keyed and an unkeyed scan. The Action refuses
+  `reviewed-baseline` unless that key is set on the step or passed as
+  `source-binding-key`. Fork `pull_request` jobs receive no secrets, so they cannot
+  satisfy that input; run the keyed drift gate on same-repository pull requests and
+  trusted branches. See [source binding](verification-source-binding.md).
 - **Paths are root-relative.** Recorded paths are relative to the scan root, so a
   snapshot taken in `/Users/alice/agent` compares with one taken in
   `/home/runner/work/agent/agent`. Without a manifest `id`, the repository agent is
@@ -191,4 +194,4 @@ jobs:
           reviewed-baseline: ${{ runner.temp }}/reviewed.json
 ```
 
-Avoid checking out `github.event.pull_request.head.sha` inside a `pull_request_target` workflow ("pwn request" hazard): `pull_request_target` runs in the base repository's security context, where adding any build, test, cache or secret step later turns an untrusted fork checkout into secret exfiltration or repository compromise. On `pull_request`, same-repository pull requests can supply `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` from repository secrets; fork pull requests receive no secrets, so a gate that also runs for forks needs a baseline recorded without the key, which cannot alert on the values only the key binds; otherwise run keyed comparisons only for same-repository pull requests and trusted branches.
+Avoid checking out `github.event.pull_request.head.sha` inside a `pull_request_target` workflow ("pwn request" hazard): `pull_request_target` runs in the base repository's security context, where adding any build, test, cache or secret step later turns an untrusted fork checkout into secret exfiltration or repository compromise. On `pull_request`, same-repository pull requests can supply `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` from repository secrets. Fork pull requests receive no secrets, and the Action refuses `reviewed-baseline` without the key. An unkeyed `diff --fail-on-alert` fails closed on unbound MCP launch values instead of comparing them, so run keyed comparisons only for same-repository pull requests and trusted branches.
