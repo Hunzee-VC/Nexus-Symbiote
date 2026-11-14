@@ -439,12 +439,6 @@ class SPDXGenerator(Generator):
             if isinstance(prop, dict) and "extension_cdxPropName" in prop
         ]
         projection = declared_projection(properties)
-        errors = spdx_errors(
-            document,
-            legacy_license=_legacy.NO_ASSERTION_LICENSE if projection is None else None,
-        )
-        if errors:
-            raise ValueError("invalid spdx export: " + "; ".join(errors[:10]))
         namespace = _document_namespace(doc["spdxId"])
         recovered, native = recover_native(properties)
         if projection == PROJECTION:
@@ -461,6 +455,15 @@ class SPDXGenerator(Generator):
             actual, wanted = _without_created(actual), _without_created(wanted)
         if unordered_projection(actual) != unordered_projection(wanted):
             raise ValueError("SPDX projection conflicts with the embedded native document")
+        # Only the flat reference topology emitted by a supported projection may
+        # reach schema validation. Inline reference objects can make the general
+        # SPDX schema revisit a tiny nested input an enormous number of times.
+        errors = spdx_errors(
+            document,
+            legacy_license=_legacy.NO_ASSERTION_LICENSE if projection is None else None,
+        )
+        if errors:
+            raise ValueError("invalid spdx export: " + "; ".join(errors[:10]))
         return recovered
 
 
