@@ -114,7 +114,8 @@ fingerprint covers, the command names the tool on standard error: inspect the
 server's original descriptor before you approve that baseline.
 `--raw-descriptors review.json` writes that original content (server info,
 capabilities, instructions, tool descriptors, prompts and resource templates, with
-only the bearer token and session ID masked) to a new file readable only by you; it
+only the bearer token masked; a server that repeats its session ID in a
+declaration ends the observation, so it cannot choose what is masked) to a new file readable only by you; it
 can hold credentials the server embeds, so keep it out of the baseline and delete it
 after review. A scheduled GitHub Actions job is a `schedule:` workflow that runs the
 two commands above against a baseline committed after review, with the token in a
