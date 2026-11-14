@@ -91,7 +91,7 @@ jobs:
       - name: Recheck candidate dependencies against current OSV advisories
         run: >-
           python scripts/check_dependency_advisories.py
-          --lock requirements-ci.lock --lock requirements-action.lock
+          --lock requirements-ci.lock --lock requirements-action.lock --lock requirements-floor.lock
           --out evidence/dependency-advisories.json
       - run: python -m pytest --strict-skips
       - name: Enforce committed security regression contracts
@@ -111,13 +111,13 @@ jobs:
       - run: python scripts/check_workflows.py
       - name: Run security acceptance against the exact built wheel
         run: |
-          python -m pip install --no-index --no-deps --force-reinstall dist/*.whl
+          python -m pip install --only-binary=:all: --no-index --no-deps --force-reinstall dist/*.whl
           python -I scripts/check_wheel_security.py dist/*.whl
       - name: Collect release evidence with the locked wheel runtime
         run: |
           python -m venv "$RUNNER_TEMP/release-smoke"
           "$RUNNER_TEMP/release-smoke/bin/python" -m pip install --require-hashes --only-binary=:all: -r requirements-action.lock
-          "$RUNNER_TEMP/release-smoke/bin/python" -m pip install --no-index --no-deps dist/*.whl
+          "$RUNNER_TEMP/release-smoke/bin/python" -m pip install --only-binary=:all: --no-index --no-deps dist/*.whl
           "$RUNNER_TEMP/release-smoke/bin/python" -m pip check
           mkdir -p evidence
           "$RUNNER_TEMP/release-smoke/bin/python" -m pip inspect > evidence/installed-distributions.json
@@ -166,7 +166,7 @@ jobs:
           set -euo pipefail
           python -m venv "$RUNNER_TEMP/compatibility"
           python_bin="$RUNNER_TEMP/compatibility/bin/python"
-          "$python_bin" -m pip install dist/*.whl
+          "$python_bin" -m pip install dist/*.whl --only-binary=:all:
           "$python_bin" -m pip check
           "$python_bin" -m pip freeze --all
           mkdir "$RUNNER_TEMP/source"

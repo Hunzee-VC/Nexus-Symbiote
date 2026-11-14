@@ -24,7 +24,10 @@ inputs:
     default: ""
   validate:
     description: >-
-      Fail the action when completeness or integrity validation fails. A model passes integrity
+      Fail the action when completeness or integrity validation fails. Integrity requires at
+      least one verified hash or signature and no unknown component evidence: a checkout
+      instruction or static tool digest satisfies that without authenticating unverified MCP
+      servers unless paired with signature-policy and reviewed-baseline. A model passes integrity
       only as a SafeTensors file each of whose weight files (the file and any shard index bound
       to it) is Sigstore-signed or digest-pinned in signature-policy. 'false' skips both checks
       and prints a warning
@@ -159,10 +162,15 @@ runs:
         SYMBIOTE_ACTION_PATH: ${{ github.action_path }}
         SYMBIOTE_BASE_PYTHON: ${{ steps.python.outputs.python-path }}
       run: |
+        set -euo pipefail
         action_venv="$(mktemp -d "$RUNNER_TEMP/nexus-symbiote-action-XXXXXX")"
+        pip_home="$action_venv/home"
+        mkdir -p "$pip_home"
         "$SYMBIOTE_BASE_PYTHON" -I -m venv "$action_venv"
-        "$action_venv/bin/python" -I -m pip install --require-hashes --only-binary=:all: -r "$SYMBIOTE_ACTION_PATH/requirements-action.lock"
-        "$action_venv/bin/python" -I -m pip install --no-deps --no-build-isolation -- "$SYMBIOTE_ACTION_PATH"
+        HOME="$pip_home" XDG_CONFIG_HOME="$pip_home" PIP_CONFIG_FILE=/dev/null \
+          "$action_venv/bin/python" -I -m pip install --isolated --require-hashes --only-binary=:all: -r "$SYMBIOTE_ACTION_PATH/requirements-action.lock"
+        HOME="$pip_home" XDG_CONFIG_HOME="$pip_home" PIP_CONFIG_FILE=/dev/null \
+          "$action_venv/bin/python" -I -m pip install --isolated --no-index --no-deps --no-build-isolation -- "$SYMBIOTE_ACTION_PATH"
         echo "python=$action_venv/bin/python" >> "$GITHUB_OUTPUT"
     - name: Collect once and apply validation gates
       id: scan

@@ -20,6 +20,7 @@ from run_inventory import DIRECTORY, run
 import nexus_symbiote
 from nexus_symbiote.core.hashing import parse_json_strict
 from nexus_symbiote.scanners.base import read_regular_text
+from nexus_symbiote.utils.files import write_output_file
 
 
 def digest(data: bytes) -> str:
@@ -40,7 +41,7 @@ def materials() -> dict[str, str]:
     files = {
         f"package/{p.relative_to(package).as_posix()}": p
         for p in package.rglob("*")
-        if p.is_file() and "__pycache__" not in p.parts and p.suffix != ".pyc"
+        if not p.is_symlink() and p.is_file() and "__pycache__" not in p.parts and p.suffix != ".pyc"
     }
     for path in [
         DIRECTORY / "evidence.py",
@@ -48,7 +49,7 @@ def materials() -> dict[str, str]:
         DIRECTORY / "manifest.json",
         *sorted((DIRECTORY / "fixtures").rglob("*")),
     ]:
-        if path.is_file():
+        if not path.is_symlink() and path.is_file():
             files["corpus/" + path.relative_to(DIRECTORY).as_posix()] = path
     return {key: digest(path.read_bytes()) for key, path in sorted(files.items())}
 
@@ -74,7 +75,8 @@ def prepare(directory: Path) -> None:
         raise ValueError("benchmark failed")
     if before != materials():
         raise ValueError("material changed during the run")
-    results = (json.dumps(report, sort_keys=True, indent=2) + "\n").encode()
+    results_text = json.dumps(report, sort_keys=True, indent=2) + "\n"
+    results = results_text.encode("utf-8")
     statement = {
         "_type": "https://in-toto.io/Statement/v1",
         "subject": [{"name": "results.json", "digest": {"sha256": digest(results)}}],
@@ -86,10 +88,12 @@ def prepare(directory: Path) -> None:
             "corpusVersion": report["corpus_version"],
         },
     }
+    if directory.is_symlink():
+        raise ValueError("output directory must not be a symlink")
     directory.mkdir(exist_ok=False)
-    (directory / "results.json").write_bytes(results)
-    (directory / "statement.json").write_text(
-        json.dumps(statement, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+    write_output_file(directory / "results.json", results_text)
+    write_output_file(
+        directory / "statement.json", json.dumps(statement, sort_keys=True, indent=2) + "\n"
     )
 
 

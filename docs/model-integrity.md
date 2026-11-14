@@ -217,7 +217,10 @@ Version 2 names a `kind` on every entry and rejects unknown kinds and fields:
 - `digest-pin` recomputes the file's SHA-256 through the collector's confined
   reader and compares it with `expected_sha256`. You are the trust root, as you
   are for the policy itself; no Sigstore install is needed. Compute the value
-  with `sha256sum`.
+  with `sha256sum`. Note that `models/onnx/model.onnx_data` above illustrates
+  `digest-pin` syntax on an auxiliary shard: `validate`'s model integrity gate
+  still requires model weights to use SafeTensors format (`*.safetensors`) and
+  pass structural validation alongside a matching signature or digest pin.
 
 OpenSSF Model Signing signatures (`model.sig`) are not verified yet: they are
 Sigstore bundles whose DSSE envelope signs an in-toto statement listing every
