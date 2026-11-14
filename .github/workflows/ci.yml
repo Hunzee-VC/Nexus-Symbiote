@@ -149,12 +149,14 @@ jobs:
       - run: python scripts/check_workflows.py
       - run: python scripts/check_repository_hygiene.py
       - name: Cap pull request size outside tests
+        id: pr-size
         if: github.event_name == 'pull_request'
         env:
-          PR_BASE: ${{ github.base_ref }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
-          git fetch --no-tags origin "$PR_BASE"
-          python scripts/check_pull_request_size.py --base "origin/$PR_BASE"
+          git fetch --no-tags --depth=1 origin "$PR_BASE" "$PR_HEAD"
+          python scripts/check_pull_request_size.py --base "$PR_BASE" --head "$PR_HEAD"
       - name: Require the locks to match pyproject.toml and each other
         run: python scripts/check_locks.py
   distribution:

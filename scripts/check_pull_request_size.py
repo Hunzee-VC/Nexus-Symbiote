@@ -1,60 +1,116 @@
-"""Fail a pull request that changes more than the cap outside tests and benchmarks.
+"""Fail a PR above the line cap outside tests, benchmarks and reviewed binary assets.
 
-The count is insertions plus deletions. ``tests/`` and ``benchmarks/`` are excluded
-so a regression suite can be large. Binary files, which git reports as ``-``, are
-not counted. Run it in CI against the pull request's base, or pass ``--numstat-file``
-for a review of a saved ``git diff --numstat`` listing.
+Measure insertions plus deletions between immutable event base/head commit IDs.
+Saved listings must use Git's --numstat -z format, including rename records.
+Unexpected binary changes fail closed: .gitattributes cannot hide source edits.
 """
 
 from __future__ import annotations
 
 import argparse
+import re
 import subprocess
+import sys
 from pathlib import Path
 
-SKIP_PREFIXES = ("tests/", "benchmarks/")
+SKIP_PREFIXES = (b"tests/", b"benchmarks/")
+BINARY_ASSET_SUFFIXES = (b".jpg", b".jpeg", b".png", b".gif", b".webp", b".ico")
 DEFAULT_LIMIT = 1500
+COMMIT = re.compile(r"[0-9a-f]{40}")
 
 
-def changed_lines(numstat: str, *, skip_prefixes: tuple[str, ...] = SKIP_PREFIXES) -> int:
-    """Sum insertions and deletions, skipping test trees and binary rows."""
+def changed_lines(numstat: bytes) -> int:
+    """Read the NUL protocol without interpreting quotes, tabs or newlines in paths."""
+    if not numstat:
+        return 0
+    if not numstat.endswith(b"\0"):
+        raise ValueError("expected a complete git diff --numstat -z listing")
+    records = iter(numstat[:-1].split(b"\0"))
     total = 0
-    for line in numstat.splitlines():
-        if not line.strip():
+    for record in records:
+        fields = record.split(b"\t", 2)
+        if len(fields) != 3:
+            raise ValueError("malformed numstat record")
+        added, deleted, path = fields
+        paths: tuple[bytes, ...]
+        if path:
+            paths = (path,)
+        else:
+            try:
+                paths = (next(records), next(records))
+            except StopIteration as exc:
+                raise ValueError("incomplete numstat rename record") from exc
+            if not all(paths):
+                raise ValueError("empty path in numstat rename record")
+        binary = added == deleted == b"-"
+        if not binary and not (added.isdigit() and deleted.isdigit()):
+            raise ValueError("invalid numstat line counts")
+        if all(path.startswith(SKIP_PREFIXES) for path in paths):
             continue
-        added, deleted, path = line.split("\t", 2)
-        if path.startswith(skip_prefixes):
-            continue
-        if added == "-" or deleted == "-":
-            continue
+        if binary:
+            if all(
+                path.startswith(b"docs/assets/") and path.endswith(BINARY_ASSET_SUFFIXES)
+                for path in paths
+            ):
+                continue
+            raise ValueError(
+                f"unexpected binary change: {paths!r}; source changes must be countable"
+            )
         total += int(added) + int(deleted)
     return total
 
 
-def _from_git(base: str) -> str:
+def _from_git(base: str, head: str) -> bytes:
+    if not COMMIT.fullmatch(base) or not COMMIT.fullmatch(head):
+        raise ValueError("--base and --head must be full immutable commit IDs")
     result = subprocess.run(  # noqa: S603
-        ["git", "diff", "--numstat", base, "HEAD"],  # noqa: S607
+        [  # noqa: S607
+            "git",
+            "diff",
+            "--numstat",
+            "-z",
+            "--find-renames",
+            "--no-ext-diff",
+            "--no-textconv",
+            base,
+            head,
+            "--",
+        ],
         check=False,
         capture_output=True,
-        text=True,
+        timeout=60,
     )
     if result.returncode != 0:
-        raise SystemExit(result.stderr.strip() or "git diff failed")
+        raise ValueError(
+            result.stderr.decode("utf-8", errors="replace").strip() or "git diff failed"
+        )
     return result.stdout
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base", help="Git ref to diff HEAD against, such as origin/main")
-    parser.add_argument("--numstat-file", type=Path, help="A saved git diff --numstat listing")
+    parser.add_argument("--base", help="Full immutable PR event base commit ID")
+    parser.add_argument("--head", help="Full immutable PR event head commit ID")
+    parser.add_argument("--numstat-file", type=Path, help="A saved git diff --numstat -z listing")
     parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
     args = parser.parse_args(argv)
-    if (args.base is None) == (args.numstat_file is None):
-        parser.error("pass exactly one of --base and --numstat-file")
-    listing = (
-        args.numstat_file.read_text(encoding="utf-8") if args.numstat_file else _from_git(args.base)
-    )
-    total = changed_lines(listing)
+    if args.limit < 0:
+        parser.error("--limit must be nonnegative")
+    if args.numstat_file is not None:
+        if args.base is not None or args.head is not None:
+            parser.error("--numstat-file cannot be combined with --base or --head")
+    elif args.base is None or args.head is None:
+        parser.error("pass both --base and --head, or --numstat-file")
+    try:
+        if args.numstat_file is not None:
+            listing = args.numstat_file.read_bytes()
+        else:
+            assert args.base is not None and args.head is not None
+            listing = _from_git(args.base, args.head)
+        total = changed_lines(listing)
+    except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+        print(f"pull request size check failed: {exc}", file=sys.stderr)
+        return 1
     print(f"pull request changes {total} lines outside tests/ and benchmarks/ (limit {args.limit})")
     return 1 if total > args.limit else 0
 

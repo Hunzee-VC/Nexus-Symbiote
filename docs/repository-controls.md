@@ -275,7 +275,7 @@ These are not applied by a merge. An administrator has to run them. Until a seco
 gh api --method POST repos/Hunzee-VC/Nexus-Symbiote/branches/main/protection/required_signatures
 
 # Delete the head branch when a pull request merges.
-gh api --method PATCH repos/Hunzee-VC/Nexus-Symbiote -f delete_branch_on_merge=true
+gh api --method PATCH repos/Hunzee-VC/Nexus-Symbiote -F delete_branch_on_merge=true
 ```
 
 Add the second reviewer to the organization, to `.github/CODEOWNERS`, to [MAINTAINERS.md](../MAINTAINERS.md), and to the PyPI project, then apply [the full protection profile](../config/github-main-protection.json). Do not invent an account to satisfy the file.
