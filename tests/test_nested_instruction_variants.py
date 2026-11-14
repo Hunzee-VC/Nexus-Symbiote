@@ -18,7 +18,7 @@ from nexus_symbiote.cli import main
 from nexus_symbiote.scanners.prompt import NESTED_INSTRUCTION_NAMES, PromptScanner
 from nexus_symbiote.utils.confined import fold_name
 
-RLO = "‮"
+RLO = "\u202e"
 
 
 def _variant(path: str, canonical: str) -> str:

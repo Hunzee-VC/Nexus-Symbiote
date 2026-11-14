@@ -26,10 +26,14 @@ class Generator(ABC):
         """Convert an AIBOM into the target format as a dict."""
 
     def generate_json(self, bom: AIBOM, indent: int = 2) -> str:
-        """Convert an AIBOM into the target format as a JSON string."""
+        """Convert an AIBOM into the target format as a JSON string.
+
+        A document that holds NaN or an infinity raises ValueError: written out, those
+        are not JSON, and a strict reader refuses the whole export.
+        """
         import json
 
-        return json.dumps(self.generate(bom), indent=indent, default=str)
+        return json.dumps(self.generate(bom), indent=indent, default=str, allow_nan=False)
 
     def generate_with_report(self, bom: AIBOM) -> ExportResult:
         from nexus_symbiote.generators._common import loss_report
