@@ -324,7 +324,12 @@ def _projection(value: Any, depth: int = 0, *, env: bool = False, unkeyed: bool 
 _PIPE_BOUNDARY = re.compile(r"[|\n]")
 _DOWNLOADER = re.compile(r"(?:curl|wget|iwr|invoke-webrequest)\b", re.IGNORECASE)
 _BASE64_DECODE = re.compile(r"base64\s+(?:-d|--decode)\b", re.IGNORECASE)
-_PIPE_SHELL = re.compile(r"\s*((?:ba|z|da)?sh)\b", re.IGNORECASE)
+_PIPE_SHELL = re.compile(
+    r"\s*(?:[/\\]?(?:[\w.+-]+[/\\])*)?(?:env\s+)?(?:ba|z|da)?sh\b", re.IGNORECASE
+)
+_COMMAND_BOUNDARY = re.compile(r"[|\n;&]")
+_POWERSHELL = re.compile(r"\b(?:powershell|pwsh)(?:\.exe)?\b", re.IGNORECASE)
+_ENCODED_COMMAND = re.compile(r"\s-(?:e|en|enc|encodedcommand)\b", re.IGNORECASE)
 _HOOK_URL = re.compile(r"https?://", re.IGNORECASE)
 _SEVERITY_RANK = {severity: index for index, severity in enumerate(RiskSeverity)}
 
@@ -339,15 +344,30 @@ def _fetch_exec(command: str) -> bool:
                 segment = command[start : boundary.start()]
                 if _DOWNLOADER.search(segment, segment.rfind(";") + 1):
                     return True
-                if shell[1].lower() in {"sh", "bash"} and _BASE64_DECODE.search(segment):
+                if _BASE64_DECODE.search(segment):
                     return True
         start = boundary.end()
     return False
 
 
+def _encoded_powershell(command: str) -> bool:
+    """Search each statement once, even when it repeats PowerShell near matches."""
+
+    def encoded(start: int, end: int) -> bool:
+        shell = _POWERSHELL.search(command, start, end)
+        return shell is not None and _ENCODED_COMMAND.search(command, shell.end(), end) is not None
+
+    start = 0
+    for boundary in _COMMAND_BOUNDARY.finditer(command):
+        if encoded(start, boundary.start()):
+            return True
+        start = boundary.end()
+    return encoded(start, len(command))
+
+
 def _command_severity(command: str) -> RiskSeverity:
     """How dangerous a hook command is, without keeping its text."""
-    if _fetch_exec(command):
+    if _fetch_exec(command) or _encoded_powershell(command):
         return RiskSeverity.CRITICAL
     if _HOOK_URL.search(command):
         return RiskSeverity.HIGH
@@ -384,7 +404,7 @@ def _hook_detail(count: int, severity: RiskSeverity, ide: str) -> str:
         f"IDE agent '{ide}' declares {count} hook command(s) that run automatically on agent events"
     )
     if severity is RiskSeverity.CRITICAL:
-        return base + ", including a command that downloads and executes a script."
+        return base + ", including a shell pipeline or encoded PowerShell command."
     if severity is RiskSeverity.HIGH:
         return base + ", including a command that contacts a network address."
     return base + "."

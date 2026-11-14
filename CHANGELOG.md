@@ -6,6 +6,8 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ### Security
 
+- Hook classification keeps absolute shell paths, `env` shell launches and encoded PowerShell commands critical while scanning disjoint command segments in linear time. Repeated PowerShell near matches cannot exhaust the collector before a later dangerous command is checked. Hidden comments distinguish the imperative `run` from ordinary words such as `runtime`.
+
 - Hook command classification checks each pipeline segment once, preventing repeated downloader or decoder names in a settings file from causing quadratic scan time while retaining late fetch-and-exec findings.
 - Hook commands are rated by what they run. A hook that downloads and pipes a script to a shell is critical, and a hook that contains a URL is high; other hook commands stay medium. The command text is still not recorded. An HTML or Markdown comment in an instruction file is high when it contains an imperative, a URL or a path under `~/`, and low otherwise. The comment text is still not recorded.
 - An exact top-level pin of an `npx`, `npm exec`, `bunx`, `bun x`, `pnpm dlx`, `yarn dlx`, `uvx`, `uv tool run` or `pipx run` package is a medium `transitive_resolution` finding. Those runners resolve the package's dependencies at launch, and a project lockfile does not cover that install.
