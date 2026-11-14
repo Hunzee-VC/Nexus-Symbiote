@@ -1321,7 +1321,7 @@ class ModelScanner(Scanner):
             else:
                 _report_variants(files, model_dir / name)
         for path in self._template_directory(files, model_dir):
-            if path.suffix in {".jinja", ".jinja2"}:
+            if path.suffix.lower() in {".jinja", ".jinja2"}:
                 self._template_file(files, path, templates, escapes)
 
         tokenizer_files: list[tuple[Path, str]] = []
@@ -1336,7 +1336,8 @@ class ModelScanner(Scanner):
             python_files = [
                 {"path": path.as_posix(), "sha256": digest}
                 for path in tree.below(model_dir)
-                if path.suffix == ".py" and (digest := self._digest(files, path)) is not None
+                if path.suffix.lower() == ".py"
+                and (digest := self._digest(files, path)) is not None
             ]
             custom_code = {
                 "declared_in": declared_in,

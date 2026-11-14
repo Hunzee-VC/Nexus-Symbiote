@@ -189,7 +189,7 @@ _WORD = re.compile(r"[a-z0-9]+")
 _WORD_ENDINGS = ("s", "es", "ed", "d", "ing")
 
 
-_JS_INTERESTING = re.compile(r"""["'\n]|/\*""")
+_JS_INTERESTING = re.compile(r"""["'`\n]|/[/*]""")
 
 
 def _without_js_comments_quoted(text: str) -> str:
@@ -206,21 +206,24 @@ def _without_js_comments_quoted(text: str) -> str:
                 if pos >= size:
                     break
         ch = text[pos]
-        if ch in "\"'":
+        if ch in "\"'`":
             ws_start = None
             end = pos + 1
-            while end < size and text[end] not in (ch, "\n", "\r"):
+            terminators = ("`",) if ch == "`" else (ch, "\n", "\r")
+            while end < size and text[end] not in terminators:
                 end += 2 if text[end] == "\\" else 1
             if end < size and text[end] == ch:
                 end += 1
             pos = end
             continue
         if ch == "/":
-            if ws_start is not None and text.startswith("//", pos):
+            if text.startswith("//", pos):
                 newline = text.find("\n", pos + 2)
                 stop = size if newline < 0 else newline
-                kept.append(text[emitted:ws_start])
-                emitted = pos = stop
+                if ws_start is not None:
+                    kept.append(text[emitted:ws_start])
+                    emitted = stop
+                pos = stop
                 ws_start = None
                 continue
             if not no_more_blocks and text.startswith("/*", pos):
@@ -249,7 +252,9 @@ def without_js_comments(text: str) -> str:
     The pattern this replaces rescanned every run of blank lines from each of its
     lines, so a file of newlines within the size limit took minutes.
     """
-    if ('"' in text or "'" in text) and ("/*" in text or "//" in text):
+    if "/*" not in text and "//" not in text:
+        return text
+    if any(q in text for q in ('"', "'", "`")):
         return _without_js_comments_quoted(text)
     kept: list[str] = []
     size = len(text)

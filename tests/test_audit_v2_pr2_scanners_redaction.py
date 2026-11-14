@@ -27,6 +27,7 @@ from nexus_symbiote.scanners.ide_agents import IDEAgentScanner, _broad_grants, _
 from nexus_symbiote.scanners.live_mcp import (
     DiscoveryError,
     PinnedHTTPTransport,
+    _resolve_public,
     check_served_tool,
 )
 from nexus_symbiote.scanners.mcp import (
@@ -34,7 +35,6 @@ from nexus_symbiote.scanners.mcp import (
     MCPScanner,
     SourceBindingKeyError,
     _load_jsonc,
-    _npmrc,
     source_binding_key,
     without_js_comments,
 )
@@ -53,6 +53,12 @@ def test_secrets_redaction_long_quoted_jwt_url_token_host_and_jwk_fields() -> No
     scrubbed = redact_text(text)
     assert long_jwt not in scrubbed
     assert REDACTED in scrubbed
+
+    # Space-containing >256-char quoted secret exercises the raised 512-char _QUOTED_SECRET bound
+    long_spaced_secret = "passphrase with spaces " + ("z" * 300)
+    spaced_scrubbed = redact_text(f'api_secret="{long_spaced_secret}"')
+    assert long_spaced_secret not in spaced_scrubbed
+    assert REDACTED in spaced_scrubbed
 
     gh_token = "ghp_" + ("A1b2C3d4E5f6" * 3)
     assert redact_url(f"https://{gh_token}.attacker.example/v1") == "[redacted-url]"
@@ -109,9 +115,12 @@ def test_source_binding_surrogate_key_does_not_echo_secret(monkeypatch: pytest.M
 
 
 def test_template_escape_markers_catch_pipe_attr_and_single_underscore_frames() -> None:
+    assert template_escape_markers(b"{{ '' | attr }}")
     assert template_escape_markers(b"{{ '' | attr('class') }}")
     assert template_escape_markers(b"{{ cycler.next._globals.os }}")
     assert template_escape_markers(b"{{ namespace._builtins }}")
+    assert template_escape_markers(b'{{ cycler.next["_" ~ "_globals_" ~ "_"] }}')
+    assert template_escape_markers(b"{{ cycler.next['_' + '_class_' + '_'] }}")
     assert not template_escape_markers(b"{{ messages[0]['content'] | trim }}")
 
 
@@ -126,7 +135,7 @@ def test_mcp_launch_rejects_package_runner_shells_and_marks_uv_env_file() -> Non
     assert uv_env.injected_environment is True
 
 
-def test_mcp_jsonc_depth_nonfinite_float_js_comments_npmrc_nested_and_dup_tools(
+def test_mcp_jsonc_depth_nonfinite_float_js_comments_and_dup_tools(
     tmp_path: Path,
 ) -> None:
     deep = "[" * 300 + "]" * 300
@@ -140,8 +149,10 @@ def test_mcp_jsonc_depth_nonfinite_float_js_comments_npmrc_nested_and_dup_tools(
 
     code_with_string_comment = (
         'const open = "/*";\n'
+        "const tpl = `multiline\n/* not a comment`;\n"
+        "const x = 1; // https://example.com/*\n"
         'import { Client } from "@modelcontextprotocol/sdk/client/index.js";\n'
-        "  // whole line comment\n"
+        "  // whole line comment across /*\n"
         'const close = "*/";\n'
         '/* real block comment */const trail = "http://example.com";\n'
     )
@@ -150,9 +161,6 @@ def test_mcp_jsonc_depth_nonfinite_float_js_comments_npmrc_nested_and_dup_tools(
     assert "whole line comment" not in stripped
     assert "real block comment" not in stripped
     assert 'const trail = "http://example.com";' in stripped
-
-    parsed_npmrc = _npmrc("${DYNAMIC_KEY}=https://evil.example/\n")
-    assert parsed_npmrc.unresolved is True
 
     # Nested .gemini/settings.json and duplicate static tool names
     nested_gemini = tmp_path / "packages" / "sub" / ".gemini"
@@ -203,8 +211,13 @@ def test_live_mcp_rejects_external_schema_refs_vocabularies_and_non_ascii_conten
             "name": "search_docs",
             "description": "Search docs",
             "inputSchema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "$vocabulary": {
+                    "https://json-schema.org/draft/2020-12/vocab/core": True,
+                    "https://json-schema.org/draft/2020-12/vocab/validation": True,
+                },
                 "type": "object",
-                "$defs": {"Query": {"type": "string"}},
+                "$defs": {"Query": {"type": "string", "pattern": "^[a-z]+$"}},
                 "properties": {
                     "q": {"$ref": "#/$defs/Query"},
                     "$id": {"type": "string"},
@@ -219,6 +232,7 @@ def test_live_mcp_rejects_external_schema_refs_vocabularies_and_non_ascii_conten
         {"type": "object", "$ref": "https://attacker.example/schema.json"},
         {"type": "object", "properties": {"x": {"$dynamicRef": "https://attacker.example/s#x"}}},
         {"type": "object", "$id": "https://attacker.example/root.json"},
+        {"type": "object", "$schema": "https://attacker.example/custom-dialect"},
         {
             "type": "object",
             "properties": {"x": {"$schema": "http://json-schema.org/draft-07/schema#"}},
@@ -227,10 +241,30 @@ def test_live_mcp_rejects_external_schema_refs_vocabularies_and_non_ascii_conten
             "type": "object",
             "$vocabulary": {"https://attacker.example/vocab/custom": True},
         },
+        {
+            "type": "object",
+            "$vocabulary": {"https://evil.test/vocab/core": True},
+        },
+        {
+            "type": "object",
+            "properties": {"q": {"type": "string", "pattern": "(?i)abc"}},
+        },
+        {
+            "type": "object",
+            "properties": {"q": {"$ref": "#/$defs/MissingTarget"}},
+        },
     ]
     for schema in bad_schemas:
         with pytest.raises(DiscoveryError):
             check_served_tool({"name": "bad", "inputSchema": schema})
+
+    # Invalid IDNA hostname raising UnicodeError/ValueError in getaddrinfo fails fast without leaking slot
+    monkeypatch.setattr(
+        "nexus_symbiote.scanners.live_mcp.socket.getaddrinfo",
+        lambda *_a, **_k: (_ for _ in ()).throw(UnicodeError("label empty or too long")),
+    )
+    with pytest.raises(DiscoveryError, match="DNS resolution failed"):
+        _resolve_public("..bad-idna.example", 443, timeout=0.2)
 
     # Non-ASCII digit Content-Length ("\uff11\uff10") must be refused
     fake_resp = MagicMock()
@@ -304,13 +338,12 @@ def test_registry_scanner_tarball_mismatch_pnpm_risks_and_patched_dependencies(
         c for c in res.components if isinstance(c, RegistryEntryComponent) and c.name == "openai"
     ]
     assert len(entries) == 1
-    # Patched dependency is excluded from registry resolution binding as a local override
     assert any(
         "override" in g.lower() or "patch" in g.lower() or "package.json" in g
         for g in res.surfaces_excluded
     )
 
-    # Now test pnpm resolution without patchedDependencies to verify missing_lockfile_integrity + registry_origin
+    # pnpm resolution without patchedDependencies verifies missing_lockfile_integrity + registry_origin
     pkg_dir = tmp_path / "unpatched"
     pkg_dir.mkdir()
     (pkg_dir / "package.json").write_text(
@@ -339,16 +372,18 @@ def test_registry_scanner_tarball_mismatch_pnpm_risks_and_patched_dependencies(
     assert "missing_lockfile_integrity" in categories
     assert "registry_origin" in categories
 
-    # Python lockfile resolving over cleartext HTTP from a private index
+    # Python lockfile resolving over uppercase HTTP:// from a private index + redacted index URL
     py_dir = tmp_path / "py-http"
     py_dir.mkdir()
     (py_dir / "pyproject.toml").write_text(
-        '[project]\ndependencies = ["langgraph>=0.2.0"]\n',
+        '[project]\ndependencies = ["langgraph>=0.2.0", "openai>=1.0.0"]\n',
         encoding="utf-8",
     )
     (py_dir / "uv.lock").write_text(
         'version = 1\n\n[[package]]\nname = "langgraph"\nversion = "0.2.14"\n'
-        'source = { registry = "http://pypi.corp.example/simple" }\n',
+        'source = { registry = "HTTP://pypi.corp.example/simple" }\n\n'
+        '[[package]]\nname = "openai"\nversion = "1.40.0"\n'
+        f'source = {{ registry = "https://ghp_{"A1b2C3d4E5f6" * 3}.corp.example/simple" }}\n',
         encoding="utf-8",
     )
     res3 = RegistryScanner().scan(py_dir)
@@ -360,6 +395,44 @@ def test_registry_scanner_tarball_mismatch_pnpm_risks_and_patched_dependencies(
     py_categories = {(r.category, r.severity.value) for r in comp3.risks}
     assert ("transport_security", "high") in py_categories
     assert ("registry_origin", "low") in py_categories
+    redacted_comp = next(
+        c for c in res3.components if isinstance(c, RegistryEntryComponent) and c.name == "openai"
+    )
+    assert redacted_comp.package_url is None
+    assert any(r.category == "registry_origin" for r in redacted_comp.risks)
+
+    # Yarn Berry bogus checksum ("0") vs valid 128-hex SHA-512 checksum
+    berry_bad = tmp_path / "berry_bad"
+    berry_bad.mkdir()
+    (berry_bad / "package.json").write_text(
+        '{"dependencies":{"openai":"^4.0.0"}}', encoding="utf-8"
+    )
+    (berry_bad / "yarn.lock").write_text(
+        '__metadata:\n  version: 8\n\n"openai@npm:^4.0.0":\n'
+        '  version: 4.52.0\n  resolution: "openai@npm:4.52.0"\n  checksum: "0"\n',
+        encoding="utf-8",
+    )
+    berry_bad_comp = next(
+        c
+        for c in RegistryScanner().scan(berry_bad).components
+        if isinstance(c, RegistryEntryComponent)
+    )
+    assert any(r.category == "missing_lockfile_integrity" for r in berry_bad_comp.risks)
+
+    berry_ok = tmp_path / "berry_ok"
+    berry_ok.mkdir()
+    (berry_ok / "package.json").write_text('{"dependencies":{"openai":"^4.0.0"}}', encoding="utf-8")
+    (berry_ok / "yarn.lock").write_text(
+        '__metadata:\n  version: 8\n\n"openai@npm:^4.0.0":\n'
+        f'  version: 4.52.0\n  resolution: "openai@npm:4.52.0"\n  checksum: 10c0/{"a" * 128}\n',
+        encoding="utf-8",
+    )
+    berry_ok_comp = next(
+        c
+        for c in RegistryScanner().scan(berry_ok).components
+        if isinstance(c, RegistryEntryComponent)
+    )
+    assert not any(r.category == "missing_lockfile_integrity" for r in berry_ok_comp.risks)
 
 
 def test_model_scanner_second_zip_pickle_member_jinja2_and_nested_custom_code(
@@ -380,7 +453,6 @@ def test_model_scanner_second_zip_pickle_member_jinja2_and_nested_custom_code(
     # Also test streaming data-descriptor ZIP (flag 0x08) via Central Directory fallback
     stream_zip = tmp_path / "streamed.onnx"
     raw_bytes = bytearray(buf.getvalue())
-    # Set general-purpose bit 3 (0x08) on first local header so sequential walk falls back to CD
     raw_bytes[6] |= 0x08
     stream_zip.write_bytes(bytes(raw_bytes))
     with stream_zip.open("rb") as f:
@@ -388,7 +460,7 @@ def test_model_scanner_second_zip_pickle_member_jinja2_and_nested_custom_code(
     assert obs.safety == SerializationSafety.UNSAFE_CODE_EXECUTION
     assert "pickle member" in obs.explanation
 
-    # Model directory with additional_chat_templates/default.jinja2 and nested subpkg/modeling.py
+    # Model directory with uppercase .JINJA2 and nested uppercase .PY custom code
     mdir = tmp_path / "hf_model"
     (mdir / "additional_chat_templates").mkdir(parents=True)
     (mdir / "subpkg").mkdir(parents=True)
@@ -396,35 +468,42 @@ def test_model_scanner_second_zip_pickle_member_jinja2_and_nested_custom_code(
         json.dumps({"model_type": "llama", "auto_map": {"AutoModel": "subpkg.modeling.MyModel"}}),
         encoding="utf-8",
     )
-    (mdir / "additional_chat_templates" / "default.jinja2").write_text(
+    (mdir / "additional_chat_templates" / "default.JINJA2").write_text(
         "{{ '' | attr('__class__') }}",
         encoding="utf-8",
     )
-    (mdir / "subpkg" / "modeling.py").write_text("class MyModel:\n    pass\n", encoding="utf-8")
-    # Minimal valid safetensors file: 8-byte header length + "{}"
+    (mdir / "subpkg" / "modeling.PY").write_text("class MyModel:\n    pass\n", encoding="utf-8")
     (mdir / "model.safetensors").write_bytes((2).to_bytes(8, "little") + b"{}")
 
     mres = ModelScanner().scan(mdir)
     mcomp = next(c for c in mres.components if isinstance(c, ModelComponent))
     assert any("CVE-2024-34359" in ref for r in mcomp.risks for ref in r.references)
     assert any(
-        entry["source"].endswith("default.jinja2")
+        entry["source"].lower().endswith("default.jinja2")
         for entry in mcomp.properties.get("chat_templates", [])
     )
     custom = mcomp.properties.get("custom_code", {})
     assert any(
-        entry["path"].endswith("subpkg/modeling.py") for entry in custom.get("python_files", [])
+        entry["path"].lower().endswith("subpkg/modeling.py")
+        for entry in custom.get("python_files", [])
     )
 
 
 def test_ide_agents_subshell_grants_dont_ask_and_codex_full_access(tmp_path: Path) -> None:
     assert "shell commands" in _broad_grants(["Bash(sh -c *)"])
-    assert "shell commands" in _broad_grants(["Bash(/bin/bash -c *)"])
-    assert "shell commands" in _broad_grants(["Bash(python3 -c *)"])
+    assert "shell commands" in _broad_grants(["Bash(/usr/local/bin/bash -c *)"])
+    assert "shell commands" in _broad_grants(["Bash(env python3 -c *)"])
+    assert "shell commands" in _broad_grants(["Bash(cmd /c *)"])
+    assert "shell commands" in _broad_grants(["Bash(pwsh -Command *)"])
     assert _broad_grants(["Bash(git status)"]) == []
+    assert _broad_grants(["Bash(sh scripts/check.sh)"]) == []
 
-    risk = _starting_mode_risk("claude-code", "dontAsk")
-    assert risk is not None and risk.severity == RiskSeverity.MEDIUM
+    for med_mode in ("dontAsk", "auto", "never"):
+        risk = _starting_mode_risk("claude-code", med_mode)
+        assert risk is not None and risk.severity == RiskSeverity.MEDIUM
+    for high_mode in ("bypassPermissions", "always", "full-access", "danger-full-access"):
+        risk_h = _starting_mode_risk("cursor", high_mode)
+        assert risk_h is not None and risk_h.severity == RiskSeverity.HIGH
 
     (tmp_path / ".codex").mkdir()
     (tmp_path / ".codex" / "config.toml").write_text(

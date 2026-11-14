@@ -1933,6 +1933,12 @@ class RegistryScanner(Scanner):
                 )
                 continue
             locator = "yarn.lock#/" + locator_key.replace("~", "~0").replace("/", "~1")
+            raw_checksum = fields.get("checksum")
+            valid_berry_checksum = bool(
+                "resolution" in fields
+                and isinstance(raw_checksum, str)
+                and re.fullmatch(r"(?:[0-9A-Za-z_-]{1,32}/)?[0-9a-fA-F]{128}", raw_checksum.strip())
+            )
             self._bind_npm_resolution(
                 comp,
                 "yarn.lock",
@@ -1943,7 +1949,7 @@ class RegistryScanner(Scanner):
                 locator,
                 lock_digest,
                 result,
-                has_checksum=bool("resolution" in fields and fields.get("checksum")),
+                has_checksum=valid_berry_checksum,
             )
         return True
 
@@ -2776,40 +2782,63 @@ class RegistryScanner(Scanner):
                 )
                 continue
             registry_origin: str | None = "https://pypi.org"
+            unverified_custom_index = False
             shown = redact_text(comp.name)
             if isinstance(source, dict):
                 raw_url = source.get("registry") if method == "uv-lockfile" else source.get("url")
-                if isinstance(raw_url, str) and raw_url.startswith(("https://", "http://")):
-                    if raw_url.startswith("http://"):
-                        comp.risks.append(
-                            _risk(
-                                RiskSeverity.HIGH,
-                                "transport_security",
-                                f"PyPI package '{shown}' is resolved over cleartext HTTP in "
-                                f"{lock_name}.",
-                                "Configure an HTTPS package index and regenerate the lockfile.",
+                if isinstance(raw_url, str) and raw_url.strip():
+                    stripped_url = raw_url.strip()
+                    lower_url = stripped_url.lower()
+                    if lower_url.startswith(("https://", "http://")):
+                        if lower_url.startswith("http://"):
+                            comp.risks.append(
+                                _risk(
+                                    RiskSeverity.HIGH,
+                                    "transport_security",
+                                    f"PyPI package '{shown}' is resolved over cleartext HTTP in "
+                                    f"{lock_name}.",
+                                    "Configure an HTTPS package index and regenerate the lockfile.",
+                                )
                             )
-                        )
-                    origin = sanitized_origin(raw_url)
-                    registry_origin = origin if origin != "[redacted]" else None
+                        origin = sanitized_origin(stripped_url)
+                        if origin is None or origin == "[redacted]":
+                            registry_origin = None
+                            unverified_custom_index = True
+                        else:
+                            registry_origin = origin
+                    else:
+                        registry_origin = None
+                        unverified_custom_index = True
             locator = f"{lock_name}#/package/{index}"
             comp.version = resolved_version
-            comp.package_url = (
-                f"pkg:pypi/{quote(comp.name, safe='')}@{quote(resolved_version, safe='')}"
-            )
-            if registry_origin is not None and registry_origin not in _PYPI_ORIGINS:
-                # As for npm: the package URL names the index it was resolved from, so it
-                # is not mistaken for the public package of the same name.
-                comp.package_url += f"?repository_url={registry_origin}"
+            if unverified_custom_index:
+                comp.package_url = None
                 comp.risks.append(
                     _risk(
                         RiskSeverity.LOW,
                         "registry_origin",
-                        f"PyPI package '{shown}' is resolved from {registry_origin}, not the "
-                        "default PyPI index.",
+                        f"PyPI package '{shown}' is resolved from a redacted or non-standard "
+                        f"index URL in {lock_name}, not the default PyPI index.",
                         "Confirm that this package index is intended and trusted for this package.",
                     )
                 )
+            else:
+                comp.package_url = (
+                    f"pkg:pypi/{quote(comp.name, safe='')}@{quote(resolved_version, safe='')}"
+                )
+                if registry_origin is not None and registry_origin not in _PYPI_ORIGINS:
+                    # As for npm: the package URL names the index it was resolved from, so it
+                    # is not mistaken for the public package of the same name.
+                    comp.package_url += f"?repository_url={registry_origin}"
+                    comp.risks.append(
+                        _risk(
+                            RiskSeverity.LOW,
+                            "registry_origin",
+                            f"PyPI package '{shown}' is resolved from {registry_origin}, not the "
+                            "default PyPI index.",
+                            "Confirm that this package index is intended and trusted for this package.",
+                        )
+                    )
             comp.registry_uri = registry_origin
             comp.source_path = lock_name
             comp.assurance_level = AssuranceLevel.DECLARED
