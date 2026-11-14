@@ -381,10 +381,32 @@ def _hidden_character_risks(
     return risks
 
 
+# Notes say `run` too (`Run make docs`, `dry-run`, `last run:`), so it counts only when
+# the next word names what to run: a path, a script or executable file, or a shell. Any
+# punctuation that a path cannot contain may come first, so `Run: ./x.sh`, `run (bash)`
+# and `run **./x.sh**` count, as do an arrow or a bullet (`->`, `- `), a prompt (`$ `), an
+# HTML tag, a code fence's language and `_` emphasis. A hyphen joined to a word before it
+# (`dry-run`) makes a noun, except in `re-run`; `<!--run` does not. A separator is never a
+# path character, so a path's scan stops at the next `run`'s separator and stays linear.
+_PATH_CHARACTER = r"[\w.~$%+@-]"
+_PUNCTUATION = r"[^\w.~$%+@/\\-]"
+_RUN_SEPARATOR = (
+    rf"(?:{_PUNCTUATION}|[-$]++(?={_PUNCTUATION})|<[a-z]++>|(?<=```)[\w+-]++(?=[ \t]*\n))"
+)
+# A name ends where a word does, or where underscores close emphasis (`_bash_`).
+_NAME_END = r"(?:\b|(?=_+(?!\w)))"
+_RUN_TARGET = (
+    r"(?<!\w)(?:(?<=\bre-)|(?<!\w-))run"
+    rf"{_RUN_SEPARATOR}+_{{0,2}}(?:"
+    r"[/\\]\S"
+    rf"|(?:[a-z_.~$%]{_PATH_CHARACTER}*|[a-z]:|\$env:\w+|\$\{{[\w:]+\}})[/\\]"
+    rf"|{_PATH_CHARACTER}+\.(?:sh|bash|zsh|ps1|bat|cmd|exe|py){_NAME_END}"
+    rf"|(?:(?:ba|z|da)?sh|pwsh|powershell){_NAME_END})"
+)
 _HIDDEN_INSTRUCTION = re.compile(
     r"https?://|~/"
     r"|\b(?:ignore|disregard|exfiltrate|execute|download|upload|send|steal|override|"
-    r"bypass|curl|wget|fetch|eval|install|run)\b",
+    rf"bypass|curl|wget|fetch|eval|install)\b|{_RUN_TARGET}",
     re.IGNORECASE,
 )
 
@@ -398,8 +420,9 @@ def detect_hidden_markup(content: str, source_name: str) -> list[RiskAssessment]
     """Report HTML and Markdown comments, which renderers hide but agents read.
 
     Only counts and lengths are reported, never the hidden text. A comment that
-    carries an imperative, a URL or a path under ``~/`` is high; other comments
-    stay low.
+    carries an imperative (``run`` only when a path, a script or a shell follows,
+    possibly after punctuation or markup), a URL or a path under ``~/`` is high; other
+    comments stay low.
     """
     count = length = 0
     instructive = False
