@@ -35,7 +35,7 @@ from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
 from nexus_symbiote.scanners.source_binding import BindingError, value_binding
 from nexus_symbiote.utils.confined import ConfinedCollection, fold_name
 from nexus_symbiote.utils.jsonc import strip_jsonc
-from nexus_symbiote.utils.secrets import redact_text
+from nexus_symbiote.utils.secrets import redact_keyed_text, redact_text
 
 IDE_AGENT_CONFIGS: dict[str, dict[str, Any]] = {
     "claude-code": {
@@ -285,11 +285,19 @@ def _projected_text(value: str, *, unkeyed: bool) -> str:
     return "".join(pieces)
 
 
-def _projection(value: Any, depth: int = 0, *, env: bool = False, unkeyed: bool = True) -> Any:
+def _projection(
+    value: Any,
+    depth: int = 0,
+    *,
+    env: bool = False,
+    unkeyed: bool = True,
+    key: str | None = None,
+) -> Any:
     """Settings as a redacted `settings_hashes` digest covers them.
 
     The standard redaction is applied to the text between shell operators, cut again
-    before each URL scheme, and
+    before each URL scheme, a text value is also redacted by the ``key`` it is held
+    under, as a header or an assignment in one string would be, and
     environment variables keep their names only, so the digest cannot confirm a guess
     of a value the redaction removes, and does not change with one; only the keyed
     binding covers those values. ``unkeyed`` raises ``AmbiguousURLError`` for a URL
@@ -303,9 +311,9 @@ def _projection(value: Any, depth: int = 0, *, env: bool = False, unkeyed: bool 
             return sorted(_projected_text(str(key), unkeyed=unkeyed) for key in value)
         projected: dict[str, Any] = {}
         merged: dict[str, list[Any]] = {}
-        for key, item in value.items():
-            text = _projected_text(str(key), unkeyed=unkeyed)
-            entry = _projection(item, depth + 1, env=key == "env", unkeyed=unkeyed)
+        for name, item in value.items():
+            text = _projected_text(str(name), unkeyed=unkeyed)
+            entry = _projection(item, depth + 1, env=name == "env", unkeyed=unkeyed, key=str(name))
             merged.setdefault(text, []).append(entry)
             projected[text] = entry
         # Keys the redaction makes equal keep every value, in canonical order, so no
@@ -317,7 +325,8 @@ def _projection(value: Any, depth: int = 0, *, env: bool = False, unkeyed: bool 
     if isinstance(value, list):
         return [_projection(item, depth + 1, unkeyed=unkeyed) for item in value]
     if isinstance(value, str):
-        return _projected_text(value, unkeyed=unkeyed)
+        text = _projected_text(value, unkeyed=unkeyed)
+        return text if key is None else redact_keyed_text(key, value, redacted=text)
     return value
 
 

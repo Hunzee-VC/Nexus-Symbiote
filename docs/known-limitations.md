@@ -426,8 +426,10 @@ A way around a limit that its entry does not describe is worth a
   `.cursor/cli.json` and the Antigravity, xAI and Copilot settings files are
   digested after the redaction, so that their digests cannot confirm a guess either.
   Without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, a change only to a value the
-  redaction removes, such as an MCP server's environment value, a token, or a URL
-  path, query or userinfo on the same host in a `notify` command, raises no alert;
+  redaction removes, such as an MCP server's environment value, a token, the value
+  of an `Authorization`, `Cookie` or credential-named key such as `password` or
+  `X-Api-Key`, or a URL path, query or userinfo on the same host in a `notify`
+  command, raises no alert;
   such a record carries a low `completeness` finding. The redaction ends a URL or
   an assigned value at a shell operator (`;`, `|`, `&`, `$`, `` ` ``, parentheses,
   braces, `<`, `>` or a line break), and starts a new URL at each later scheme
