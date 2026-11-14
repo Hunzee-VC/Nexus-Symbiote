@@ -322,6 +322,10 @@ def _endpoint(value: str, *, origin_only: bool = False) -> tuple[str, str, int, 
             )
         host = parsed.hostname.lower()
         port = 443 if parsed.port is None else parsed.port
+    except DiscoveryError:
+        # The refusal above; DiscoveryError is a ValueError, which the next clause would
+        # otherwise replace with the generic text.
+        raise
     except ValueError as exc:
         raise DiscoveryError("invalid endpoint") from exc
     if host.endswith(".") or not 1 <= port <= 65535:
@@ -624,6 +628,10 @@ def _json(raw: bytes) -> dict[str, Any]:
             object_pairs_hook=unique,
             parse_constant=lambda _: (_ for _ in ()).throw(DiscoveryError("nonfinite JSON")),
         )
+    except DiscoveryError:
+        # The hooks' own diagnostics; DiscoveryError is a ValueError, which the next
+        # clause would otherwise replace with the generic text.
+        raise
     except (UnicodeError, ValueError, RecursionError) as exc:
         raise DiscoveryError("invalid JSON response") from exc
     if not isinstance(value, dict):

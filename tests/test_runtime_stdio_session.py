@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -11,9 +12,16 @@ from pathlib import Path
 import pytest
 
 from nexus_symbiote.live.pinned_process import isolation_off
-from nexus_symbiote.live.session import PinnedStdioSession, invoke_pinned_stdio
+from nexus_symbiote.live import session as live_session
+from nexus_symbiote.live.session import (
+    MAX_REQUEST_BYTES,
+    ExecutionOutcomeUnknown,
+    PinnedStdioSession,
+    invoke_pinned_stdio,
+)
 from nexus_symbiote.runtime import AuthorizationError, digest, sign_contract
 from nexus_symbiote.runtime_validation import MAX_ARGUMENT_BYTES
+from tests.support import STDIO_HELLO, launcher_log, misbehaving_launcher
 from tests.test_runtime_authorization import DEFINITION, fixture
 
 pytestmark = pytest.mark.usefixtures("nonisolated_pinned_fixtures")
@@ -317,3 +325,205 @@ def test_gateway_gates_prevent_real_process_tool_calls(tmp_path, failure, reason
     assert denied.value.reason == reason
     records = [json.loads(line)[0] for line in log.read_text().splitlines()] if log.exists() else []
     assert "tools/call" not in records
+
+
+# The bounds of the session's handshake and descriptor lookup. A launcher that misbehaves
+# in one way is denied at a fixed diagnostic before any tools/call is written, and its
+# process group is killed and reaped. The snippets run inside the launcher; see
+# tests.support.misbehaving_launcher.
+SERVED = f"reply({{'tools': [{DEFINITION!r}]}})"
+BAD_NAME = "invalid or duplicate MCP tool name"
+BAD_CURSOR = "invalid MCP pagination cursor"
+
+
+def scripted(tmp_path: Path, **behaviour: str | dict) -> tuple[Path, str, Path]:
+    log = tmp_path / "scripted.log"
+    path = tmp_path / "scripted-launcher"
+    pin = misbehaving_launcher(path, log, **behaviour)
+    return path, pin, log
+
+
+def assert_reaped_without_a_call(log: Path) -> list[object]:
+    entries = launcher_log(log)
+    assert entries and entries[0][0] == "started"
+    methods = [entry[0] for entry in entries]
+    assert "tools/call" not in methods
+    for entry in entries:
+        with pytest.raises(ProcessLookupError):
+            os.kill(int(entry[1]), 0)
+    return methods
+
+
+def denied_describe(tmp_path: Path, failure: str, **behaviour: str | dict) -> list[object]:
+    call = fixture(tmp_path)[1]
+    path, pin, log = scripted(tmp_path, **behaviour)
+    with PinnedStdioSession(command=str(path), sha256=pin, server_id="server:mail") as session:
+        with pytest.raises(AuthorizationError) as denied:
+            session.describe("server:mail", "send")
+        assert str(denied.value) == failure
+        with pytest.raises(AuthorizationError, match="described session"):
+            session.execute(call)
+    return assert_reaped_without_a_call(log)
+
+
+@pytest.mark.parametrize(
+    "on_list",
+    [
+        "reply({'tools': [{'name': 't%d' % i} for i in range(4097)]})",
+        "reply({'tools': 'send'})",
+        "reply({})",
+    ],
+    ids=["too-many", "not-a-list", "absent"],
+)
+def test_an_oversized_or_invalid_tool_list_is_denied(tmp_path, on_list):
+    denied_describe(tmp_path, "invalid or oversized MCP tool list", on_list=on_list)
+
+
+@pytest.mark.parametrize("on_list", ["reply({'tools': ['send']})", "reply({'tools': [None]})"])
+def test_a_tool_that_is_not_an_object_is_denied(tmp_path, on_list):
+    denied_describe(tmp_path, "invalid MCP tool", on_list=on_list)
+
+
+@pytest.mark.parametrize(
+    "on_list",
+    [
+        f"reply({{'tools': [{DEFINITION!r}, {DEFINITION!r}]}})",
+        "reply({'tools': [{'name': ''}]})",
+        "reply({'tools': [{'description': 'unnamed'}]})",
+        "reply({'tools': [{'name': 7}]})",
+        "reply({'tools': [{'name': 'x' * 257}]})",
+        "reply({'tools': [{'name': 'send\\x1b[0m'}]})",
+    ],
+    ids=["duplicate", "empty-name", "no-name", "non-string-name", "long-name", "control"],
+)
+def test_an_invalid_or_duplicate_tool_name_is_denied(tmp_path, on_list):
+    denied_describe(tmp_path, BAD_NAME, on_list=on_list)
+
+
+def test_a_duplicate_across_pages_is_denied_like_one_within_a_page(tmp_path):
+    on_list = (
+        f"if page == 1:\n    reply({{'tools': [{DEFINITION!r}], 'nextCursor': 'two'}})\n"
+        f"else:\n    reply({{'tools': [{DEFINITION!r}]}})"
+    )
+    methods = denied_describe(tmp_path, BAD_NAME, on_list=on_list)
+    assert methods.count("tools/list") == 2
+
+
+@pytest.mark.parametrize(
+    "on_list",
+    [
+        "reply({'tools': [], 'nextCursor': ''})",
+        "reply({'tools': [], 'nextCursor': 7})",
+        "reply({'tools': [], 'nextCursor': 'x' * 257})",
+        "reply({'tools': [], 'nextCursor': 'same'})",
+    ],
+    ids=["empty", "not-a-string", "too-long", "repeated"],
+)
+def test_an_invalid_or_repeated_cursor_is_denied(tmp_path, on_list):
+    denied_describe(tmp_path, BAD_CURSOR, on_list=on_list)
+
+
+def test_the_page_budget_ends_a_tool_list_that_never_finishes(tmp_path):
+    on_list = "reply({'tools': [], 'nextCursor': 'page-%d' % page})"
+    methods = denied_describe(tmp_path, "MCP page budget exceeded", on_list=on_list)
+    assert methods.count("tools/list") == 64
+
+
+@pytest.mark.parametrize(
+    "hello",
+    [
+        {**STDIO_HELLO, "capabilities": {}},
+        {**STDIO_HELLO, "capabilities": {"tools": "yes"}},
+        {**STDIO_HELLO, "protocolVersion": "2099-01-01"},
+        {**STDIO_HELLO, "serverInfo": {"name": "fixture"}},
+        {**STDIO_HELLO, "serverInfo": {"name": "", "version": "1"}},
+    ],
+    ids=["no-tools", "tools-not-an-object", "protocol", "no-version", "empty-name"],
+)
+def test_a_handshake_without_the_tool_capability_denies_before_listing(tmp_path, hello):
+    path, pin, log = scripted(tmp_path, hello=hello)
+    with (
+        pytest.raises(AuthorizationError, match="MCP tool capability not negotiated"),
+        PinnedStdioSession(command=str(path), sha256=pin, server_id="server:mail"),
+    ):
+        pass
+    assert assert_reaped_without_a_call(log) == ["started", "initialize"]
+
+
+def test_a_tools_call_request_over_the_byte_limit_is_never_written(tmp_path):
+    call = fixture(tmp_path)[1]
+    oversized = call.model_copy(
+        update={"arguments": {"to": "team@example.test", "body": "a" * MAX_REQUEST_BYTES}}
+    )
+    path, pin, log = scripted(tmp_path, on_list=SERVED)
+    with PinnedStdioSession(command=str(path), sha256=pin, server_id="server:mail") as session:
+        session.describe("server:mail", "send")
+        with pytest.raises(ExecutionOutcomeUnknown) as outcome:
+            session.execute(oversized)
+    cause = outcome.value.__cause__
+    assert isinstance(cause, AuthorizationError)
+    assert str(cause) == "MCP request exceeds byte limit"
+    assert assert_reaped_without_a_call(log) == [
+        "started",
+        "initialize",
+        "notifications/initialized",
+        "tools/list",
+    ]
+
+
+class _ZeroWrites:
+    """``os`` as seen by the module under test, with every write accepting nothing."""
+
+    def __getattr__(self, name: str):
+        return getattr(os, name)
+
+    def write(self, fd: int, data) -> int:
+        return 0
+
+
+def test_a_write_that_makes_no_progress_closes_the_session_and_reaps_the_process(
+    tmp_path, monkeypatch
+):
+    path, pin, _ = scripted(tmp_path)
+    started: list[subprocess.Popen[bytes]] = []
+    popen = subprocess.Popen
+
+    def record(*args, **kwargs):
+        process = popen(*args, **kwargs)
+        started.append(process)
+        return process
+
+    monkeypatch.setattr(live_session.subprocess, "Popen", record)
+    monkeypatch.setattr(live_session, "os", _ZeroWrites())
+    with (
+        pytest.raises(AuthorizationError, match="MCP request stream closed"),
+        PinnedStdioSession(command=str(path), sha256=pin, server_id="server:mail"),
+    ):
+        pass
+    assert len(started) == 1 and started[0].returncode is not None
+    with pytest.raises(ProcessLookupError):
+        os.kill(started[0].pid, 0)
+
+
+def test_an_exhausted_frame_source_is_a_missing_response(tmp_path):
+    path, pin, log = scripted(tmp_path)
+    with PinnedStdioSession(command=str(path), sha256=pin, server_id="server:mail") as session:
+        session._inbound = iter(())
+        with pytest.raises(AuthorizationError, match="missing MCP response"):
+            session.describe("server:mail", "send")
+    # The launcher is killed as soon as the lookup fails, so it may not have logged the
+    # request it was reading.
+    assert assert_reaped_without_a_call(log)[:2] == ["started", "initialize"]
+
+
+def test_a_launcher_over_the_byte_budget_is_denied_before_it_is_read_or_run(tmp_path):
+    # A sparse file: the size check reads st_size before any byte, so no 128 MiB is written.
+    path = tmp_path / "huge-launcher"
+    with path.open("wb") as stream:
+        stream.truncate(128 * 1024 * 1024 + 1)
+    pin = "sha256:" + hashlib.sha256(b"").hexdigest()
+    with (
+        pytest.raises(AuthorizationError, match="launcher exceeds byte budget"),
+        PinnedStdioSession(command=str(path), sha256=pin, server_id="server:mail"),
+    ):
+        pass

@@ -248,3 +248,126 @@ def test_a_ratio_skewed_by_a_burst_of_load_is_measured_once_more(monkeypatch):
     assert support.scaling_ratio(lambda scale: None) == pytest.approx(16)
     monkeypatch.setattr(support, "time", clock([0.5, 0.5, 0.1, 0.1]))
     assert support.scaling_ratio(lambda scale: None) == pytest.approx(5)
+
+
+GUARDED_ENTRY_POINTS = """
+import socket
+
+import pytest
+
+UNROUTABLE = ("192.0.2.1", 9)
+
+
+def refused(attempt):
+    with pytest.raises(OSError, match="test suite blocked outbound non-loopback"):
+        attempt()
+
+
+def test_connect():
+    refused(lambda: socket.socket().connect(("192.0.2.1", 443)))
+
+
+def test_connect_ex():
+    refused(lambda: socket.socket().connect_ex(("192.0.2.1", 443)))
+
+
+def test_create_connection():
+    refused(lambda: socket.create_connection(("192.0.2.1", 443), 0.01))
+
+
+def test_sendto():
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp:
+        refused(lambda: udp.sendto(b"x", UNROUTABLE))
+        refused(lambda: udp.sendto(b"x", 0, UNROUTABLE))
+        refused(lambda: udp.sendto(b"x", ("example.com", 9)))
+
+
+def test_sendmsg():
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp:
+        refused(lambda: udp.sendmsg([b"x"], [], 0, UNROUTABLE))
+
+
+def test_getaddrinfo():
+    refused(lambda: socket.getaddrinfo("example.com", 443))
+    refused(lambda: socket.getaddrinfo(b"example.com", 443))
+    refused(lambda: socket.getaddrinfo("192.0.2.1", 443))
+    refused(lambda: socket.getaddrinfo("localhost.example.com", 443))
+
+
+def test_gethostbyname():
+    refused(lambda: socket.gethostbyname("example.com"))
+
+
+def test_gethostbyname_ex():
+    refused(lambda: socket.gethostbyname_ex("example.com"))
+
+
+def test_a_defect_that_marks_offline_without_the_guard_is_still_caught():
+    from nexus_symbiote import modes
+
+    # The product's audit hook, once installed, refuses creating the socket itself while
+    # _active says offline; the socket exists first so that only the methods are tried.
+    with socket.socket() as sock:
+        modes._active = modes.Mode.OFFLINE
+        try:
+            refused(lambda: socket.getaddrinfo("example.com", 443))
+            refused(lambda: sock.connect(("192.0.2.1", 443)))
+        finally:
+            modes._active = None
+
+
+def test_the_products_offline_refusal_is_what_a_test_sees():
+    from nexus_symbiote import modes
+
+    with modes.enforce(modes.Mode.OFFLINE), pytest.raises(modes.OfflineViolation):
+        socket.getaddrinfo("example.com", 443)
+    with modes.enforce(modes.Mode.OFFLINE), pytest.raises(modes.OfflineViolation):
+        socket.create_connection(("192.0.2.1", 443), 0.01)
+
+
+def test_loopback_targets_and_names_pass():
+    assert socket.getaddrinfo("localhost", 0)
+    assert socket.getaddrinfo("127.0.0.1", 0)
+    assert socket.getaddrinfo("::1", 0)
+    assert socket.getaddrinfo(None, 80)
+    assert socket.gethostbyname("localhost").startswith("127.")
+    assert socket.gethostbyname_ex("localhost")
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp:
+        udp.sendto(b"x", ("127.0.0.1", 9))
+        udp.sendto(b"x", 0, ("localhost", 9))
+        udp.sendmsg([b"x"], [], 0, ("127.0.0.1", 9))
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        with socket.create_connection(listener.getsockname(), 1):
+            pass
+        with socket.socket() as client:
+            client.connect(listener.getsockname())
+"""
+
+
+def test_every_guarded_socket_entry_point_refuses_a_non_loopback_target(suite):
+    suite.makepyfile(GUARDED_ENTRY_POINTS)
+    suite.runpytest("-p", "no:cacheprovider").assert_outcomes(passed=11)
+
+
+def test_the_c_socket_type_is_guarded_only_by_the_products_audit_hook():
+    """The suite guard patches socket.socket; the C type's methods cannot be replaced.
+
+    Inside the product's offline guard its audit hook refuses the C type too, which is
+    why the suite guard stands down while that guard is installed and never masks it.
+    """
+    import _socket
+    import socket
+
+    from nexus_symbiote import modes
+
+    with pytest.raises(TypeError):
+        _socket.socket.sendto = lambda *args: None  # type: ignore[method-assign]
+    assert "_socket.socket, the C type, is immutable" in CONFTEST
+    early = _socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        with modes.enforce(modes.Mode.OFFLINE), pytest.raises(modes.OfflineViolation):
+            early.sendto(b"x", ("192.0.2.1", 9))
+    finally:
+        early.close()

@@ -60,6 +60,24 @@ MODULE_FLOORS: dict[str, tuple[int, int | None]] = {
     # parse pre-empts is covered by substituting the digest).
     "nexus_symbiote/inventory_export.py": (98, 98),
     "nexus_symbiote/inventory_export_cli.py": (98, 98),
+    # The modules the 2026-11-14 audit found without a floor: the live-mode and pinned
+    # stdio paths, the validation worker's gateway side, safe output writes, collection
+    # limits, advisory queries, launcher classification, the ShadowScan import and the gate
+    # reports. The worker itself runs in an isolated subprocess (-I, PATH only) that
+    # coverage does not trace, so runtime_validation.py measures lower than it is tested.
+    # Measured with the tests added then: 77/74, 93/85, 94/91, 96/90, 95/93, 100/100,
+    # 96/94, 93/87, 96/92, 96/91 and 98/93.
+    "nexus_symbiote/runtime_validation.py": (76, 73),
+    "nexus_symbiote/utils/files.py": (92, 84),
+    "nexus_symbiote/live/stdio.py": (92, 89),
+    "nexus_symbiote/live/session.py": (95, 88),
+    "nexus_symbiote/live/verify.py": (94, 92),
+    "nexus_symbiote/limits.py": (98, 98),
+    "nexus_symbiote/advisories.py": (95, 93),
+    "nexus_symbiote/scanners/mcp_launch.py": (92, 86),
+    "nexus_symbiote/scanners/live_mcp.py": (95, 91),
+    "nexus_symbiote/scanners/shadowscan.py": (95, 90),
+    "nexus_symbiote/reporting.py": (97, 92),
 }
 COUNTS = (
     ("statement", "covered_lines", "num_statements"),

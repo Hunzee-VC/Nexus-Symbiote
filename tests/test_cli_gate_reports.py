@@ -793,3 +793,44 @@ def test_a_checkout_report_only_policy_cannot_pass_a_failed_gate_in_ci(tmp_path,
     assert accepted.exit_code == 0, accepted.output
     operator = CliRunner().invoke(main, [*args, "--report-only"])
     assert operator.exit_code == 0, operator.output
+
+
+def test_gate_reasons_list_the_first_tripped_findings_and_count_the_rest():
+    from nexus_symbiote.reporting import LISTED, gate_reason_lines
+
+    findings = [
+        {"severity": "critical", "component_name": f"c{index}", "category": "k", "detail": "d"}
+        for index in range(LISTED + 3)
+    ]
+    findings.append({"severity": "low", "component_name": "quiet", "category": "k", "detail": "d"})
+    document = {
+        "gate_reasons": ["finding at or above high severity"],
+        "fail_on_severity": "high",
+        "findings": findings,
+    }
+    lines = [text for text, _ in gate_reason_lines(document)]
+    assert lines[0] == "  - finding at or above high severity"
+    assert lines[1 : LISTED + 1] == [
+        f"  - finding: critical c{index} [k] d" for index in range(LISTED)
+    ]
+    assert lines[LISTED + 1] == "  - finding: 3 more at or above high"
+    assert len(lines) == LISTED + 2
+    document["findings"] = findings[:LISTED]
+    assert all("more at or above" not in text for text, _ in gate_reason_lines(document))
+
+
+def test_risk_report_lists_the_first_coverage_gaps_and_points_to_the_json():
+    from nexus_symbiote.reporting import LISTED, risk_report_lines
+
+    document = {
+        "passed": False,
+        "overall_score": 4.0,
+        "gate_reasons": ["collection coverage is unknown or incomplete"],
+        "coverage_gaps": [f"gap {index:02d}" for index in range(LISTED + 2)],
+    }
+    lines = [text for text, _ in risk_report_lines(document)]
+    listed = [text for text in lines if text.startswith("  - coverage gap: gap ")]
+    assert listed == [f"  - coverage gap: gap {index:02d}" for index in range(LISTED)]
+    assert "  - coverage gap: 2 more in --json-output" in lines
+    document["coverage_gaps"] = document["coverage_gaps"][:LISTED]
+    assert all("more in --json-output" not in text for text, _ in risk_report_lines(document))
