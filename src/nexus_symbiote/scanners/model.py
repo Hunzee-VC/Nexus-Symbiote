@@ -148,8 +148,9 @@ _UNSAFE_SUFFIXES = {
 _PICKLE_WRAPPERS = {".tar", ".gz", ".bz2", ".xz", ".lzma", ".zst"}
 _TEXT_PICKLE_START = frozenset(b"(cNILFSV}])KJMUTX")
 _INDEX = re.compile(r"(?P<base>.+?)\.index(?:\.[A-Za-z0-9_-]+)?\.json", re.IGNORECASE)
+# transformers reads ``repository--module.Class``; a repository need not name an owner.
 _CODE_REFERENCE = re.compile(
-    r"(?:[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*--)?"
+    r"(?:[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)?--)?"
     r"[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*"
 )
 _HUB_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}(?:/[A-Za-z0-9][A-Za-z0-9._-]{0,95})?")

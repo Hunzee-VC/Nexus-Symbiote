@@ -552,6 +552,20 @@ def test_cross_repository_auto_map_is_named_in_the_finding(project):
     assert component.properties["custom_code"]["cross_repository"] is True
 
 
+def test_a_reference_to_a_repository_without_an_owner_names_another_repository(project):
+    # transformers splits on "--" and fetches the module from the repository gpt2.
+    write_safetensors(project / "model.safetensors")
+    (project / "config.json").write_text(
+        json.dumps({"auto_map": {"AutoModel": "gpt2--modeling_gpt.Model"}})
+    )
+    component = ModelScanner().scan(project).components[0]
+    (risk,) = [risk for risk in component.risks if risk.category == "custom_code"]
+    assert "another repository" in risk.detail
+    custom_code = component.properties["custom_code"]
+    assert custom_code["references"] == ["gpt2--modeling_gpt.Model"]
+    assert custom_code["cross_repository"] is True
+
+
 def test_python_files_without_declared_custom_code_do_not_change_the_inventory(project):
     write_safetensors(project / "model.safetensors")
     before = ModelScanner().scan(project)
