@@ -8,10 +8,11 @@ classes restate recorded evidence (``risk_classes``), and unclassified means unk
 safe. Every listing the view bounds says how much it left out.
 
 The HTML file is inert: every inventory string is clipped, neutralized and escaped by one
-function and appears only as text or as an escaped attribute value; ids, classes and data
-attributes come from node indexes and fixed vocabularies. The one style block and the one
-script are fixed text whose hashes the file's Content-Security-Policy pins, and the script
-reads only indexes and fixed-vocabulary attributes from the page.
+function and appears only as text or as an escaped attribute value; ids, classes and the
+data attributes other than ``data-name`` come from node indexes and fixed vocabularies.
+The one style block and the one script are fixed text whose hashes the file's
+Content-Security-Policy pins, and the script reads indexes and fixed-vocabulary
+attributes from the page, and ``data-name`` only to compare it with the name filter.
 """
 
 from __future__ import annotations
@@ -396,8 +397,9 @@ def _exposure(
 ) -> tuple[int, int, tuple[ExposurePath, ...], int]:
     """The best-ranked shortest paths from agents and IDE agents to sinks.
 
-    A first pass over each kept source ranks every (source, sink) pair it reaches by
-    distance alone and keeps the best MAX_PATHS; a second pass rebuilds only those paths.
+    A first pass over each kept source ranks every (source, sink) pair it reaches by sink
+    weight, then distance, without building its route, and keeps the best MAX_PATHS; a
+    second pass rebuilds only those paths.
     The work is linear in kept sources times nodes and edges, plus MAX_PATHS paths.
     """
     successors: list[set[int]] = [set() for _ in nodes]

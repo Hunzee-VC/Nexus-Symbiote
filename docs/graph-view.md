@@ -215,7 +215,7 @@ nodes and edges; use the chips to show only components with a risk class, a high
 critical finding, `unpinned` as the [JSON document](#the-json-document) defines it, or
 no classification (a component must match every chip selected); type in the name
 filter, which matches a name as the page shows it, whole up to 200 characters and
-otherwise its first 199; and press Escape to clear everything. The page follows the system's light or dark theme and prints with every
+otherwise its first 199; and press Escape to clear the selection and the filters. The page follows the system's light or dark theme and prints with every
 component's details.
 
 ## Example: the demo agent
