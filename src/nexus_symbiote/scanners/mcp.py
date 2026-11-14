@@ -73,6 +73,7 @@ from nexus_symbiote.utils.secrets import (
     SecretScrubber,
     redact_descriptor,
     redact_text,
+    secret_like,
     secret_values,
 )
 from nexus_symbiote.utils.terminal import neutralize
@@ -289,6 +290,11 @@ def source_binding_key() -> bytes | None:
             f"{_MIN_SOURCE_BINDING_KEY_LENGTH} characters"
         )
     return key.encode()
+
+
+def _launch_secrets(launch: Launch) -> list[str]:
+    # Earlier assignments remain private even when a later value shadows them.
+    return [value for name, value in launch.environment if secret_like(name, value)]
 
 
 def _value_binding(
@@ -1495,7 +1501,7 @@ class MCPScanner(Scanner):
                 and all(isinstance(arg, str) for arg in args)
             ):
                 try:
-                    values.extend(secret_values(dict(analyze(command, args).environment)))
+                    values.extend(_launch_secrets(analyze(command, args)))
                 except (TypeError, ValueError, RecursionError):
                     # The server's normal parsing path reports this failure.
                     continue
@@ -1507,7 +1513,7 @@ class MCPScanner(Scanner):
             launch = analyze(config.get("command", ""), config.get("args", []))
         except (TypeError, ValueError, RecursionError):
             return "[withheld]"
-        scrubber = SecretScrubber([*file_secrets, *secret_values(dict(launch.environment))])
+        scrubber = SecretScrubber([*file_secrets, *_launch_secrets(launch)])
         # Clipping first can truncate a token so its recognizable shape is lost.
         return neutralize(redact_text(name, scrubber)[:256])
 
@@ -1649,7 +1655,7 @@ class MCPScanner(Scanner):
                 *secret_values(env),
                 *secret_values(config.get("headers", {})),
                 *secret_values(config.get("http_headers", {})),
-                *secret_values(dict(launch.environment)),
+                *_launch_secrets(launch),
             ]
         )
         cwd = config.get("cwd")

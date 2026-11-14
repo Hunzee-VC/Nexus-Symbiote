@@ -6,6 +6,7 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ### Security
 
+- Repeated inline environment assignments retain every recognized credential for redaction, including values shadowed by a later assignment in the same launcher.
 - Merged MCP diagnostics apply free-text credential rules before clipping names and share recognized inline launcher credentials across servers of the same file. Live descriptor regressions distinguish masked bearer metadata from refused session-ID echoes.
 - Malformed MCP tool diagnostics scrub token-shaped server names and known file or inline-environment credentials before clipping and terminal neutralization, preserving the failed-coverage report without publishing those values.
 - Collectors close four risk-coverage gaps: an A2A alternative interface that declares an explicit non-HTTPS scheme fails the transport check (a 1.0 gRPC host:port form does not); prompt-skipping starting modes declared in JSON settings (`danger-full-access`, `full-access`, `dontAsk`, `never`, `auto`) are rated like their Codex TOML equivalents; a malformed MCP tool entry's failure names the server whose record and risks it withholds; and a declared RAG source named like the collector's own `import-`/`env-` evidence components is recorded as `rag:declared-…` so it cannot displace them.
