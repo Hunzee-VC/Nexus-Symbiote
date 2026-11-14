@@ -97,7 +97,9 @@ class TestFullPipeline:
         scan2 = runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_v2)])
         assert scan2.exit_code == 0
 
-        diff = runner.invoke(main, ["diff", str(bom_v1), str(bom_v2), "--json-output"])
+        diff = runner.invoke(
+            main, ["diff", str(bom_v1), str(bom_v2), "--json-output", "--no-fail-on-alert"]
+        )
         assert diff.exit_code == 0
         diff_data = json.loads(diff.output)
         assert diff_data["has_changes"] is True

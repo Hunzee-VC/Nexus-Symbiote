@@ -82,7 +82,7 @@ def test_mcp_endpoint_substitution_after_scan(tmp_path):
     identical = compare(snapshots[0], snapshots[1], "--fail-on-alert", expected_exit=1)
     assert identical["has_changes"]
     assert "unbound" in identical["components_modified"][0]["details"][0]
-    changed = compare(snapshots[1], snapshots[2])
+    changed = compare(snapshots[1], snapshots[2], "--no-fail-on-alert")
     assert compare(snapshots[1], snapshots[2], "--fail-on-alert", expected_exit=1) == changed
     assert changed["has_changes"]
     assert changed["total_changes"] == 1
@@ -92,8 +92,8 @@ def test_mcp_endpoint_substitution_after_scan(tmp_path):
     assert changed["security_alerts"][0]["severity"] == "critical"
     assert changed["security_alerts"][0]["component"] == modified["bom_ref"]
     args = ["diff", str(snapshots[1]), str(snapshots[2])]
-    report = runner.invoke(main, args)
-    gated = runner.invoke(main, [*args, "--fail-on-alert"])
+    report = runner.invoke(main, [*args, "--no-fail-on-alert"])
+    gated = runner.invoke(main, args)
     assert report.exit_code == 0 and gated.exit_code == 1
     assert gated.output == report.output
     assert "MCP server endpoint changed" in gated.output
