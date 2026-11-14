@@ -313,7 +313,15 @@ class TestDiffCommand:
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["has_changes"] is True
-        assert [c["bom_ref"] for c in data["components_modified"]] == ["registry:pypi/transformers"]
+        modified = data["components_modified"]
+        assert [c["bom_ref"] for c in modified if c["bom_ref"].startswith("registry:")] == [
+            "registry:pypi/transformers"
+        ]
+        assert all(
+            "unbound" in " ".join(c["details"])
+            for c in modified
+            if not c["bom_ref"].startswith("registry:")
+        )
         assert [c["bom_ref"] for c in data["components_added"]] == ["registry:pypi/langchain"]
         assert data["components_removed"] == []
 

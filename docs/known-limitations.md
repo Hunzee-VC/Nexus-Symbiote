@@ -174,13 +174,17 @@ A way around a limit that its entry does not describe is worth a
   values are exported only as redacted positions and names, and endpoint and
   package index URLs as origins. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, `diff`
   alerts on any change to a server's command, arguments, environment or header
-  values. Without it, `diff` alerts on a changed command basename, launcher,
-  package or version, and on added or removed arguments, variables or headers; see
-  [source binding](verification-source-binding.md).
-- **Without the key, changed values pass.** A served directory widened from
-  `./notes` to `/`, a changed flag, environment or header value, an endpoint or
+  values. Without it, `diff` still alerts on a changed command basename, launcher,
+  package or version, and on added or removed arguments, variables or headers, and
+  a server whose remaining values are unbound is a medium alert: argument,
+  environment and endpoint-path drift is undetectable. That alert does not say
+  which value changed. See [source binding](verification-source-binding.md).
+- **Without the key, the value itself is not compared.** A served directory widened
+  from `./notes` to `/`, a changed flag, environment or header value, an endpoint or
   index path changed on the same host, a project resolver setting value, and the
-  directory of a command raise no alert.
+  directory of a command do not produce an alert that names the new value. For an
+  MCP server that recorded those values as unbound, `diff --fail-on-alert` still
+  fails, because the comparison cannot show that they stayed the same.
 - **Unbound values add to the score.** Each server with such values carries a low
   `completeness` risk that names the key. It is not a gap, but it adds 1 to the
   risk score, so about ten such servers add 10 points toward the default fail

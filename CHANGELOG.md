@@ -6,6 +6,7 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ### Security
 
+- **Breaking:** `diff --fail-on-alert` fails when an MCP server's launch arguments, environment values or endpoint path were collected without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`. Those values are redacted, so a filesystem root widened from `/srv/data` to `/` used to compare as unchanged. The alert says the values are unbound; it does not record the new value. Collect both snapshots with the same key to compare them. Servers whose arguments are only the recorded package and `-y` are unchanged. The Action's `reviewed-baseline` input now requires that key, via `source-binding-key` or the step environment, and prints a warning when a run has no baseline and no key.
 - `advisories --exclude` matches npm names in any case, and refuses a pattern with a `*` anywhere but at its end instead of sending the name it could never match. A scoped registry's package name and both values of a shadowed header are withheld.
 - Secret redaction covers keys, escaped quotes and Negotiate/NTLM credentials, and A2A card signature headers shaped like credentials are withheld.
 - The workflow checker closes ways a workflow change could pass it: `action.yml` files beside workflows, a gate in a step that continues on error, interpreter and shell options that run code, heredocs before the command, array assignments, and pinned actions whose version it cannot read. The lock checker requires every hash line to be a single SHA-256 hash.

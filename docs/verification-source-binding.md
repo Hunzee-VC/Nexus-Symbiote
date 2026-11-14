@@ -98,7 +98,11 @@ low `completeness` risk that names the key and lists what is unbound: a command 
 recorded launcher package and `-y`, environment values, header values, an endpoint path,
 query, fragment or user information, or project resolver settings. A server whose
 arguments are only its recorded launcher package, or with a bare endpoint origin,
-carries none.
+carries none. `diff --fail-on-alert` treats an MCP server with that finding as a
+medium alert that launch values are unbound, including when the two inventories
+were collected from the same bytes: the redacted export cannot show that an
+argument or environment value stayed the same. Set the key on both collections to
+compare the values. The alert does not record the value.
 
 Profile v1 records (an unkeyed digest over raw configuration, including secret
 values) let anyone holding the BOM confirm guesses for low-entropy secrets. They

@@ -177,6 +177,7 @@ class Config:
     limits: str = ""
     baseline: bytes | None = field(default=None, repr=False)
     allow_unsigned_discovery: bool = False
+    binding_key: str = field(default="", repr=False)
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> Config:
@@ -223,6 +224,29 @@ class Config:
             if reviewed
             else None
         )
+        from nexus_symbiote.scanners.mcp import (
+            _MIN_SOURCE_BINDING_KEY_LENGTH,
+            SOURCE_BINDING_KEY_ENV,
+        )
+
+        supplied_key = env.get("SYMBIOTE_SOURCE_BINDING_KEY", "")
+        inherited_key = env.get(SOURCE_BINDING_KEY_ENV, "")
+        if supplied_key and (
+            len(supplied_key) < _MIN_SOURCE_BINDING_KEY_LENGTH
+            or any(c in supplied_key for c in "\r\n\x00")
+        ):
+            raise InputError(
+                "source-binding-key must be one line of at least "
+                f"{_MIN_SOURCE_BINDING_KEY_LENGTH} characters"
+            )
+        effective_key = supplied_key or inherited_key
+        if baseline is not None and len(effective_key) < _MIN_SOURCE_BINDING_KEY_LENGTH:
+            raise InputError(
+                "reviewed-baseline needs a source binding key of at least "
+                f"{_MIN_SOURCE_BINDING_KEY_LENGTH} characters (source-binding-key or "
+                f"{SOURCE_BINDING_KEY_ENV}): without it MCP launch arguments, environment "
+                "values and endpoint paths are not compared"
+            )
         validate = _boolean(env.get("SYMBIOTE_VALIDATE", "true"), "validate")
         if validate and scanners and set(scanners) != SCANNERS:
             raise InputError(
@@ -246,10 +270,13 @@ class Config:
             _boolean(
                 env.get("SYMBIOTE_ALLOW_UNSIGNED_DISCOVERY", "false"), "allow-unsigned-discovery"
             ),
+            supplied_key,
         )
 
 
-def _run(args: list[str], *, private: Path, limits: str = "") -> subprocess.CompletedProcess[str]:
+def _run(
+    args: list[str], *, private: Path, limits: str = "", binding_key: str = ""
+) -> subprocess.CompletedProcess[str]:
     # Offline Sigstore verification trusts any trusted_root.json in the per-user
     # cache without checking it, and an earlier job or step can plant one there.
     # An empty private home makes sigstore seed it from its hash-locked package.
@@ -263,6 +290,11 @@ def _run(args: list[str], *, private: Path, limits: str = "") -> subprocess.Comp
     env.pop(LIMITS_ENV, None)
     if limits:
         env[LIMITS_ENV] = limits
+    # An explicit input replaces a key inherited from the job. An empty input does not.
+    if binding_key:
+        from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
+
+        env[SOURCE_BINDING_KEY_ENV] = binding_key
     # The executable is this interpreter; arguments never pass through a shell.
     return subprocess.run(  # noqa: S603
         [sys.executable, "-I", "-m", "nexus_symbiote", *args],
@@ -416,6 +448,20 @@ def _announce(config: Config) -> None:
         _annotate("notice", "collection limits set by the limits input: " + config.limits)
     if config.baseline is None:
         _say("  drift gate: not configured (set reviewed-baseline to fail on drift)")
+        from nexus_symbiote.scanners.mcp import (
+            _MIN_SOURCE_BINDING_KEY_LENGTH,
+            SOURCE_BINDING_KEY_ENV,
+        )
+
+        inherited = os.environ.get(SOURCE_BINDING_KEY_ENV, "")
+        if len(config.binding_key or inherited) < _MIN_SOURCE_BINDING_KEY_LENGTH:
+            _annotate(
+                "warning",
+                f"{SOURCE_BINDING_KEY_ENV} is not set to at least "
+                f"{_MIN_SOURCE_BINDING_KEY_LENGTH} characters: MCP launch arguments, "
+                "environment values and endpoint paths are not bound, so a later diff "
+                "cannot see those changes",
+            )
 
 
 def _summary_text(result: str, gates: Mapping[str, str], notes: Iterable[str]) -> str:
@@ -486,7 +532,9 @@ def run(
         if command is None:
             private = scratch / "home"
             private.mkdir(mode=0o700)
-            command = functools.partial(_run, private=private, limits=config.limits)
+            command = functools.partial(
+                _run, private=private, limits=config.limits, binding_key=config.binding_key
+            )
         native = scratch / "native.json"
         signers: list[str] = []
         if config.signature_policy is not None:
