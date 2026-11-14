@@ -420,15 +420,36 @@ A way around a limit that its entry does not describe is worth a
   TFLite, Core ML and ExecuTorch files are rated `unknown`: Keras Lambda layers,
   SavedModel operations and custom operators are not inspected. Each is a high
   finding, which the default gate does not fail on by severity alone.
-- **Some files are not inventoried.** Pickles under names other than the
-  [listed suffixes](model-integrity.md#model-files-and-references), NumPy `.npy` and
-  `.npz` arrays, and `.pb` files other than `saved_model.pb` produce no component.
-- **Pickle recognition under another suffix is bounded.** A binary pickle is
-  recognized by its PROTO opcode and 16 well-formed opcodes in the first 64 KiB, a
-  text-protocol pickle by a consistent stream of at most 4,096 opcodes, and a ZIP
-  archive by a `.pkl` member in its first local header or in a central directory of
-  at most 1 MiB, read from the end of the archive. A pickle hidden otherwise under
-  `.onnx`, `.gguf` or another suffix is rated `unknown`, a high finding, and
+- **Some files are not inventoried.** A file outside the
+  [listed names](model-integrity.md#model-files-and-references) is inventoried by
+  its content only when it is named `.npy`, `.npz` or `.dat` or has any name below a
+  directory named `model`, `models`, `weights`, `checkpoint` or `checkpoints`, and it
+  does not have the name of a model directory's configuration, tokenizer or chat
+  template file, such as `config.json`, and is not a Python or Jinja source. There, a
+  recognized pickle, a NumPy array with an object dtype (which
+  `np.load(allow_pickle=True)` unpickles) and a ZIP archive with a pickle-family
+  member or such an array as a member are rated
+  `unsafe-code-execution`, and a NumPy header or ZIP archive left unread at the
+  bounds below is rated `unknown`. A pickle renamed anywhere else, an unrecognized
+  pickle, a numeric NumPy array, a ZIP archive with neither kind of member, and `.pb`
+  files other than `saved_model.pb` produce no component. A candidate ZIP archive is
+  read to its end and digested, as a model archive is, and a candidate larger than
+  the `model-bytes` limit is a collection failure.
+- **Content recognition is bounded.** A binary pickle is recognized by its PROTO
+  opcode and 16 well-formed opcodes in the first 64 KiB, and a text-protocol pickle
+  by a consistent stream of at most 4,096 opcodes. A NumPy array's version 1, 2 or 3
+  header is parsed when it is at most 64 KiB long, as every version 1 header is, and
+  while the 16,000,000 structure units one scan shares with the ONNX and GGUF readers
+  last, at one unit a header byte; only its `descr` value is read for types, so a
+  field named `O` is not one. A ZIP
+  archive is recognized by a pickle-family member in its first local header or in a
+  central directory of at most 1 MiB, read from the end of the archive, including
+  ZIP64, and by an object-dtype array as any member, read from the member's local
+  header and the start of its stored or DEFLATE-compressed data. A longer array
+  header, a longer or malformed directory, a member compressed by another method,
+  such as BZIP2 or LZMA, and a member whose data runs past the next member's local
+  header are rated `unknown`, a high finding; a pickle hidden otherwise under
+  `.onnx`, `.gguf` or another suffix is rated `unknown` too, and
   `validate --project` still refuses it as unverified.
 - **Templates and tensors are checked shallowly.** GGUF and Hugging Face chat
   templates are checked for potential Python-internals access patterns, not evaluated;

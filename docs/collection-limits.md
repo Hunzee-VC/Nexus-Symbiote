@@ -246,12 +246,13 @@ shorten lists whose content is recorded or bound anyway.
 | Model artifact named in an operator signature policy | 5 GiB |
 | Sigstore bundle named in an operator signature policy | 4 MiB |
 | Model file header read to identify and inspect its format | 1 MiB |
-| Pickle sample inspected under another model suffix, and the opcodes read from it | 64 KiB; 4,096 |
-| ZIP central directory read from the end of a model file to find a pickle member | 1 MiB |
+| Pickle sample inspected under another model suffix or in a file checked by content, and the opcodes read from it | 64 KiB; 4,096 |
+| NumPy array header parsed in a model file, a file checked by content or a ZIP member; a longer one is rated `unknown` | 64 KiB |
+| ZIP central directory read from the end of a model file or a file checked by content to find a pickle-family or object-array member; a longer one is rated `unknown` | 1 MiB |
 | Shard indexes in one model directory | 16 |
 | GGUF metadata the model collector inspects: keys, one string, one array, all metadata; a file beyond them is a gap | 65,536; 16 MiB; 2,097,152 items; 128 MiB |
 | ONNX structure the model collector reads for external data: nesting, fields in one file, one location; a file beyond them that may name external data is a failure | 64; 4,000,000; 4,096 bytes |
-| Structure units the ONNX and GGUF readers spend in one scan or one validation | 16,000,000 |
+| Structure units the ONNX and GGUF readers spend in one scan or one validation, shared with NumPy array headers at one unit a byte; a header past them is rated `unknown` | 16,000,000 |
 | Python file the a2a and rag import heuristics parse; a larger file is skipped, and for a2a one that names `AgentCard` is a gap | 262,144 characters |
 | Root `requirements*.txt` files, together: text, and logical lines | 4 MiB; 100,000 |
 | MCP servers in one MCP client file | 1,000 |
