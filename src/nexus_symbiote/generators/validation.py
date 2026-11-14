@@ -226,6 +226,16 @@ def _cyclonedx_refs(document: dict[str, Any]) -> list[str]:
     return [item["bom-ref"] for item in holders if isinstance(item.get("bom-ref"), str)]
 
 
+_BOM_LINK_ELEMENT = re.compile(
+    r"urn:cdx:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[1-9][0-9]*#.+",
+    re.DOTALL,
+)
+
+
+def _is_bom_link(target: object) -> bool:
+    return isinstance(target, str) and _BOM_LINK_ELEMENT.fullmatch(target) is not None
+
+
 def validate_cyclonedx(document: dict[str, Any]) -> list[str]:
     errors = _schema_errors(document, "cyclonedx")
     if errors:
@@ -248,11 +258,11 @@ def validate_cyclonedx(document: dict[str, Any]) -> list[str]:
     for vulnerability in vulnerabilities:
         for affected in vulnerability.get("affects", []):
             target = affected.get("ref")
-            if target not in known and not str(target).startswith("urn:cdx:"):
+            if target not in known and not _is_bom_link(target):
                 errors.append(f"unresolved CycloneDX reference: {target}")
     for composition in document.get("compositions", []):
         for target in [*composition.get("assemblies", []), *composition.get("dependencies", [])]:
-            if target not in known and not str(target).startswith("urn:cdx:"):
+            if target not in known and not _is_bom_link(target):
                 errors.append(f"unresolved CycloneDX reference: {target}")
     return errors
 

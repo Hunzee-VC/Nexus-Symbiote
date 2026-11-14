@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import sys
 import time
 from copy import deepcopy
@@ -227,8 +226,11 @@ def test_vex_affected_references_must_resolve_or_be_bom_links():
     tool.risks = [RiskAssessment(severity=RiskSeverity.LOW, category="c", detail="d")]
     vex = VEXGenerator().generate(bom)
     assert validate_cyclonedx(vex) == []
-    vex["vulnerabilities"][0]["affects"] = [{"ref": "urn:cdx:" + "0" * 36 + "/1#tool:send"}]
+    link = "urn:cdx:00000000-0000-0000-0000-000000000000/1#tool:send"
+    vex["vulnerabilities"][0]["affects"] = [{"ref": link}]
     assert validate_cyclonedx(vex) == []
+    for malformed in ("urn:cdx:", "urn:cdx:garbage"):
+        vex["vulnerabilities"][0]["affects"] = [{"ref": malformed}]
+        assert validate_cyclonedx(vex) == [f"unresolved CycloneDX reference: {malformed}"]
     vex["vulnerabilities"][0]["affects"] = [{"ref": "elsewhere"}]
     assert validate_cyclonedx(vex) == ["unresolved CycloneDX reference: elsewhere"]
-    assert json.dumps(vex)

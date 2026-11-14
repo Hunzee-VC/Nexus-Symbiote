@@ -83,7 +83,7 @@ def _linked_spellings(root: Path, links: int, holder: str, names: tuple[str, ...
         for spelling in _spellings(name, 16):
             (target / spelling).write_text("{}")
     if len(os.listdir(target)) != 16 * len(names):
-        pytest.skip("file system folds case")
+        pytest.skip("needs a case-sensitive file system to hold distinct spellings")
     for index in range(links):
         (root / f"p{index}").mkdir()
         (root / f"p{index}" / holder).symlink_to("../t", target_is_directory=True)
@@ -301,7 +301,9 @@ def test_python_failures_past_the_listing_bound_stay_visible(tmp_path):
         failures = MCPScanner().scan(project).scan_failures
     # One line for each reason past the bound: the syntax failures, then the limit.
     assert len(failures) == MAX_LISTED_FAILURES + 2
-    assert failures[-2] == "pkg/m1000.py: invalid Python syntax (and 4 more not listed)"
+    assert failures[-2] == (
+        f"pkg/m{MAX_LISTED_FAILURES:04d}.py: invalid Python syntax (and 4 more not listed)"
+    )
     assert failures[-1] == (
         "pkg/zz_server.py: python-nodes limit of 100 exceeded; raise it with --limit python-nodes=N"
     )
@@ -315,7 +317,7 @@ def test_nested_instruction_variants_past_the_listing_bound_stay_visible(tmp_pat
         package.mkdir(parents=True)
         (package / "claude.md").write_text("lower\n")
     if (project / "p0000" / "CLAUDE.md").exists():
-        pytest.skip("file system folds case")
+        pytest.skip("needs a case-sensitive file system to hold distinct spellings")
     failures = PromptScanner().scan(project).scan_failures
     listed = _listed(failures)
     assert len(listed) <= MAX_LISTED_FAILURES

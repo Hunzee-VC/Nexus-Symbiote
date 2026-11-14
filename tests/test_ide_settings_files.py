@@ -91,11 +91,6 @@ model = "gpt-5-mini"
 """
 
 
-@pytest.fixture(autouse=True)
-def _no_ambient_key(monkeypatch):
-    monkeypatch.delenv(SOURCE_BINDING_KEY_ENV, raising=False)
-
-
 def _write(root: Path, relative: str, value: str | bytes) -> None:
     path = root / relative
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -701,7 +696,7 @@ def test_a_settings_path_that_is_not_a_readable_regular_file_is_a_failure(tmp_pa
     assert "Shell" not in repr(result.components)
 
 
-def test_an_oversized_settings_file_names_the_limit(runner, tmp_path):
+def test_an_oversized_settings_file_names_the_limit(tmp_path):
     project = tmp_path / "project"
     _write(project, ".xai/config.json", json.dumps({"padding": "x" * 70_000}))
     with limits.applied(limits.resolve(["file-bytes=64KiB"], {})):

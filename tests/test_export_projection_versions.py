@@ -225,12 +225,12 @@ def test_deeply_nested_public_documents_fail_with_value_errors(generator):
     nested: dict[str, Any] = {"type": "library", "bom-ref": "leaf", "name": "leaf"}
     for index in range(5000):
         nested = {"type": "library", "bom-ref": f"n{index}", "name": "n", "components": [nested]}
-    document: dict[str, Any] = (
-        {"bomFormat": "CycloneDX", "specVersion": "1.7", "version": 1, "components": [nested]}
-        if generator is CycloneDXGenerator
-        else {"@context": "https://spdx.org/rdf/3.0.1/spdx-context.jsonld", "@graph": [nested]}
-    )
-    with pytest.raises(ValueError):
+    document: dict[str, Any] = generator().generate(fixture_bom())
+    if generator is CycloneDXGenerator:
+        document["components"] = [nested]
+    else:
+        document["@graph"].append(nested)
+    with pytest.raises(ValueError, match="nested too deeply"):
         generator.recover(document)
 
 

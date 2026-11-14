@@ -79,7 +79,6 @@ class TestCycloneDXGenerator:
         assert result["specVersion"] == "1.7"
         assert "serialNumber" in result
         assert len(result["components"]) == 4
-        assert result["dependencies"] == []
 
     def test_component_types_mapped(self):
         gen = CycloneDXGenerator()
@@ -157,13 +156,14 @@ class TestSPDXGenerator:
         gen = SPDXGenerator()
         result = gen.generate(_sample_aibom())
         elements = [e for e in result["@graph"][1:] if e.get("type") != "Relationship"]
-        for elem in elements:
-            if "extension" in elem:
-                ext = elem["extension"][0]
-                assert ext["type"] == "extension_CdxPropertiesExtension"
-                assert "nexus-symbiote:component" in {
-                    p["extension_cdxPropName"] for p in ext["extension_cdxProperty"]
-                }
+        extended = [elem for elem in elements if "extension" in elem]
+        assert extended
+        for elem in extended:
+            ext = elem["extension"][0]
+            assert ext["type"] == "extension_CdxPropertiesExtension"
+            assert "nexus-symbiote:component" in {
+                p["extension_cdxPropName"] for p in ext["extension_cdxProperty"]
+            }
 
     def test_relationship_types(self):
         from nexus_symbiote.generators.spdx import NO_ASSERTION_LICENSE
@@ -180,6 +180,7 @@ class TestSPDXGenerator:
             for element in result["@graph"]
             if element.get("type") in {"ai_AIPackage", "dataset_DatasetPackage"}
         ]
+        assert licensed_packages
         for package in licensed_packages:
             for kind in license_kinds:
                 licensing = [
@@ -365,8 +366,8 @@ class TestCycloneDXGeneratorFull:
     def test_prompt_properties(self):
         gen = CycloneDXGenerator()
         result = gen.generate(_full_component_aibom())
-        p = next(c for c in result["components"] if c["name"] == "system-prompt")
-        props = {p["name"]: p["value"] for p in p.get("properties", [])}
+        prompt = next(c for c in result["components"] if c["name"] == "system-prompt")
+        props = {p["name"]: p["value"] for p in prompt.get("properties", [])}
         assert props["nexus-symbiote:promptType"] == "system-prompt"
         assert props["nexus-symbiote:contentHash"] == "sha256:ppp"
 

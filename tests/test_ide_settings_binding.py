@@ -454,7 +454,7 @@ def test_cursor_hook_commands_are_counted_scored_and_digested(tmp_path):
     assert first.properties["settings_hashes"] != second.properties["settings_hashes"]
 
 
-@pytest.mark.parametrize("separator", ["\r", " ", " "])
+@pytest.mark.parametrize("separator", ["\r", "\u2028", "\u2029"])
 def test_settings_whose_line_comment_ends_differently_per_reader_are_a_failure(tmp_path, separator):
     # VS Code-based editors end a line comment at a lone carriage return, U+2028 or
     # U+2029; a reader that ends it only at a line feed would not see these hooks.

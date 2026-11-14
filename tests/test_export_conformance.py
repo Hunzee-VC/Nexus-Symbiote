@@ -109,8 +109,11 @@ def test_authority_and_false_values_round_trip(generator):
 
 def test_cdx_preserves_false_annotations_and_merges_adjacency():
     bom = fixture_bom()
+    bom.dependencies[0].relationship = "depends-on"
     document = CycloneDXGenerator().generate(bom)
-    assert len(document["dependencies"]) == 1
+    assert document["dependencies"] == [
+        {"ref": "agent:main", "dependsOn": ["model:one", "tool:send"]}
+    ]
     props = next(c for c in document["components"] if c["bom-ref"] == "tool:send")["properties"]
     assert {p["name"]: p["value"] for p in props}[
         "nexus-symbiote:annotation.destructiveHint"

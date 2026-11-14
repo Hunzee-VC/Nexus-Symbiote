@@ -248,7 +248,7 @@ def test_an_imported_record_is_never_the_repository_agent(tmp_path):
 
 @pytest.mark.parametrize(
     "suffix",
-    ["0", "\n", "‮​forged", "\x1b[31m", " x"],
+    ["0", "\n", "\u202e\u200bforged", "\x1b[31m", " x"],
     ids=repr,
 )
 def test_only_an_exact_repository_reference_is_the_repository_agent(tmp_path, suffix):

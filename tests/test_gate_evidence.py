@@ -59,7 +59,7 @@ def test_minimum_observed_assurance_is_attainable_for_measured_inventories(tmp_p
     _scan(project, target)
     result = CliRunner().invoke(main, ["validate", str(target), "--project", str(project)])
     assert result.exit_code == 1
-    assert "minimum observed assurance not attained (1 declared components)" in result.output
+    assert "minimum observed assurance not attained (1 declared component)" in result.output
 
 
 def test_risk_json_records_the_effective_gate_and_its_origin(tmp_path):

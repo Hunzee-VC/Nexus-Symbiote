@@ -1114,7 +1114,8 @@ def assurance_problems(
     ]
     declared = sum(not _observed_composition(c) for c in subjects)
     if not bom.metadata.completeness or not subjects or declared:
-        return [f"minimum observed assurance not attained ({declared} declared components)"]
+        noun = "component" if declared == 1 else "components"
+        return [f"minimum observed assurance not attained ({declared} declared {noun})"]
     if any(not c.claims for c in subjects):
         return ["observed assurance requires claim provenance"]
     return []

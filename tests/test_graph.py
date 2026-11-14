@@ -228,7 +228,8 @@ def test_validation_settings_are_not_ignored(tmp_path):
     assert result.exit_code == 0
     assert result.output.count("SKIPPED by explicit policy") == 2
     (tmp_path / ".nexus-symbiote.yaml").write_text(
-        "validate: {require_completeness: false, require_integrity: false, minimum_assurance_level: observed}"
+        "validate: {require_completeness: false, require_integrity: false, "
+        "minimum_assurance_level: observed}"
     )
     result = CliRunner().invoke(main, ["validate", str(path), "--project", str(tmp_path)])
     assert result.exit_code != 0
@@ -310,7 +311,10 @@ def test_agent_manifest_instruction_refs_fail_closed_without_partial_bom(tmp_pat
     outside = tmp_path.parent / "outside.md"
     outside.write_text("outside")
     (tmp_path / "linked.md").symlink_to(outside)
-    (tmp_path / "symlink-dir").symlink_to(tmp_path.parent, target_is_directory=True)
+    elsewhere = tmp_path.parent / f"{tmp_path.name}-elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "instructions.md").write_text("outside")
+    (tmp_path / "symlink-dir").symlink_to(elsewhere, target_is_directory=True)
     (tmp_path / "valid.md").write_text("valid instruction")
     (tmp_path / "agent.yaml").write_text(f"name: test\ninstructions: [valid.md, {instruction}]\n")
     bom = AIBOM()
