@@ -46,12 +46,19 @@ and then calls it (`REDUCE`, `INST`, `OBJ`, `NEWOBJ`, `NEWOBJ_EX` or `BUILD`) is
 recognized however it ends, at the end of the file, at a byte that is no opcode or at
 a stack underflow: a binary one in any position, and a text-protocol one after an
 earlier pickle reached STOP. One that names such a callable after a STOP but calls
-nothing before it fails is rated `unknown`. A call counts only when the unpickler's
+nothing before it fails at a flaw in the file is not a component, as `pickle.load`
+stops there; one that the 64 KiB or 4,096-opcode bound cuts short before a call is
+rated `unknown`. A call counts only when the unpickler's
 stack, which the check follows with its MARK fences and memo, holds what the opcode
 calls and that item is a named callable or an object a call returned: the lines
 `VERSION`, `.cache`, `build` read as a pickle, then a name and a `BUILD` with nothing to
 build, which `pickle.load` refuses at a stack underflow without calling anything, so
-such text is rated `unknown` at most. A name that comes only after a stack underflow,
+such text, and lists such as `VERSION`, `.cache`, `logs`, `outputs`, are not
+components. A protocol 4 or 5 pickle whose STOP falls inside a FRAME with bytes left
+in the frame is read on from both places a loader may resume: after the STOP, as an
+unpickler reading a buffered file does, and after the frame, as one reading
+`io.BytesIO` or an unbuffered file, or the pure-Python unpickler, does. The worse
+reading counts, and such a file is rated `unknown` at least. A name that comes only after a stack underflow,
 where `pickle.load` stops, counts for nothing, so a list such as `VERSION`, `.build`,
 `checkpoints`, `logs` is not a component. Any other content, such as a numeric NumPy array or a ZIP archive with
 neither a pickle-family member nor an object-dtype array as a member, is not a

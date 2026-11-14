@@ -20,6 +20,7 @@ from nexus_symbiote.scanners.model import (
     MAX_PICKLE_OPCODES,
     NUMPY_HEADER_UNREAD,
     NUMPY_OBJECT_ARRAY,
+    PICKLE_FRAME_TAIL,
     PICKLE_NAME_UNCALLED,
     PICKLE_UNREAD,
     ZIP_DIRECTORY_UNREAD,
@@ -561,8 +562,20 @@ def test_text_that_reads_as_a_name_without_a_call_is_not_critical(tmp_path: Path
     assert _components(tmp_path) == {}
 
 
-def test_a_name_after_a_stop_with_no_call_is_unknown(tmp_path: Path) -> None:
+def test_a_name_after_a_stop_with_no_call_before_a_flaw_is_not_inventoried(
+    tmp_path: Path,
+) -> None:
+    # pickle.load stops at the byte that is no opcode, or at the end, before any call.
     (tmp_path / "named.dat").write_bytes(b"N.cos\nsystem\n\xff")
+    (tmp_path / "ended.dat").write_bytes(b"N.cos\nsystem\n")
+    assert _components(tmp_path) == {}
+
+
+def test_a_name_after_a_stop_cut_short_by_the_bound_is_unknown(tmp_path: Path) -> None:
+    data = b"N.cos\nsystem\nS'" + b"a" * MAX_PICKLE_INSPECTION_BYTES + b"'\n\x85R."
+    # The call comes after the inspected sample.
+    assert data.index(b"R.") > MAX_PICKLE_INSPECTION_BYTES
+    (tmp_path / "named.dat").write_bytes(data)
     component = _components(tmp_path)["named.dat"]
     assert component.serialization_safety is SerializationSafety.UNKNOWN
     assert component.properties["format_inspection"] == PICKLE_NAME_UNCALLED
@@ -613,6 +626,9 @@ _UNCALLED_TEXT = {
     "paths.dat": b"VERSION\n.cache\nlogs\noutputs\n",
     "models/notes.txt": b"N.cache\nbuild\nbin\n",
     "models/llama/MANIFEST": b"Vendored paths:\n.cache\nbuild\nREADME.md\n",
+    "models/.gitignore": b"VERSION\n.cache\nbuild\nbin\n",
+    "models/.gitignore2": b"Vocabulary files kept out of git\n.cache\ntokenizer\noutputs/\nruns/\n",
+    "models/cache-build": b"VERSION\n.cache\nbuild\n",
     "models/calls-none": b"N.cos\nsystem\nN)R.",
     "models/obj-without-mark": b"N.cos\nsystem\no.",
 }
@@ -644,16 +660,12 @@ def _calls_anything(data: bytes) -> bool:
     return bool(called)
 
 
-def test_a_name_with_no_operands_for_its_call_is_not_critical(tmp_path: Path) -> None:
+def test_a_name_with_no_operands_for_its_call_is_not_inventoried(tmp_path: Path) -> None:
     (tmp_path / "models" / "llama").mkdir(parents=True)
     for relative, data in _UNCALLED_TEXT.items():
         assert not _calls_anything(data)
         (tmp_path / relative).write_bytes(data)
-    found = _components(tmp_path)
-    for relative, component in found.items():
-        assert component.serialization_safety is SerializationSafety.UNKNOWN, relative
-        assert component.properties["format_inspection"] == PICKLE_NAME_UNCALLED
-        assert not _critical(component)
+    assert _components(tmp_path) == {}
 
 
 @pytest.mark.parametrize(
@@ -742,4 +754,55 @@ def test_a_name_past_a_stack_underflow_is_not_inventoried(tmp_path: Path) -> Non
     for relative, data in _NAMED_PAST_AN_UNDERFLOW.items():
         assert not _finds_a_class(data)
         (tmp_path / relative).write_bytes(data)
+    assert _components(tmp_path) == {}
+
+
+def _frame(body: bytes) -> bytes:
+    return b"\x95" + len(body).to_bytes(8, "little") + body
+
+
+_TEXT_EXEC = b"cbuiltins\nexec\n(S'import builtins; builtins.HIT=1'\ntR."
+_SYS_INFO = pickle.dumps({"protocol_version": 1001}, protocol=4)[11:]
+
+# A harmless pickle whose STOP falls inside a FRAME with bytes after it: an unpickler
+# reading io.BytesIO or an unbuffered file resumes after the frame, one reading with
+# peek after the STOP.
+_FRAME_TAIL_THEN_CALL = {
+    "invalid-opcode": b"\x80\x04" + _frame(b"N.\xff\xff") + b"\x80\x04" + _STACK_CALL,
+    "invalid-opcode-text": b"\x80\x04" + _frame(b"N.\xff") + _TEXT_EXEC,
+    "proto-9": b"\x80\x04" + _frame(b"N.\x80\x09") + b"\x80\x04" + _STACK_CALL,
+    "harmless-opcodes": b"\x80\x04" + _frame(b"K\x01.\x00\x00\x00") + _TEXT_EXEC,
+    "torch-legacy": pickle.dumps(0x1950A86A20F9469CFC6C, protocol=2)
+    + pickle.dumps(1001, protocol=2)
+    + b"\x80\x04"
+    + _frame(_SYS_INFO + b"\xff")
+    + b"\x80\x02"
+    + _STACK_CALL,
+}
+
+
+@pytest.mark.parametrize("data", _FRAME_TAIL_THEN_CALL.values(), ids=_FRAME_TAIL_THEN_CALL)
+def test_a_call_after_a_frame_with_a_tail_is_critical(tmp_path: Path, data: bytes) -> None:
+    assert _runs_exec(data)
+    (tmp_path / "models").mkdir()
+    files = ["models/x", "x.dat", "x.npy"]
+    for relative in files:
+        (tmp_path / relative).write_bytes(data)
+    found = _components(tmp_path)
+    assert sorted(found) == sorted(files)
+    for component in found.values():
+        assert component.serialization_safety is UNSAFE
+        assert _critical(component)
+
+
+def test_a_frame_with_bytes_after_its_stop_is_unknown(tmp_path: Path) -> None:
+    (tmp_path / "tail.dat").write_bytes(b"\x80\x04" + _frame(b"N.\xff"))
+    component = _components(tmp_path)["tail.dat"]
+    assert component.serialization_safety is SerializationSafety.UNKNOWN
+    assert component.properties["format_inspection"] == PICKLE_FRAME_TAIL
+
+
+def test_a_frame_that_ends_at_its_stop_is_read_as_before(tmp_path: Path) -> None:
+    (tmp_path / "header.dat").write_bytes(pickle.dumps({"protocol_version": 1001}, protocol=4))
+    (tmp_path / "pair.dat").write_bytes(pickle.dumps(1, protocol=4) + pickle.dumps(2, protocol=4))
     assert _components(tmp_path) == {}

@@ -175,8 +175,13 @@ PICKLE_UNREAD = (
     "no bounded structural validator for this format/loader"
 )
 PICKLE_NAME_UNCALLED = (
-    "pickle opcode stream after a STOP that names a callable and fails before calling it; "
-    "no bounded structural validator for this format/loader"
+    "pickle opcode stream after a STOP that names a callable and is cut short by the "
+    "inspection limits before calling it; no bounded structural validator for this "
+    "format/loader"
+)
+PICKLE_FRAME_TAIL = (
+    "pickle opcode stream with bytes after a STOP inside its frame, where loaders resume "
+    "at different offsets; no bounded structural validator for this format/loader"
 )
 # Content that a bound left unread: a file no model name rates is inventoried for it.
 _CONTENT_UNREAD = frozenset(
@@ -186,6 +191,7 @@ _CONTENT_UNREAD = frozenset(
         NUMPY_HEADER_UNREAD,
         PICKLE_UNREAD,
         PICKLE_NAME_UNCALLED,
+        PICKLE_FRAME_TAIL,
     }
 )
 _NUMPY_MAGIC = b"\x93NUMPY"
@@ -381,33 +387,84 @@ def _recognized_pickle(
     ``pickle.load`` calls what a pickle names before it meets a flaw further on, so a
     segment that names a callable by module and name and then calls it is recognized
     however it ends: under a model name, and by content when it is binary or follows a
-    STOP. One that follows a STOP and names such a callable without calling it before
-    the flaw is rated unknown. A pickle that follows a STOP may start with any opcode,
+    STOP. One that follows a STOP and names such a callable without calling it is rated
+    unknown only when the bounds cut it short; a flaw in the file stops ``pickle.load``
+    before any call. A pickle that follows a STOP may start with any opcode,
     as ``pickle.load`` reads it, and a call counts only when the unpickler's stack
     holds a named callable, or an object made from one, where the calling opcode takes
-    it (``_Stack``).
+    it (``_Stack``). A STOP inside a FRAME with bytes left in the frame is rated unknown
+    at least, and the next pickle is read both after the STOP and after the frame.
     """
     binary = len(prefix) >= 2 and prefix[0] == 0x80 and 2 <= prefix[1] <= 5
     if not binary and (not prefix or prefix[0] not in _TEXT_PICKLE_START):
         return None
     sample = prefix + stream.read(max(0, min(size, MAX_PICKLE_INSPECTION_BYTES) - len(prefix)))
-    seen = marks = start = 0
-    while True:
-        segment = _pickle_segment(sample, size, start, binary, by_content, seen, marks)
-        if segment.end is None:
-            return segment.rating
-        seen, marks, start = segment.seen, segment.marks, segment.end
-        following = sample[start : start + 2]
-        if not following:
-            return (SerializationSafety.UNKNOWN, PICKLE_UNREAD) if len(sample) < size else None
-        if following[0] not in _OPCODE_BYTES:
-            return None
-        if following[0] == 0x80 and len(following) < 2:
-            return (SerializationSafety.UNKNOWN, PICKLE_UNREAD) if len(sample) < size else None
-        if following[0] == 0x80 and following[1] > 5:
-            return None
-        # Any opcode can start the next pickle; only PROTO 2 to 5 marks a binary one.
-        binary = following[0] == 0x80 and following[1] >= 2
+    count = _Count()
+    pending: list[tuple[int, bool]] = [(0, binary)]
+    worst: tuple[SerializationSafety, str] | None = None
+    while pending:
+        start, binary = pending.pop()
+        segment = _pickle_segment(sample, size, start, binary, by_content, count)
+        ratings = [segment.rating]
+        if segment.end is not None:
+            # A STOP inside a FRAME with bytes left in it: an unpickler that reads with
+            # peek resumes after the STOP, and one reading io.BytesIO or an unbuffered
+            # file, or the pure-Python one, after the frame. Both are read.
+            ends = [segment.end]
+            if segment.frame_end is not None:
+                ratings.append((SerializationSafety.UNKNOWN, PICKLE_FRAME_TAIL))
+                ends.append(segment.frame_end)
+            for end in reversed(ends):
+                following = _following(sample, size, end)
+                if isinstance(following, bool):
+                    pending.append((end, following))
+                else:
+                    ratings.append(following)
+        for rating in ratings:
+            worst = _worse(worst, rating)
+        if worst is not None and worst[0] is SerializationSafety.UNSAFE_CODE_EXECUTION:
+            return worst
+    return worst
+
+
+def _following(
+    sample: bytes, size: int, start: int
+) -> bool | tuple[SerializationSafety, str] | None:
+    """Whether the pickle at ``start`` is binary, or the rating when none starts there."""
+    following = sample[start : start + 2]
+    unread = (SerializationSafety.UNKNOWN, PICKLE_UNREAD) if len(sample) < size else None
+    if not following:
+        return unread
+    if following[0] not in _OPCODE_BYTES:
+        return None
+    if following[0] == 0x80 and len(following) < 2:
+        return unread
+    if following[0] == 0x80 and following[1] > 5:
+        return None
+    # Any opcode can start the next pickle; only PROTO 2 to 5 marks a binary one.
+    return following[0] == 0x80 and following[1] >= 2
+
+
+def _worse(
+    first: tuple[SerializationSafety, str] | None, second: tuple[SerializationSafety, str] | None
+) -> tuple[SerializationSafety, str] | None:
+    """The rating that ranks higher: code execution, then unknown, then none."""
+    if second is None:
+        return first
+    if first is None or (
+        second[0] is SerializationSafety.UNSAFE_CODE_EXECUTION
+        and first[0] is not SerializationSafety.UNSAFE_CODE_EXECUTION
+    ):
+        return second
+    return first
+
+
+class _Count:
+    """The opcodes and MARKs read so far, charged across every pickle of one sample."""
+
+    def __init__(self) -> None:
+        self.seen = 0
+        self.marks = 0
 
 
 class _Segment(NamedTuple):
@@ -415,17 +472,17 @@ class _Segment(NamedTuple):
 
     rating: tuple[SerializationSafety, str] | None
     end: int | None = None
-    seen: int = 0
-    marks: int = 0
+    frame_end: int | None = None
 
 
 def _pickle_segment(
-    sample: bytes, size: int, start: int, binary: bool, by_content: bool, seen: int, marks: int
+    sample: bytes, size: int, start: int, binary: bool, by_content: bool, count: _Count
 ) -> _Segment:
     """Rate the pickle at ``start`` of ``sample``.
 
-    Only a file found ``by_content`` continues past a STOP; ``seen`` and ``marks`` are
-    the opcode and MARK counts of the pickles before it, charged to the same bounds.
+    Only a file found ``by_content`` continues past a STOP, at ``end``, and also at
+    ``frame_end`` when the STOP falls inside a FRAME with bytes after it; ``count``
+    holds the opcodes and MARKs of every pickle read, charged to the same bounds.
     """
     kind = "binary" if binary else "text-protocol"
     recognized = (
@@ -434,15 +491,18 @@ def _pickle_segment(
     )
     own = 0
     code = named = invoked = bounded = False
+    frame_end: int | None = None
     stack: _Stack | None = _Stack()
     opcodes = io.BytesIO(sample)
     opcodes.seek(start)
     try:
         for opcode, argument, _ in pickletools.genops(opcodes):
-            seen += 1
+            count.seen += 1
             own += 1
-            marks += opcode.name == "MARK"
+            count.marks += opcode.name == "MARK"
             code = code or opcode.name in _CODE_OPCODES
+            if opcode.name == "FRAME" and isinstance(argument, int):
+                frame_end = opcodes.tell() + argument
             if stack is not None:
                 # pickle.load stops at a stack underflow: what follows names nothing.
                 names = _names_callable(opcode.name, argument, stack.strings())
@@ -452,7 +512,7 @@ def _pickle_segment(
                     stack = None
                 else:
                     invoked = invoked or (named and calls)
-            if seen > MAX_PICKLE_OPCODES or marks > MAX_PICKLE_MARKS:
+            if count.seen > MAX_PICKLE_OPCODES or count.marks > MAX_PICKLE_MARKS:
                 bounded = True
                 break
         else:
@@ -461,7 +521,8 @@ def _pickle_segment(
             # globals, imports artifact code, invokes reducers or constructs objects.
             pickletools.dis(sample[start:end], out=io.StringIO())
             if by_content and not code:
-                return _Segment(None, end, seen, marks)
+                tail = frame_end if frame_end is not None and frame_end > end else None
+                return _Segment(None, end, tail)
             return _Segment(recognized)
     except (ValueError, UnicodeError, OverflowError, RecursionError, IndexError):
         # The sample ended inside an opcode, before the end of the file.
@@ -471,7 +532,9 @@ def _pickle_segment(
     # as likely prose.
     if invoked and (binary or start > 0 or not by_content):
         return _Segment(recognized)
-    if by_content and named and start > 0:
+    # A name with no call before a flaw in the file is never called: pickle.load stops
+    # there. Only a bound that left the rest unread keeps it from being known.
+    if by_content and named and start > 0 and bounded:
         return _Segment((SerializationSafety.UNKNOWN, PICKLE_NAME_UNCALLED))
     if by_content and not code:
         # A text-protocol segment cut short is read as a pickle only after an earlier
