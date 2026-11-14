@@ -186,6 +186,35 @@ def test_python_lockfile_resolution_binds_exact_version_and_redacts_origin(
     assert "SECRET_CANARY" not in comp.model_dump_json()
 
 
+@pytest.mark.parametrize(
+    "source_toml",
+    [
+        'source = { registry = "HTTPS://evil.example/simple" }',
+        'source = { registry = "wheels" }',
+        'source = { registry = "file:///srv/wheels" }',
+        'source = { registry = "https://evil.example\\\\@pypi.org/simple" }',
+        'source = { registry = "https://ev%69l.example/simple" }',
+        "source = { registry = 5 }",
+        "source = { }",
+    ],
+)
+def test_python_lockfile_index_that_is_not_a_plain_url_is_never_recorded_as_pypi(
+    tmp_path, source_toml
+):
+    # uv reads an upper-case scheme and ends the authority at a backslash, so each of
+    # these names an index other than pypi.org, or no index the collector can name.
+    (tmp_path / "pyproject.toml").write_text('[project]\ndependencies = ["openai==1.2.3"]\n')
+    (tmp_path / "uv.lock").write_text(
+        f'version = 1\n\n[[package]]\nname = "openai"\nversion = "1.2.3"\n{source_toml}\n'
+    )
+    result = RegistryScanner().scan(tmp_path)
+    comp = result.components[0]
+    assert comp.package_url is None
+    assert comp.registry_uri is None
+    assert any("origin is unverified" in gap for gap in result.surfaces_excluded)
+    assert "evil" not in comp.model_dump_json()
+
+
 def test_python_lockfile_rejects_editable_or_competing_lockfiles(tmp_path):
     (tmp_path / "pyproject.toml").write_text('[project]\ndependencies = ["openai>=1.0"]\n')
     (tmp_path / "uv.lock").write_text(
