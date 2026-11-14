@@ -15,6 +15,7 @@ from nexus_symbiote.core.collection import is_imported
 from nexus_symbiote.core.enums import SerializationSafety
 from nexus_symbiote.core.hashing import (
     TOOL_DEFINITION_HASH_VERSION,
+    canonical_json,
     descriptor_binding,
     hash_tool_definition,
     normalize_digest,
@@ -525,6 +526,18 @@ class IntegrityValidator:
             return
         try:
             algorithm, expected = normalize_digest(comp.definition_hash, "sha256")
+            # Both property spellings are supported. Never let a preferred alias
+            # hide another displayed value, including a value behind explicit null.
+            for primary, alias in (
+                ("mcp_title", "title"),
+                ("mcp_output_schema", "output_schema"),
+                ("mcp_meta", "meta"),
+            ):
+                if primary in comp.properties and alias in comp.properties:
+                    if canonical_json({"value": comp.properties[primary]}) != canonical_json(
+                        {"value": comp.properties[alias]}
+                    ):
+                        raise ValueError("Conflicting tool descriptor extension aliases")
             extensions = tool_definition_extensions(
                 {
                     "title": comp.properties.get("mcp_title", comp.properties.get("title")),
@@ -541,23 +554,16 @@ class IntegrityValidator:
                 comp.annotations,
                 **extensions,
             )
-            # Pre-0.2.0 observation inventories stored the display hash without
-            # title/outputSchema/_meta while the fingerprint already bound them,
-            # so a legacy BOM's redacted hash is the extension-free digest and
-            # its definition hash is the extended one. Accept either
-            # computation against either stored digest; a descriptor that
-            # matches neither is still a mismatch.
-            legacy_recomputed = hash_tool_definition(
-                comp.name,
-                comp.description_text,
-                comp.input_schema,
-                comp.annotations,
-            )
+            # Every displayed extension must be bound by the matching digest.
+            # Historical observation inventories may have an extension-free
+            # redacted hash, but their full descriptor must still match the
+            # original hash. Omitting extensions here would let changed metadata
+            # pass by matching only the unchanged base fields.
             raw_hash = f"{algorithm}:{expected}"
             accepted = {raw_hash}
             if comp.redacted_definition_hash is not None:
                 accepted.add(comp.redacted_definition_hash)
-            if recomputed not in accepted and legacy_recomputed not in accepted:
+            if recomputed not in accepted:
                 raise ValueError("Tool definition differs from its declared digest")
             if comp.bom_ref in local_tools:
                 local = local_tools[comp.bom_ref]
