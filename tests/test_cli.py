@@ -25,6 +25,7 @@ from nexus_symbiote.core.models import (
     ToolComponent,
 )
 from nexus_symbiote.scanner_catalog import BUILTIN_SCANNER_NAMES
+from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
 
 
 def _create_test_project(tmp_path: Path) -> Path:
@@ -286,13 +287,16 @@ class TestRiskCommand:
 
 
 class TestDiffCommand:
-    def test_diff_identical(self, tmp_path):
+    def test_diff_identical(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, "cli-drift-fixture-" + "k" * 32)
         project = _create_test_project(tmp_path)
         runner = CliRunner()
         bom_path = tmp_path / "bom.json"
-        runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_path)])
+        scan = runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_path)])
+        assert scan.exit_code == 0, scan.output
         result = runner.invoke(main, ["diff", str(bom_path), str(bom_path)])
-        assert result.exit_code == 0
+        assert result.exit_code == 0, result.output
+        assert "No changes detected" in result.output
 
     def test_diff_with_changes(self, tmp_path):
         project = _project_beside_outputs(tmp_path)
@@ -326,15 +330,18 @@ class TestDiffCommand:
         assert [c["bom_ref"] for c in data["components_added"]] == ["registry:pypi/langchain"]
         assert data["components_removed"] == []
 
-    def test_diff_json_output(self, tmp_path):
+    def test_diff_json_output(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, "cli-drift-fixture-" + "k" * 32)
         project = _create_test_project(tmp_path)
         runner = CliRunner()
         bom_path = tmp_path / "bom.json"
-        runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_path)])
+        scan = runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_path)])
+        assert scan.exit_code == 0, scan.output
         result = runner.invoke(main, ["diff", str(bom_path), str(bom_path), "--json-output"])
-        assert result.exit_code == 0
+        assert result.exit_code == 0, result.output
         data = json.loads(result.output)
-        assert "has_changes" in data
+        assert data["has_changes"] is False
+        assert data["security_alerts"] == []
 
 
 class TestSummaryCommand:
