@@ -154,8 +154,10 @@ def test_wrapped_and_spelled_out_launches_stay_critical(command: str) -> None:
         'pwsh -wd "/tmp/a b c d" -enc SQBFAFgA',
         "pwsh -wd /tmp/a\\ b -enc SQBFAFgA",
         'pwsh -WorkingDirectory "C:\\Program Files" -enc SQBFAFgA',
-        'pwsh -NoProfile -ExecutionPolicy Bypass -WorkingDirectory "D:\\Build Agent\\work"'
-        " -EncodedCommand SQBFAFgA",
+        (
+            'pwsh -NoProfile -ExecutionPolicy Bypass -WorkingDirectory "D:\\Build Agent\\work"'
+            + " -EncodedCommand SQBFAFgA"
+        ),
         "pwsh -CustomPipeName 'a b' -enc SQBFAFgA",
         'pwsh -ConfigurationName "my cfg" -enc SQBFAFgA',
         'pwsh -SettingsFile "C:\\My Settings\\s.json" -enc SQBFAFgA',
@@ -174,15 +176,23 @@ def test_shell_syntax_before_an_encoded_flag_stays_critical(command: str) -> Non
     [
         "powershell -c \"Start-Process powershell.exe '-NoP -W Hidden -Enc SQBFAFgA'\"",
         "powershell -c \"saps powershell '-nop -enc SQBFAFgA'\"",
-        'powershell -c "Start-Process powershell -ArgumentList'
-        " '-ExecutionPolicy Bypass -EncodedCommand SQBFAFgA'\"",
+        (
+            'powershell -c "Start-Process powershell -ArgumentList'
+            + " '-ExecutionPolicy Bypass -EncodedCommand SQBFAFgA'\""
+        ),
         "powershell -c \"Start-Process powershell -ArgumentList '-ep bypass -enc SQBFAFgA'\"",
-        'powershell -c "Start-Process powershell -Verb RunAs -ArgumentList'
-        " '-w hidden -enc SQBFAFgA'\"",
-        'powershell -c "Start-Process -FilePath powershell.exe -ArgumentList'
-        " '-WindowStyle Hidden -enc SQBFAFgA'\"",
-        'powershell -NoProfile -Command "Start-Process -WindowStyle Hidden powershell'
-        " -ArgumentList '-WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand SQBFAFgA'\"",
+        (
+            'powershell -c "Start-Process powershell -Verb RunAs -ArgumentList'
+            + " '-w hidden -enc SQBFAFgA'\""
+        ),
+        (
+            'powershell -c "Start-Process -FilePath powershell.exe -ArgumentList'
+            + " '-WindowStyle Hidden -enc SQBFAFgA'\""
+        ),
+        (
+            'powershell -NoProfile -Command "Start-Process -WindowStyle Hidden powershell'
+            + " -ArgumentList '-WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand SQBFAFgA'\""
+        ),
         "pwsh -c 'Start-Process pwsh -ArgumentList \"-w hidden -enc SQBFAFgA\"'",
         'cmd /c start powershell -ArgumentList "-w hidden -enc SQBFAFgA"',
         "powershell -c \"Start-Process powershell -ArgumentList '-enc SQBFAFgA'\"",
