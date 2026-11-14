@@ -300,7 +300,9 @@ skip:
   and a pointer that resolves to nothing or to a value that is not a schema.
 
 Reference targets are checked by the same rules wherever they are in the
-document. `format` is never asserted.
+document. `format`, `contentEncoding`, `contentMediaType` and `contentSchema` are
+never asserted, so a string declared as JSON is not checked against its
+`contentSchema`.
 
 `pattern` and `patternProperties` are ECMA-262 regular expressions read with the
 `u` flag. Syntax that the `u` flag rejects and that would otherwise be read
@@ -308,7 +310,8 @@ differently is `schema-invalid`: inline flags and other Python-only groups,
 possessive quantifiers (`a*+`), quantifiers without a minimum (`{,n}`), quantified
 assertions, and `\d`, `\w` or `\s` as a range bound (`[%-\w]`). The empty
 classes `[]` and `[^]` are refused too, as is a pattern nested too deeply for
-Python to compile. So is a backreference (`\1` or
+Python to compile or with a repetition count too large for it (`a{4294967296}`).
+So is a backreference (`\1` or
 `\k<name>`) unless its group always takes part, once, before the reference:
 ECMA-262 reads a reference to a group that did not take part as the empty string
 and resets the captures of a loop on each iteration, while Python fails the

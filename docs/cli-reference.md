@@ -636,7 +636,7 @@ nexus-symbiote runtime sign [OPTIONS] CONTRACT_PATH
 | Option | Description |
 |---|---|
 | `--kind` `snapshot\|approval\|trust\|model` | Contract purpose; a signature is valid only for this purpose. (required) |
-| `--key` `PATH` | Ed25519 private key PEM with mode 0600; repeat for multiple signers. (required, repeatable) |
+| `--key` `PATH` | Ed25519 private key PEM that only its owner can access; repeat for multiple signers. (required, repeatable) |
 | `--out` `PATH` | Signed envelope file to create; must not exist. (required) |
 | `--passphrase-file` `PATH` | Passphrase for encrypted private keys, on the first line of this file, which only its owner may read. |
 

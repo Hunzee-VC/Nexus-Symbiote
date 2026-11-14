@@ -1022,6 +1022,18 @@ def test_documented_native_rule_names_its_bounds():
     assert f"nested at most {MAX_NATIVE_DEPTH} levels deep" in flat
 
 
+def test_documented_native_rule_reads_a_missing_metadata_as_empty():
+    flat = " ".join(DOCUMENT.split())
+    assert "that has a `components` list and validates as a native inventory" in flat
+    assert "a missing `metadata` is read as an empty object" in flat
+    without, empty = (
+        build_statement(subject, name="s", purpose="generated", signed_at=SIGNED_AT)["predicate"]
+        for subject in (b'{"components": []}', b'{"metadata": {}, "components": []}')
+    )
+    assert without["subject_format"] == "nexus-symbiote-aibom"
+    assert without["content_digest"] == empty["content_digest"]
+
+
 def test_reason_table_documents_exactly_the_codes():
     section = DOCUMENT.split("## Reason codes", 1)[1].split("\n## ", 1)[0]
     assert set(re.findall(r"^\| `([a-z-]+)` \|", section, re.M)) == set(REASONS)

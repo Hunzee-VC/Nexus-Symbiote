@@ -208,8 +208,10 @@ jsonschema would treat the items `contains` matched as evaluated; an assertion
 next to `$ref` in draft-04 to draft-07, which ignore the siblings of `$ref`; a
 subschema with its own `$schema` or base URI (`$id`, or
 `id` in draft-04); and a reference that is not a JSON Pointer within the schema,
-such as `https://tools.example.test/run#/x` or an anchor. `format` is an
-annotation and is never asserted. `pattern` and `patternProperties` have ECMA-262
+such as `https://tools.example.test/run#/x` or an anchor. `format`,
+`contentEncoding`, `contentMediaType` and `contentSchema` are annotations and are
+never asserted: a string declared as JSON is not parsed or checked against its
+`contentSchema`. `pattern` and `patternProperties` have ECMA-262
 meaning, read with the `u` flag that JSON Schema recommends: `$` does not match
 before a final newline, `\d` and `\w` are ASCII, `\s` and `.` use ECMA-262's
 whitespace and line terminators, and `[\s\S]` matches any character. Pattern

@@ -135,6 +135,21 @@ def test_pattern_syntax_without_an_ecma_262_meaning_makes_the_schema_invalid(pat
 @pytest.mark.parametrize(
     "pattern",
     [
+        "^a{4294967296}$",
+        "^a{1,4294967296}$",
+        "^a{" + "9" * 5000 + "}$",
+        "^(a)\\1" + "0" * 5000 + "$",
+    ],
+)
+def test_pattern_with_a_number_python_cannot_compile_makes_the_schema_invalid(pattern):
+    with pytest.raises(re.error, match="too large"):
+        validation._EcmaRegex().compile(pattern)
+    assert outcome(string_schema(pattern), {"value": "a"}) == "schema-invalid"
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    [
         # ECMA-262 matches a reference to a group that did not take part as the empty
         # string and resets the captures of a loop on each iteration; Python fails the
         # reference and keeps the captures of earlier iterations.

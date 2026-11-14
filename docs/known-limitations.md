@@ -751,8 +751,8 @@ A way around a limit that its entry does not describe is worth a
   a document another build wrote with its lists in another order has another content
   digest than its sorted rewrite; see
   [reproducible inventories](reproducible-inventories.md#limits).
-- **Some readable inventories have no digests.** A document without a `metadata`
-  object or a `components` list has no content digest, and one larger or deeper than
+- **Some readable inventories have no digests.** A document without a `components`
+  list has no content digest, and one larger or deeper than
   a runtime snapshot binds has no canonical digest; `digest` prints `unavailable`
   for the missing one and exits 1.
 - **A malformed `SOURCE_DATE_EPOCH` stops collection.** `scan`, `baseline` and

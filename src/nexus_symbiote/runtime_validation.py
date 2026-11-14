@@ -159,8 +159,9 @@ def validate_arguments(schema: Any, arguments: dict[str, Any]) -> None:
     uses the installed trusted package and an empty reference retrieval registry.
     Start-up has its own deadline; the evaluation budget starts when the worker
     reports that it is ready. Capacity exhaustion, unavailable POSIX limits,
-    crashes, malformed replies and timeouts deny the operation, each with its
-    own reason. No approval nonce is consumed here.
+    crashes, malformed replies and timeouts deny the operation with a stable
+    reason code; crashes and malformed replies share one. No approval nonce is
+    consumed here.
     """
     if not isinstance(schema, dict):
         raise ValidationBudgetError(
@@ -672,11 +673,14 @@ class _EcmaRegex:
             raise re.error("pattern flags are not supported")
         compiled = self._compiled.get(pattern)
         if compiled is None:
-            translated = ecma_pattern(pattern)
             try:
-                compiled = re.compile(translated, re.ASCII)
+                compiled = re.compile(ecma_pattern(pattern), re.ASCII)
             except RecursionError as exc:
                 raise re.error("pattern nests too deeply") from exc
+            except (OverflowError, ValueError) as exc:
+                # Valid ECMA-262 numbers that Python cannot hold: a repetition count
+                # above its limit, or more digits than int() converts.
+                raise re.error("pattern holds a number too large to compile") from exc
             self._compiled[pattern] = compiled
         return compiled
 

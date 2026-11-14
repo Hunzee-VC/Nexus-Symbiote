@@ -302,8 +302,9 @@ inventory without the fields that record the collection event:
 claim, each left out only when it has the form the native format writes. Two collections of the same content therefore have the same
 content digest. `attest` decides `subject_format` from the bytes it signs: a strict
 JSON object of at most 16 MiB, with arrays and objects nested at most 256 levels deep,
-that has `metadata` and `components` and validates as a native inventory is
-`nexus-symbiote-aibom`; anything else, including a native format version this build
+that has a `components` list and validates as a native inventory is
+`nexus-symbiote-aibom` (a missing `metadata` is read as an empty object, as every
+command reads it); anything else, including a native format version this build
 cannot read, is `other`. The depth bound is part of the rule so that the same bytes get
 the same answer on every interpreter and through every entry point; a more deeply
 nested inventory that other commands still read is `other` here. For a native subject,
