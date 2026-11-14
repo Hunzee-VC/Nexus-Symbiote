@@ -91,7 +91,7 @@ The canonical contract form is the JSON form of the contract model with every
 field present, defaults included, and timestamps in UTC written as
 `YYYY-MM-DDTHH:MM:SSZ`, or with six fractional digits when there are
 microseconds. A predicate in any other form, such as a `+00:00` offset or an
-omitted default, is rejected, so one contract has exactly one digest. The
+omitted default, is rejected, so one contract has exactly one digest.
 `sign_contract` refuses a contract object that is not in canonical form, such as
 a `model_copy` that holds a non-UTC timestamp; `runtime sign` reads JSON,
 validates it and signs the canonical form.
@@ -300,9 +300,10 @@ skip:
   and a pointer that resolves to nothing or to a value that is not a schema.
 
 Reference targets are checked by the same rules wherever they are in the
-document. `format`, `contentEncoding`, `contentMediaType` and `contentSchema` are
-never asserted, so a string declared as JSON is not checked against its
-`contentSchema`.
+document. A keyword that no supported dialect defines, including a misspelling
+such as `maxlength`, is an annotation: it is ignored, not refused. `format`,
+`contentEncoding`, `contentMediaType` and `contentSchema` are never asserted, so a
+string declared as JSON is not checked against its `contentSchema`.
 
 `pattern` and `patternProperties` are ECMA-262 regular expressions read with the
 `u` flag. Syntax that the `u` flag rejects and that would otherwise be read
@@ -342,11 +343,12 @@ raised by the integrator's adapters (`authenticate`, `describe`, `resolve_scope`
 2. Authenticate the workload (`authenticate()`).
 3. Trust status: verify signatures with the trust ring and quorum
    (`signers-insufficient` and the envelope and statement codes), the validity
-   window (`trust-*`), the tenant (`trust-tenant-mismatch`), the signers' scopes
+   window (`trust-*`), the tenant (`trust-tenant-mismatch`), the signers that the
+   status itself revokes (`trust-signer-revoked`), the signers' scopes
    (`signers-out-of-scope`), and the transition from the recorded status
-   (`trust-signer-revoked`, `trust-rollback`, `trust-fork`,
-   `trust-restore-required`). An accepted newer status is recorded even if the
-   call is denied later.
+   (`trust-signer-revoked` for a signer that the recorded status revokes,
+   `trust-rollback`, `trust-fork`, `trust-restore-required`). An accepted newer
+   status is recorded even if the call is denied later.
 4. Snapshot: signatures with the snapshot ring and quorum, validity window
    (`snapshot-*`), equality with the authenticated context (`context-mismatch`),
    revocation of the snapshot and of its signers (`snapshot-revoked`,
@@ -402,7 +404,8 @@ scopes, approvers and an approval's bindings are checked only by the gateway.
 
 `AuthorizationError.reason` and the `runtime` commands use these codes. They are
 stable; the message text is not. `validation-capacity`, `validation-timeout` and
-a locked store (`state-unavailable`) can clear when the call is retried; every
+a locked store (`state-unavailable`) can clear when the call is retried, and a
+`-not-yet-valid` code clears once the contract's `not_before` is reached; every
 other code is permanent for the evidence presented.
 
 | Code | Meaning |
@@ -571,9 +574,9 @@ or a symbolic link. `StateStore(path)` opens an existing store. It refuses a
 missing file or a database without a store's tables (`state-missing`), a symbolic
 link or anything but a regular file (`state-invalid`), and a file that is not an
 SQLite database (`state-unavailable`), and it restricts a group- or
-world-accessible file to 0600. A store removed while a gateway runs makes every call fail with
-`state-unavailable`; it is never recreated empty. Each store has a random
-`store_id`.
+world-accessible file to 0600. A store removed while a gateway runs makes every
+call fail with `state-unavailable`; it is never recreated empty. Each store has a
+random `store_id`.
 
 The store records, per tenant, the accepted trust status (serial, digest and
 revoked signer IDs); per tenant, deployment and agent, the current snapshot
@@ -597,9 +600,8 @@ fresh snapshot before restarting.
   mode 0600 and, with `--passphrase-file`, encrypts the private key with the
   file's first line, at most 1,023 bytes. `runtime sign` refuses a private key
   file, and both commands refuse a passphrase file, that its group or others can
-  read. A key held
-  in a KMS, an HSM or an agent can sign through `sign_contract` by implementing
-  `ContractSigner`: `sign(data) -> bytes` and `public_key()`.
+  read. A key held in a KMS, an HSM or an agent can sign through `sign_contract`
+  by implementing `ContractSigner`: `sign(data) -> bytes` and `public_key()`.
 - **Distribute** public keys to every gateway's rings and give each approval key
   its holder in `approval_actors`. Trust statuses expire after an hour and
   snapshots after a day, so their signing keys must be available to automation;
@@ -611,10 +613,11 @@ fresh snapshot before restarting.
   key's scope ends its use on schedule.
 - **Revoke** a compromised key by listing its key ID in `revoked_signers` of a
   trust status signed by another trust key; every snapshot, trust status and
-  approval that key signed is then denied. Remove it from every gateway's rings as well, because a revocation
-  binds only tenants whose statuses list it. Keep a separately protected recovery
-  trust key, and do not pre-sign trust statuses for later windows: a presenter
-  could withhold the newest one until the older ones expire.
+  approval that key signed is then denied. Remove it from every gateway's rings as
+  well, because a revocation binds only tenants whose statuses list it. Keep a
+  separately protected recovery trust key, and do not pre-sign trust statuses for
+  later windows: a presenter could withhold the newest one until the older ones
+  expire.
 - **Supersede** a snapshot by issuing a higher serial and registering it on
   every store with `runtime register` or `register_snapshot`; to retire it on
   stores you cannot reach, list its digest in `revoked_snapshots` of the next

@@ -338,6 +338,16 @@ def test_constraint_the_declared_dialect_ignores_makes_the_schema_invalid(schema
     assert outcome({"type": "object", **schema}, {"v": "toolong"}) == "schema-invalid"
 
 
+@pytest.mark.parametrize("dialect", [DRAFT_04, DRAFT_07, None])
+def test_keyword_no_supported_dialect_defines_is_an_ignored_annotation(dialect):
+    # As the runtime guides say: only keywords some supported dialect defines are
+    # refused, so a misspelled constraint is neither refused nor enforced.
+    schema = {"type": "object", "properties": {"v": {"type": "string", "maxlength": 3}}}
+    if dialect is not None:
+        schema["$schema"] = dialect
+    assert outcome(schema, {"v": "toolong"}) == "valid"
+
+
 DRAFT_03 = "http://json-schema.org/draft-03/schema#"
 DRAFT_06 = "http://json-schema.org/draft-06/schema#"
 DRAFT_2019 = "https://json-schema.org/draft/2019-09/schema"

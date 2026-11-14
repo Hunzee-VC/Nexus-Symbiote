@@ -139,6 +139,18 @@ def test_gateway_executes_approved_call_and_consumes_approval(tmp_path):
     assert len(values[-1]) == 1
 
 
+def test_a_not_yet_valid_approval_is_admitted_once_its_window_opens(tmp_path):
+    # The reference lists *-not-yet-valid codes as clearing for the same evidence.
+    values = list(fixture(tmp_path))
+    window = {"not_before": NOW + timedelta(seconds=30), "not_after": NOW + timedelta(minutes=2)}
+    values[5] = values[5].model_copy(update=window)
+    approval = sign_contract(values[5], "approval", (values[7],))
+    with pytest.raises(AuthorizationError) as early:
+        invoke(values, approval=approval)
+    assert early.value.reason == "approval-not-yet-valid"
+    assert invoke(values, approval=approval, now=NOW + timedelta(seconds=30)) == "executed"
+
+
 def test_scope_resolver_cannot_modify_request_during_resolution(tmp_path):
     values = fixture(tmp_path)
     gateway = values[0]

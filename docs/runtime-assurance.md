@@ -1,8 +1,6 @@
 # Runtime assurance integration
 
-The `nexus_symbiote` package is the compatibility baseline. Runtime contracts add an
-explicit approval boundary to its inventory model. The experimental parallel
-foundation package is not a dependency of this implementation.
+Runtime contracts add an explicit approval boundary to the inventory model.
 
 The [runtime contract reference](runtime-contract-reference.md) specifies every
 contract field, the envelope, the digests, the order of checks, the reason codes,
@@ -37,7 +35,9 @@ Four signed contracts have distinct predicate types and schemas:
 | Action approval | Bind one or more approvers to one snapshot, execution context, exact request and single-use nonce | 5 minutes |
 | Hosted model attestation | Bind a trusted provider statement to endpoint, requested alias and resolved revision | 24 hours |
 
-Approval nonces are single-use within a tenant and state store; draw each one from a cryptographically secure generator with at least 128 bits of entropy (for example `secrets.token_hex(16)`), never from a counter.
+Approval nonces are single-use within a tenant and state store; draw each one
+from a cryptographically secure generator with at least 128 bits of entropy (for
+example `secrets.token_hex(16)`), never from a counter.
 
 Signatures authenticate the claims of authorized issuers. They do not prove
 human presence, model safety, complete discovery, or the truth of a provider's
@@ -118,9 +118,9 @@ when the operator policy requires multiple distinct authorized signers for that
 purpose. Values must be integers from 1 through 32 and cannot exceed the number
 of distinct, correctly identified public keys in that purpose's key ring.
 Booleans and duplicate aliases do not establish a quorum. An empty key ring is
-allowed only with the default threshold and disables verification for that
-purpose; it never approves an unsigned contract. The pinned stdio adapter carries
-the gateway's whole configuration into the same-process invocation.
+allowed only with the default threshold and disables that purpose: no contract of
+it verifies, so it never approves an unsigned contract. The pinned stdio adapter
+carries the gateway's whole configuration into the same-process invocation.
 
 An approval quorum counts people, not keys. `approval_actors` maps each approval
 key to the person who holds it; an approval needs signers from at least
@@ -197,28 +197,32 @@ closed.
 Schemas are evaluated in the dialect their `$schema` declares: draft-04, draft-06,
 draft-07, 2019-09 or 2020-12. A schema without `$schema` is evaluated as 2020-12.
 Any other dialect is refused. A constraint that evaluation would skip makes the
-schema invalid rather than approved but unenforced: a keyword that the declared
-dialect's specification does not define, such as draft-07 `dependencies` in a
-schema without `$schema`, `const` in a draft-04 schema or `maxContains` in a
-draft-07 schema; a keyword that only drafts before draft-04 define (`divisibleBy`,
+schema invalid rather than approved but unenforced: an assertion or applicator
+keyword that the declared dialect's specification does not define but another
+supported dialect does, such as draft-07 `dependencies` in a schema without
+`$schema`, `const` in a draft-04 schema or `maxContains` in a draft-07 schema; a
+keyword that only drafts before draft-04 define (`divisibleBy`,
 `disallow`, `extends`, `requires`, `maxDecimal`, `minimumCanEqual`,
 `maximumCanEqual`), and an `optional` whose value is not `true`, in any dialect; a
 2019-09 `unevaluatedItems` that applies where a `contains` does, because
 jsonschema would treat the items `contains` matched as evaluated; an assertion
 next to `$ref` in draft-04 to draft-07, which ignore the siblings of `$ref`; a
-subschema with its own `$schema` or base URI (`$id`, or
-`id` in draft-04); and a reference that is not a JSON Pointer within the schema,
-such as `https://tools.example.test/run#/x` or an anchor. `format`,
-`contentEncoding`, `contentMediaType` and `contentSchema` are annotations and are
-never asserted: a string declared as JSON is not parsed or checked against its
-`contentSchema`. `pattern` and `patternProperties` have ECMA-262
-meaning, read with the `u` flag that JSON Schema recommends: `$` does not match
-before a final newline, `\d` and `\w` are ASCII, `\s` and `.` use ECMA-262's
-whitespace and line terminators, and `[\s\S]` matches any character. Pattern
-syntax that ECMA-262 rejects or reads differently and that has no translation
-makes the schema invalid: inline flags, possessive quantifiers such as `a*+`,
-`{,n}`, quantified assertions, `\d`, `\w` or `\s` as a range bound, such as
-`[%-\w]`, and a backreference to a group that may not take part, such as
+subschema whose `$schema` differs from the root's, or with its own base URI (`$id`
+below the root, or `id` in draft-04) other than a draft-04 to draft-07 plain-name
+anchor such as `"$id": "#node"`; and a reference that is not a JSON Pointer within
+the schema, such as `https://tools.example.test/run#/x` or an anchor. A keyword
+that no supported dialect defines, including a misspelling such as `maxlength`, is
+ignored like any other annotation, so check how each constraint is spelled before
+you approve a schema. `format`, `contentEncoding`, `contentMediaType` and
+`contentSchema` are annotations and are never asserted: a string declared as JSON
+is not parsed or checked against its `contentSchema`. `pattern` and
+`patternProperties` have ECMA-262 meaning, read with the `u` flag that JSON Schema
+recommends: `$` does not match before a final newline, `\d` and `\w` are ASCII,
+`\s` and `.` use ECMA-262's whitespace and line terminators, and `[\s\S]` matches
+any character. Pattern syntax that ECMA-262 rejects or reads differently and that
+has no translation makes the schema invalid: inline flags, possessive quantifiers
+such as `a*+`, `{,n}`, quantified assertions, `\d`, `\w` or `\s` as a range bound,
+such as `[%-\w]`, and a backreference to a group that may not take part, such as
 `^(['"])?rm\1\s`, which ECMA-262 reads as empty and Python as a failed match. A
 backreference to a group that always takes part first, as in `^(['"]).*\1$`,
 keeps its meaning. A pattern that is valid only without the `u` flag, such as
