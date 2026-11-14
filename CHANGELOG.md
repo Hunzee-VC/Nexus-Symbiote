@@ -12,7 +12,7 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 - Piping command output into `head` exits quietly with status 141. It used to report `internal error (BrokenPipeError)` and exit 1.
 - Instruction files that contain U+2028 or U+2029 are a low `line_separators` finding. Ordinary spaces, including NBSP and the ideographic space, are not findings.
 - The OpenSSF Scorecard workflow grants no permissions at the top level, so a job added later does not inherit `read-all`.
-- `.gitleaks.toml` allowlists `tests/` so synthetic fixture tokens are not mixed with a real secret. Do not put a real secret under `tests/`.
+- `.gitleaks.toml` explicitly extends Gitleaks' built-in detection rules and has no directory-wide fixture exclusions. Custom configuration previously loaded zero detection rules; the test-tree exclusion would also have hidden real credentials under `tests/`.
 - The committed release-tag ruleset also blocks tag creation, so that a pre-created `v*` tag cannot squat the next release's name; the publication preflight already requires the ruleset to block updates and deletions.
 - The wheel smoke installs in CI and the release compatibility job resolve dependencies with `--only-binary=:all:`, so a poisoned source distribution of a dependency cannot run a build hook there. The platform smoke and the randomized property-test jobs run with `--strict-skips`, so a missing optional dependency fails them instead of skipping their Sigstore cases.
 - `advisories --exclude` matches npm names in any case, and refuses a pattern with a `*` anywhere but at its end instead of sending the name it could never match. A scoped registry's package name and both values of a shadowed header are withheld.
