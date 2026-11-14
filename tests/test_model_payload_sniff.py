@@ -17,6 +17,7 @@ from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import RiskSeverity, SerializationSafety
 from nexus_symbiote.scanners.model import (
     MAX_PICKLE_INSPECTION_BYTES,
+    MAX_PICKLE_OPCODES,
     NUMPY_HEADER_UNREAD,
     NUMPY_OBJECT_ARRAY,
     PICKLE_UNREAD,
@@ -430,3 +431,46 @@ def test_a_pickle_past_the_bound_after_a_harmless_one_is_unknown(tmp_path: Path)
     component = _components(tmp_path)["padded.dat"]
     assert component.serialization_safety is SerializationSafety.UNKNOWN
     assert component.properties["format_inspection"] == PICKLE_UNREAD
+
+
+def _padded_legacy_torch(protocol: int, *, by_opcodes: bool) -> bytes:
+    """Legacy ``torch.save`` bytes whose ``sys_info`` pickle runs past an inspection bound."""
+    sys_info: dict[str, object] = {"protocol_version": 1001, "little_endian": True}
+    if by_opcodes:
+        sys_info.update({f"k{index}": index for index in range(MAX_PICKLE_OPCODES)})
+    else:
+        sys_info["note"] = "x" * MAX_PICKLE_INSPECTION_BYTES
+    header = [0x1950A86A20F9469CFC6C, 1001, sys_info]
+    parts = [pickle.dumps(part, protocol=protocol) for part in header]
+    return b"".join([*parts, pickle.dumps(_Boom(), protocol=protocol)])
+
+
+@pytest.mark.parametrize("protocol", [0, 2])
+@pytest.mark.parametrize("by_opcodes", [True, False], ids=["opcodes", "bytes"])
+def test_a_padded_header_pickle_after_a_stop_is_unknown(
+    tmp_path: Path, protocol: int, by_opcodes: bool
+) -> None:
+    legacy = _padded_legacy_torch(protocol, by_opcodes=by_opcodes)
+    stream = io.BytesIO(legacy)
+    for _ in range(3):
+        pickle.load(stream)  # noqa: S301 - the test's own bytes
+    assert pickle.Unpickler(stream).load() == 2  # noqa: S301 - _Boom evaluates 1+1
+    (tmp_path / "models").mkdir()
+    (tmp_path / "models" / "pytorch_model").write_bytes(legacy)
+    (tmp_path / "weights.dat").write_bytes(legacy)
+    found = _components(tmp_path)
+    assert sorted(found) == ["models/pytorch_model", "weights.dat"]
+    for component in found.values():
+        assert component.serialization_safety is SerializationSafety.UNKNOWN
+        assert component.properties["format_inspection"] == PICKLE_UNREAD
+
+
+def test_text_cut_short_without_an_earlier_stop_is_not_inventoried(tmp_path: Path) -> None:
+    (tmp_path / "models").mkdir()
+    # Text-protocol streams that reach a bound before any STOP, or fail before one.
+    (tmp_path / "models" / "list.txt").write_bytes(b"(" + b"I1\n" * MAX_PICKLE_OPCODES)
+    (tmp_path / "long.dat").write_bytes(b"(S'" + b"x" * MAX_PICKLE_INSPECTION_BYTES + b"'\n")
+    # After a STOP, a text segment that fails short of the bound, or ends with the file.
+    (tmp_path / "models" / "notes").write_bytes(b"N.(I1\nnot a pickle at all\n")
+    (tmp_path / "tail.dat").write_bytes(b"N.(I1\nI2\n")
+    assert _components(tmp_path) == {}

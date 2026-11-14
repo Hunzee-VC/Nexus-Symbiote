@@ -33,7 +33,10 @@ component. A loader can unpickle the pickles that follow a STOP, as `torch.load`
 with the three header pickles of `torch.save`'s legacy format before the main one, so
 the check reads on past a STOP that names nothing and counts every pickle within the
 same bounds. A binary pickle that names none in the opcodes read before the 64 KiB or
-4,096-opcode bound is rated `unknown`, because what follows was not read. Any other content, such as a numeric NumPy array or a ZIP archive with
+4,096-opcode bound is rated `unknown`, because what follows was not read, and so is a
+text-protocol pickle cut short that way after an earlier pickle reached STOP, as a
+legacy file with protocol 0 headers and a padded `sys_info` is; a text-protocol stream
+cut short before any STOP is not a component. Any other content, such as a numeric NumPy array or a ZIP archive with
 neither a pickle-family member nor an object-dtype array as a member, is not a
 component. Each such file is opened once, after every file that the models with a
 name bind and their directories configure has been read, and only if it is not one

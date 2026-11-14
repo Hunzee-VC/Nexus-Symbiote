@@ -171,7 +171,7 @@ NUMPY_HEADER_UNREAD = (
     "validator for this format/loader"
 )
 PICKLE_UNREAD = (
-    "binary pickle opcode stream that names no callable before the inspection limits; "
+    "pickle opcode stream that names no callable before the inspection limits; "
     "no bounded structural validator for this format/loader"
 )
 # Content that a bound left unread: a file no model name rates is inventoried for it.
@@ -348,7 +348,10 @@ def _recognized_pickle(
     before the inspection bounds is rated unknown: what follows was not read. Such a
     file is read past a STOP that names nothing, within the same bounds: a loader can
     unpickle the pickles that follow, as ``torch.load`` does with the legacy format's
-    three harmless header pickles before the one that rebuilds the tensors.
+    three harmless header pickles before the one that rebuilds the tensors. Once one
+    pickle has reached STOP, a following one cut short by the bounds before naming a
+    callable is rated unknown in either protocol; a text-protocol stream cut short
+    before any STOP is not a pickle, as text may read as one.
     """
     binary = len(prefix) >= 2 and prefix[0] == 0x80 and 2 <= prefix[1] <= 5
     if not binary and (not prefix or prefix[0] not in _TEXT_PICKLE_START):
@@ -418,10 +421,13 @@ def _pickle_segment(
     except (ValueError, UnicodeError, OverflowError, RecursionError, IndexError):
         # The sample ended inside an opcode, before the end of the file.
         bounded = len(sample) < size and opcodes.tell() >= len(sample)
+    if by_content and not code:
+        # A text-protocol segment cut short is read as a pickle only after an earlier
+        # one reached STOP: on its own it is as likely ordinary text.
+        unread = bounded and (binary or start > 0)
+        return _Segment((SerializationSafety.UNKNOWN, PICKLE_UNREAD) if unread else None)
     if not binary:
         return _Segment(None)
-    if by_content and not code:
-        return _Segment((SerializationSafety.UNKNOWN, PICKLE_UNREAD) if bounded else None)
     return _Segment(recognized if own >= MIN_PICKLE_OPCODES or (code and bounded) else None)
 
 
