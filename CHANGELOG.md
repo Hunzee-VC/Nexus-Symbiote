@@ -6,6 +6,10 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ### Security
 
+- Piping command output into `head` exits quietly with status 141. It used to report `internal error (BrokenPipeError)` and exit 1.
+- Instruction files that contain U+2028 or U+2029 are a low `line_separators` finding. Ordinary spaces, including NBSP and the ideographic space, are not findings.
+- The OpenSSF Scorecard workflow grants no permissions at the top level, so a job added later does not inherit `read-all`.
+- `.gitleaks.toml` allowlists `tests/` so synthetic fixture tokens are not mixed with a real secret. Do not put a real secret under `tests/`.
 - `advisories --exclude` matches npm names in any case, and refuses a pattern with a `*` anywhere but at its end instead of sending the name it could never match. A scoped registry's package name and both values of a shadowed header are withheld.
 - Secret redaction covers keys, escaped quotes and Negotiate/NTLM credentials, and A2A card signature headers shaped like credentials are withheld.
 - The workflow checker closes ways a workflow change could pass it: `action.yml` files beside workflows, a gate in a step that continues on error, interpreter and shell options that run code, heredocs before the command, array assignments, and pinned actions whose version it cannot read. The lock checker requires every hash line to be a single SHA-256 hash.
@@ -14,6 +18,8 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 - The CI, Action and floor locks pin `dnspython` 2.9.2 instead of 2.9.1, which advisory GHSA-vvf4-9x63-8xvv affects. `dnspython` is a transitive dependency of `email-validator`, and the Action installs it from `requirements-action.lock`. The locks' upload cut-off moves to 2026-11-07; every other CI and Action pin is unchanged, and the floor lock's unpinned transitive dependencies resolve again at that cut-off.
 
 ### Changed
+
+- The pre-commit hook description states that `language: python` installs from `pyproject.toml` ranges without the hash lock, and how to run the command from a lock-installed environment with `language: system`.
 
 - **Breaking:** a policy file accepts only the documented `validate` key, and an unlistable root is an error. `verify-artifact` and `verify-discovery` reject `--trust-root` or `--trust-root-sha256` without `--bundle`.
 - `risk` prints an unscored run as unscored, labels a failed discovery-producer check as such rather than as a failed project reconciliation, and, like `summary`, orders severity breakdowns from critical to info. `vex` and `advisories` print why an inventory could not be read.

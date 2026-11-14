@@ -8,7 +8,8 @@ on:
   schedule:
     - cron: "37 2 * * 3"
   workflow_dispatch:
-permissions: read-all
+# Empty, not read-all: a job added later must declare its own permissions.
+permissions: {}
 jobs:
   analysis:
     name: Scorecard analysis
