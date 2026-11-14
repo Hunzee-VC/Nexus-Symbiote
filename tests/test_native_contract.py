@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -47,6 +48,32 @@ def test_published_examples_match_schema_and_runtime():
         document = json.loads(example.read_text())
         assert not list(validator.iter_errors(document)), example.name
         AIBOM.model_validate(document)
+
+
+def test_the_example_links_and_fingerprints_tools_as_collection_does():
+    from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
+    from nexus_symbiote.graph import validate_graph
+
+    example = AIBOM.load(Path(__file__).parents[1] / "schemas/examples/minimal-aibom.json")
+    servers = {c.bom_ref for c in example.get_components_by_type(ComponentType.MCP_SERVER)}
+    tools = {c.bom_ref for c in example.get_components_by_type(ComponentType.TOOL)}
+    provided = {
+        (edge.source_ref, edge.target_ref)
+        for edge in example.dependencies
+        if edge.relationship == "provides-tool"
+    }
+    assert {target for _, target in provided} == tools and {s for s, _ in provided} == servers
+    assert not validate_graph(example)
+    exported = CycloneDXGenerator().generate(example)["dependencies"]
+    assert {entry["ref"] for entry in exported} >= tools
+    digests = [
+        digest
+        for component in example.to_dict()["components"]
+        for key, digest in component.items()
+        if key in {"schema_hash", "definition_hash", "content_hash"}
+    ]
+    assert len(digests) == 4
+    assert all(re.fullmatch(r"sha256:[0-9a-f]{64}", digest) for digest in digests)
 
 
 def test_nested_capability_unknown_semantics_rejected():
