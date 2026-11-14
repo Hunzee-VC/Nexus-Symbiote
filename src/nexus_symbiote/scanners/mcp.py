@@ -1463,7 +1463,8 @@ class MCPScanner(Scanner):
             if key_error is not None and entries:
                 result.scan_failures.append(f"{dialect.path}: {key_error}")
                 continue
-            file_secrets = self._file_secrets(entries)
+            # Prepare the shared values once, not once for every server and failure.
+            file_scrubber = SecretScrubber(self._file_secrets(entries))
             server_refs: list[str] = []
             for server_name, server_config in entries:
                 problem = (
@@ -1476,7 +1477,7 @@ class MCPScanner(Scanner):
                     continue
                 try:
                     mcp_comp, tool_comps = self._parse_server(
-                        server_name, server_config, dialect, key, result, file_secrets
+                        server_name, server_config, dialect, key, result, file_scrubber
                     )
                 except SourceBindingKeyError as exc:
                     result.scan_failures.append(f"{dialect.path}: {exc}")
@@ -1484,7 +1485,7 @@ class MCPScanner(Scanner):
                 except (TypeError, ValueError, RecursionError):
                     # The whole server record is dropped with its risk findings, so the
                     # failure must say which server a reviewer no longer sees.
-                    shown = self._diagnostic_server_name(server_name, server_config, file_secrets)
+                    shown = self._diagnostic_server_name(server_name, server_config, file_scrubber)
                     result.scan_failures.append(
                         f"{dialect.path}: invalid tool definition for server '{shown}'; "
                         "the server and its risks are not inventoried"
@@ -1543,12 +1544,16 @@ class MCPScanner(Scanner):
         return values
 
     @staticmethod
-    def _diagnostic_server_name(name: str, config: dict[str, Any], file_secrets: list[str]) -> str:
+    def _diagnostic_server_name(
+        name: str, config: dict[str, Any], file_scrubber: SecretScrubber | None = None
+    ) -> str:
         try:
             launch = analyze(config.get("command", ""), config.get("args", []))
         except (TypeError, ValueError, RecursionError):
             return "[withheld]"
-        scrubber = SecretScrubber([*file_secrets, *_launch_secrets(launch)])
+        scrubber = (
+            file_scrubber if file_scrubber is not None else SecretScrubber(_launch_secrets(launch))
+        )
         # Clipping first can truncate a token so its recognizable shape is lost.
         return neutralize(redact_text(name, scrubber)[:256])
 
@@ -1666,7 +1671,7 @@ class MCPScanner(Scanner):
         dialect: McpDialect,
         key: bytes | None,
         result: ScanResult,
-        file_secrets: list[str] | None = None,
+        file_scrubber: SecretScrubber | None = None,
     ) -> tuple[MCPServerComponent, list[ToolComponent]]:
         config_scope = dialect.path
         command = config.get("command", "")
@@ -1683,18 +1688,18 @@ class MCPScanner(Scanner):
         )
         # Launch arguments are opaque executable inputs. Only the launcher's own
         # grammar is read; argument and environment values never leave.
-        # Each header map on its own: a name in both keeps both of its values secret.
-        # The file's other servers contribute too: this server's free text may repeat
-        # a value that one of them holds.
-        scrubber = SecretScrubber(
-            [
-                *(file_secrets or []),
-                *secret_values(env),
-                *secret_values(config.get("headers", {})),
-                *secret_values(config.get("http_headers", {})),
-                *_launch_secrets(launch),
-            ]
-        )
+        # The prepared file context covers this server and its siblings. Standalone
+        # callers still collect every header map and inline pair, including shadows.
+        scrubber = file_scrubber
+        if scrubber is None:
+            scrubber = SecretScrubber(
+                [
+                    *secret_values(env),
+                    *secret_values(config.get("headers", {})),
+                    *secret_values(config.get("http_headers", {})),
+                    *_launch_secrets(launch),
+                ]
+            )
         cwd = config.get("cwd")
         relocated = (
             launch.relocated
@@ -2477,7 +2482,7 @@ class MCPScanner(Scanner):
     ) -> list[ToolComponent]:
         tools_config = config.get("tools", [])
         tool_comps = []
-        scrubber = secrets or SecretScrubber()
+        scrubber = secrets if secrets is not None else SecretScrubber()
 
         if isinstance(tools_config, list):
             for tool_def in tools_config:

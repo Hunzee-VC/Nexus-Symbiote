@@ -89,7 +89,7 @@ def test_shadowed_inline_secret_is_redacted_from_a_sibling_failure(tmp_path):
 
 def test_diagnostic_scrubs_all_own_inline_values_without_file_context():
     config = {"command": "env", "args": [f"API_TOKEN={SHADOWED}", f"API_TOKEN={SECRET}", "node"]}
-    assert MCPScanner._diagnostic_server_name(f"agent-{SHADOWED}-{SECRET}", config, []) == (
+    assert MCPScanner._diagnostic_server_name(f"agent-{SHADOWED}-{SECRET}", config) == (
         "agent-***-***"
     )
 
