@@ -215,6 +215,38 @@ def test_python_lockfile_index_that_is_not_a_plain_url_is_never_recorded_as_pypi
     assert "evil" not in comp.model_dump_json()
 
 
+@pytest.mark.parametrize(
+    "lock_name, source_toml, origin, purl",
+    [
+        (
+            "poetry.lock",
+            'source = { type = "legacy", url = "https://PyPI.org/simple" }',
+            "https://pypi.org",
+            "pkg:pypi/openai@1.2.3",
+        ),
+        (
+            "uv.lock",
+            'source = { registry = "https://Pypi.Private.Example:8443/simple" }',
+            "https://pypi.private.example:8443",
+            "pkg:pypi/openai@1.2.3?repository_url=https://pypi.private.example:8443",
+        ),
+    ],
+)
+def test_python_lockfile_index_host_is_read_in_lower_case(
+    tmp_path, lock_name, source_toml, origin, purl
+):
+    # A host name is case-insensitive; Poetry records a configured URL as typed.
+    (tmp_path / "pyproject.toml").write_text('[project]\ndependencies = ["openai==1.2.3"]\n')
+    (tmp_path / lock_name).write_text(
+        f'version = 1\n\n[[package]]\nname = "openai"\nversion = "1.2.3"\n{source_toml}\n'
+    )
+    result = RegistryScanner().scan(tmp_path)
+    assert not result.surfaces_excluded
+    comp = result.components[0]
+    assert comp.registry_uri == origin
+    assert comp.package_url == purl
+
+
 def test_python_lockfile_rejects_editable_or_competing_lockfiles(tmp_path):
     (tmp_path / "pyproject.toml").write_text('[project]\ndependencies = ["openai>=1.0"]\n')
     (tmp_path / "uv.lock").write_text(

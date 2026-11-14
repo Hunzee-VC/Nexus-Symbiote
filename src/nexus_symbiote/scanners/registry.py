@@ -321,9 +321,9 @@ _INDEX_HOST = re.compile(r"[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?|\[[0-9a-f:.]{2
 def _index_origin(value: object) -> str | None:
     """The origin of a lockfile's package index, or None when it cannot be established.
 
-    Only a lower-case ``http://`` or ``https://`` URL whose authority every URL parser
-    reads the same way has one: no backslash, percent-escape, control character or text
-    outside ASCII. urlsplit takes the host after the last ``@``, while WHATWG parsers,
+    Only a URL with a lower-case ``http://`` or ``https://`` scheme whose authority every
+    URL parser reads the same way has one: no backslash, percent-escape, control character
+    or text outside ASCII. The host is compared and recorded in lower case. urlsplit takes the host after the last ``@``, while WHATWG parsers,
     which uv uses, end the authority at a backslash. User information is dropped.
     """
     if not isinstance(value, str) or not value.isascii() or len(value) > 4096:
@@ -338,7 +338,8 @@ def _index_origin(value: object) -> str | None:
     except ValueError:
         return None
     netloc = parts.netloc.rpartition("@")[2]
-    host = netloc.rsplit(":", 1)[0] if port is not None else netloc
+    # Host names are case-insensitive, and Poetry writes a configured URL as typed.
+    host = (netloc.rsplit(":", 1)[0] if port is not None else netloc).lower()
     if "%" in netloc or not _INDEX_HOST.fullmatch(host):
         return None
     return f"{parts.scheme}://{host}" + (f":{port}" if port is not None else "")
