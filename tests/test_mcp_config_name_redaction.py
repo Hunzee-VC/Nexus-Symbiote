@@ -172,3 +172,36 @@ def test_no_export_carries_a_token_shaped_name(tmp_path, fmt):
     assert result.exit_code == 0, result.output
     text = output.read_text()
     assert all(token not in text for token in TOKENS.values())
+
+
+@pytest.mark.parametrize(
+    ("command", "args"),
+    [("bunx", ["pkg@1.2.3"]), ("deno", ["run", "npm:pkg@1.2.3"]), ("npx", ["-y", "pkg@1.2.3"])],
+)
+def test_a_scoped_registry_variable_names_only_a_plain_scope(tmp_path, command, args):
+    name = "npm_config_@corp S3cr3t-Value_With Spaces!!\x1b:registry"
+    env = {name: "https://x.example", "npm_config_@acme:registry": "https://y.example"}
+    record = _server(tmp_path, {"command": command, "args": args, "env": env})
+    assert record.properties["package_sources"] == [
+        "env:npm_config_@acme:registry=https://y.example",
+        "env:npm_config_[other]=https://x.example",
+    ]
+    assert "S3cr3t" not in record.model_dump_json()
+
+
+def test_a_header_value_shadowed_by_http_headers_is_still_scrubbed(tmp_path):
+    record = _server(
+        tmp_path,
+        {
+            "url": "https://x.example",
+            "headers": {"X-Api-Key": "plainsecretvalue1"},
+            "http_headers": {"X-Api-Key": "othervalue12345"},
+            "tools": [{"name": "t", "description": "key plainsecretvalue1 and othervalue12345"}],
+        },
+    )
+    tool = next(
+        c for c in MCPScanner().scan(tmp_path / "p").components if c.component_type.value == "tool"
+    )
+    assert record.endpoint_url == "https://x.example"
+    assert "plainsecretvalue1" not in tool.model_dump_json()
+    assert "othervalue12345" not in tool.model_dump_json()

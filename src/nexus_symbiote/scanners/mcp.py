@@ -782,7 +782,18 @@ _KNOWN_SETTINGS = (
 
 
 def _environment_label(variable: str) -> str:
-    """A package source label for an environment variable, never a token-shaped name."""
+    """A package source label for an environment variable, never a token-shaped name.
+
+    Every name comes from a fixed vocabulary but the scope of an npm scoped registry,
+    which is named only as ``_setting_name`` names it, as the npm resolver view does.
+    """
+    key = _npm_key(variable)
+    if (
+        key is not None
+        and _SCOPED_REGISTRY.fullmatch(key)
+        and _setting_name(key, set()) == "[other]"
+    ):
+        return "env:npm_config_[other]"
     return "env:[redacted]" if TOKEN_SHAPE.search(variable) else f"env:{variable}"
 
 
@@ -1543,8 +1554,14 @@ class MCPScanner(Scanner):
         )
         # Launch arguments are opaque executable inputs. Only the launcher's own
         # grammar is read; argument and environment values never leave.
+        # Each header map on its own: a name in both keeps both of its values secret.
         scrubber = SecretScrubber(
-            [*secret_values(env), *secret_values(headers), *secret_values(dict(launch.environment))]
+            [
+                *secret_values(env),
+                *secret_values(config.get("headers", {})),
+                *secret_values(config.get("http_headers", {})),
+                *secret_values(dict(launch.environment)),
+            ]
         )
         cwd = config.get("cwd")
         relocated = (
