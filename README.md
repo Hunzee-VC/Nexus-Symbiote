@@ -82,7 +82,7 @@ Paste the block as one unit, unchanged. Nothing is installed unless the attestat
 
 ### Try it in 60 seconds
 
-From the checkout, inventory the bundled [demo agent](https://github.com/Hunzee-VC/Nexus-Symbiote/tree/main/examples/demo-agent). Nothing is executed and no network is used:
+This walkthrough needs the [source install](#install-from-reviewed-source): the `v0.1.0` wheel has no checkout and does not read the signer policy format used below. From the checkout, inventory the bundled [demo agent](https://github.com/Hunzee-VC/Nexus-Symbiote/tree/main/examples/demo-agent). Nothing is executed and no network is used:
 
 ```bash
 nexus-symbiote scan examples/demo-agent -o demo.aibom.json
