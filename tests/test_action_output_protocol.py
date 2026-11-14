@@ -123,7 +123,17 @@ def test_every_declared_output_is_written_before_collection(tmp_path, capsys):
     calls: list[list[str]] = []
     outputs = tmp_path / "out"
     config = configuration(tmp_path)
-    assert runner.run(config, command=stub(calls, scan=(1, HOSTILE)), outputs=outputs) == 1
+    declared_at_collection: list[list[str]] = []
+    inner = stub(calls, scan=(1, HOSTILE))
+
+    def command(args: list[str]) -> subprocess.CompletedProcess[str]:
+        if args[0] == "scan":
+            lines = outputs.read_text().splitlines() if outputs.exists() else []
+            declared_at_collection.append([line.split("=", 1)[0] for line in lines])
+        return inner(args)
+
+    assert runner.run(config, command=command, outputs=outputs) == 1
+    assert declared_at_collection == [list(DECLARED)]
     lines = outputs.read_text().splitlines()
     assert [line.split("=", 1)[0] for line in lines[: len(DECLARED)]] == list(DECLARED)
     values = published(outputs)
@@ -141,7 +151,7 @@ def test_action_yml_maps_exactly_the_outputs_the_runner_writes():
         re.fullmatch(r"\$\{\{ steps\.scan\.outputs\.(\w+) \}\}", output["value"]).group(1)
         for output in action["outputs"].values()
     }
-    assert mapped <= set(DECLARED)
+    assert mapped == set(DECLARED) - {"sarif_path"}
     steps = action["runs"]["steps"]
     uploads = [step for step in steps if "upload" in step.get("uses", "")]
     for step in uploads:
@@ -170,7 +180,7 @@ def test_the_action_keeps_its_interpreter_off_the_callers_path():
 
 
 @pytest.mark.parametrize("value", ["-0", "1e-400", "0_0", " 5", "inf", "5.", ".5", "100.5", "007"])
-def test_threshold_accepts_only_plain_decimals_from_0_to_100(tmp_path, value):
+def test_threshold_refuses_anything_but_a_plain_decimal_from_0_to_100(tmp_path, value):
     with pytest.raises(ValueError, match="risk-threshold"):
         configuration(tmp_path, SYMBIOTE_RISK_THRESHOLD=value)
 

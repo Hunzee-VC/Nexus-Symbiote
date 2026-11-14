@@ -25,7 +25,7 @@ def test_the_scanners_input_says_that_a_partial_list_fails_the_gates():
 
 
 def _gates(runner, tmp_path: Path, names: list[str]) -> tuple[int, int]:
-    """The exit codes of validate and risk, as the Action runs them, for a scan with names."""
+    """The exit codes of validate --skip-integrity and risk for a scan with names."""
     inventory = tmp_path / f"{len(names)}.json"
     chosen = [argument for name in names for argument in ("--scanner", name)]
     scan = ["scan", str(DEMO), "--no-project-policy", "--report-only", *chosen]

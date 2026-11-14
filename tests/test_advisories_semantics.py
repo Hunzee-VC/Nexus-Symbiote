@@ -265,7 +265,7 @@ def test_private_origin_exclusion_follows_python_lockfile_resolutions(
     assert withheld == {"mcp-acme-tools": "resolved from a non-public registry origin"}
 
 
-def test_private_packages_are_sent_unless_excluded():
+def test_private_packages_are_sent_by_default():
     transport = Scripted(clean)
     fetch_advisories(
         AIBOM(components=[npm("@acme/mcp-billing", registry_uri="https://npm.acme.internal")]),
@@ -299,9 +299,9 @@ def test_mcp_launcher_package_identity_is_reconciled():
         {"version": "0.1.16"},
         {"launcher_package": "npm:other"},
         {"launcher_package": "pypi:mcp-remote"},
-        {"package_url": "pkg:npm/mcp-remote@latest"},
+        {"package_url": "pkg:npm/mcp-remote@latest", "version": "latest"},
     ):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="disagrees|exact"):
             mcp_package_identity(SimpleNamespace(**{**vars(server), **mismatch}))  # type: ignore[arg-type]
 
 

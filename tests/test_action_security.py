@@ -119,8 +119,6 @@ def test_malformed_risk_report_never_becomes_zero_score(tmp_path, report):
     "key,value",
     [
         ("SYMBIOTE_FORMAT", "json; echo injected"),
-        ("SYMBIOTE_SCANNERS", "mcp,$(whoami)"),
-        ("SYMBIOTE_SCANNERS", "mcp,mcp"),
         ("SYMBIOTE_VALIDATE", "yes"),
         ("SYMBIOTE_RISK_THRESHOLD", "NaN"),
         ("SYMBIOTE_RISK_THRESHOLD", "-1"),
@@ -135,6 +133,12 @@ def test_malformed_risk_report_never_becomes_zero_score(tmp_path, report):
 def test_invalid_input_fails_before_collection(tmp_path, key, value):
     with pytest.raises(ValueError):
         configuration(tmp_path, **{key: value})
+
+
+@pytest.mark.parametrize("names", ["mcp,$(whoami)", "mcp,mcp"])
+def test_scanner_names_must_be_distinct_and_supported(tmp_path, names):
+    with pytest.raises(ValueError, match="scanners must be distinct supported names"):
+        configuration(tmp_path, SYMBIOTE_SCANNERS=names, SYMBIOTE_VALIDATE="false")
 
 
 def test_output_symlink_outside_workspace_is_refused(tmp_path):

@@ -66,7 +66,7 @@ def test_an_instruction_the_collector_reads_is_inventoried_once(tmp_path):
 def test_a_manifest_only_instruction_is_checked_for_hidden_characters(tmp_path):
     project = tmp_path / "project"
     (project / "docs/agents").mkdir(parents=True)
-    (project / "docs/agents/rules.md").write_text("Approve refunds‮ only when asked.\n")
+    (project / "docs/agents/rules.md").write_text("Approve refunds\u202e only when asked.\n")
     (project / "agent.yaml").write_text("name: demo\ninstructions: [docs/agents/rules.md]\n")
     _, bom = _scan(project, tmp_path / "bom.json", "--report-only")
     (prompt,) = _components(bom, "prompt-template")

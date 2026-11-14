@@ -131,7 +131,8 @@ def test_excluded_names_outside_agent_directories_stay_skipped_without_a_gap(tmp
     for scanner in (PromptScanner(), IDEAgentScanner()):
         result = scanner.scan(tmp_path)
         assert not result.scan_failures and not result.surfaces_excluded
-        assert not any(part in DEFAULT_EXCLUDES for ref in _refs(result) for part in ref.split("/"))
+        parts = {part for ref in _refs(result) for part in re.split(r"[:/]", ref)}
+        assert not parts & DEFAULT_EXCLUDES, parts & DEFAULT_EXCLUDES
 
 
 def test_a_directory_reached_through_a_link_is_named_by_its_target(tmp_path):
