@@ -340,6 +340,21 @@ def test_unrelated_sources_larger_than_file_bytes_are_searched_as_a_stream(tmp_p
     ]
 
 
+def test_a_source_symlinked_within_the_project_is_read_through_its_target(tmp_path):
+    _write(tmp_path, "pkg/real.py", "x = 1\n")
+    _write(tmp_path, "web/real.ts", "export const x = 1;\n")
+    _write(tmp_path, "web/server.ts", SERVER_TS)
+    (tmp_path / "pkg" / "alias.py").symlink_to("real.py")
+    (tmp_path / "web" / "alias.ts").symlink_to("real.ts")
+    (tmp_path / "web" / "linked.ts").symlink_to("server.ts")
+    result = MCPScanner().scan(tmp_path)
+    assert result.scan_failures == []
+    assert sorted(c.source_path for c in result.components if c.component_type == "tool") == [
+        "web/linked.ts",
+        "web/server.ts",
+    ]
+
+
 def test_a_byte_order_mark_does_not_make_python_source_invalid(tmp_path):
     (tmp_path / "agent.py").write_bytes(b"\xef\xbb\xbf" + CLIENT_PY.encode())
     result = MCPScanner().scan(tmp_path)

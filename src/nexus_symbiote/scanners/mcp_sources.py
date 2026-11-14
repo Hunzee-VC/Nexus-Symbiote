@@ -480,13 +480,16 @@ class _Markers:
 def _search(files: ConfinedCollection, path: Path, keep: int, budget: SourceBudget) -> _Source:
     """Read a file in chunks, keeping its first ``keep`` bytes and noting each marker.
 
+    A relative symlink to a regular file in the project is read through its target.
     Every chunk is charged to the source budget. A file larger than the whole budget
     is refused alone before it is read, so it does not spend the budget.
     """
     head = bytearray()
     size = 0
     markers = _Markers(path, keep)
-    with files.open_regular(path, max_bytes=budget.bound) as stream:
+    # A path with no such target is opened itself, so the refusal is recorded.
+    target = files.in_root_target(path) or path
+    with files.open_regular(target, max_bytes=budget.bound) as stream:
         while chunk := stream.read(_CHUNK_BYTES):
             if not budget.admit(len(chunk), path):
                 raise _BudgetSpentError
