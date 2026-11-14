@@ -161,8 +161,11 @@ input-schema validity, request-bound approval and revocation before execution.
 The descriptor digest covers `name`, `description`, `inputSchema`,
 `annotations`, `title`, `outputSchema` and `_meta`; a descriptor with any other
 field, such as `icons`, fails closed until the digest profile is upgraded.
-Arguments are copied before checking; schema references cannot trigger network
-retrieval. Identities and validity are checked again immediately before execution.
+Arguments and the served descriptor are copied before checking, so validation uses
+the same descriptor that was digested; schema references cannot trigger network
+retrieval. The workload identity is checked again before admission, and contract
+and signer-scope validity and the approver quorum are rechecked in the admission
+transaction. The decision callback runs after admission and before execution.
 The executor and scope resolver receive the RFC 8785 canonical JSON value that
 the approval binds by default (`canonical_arguments=True`), with keys in RFC
 8785 order and integral floats between -(2^53 - 1) and 2^53 - 1 converted to
@@ -308,12 +311,23 @@ registration-only gateway without adapters with `ReferenceGateway.registrar(...)
 To retire a snapshot on stores you cannot reach, list its digest in
 `revoked_snapshots` of the next trust status. A superseded snapshot or an older
 trust status is refused from a read of the store, without taking its write lock.
+Before recording a new trust status or advancing a snapshot, the gateway rechecks
+contract validity and signer scopes while holding the state lock. Snapshot
+advancement also requires the checked trust status still to be the current head;
+a concurrent update makes the stale transition fail with `trust-superseded`.
+Snapshot admission takes a SQLite write lock even when the same snapshot is
+already recorded, so concurrent calls can contend on the shared store before
+reaching their final admission transaction. A lock that cannot be acquired within
+the store's timeout denies the call with `state-unavailable`. Size and monitor the
+gateway fleet for this shared-store contention, and retry only in accordance with
+the operation's idempotency and approval semantics.
 
 Fresh authenticated revocation knowledge is retained even when the current
 operation is denied. Failed signature or binding checks cannot advance snapshot
 state. After the final identity check, the gateway takes the database write lock,
-confirms the current trust head and snapshot head, and checks validity against
-its clock before committing the nonce. The commit admits the call. A newer trust
+confirms the current trust head and snapshot head, and checks contract validity,
+signer scopes and the distinct approver quorum against its clock before committing
+the nonce. The commit admits the call. A newer trust
 status or snapshot committed before admission denies the stale call and preserves
 its nonce. A later revocation applies to subsequent admissions. Cancellation of
 work already admitted requires executor support. Execution failure after
