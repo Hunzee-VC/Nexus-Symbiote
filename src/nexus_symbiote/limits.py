@@ -69,7 +69,8 @@ SPECS: dict[str, LimitSpec] = {
             "entries",
             "count",
             10_000_000,
-            "Directory entries one collector lists while it walks the project.",
+            "Directory entries listed by walks and exact-name checks in one collection; "
+            "also the independent bound on project-policy discovery.",
         ),
         LimitSpec(
             "depth",
