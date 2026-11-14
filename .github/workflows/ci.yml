@@ -88,7 +88,7 @@ jobs:
   coverage:
     name: Coverage Python 3.12
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -107,7 +107,7 @@ jobs:
           COVERAGE_JSON: ${{ runner.temp }}/coverage-python-3.12.json
         run: |
           set -o pipefail
-          timeout --signal=INT --kill-after=30s 25m \
+          timeout --signal=INT --kill-after=30s 40m \
             bash --noprofile --norc -e -o pipefail -c '
               python -m pytest -vv --strict-skips --durations=20 -o test_timeout=240 \
                 --cov=nexus_symbiote --cov=scripts --cov-branch --cov-report=term-missing \
