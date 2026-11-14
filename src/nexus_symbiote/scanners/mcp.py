@@ -249,6 +249,8 @@ UNPARSED_CLIENT_FILES = (
 UNPARSED_CLIENT_DIRECTORIES = (".continue/mcpServers",)
 
 MAX_SERVERS_PER_FILE = 1000
+# Credential values of all servers in one file, each scrubbed from every server's text.
+MAX_SECRETS_PER_FILE = 4096
 MAX_TOOLS_PER_SERVER = 1000
 MAX_TOOLS_PER_FILE = 5000
 MAX_ARGUMENTS = 1024
@@ -1409,6 +1411,13 @@ class MCPScanner(Scanner):
             if key_error is not None and entries:
                 result.scan_failures.append(f"{dialect.path}: {key_error}")
                 continue
+            file_secrets = SecretScrubber(self._file_secrets(entries))
+            if len(file_secrets) > MAX_SECRETS_PER_FILE:
+                result.scan_failures.append(
+                    f"{dialect.path}: more than {MAX_SECRETS_PER_FILE} credential values in one "
+                    "file; not collected"
+                )
+                continue
             server_refs: list[str] = []
             for server_name, server_config in entries:
                 problem = (
@@ -1421,7 +1430,7 @@ class MCPScanner(Scanner):
                     continue
                 try:
                     mcp_comp, tool_comps = self._parse_server(
-                        server_name, server_config, dialect, key, result
+                        server_name, server_config, dialect, key, result, file_secrets
                     )
                 except SourceBindingKeyError as exc:
                     result.scan_failures.append(f"{dialect.path}: {exc}")
@@ -1451,6 +1460,23 @@ class MCPScanner(Scanner):
         for host, refs in pending_refs.items():
             clients[host].server_refs = sorted(refs)
         return found_any
+
+    @staticmethod
+    def _file_secrets(entries: list[tuple[str, Any]]) -> list[str]:
+        """Credential values of every server in a file.
+
+        One server's tool text or name may repeat a value that another server's
+        environment or headers hold, so the file's values are scrubbed from each.
+        """
+        values: list[str] = []
+        for _, config in entries:
+            if not isinstance(config, dict):
+                continue
+            for field in ("env", "headers", "http_headers"):
+                mapping = config.get(field)
+                if isinstance(mapping, dict):
+                    values.extend(secret_values(mapping))
+        return values
 
     @staticmethod
     def _read_dialect(files: ConfinedCollection, dialect: McpDialect, result: ScanResult) -> Any:
@@ -1566,6 +1592,7 @@ class MCPScanner(Scanner):
         dialect: McpDialect,
         key: bytes | None,
         result: ScanResult,
+        file_secrets: SecretScrubber | None = None,
     ) -> tuple[MCPServerComponent, list[ToolComponent]]:
         config_scope = dialect.path
         command = config.get("command", "")
@@ -1583,7 +1610,9 @@ class MCPScanner(Scanner):
         # Launch arguments are opaque executable inputs. Only the launcher's own
         # grammar is read; argument and environment values never leave.
         # Each header map on its own: a name in both keeps both of its values secret.
-        scrubber = SecretScrubber(
+        # The file's other servers contribute too: this server's free text may repeat
+        # a value that one of them holds.
+        scrubber = (file_secrets or SecretScrubber()).extended(
             [
                 *secret_values(env),
                 *secret_values(config.get("headers", {})),
@@ -1839,7 +1868,11 @@ class MCPScanner(Scanner):
         packages: list[dict[str, Any]] = []
         identities: list[str] = []
         for package in launch.packages:
-            hidden = scrubber.contains(package.spec)
+            # A credential in the package position is withheld as _safe_name withholds
+            # a token-shaped command; the name may be a normalised form of the spec.
+            hidden = scrubber.contains(package.spec) or any(
+                TOKEN_SHAPE.search(text) for text in (package.spec, package.name) if text
+            )
             if hidden:
                 withheld.append("launcher package")
             entry_identity = "[withheld]" if hidden else package.identity

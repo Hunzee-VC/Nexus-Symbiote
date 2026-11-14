@@ -1268,9 +1268,17 @@ class RegistryScanner(Scanner):
         elif not registry:
             risks.append(self._npm_source_risk(name, kind, spec))
         package_url = None
-        if resolution is not None and resolution.consistent:
+        # A name the redaction changed is exported as the marker; no package URL may
+        # spell it out.
+        if name == package and resolution is not None and resolution.consistent:
             package_url = self._npm_purl(package, resolution.version, resolution.origin)
-        elif registry and record is None and not in_doubt and _npm_exact(version_range):
+        elif (
+            name == package
+            and registry
+            and record is None
+            and not in_doubt
+            and _npm_exact(version_range)
+        ):
             # Only without a lock record: one that was not taken, a lockfile that was
             # not read and an override each leave the version the spec names in doubt.
             package_url = self._npm_purl(package, version_range, None)
