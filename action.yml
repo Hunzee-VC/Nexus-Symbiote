@@ -63,7 +63,19 @@ inputs:
       earlier step of a trusted workflow writes under RUNNER_TEMP from the base branch or an
       artifact; never a file from the checked-out code. When set, the Action runs
       `diff <baseline> <inventory> --fail-on-alert` and fails on any drift alert. The same path
-      rules as signature-policy apply. Empty means no drift gate
+      rules as signature-policy apply. Requires source-binding-key, or
+      NEXUS_SYMBIOTE_SOURCE_BINDING_KEY of at least 32 characters in the step environment:
+      without that key, launch arguments, environment values and endpoint paths are not
+      compared. Empty means no drift gate
+    default: ""
+  source-binding-key:
+    description: >-
+      Operator secret of at least 32 characters. It keys the bindings that let drift
+      detection see MCP launch arguments, environment values and endpoint paths. Required
+      when reviewed-baseline is set. When empty, the step environment's
+      NEXUS_SYMBIOTE_SOURCE_BINDING_KEY is used instead. Prefer a repository secret. The
+      value is passed only to the scan and is not printed. Record the baseline with the
+      same secret
     default: ""
   sarif-upload:
     description: >-
@@ -180,6 +192,7 @@ runs:
         SYMBIOTE_RISK_THRESHOLD: ${{ inputs.risk-threshold }}
         SYMBIOTE_FAIL_ON_SEVERITY: ${{ inputs.fail-on-severity }}
         SYMBIOTE_REVIEWED_BASELINE: ${{ inputs.reviewed-baseline }}
+        SYMBIOTE_SOURCE_BINDING_KEY: ${{ inputs.source-binding-key }}
         SYMBIOTE_SARIF: ${{ inputs.sarif-upload }}
         SYMBIOTE_UPLOAD_ARTIFACT: ${{ inputs.upload-artifact }}
         SYMBIOTE_SIGNATURE_POLICY: ${{ inputs.signature-policy }}
