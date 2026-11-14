@@ -47,6 +47,7 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
   shared credential redactor before entering inventories or exports. Recognized
   tokens and password assignments are withheld, including Hugging Face and npm
   tokens; existing exports may contain those values and should be recollected.
+- Docker MCP launches with `--use-api-socket` raise a high `launch_context` finding for engine access and forwarded client credentials, including with a digest-pinned image. Python A2A card constructors imported under an alias now report the same coverage gaps as `AgentCard`.
 - `advisories --exclude` matches npm names in any case, and refuses a pattern with a `*` anywhere but at its end instead of sending the name it could never match. A scoped registry's package name and both values of a shadowed header are withheld.
 - A `uv.lock` or `poetry.lock` record whose package index is not a plain lower-case `http://` or `https://` URL is a coverage gap and binds no package URL. Such a source used to be recorded as `https://pypi.org`: a directory of wheels, an upper-case scheme such as `HTTPS://`, a `file://` URL, or an authority with a backslash (`https://evil.example\@pypi.org/simple`), which uv reads as another host than Python's `urlsplit` does.
 - Secret redaction covers keys, escaped quotes and Negotiate/NTLM credentials, and A2A card signature headers shaped like credentials are withheld.
