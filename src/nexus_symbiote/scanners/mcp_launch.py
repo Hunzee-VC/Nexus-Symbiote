@@ -2612,6 +2612,11 @@ def _host_source(spec: str, *, mount: bool) -> str | None:
 
 
 def _container_context(options: list[tuple[str, str | None]], launch: Launch) -> None:
+    # Docker forwards both the engine socket and client credentials; the last flag wins.
+    api_socket = dict(options).get("--use-api-socket", "false")
+    if api_socket is None or api_socket.lower() in {"true", "1"}:
+        launch.mark("runtime_socket_mount")
+        launch.mark("runtime_credentials_forwarded")
     for option, value in options:
         text = (value or "").strip().lower()
         if option == "--privileged" and text in {"", "true", "1"}:

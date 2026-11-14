@@ -714,6 +714,17 @@ def _card_preference(path: str) -> tuple[bool, int, bool, str]:
 
 def _calls(tree: ast.Module) -> tuple[set[str], bool, bool]:
     """Names of called SDK constructors, and whether AgentCard is built from literals."""
+    card_names = {"AgentCard"}
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.ImportFrom)
+            and node.level == 0
+            and node.module is not None
+            and node.module.split(".")[0] == "a2a"
+        ):
+            card_names.update(
+                alias.asname or alias.name for alias in node.names if alias.name == "AgentCard"
+            )
     called: set[str] = set()
     literal_card = mapping_card = False
     for node in ast.walk(tree):
@@ -722,12 +733,12 @@ def _calls(tree: ast.Module) -> tuple[set[str], bool, bool]:
         func = node.func
         loaded = False
         if isinstance(func, ast.Name):
-            name = func.id
+            name = "AgentCard" if func.id in card_names else func.id
         elif isinstance(func, ast.Attribute):
             name = func.attr
             owner = func.value
             if (
-                (isinstance(owner, ast.Name) and owner.id == "AgentCard")
+                (isinstance(owner, ast.Name) and owner.id in card_names)
                 or (isinstance(owner, ast.Attribute) and owner.attr == "AgentCard")
             ) and name in _CARD_LOADERS | _CARD_CONSTRUCTORS:
                 name, loaded = "AgentCard", name in _CARD_LOADERS
