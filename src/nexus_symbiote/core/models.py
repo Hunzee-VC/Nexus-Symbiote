@@ -90,8 +90,21 @@ class ClaimEvidence(InventoryModel):
     unknown_reason: str | None = None
 
 
+def _require_component_type(schema: dict[str, Any]) -> None:
+    """Publish ``component_type`` as required: it is the tag a reader selects the model by.
+
+    Each subclass keeps its type as the default for objects built in process.
+    """
+    properties = schema["properties"]
+    properties["component_type"].pop("default", None)
+    required = {*schema.get("required", ()), "component_type"}
+    schema["required"] = [name for name in properties if name in required]
+
+
 class ComponentBase(InventoryModel):
     """Base for every AgentBOM component."""
+
+    model_config = ConfigDict(json_schema_extra=_require_component_type)
 
     bom_ref: str = Field(
         description="Unique reference within this BOM", max_length=MAX_REFERENCE_CHARS

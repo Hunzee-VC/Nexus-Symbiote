@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote.core.enums import ComponentType
 from nexus_symbiote.core.models import AgentComponent, CapabilityDeclaration
 
 
@@ -91,6 +92,24 @@ def test_dependency_edges_reject_unknown_fields_in_schema_and_model():
     assert list(_schema_validator().iter_errors(document))
     with pytest.raises(ValidationError):
         AIBOM.model_validate(document)
+
+
+def test_the_schema_requires_the_component_type_the_reader_selects_a_model_by():
+    validator = _schema_validator()
+    mapping = validator.schema["properties"]["components"]["items"]["discriminator"]["mapping"]
+    assert set(mapping) == {kind.value for kind in ComponentType}
+    for kind in mapping:
+        component = AIBOM.model_validate(
+            {"components": [{"bom_ref": "c", "component_type": kind, "name": "c"}]}
+        ).to_dict()["components"][0]
+        assert not list(validator.iter_errors({"components": [component]})), kind
+        del component["component_type"]
+        document = {"components": [component]}
+        assert list(validator.iter_errors(document)), kind
+        with pytest.raises(ValidationError, match="discriminator 'component_type'"):
+            AIBOM.model_validate(document)
+    untyped = {"components": [{"bom_ref": "agent:x", "name": "x", "autonomy_level": "L2-agent"}]}
+    assert list(validator.iter_errors(untyped))
 
 
 @pytest.mark.parametrize(

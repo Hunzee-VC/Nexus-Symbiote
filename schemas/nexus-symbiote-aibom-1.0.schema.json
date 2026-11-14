@@ -12,7 +12,6 @@
         },
         "component_type": {
           "const": "a2a-client",
-          "default": "a2a-client",
           "title": "Component Type",
           "type": "string"
         },
@@ -146,6 +145,7 @@
       },
       "required": [
         "bom_ref",
+        "component_type",
         "name"
       ],
       "title": "A2AClientComponent",
@@ -163,7 +163,6 @@
         },
         "component_type": {
           "const": "a2a-server",
-          "default": "a2a-server",
           "title": "Component Type",
           "type": "string"
         },
@@ -321,6 +320,7 @@
       },
       "required": [
         "bom_ref",
+        "component_type",
         "name"
       ],
       "title": "A2AServerComponent",
@@ -451,7 +451,6 @@
         },
         "component_type": {
           "const": "agent",
-          "default": "agent",
           "title": "Component Type",
           "type": "string"
         },
@@ -706,6 +705,7 @@
       },
       "required": [
         "bom_ref",
+        "component_type",
         "name"
       ],
       "title": "AgentComponent",
@@ -1358,7 +1358,6 @@
         },
         "component_type": {
           "const": "data-source",
-          "default": "data-source",
           "title": "Component Type",
           "type": "string"
         },
@@ -1527,6 +1526,7 @@
       },
       "required": [
         "bom_ref",
+        "component_type",
         "name"
       ],
       "title": "DataSourceComponent",
@@ -1871,7 +1871,6 @@
         },
         "component_type": {
           "const": "guardrail-policy",
-          "default": "guardrail-policy",
           "title": "Component Type",
           "type": "string"
         },
@@ -2017,6 +2016,7 @@
       },
       "required": [
         "bom_ref",
+        "component_type",
         "name"
       ],
       "title": "GuardrailComponent",
@@ -2043,7 +2043,6 @@
         },
         "component_type": {
           "const": "ide-agent",
-          "default": "ide-agent",
           "title": "Component Type",
           "type": "string"
         },
@@ -2185,6 +2184,7 @@
       },
       "required": [
         "bom_ref",
+        "component_type",
         "name"
       ],
       "title": "IDEAgentComponent",
@@ -2202,7 +2202,6 @@
         },
         "component_type": {
           "const": "mcp-client",
-          "default": "mcp-client",
           "title": "Component Type",
           "type": "string"
         },
@@ -2331,6 +2330,7 @@
       },
       "required": [
         "bom_ref",
+        "component_type",
         "name"
       ],
       "title": "MCPClientComponent",
@@ -2348,7 +2348,6 @@
         },
         "component_type": {
           "const": "mcp-server",
-          "default": "mcp-server",
           "title": "Component Type",
           "type": "string"
         },
@@ -2572,6 +2571,7 @@
       },
       "required": [
         "bom_ref",
+        "component_type",
         "name"
       ],
       "title": "MCPServerComponent",
@@ -2589,7 +2589,6 @@
         },
         "component_type": {
           "const": "memory-store",
-          "default": "memory-store",
           "title": "Component Type",
           "type": "string"
         },
@@ -2747,6 +2746,7 @@
       },
       "required": [
         "bom_ref",
+        "component_type",
         "name"
       ],
       "title": "MemoryStoreComponent",
@@ -2764,7 +2764,6 @@
         },
         "component_type": {
           "const": "model",
-          "default": "model",
           "title": "Component Type",
           "type": "string"
         },
@@ -3064,6 +3063,7 @@
       },
       "required": [
         "bom_ref",
+        "component_type",
         "name"
       ],
       "title": "ModelComponent",
@@ -3081,7 +3081,6 @@
         },
         "component_type": {
           "const": "prompt-template",
-          "default": "prompt-template",
           "title": "Component Type",
           "type": "string"
         },
@@ -3230,6 +3229,7 @@
       },
       "required": [
         "bom_ref",
+        "component_type",
         "name"
       ],
       "title": "PromptComponent",
@@ -3247,7 +3247,6 @@
         },
         "component_type": {
           "const": "rag-source",
-          "default": "rag-source",
           "title": "Component Type",
           "type": "string"
         },
@@ -3448,6 +3447,7 @@
       },
       "required": [
         "bom_ref",
+        "component_type",
         "name"
       ],
       "title": "RAGSourceComponent",
@@ -3465,7 +3465,6 @@
         },
         "component_type": {
           "const": "registry-entry",
-          "default": "registry-entry",
           "title": "Component Type",
           "type": "string"
         },
@@ -3660,6 +3659,7 @@
       },
       "required": [
         "bom_ref",
+        "component_type",
         "name"
       ],
       "title": "RegistryEntryComponent",
@@ -3752,7 +3752,6 @@
         },
         "component_type": {
           "const": "skill-package",
-          "default": "skill-package",
           "title": "Component Type",
           "type": "string"
         },
@@ -3896,6 +3895,7 @@
       },
       "required": [
         "bom_ref",
+        "component_type",
         "name"
       ],
       "title": "SkillPackageComponent",
@@ -3913,7 +3913,6 @@
         },
         "component_type": {
           "const": "tool",
-          "default": "tool",
           "title": "Component Type",
           "type": "string"
         },
@@ -4103,6 +4102,7 @@
       },
       "required": [
         "bom_ref",
+        "component_type",
         "name"
       ],
       "title": "ToolComponent",
@@ -4142,7 +4142,6 @@
         },
         "component_type": {
           "const": "verified-extension",
-          "default": "verified-extension",
           "title": "Component Type",
           "type": "string"
         },
@@ -4336,6 +4335,7 @@
       },
       "required": [
         "bom_ref",
+        "component_type",
         "name"
       ],
       "title": "VerifiedExtensionComponent",
