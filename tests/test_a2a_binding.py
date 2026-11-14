@@ -258,7 +258,8 @@ def test_keyed_baseline_fails_reconciliation_without_its_key(tmp_path, monkeypat
     assert not CompletenessValidator().validate_against_project(bom, project).is_complete
 
 
-def test_snapshot_with_the_superseded_card_profile_fails_reconciliation(tmp_path):
+@pytest.mark.parametrize("profile", ["v1", "v2", "v3"])
+def test_snapshot_with_the_superseded_card_profile_fails_reconciliation(tmp_path, profile):
     project = tmp_path / "project"
     _write_card(project, {**CARD, "url": "https://agents.example.com"})
     baseline = tmp_path / "baseline.json"
@@ -266,7 +267,7 @@ def test_snapshot_with_the_superseded_card_profile_fails_reconciliation(tmp_path
     bom = AIBOM.load(baseline)
     assert CompletenessValidator().validate_against_project(bom, project).is_complete
     (server,) = [c for c in bom.components if isinstance(c, A2AServerComponent)]
-    server.properties["static_card_hash_profile"] = "nexus-symbiote/a2a-card-structure/v1"
+    server.properties["static_card_hash_profile"] = f"nexus-symbiote/a2a-card-structure/{profile}"
     report = CompletenessValidator().validate_against_project(bom, project)
     assert any("a2a-server:billing-agent" in issue.description for issue in report.issues)
 
@@ -1011,7 +1012,7 @@ VECTOR_CLIENT = {"name": "c", "agentCardUrl": "https://a.example/.well-known/age
 VECTORS = [
     (
         "static_card_hash",
-        '{"profile":"nexus-symbiote/a2a-card-structure/v3",'
+        '{"profile":"nexus-symbiote/a2a-card-structure/v4",'
         '"structure":{"additional_interfaces":[{"fragment":false,"path_separators":0,'
         '"plain_path":"","query":false,"userinfo":false}],"authentication_schemes":null,'
         '"capabilities":{},'
@@ -1025,7 +1026,7 @@ VECTORS = [
         '"security_schemes":[["k","apiKey"],["o","oauth2"]],"signatures":[],'
         '"skill_security":[["lookup",'
         '{"security":[{"o":["t"]}]}]],"supported_interfaces":[]}}',
-        "sha256:8e16287a6387ae5e87c1fbbb20df0d183b31c0ee3b0ec4e2055347c6946b90d2",
+        "sha256:ab8b20b92b0cf6645924b4075646d699a9e73cc5a4500aad91c7ee4a314a04c5",
     ),
     (
         "static_value_binding",
@@ -1105,7 +1106,7 @@ VECTOR_CARD_1_0 = {
     ],
 }
 VECTOR_1_0 = (
-    '{"profile":"nexus-symbiote/a2a-card-structure/v3","structure":{"additional_interfaces":[],'
+    '{"profile":"nexus-symbiote/a2a-card-structure/v4","structure":{"additional_interfaces":[],'
     '"authentication_schemes":null,"capabilities":{},"endpoint":{"fragment":false,'
     '"path_separators":1,"plain_path":null,"query":false,"userinfo":false},"extensions":[],'
     '"fields":["name","securityRequirements",'
@@ -1121,7 +1122,7 @@ VECTOR_1_0 = (
 
 
 def test_a2a_1_0_card_matches_its_published_structure_vector(tmp_path):
-    expected = "sha256:e85679a927eaaec1a504c194a168fab78590dc2274e07b49145e5d5777707b65"
+    expected = "sha256:06986934fe23bdc0c17ed47b43d0118dff53ec6876593bf218c66ea269bfd92e"
     assert "sha256:" + hashlib.sha256(VECTOR_1_0.encode()).hexdigest() == expected
     card = _server(tmp_path, VECTOR_CARD_1_0)
     assert card.properties["static_card_hash"] == expected
