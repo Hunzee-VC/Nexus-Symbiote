@@ -358,7 +358,7 @@ def _projection(
 
 
 # sh, bash, zsh, dash, including /bin/sh, /usr/bin/bash and `/usr/bin/env bash`.
-_SHELL = r"(?:[/\\]?(?:[\w.+-]+[/\\])*)?(?:env\s+)?((?:ba|z|da)?sh)\b"
+_SHELL = r"(?:[/\\]?(?:[\w.+-]+[/\\])*)?(?:env\s+)?(?:ba|z|da)?sh\b"
 # Each matcher runs once per pipeline segment, so a command of repeated near
 # misses costs linear time whatever its length.
 _PIPE_BOUNDARY = re.compile(r"[|\n]")
@@ -386,7 +386,7 @@ def _fetch_exec(command: str) -> bool:
                 segment = command[start : boundary.start()]
                 if _DOWNLOADER.search(segment, segment.rfind(";") + 1):
                     return True
-                if shell[1].lower() in {"sh", "bash"} and _BASE64_DECODE.search(segment):
+                if _BASE64_DECODE.search(segment):
                     return True
         start = boundary.end()
     return _encoded_powershell(command)
@@ -445,7 +445,10 @@ def _hook_detail(count: int, severity: RiskSeverity, ide: str) -> str:
         f"IDE agent '{ide}' declares {count} hook command(s) that run automatically on agent events"
     )
     if severity is RiskSeverity.CRITICAL:
-        return base + ", including a command that downloads and executes a script."
+        return base + (
+            ", including a command that pipes a download or a decoded payload into a shell"
+            " or runs encoded PowerShell."
+        )
     if severity is RiskSeverity.HIGH:
         return base + ", including a command that contacts a network address."
     return base + "."
