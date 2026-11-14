@@ -1,9 +1,12 @@
 """Offline validation against pinned official schemas and local graph constraints.
 
-Validation cost stays linear in the document: ``uniqueItems`` is checked with a set
-instead of jsonschema's pairwise fallback for unorderable items, and the graph checks
-index each collection once. Format assertions use the checkers defined here, so the
-result does not depend on which optional packages happen to be installed.
+Array uniqueness uses a set instead of jsonschema's pairwise fallback for
+unorderable items, and graph checks index each collection once. General schema
+validation is not a resource sandbox: nested SPDX reference objects can amplify
+work. Recovery restricts input to a supported projection before validating it.
+Callers validating arbitrary documents must enforce external resource limits.
+Format assertions use the checkers defined here, so the result does not depend on
+which optional packages happen to be installed.
 """
 
 from __future__ import annotations
