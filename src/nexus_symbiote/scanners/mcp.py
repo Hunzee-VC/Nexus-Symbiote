@@ -1794,7 +1794,7 @@ class MCPScanner(Scanner):
             if primary is not None and launcher_package is not None and not identity_unknown
             else None
         )
-        settings = self._client_settings(config)
+        settings = self._client_settings(config, scrubber)
         context = dict(launch.context)
         loading = [
             variable
@@ -1833,6 +1833,7 @@ class MCPScanner(Scanner):
             {"-y", "--yes", *(package.spec for package in packages)} if launcher_package else set()
         )
         unbound = self._unbound_values(args, env, headers, endpoint_url, command, launch, recorded)
+        unbound.extend(self._unbound_client_values(config))
         if resolver:
             unbound.append("project resolver settings")
         if unbound and key is None:
@@ -2218,15 +2219,25 @@ class MCPScanner(Scanner):
             return "[redacted]", "endpoint authority is ambiguous"
         return sanitized_origin(url), None
 
-    @staticmethod
-    def _client_settings(config: dict[str, Any]) -> dict[str, Any]:
-        """Client behaviour switches as booleans and counts, never values."""
+    @classmethod
+    def _client_settings(cls, config: dict[str, Any], scrubber: SecretScrubber) -> dict[str, Any]:
+        """Client behaviour switches as booleans and counts, and the tool names they name.
+
+        Tool names are identifiers, not values: swapping which tool is auto-approved or
+        filtered keeps every count, so the names must be exported for diff to see it.
+        """
         settings: dict[str, Any] = {}
-        approved = len(config.get("alwaysAllow", [])) + len(config.get("autoApprove", []))
+        approved = sorted(
+            cls._tool_name(tool, scrubber)
+            for field in ("alwaysAllow", "autoApprove")
+            for tool in config.get(field, [])
+        )
         if config.get("trust") is True:
             settings["auto_approve"] = "all"
         elif approved:
-            settings["auto_approve"] = approved
+            settings["auto_approve"] = len(approved)
+        if approved:
+            settings["auto_approved_tools"] = approved
         if config.get("disabled") is True or config.get("enabled") is False:
             settings["disabled"] = True
         for field, label in (
@@ -2240,8 +2251,8 @@ class MCPScanner(Scanner):
         ):
             if field in config:
                 settings[label] = True
-        filters = sum(
-            len(config.get(field, []))
+        filters = {
+            field: sorted(cls._tool_name(tool, scrubber) for tool in config[field])
             for field in (
                 "includeTools",
                 "excludeTools",
@@ -2249,9 +2260,11 @@ class MCPScanner(Scanner):
                 "disabled_tools",
                 "disabledTools",
             )
-        )
+            if config.get(field)
+        }
         if filters:
-            settings["tool_filters"] = filters
+            settings["tool_filters"] = sum(len(names) for names in filters.values())
+            settings["tool_filter_names"] = filters
         return settings
 
     @staticmethod
@@ -2278,6 +2291,25 @@ class MCPScanner(Scanner):
             _has_path_or_query(endpoint_url) or "#" in endpoint_url or _has_userinfo(endpoint_url)
         ):
             unbound.append("endpoint path and query")
+        return unbound
+
+    @staticmethod
+    def _unbound_client_values(config: dict[str, Any]) -> list[str]:
+        """Client settings exported only as present, whose values only the keyed binding covers."""
+        unbound = []
+        for label, fields in (
+            ("working directory", ("cwd",)),
+            ("environment file", ("envFile",)),
+            ("watch paths", ("watchPaths",)),
+            ("authentication settings", ("oauth", "auth")),
+            ("development settings", ("dev",)),
+            (
+                "forwarded environment variable names",
+                ("env_vars", "bearer_token_env_var", "env_http_headers"),
+            ),
+        ):
+            if any(config.get(field) for field in fields):
+                unbound.append(label)
         return unbound
 
     def _server_risks(

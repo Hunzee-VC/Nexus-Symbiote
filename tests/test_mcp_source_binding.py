@@ -1122,3 +1122,96 @@ def test_prepared_cache_and_tool_directories_are_package_sources(tmp_path, confi
     server = _server(tmp_path, config)
     assert label in server.properties["package_sources"]
     assert any(r.category == "package_source" for r in server.risks)
+
+
+def _toml_list(values: list[str]) -> str:
+    return "[" + ", ".join(json.dumps(value) for value in values) + "]"
+
+
+def _client_file(path: str, first: str, first_names: list[str], second: str, names: list[str]):
+    if path.endswith(".toml"):
+        return (
+            '[mcp_servers.git]\ncommand = "uvx"\nargs = ["mcp-server-git==0.6.2"]\n'
+            f"{first} = {_toml_list(first_names)}\n{second} = {_toml_list(names)}\n"
+        )
+    server = {"command": "uvx", "args": ["mcp-server-git==0.6.2"], first: first_names}
+    server[second] = names
+    return json.dumps({"mcpServers": {"git": server}})
+
+
+@pytest.mark.parametrize(
+    "path,first,second",
+    [
+        (".mcp.json", "autoApprove", "disabledTools"),
+        (".roo/mcp.json", "alwaysAllow", "disabledTools"),
+        (".kiro/settings/mcp.json", "autoApprove", "excludeTools"),
+        (".cursor/mcp.json", "alwaysAllow", "includeTools"),
+        (".gemini/settings.json", "includeTools", "excludeTools"),
+        (".codex/config.toml", "enabled_tools", "disabled_tools"),
+    ],
+)
+def test_swapping_named_tools_with_the_same_count_fails_the_keyless_diff(
+    tmp_path, monkeypatch, path, first, second
+):
+    monkeypatch.delenv(SOURCE_BINDING_KEY_ENV, raising=False)
+    boms = []
+    for label, names in (("a", ["git_status", "git_reset"]), ("b", ["git_reset", "git_status"])):
+        root = tmp_path / label
+        (root / path).parent.mkdir(parents=True)
+        (root / path).write_text(_client_file(path, first, names[:1], second, names[1:]))
+        output = tmp_path / f"{label}.json"
+        run = CliRunner().invoke(
+            main, ["scan", "--no-project-policy", "--report-only", str(root), "-o", str(output)]
+        )
+        assert run.exit_code == 0, run.output
+        boms.append(str(output))
+
+    run = CliRunner().invoke(main, ["diff", *boms, "--fail-on-alert"])
+    assert run.exit_code == 1, run.output
+    assert "No changes detected" not in run.output
+
+
+def test_named_tool_lists_are_exported_sorted_and_redacted(tmp_path, monkeypatch):
+    monkeypatch.delenv(SOURCE_BINDING_KEY_ENV, raising=False)
+    token = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+    server = _server(
+        tmp_path,
+        {
+            "command": "uvx",
+            "args": ["mcp-server-git==0.6.2"],
+            "env": {"GIT_TOKEN": "hunter2-git-secret"},
+            "autoApprove": ["git_status", "git_log"],
+            "alwaysAllow": ["git_diff"],
+            "disabledTools": ["git_reset", "hunter2-git-secret", token],
+        },
+    )
+    settings = server.properties["client_settings"]
+    assert settings["auto_approve"] == 3
+    assert settings["auto_approved_tools"] == ["git_diff", "git_log", "git_status"]
+    assert settings["tool_filters"] == 3
+    names = settings["tool_filter_names"]["disabledTools"]
+    assert "git_reset" in names and len(names) == 3
+    dumped = server.model_dump_json()
+    assert "hunter2-git-secret" not in dumped and token not in dumped
+
+
+@pytest.mark.parametrize(
+    "setting,label",
+    [
+        ({"cwd": "./srv"}, "working directory"),
+        ({"envFile": ".env"}, "environment file"),
+        ({"watchPaths": ["src"]}, "watch paths"),
+        ({"oauth": {"clientId": "app"}}, "authentication settings"),
+        ({"auth": {"CLIENT_ID": "app"}}, "authentication settings"),
+        ({"dev": {"watch": "src"}}, "development settings"),
+        ({"env_vars": ["GIT_TOKEN"]}, "forwarded environment variable names"),
+        ({"bearer_token_env_var": "GIT_TOKEN"}, "forwarded environment variable names"),
+    ],
+)
+def test_client_setting_values_are_named_unbound_without_the_key(
+    tmp_path, monkeypatch, setting, label
+):
+    monkeypatch.delenv(SOURCE_BINDING_KEY_ENV, raising=False)
+    server = _server(tmp_path, {"command": "uvx", "args": ["mcp-server-git==0.6.2"], **setting})
+    finding = next(r for r in server.risks if r.category == "completeness")
+    assert label in finding.detail
