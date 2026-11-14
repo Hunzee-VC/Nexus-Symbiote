@@ -1,8 +1,9 @@
 """One pinned stdio process for descriptor observation and authorized tool calls.
 
-The launcher must be independently approved by the operator. The process runs
-in a PID namespace so a descendant that calls setsid dies with the session.
-That is not a filesystem or network sandbox, and it does not authenticate the
+The launcher must be independently approved by the operator. By default a kernel
+PID namespace is required before execution. An explicit operator isolation_off()
+context accepts best-effort cleanup in an independently isolated worker instead.
+Neither mode is a filesystem or network sandbox, and it does not authenticate the
 workload or prove backend behavior.
 
 Once ``tools/call`` has been written, a failure is never reported as an

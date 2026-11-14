@@ -929,12 +929,15 @@ nexus-symbiote verify-live [OPTIONS] AIBOM_PATH
 | `--json-output` | Output the verification report as JSON. |
 | `--record` | Print an unsigned candidate BOM with the observed descriptors instead of a report; exits 1 when served tools, declarations or the server identity drifted, unless `--accept-drift`. |
 | `--accept-drift` | With `--record`, exit 0 although changed or new tools, declarations or server identity were recorded. |
-| `--no-isolation` | Do not run the launcher in a PID namespace. A descendant that calls `setsid` can then outlive the session. Printed as a warning. |
+| `--no-isolation` | Explicitly allow execution without kernel PID containment. Cleanup is best effort; detached children may outlive the session. Printed as a warning. |
 
-By default a descendant that called `setsid` dies with the session. When the kernel
-allows it, the launcher is pid 1 of a new user and PID namespace (`unshare`). A host
-that refuses the namespace, as Ubuntu 24.04 runners do, still runs the launcher and
-kills its descendant tree. It is not a filesystem or network sandbox.
+By default the launcher must run as pid 1 of a new user and PID namespace
+(`unshare`), so the kernel ends its descendants with the session. A host that refuses
+the namespace fails with `isolation-unavailable` before executing the pinned launcher.
+Only the explicit operator option `--no-isolation` permits a launch without this
+boundary. Its process-tree cleanup is best effort: a daemonized child can be
+reparented and survive. Run that opt-out only in an independently isolated worker.
+Neither form is a filesystem or network sandbox.
 
 Servers whose transport is `sse`, `streamable-http` or `http` and that record no
 launch command are reported as not verifiable by `verify-live` (reason
