@@ -592,6 +592,8 @@ class IDEAgentScanner(Scanner):
                 permissions = data["permissions"]
                 if not isinstance(permissions, dict):
                     result.scan_failures.append(f"{relative}: invalid permission settings object")
+                    # The file's other declarations still count.
+                    merged.update({key: item for key, item in data.items() if key != "permissions"})
                     continue
                 previous = merged.get("permissions", {})
                 combined = {**previous, **permissions}

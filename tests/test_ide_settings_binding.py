@@ -465,3 +465,18 @@ def test_settings_whose_line_comment_ends_differently_per_reader_are_a_failure(t
     _write(tmp_path, ".cursor/hooks.json", text)
     result = IDEAgentScanner().scan(tmp_path)
     assert result.scan_failures == [".cursor/hooks.json: invalid JSON or duplicate keys"]
+
+
+def test_an_invalid_permissions_object_keeps_the_other_declarations(tmp_path):
+    _write(
+        tmp_path,
+        ".claude/settings.json",
+        {"permissions": [], "enableAllProjectMcpServers": True, "apiKeyHelper": "/bin/key"},
+    )
+    result = IDEAgentScanner().scan(tmp_path)
+    assert result.scan_failures == [".claude/settings.json: invalid permission settings object"]
+    agent = _agent(result)
+    declared = agent.properties["settings_declarations"]
+    assert declared["enable_all_project_mcp_servers"] and declared["api_key_helper"]
+    categories = {risk.category for risk in agent.risks}
+    assert {"mcp_auto_approval", "credential_helper"} <= categories
