@@ -89,7 +89,7 @@ A2A_CONFIG_FILES = ["a2a.json", "a2a.yaml", "a2a.yml", "a2a_config.json"]
 # also cover the requirement values of schemes other than OAuth 2.0 and OpenID Connect,
 # which are not exported, so a BOM holder can confirm guesses of those values. Other
 # values are bound only by an HMAC under the operator key, as for MCP.
-CARD_STRUCTURE_PROFILE = "nexus-symbiote/a2a-card-structure/v3"
+CARD_STRUCTURE_PROFILE = "nexus-symbiote/a2a-card-structure/v4"
 CARD_VALUE_BINDING_PROFILE = "nexus-symbiote/a2a-card-values/v1"
 CLIENT_STRUCTURE_PROFILE = "nexus-symbiote/a2a-client-structure/v1"
 CLIENT_VALUE_BINDING_PROFILE = "nexus-symbiote/a2a-client-values/v1"
@@ -441,8 +441,21 @@ def _requires_authentication(alternatives: list[dict[str, list[str]]], typed: se
     return all(alternative and set(alternative) <= typed for alternative in alternatives)
 
 
+def _scheme_label(name: str, seen: dict[str, str]) -> str:
+    label = redact_text(name)
+    if label in seen and seen[label] != name:
+        # Hashing original names would expose guesses of withheld credentials;
+        # keeping only projected names would erase scheme-to-value associations.
+        raise _BindingError(
+            "security scheme names collide after redaction; "
+            "use distinct non-secret scheme identifiers"
+        )
+    seen[label] = name
+    return label
+
+
 def _digested(
-    alternatives: list[dict[str, list[str]]], kinds: dict[str, str]
+    alternatives: list[dict[str, list[str]]], kinds: dict[str, str], names: dict[str, str]
 ) -> tuple[list[dict[str, list[str]]], set[str], bool]:
     """Return the digested alternatives, the exported scopes and whether one was redacted."""
     digested: list[dict[str, list[str]]] = []
@@ -451,15 +464,16 @@ def _digested(
     for alternative in alternatives:
         values: dict[str, list[str]] = {}
         for scheme_name, named in alternative.items():
+            label = _scheme_label(scheme_name, names)
             if kinds.get(scheme_name) in SCOPED_SCHEME_TYPES:
                 exported = {scope: _scope(scope) for scope in named}
                 redacted |= any(scope != kept for scope, kept in exported.items())
-                values[redact_text(scheme_name)] = sorted(set(exported.values()))
+                values[label] = sorted(set(exported.values()))
                 scopes.update(exported.values())
             else:
                 # Role names may be anything, even a pasted credential, so they stay
                 # out of the export; only the digest covers them.
-                values[redact_text(scheme_name)] = sorted(set(named))
+                values[label] = sorted(set(named))
         digested.append(values)
     return sorted(digested, key=canonical_json), scopes, redacted
 
@@ -489,7 +503,9 @@ def _security(data: dict[str, Any], skills: list[tuple[str, dict[str, Any]]]) ->
         raise ValueError("invalid security schemes")
     kinds: dict[str, str] = {}
     typed: set[str] = set()
+    names: dict[str, str] = {}
     for scheme_name, scheme in schemes.items():
+        _scheme_label(scheme_name, names)
         kinds[scheme_name], stated = _scheme_type(scheme)
         # A type such as "none" or an unknown extension shows no authentication.
         if stated and kinds[scheme_name] != "other":
@@ -504,7 +520,7 @@ def _security(data: dict[str, Any], skills: list[tuple[str, dict[str, Any]]]) ->
             forms[form] = None
             continue
         alternatives = _alternatives(requirements, wrapped=form == "security_requirements")
-        forms[form], named_scopes, redacted = _digested(alternatives, kinds)
+        forms[form], named_scopes, redacted = _digested(alternatives, kinds, names)
         scopes |= named_scopes
         redacted_scopes |= redacted
         decisions.append(bool(alternatives) and _requires_authentication(alternatives, typed))
@@ -519,7 +535,7 @@ def _security(data: dict[str, Any], skills: list[tuple[str, dict[str, Any]]]) ->
             entries += sum(1 + len(alt) + sum(map(len, alt.values())) for alt in alternatives)
             if entries > _MAX_ENTRIES:
                 raise ValueError("oversized skill security requirements")
-            declared[form], named_scopes, redacted = _digested(alternatives, kinds)
+            declared[form], named_scopes, redacted = _digested(alternatives, kinds, names)
             scopes |= named_scopes
             redacted_scopes |= redacted
             # The specifications leave open how a skill's requirements combine with the
