@@ -277,16 +277,20 @@ baseline validated without its key, or with a different key, fails reconciliatio
 The binding needs RFC 8785 JSON values: under the key, a client entry with a value
 such as an unquoted YAML date is a scan failure that names the key.
 
-Without the key, a changed path, query, tenant or other unexported value is
-detected only when it changes an exported origin, a URL's shape, a top-level field
-name or the record's completeness risk; a same-depth path change on the same host,
-or a changed tenant value, passes `diff --fail-on-alert`. A card carries a low `completeness`
+Without the key, a changed path, query, tenant or other unexported value changes
+the record only when it changes an exported origin, a URL's shape, a top-level field
+name or the record's completeness risk. A card carries a low `completeness`
 risk naming the key and listing what is unbound when its endpoint, a supported or
 additional interface URL, or a security scheme URL goes beyond its exported origin
 or has none, when a supported interface sets a `tenant`, or when a scope of the card
 or of a skill was redacted. A client carries it when its `agentCardUrl` goes beyond
-its exported origin and is not one of the root paths above. Other values are bound
-only by the key, and the risk does not list them: descriptions; the id of a skill
+its exported origin and is not one of the root paths above. Both say the values are
+not bound in this inventory, so `diff` raises a medium alert that the record's values
+are unbound on every comparison, changed or not, and names no value: a same-depth
+path change on the same host, or a changed tenant value, fails a keyless
+`diff --fail-on-alert` on that alert rather than on the change. Other values are bound
+only by the key, and the risk does not list them; on a record without the risk, a
+change to one of them passes a keyless `diff --fail-on-alert`: descriptions; the id of a skill
 that has a name, and skill descriptions, tags, examples and input or output modes;
 security scheme fields other than their types and URLs, such as an API key's `name`
 and location, an HTTP scheme's `scheme` and `bearerFormat`, an authorization code

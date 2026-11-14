@@ -40,6 +40,22 @@ def _rag(text: str) -> dict[str, str]:
     return {"rag_config.json": json.dumps({"sources": [source]})}
 
 
+def _a2a_client(path: str) -> dict[str, str]:
+    client = {"name": "planner", "agentCardUrl": f"https://a.example{path}/card.json"}
+    return {"a2a.json": json.dumps({"clients": [client]})}
+
+
+def _a2a_card(path: str) -> dict[str, str]:
+    card = {
+        "name": "billing-agent",
+        "version": "1.0.0",
+        "url": f"https://a.example{path}",
+        "protocols": ["a2a/0.3"],
+        "skills": [{"id": "lookup", "name": "lookup-invoice"}],
+    }
+    return {".well-known/agent.json": json.dumps(card)}
+
+
 CHANGES = {
     "settings env url host": (
         _settings({"env": {"API_URL": "https://a.example/x"}}),
@@ -57,6 +73,16 @@ CHANGES = {
         "prompt:import:notes.txt",
     ),
     "rag inline document at the same count": (_rag("yes"), _rag("no"), "rag:kb"),
+    "a2a client card url path on the same host": (
+        _a2a_client("/p1"),
+        _a2a_client("/p2"),
+        "a2a-client:planner",
+    ),
+    "a2a card endpoint path on the same host": (
+        _a2a_card("/p1"),
+        _a2a_card("/p2"),
+        "a2a-server:billing-agent",
+    ),
 }
 
 
@@ -121,3 +147,21 @@ def test_an_unbound_import_uses_the_shared_phrase(tmp_path, monkeypatch):
     ]
     (risk,) = [r for r in record.risks if r.category == "completeness"]
     assert UNBOUND_VALUES_DETAIL in risk.detail
+
+
+DOCS = Path(__file__).resolve().parents[1] / "docs"
+
+
+@pytest.mark.parametrize(
+    ("page", "claim"),
+    [
+        (
+            "verification-source-binding.md",
+            "or a changed tenant value, passes `diff --fail-on-alert`",
+        ),
+        ("security-model.md", "same-host path changes still raise no alert without the key"),
+    ],
+)
+def test_the_docs_do_not_say_a_keyless_same_host_change_passes(page, claim):
+    text = " ".join((DOCS / page).read_text().split())
+    assert claim not in text
