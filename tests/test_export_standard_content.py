@@ -387,13 +387,25 @@ def test_spdx_identifiers_are_minted_in_the_operator_namespace_or_a_uuid_urn():
         "https://SPDX.ORG.../x",
         "https://spdx%2Eorg/spdxdocs/x",
         "https://www.spdx.org./x",
+        "https://spdx\u3002org/x",
+        "https://spdx\uff0eorg/x",
+        "https://\uff53\uff50\uff44\uff58.org/x",
+        "https://spd\u00adx.org/x",
+        "https://spdx%E3%80%82org/x",
         "not an iri",
         "https://x.example/#frag",
+        "https://example.com/\x1b[31mred\x00",
+        "https://example.com/\x7f",
+        "https://example.com/\x9b",
+        "https://example.com/%zz",
+        "https://ex%FFample.com/x",
         "",
     ):
         with pytest.raises(ValueError):
             SPDXGenerator(namespace)
     assert SPDXGenerator("https://spdx.org.example.com/x").generate(bom)
+    international = SPDXGenerator("https://\u4f8b\u3048.\u30c6\u30b9\u30c8/agents").generate(bom)
+    assert native_document(SPDXGenerator.recover(international)) == native_document(bom)
 
 
 def test_spdx_validation_rejects_undefined_vocabulary_references():

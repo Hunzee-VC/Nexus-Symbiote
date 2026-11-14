@@ -44,7 +44,12 @@ from nexus_symbiote.generators.package_identifiers import (
     package_identifier,
     package_identifier_properties,
 )
-from nexus_symbiote.generators.validation import SPDX_COLLECTIONS, require_valid, spdx_errors
+from nexus_symbiote.generators.validation import (
+    _IRI_EXCLUDED,
+    SPDX_COLLECTIONS,
+    require_valid,
+    spdx_errors,
+)
 
 PROJECTION = "spdx-3.0.1/2"
 SPDX_TYPE_MAP = {
@@ -95,10 +100,18 @@ def _extension(properties: list[dict[str, str]]) -> list[dict[str, Any]]:
 
 def _validated_namespace(namespace: str) -> str:
     value = namespace.rstrip("/")
-    if len(value) > 2048 or _NAMESPACE.fullmatch(value) is None:
-        raise ValueError("SPDX namespace must be an absolute IRI without a query or fragment")
-    # "spdx.org." and "spdx%2Eorg" name the same host as "spdx.org".
-    host = unquote(urlsplit(value).hostname or "").lower().rstrip(".")
+    invalid = "SPDX namespace must be an absolute IRI without a query or fragment"
+    if len(value) > 2048 or _NAMESPACE.fullmatch(value) is None or _IRI_EXCLUDED.search(value):
+        raise ValueError(invalid)
+    # "spdx.org.", "spdx%2Eorg" and IDNA spellings such as "spdx\u3002org" name the
+    # same host as "spdx.org".
+    host = unquote(urlsplit(value).hostname or "")
+    if not host.isascii():
+        try:
+            host = host.encode("idna").decode("ascii")
+        except UnicodeError as exc:
+            raise ValueError(invalid) from exc
+    host = host.lower().rstrip(".")
     if host == "spdx.org" or host.endswith(".spdx.org"):
         raise ValueError("SPDX namespace must be one the document creator controls")
     return value
