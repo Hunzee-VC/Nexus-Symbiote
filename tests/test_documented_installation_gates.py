@@ -46,6 +46,9 @@ case "$*" in
     if [ "$FAIL" = bad-digest ]; then printf changed >> "$1/$WHEEL"; fi
     if [ "$FAIL" = extra-wheel ]; then : > "$1/other-1-py3-none-any.whl"; fi
     if [ "$FAIL" = hidden-file ]; then : > "$1/.unexpected"; fi
+    if [ "$FAIL" = fifo ]; then rm "$1/$WHEEL"; mkfifo "$1/$WHEEL"; fi
+    if [ "$FAIL" = directory ]; then rm "$1/$WHEEL"; mkdir "$1/$WHEEL"; fi
+    if [ "$FAIL" = symlink ]; then rm "$1/$WHEEL"; ln -s "$CALLS" "$1/$WHEEL"; fi
     ;;
   *'--require-hashes'*) [ "$FAIL" != lock ] || exit 1 ;;
   *'pip install'*) [ "$FAIL" != install ] || exit 1 ;;
@@ -176,6 +179,9 @@ def test_rehearsal_installs_only_the_exact_checked_wheel(tmp_path):
         "missing-entry",
         "duplicate-entry",
         "missing-manifest",
+        "fifo",
+        "directory",
+        "symlink",
     ],
 )
 def test_rehearsal_verification_failure_never_reaches_install(tmp_path, failure):

@@ -104,7 +104,8 @@ as described below.
      downloaded=("$wheel_dir"/*)
      test "${#downloaded[@]}" -eq 1
      test "${downloaded[0]}" = "$wheel_dir/$wheel"
-     test -f "$wheel_dir/$wheel" && test ! -L "$wheel_dir/$wheel"
+     test -f "$wheel_dir/$wheel"
+     test ! -L "$wheel_dir/$wheel"
      expected_sha="$(awk -v file="dist/$wheel" \
        '$2 == file { n++; print $1 } END { if (n != 1) exit 1 }' "$run_checksums")"
      [[ "$expected_sha" =~ ^[0-9a-f]{64}$ ]]
