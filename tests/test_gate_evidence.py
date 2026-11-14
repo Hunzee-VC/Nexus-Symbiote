@@ -77,6 +77,7 @@ def test_risk_json_records_the_effective_gate_and_its_origin(tmp_path):
         "fail_on_severity": "critical",
         "ignore_categories": [],
         "suppressions": 0,
+        "score_scale": "unbounded-sum",
         "fail_threshold_source": "built-in",
         "fail_on_severity_source": "built-in",
         "warn_threshold_source": "project policy",
