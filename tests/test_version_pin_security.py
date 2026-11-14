@@ -146,4 +146,4 @@ def test_unknown_flags_do_not_reinterpret_following_secrets(command):
     words = command.split()
     launch = analyze(words[0], [*words[1:], "--password", "secret@1.2.3"])
     assert launch.unknown is not None
-    assert all("secret" not in package.spec for package in launch.packages)
+    assert not launch.packages

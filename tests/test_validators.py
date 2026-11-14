@@ -518,12 +518,25 @@ class TestCompletenessValidatorAdvanced:
         assert any("model files" in i.description for i in report.issues)
 
     def test_validate_against_project_all_present(self, tmp_path):
-        (tmp_path / ".mcp.json").write_text('{"mcpServers": {}}')
-        (tmp_path / "CLAUDE.md").write_text("prompt")
-        bom = _full_bom()
-        cv = CompletenessValidator()
-        report = cv.validate_against_project(bom, tmp_path)
-        assert not any("MCP config" in i.description for i in report.issues)
+        from click.testing import CliRunner
+
+        from nexus_symbiote.cli import main
+
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / ".mcp.json").write_text('{"mcpServers": {}}')
+        (project / "CLAUDE.md").write_text("prompt")
+        target = tmp_path / "bom.json"
+        run = CliRunner().invoke(
+            main, ["scan", "--report-only", "--no-project-policy", str(project), "-o", str(target)]
+        )
+        assert run.exit_code == 0, run.output
+        report = CompletenessValidator().validate_against_project(AIBOM.load(target), project)
+        assert not any(
+            "Missing or mismatched local component" in i.description
+            or "no matching local evidence" in i.description
+            for i in report.issues
+        ), [i.description for i in report.issues]
 
     def test_surfaces_missing_info_issues(self):
         bom = AIBOM()
