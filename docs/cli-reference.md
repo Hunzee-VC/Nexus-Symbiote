@@ -227,12 +227,21 @@ stdio MCP server's `bom_ref` to exactly a `command` and a `sha256`:
 of its bytes as `sha256:<64 lowercase hexadecimal characters>`. A server without an
 entry is not started.
 
-The file must lie outside the project and outside the repository (the nearest
-directory with a `.git` entry) that holds the project or the inventory. On POSIX
+The file must lie outside the project and outside every repository (a directory with
+a `.git` entry) that encloses the project or the inventory, including the repository
+around a nested checkout such as a submodule. On POSIX
 systems it must also be a single-link regular file owned by you or root that only its
-owner can write, in a directory owned by you or root that others cannot write unless
-it is sticky. A policy that breaks these rules is a usage error (exit 2). The checks
+owner can write, and every directory above it, up to the file system root, must be
+owned by you or root and not writable by others unless it is sticky: whoever can write
+an ancestor can rename the directory below it and put another policy in its place. A
+policy that breaks these rules is a usage error (exit 2). The checks
 catch a misplaced policy; they do not authenticate it.
+
+The ownership rule includes `/`. Inside a user namespace that does not map host root
+and keeps the host's file system, such as one made with `unshare -r`, `/` and `/tmp`
+appear owned by the overflow user (usually uid 65534), so every launch policy is
+refused, and no option overrides the check. Run `verify-live` where `/` and every
+directory above the policy are owned by root or by you.
 
 ### JSON documents
 
@@ -924,7 +933,7 @@ nexus-symbiote verify-live [OPTIONS] AIBOM_PATH
 
 | Option | Description |
 |---|---|
-| `--project` `DIRECTORY` | Untrusted project root (required); the launch policy must be outside it and outside the repository that holds the project or the inventory. |
+| `--project` `DIRECTORY` | Untrusted project root (required); the launch policy must be outside it and outside every repository that encloses the project or the inventory. |
 | `--launch-policy` `FILE` | Operator-owned JSON outside the project: exact server references to absolute commands and SHA-256 pins; see [launch policy](#launch-policy). (required) |
 | `--json-output` | Output the verification report as JSON. |
 | `--record` | Print an unsigned candidate BOM with the observed descriptors instead of a report; exits 1 when served tools, declarations or the server identity drifted, unless `--accept-drift`. |
