@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import signal
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -93,6 +94,14 @@ def test_setsid_descendant_dies_when_the_pid_namespace_is_refused(
     command, digest = _launcher(tmp_path, marker)
     observe_pinned(str(command), digest)
     _assert_dead(_host_pid(marker))
+
+
+def test_a_finished_pid_is_not_remembered_as_namespaced() -> None:
+    proc = subprocess.Popen(["/bin/true"], start_new_session=True)  # noqa: S603
+    proc.wait(timeout=5)
+    pinned_process._NAMESPACED.add(proc.pid)
+    pinned_process.terminate_process_group(proc)
+    assert proc.pid not in pinned_process._NAMESPACED
 
 
 def test_without_isolation_a_setsid_descendant_survives(tmp_path: Path) -> None:

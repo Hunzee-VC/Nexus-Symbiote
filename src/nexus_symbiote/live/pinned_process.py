@@ -251,12 +251,18 @@ def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
     Descendants are killed first, while their parent is still alive, so a ``setsid``
     child is still visible in the process tree. The process group is killed after that.
     """
-    namespaced = proc.pid in _NAMESPACED
-    if isolation_enabled() and not namespaced:
-        _kill_descendants(proc.pid)
     try:
-        os.killpg(proc.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
-    if isolation_enabled() and not namespaced:
-        _kill_descendants(proc.pid)
+        namespaced = proc.pid in _NAMESPACED
+        if isolation_enabled() and not namespaced:
+            _kill_descendants(proc.pid)
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        if isolation_enabled() and not namespaced:
+            _kill_descendants(proc.pid)
+    finally:
+        # A finished pid must not stay marked. The kernel can reuse it for a later
+        # launcher that is not in a PID namespace, and that launcher would then skip
+        # the descendant-tree kill.
+        _NAMESPACED.discard(proc.pid)
