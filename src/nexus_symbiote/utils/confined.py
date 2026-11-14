@@ -1354,7 +1354,7 @@ class ConfinedCollection:
         """Whether the directory a symlink names exists, ``below`` components above ``target``."""
         try:
             fd = self._open_directory_no_follow(Path(*target.parts[: len(target.parts) - below]))
-        except OSError:
+        except (OSError, CollectionError):
             return False
         os.close(fd)
         return True
@@ -1429,8 +1429,14 @@ class ConfinedCollection:
                 os.close(parent)
         except FileNotFoundError as exc:
             raise _LinkRefusedError("symlink target is unavailable") from exc
+        except LimitExceededError as exc:
+            raise _LinkRefusedError(str(exc)) from exc
+        except CollectionError as exc:
+            raise _LinkRefusedError(str(exc)) from exc
         except OSError as exc:
             raise _LinkRefusedError("symlink target passes through another symlink") from exc
+        if self._root_dev is not None and info.st_dev != self._root_dev:
+            raise _LinkRefusedError("symlink target crosses a filesystem mount boundary")
         if stat.S_ISREG(info.st_mode):
             return None
         if stat.S_ISDIR(info.st_mode):
@@ -1453,7 +1459,7 @@ class ConfinedCollection:
         index: dict[str, list[tuple[str, str]]] | None = None
         try:
             fd = self._open_directory_no_follow(directory)
-        except OSError:
+        except (OSError, CollectionError):
             self._listings[directory] = None
             return None
         try:

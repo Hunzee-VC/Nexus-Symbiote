@@ -273,6 +273,8 @@ def pathname_identity(path: Path) -> tuple[int, int] | None:
             os.close(parent_fd)
     except OSError:
         return None
+    if not stat.S_ISREG(info.st_mode):
+        return None
     return (info.st_dev, info.st_ino)
 
 

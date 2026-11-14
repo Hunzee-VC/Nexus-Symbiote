@@ -6,8 +6,8 @@ import errno
 import hashlib
 import json
 import os
-import resource
 import shutil
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -151,24 +151,43 @@ def test_schema_with_supported_or_optional_vocabulary_passes_and_subschema_vocab
 
 
 def test_worker_cpu_hard_limit_is_finite(monkeypatch: pytest.MonkeyPatch) -> None:
+    import io
+
     from nexus_symbiote import runtime_validation
 
-    recorded: dict[int, tuple[int, int]] = {}
+    if os.name != "posix":
+        assert runtime_validation._worker() == 1
+        return
+    import resource
+
+    recorded: list[tuple[int, tuple[int, int]]] = []
     monkeypatch.setattr(
         resource,
         "getrlimit",
-        lambda kind: (resource.RLIM_INFINITY, resource.RLIM_INFINITY),
+        lambda _kind: (resource.RLIM_INFINITY, resource.RLIM_INFINITY),
     )
     monkeypatch.setattr(
         resource,
         "setrlimit",
-        lambda kind, limits_pair: recorded.__setitem__(kind, limits_pair),
+        lambda kind, limits_pair: recorded.append((kind, limits_pair)),
     )
-    runtime_validation._apply_worker_limits()
-    assert recorded[resource.RLIMIT_CPU] == (
-        WORKER_STARTUP_CPU_SECONDS,
-        WORKER_STARTUP_CPU_SECONDS,
+    monkeypatch.setattr(
+        resource,
+        "getrusage",
+        lambda _who: type("Usage", (), {"ru_utime": 99.0, "ru_stime": 5.0})(),
     )
+    payload = json.dumps({"schema": {"type": "object"}, "arguments": {}}).encode("utf-8")
+    monkeypatch.setattr(sys, "stdin", type("FakeIn", (), {"buffer": io.BytesIO(payload)})())
+    monkeypatch.setattr(sys, "stdout", type("FakeOut", (), {"buffer": io.BytesIO()})())
+    saved_modules = dict(sys.modules)
+    try:
+        assert runtime_validation._worker() == 0
+    finally:
+        sys.modules.clear()
+        sys.modules.update(saved_modules)
+    cpu_calls = [limits_pair for kind, limits_pair in recorded if kind == resource.RLIMIT_CPU]
+    assert len(cpu_calls) >= 2
+    assert cpu_calls[-1] == (WORKER_STARTUP_CPU_SECONDS, WORKER_STARTUP_CPU_SECONDS)
 
 
 # ---------------------------------------------------------------------------
@@ -182,6 +201,7 @@ def test_worker_cpu_hard_limit_is_finite(monkeypatch: pytest.MonkeyPatch) -> Non
         "a: &anchor [docs]\nexclude_paths: *anchor\n",
         "exclude_paths: &anchor [docs]\n",
         'exclude_paths:\n  - "\\uD800"\n',
+        'exclude_paths:\n  - !!int "1:\\uD800"\n',
     ],
 )
 def test_policy_yaml_rejects_anchors_aliases_and_escaped_surrogates(raw_yaml: str) -> None:
@@ -224,20 +244,39 @@ def test_policy_venv_exclusion_is_not_flagged_as_weakened(tmp_path: Path) -> Non
 
 
 def test_open_directory_nofollow_uses_o_path_on_execute_only_intermediate_dir(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     traverse = tmp_path / "exec_only"
     target = traverse / "workspace"
     target.mkdir(parents=True)
-    traverse.chmod(0o711)
+    real_open = os.open
+    o_path = getattr(os, "O_PATH", 0)
+    workspace_dir_fds: list[int | None] = []
+
+    def _spy_open(
+        path: str | os.PathLike[str],
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        name = os.fsdecode(path)
+        if o_path and name.endswith("exec_only") and not (flags & o_path):
+            raise PermissionError(errno.EACCES, "execute-only directory")
+        if name == "workspace" or name.endswith("/workspace"):
+            workspace_dir_fds.append(dir_fd)
+        if dir_fd is not None:
+            return real_open(path, flags, mode, dir_fd=dir_fd)
+        return real_open(path, flags, mode)
+
+    monkeypatch.setattr(os, "open", _spy_open)
+    monkeypatch.setattr(os, "supports_dir_fd", os.supports_dir_fd | {_spy_open})
+    fd = open_directory_nofollow(target)
     try:
-        fd = open_directory_nofollow(target)
-        try:
-            assert os.fstat(fd).st_ino == target.stat().st_ino
-        finally:
-            os.close(fd)
+        assert os.fstat(fd).st_ino == target.stat().st_ino
     finally:
-        traverse.chmod(0o700)
+        os.close(fd)
+    assert workspace_dir_fds and all(dfd is not None for dfd in workspace_dir_fds)
 
 
 def test_confined_collection_rejects_cross_device_mount_and_two_hop_walk_symlinks(
@@ -253,6 +292,48 @@ def test_confined_collection_rejects_cross_device_mount_and_two_hop_walk_symlink
         walked = [p.as_posix() for p in files.iter_files("hop1")]
     assert walked == ["real_target/ok.txt"]
     assert any("symlink reached through another symlink" in item for item in failures)
+
+    # Cross-mount symlinked directory and root-mounted regular file must not crash iter_files
+    mnt_dir = tmp_path / "mnt_dir"
+    mnt_dir.mkdir()
+    (mnt_dir / "secret.txt").write_text("x", encoding="utf-8")
+    (tmp_path / "mounted_leaf.txt").write_text("y", encoding="utf-8")
+    (tmp_path / "link_to_mnt").symlink_to("mnt_dir/secret.txt")
+    (tmp_path / "link_to_leaf").symlink_to("mounted_leaf.txt")
+    mnt_ino = mnt_dir.stat().st_ino
+    leaf_ino = (tmp_path / "mounted_leaf.txt").stat().st_ino
+    real_fstat = os.fstat
+    real_stat = os.stat
+
+    class _FakeStat:
+        def __init__(self, inner: os.stat_result) -> None:
+            self._inner = inner
+            self.st_dev = inner.st_dev + 99
+
+        def __getattr__(self, attr: str) -> Any:
+            return getattr(self._inner, attr)
+
+    monkeypatch.setattr(
+        os,
+        "fstat",
+        lambda fd: _FakeStat(s) if (s := real_fstat(fd)).st_ino in {mnt_ino, leaf_ino} else s,  # type: ignore[return-value]
+    )
+    monkeypatch.setattr(
+        os,
+        "stat",
+        lambda *a, **kw: (
+            _FakeStat(s)  # type: ignore[return-value]
+            if (s := real_stat(*a, **kw)).st_ino in {mnt_ino, leaf_ino}
+            else s
+        ),
+    )
+    mount_failures: list[str] = []
+    with ConfinedCollection(tmp_path, mount_failures) as files:
+        collected = [p.as_posix() for p in files.iter_files()]
+        assert files.case_variants(Path("mnt_dir/secret.txt")) == []
+    assert "mnt_dir/secret.txt" not in collected
+    assert "mounted_leaf.txt" not in collected
+    assert "link_to_leaf" not in collected
 
     mount_failures: list[str] = []
     with ConfinedCollection(tmp_path, mount_failures) as files:
@@ -751,6 +832,115 @@ def test_statestore_refuses_symlinked_or_world_writable_parent_and_runtime_symli
     shutil.copyfile(db_path, other_db)
     db_path.unlink()
     db_path.symlink_to(other_db)
+    from nexus_symbiote.core.hashing import pathname_identity
+
+    assert pathname_identity(db_path) is None
     with pytest.raises(AuthorizationError) as swapped:
         store.record(())
     assert swapped.value.reason == "state-invalid"
+
+    # Concurrent symlink planted on FileExistsError during StateStore.initialize must not chmod victim
+    victim = tmp_path / "victim_file.txt"
+    victim.write_text("keep", encoding="utf-8")
+    victim.chmod(0o644)
+    race_parent = tmp_path / "race_parent"
+
+    def _plant_symlink_mkdir(p: str | os.PathLike[str], mode: int = 0o777) -> None:
+        Path(p).symlink_to(victim)
+        raise FileExistsError(errno.EEXIST, "exists")
+
+    real_mkdir = os.mkdir
+    os.mkdir = _plant_symlink_mkdir  # type: ignore[assignment]
+    try:
+        with pytest.raises(AuthorizationError) as raced:
+            StateStore.initialize(race_parent / "state.sqlite")
+        assert raced.value.reason == "state-invalid"
+    finally:
+        os.mkdir = real_mkdir  # type: ignore[assignment]
+    assert (victim.stat().st_mode & 0o777) == 0o644
+
+
+def test_final_time_rechecks_distinct_human_approver_quorum_and_sticky_sig_policy(
+    tmp_path: Path,
+) -> None:
+    (
+        now,
+        base_kwargs,
+        call,
+        bom,
+        snapshot,
+        statuses,
+        approval,
+        release,
+        _human,
+        trust_key,
+        executed,
+    ) = _runtime_fixture(tmp_path)
+    alice_k1 = Ed25519PrivateKey.generate()
+    alice_k2 = Ed25519PrivateKey.generate()
+    bob_k1 = Ed25519PrivateKey.generate()
+    ticks = iter([now, now + timedelta(seconds=45)])
+    gw = ReferenceGateway(
+        **{
+            **base_kwargs,
+            "approval_threshold": 2,
+            "approval_keys": {
+                key_id(alice_k1.public_key()): alice_k1.public_key(),
+                key_id(alice_k2.public_key()): alice_k2.public_key(),
+                key_id(bob_k1.public_key()): bob_k1.public_key(),
+            },
+            "approval_actors": {
+                key_id(alice_k1.public_key()): "alice",
+                key_id(alice_k2.public_key()): "alice",
+                key_id(bob_k1.public_key()): "bob",
+            },
+            "signer_scopes": {
+                key_id(bob_k1.public_key()): SignerScope(
+                    tenants=frozenset({"acme"}),
+                    not_before=now - timedelta(minutes=1),
+                    not_after=now + timedelta(seconds=20),
+                )
+            },
+            "clock": lambda: next(ticks, now + timedelta(seconds=45)),
+        }
+    )
+    alice_approval = approval.model_copy(update={"actor": "alice"})
+    with pytest.raises(AuthorizationError) as quorum_err:
+        gw.invoke(
+            call,
+            bom=bom,
+            snapshot=sign_contract(snapshot, "snapshot", (release,)),
+            trust=sign_contract(statuses, "trust", (trust_key,)),
+            approval=sign_contract(alice_approval, "approval", (alice_k1, alice_k2, bob_k1)),
+        )
+    assert quorum_err.value.reason == "approval-quorum-not-met"
+    assert executed == []
+
+    # Sticky 0o1777 caller-owned directory is accepted for signature policies while unsticky 0o777 fails
+    sticky_dir = tmp_path / "sticky_policies"
+    sticky_dir.mkdir()
+    sticky_dir.chmod(0o1777)
+    project = tmp_path / "proj"
+    project.mkdir()
+    (project / "m.bin").write_bytes(b"abc")
+    pol = sticky_dir / "policy.json"
+    pol.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "artifacts": [
+                    {
+                        "kind": "digest-pin",
+                        "artifact_path": "m.bin",
+                        "expected_sha256": hashlib.sha256(b"abc").hexdigest(),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    pol.chmod(0o600)
+    assert len(load_signature_policies(pol, project).digest_pins) == 1
+    sticky_dir.chmod(0o777)
+    with pytest.raises(SignaturePolicyError, match="world-writable"):
+        load_signature_policies(pol, project)

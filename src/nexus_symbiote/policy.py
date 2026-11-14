@@ -320,6 +320,12 @@ def parse_yaml_mapping(text: str, *, max_nodes: int = MAX_YAML_NODES) -> dict[st
                 raise PolicyError("YAML complexity exceeds policy budget")
             return super().compose_node(parent, index)
 
+        def construct_scalar(self, node: Any) -> str:
+            value = str(super().construct_scalar(node))
+            if _contains_lone_surrogate(value):
+                raise PolicyError("YAML strings must not contain lone UTF-16 surrogates")
+            return value
+
     def mapping(loader: Any, node: Any) -> dict[str, Any]:
         data: dict[str, Any] = {}
         for key_node, value_node in node.value:

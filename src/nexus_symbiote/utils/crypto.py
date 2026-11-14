@@ -6,7 +6,9 @@ import hashlib
 import hmac
 import json
 import os
+import secrets
 import stat
+import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
@@ -265,7 +267,26 @@ def _ancestor_error(directory: Path, *, dir_what: str, remedy: str) -> str | Non
     """Reject non-sticky world-writable or foreign non-root ancestors above an unpinned root."""
     uid = _current_uid()
     trusted_uids = _trusted_ancestor_uids(uid) if uid is not None else set()
-    for ancestor in Path(os.path.abspath(directory)).parents:
+    abs_dir = Path(os.path.abspath(directory))
+    parts = list(abs_dir.parts)
+    if (
+        sys.platform == "darwin"
+        and len(parts) > 1
+        and parts[0] == "/"
+        and parts[1]
+        in {
+            "var",
+            "tmp",
+            "etc",
+        }
+    ):
+        link_path = f"/{parts[1]}"
+        try:
+            if os.path.islink(link_path) and os.readlink(link_path) == f"private/{parts[1]}":
+                abs_dir = Path("/", "private", *parts[1:])
+        except OSError:
+            pass
+    for ancestor in abs_dir.parents:
         try:
             info = os.lstat(ancestor)
         except OSError:
@@ -386,7 +407,7 @@ def _read_sigstore_cache() -> tuple[Path | None, bytes | None, str | None]:
 def _write_raw_nofollow(dir_fd: int, name: str, payload: bytes) -> None:
     """Write ``payload`` to ``name`` in ``dir_fd`` via raw OS calls without os.fdopen."""
     cloexec = getattr(os, "O_CLOEXEC", 0)
-    temp_name = f".{name}.{os.getpid()}.tmp"
+    temp_name = f".{name}.{os.getpid()}.{secrets.token_hex(4)}.tmp"
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | cloexec
     fd = os.open(temp_name, flags, 0o600, dir_fd=dir_fd)
     try:
@@ -402,7 +423,14 @@ def _write_raw_nofollow(dir_fd: int, name: str, payload: bytes) -> None:
             pass
         raise
     os.close(fd)
-    os.replace(temp_name, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+    try:
+        os.replace(temp_name, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+    except BaseException:
+        try:
+            os.unlink(temp_name, dir_fd=dir_fd)
+        except OSError:
+            pass
+        raise
 
 
 def _refresh_seeded_sigstore_cache(trusted_root: Path, content: bytes) -> bytes:
@@ -707,6 +735,10 @@ def verify_sigstore_digest(
         _, digest = normalize_digest(digest_hex, "sha256")
         if len(bundle_json) > MAX_BUNDLE_BYTES:
             raise ValueError("bundle byte limit exceeded")
+        from nexus_symbiote.core.hashing import MAX_JSON_NESTING, json_nesting_exceeds
+
+        if json_nesting_exceeds(bundle_json.decode("utf-8"), MAX_JSON_NESTING):
+            raise ValueError("bundle JSON nesting limit exceeded")
         if _carries_dsse_envelope(bundle_json):
             return VerificationResult(False, error=DSSE_UNSUPPORTED)
         from sigstore.hashes import Hashed

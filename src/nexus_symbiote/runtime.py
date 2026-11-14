@@ -1192,12 +1192,26 @@ class StateStore:
                 if probe == probe.parent:
                     break
                 probe = probe.parent
+            dir_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
             for component in reversed(missing):
+                created = False
                 try:
                     os.mkdir(component, 0o700)
+                    created = True
                 except FileExistsError:
                     pass
-                os.chmod(component, 0o700)
+                if created:
+                    comp_fd = os.open(component, dir_flags)
+                    try:
+                        comp_info = os.fstat(comp_fd)
+                        if uid is not None and comp_info.st_uid != uid:
+                            raise AuthorizationError(
+                                "state database directory must be owned by the current user",
+                                reason="state-invalid",
+                            )
+                        os.fchmod(comp_fd, 0o700)
+                    finally:
+                        os.close(comp_fd)
             parent_fd = open_directory_nofollow(path.parent)
             try:
                 parent_info = os.fstat(parent_fd)
@@ -1243,26 +1257,62 @@ class StateStore:
         return cls(path)
 
     def _check_path_binding(self) -> None:
-        from nexus_symbiote.core.hashing import pathname_identity
+        from nexus_symbiote.core.hashing import open_directory_nofollow
 
         expected_inode = getattr(self, "_inode", None)
         if expected_inode is None:
             return
-        ident = pathname_identity(self.path)
-        if ident is None:
-            abs_path = Path(os.path.abspath(self.path))
-            if os.path.islink(abs_path) or any(
-                os.path.islink(parent) for parent in abs_path.parents
-            ):
+        uid = getattr(os, "geteuid", lambda: None)()
+        abs_path = Path(os.path.abspath(self.path))
+        try:
+            parent_fd = open_directory_nofollow(self.path.parent)
+        except FileNotFoundError:
+            if any(os.path.islink(parent) for parent in abs_path.parents):
+                raise AuthorizationError(
+                    "state database cannot be a symlink", reason="state-invalid"
+                ) from None
+            return
+        except OSError as exc:
+            raise AuthorizationError(
+                "state database parent directory cannot be a symlink or unavailable",
+                reason="state-invalid",
+            ) from exc
+        try:
+            parent_info = os.fstat(parent_fd)
+            if uid is not None and parent_info.st_uid != uid:
+                raise AuthorizationError(
+                    "state database directory must be owned by the current user",
+                    reason="state-invalid",
+                )
+            if parent_info.st_mode & 0o002:
+                raise AuthorizationError(
+                    "state database directory cannot be world-writable",
+                    reason="state-invalid",
+                )
+            try:
+                info = os.stat(self.path.name, dir_fd=parent_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                return
+            except OSError as exc:
+                raise AuthorizationError(
+                    "state database cannot be inspected", reason="state-invalid"
+                ) from exc
+            if stat.S_ISLNK(info.st_mode):
                 raise AuthorizationError(
                     "state database cannot be a symlink", reason="state-invalid"
                 )
-            return
-        if ident != expected_inode:
-            raise AuthorizationError(
-                "state database identity changed; open the replacement store explicitly",
-                reason="state-invalid",
-            )
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_nlink != 1
+                or (uid is not None and info.st_uid != uid)
+                or (info.st_dev, info.st_ino) != expected_inode
+            ):
+                raise AuthorizationError(
+                    "state database identity changed; open the replacement store explicitly",
+                    reason="state-invalid",
+                )
+        finally:
+            os.close(parent_fd)
 
     def _verify_store_id(self, db: sqlite3.Connection) -> None:
         expected = getattr(self, "store_id", None)
@@ -1877,7 +1927,7 @@ class ReferenceGateway(Generic[T]):
             )
             if consent is not None:
                 _window(consent, final_time, MAX_LIFETIMES["approval"], "approval")
-                self._scoped(
+                scoped = self._scoped(
                     set(facts["approval_signers"]),
                     self.approval_threshold,
                     final_time,
@@ -1886,6 +1936,7 @@ class ReferenceGateway(Generic[T]):
                     agent=context.agent_id,
                     tools=[(call.server_id, call.tool_name)],
                 )
+                self._approval_quorum(consent, scoped)
 
         self.state.record(
             ((_snapshot_scope(approved), approved.serial, snapshot_digest), trust_head),
@@ -1895,6 +1946,26 @@ class ReferenceGateway(Generic[T]):
             check_time=check_time,
         )
         return call
+
+    def _approval_quorum(self, consent: ActionApproval, scoped: set[str]) -> dict[str, str]:
+        # The quorum counts people, not keys: two keys enrolled for one approver
+        # are one approval, and the named actor must be one of the signers.
+        bound = {
+            signer: self.approval_actors[signer]
+            for signer in scoped
+            if self.approval_actors.get(signer) is not None
+        }
+        actors = set(bound.values())
+        if len(bound) < self.approval_threshold or consent.actor not in actors:
+            raise AuthorizationError(
+                "approval actor is not bound to its authorized signing key",
+                reason="approval-actor-unbound",
+            )
+        if len(actors) < self.approval_threshold:
+            raise AuthorizationError(
+                "approval quorum requires distinct approvers", reason="approval-quorum-not-met"
+            )
+        return bound
 
     def _check_approval(
         self,
@@ -1933,23 +2004,7 @@ class ReferenceGateway(Generic[T]):
             agent=context.agent_id,
             tools=[(call.server_id, call.tool_name)],
         )
-        # The quorum counts people, not keys: two keys enrolled for one approver
-        # are one approval, and the named actor must be one of the signers.
-        bound = {
-            signer: self.approval_actors[signer]
-            for signer in scoped
-            if self.approval_actors.get(signer) is not None
-        }
-        actors = set(bound.values())
-        if len(bound) < self.approval_threshold or consent.actor not in actors:
-            raise AuthorizationError(
-                "approval actor is not bound to its authorized signing key",
-                reason="approval-actor-unbound",
-            )
-        if len(actors) < self.approval_threshold:
-            raise AuthorizationError(
-                "approval quorum requires distinct approvers", reason="approval-quorum-not-met"
-            )
+        bound = self._approval_quorum(consent, scoped)
         facts["approval_signers"] = tuple(sorted(bound))
         if consent.snapshot_digest != snapshot_digest:
             raise AuthorizationError(

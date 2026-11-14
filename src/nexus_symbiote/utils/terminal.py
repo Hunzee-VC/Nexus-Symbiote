@@ -76,8 +76,8 @@ def echo_line(prefix: str, *values: object, err: bool = False) -> None:
 _JSON_UNSAFE_TEXT = re.compile(
     r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\xad\u034f\u0600-\u0605\u061c\u06dd\u070f\u0890\u0891"
     r"\u08e2\u115f\u1160\u17b4\u17b5\u180b-\u180f\u200b-\u200f\u2028\u2029\u202a-\u202e"
-    r"\u2060-\u206f\u3164\ufe00-\ufe0f\ufeff\uffa0\ufff0-\ufff8\ufff9-\ufffb\U000110bd"
-    r"\U000110cd\U00013430-\U0001343f\U0001bca0-\U0001bca3\U0001d173-\U0001d17a"
+    r"\u2060-\u206f\u3164\ufe00-\ufe0f\ufeff\uffa0\ufff0-\ufff8\ufff9-\ufffb\ufffe\uffff"
+    r"\U000110bd\U000110cd\U00013430-\U0001343f\U0001bca0-\U0001bca3\U0001d173-\U0001d17a"
     r"\U000e0000-\U000e0fff]"
 )
 

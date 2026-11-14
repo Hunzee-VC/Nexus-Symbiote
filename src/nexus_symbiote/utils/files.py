@@ -120,6 +120,7 @@ def write_output_file(
                     )
                 except OSError as exc:
                     if exc.errno not in {
+                        errno.EPERM,
                         errno.EOPNOTSUPP,
                         getattr(errno, "ENOTSUP", errno.EOPNOTSUPP),
                     }:
