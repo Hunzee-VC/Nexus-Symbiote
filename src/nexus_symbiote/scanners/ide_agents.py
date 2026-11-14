@@ -436,6 +436,19 @@ def _count(value: Any) -> int:
     return len(value) if isinstance(value, (list, dict)) else 0
 
 
+# Declared starting modes beyond the two named in _starting_mode_risk that run
+# without approval prompts, rated as the Codex TOML path rates its equivalents:
+# unsandboxed full access high, never-ask medium.
+_PROMPT_SKIPPING_MODES: dict[str, RiskSeverity] = {
+    "danger-full-access": RiskSeverity.HIGH,
+    "full-access": RiskSeverity.HIGH,
+    "dontAsk": RiskSeverity.MEDIUM,
+    "never": RiskSeverity.MEDIUM,
+    "auto": RiskSeverity.MEDIUM,
+    "on-failure": RiskSeverity.MEDIUM,
+}
+
+
 def _starting_mode_risk(ide_type: str, mode: str | None) -> RiskAssessment | None:
     """The finding for a declared starting mode that skips approval prompts."""
     if mode == "bypassPermissions":
@@ -462,6 +475,20 @@ def _starting_mode_risk(ide_type: str, mode: str | None) -> RiskAssessment | Non
             recommendation=(
                 "Use the default or plan mode in project settings; grant narrow allow "
                 "rules instead."
+            ),
+        )
+    severity = _PROMPT_SKIPPING_MODES.get(mode or "")
+    if severity is not None:
+        return RiskAssessment(
+            severity=severity,
+            category="permission_scope",
+            detail=(
+                f"IDE agent '{ide_type}' declares starting mode '{mode}', which runs "
+                "without approval prompts; effective approval remains unverified."
+            ),
+            recommendation=(
+                "Use a default or sandboxed mode in project settings and approve "
+                "actions explicitly."
             ),
         )
     return None
@@ -542,8 +569,11 @@ class IDEAgentScanner(Scanner):
                 documents[relative] = data
         self._bind_settings(ide_type, documents, result, risks, properties)
         mode = self._extract_permission_mode(settings or {}, ide_type, result)
+        toml_mode = False
         if ide_type == "codex" and mode is None:
+            # _codex_settings already rated the TOML approval and sandbox modes.
             mode = properties.get("approval_policy")
+            toml_mode = True
         broad = self._broad_permissions(settings or {}, ide_type, result)
         if broad:
             risks.insert(
@@ -561,7 +591,7 @@ class IDEAgentScanner(Scanner):
                     ),
                 ),
             )
-        starting_mode = _starting_mode_risk(ide_type, mode)
+        starting_mode = None if toml_mode else _starting_mode_risk(ide_type, mode)
         if starting_mode is not None:
             risks.insert(0, starting_mode)
         layered = (

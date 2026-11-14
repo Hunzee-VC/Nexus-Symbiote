@@ -75,6 +75,7 @@ from nexus_symbiote.utils.secrets import (
     redact_text,
     secret_values,
 )
+from nexus_symbiote.utils.terminal import neutralize
 
 
 @dataclass(frozen=True)
@@ -1412,6 +1413,7 @@ class MCPScanner(Scanner):
             if key_error is not None and entries:
                 result.scan_failures.append(f"{dialect.path}: {key_error}")
                 continue
+            file_secrets = self._file_secrets(entries)
             server_refs: list[str] = []
             for server_name, server_config in entries:
                 problem = (
@@ -1430,7 +1432,13 @@ class MCPScanner(Scanner):
                     result.scan_failures.append(f"{dialect.path}: {exc}")
                     continue
                 except (TypeError, ValueError, RecursionError):
-                    result.scan_failures.append(f"{dialect.path}: invalid tool definition")
+                    # The whole server record is dropped with its risk findings, so the
+                    # failure must say which server a reviewer no longer sees.
+                    shown = self._diagnostic_server_name(server_name, server_config, file_secrets)
+                    result.scan_failures.append(
+                        f"{dialect.path}: invalid tool definition for server '{shown}'; "
+                        "the server and its risks are not inventoried"
+                    )
                     continue
                 result.components.append(mcp_comp)
                 result.components.extend(tool_comps)
@@ -1454,6 +1462,29 @@ class MCPScanner(Scanner):
         for host, refs in pending_refs.items():
             clients[host].server_refs = sorted(refs)
         return found_any
+
+    @staticmethod
+    def _file_secrets(entries: list[tuple[str, Any]]) -> list[str]:
+        """Credential values in a source file, shared by its failure diagnostics."""
+        values: list[str] = []
+        for _, config in entries:
+            if not isinstance(config, dict):
+                continue
+            for field in ("env", "headers", "http_headers"):
+                mapping = config.get(field)
+                if isinstance(mapping, dict):
+                    values.extend(secret_values(mapping))
+        return values
+
+    @staticmethod
+    def _diagnostic_server_name(name: str, config: dict[str, Any], file_secrets: list[str]) -> str:
+        try:
+            launch = analyze(config.get("command", ""), config.get("args", []))
+        except (TypeError, ValueError, RecursionError):
+            return "[withheld]"
+        scrubber = SecretScrubber([*file_secrets, *secret_values(dict(launch.environment))])
+        # Clipping first can truncate a token so its recognizable shape is lost.
+        return neutralize(redact_text(name, scrubber, identifier=True)[:256])
 
     @staticmethod
     def _read_dialect(files: ConfinedCollection, dialect: McpDialect, result: ScanResult) -> Any:

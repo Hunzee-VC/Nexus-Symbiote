@@ -604,7 +604,11 @@ class RAGScanner(Scanner):
             raise _SourceError(f"RAG source name exceeds {_MAX_NAME} characters")
         else:
             name = redact_text(declared_name)
-            bom_ref = f"rag:{name}"
+            # "import-" and "env-" are reserved for this collector's own evidence
+            # components; a declared name must not take their place, or the genuine
+            # evidence component would be dropped as a conflicting duplicate.
+            reserved = name.startswith(("import-", "env-"))
+            bom_ref = f"rag:declared-{name}" if reserved else f"rag:{name}"
         shown = neutralize(name)
         corpus_type = _identifier(source.get("type"), "type")
         store_type = _identifier(source.get("store_type"), "store_type")
