@@ -242,7 +242,7 @@ def _numpy_object_header(blob: bytes) -> bool:
         sample = data
     elif method == 8:
         try:
-            sample = zlib.decompressobj().decompress(data, max_length=512)
+            sample = zlib.decompressobj(wbits=-zlib.MAX_WBITS).decompress(data, max_length=512)
         except zlib.error:
             return False
     else:

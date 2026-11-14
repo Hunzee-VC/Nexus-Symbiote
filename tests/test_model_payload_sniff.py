@@ -7,6 +7,8 @@ import pickle
 import zipfile
 from pathlib import Path
 
+import pytest
+
 from nexus_symbiote.core.enums import RiskSeverity, SerializationSafety
 from nexus_symbiote.scanners.model import ModelScanner, sniffed_payload
 
@@ -77,3 +79,47 @@ def test_sniffed_payload_ignores_a_numeric_header_and_a_short_magic_byte() -> No
     assert sniffed_payload(b"\x80\x02") is None
     assert sniffed_payload(_npy("|O")) is not None
     assert sniffed_payload(_reduce_pickle()) is not None
+
+
+def _npz(descr: str, compression: int) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=compression) as archive:
+        archive.writestr("array.npy", _npy(descr))
+    return buffer.getvalue()
+
+
+@pytest.mark.parametrize("compression", [zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED])
+def test_object_array_headers_are_recognized_in_npz_members(compression: int) -> None:
+    assert sniffed_payload(_npz("|O", compression)) is not None
+    assert sniffed_payload(_npz("<f8", compression)) is None
+
+
+@pytest.mark.parametrize("compression", [zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED])
+def test_npz_object_arrays_are_inventoried_without_loading_them(
+    tmp_path: Path, compression: int
+) -> None:
+    (tmp_path / "objects.npz").write_bytes(_npz("|O", compression))
+    (tmp_path / "numbers.npz").write_bytes(_npz("<f8", compression))
+    objects = _component(tmp_path, "objects.npz")
+    assert objects is not None
+    assert objects.serialization_safety is SerializationSafety.UNSAFE_CODE_EXECUTION
+    assert any(
+        risk.category == "serialization_format" and risk.severity is RiskSeverity.CRITICAL
+        for risk in objects.risks
+    )
+    assert _component(tmp_path, "numbers.npz") is None
+
+
+@pytest.mark.parametrize("truncated_bytes", [0, 1, 2])
+def test_an_incomplete_compressed_header_is_not_a_recognized_array(truncated_bytes: int) -> None:
+    archive = _npz("|O", zipfile.ZIP_DEFLATED)
+    offset = 30 + int.from_bytes(archive[26:28], "little")
+    offset += int.from_bytes(archive[28:30], "little")
+    assert sniffed_payload(archive[: offset + truncated_bytes]) is None
+
+
+def test_invalid_raw_deflate_is_refused_without_a_parser_exception() -> None:
+    archive = _npz("|O", zipfile.ZIP_DEFLATED)
+    offset = 30 + int.from_bytes(archive[26:28], "little")
+    offset += int.from_bytes(archive[28:30], "little")
+    assert sniffed_payload(archive[:offset] + b"\x07") is None
