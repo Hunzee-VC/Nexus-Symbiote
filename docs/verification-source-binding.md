@@ -408,8 +408,9 @@ WHATWG parsers such as Codex's as `attacker.example`, or an `http`, `https`, `ws
 `wss` or `ftp` URL with an empty authority) is a failure that names the file, gets no
 digest and fails the scan gate, as the `mcp` collector refuses such an endpoint; with
 the key, the keyed binding covers its host. Keys
-are redacted the same way, so of two entries whose keys differ only in
-what the redaction removes, the digest covers the last one in the file. Anyone holding
+are redacted the same way. When distinct keys redact identically, the digest
+retains all projected values in canonical order rather than dropping earlier entries.
+Anyone holding
 the BOM therefore cannot confirm a guess of a value the
 redaction removes, such as the environment value of an MCP server that
 `.codex/config.toml` declares, which the `mcp` record withholds too, or an
