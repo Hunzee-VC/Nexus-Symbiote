@@ -486,7 +486,10 @@ other code is permanent for the evidence presented.
 
 `invoke_pinned_stdio`'s pinned session raises its refusals without a code, so they
 are recorded as `denied`. A session deadline or protocol error before `tools/call` is
-sent is recorded as `adapter-error`. In both cases `tools/call` is never sent.
+sent is recorded as `adapter-error`. In both cases `tools/call` is never sent. This
+includes a launcher that cannot be read or differs from its pin and a failed
+`initialize` handshake, which happen before the gateway runs; their records hold
+only the time, the call labels and `store_id`.
 
 The `runtime` commands print the code in parentheses at the end of the error,
 next to their own codes: `runtime-input-error` for a contract that does not

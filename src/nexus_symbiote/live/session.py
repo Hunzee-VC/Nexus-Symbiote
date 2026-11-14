@@ -20,6 +20,7 @@ import subprocess
 import tempfile
 import time
 from collections.abc import Mapping
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -27,15 +28,20 @@ from nexus_symbiote.core.hashing import open_regular_file
 from nexus_symbiote.live.stdio import DEADLINE_SECONDS, MAX_TOOLS, PROTOCOL, _frames, _ready
 from nexus_symbiote.runtime import (
     AuthorizationError,
+    Decision,
     Envelope,
     ReferenceGateway,
     ServedTool,
     ToolCall,
     canonical_bytes,
 )
+from nexus_symbiote.runtime_validation import MAX_ARGUMENT_BYTES
 from nexus_symbiote.scanners.live_mcp import SUPPORTED_PROTOCOL_VERSIONS
 
 T = TypeVar("T")
+# Room for the JSON-RPC envelope and tool name, so every argument set the gateway
+# admits fits in one tools/call request.
+MAX_REQUEST_BYTES = MAX_ARGUMENT_BYTES + 64 * 1024
 
 
 class ExecutionOutcomeUnknown(Exception):  # noqa: N818 - the name states the outcome, not a fault
@@ -158,7 +164,7 @@ class PinnedStdioSession:
         if proc is None or proc.stdin is None:
             raise AuthorizationError("pinned session is closed")
         payload = memoryview(canonical_bytes({"jsonrpc": "2.0", **message}) + b"\n")
-        if len(payload) > 1024 * 1024:
+        if len(payload) > MAX_REQUEST_BYTES:
             raise AuthorizationError("MCP request exceeds byte limit")
         while payload:
             _ready(proc.stdin.fileno(), selectors.EVENT_WRITE, self._deadline)
@@ -223,14 +229,14 @@ class PinnedStdioSession:
                 ):
                     raise AuthorizationError("invalid or duplicate MCP tool name")
                 tools[name] = item
-            if "nextCursor" not in result:
+            cursor = result.get("nextCursor")
+            if cursor is None:
                 if tool_name not in tools:
                     raise AuthorizationError("approved tool missing from session")
                 self._described = tool_name
                 return ServedTool(
                     endpoint_identity=self.endpoint_identity, definition=tools[tool_name]
                 )
-            cursor = result["nextCursor"]
             if (
                 not isinstance(cursor, str)
                 or not cursor
@@ -303,14 +309,37 @@ def invoke_pinned_stdio(
     Raises ``AuthorizationError`` only before ``tools/call`` is sent. After that,
     ``ToolCallError`` reports a JSON-RPC error reply and ``ExecutionOutcomeUnknown``
     any other failure. Neither is a denial: the approval has been spent, and an
-    unknown outcome means the tool may have run.
+    unknown outcome means the tool may have run. A launcher that cannot be staged
+    or started, or a failed ``initialize`` handshake, happens before the gateway
+    runs; it is reported to ``on_decision`` as the gateway reports a failing
+    adapter: ``AuthorizationError`` with its reason, anything else as ``adapter-error``.
     """
-    with PinnedStdioSession(
-        command=command,
-        sha256=sha256,
-        server_id=call.server_id,
-        call_deadline_seconds=call_deadline_seconds,
-    ) as session:
+    with ExitStack() as stack:
+        try:
+            session = stack.enter_context(
+                PinnedStdioSession(
+                    command=command,
+                    sha256=sha256,
+                    server_id=call.server_id,
+                    call_deadline_seconds=call_deadline_seconds,
+                )
+            )
+        except Exception as exc:
+            reason = exc.reason if isinstance(exc, AuthorizationError) else "adapter-error"
+            if gateway.on_decision is not None:
+                gateway.on_decision(
+                    Decision(
+                        admitted=False,
+                        reason=reason,
+                        time=gateway.clock(),
+                        server_id=call.server_id,
+                        tool_name=call.tool_name,
+                        action=call.action,
+                        resource=call.resource,
+                        store_id=getattr(gateway.state, "store_id", None),
+                    )
+                )
+            raise
         # bind_adapters keeps every gateway setting (signer scopes, on_decision,
         # allow_shared_keys, canonical_arguments) and swaps only describe/execute.
         bound = gateway.bind_adapters(describe=session.describe, execute=session.execute)
