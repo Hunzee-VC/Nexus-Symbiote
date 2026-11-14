@@ -1,0 +1,199 @@
+{
+  "@context": "https://spdx.org/rdf/3.0.1/spdx-context.jsonld",
+  "@graph": [
+    {
+      "type": "SpdxDocument",
+      "spdxId": "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb",
+      "creationInfo": "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#creation",
+      "name": "Nexus SymBiote AgentBOM urn:uuid:b4e064d6-4631-53b2-96b3-602add6b9052",
+      "element": [
+        "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#producer-b5781ba8-ca34-5472-b128-489da94c266a",
+        "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#generator-b5781ba8-ca34-5472-b128-489da94c266a",
+        "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#component-1757d387-d735-5a1e-a266-514256eedf72",
+        "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#component-15b4fe89-a635-5bb5-b96f-179527129acb",
+        "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#relationship-d2645b29-fb28-5cab-aaeb-bda7fff2e892",
+        "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#license-relationship-8cfb646c-d164-512c-b5c2-04f0e0e2a720",
+        "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#license-relationship-ea64618f-9c4c-5fef-839b-484039a1f13f",
+        "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#sbom-da3b3b6e-e912-5d72-a156-cbc1c4c60207"
+      ],
+      "rootElement": [
+        "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#sbom-da3b3b6e-e912-5d72-a156-cbc1c4c60207"
+      ],
+      "profileConformance": [
+        "core",
+        "software",
+        "expandedLicensing",
+        "extension"
+      ],
+      "comment": "Collection coverage is unknown: static collection does not observe runtime, network or live tool surfaces. This document does not assert complete collection.",
+      "extension": [
+        {
+          "type": "extension_CdxPropertiesExtension",
+          "extension_cdxProperty": [
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "nexus-symbiote:document",
+              "extension_cdxPropValue": "{\"components\":[{\"assurance_level\":\"declared\",\"authorizations\":[],\"autonomy_level\":null,\"bom_ref\":\"agent:test\",\"claims\":{},\"component_type\":\"agent\",\"data_refs\":[],\"deployment_status\":\"unknown\",\"guardrail_refs\":[],\"hashes\":{},\"memory_refs\":[],\"model_refs\":[],\"name\":\"Example\",\"prompt_refs\":[],\"properties\":{},\"risks\":[],\"skill_refs\":[],\"sub_agent_refs\":[],\"tool_refs\":[],\"trust_tier\":\"unknown\"},{\"annotations\":{},\"assurance_level\":\"declared\",\"bom_ref\":\"tool:test\",\"claims\":{},\"component_type\":\"tool\",\"hashes\":{},\"name\":\"Lookup\",\"properties\":{},\"risks\":[],\"trust_tier\":\"unknown\"}],\"dependencies\":[{\"conditions\":\"Only when approved\\nand read-only\\t\u202eapproval\",\"relationship\":\"invokes\",\"source_ref\":\"agent:test\",\"target_ref\":\"tool:test\"}],\"metadata\":{\"authors\":[],\"serial_number\":\"urn:uuid:b4e064d6-4631-53b2-96b3-602add6b9052\",\"spec_version\":\"1.1.0\",\"timestamp\":\"2026-11-14T00:00:00Z\",\"tool_name\":\"nexus-symbiote\",\"tool_vendor\":\"aisecnomad\",\"tool_version\":\"0.2.0\",\"version\":1}}"
+            },
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "nexus-symbiote:documentDigest",
+              "extension_cdxPropValue": "sha256:4ddc4d784291ba51287b5eb0c11b3f8b3e83dc9ae99dcc46787fb84860330fff"
+            },
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "nexus-symbiote:lossReport",
+              "extension_cdxPropValue": "{\"admissionAuthority\":false,\"extensionRoundTripComplete\":true,\"itemCoverage\":\"selected-security-fields\",\"items\":[{\"path\":\"\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"agent authority, assurance, and coverage require the Nexus Symbiote extension\",\"severity\":\"info\"},{\"path\":\"/components/0/trust_tier\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/0/assurance_level\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/1/trust_tier\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/1/assurance_level\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/dependencies/0/relationship\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Complete relationship semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/dependencies/0/conditions\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Complete relationship semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"}],\"nativeSemanticsComplete\":false,\"normalizations\":[\"component and dependency collections sorted for deterministic output\",\"valid declared package URLs canonicalized\",\"standard version fields carry exact versions of registry entries and the declared versions of other kinds, up to 1024 characters\"],\"profile\":\"nexus-symbiote-export/v2\",\"sourceDigest\":\"sha256:4ddc4d784291ba51287b5eb0c11b3f8b3e83dc9ae99dcc46787fb84860330fff\",\"target\":\"spdx-3.0.1\"}"
+            },
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "nexus-symbiote:projection",
+              "extension_cdxPropValue": "spdx-3.0.1/2"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "SoftwareAgent",
+      "spdxId": "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#producer-b5781ba8-ca34-5472-b128-489da94c266a",
+      "creationInfo": "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#creation",
+      "name": "nexus-symbiote"
+    },
+    {
+      "type": "Tool",
+      "spdxId": "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#generator-b5781ba8-ca34-5472-b128-489da94c266a",
+      "creationInfo": "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#creation",
+      "name": "nexus-symbiote",
+      "summary": "0.2.0"
+    },
+    {
+      "type": "ai_AIPackage",
+      "spdxId": "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#component-1757d387-d735-5a1e-a266-514256eedf72",
+      "creationInfo": "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#creation",
+      "name": "Example",
+      "extension": [
+        {
+          "type": "extension_CdxPropertiesExtension",
+          "extension_cdxProperty": [
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "nexus-symbiote:component",
+              "extension_cdxPropValue": "{\"assurance_level\":\"declared\",\"authorizations\":[],\"autonomy_level\":null,\"bom_ref\":\"agent:test\",\"claims\":{},\"component_type\":\"agent\",\"data_refs\":[],\"deployment_status\":\"unknown\",\"guardrail_refs\":[],\"hashes\":{},\"memory_refs\":[],\"model_refs\":[],\"name\":\"Example\",\"prompt_refs\":[],\"properties\":{},\"risks\":[],\"skill_refs\":[],\"sub_agent_refs\":[],\"tool_refs\":[],\"trust_tier\":\"unknown\"}"
+            },
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "agentbom:kind",
+              "extension_cdxPropValue": "agent"
+            },
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "agentbom:claimsVerifiedByExporter",
+              "extension_cdxPropValue": "false"
+            }
+          ]
+        }
+      ],
+      "software_primaryPurpose": "application"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#component-15b4fe89-a635-5bb5-b96f-179527129acb",
+      "creationInfo": "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#creation",
+      "name": "Lookup",
+      "extension": [
+        {
+          "type": "extension_CdxPropertiesExtension",
+          "extension_cdxProperty": [
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "nexus-symbiote:component",
+              "extension_cdxPropValue": "{\"annotations\":{},\"assurance_level\":\"declared\",\"bom_ref\":\"tool:test\",\"claims\":{},\"component_type\":\"tool\",\"hashes\":{},\"name\":\"Lookup\",\"properties\":{},\"risks\":[],\"trust_tier\":\"unknown\"}"
+            },
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "agentbom:kind",
+              "extension_cdxPropValue": "tool"
+            },
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "agentbom:claimsVerifiedByExporter",
+              "extension_cdxPropValue": "false"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "Relationship",
+      "spdxId": "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#relationship-d2645b29-fb28-5cab-aaeb-bda7fff2e892",
+      "creationInfo": "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#creation",
+      "relationshipType": "other",
+      "from": "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#component-1757d387-d735-5a1e-a266-514256eedf72",
+      "to": [
+        "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#component-15b4fe89-a635-5bb5-b96f-179527129acb"
+      ],
+      "completeness": "noAssertion",
+      "extension": [
+        {
+          "type": "extension_CdxPropertiesExtension",
+          "extension_cdxProperty": [
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "nexus-symbiote:relationship",
+              "extension_cdxPropValue": "{\"conditions\":\"Only when approved\\nand read-only\\t\u202eapproval\",\"relationship\":\"invokes\",\"source_ref\":\"agent:test\",\"target_ref\":\"tool:test\"}"
+            }
+          ]
+        }
+      ],
+      "comment": "Conditional native relationship 'invokes' (conditions: Only when approved\nand read-only\t\u202eapproval). Not an unconditional usesTool assertion."
+    },
+    {
+      "type": "Relationship",
+      "spdxId": "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#license-relationship-8cfb646c-d164-512c-b5c2-04f0e0e2a720",
+      "creationInfo": "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#creation",
+      "relationshipType": "hasDeclaredLicense",
+      "from": "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#component-1757d387-d735-5a1e-a266-514256eedf72",
+      "to": [
+        "expandedlicensing_NoAssertionLicense"
+      ]
+    },
+    {
+      "type": "Relationship",
+      "spdxId": "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#license-relationship-ea64618f-9c4c-5fef-839b-484039a1f13f",
+      "creationInfo": "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#creation",
+      "relationshipType": "hasConcludedLicense",
+      "from": "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#component-1757d387-d735-5a1e-a266-514256eedf72",
+      "to": [
+        "expandedlicensing_NoAssertionLicense"
+      ]
+    },
+    {
+      "type": "software_Sbom",
+      "spdxId": "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#sbom-da3b3b6e-e912-5d72-a156-cbc1c4c60207",
+      "creationInfo": "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#creation",
+      "element": [
+        "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#component-1757d387-d735-5a1e-a266-514256eedf72",
+        "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#component-15b4fe89-a635-5bb5-b96f-179527129acb",
+        "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#relationship-d2645b29-fb28-5cab-aaeb-bda7fff2e892",
+        "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#license-relationship-8cfb646c-d164-512c-b5c2-04f0e0e2a720",
+        "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#license-relationship-ea64618f-9c4c-5fef-839b-484039a1f13f"
+      ],
+      "rootElement": [
+        "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#component-1757d387-d735-5a1e-a266-514256eedf72"
+      ]
+    },
+    {
+      "type": "CreationInfo",
+      "@id": "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#creation",
+      "specVersion": "3.0.1",
+      "created": "2026-11-14T00:00:00Z",
+      "createdBy": [
+        "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#producer-b5781ba8-ca34-5472-b128-489da94c266a"
+      ],
+      "createdUsing": [
+        "urn:uuid:1a8923ed-33db-526e-8aa0-99574f7be1eb#generator-b5781ba8-ca34-5472-b128-489da94c266a"
+      ]
+    }
+  ]
+}

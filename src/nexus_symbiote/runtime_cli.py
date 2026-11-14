@@ -104,7 +104,11 @@ def _safe_error(exc: BaseException, operation: str) -> str:
 
 
 def _read(path: Path, maximum: int = MAX_INPUT_BYTES, *, owner_only: str = "") -> bytes:
-    """Read a bounded regular file; with ``owner_only``, refuse one others can access."""
+    """Read a bounded regular file.
+
+    With ``owner_only``, refuse a file that the effective user does not own or that its
+    group or others can access.
+    """
     with open_regular_file(path) as stream:
         info = os.fstat(stream.fileno())
         if owner_only and os.name == "posix":
@@ -265,7 +269,7 @@ def runtime_group() -> None:
     "--passphrase-file",
     type=click.Path(path_type=Path),
     help="Encrypt the private key with the passphrase on the first line of this file, "
-    "which only its owner may read.",
+    "which you own and only you may read.",
 )
 def keygen(private_key: Path, public_key: Path, passphrase_file: Path | None) -> None:
     """Create an Ed25519 key pair without overwriting existing files.
@@ -319,7 +323,8 @@ def keygen(private_key: Path, public_key: Path, passphrase_file: Path | None) ->
     multiple=True,
     required=True,
     type=click.Path(exists=True, path_type=Path),
-    help="Ed25519 private key PEM that only its owner can access; repeat for multiple signers.",
+    help="Ed25519 private key PEM that you own and only you can access; "
+    "repeat for multiple signers.",
 )
 @click.option(
     "--out",
@@ -331,7 +336,7 @@ def keygen(private_key: Path, public_key: Path, passphrase_file: Path | None) ->
     "--passphrase-file",
     type=click.Path(path_type=Path),
     help="Passphrase for encrypted private keys, on the first line of this file, "
-    "which only its owner may read.",
+    "which you own and only you may read.",
 )
 def sign(
     contract_path: Path,

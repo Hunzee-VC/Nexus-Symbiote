@@ -137,7 +137,7 @@ def test_a_0_1_0_export_with_a_changed_public_field_is_rejected(name):
 def test_current_exports_declare_their_projection(generator):
     document = generator().generate(fixture_bom())
     (marker,) = [p["value"] for p in _properties(document) if p["name"] == PROJECTION_PROPERTY]
-    assert marker == ("cyclonedx-1.7/2" if generator is CycloneDXGenerator else "spdx-3.0.1/2")
+    assert marker == ("cyclonedx-1.7/2" if generator is CycloneDXGenerator else "spdx-3.0.1/3")
 
 
 @pytest.mark.parametrize("change", ["unknown", "removed", "duplicated"])
@@ -156,10 +156,17 @@ def test_a_changed_projection_marker_is_rejected(change):
         CycloneDXGenerator.recover(document)
 
 
-@pytest.mark.parametrize("name", ["api-inventory.cyclonedx.json", "api-inventory.spdx.json"])
-def test_a_0_1_0_export_cannot_claim_the_current_projection(name):
+@pytest.mark.parametrize(
+    ("name", "marker"),
+    [
+        ("api-inventory.cyclonedx.json", "cyclonedx-1.7/2"),
+        ("api-inventory.spdx.json", "spdx-3.0.1/2"),
+        ("api-inventory.spdx.json", "spdx-3.0.1/3"),
+    ],
+)
+def test_a_0_1_0_export_cannot_claim_a_later_projection(name, marker):
     document = _load(name)
-    _set_marker(document, "cyclonedx-1.7/2" if "metadata" in document else "spdx-3.0.1/2")
+    _set_marker(document, marker)
     with pytest.raises(ValueError):
         _generator(name).recover(document)
 
