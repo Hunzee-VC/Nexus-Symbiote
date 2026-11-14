@@ -850,8 +850,8 @@ def test_an_exact_spec_beside_a_lockfile_that_is_not_read_has_no_package_url(tmp
             entry = npmjs(version="4.52.0", resolved="https://evil.example/openai.tgz")
             (tmp_path / name).write_bytes(lock_bytes(entry))
         elif content == "symlink":
-            (tmp_path.parent / "outside.json").write_bytes(lock_bytes(npmjs(version="4.52.0")))
-            (tmp_path / name).symlink_to(tmp_path.parent / "outside.json")
+            (tmp_path / "outside.json").write_bytes(lock_bytes(npmjs(version="4.52.0")))
+            (tmp_path / name).symlink_to(tmp_path / "outside.json")
         else:
             (tmp_path / name).write_text(content)
     result = RegistryScanner().scan(tmp_path)

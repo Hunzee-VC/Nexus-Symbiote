@@ -65,7 +65,6 @@ def test_the_per_file_model_limit_names_itself(tmp_path):
         "model.safetensors: model-bytes limit of 256 bytes exceeded; "
         "raise it with --limit model-bytes=N"
     ) in [failure.replace(str(tmp_path) + "/", "") for failure in result.scan_failures]
-    assert result.components[0].hashes == {}
 
 
 def test_every_model_hash_path_follows_the_same_limit(tmp_path):

@@ -40,9 +40,13 @@ class TestEnums:
         assert len(ComponentType) >= 11
 
     def test_risk_severity_ordering(self):
-        severities = list(RiskSeverity)
-        assert RiskSeverity.CRITICAL in severities
-        assert RiskSeverity.INFO in severities
+        assert [severity.value for severity in RiskSeverity] == [
+            "critical",
+            "high",
+            "medium",
+            "low",
+            "info",
+        ]
 
     def test_serialization_safety_values(self):
         assert SerializationSafety.SAFE.value == "safe"

@@ -81,10 +81,12 @@ def test_nested_capability_unknown_semantics_rejected():
         CapabilityDeclaration.model_validate({"unrecognized_approval_bypass": True})
 
 
-def test_loader_rejects_duplicate_keys_and_limits(tmp_path):
+def test_loader_rejects_duplicate_keys(tmp_path):
+    from nexus_symbiote.core.aibom import NativeFormatError
+
     path = tmp_path / "bom.json"
     path.write_text('{"components":[],"components":[]}')
-    with pytest.raises(ValueError):
+    with pytest.raises(NativeFormatError, match="duplicate keys"):
         AIBOM.load(path)
 
 
