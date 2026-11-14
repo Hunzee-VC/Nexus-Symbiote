@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import heapq
 import re
 from collections.abc import Iterable, Mapping
 from typing import Any
@@ -37,12 +38,17 @@ LONG_CREDENTIAL_LENGTH = 16
 # Formats distinctive enough to stand out inside a name (AWS_AKIA..., X_glpat-...).
 # Each stops at the end of its own run or matches the rest, so starting one after
 # every "_" or "-" keeps the scan linear. An AWS key id must end there, or
-# REGION_ASIAPACIFICSOUTHEAST1 would read as one.
+# REGION_ASIAPACIFICSOUTHEAST1 would read as one. The AI-vendor prefixes also open
+# ordinary names (pplx-7b-online, fw_config_loader), so each needs a body of at
+# least 20 characters in the vendor's own alphabet.
 _DISTINCT_SHAPES = (
     r"gh[oprsu]_[A-Za-z0-9]{36,}+|github_pat_\w{22,}+|glpat-[\w-]{20,}+"
     r"|xox[abeoprs]-[\w-]{10,}+|[rs]k_(?:live|test)_[A-Za-z0-9]{16,}+"
     r"|(?:AKIA|ASIA)[A-Z0-9]{16}(?![A-Za-z0-9])|AIza[\w-]{35}|ya29\.[\w-]{20,}+"
     r"|npm_[A-Za-z0-9]{36}|pypi-[\w-]{50,}+|hf_[A-Za-z0-9]{30,}+"
+    r"|pcsk_[A-Za-z0-9_]{20,}+|gsk_[A-Za-z0-9]{20,}+|r8_[A-Za-z0-9]{20,}+"
+    r"|pplx-[A-Za-z0-9]{20,}+|xai-[A-Za-z0-9]{20,}+|lsv2_(?:pt|sk)_[A-Za-z0-9_]{20,}+"
+    r"|tvly-[A-Za-z0-9-]{20,}+|fw_[A-Za-z0-9]{20,}+"
 )
 # A JWT can fail only at its first dot, so it starts only at a word boundary: started
 # after every "_" its first segment would be rescanned once per position.
@@ -134,6 +140,10 @@ def secret_values(variables: Mapping[str, Any]) -> list[str]:
     ]
 
 
+def _longest_first(value: str) -> tuple[int, str]:
+    return (-len(value), value)
+
+
 class SecretScrubber:
     """Known secret values, prepared once per source and applied linearly per text.
 
@@ -146,11 +156,31 @@ class SecretScrubber:
 
     def __init__(self, values: Iterable[str] = ()) -> None:
         unique = {value for value in values if value}
-        self._values = tuple(sorted(unique, key=lambda value: (-len(value), value)))
-        self._shortest = min((len(value) for value in self._values), default=0)
+        self._values = tuple(sorted(unique, key=_longest_first))
+        self._shortest = len(self._values[-1]) if self._values else 0
 
     def __bool__(self) -> bool:
         return bool(self._values)
+
+    def __len__(self) -> int:
+        return len(self._values)
+
+    def extended(self, values: Iterable[str]) -> SecretScrubber:
+        """This scrubber with ``values`` added, merged without sorting its own again.
+
+        A file's values are prepared once and each server adds its own few, so the
+        cost per server grows with the file's values, not with their sort.
+        """
+        known = set(self._values)
+        extra = sorted(
+            {value for value in values if value and value not in known}, key=_longest_first
+        )
+        if not extra:
+            return self
+        merged = SecretScrubber()
+        merged._values = tuple(heapq.merge(self._values, extra, key=_longest_first))
+        merged._shortest = len(merged._values[-1])
+        return merged
 
     def contains(self, text: str) -> bool:
         if not self._values or len(text) < self._shortest:
