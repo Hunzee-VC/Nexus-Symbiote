@@ -43,8 +43,8 @@ gate is only as strong as the place the baseline comes from.
   signed still verifies, so bound its age with `--max-age-days` and keep attested
   baselines where the change under review cannot choose among them.
 - **Protect the gate itself.** On the `pull_request` event the workflow file comes
-  from the pull request, so an author can edit `--fail-on-alert` away unless workflow
-  edits are gated. Require the workflow through an organization ruleset (*Require
+  from the pull request, so an author can add `--no-fail-on-alert`, or remove the diff
+  step, unless workflow edits are gated. Require the workflow through an organization ruleset (*Require
   workflows to pass before merging*), and require `CODEOWNERS` review of `.github/`
   and `.nexus-symbiote/reviewed.json`, as described in [Protect the gate](#protect-the-gate)
   below. Avoid checking out an untrusted pull request head inside a `pull_request_target`
@@ -148,8 +148,8 @@ additions as removals), and snapshots that disagree on absolute paths.
 
 ## Exit status
 
-`diff` exits 0 without `--fail-on-alert`, whatever it finds. With it, the command
-exits 1 when it reports any security alert, and 0 otherwise. An unreadable or
+`diff` exits 1 when it reports any security alert, and 0 otherwise; the gate is on
+by default, and only an explicit `--no-fail-on-alert` turns it off. An unreadable or
 invalid input is an error (exit 1); a missing file is a usage error (exit 2).
 
 ## Protect the gate

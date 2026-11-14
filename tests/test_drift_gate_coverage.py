@@ -262,17 +262,43 @@ def test_a_second_identical_gap_is_a_new_gap():
     assert [a["severity"] for a in report.security_alerts] == ["high"]
 
 
-def test_scanned_surfaces_alone_are_an_info_note():
+def test_scanned_surfaces_added_alone_are_an_info_note():
     report = _compare(_claim(), _claim(surfaces_scanned=["a.json", "src/new.py"]))
     assert report.security_alerts == []
     assert report.metadata_changes == [
         {
             "field": "completeness.surfaces_scanned",
             "severity": "info",
-            "detail": "Scanned surfaces changed: 1 added (src/new.py). "
+            "detail": "1 scanned surface added (src/new.py). "
             "Components found there are compared separately.",
         }
     ]
+
+
+def test_removed_scanned_surface_alerts_as_narrowed_coverage():
+    report = _compare(_claim(surfaces_scanned=["a.json", "src/old.py"]), _claim())
+    assert [(a["severity"], a["component"]) for a in report.security_alerts] == [
+        ("high", "metadata")
+    ]
+    assert "src/old.py" in report.security_alerts[0]["alert"]
+    assert "coverage narrowed" in report.security_alerts[0]["alert"]
+    assert report.metadata_changes[0]["field"] == "completeness.surfaces_scanned"
+
+
+def test_collector_newly_recorded_as_failed_alerts():
+    noted = _compare(
+        _claim(scanner_status={"mcp": "complete"}),
+        _claim(scanner_status={"mcp": "complete", "model": "failed"}),
+    )
+    assert [a["severity"] for a in noted.security_alerts] == ["high"]
+    assert "'model'" in noted.security_alerts[0]["alert"]
+    assert "does not show this gap predates the change" in noted.security_alerts[0]["alert"]
+    complete = _compare(
+        _claim(scanner_status={"mcp": "complete"}),
+        _claim(scanner_status={"mcp": "complete", "model": "complete"}),
+    )
+    assert complete.security_alerts == []
+    assert {c["severity"] for c in complete.metadata_changes} == {"info"}
 
 
 def test_shared_gaps_are_noted_without_counting_as_change(tmp_path):
@@ -1053,7 +1079,13 @@ def test_an_overlong_report_location_is_clipped_in_the_note():
 @pytest.mark.parametrize(
     ("before", "after", "severity", "detail"),
     [
-        (None, "sha256:" + "a" * 64, "info", "File hash (sha256) became available."),
+        (
+            None,
+            "sha256:" + "a" * 64,
+            "medium",
+            "File hash (sha256) became available — first binding of content the baseline "
+            "never pinned.",
+        ),
         ("sha256:" + "a" * 64, "sha256:" + "b" * 64, "high", "File hash (sha256) changed."),
         ("sha256:" + "a" * 64, None, "high", "File hash (sha256) removed — integrity is unknown."),
     ],
@@ -1068,6 +1100,15 @@ def test_a_file_hash_change_says_whether_it_was_added_changed_or_removed(
         AIBOMDiffer().diff(AIBOM(components=[model(before)]), AIBOM(components=[model(after)]))
     ).components_modified
     assert (change.severity, change.details) == (severity, [detail])
+
+
+def test_a_first_hash_binding_fails_the_drift_gate():
+    """Content first pinned after an unhashed baseline is reviewable, so it must alert."""
+    old = ModelComponent(bom_ref="m", name="m")
+    new = ModelComponent(bom_ref="m", name="m", hashes={"sha256": "sha256:" + "a" * 64})
+    report = AIBOMDiffer().diff(AIBOM(components=[old]), AIBOM(components=[new]))
+    assert [a["severity"] for a in report.security_alerts] == ["medium"]
+    assert "became available" in report.security_alerts[0]["alert"]
 
 
 @pytest.mark.parametrize(

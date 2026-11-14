@@ -138,7 +138,7 @@ What exit status 1 means for each gate:
 | `scan` | A collector failed or the scan gate failed, unless `--report-only` or a report-only project policy applies. |
 | `validate` | Completeness, integrity (including integrity that is only unknown), the discovery producer check, the minimum assurance level or the dependency graph failed, or unverified discovery evidence was gated (see below). |
 | `risk` | The risk gate failed, `--project` reconciliation failed, or unverified discovery evidence was gated (see below). |
-| `diff` | `--fail-on-alert` was given and the diff reports a security alert. |
+| `diff` | The diff reports a security alert; `--no-fail-on-alert` turns this gate off. |
 | `digest` | The file is a valid native inventory, but its canonical or content digest is undefined: the other values are printed, and the missing one as `unavailable` (`null` with `--json-output`). |
 | `graph` | The inventory's graph is invalid, `--focus` names no component, or the view would hold more components than `--max-nodes`. |
 | `minimum-elements` | `--fail-under` was given and fewer than that percentage of the assessable elements are present, or the inventory's CycloneDX export fails its checks. |
@@ -409,7 +409,7 @@ nexus-symbiote diff [OPTIONS] OLD_PATH NEW_PATH
 | Option | Description |
 |---|---|
 | `--json-output` | Output as JSON |
-| `--fail-on-alert` | Exit with status 1 if the diff reports a security alert. |
+| `--fail-on-alert / --no-fail-on-alert` | Exit with status 1 if the diff reports a security alert (default: on). |
 
 The report lists security alerts, notes (`[INFO]` metadata changes, and `[NOTE]` lines
 about the comparison itself, also after `No changes detected.`), and added, removed and

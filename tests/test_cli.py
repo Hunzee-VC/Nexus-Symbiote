@@ -303,14 +303,15 @@ class TestDiffCommand:
         bom_b = _scanned(runner, project, tmp_path / "b.json")
 
         result = runner.invoke(main, ["diff", str(bom_a), str(bom_b)])
-        assert result.exit_code == 0
+        assert result.exit_code == 1
         assert "changes detected" in result.stdout
         assert any(line.startswith("  + langchain") for line in result.stdout.splitlines())
         assert (
-            runner.invoke(main, ["diff", str(bom_a), str(bom_b), "--fail-on-alert"]).exit_code == 1
+            runner.invoke(main, ["diff", str(bom_a), str(bom_b), "--no-fail-on-alert"]).exit_code
+            == 0
         )
         result = runner.invoke(main, ["diff", str(bom_a), str(bom_b), "--json-output"])
-        assert result.exit_code == 0
+        assert result.exit_code == 1
         data = json.loads(result.output)
         assert data["has_changes"] is True
         assert [c["bom_ref"] for c in data["components_modified"]] == ["registry:pypi/transformers"]
@@ -452,7 +453,7 @@ class TestDiffFixture:
 
         runner = CliRunner()
         result = runner.invoke(main, ["diff", str(old_path), str(new_path)])
-        assert result.exit_code == 0
+        assert result.exit_code == 1
         assert "added" in result.output.lower()
 
     def test_diff_component_removed(self, tmp_path):
@@ -470,7 +471,7 @@ class TestDiffFixture:
 
         runner = CliRunner()
         result = runner.invoke(main, ["diff", str(old_path), str(new_path)])
-        assert result.exit_code == 0
+        assert result.exit_code == 1
         assert "removed" in result.output.lower()
 
     def test_diff_component_modified(self, tmp_path):
@@ -484,7 +485,7 @@ class TestDiffFixture:
 
         runner = CliRunner()
         result = runner.invoke(main, ["diff", str(old_path), str(new_path)])
-        assert result.exit_code == 0
+        assert result.exit_code == 1
         assert "modified" in result.output.lower()
         data = json.loads(
             runner.invoke(main, ["diff", str(old_path), str(new_path), "--json-output"]).output
