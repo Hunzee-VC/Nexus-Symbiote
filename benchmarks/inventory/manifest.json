@@ -61,6 +61,10 @@
         "label_source": "packages/markitdown-mcp/README.md names the sole public tool. Three undecorated module-level helper or entry-point functions are explicit decoys.",
         "license_file": "upstream/markitdown-LICENSE"
       },
+      "coverage_rationale": "The source passes the MCP server to an application helper; its use is not resolved, so unobserved labels remain unknown.",
+      "expected_mcp_exclusions": [
+        "packages/markitdown-mcp/src/markitdown_mcp/__main__.py: unsupported Python MCP binding or dynamic registration"
+      ],
       "tools": ["convert_to_markdown"],
       "decoys": ["check_plugins_enabled", "create_starlette_app", "main"]
     },

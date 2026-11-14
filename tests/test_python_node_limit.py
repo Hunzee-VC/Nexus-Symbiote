@@ -180,38 +180,55 @@ def _helper_calls(scale: int) -> str:
     )
 
 
-def test_the_analysis_of_a_large_module_is_linear(tmp_path):
+def _clean_calls(scale: int) -> str:
+    """A large helper and many ordinary calls without passing it the server."""
+    return (
+        FACTORY
+        + "def helper():\n"
+        + "    pass\n" * (1_500 * scale)
+        + "helper()\n" * (1_500 * scale)
+        + "server.run()\n" * (1_500 * scale)
+    )
+
+
+@pytest.mark.parametrize("incomplete", [False, True], ids=["complete", "helper-gap"])
+def test_the_analysis_of_a_large_module_is_linear(tmp_path, incomplete):
     generous = replace(limits.DEFAULTS, python_nodes=1_000_000, syntax_bytes=4 * limits.MIB)
+    source = _helper_calls if incomplete else _clean_calls
     roots = {
-        scale: _project(tmp_path / f"p{scale}", {"server.py": _helper_calls(scale)})
-        for scale in (1, 4)
+        scale: _project(tmp_path / f"p{scale}", {"server.py": source(scale)}) for scale in (1, 4)
     }
 
     def run(scale: int) -> None:
         with limits.applied(generous):
             result = MCPScanner().scan(roots[scale])
-        assert result.scan_failures == [] and result.surfaces_excluded == []
+        assert result.scan_failures == []
+        assert result.surfaces_excluded == (
+            ["server.py: unsupported Python MCP binding or dynamic registration"]
+            if incomplete
+            else []
+        )
 
     assert scaling_ratio(run) < 8
 
 
 @pytest.mark.parametrize(
-    "helper, call, benign",
+    "helper, call",
     [
-        ("def run(app, /, *, host):\n    app.run(host=host)\n", "run(server, host='x')", True),
-        ("def run(*, app):\n    return app.settings\n", "run(app=server)", True),
-        ("def wire(*, app):\n    app.add_tool(f)\n", "wire(app=server)", False),
-        ("def wire(app, /):\n    keep = app\n", "wire(server)", False),
-        ("def wire(app):\n    app.run\n    del app\n", "wire(server)", False),
-        ("def wire(a, b):\n    b.run()\n    a.add_tool(f)\n", "wire(server, server)", False),
-        ("def wire(a, b):\n    a.run()\n    b.add_tool(f)\n", "wire(b=other, a=server)", True),
-        ("def wire(app):\n    app.run()\n", "wire(other, server)", False),
+        ("def run(app, /, *, host):\n    app.run(host=host)\n", "run(server, host='x')"),
+        ("def run(*, app):\n    return app.settings\n", "run(app=server)"),
+        ("def wire(*, app):\n    app.add_tool(f)\n", "wire(app=server)"),
+        ("def wire(app, /):\n    keep = app\n", "wire(server)"),
+        ("def wire(app):\n    app.run\n    del app\n", "wire(server)"),
+        ("def wire(a, b):\n    b.run()\n    a.add_tool(f)\n", "wire(server, server)"),
+        ("def wire(a, b):\n    a.run()\n    b.add_tool(f)\n", "wire(b=other, a=server)"),
+        ("def wire(app):\n    app.run()\n", "wire(other, server)"),
     ],
 )
-def test_helpers_are_judged_by_how_they_use_each_parameter(tmp_path, helper, call, benign):
+def test_passing_server_to_a_helper_is_always_a_gap(tmp_path, helper, call):
     source = FACTORY + "other = object()\n" + helper + "\n".join([call] * 3) + "\n"
     result = MCPScanner().scan(_project(tmp_path / "p", {"server.py": source}))
     assert any(isinstance(c, MCPServerComponent) for c in result.components)
     assert not [c for c in result.components if isinstance(c, ToolComponent)]
     gap = "server.py: unsupported Python MCP binding or dynamic registration"
-    assert (gap not in result.surfaces_excluded) is benign, result.surfaces_excluded
+    assert result.surfaces_excluded == [gap]
