@@ -189,7 +189,7 @@ def test_a_project_root_that_cannot_be_listed_is_not_taken_to_have_no_policy(tmp
     def unlistable(path):
         raise PermissionError(13, "Permission denied")
 
-    monkeypatch.setattr(os, "listdir", unlistable)
+    monkeypatch.setattr(os, "scandir", unlistable)
     with pytest.raises(PolicyError, match="cannot be listed: Permission denied"):
         load_policy(tmp_path)
 

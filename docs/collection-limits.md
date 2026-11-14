@@ -1,7 +1,7 @@
 # Collection limits
 
-Every collector bounds what it reads from a project, so that very large or hostile
-input cannot exhaust memory or hold a scan indefinitely. Each bound fails closed.
+Every collector bounds what it reads from a project to limit the work and memory
+used for very large or hostile input. Each bound fails closed.
 When a collector reaches one, it records a scan failure and its status becomes
 `failed`, so `scan`, `baseline`, `validate`, `risk` and the GitHub Action fail. The
 failure names the limit, its value, the root-relative path where it was reached
@@ -25,6 +25,13 @@ vendor/links/l01000: symlink target is absolute (and 93999 more not listed)
 Raising a limit moves the point where collection stops. It never turns a reported
 stop into a silent one and never relaxes a gate, and lowering one can only add
 failures.
+
+Project-policy discovery has its own directory-listing budget, using the same
+operator `entries` value. It must finish listing the project root before selecting
+a policy or applying defaults. If that listing exceeds the bound, the command
+refuses before writing an inventory; it does not silently assume there is no
+policy. An operator who explicitly chooses `--no-project-policy` bypasses policy
+discovery, while the collectors retain their own entry budgets.
 
 - [Set a limit](#set-a-limit)
 - [Limits](#limits)
@@ -78,7 +85,7 @@ The pre-commit hooks add their arguments after the command, so set
 |---|---|---|---|---|
 | `file-bytes` | 4 MiB | 1 GiB | One file a collector reads into memory: configuration, manifests, lockfiles and instruction files. The mcp collector holds this much of each source file it searches. | The file is not read. A larger source file is still searched, as a stream; see [below](#source-files-the-mcp-collector-searches) for when it fails. |
 | `total-bytes` | 32 MiB | 64 GiB | All bytes one collector reads, apart from model files, which have their own budget below. Each collector has its own budget. The mcp, a2a and rag collectors may read `source-scan-bytes` more, so their source search always reaches its own budget first. | That file is not read; later files are read only while they fit in what remains. |
-| `entries` | 100000 | 10000000 | Files and directories one collector lists while it walks the project. Directories named `.git`, `node_modules`, `__pycache__`, `.venv` or `venv`, and paths excluded by policy, count as one entry each and are not listed. The same number bounds one collection's case-variant search, and twice it bounds the weight files the model collector, and `validate --project`, bind to models and the directory digests it records on them. | The directory being listed, and everything after it, is not walked. |
+| `entries` | 100000 | 10000000 | Entries listed by walks and exact-name verification share one collection budget. Directories named `.git`, `node_modules`, `__pycache__`, `.venv` or `venv`, and paths excluded by policy, count as one entry each and are not walked. Verifying an exact filename may also need its parent directory's entries. The same number independently bounds project-policy discovery and one collection's case-variant search, and twice it bounds the weight files the model collector, and `validate --project`, bind to models and the directory digests it records on them. | An incomplete directory listing is refused and later walks stop; an exact-name check needing that listing cannot succeed. Project-policy discovery instead refuses the command before an inventory is written. |
 | `depth` | 32 | 256 | Directory nesting below the walk's starting directory. | That directory and everything beneath it are not walked. |
 | `model-bytes` | 64 GiB | 1024 GiB | One model weight or tokenizer file that the model collector inspects and hashes; also the artifact `verify-artifact` hashes and each artifact `validate --project` hashes again. | The file is recorded without a hash. |
 | `model-total-bytes` | 256 GiB | 16384 GiB | All bytes the model collector reads, weights and model configuration included; `validate --project` reads a model's bound weight files within the same amount. `validate` charges every artifact it reads to six times this limit, so a supplied inventory cannot multiply the work of the scan behind it. | That file is recorded without a hash; later files are hashed only while they fit in what remains. In `validate`, what does not fit is reported as not checked. |
@@ -87,6 +94,14 @@ The pre-commit hooks add their arguments after the command, so set
 | `ts-nodes` | 20000 | 10000000 | Syntax nodes in one TypeScript or JavaScript file the mcp collector parses for MCP servers and client transports. | That file is not collected. |
 | `python-nodes` | 200000 | 10000000 | Syntax nodes in one Python file the mcp collector parses for MCP servers, clients and agent tools, counted as the Python that runs the scan parses the file. | That file is not collected. |
 | `import-lookups` | 5000 | 1000000 | Memory files whose `@path` imports the prompt collector follows, and distinct import targets it looks up, together in one collection. A monorepo of 2,000 packages whose `CLAUDE.md` files each import three shared documents uses 2,003. | The imports of the file being followed, and of every file after it, are not inventoried. |
+
+A bounded listing may fetch one additional entry to detect that it does not fit;
+for a budget of `N` entries, an overflowing listing observes at most `N + 1`
+entries. Partial exact-name indexes are never used. Complete indexes can be reused
+without another listing; listing a changed directory spends the shared budget
+again. Entries observed before an I/O error still spend that budget. These are
+input and work bounds, not a process sandbox or a wall-clock
+deadline. Keep an external job timeout for the complete operation.
 
 ### Source files the mcp collector searches
 
@@ -220,6 +235,7 @@ shorten lists whose content is recorded or bound anyway.
 | Paths the prompt collector lists in the `imports` and `imported_by` properties of one collection; past it a list is replaced by `imports_count` and `imports_digest`, or by `imported_by_count`, which is not a failure because every imported file is still inventoried and the digest binds what each file imports | 262,144 characters |
 | `@path` import references in one memory or imported file | 1,000 |
 | Codec name in a Python encoding declaration | 64 characters |
+| Dots separating key or table-name parts in TOML read by the registry, IDE and MCP collectors, including Codex settings and package-resolver configuration; quoted parts count, dots inside strings and comments do not | 16 (17 parts); checked before parsing |
 | MCP tool registrations in one TypeScript or JavaScript file | 1,000 |
 | TypeScript native parse time per file | 250 ms, in proportion to `syntax-bytes` above its default |
 | TypeScript analysis time per file | 2 s, in proportion to `ts-nodes` above its default |

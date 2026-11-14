@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import os
 import re
-import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +35,7 @@ from nexus_symbiote.scanners.source_binding import BindingError, value_binding
 from nexus_symbiote.utils.confined import ConfinedCollection, fold_name
 from nexus_symbiote.utils.jsonc import strip_jsonc
 from nexus_symbiote.utils.secrets import REDACTED, redact_keyed_text, redact_text
+from nexus_symbiote.utils.toml import loads as load_toml
 
 IDE_AGENT_CONFIGS: dict[str, dict[str, Any]] = {
     "claude-code": {
@@ -943,8 +943,8 @@ class IDEAgentScanner(Scanner):
         if text is None:
             return
         try:
-            config = tomllib.loads(text)
-        except (tomllib.TOMLDecodeError, ValueError, RecursionError):
+            config = load_toml(text)
+        except (ValueError, RecursionError, MemoryError):
             result.scan_failures.append(f"{CODEX_CONFIG}: invalid TOML")
             return
         documents[CODEX_CONFIG] = config
