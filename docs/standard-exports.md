@@ -119,6 +119,7 @@ Messages and recommendations are one line of plain text: control, bidirectional 
 | `invisible_characters` | Invisible characters in instructions | CWE-451, CWE-1427 | LLM01:2025 | LLM01:2026 | ASI01 | AML.T0068 | MEASURE-2.7 |
 | `launch_context` | Widened MCP launch context | none | none | none | ASI05 | none | MEASURE-2.7 |
 | `launcher_identity` | Unknown MCP launcher identity | none | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0010.005 | MEASURE-2.7 |
+| `line_separators` | Line or paragraph separators | none | LLM01:2025 | none | none | none | MEASURE-2.7 |
 | `local_process` | Local MCP server process | none | none | none | ASI07 | AML.T0010.005 | MEASURE-2.7 |
 | `lockfile_resolution_mismatch` | Lockfile resolution mismatch | none | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0010.001 | MANAGE-3.1 |
 | `lockfile_unread` | Unread lockfile | none | none | none | none | none | GOVERN-1.6 |

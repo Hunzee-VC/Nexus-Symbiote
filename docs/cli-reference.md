@@ -282,10 +282,13 @@ repos:
 
 pre-commit installs a hook of `language: python` into its own environment with
 `pip install`, which resolves the dependency ranges in `pyproject.toml` from PyPI
-without hashes, unlike the hash-locked install the README describes. Pin `rev` to a
-reviewed commit, and treat the hooks as a convenience for your own tree, not a control:
-a failing hook can be skipped, and the GitHub Action or a protected CI job is the
-gate.
+without hashes, unlike the hash-locked install the README describes. pre-commit
+cannot apply `requirements-ci.lock` itself. For a locked environment, install that
+lock in the way the README describes and point pre-commit at the resulting command
+with `language: system` instead of using the published `language: python` hooks.
+Pin `rev` to a reviewed commit, and treat the hooks as a convenience for your own
+tree, not a control: a failing hook can be skipped, and the GitHub Action or a
+protected CI job is the gate.
 
 ## Command details
 

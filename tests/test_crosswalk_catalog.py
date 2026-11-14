@@ -133,10 +133,14 @@ ORDER = {
 }
 
 
-def documented_categories() -> set[str]:
+def documented_category_rows() -> list[str]:
     text = FINDING_CATALOG.read_text(encoding="utf-8")
     table = text.split("## Categories", 1)[1].split("\n## ", 1)[0]
-    return set(re.findall(r"^\| `([^`]+)` \|", table, re.M))
+    return re.findall(r"^\| `([^`]+)` \|", table, re.M)
+
+
+def documented_categories() -> set[str]:
+    return set(documented_category_rows())
 
 
 def _all_references() -> list[tuple[str, Reference]]:
@@ -388,6 +392,12 @@ def test_the_finding_catalog_no_longer_lists_uncatalogued_categories():
     assert "generic rule" in section
     assert "`launcher_identity`" not in section
     assert "framework-crosswalk.md" in section
+
+
+def test_the_finding_catalog_lists_each_category_once_in_alphabetical_order():
+    rows = documented_category_rows()
+    assert len(rows) == len(set(rows))
+    assert rows == sorted(rows)
 
 
 def test_rationales_claim_no_weakness_or_documentation_gap_that_findings_do_not_record():

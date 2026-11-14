@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import math
 import os
@@ -230,6 +231,24 @@ def _gate_sources(
         "ignore_categories_source": origin("ignore_categories"),
         "suppressions_source": origin("suppressions"),
     }
+
+
+def _silence_broken_pipe() -> None:
+    """Point standard output at /dev/null so shutdown does not print a traceback.
+
+    The Python file object may already be closed, so this uses descriptor 1
+    rather than ``sys.stdout.fileno()``.
+    """
+    try:
+        null = os.open(os.devnull, os.O_WRONLY)
+    except OSError:
+        return
+    try:
+        os.dup2(null, 1)
+    except OSError:
+        pass
+    finally:
+        os.close(null)
 
 
 def _failure(exc: Exception) -> click.ClickException:
@@ -508,6 +527,11 @@ class _RootGroup(click.Group):
         except (click.exceptions.Exit, click.Abort):
             raise
         except Exception as exc:
+            if isinstance(exc, BrokenPipeError) or (
+                isinstance(exc, OSError) and exc.errno == errno.EPIPE
+            ):
+                _silence_broken_pipe()
+                raise click.exceptions.Exit(141) from None
             # A traceback can quote project or inventory text, so it is shown only on
             # request; the command still fails closed.
             if ctx.meta.get(DEBUG_KEY):
