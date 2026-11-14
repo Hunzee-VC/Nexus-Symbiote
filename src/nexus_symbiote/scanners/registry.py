@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import binascii
 import fnmatch
+import json
 import re
 import shlex
 import unicodedata
@@ -798,6 +799,168 @@ class _Resolution(NamedTuple):
     # that names this package and version, so the declared range is resolved.
     resolved: bool
     consistent: bool
+
+
+_YARN_LINES = 100_000
+_YARN_DEPTH = 8
+_YARN_LINE_BREAK = re.compile(r"\r\n|\r|\n")
+# What Yarn 1's tokenizer and a YAML reader both read as one plain word.
+_YARN_WORD = re.compile(r"""[^\x00-\x20\x7f-\U0010ffff:,"'\\#]+""")
+_YARN_V1_WORD_START = re.compile(r"[A-Za-z/.-]")
+_YARN_BERRY_WORD_START = re.compile(r"[A-Za-z0-9/._~^<=-]")
+_BERRY_KEY_SEPARATOR = re.compile(r"\s*,\s*")
+# Fields a record is bound from: each must be a string Yarn reads as one.
+_YARN_SCALAR_FIELDS = frozenset(
+    {"version", "resolved", "integrity", "resolution", "checksum", "linkType"}
+)
+
+
+class _YarnToken(NamedTuple):
+    kind: str
+    value: str
+    spaced: bool
+
+
+def _yarn_tokens(line: str, berry: bool) -> list[_YarnToken]:
+    """Tokenize one line as Yarn 1 does, refusing what it or a YAML reader reads
+    otherwise: quoted strings are JSON strings, and comments, tabs, single quotes and
+    words that Yarn splits into a number or boolean and a string are refused."""
+    tokens: list[_YarnToken] = []
+    i, spaced = 0, False
+    while i < len(line):
+        ch = line[i]
+        if ch == " ":
+            i, spaced = i + 1, True
+            continue
+        if ch == '"':
+            # Yarn's end rule: a quote ends the string unless one backslash precedes it.
+            end = i + 1
+            while True:
+                end = line.find('"', end)
+                if end < 0:
+                    raise ValueError("unterminated yarn.lock string")
+                if not (line[end - 1] == "\\" and line[end - 2] != "\\"):
+                    break
+                end += 1
+            value = json.loads(line[i : end + 1])
+            if not isinstance(value, str):
+                raise ValueError("invalid yarn.lock string")
+            value.encode("utf-8")
+            tokens.append(_YarnToken("str", value, spaced))
+            i = end + 1
+        elif ch in ":,":
+            tokens.append(_YarnToken(ch, ch, spaced))
+            i, spaced = i + 1, False
+            continue
+        else:
+            match = _YARN_WORD.match(line, i)
+            if match is None:
+                raise ValueError("unsupported yarn.lock character")
+            word = match.group()
+            if berry:
+                if not _YARN_BERRY_WORD_START.match(word):
+                    raise ValueError("unsupported yarn.lock word")
+                kind = "str"
+            elif word.isdigit():
+                kind = "number"
+            elif word in ("true", "false"):
+                kind = "boolean"
+            elif not _YARN_V1_WORD_START.match(word) or word.startswith(("true", "false")):
+                raise ValueError("unsupported yarn.lock word")
+            else:
+                kind = "str"
+            tokens.append(_YarnToken(kind, word, spaced))
+            i = match.end()
+        if i < len(line) and line[i] not in " :,":
+            raise ValueError("adjacent yarn.lock tokens")
+        spaced = False
+    return tokens
+
+
+def _yarn_selectors(tokens: list[_YarnToken], berry: bool) -> list[str]:
+    if len(tokens) < 2 or tokens[-1].kind != ":":
+        raise ValueError("invalid yarn.lock header")
+    keys = tokens[:-1]
+    if any(t.kind != "str" for t in keys[::2]) or any(t.kind != "," for t in keys[1::2]):
+        raise ValueError("invalid yarn.lock header")
+    if len(keys) % 2 == 0:
+        raise ValueError("invalid yarn.lock header")
+    selectors = [t.value for t in keys[::2]]
+    if berry:
+        # Berry reads one YAML key and splits it into descriptors.
+        if len(selectors) != 1:
+            raise ValueError("invalid yarn.lock header")
+        selectors = _BERRY_KEY_SEPARATOR.split(selectors[0])
+    if any(not s or s != s.strip() for s in selectors):
+        raise ValueError("empty yarn.lock selector")
+    return selectors
+
+
+def _yarn_lockfile_stanzas(text: str) -> list[tuple[list[str], dict[str, str]]]:
+    """The stanzas of a Yarn v1 or Berry lockfile, each with its selectors and the
+    string fields at its first level. Raises ValueError on any line that Yarn 1's
+    parser, or the YAML reader Berry uses, would read differently or not at all."""
+    lines = _YARN_LINE_BREAK.split(text)
+    if len(lines) > _YARN_LINES:
+        raise ValueError("yarn.lock line limit exceeded")
+    berry = False
+    stanzas: list[tuple[list[str], dict[str, str]]] = []
+    fields: dict[str, str] = {}
+    # The keys of each open object; a line may be indented one level past the last.
+    open_keys: list[set[str]] = []
+    first_header = True
+    for line in lines:
+        if not line or line.startswith("#"):
+            # Yarn 1 closes every open object at an empty or comment line.
+            open_keys = []
+            continue
+        content = line.lstrip(" ")
+        spaces = len(line) - len(content)
+        if not content or spaces % 2 or spaces // 2 > len(open_keys):
+            raise ValueError("invalid yarn.lock indentation")
+        level = spaces // 2
+        if first_header:
+            berry = level == 0 and content == "__metadata:"
+        tokens = _yarn_tokens(content, berry)
+        if level == 0:
+            selectors = _yarn_selectors(tokens, berry)
+            fields = {}
+            if selectors != ["__metadata"]:
+                stanzas.append((selectors, fields))
+            elif not first_header:
+                raise ValueError("misplaced yarn.lock metadata")
+            first_header = False
+            open_keys = [set()]
+            continue
+        del open_keys[level:]
+        if not tokens or tokens[0].kind != "str" or not tokens[0].value:
+            raise ValueError("invalid yarn.lock key")
+        key = tokens[0].value
+        rest = tokens[1:]
+        colon = bool(rest) and rest[0].kind == ":"
+        if colon:
+            rest = rest[1:]
+        elif berry:
+            raise ValueError("yarn.lock field without a colon")
+        if key in open_keys[-1]:
+            raise ValueError("duplicate key in yarn.lock stanza")
+        open_keys[-1].add(key)
+        if not rest and colon:
+            if level == 1 and key in _YARN_SCALAR_FIELDS:
+                raise ValueError("yarn.lock field is not a string")
+            if len(open_keys) >= _YARN_DEPTH:
+                raise ValueError("yarn.lock nesting limit exceeded")
+            open_keys.append(set())
+            continue
+        if len(rest) != 1 or not rest[0].spaced or rest[0].kind in (":", ","):
+            raise ValueError("invalid yarn.lock field")
+        if level == 1 and key in _YARN_SCALAR_FIELDS:
+            if rest[0].kind != "str":
+                raise ValueError("yarn.lock field is not a string")
+            fields[key] = rest[0].value
+    if not stanzas:
+        raise ValueError("empty yarn.lock")
+    return stanzas
 
 
 class RegistryScanner(Scanner):
@@ -1795,49 +1958,18 @@ class RegistryScanner(Scanner):
         """Bind Yarn records to the components, which package.json declares from a
         registry. False when the lockfile is not read."""
         try:
-            text = lock_bytes.decode("utf-8")
-            lines = text.splitlines()
-            if len(lines) > 100_000:
-                raise ValueError("yarn.lock line limit exceeded")
-            stanzas: list[tuple[list[str], dict[str, str]]] = []
-            current_selectors: list[str] | None = None
-            current_fields: dict[str, str] = {}
-            for raw_line in lines:
-                stripped = raw_line.strip()
-                if not stripped or stripped.startswith("#"):
-                    continue
-                if not raw_line[0].isspace():
-                    if not stripped.endswith(":"):
-                        raise ValueError("invalid yarn.lock header")
-                    if current_selectors is not None and current_selectors != ["__metadata"]:
-                        stanzas.append((current_selectors, current_fields))
-                    header = stripped[:-1].strip()
-                    current_selectors = [
-                        s.strip().strip('"').strip("'") for s in header.split(",") if s.strip()
-                    ]
-                    if not current_selectors:
-                        raise ValueError("empty yarn.lock selector")
-                    current_fields = {}
-                else:
-                    if current_selectors is None:
-                        raise ValueError("orphan yarn.lock field")
-                    if raw_line.startswith("  ") and not raw_line.startswith("   "):
-                        match = re.match(r"^([A-Za-z0-9_]+)(?::\s*|\s+)(.+)$", stripped)
-                        if match:
-                            key = match.group(1)
-                            val = match.group(2).strip().strip('"').strip("'")
-                            if key in current_fields:
-                                raise ValueError("duplicate key in yarn.lock stanza")
-                            current_fields[key] = val
-            if current_selectors is not None and current_selectors != ["__metadata"]:
-                stanzas.append((current_selectors, current_fields))
-            if not stanzas:
-                raise ValueError("empty yarn.lock")
+            stanzas = _yarn_lockfile_stanzas(lock_bytes.decode("utf-8"))
         except (ValueError, UnicodeError):
             result.scan_failures.append("yarn.lock: invalid or unsupported lockfile")
             return False
         lock_digest = hash_bytes(lock_bytes)
-        by_pkg: dict[str, list[tuple[str, dict[str, str], str]]] = {}
+        # Yarn keeps the last stanza of a repeated selector; neither is bound.
+        repeated = {
+            sel
+            for sel, count in Counter(s for sels, _ in stanzas for s in set(sels)).items()
+            if count > 1
+        }
+        by_pkg: dict[str, list[tuple[str, dict[str, str], str, bool]]] = {}
         for selectors, fields in stanzas:
             first_sel = selectors[0]
             for sel in selectors:
@@ -1845,7 +1977,9 @@ class RegistryScanner(Scanner):
                 if at_idx <= 0:
                     continue
                 sel_name, sel_spec = sel[:at_idx], sel[at_idx + 1 :]
-                by_pkg.setdefault(sel_name, []).append((sel_spec, fields, first_sel))
+                by_pkg.setdefault(sel_name, []).append(
+                    (sel_spec, fields, first_sel, sel in repeated)
+                )
         for comp in components:
             alias = comp.properties.get("npm_alias")
             if alias is not None:
@@ -1864,16 +1998,16 @@ class RegistryScanner(Scanner):
             req = str(comp.properties.get("requested_version", "")).strip()
             # Yarn records the spec package.json declares; a stanza of another spec is
             # another package's dependency, not what this one installs.
-            chosen = [e for e in entries if e[0].strip() in (req, f"npm:{req}")]
+            chosen = [e for e in entries if e[0] in (req, f"npm:{req}")]
             if not chosen:
                 continue
             distinct_versions = {e[1].get("version") for e in chosen}
-            if len(distinct_versions) > 1:
+            if len(distinct_versions) > 1 or any(e[3] for e in chosen):
                 result.surfaces_excluded.append(
                     f"yarn.lock: multiple package resolutions for {comp.name} are ambiguous"
                 )
                 continue
-            sel_spec, fields, locator_key = chosen[0]
+            sel_spec, fields, locator_key, _ = chosen[0]
             resolution_val = fields.get("resolution", "")
             resolved_val = fields.get("resolved", "")
             if sel_spec.startswith("npm:") and "@" in sel_spec[4:]:

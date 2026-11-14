@@ -659,7 +659,10 @@ A way around a limit that its entry does not describe is worth a
   lower case. The `wheels` and `sdist` URLs of a
   `uv.lock` record are not read, so the recorded origin is the index, not where each
   artifact is downloaded from. Lockfiles of more than one npm package manager, or both
-  `uv.lock` and `poetry.lock`, are a gap and bind no lockfile evidence.
+  `uv.lock` and `poetry.lock`, are a gap and bind no lockfile evidence. `yarn.lock` is
+  read with a strict subset of Yarn 1's lockfile syntax, and of the YAML that Yarn
+  Berry writes: a lockfile edited into another layout that Yarn still accepts, such
+  as one with indented comments, is a collection failure.
 - **Some lockfiles are not read.** `Pipfile.lock`, `pdm.lock`, `bun.lock` and
   `bun.lockb` give each package they may resolve a low `lockfile_unread` finding,
   not a gap.

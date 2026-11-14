@@ -590,9 +590,10 @@ def node_lock(
             f"  openai@{version}:\n"
             "    resolution:\n" + resolution
         )
-    lines = [f'"openai@{spec}":', f'  version "{version}"']
+    # Yarn writes its quoted strings as JSON strings.
+    lines = [f'"openai@{spec}":', f"  version {json.dumps(version)}"]
     if resolved is not None:
-        lines.append(f'  resolved "{resolved}"')
+        lines.append(f"  resolved {json.dumps(resolved)}")
     lines.append(f"  integrity {integrity}")
     return "# yarn lockfile v1\n\n" + "\n".join(lines) + "\n"
 
