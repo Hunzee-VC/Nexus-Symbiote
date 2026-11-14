@@ -359,7 +359,8 @@ scan:
   # These four directories are always skipped. Any other path listed here is a
   # recorded coverage gap, so the scan gate fails; use it only with report-only scans.
   exclude_paths: ["node_modules", ".git", "__pycache__", ".venv"]
-  failure_mode: "error"  # or "report-only": never fail CI
+  failure_mode: "error"  # "report-only" prints findings without failing; in CI
+  # that takes --report-only or --accept-project-policy on the invocation too
 risk:
   fail_threshold: 50.0  # aggregate score; lowering it is stricter
   warn_threshold: 25.0  # must not exceed fail_threshold

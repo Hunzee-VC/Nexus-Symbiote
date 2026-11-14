@@ -733,6 +733,7 @@ nexus-symbiote scan [OPTIONS] [PROJECT_PATH]
 | `--check` | Collect and apply the scan gate without writing an inventory. Cannot be combined with `-o`. |
 | `--signature-policy` `PATH` | Explicit operator signer policy JSON |
 | `--no-project-policy` | Use built-in policy without reading configuration from the target. |
+| `--accept-project-policy` | In CI, honor a report-only failure mode set by the scanned project's policy file; without this flag a failed gate still exits 1 there. |
 
 `PROJECT_PATH` is resolved before collection, because the collectors refuse a root
 reached through a symbolic link. When it resolves through a link, `scan` names the
