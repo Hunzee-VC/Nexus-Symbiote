@@ -972,6 +972,27 @@ def _observed_tool(checked: CheckedDescriptor) -> ObservedTool:
     )
 
 
+# A session identifier shorter than this is not a credential worth guarding, and it
+# would occur by chance in ordinary declarations.
+MIN_GUARDED_SESSION_ID = 8
+
+
+def _repeats(value: Any, text: str) -> bool:
+    """Whether ``text`` occurs in any string or key of a JSON value."""
+    pending = [value]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, str):
+            if text in item:
+                return True
+        elif isinstance(item, dict):
+            pending.extend(item)
+            pending.extend(item.values())
+        elif isinstance(item, list):
+            pending.extend(item)
+    return False
+
+
 def _mask_exact(value: Any, secrets: list[str]) -> Any:
     """Mask only the exact credential values; the raw review copy keeps everything else."""
     if isinstance(value, str):
@@ -1177,7 +1198,20 @@ def discover_tools(
                 not 0x21 <= ord(c) <= 0x7E for c in session
             ):
                 raise DiscoveryError("invalid MCP session identifier")
-        secrets = [value for value in (bearer_token, session) if value]
+        # The server chooses its session identifier, so it is never a redaction pattern:
+        # as one, it would let the server blank any text of its own out of the inventory
+        # and the review copy while the fingerprints still bind that text. A declaration
+        # that repeats the identifier ends the observation instead.
+        guarded = (
+            session if session is not None and len(session) >= MIN_GUARDED_SESSION_ID else None
+        )
+
+        def refuse_session(declaration: Any) -> None:
+            if guarded is not None and _repeats(declaration, guarded):
+                raise DiscoveryError("server declaration repeats the session identifier")
+
+        secrets = [bearer_token] if bearer_token else []
+        refuse_session(hello)
         negotiated, server_info, capabilities, instructions, identity = check_server_hello(
             hello, secrets
         )
@@ -1197,6 +1231,7 @@ def discover_tools(
         extensions: dict[str, str] = {}
         for raw_tool in listing("tools/list", "tools"):
             check_deadline()
+            refuse_session(raw_tool)
             checked = check_served_tool(raw_tool, secrets)
             if checked.name in names:
                 raise DiscoveryError("duplicate tool identity across discovery pages")
@@ -1223,6 +1258,7 @@ def discover_tools(
                 return None, None
             for raw_item in raw_items:
                 check_deadline()
+                refuse_session(raw_item)
                 item = check_listed_item(raw_item, identity, secrets)
                 if item.identity in digests:
                     raise DiscoveryError("duplicate list entry identity")

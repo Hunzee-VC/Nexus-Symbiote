@@ -472,7 +472,7 @@ nexus-symbiote discover-mcp [OPTIONS] ENDPOINT
 | `--client-name` `TEXT` | `clientInfo` name sent in `initialize` (default: `nexus-symbiote-discovery`); use your production host's so the server cannot single out the observer. |
 | `--client-version` `TEXT` | `clientInfo` version sent in `initialize` (default: the tool version). |
 | `--user-agent` `TEXT` | `User-Agent` header to send; none is sent by default. |
-| `--raw-descriptors` `PATH` | Also write the unredacted server info, capabilities, instructions, tool descriptors, prompts and resource templates to this new file (mode 0600) for review; only the bearer token and session ID are masked. |
+| `--raw-descriptors` `PATH` | Also write the unredacted server info, capabilities, instructions, tool descriptors, prompts and resource templates to this new file (mode 0600) for review; only the bearer token is masked, and a server whose declarations repeat its own session ID (of eight or more characters) ends the observation. |
 
 ### `export-inventory`
 
