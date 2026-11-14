@@ -22,6 +22,7 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ### Fixed
 
+- Runtime guides distinguish authorization denial from an admitted execution that raises after a side effect; the runnable example verifies the admission record and consumed approval. Malformed-inventory tests now reach schema validation with valid JSON, and collection-gap baseline tests establish a passing local subject before asserting each specific gap.
 - TypeScript collection records SDK uses hidden by `eval` wrappers, URL queries and fragments, and method names, and records nothing from ambient declarations. Python collection judges a helper only when a call must reach its definition, reads git revisions where pip and uv read them, and counts module literals behind `*` and `**`.
 - Claude settings with an invalid `permissions` value keep their other declarations, and keys the redaction makes equal keep every value in the drift digest.
 - Lockfile collection binds pnpm and Yarn records only to what they resolve and checks Python lock versions against every declaration; a private Python index is named in the package URL.
