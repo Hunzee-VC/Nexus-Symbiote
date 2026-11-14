@@ -2139,7 +2139,7 @@
             }
           ],
           "default": null,
-          "description": "claude-code, codex, cursor, antigravity, xai, windsurf, cline",
+          "description": "claude-code, codex, cursor, gemini, antigravity, xai, windsurf, cline, copilot",
           "title": "Ide Type"
         },
         "config_files": {
@@ -3574,7 +3574,7 @@
             }
           ],
           "default": null,
-          "description": "npm, pypi or docker-hub from built-in collectors; huggingface, mcp-registry and skill-marketplace are reserved for supplied inventories",
+          "description": "npm, pypi, docker-hub or oci from built-in collectors; huggingface, mcp-registry and skill-marketplace are reserved for supplied inventories",
           "title": "Registry Type"
         },
         "registry_uri": {
@@ -4097,7 +4097,7 @@
             }
           ],
           "default": null,
-          "description": "Canonicalization protocol, or unknown for legacy fingerprints",
+          "description": "Canonicalization protocol; absent, or an earlier one, for legacy fingerprints",
           "title": "Definition Hash Version"
         }
       },

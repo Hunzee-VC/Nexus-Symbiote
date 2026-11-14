@@ -60,7 +60,8 @@ def inventory_digests(raw: bytes) -> InventoryDigests:
     Raises ``NativeFormatError`` when the bytes are not a native inventory this build
     reads.
     """
-    # Imported here: core.aibom imports this module to derive serial numbers.
+    # Imported here so that importing this module does not load the runtime gateway and
+    # its cryptography and sqlite3 dependencies.
     from nexus_symbiote.runtime import AuthorizationError, bom_digest
 
     document = parse_native_bytes(raw)

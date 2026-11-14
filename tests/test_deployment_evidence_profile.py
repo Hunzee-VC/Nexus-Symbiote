@@ -126,6 +126,13 @@ def test_timestamps_must_have_timezone():
         )
 
 
+@pytest.mark.parametrize("value", ["1700000000", "99999999999", "1700000000.5", "-5"])
+def test_a_string_of_digits_is_not_read_as_unix_time(value):
+    with pytest.raises(ValidationError):
+        evidence(collected_at=value)
+    assert evidence(collected_at="2026-01-01T00:00:00Z").collected_at == NOW
+
+
 def test_native_schema_checks_deployment_profile_shape():
     schema = json.loads(
         (Path(__file__).parents[1] / "schemas" / "nexus-symbiote-aibom-1.0.schema.json").read_text()

@@ -63,8 +63,10 @@ _SUBINTERPRETER_MODULES = ("_interpreters", "_xxsubinterpreters")
 _MISSING = object()
 # CPython raises these audit events inside the C implementations, so they also
 # catch _socket.socket methods, references captured before the guard, and
-# connect_ex (which raises socket.connect). listen, accept, send and recv have
-# no audit event; the attribute patches above remain the guard for those.
+# connect_ex (which raises socket.connect). listen, accept, send and recv raise
+# no audit event: listen is patched above, accept is refused by the socket.__new__
+# check below when the accepted socket is not Unix-domain, and send and recv are
+# not guarded, so a socket created before the guard keeps them.
 # _posixsubprocess.fork_exec has no audit event either; it is patched instead.
 _AUDIT_EVENTS = {
     "socket.connect": "network access (socket.connect)",

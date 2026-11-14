@@ -314,11 +314,18 @@ def hash_tool_definition(
 
 
 def hash_file(path: Path, algorithm: str = "sha256") -> str | None:
-    """Hash a file's contents. Returns None if the file does not exist."""
-    if not path.is_file():
-        return None
+    """Hash a regular file's contents, read without following a symbolic link.
+
+    Returns None when ``path``, or a directory on the way to it, does not exist. Any
+    other failure raises ``OSError``, including a symbolic link, whatever it points to,
+    and anything that is not a regular file.
+    """
     h = hashlib.new(algorithm)
-    with open_regular_file(path) as f:
+    try:
+        stream = open_regular_file(path)
+    except FileNotFoundError:
+        return None
+    with stream as f:
         while chunk := f.read(8192):
             h.update(chunk)
     return f"{algorithm}:{h.hexdigest()}"

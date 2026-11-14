@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from nexus_symbiote.core.hashing import (
     canonical_json,
     extract_version_pin,
@@ -115,6 +117,19 @@ class TestHashFile:
         f = tmp_path / "test.bin"
         f.write_bytes(b"data")
         assert hash_file(f) == hash_file(f)
+
+    def test_missing_directory(self, tmp_path):
+        assert hash_file(tmp_path / "absent" / "nope") is None
+
+    @pytest.mark.parametrize("target", ["real.txt", "absent.txt", "directory"])
+    def test_links_and_directories_raise_whatever_they_point_to(self, tmp_path, target):
+        (tmp_path / "real.txt").write_bytes(b"data")
+        (tmp_path / "directory").mkdir()
+        (tmp_path / "link").symlink_to(target)
+        with pytest.raises(OSError):
+            hash_file(tmp_path / "link")
+        with pytest.raises(OSError):
+            hash_file(tmp_path / "directory")
 
 
 class TestHashBytes:

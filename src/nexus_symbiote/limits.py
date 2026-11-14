@@ -159,7 +159,7 @@ def format_value(name: str, value: int) -> str:
     for suffix, size in (("GiB", GIB), ("MiB", MIB), ("KiB", KIB)):
         if value >= size and value % size == 0:
             return f"{value // size} {suffix}"
-    return f"{value} bytes"
+    return f"{value} byte" if value == 1 else f"{value} bytes"
 
 
 @dataclass(frozen=True)

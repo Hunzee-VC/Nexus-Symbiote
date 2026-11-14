@@ -307,3 +307,24 @@ class TestAIBOM:
         assert s["total_components"] == 1
         assert s["total_risks"] == 1
         assert "high" in s["risk_breakdown"]
+
+    def test_summary_is_json_like_the_summary_command(self):
+        from datetime import UTC, datetime
+
+        bom = AIBOM()
+        bom.metadata.completeness = CompletenessClaim(
+            scope="repository", timestamp=datetime(2026, 1, 1, tzinfo=UTC)
+        )
+        completeness = json.loads(json.dumps(bom.summary()))["completeness"]
+        assert completeness["timestamp"] == "2026-01-01T00:00:00Z"
+
+
+def test_value_descriptions_name_every_value_a_built_in_collector_emits():
+    from nexus_symbiote.core.models import IDEAgentComponent, RegistryEntryComponent
+    from nexus_symbiote.scanners.ide_agents import IDE_AGENT_CONFIGS
+
+    ide = IDEAgentComponent.model_fields["ide_type"].description
+    assert set(IDE_AGENT_CONFIGS) <= set(ide.split(", "))
+    registry = RegistryEntryComponent.model_fields["registry_type"].description
+    built_in = registry.split(" from built-in collectors")[0].replace(" or ", ", ").split(", ")
+    assert set(built_in) == {"npm", "pypi", "docker-hub", "oci"}

@@ -37,7 +37,7 @@ A schema-valid document is not a verified one. Validity says nothing about wheth
 
 ## Compatibility
 
-Unknown fields are rejected rather than ignored, on every object including dependency edges, so a producer cannot smuggle unreviewed semantics into a document. Booleans, integers and timestamps are as strict as the schema: the model refuses `"no"` or `0` for a boolean, `"3"` for an integer and a number for a timestamp. Missing security values mean **unknown**, not `false`; see the [security defaults migration](../docs/security-defaults-migration.md). Standard exports (CycloneDX 1.7 and SPDX 3.0.1) are validated against the official schemas vendored under `src/nexus_symbiote/generators/schemas/vendor/`, whose provenance digests the hygiene check and the package verify. [Standard exports](../docs/standard-exports.md#extension-properties) lists the properties that carry the native semantics.
+Unknown fields are rejected rather than ignored, on every object including dependency edges, so a producer cannot smuggle unreviewed semantics into a document. Booleans, integers and timestamps are as strict as the schema: the model refuses `"no"` or `0` for a boolean, `"3"` for an integer and a number, or a string of digits such as `"1700000000"`, for a timestamp. Missing security values mean **unknown**, not `false`; see the [security defaults migration](../docs/security-defaults-migration.md). Standard exports (CycloneDX 1.7 and SPDX 3.0.1) are validated against the official schemas vendored under `src/nexus_symbiote/generators/schemas/vendor/`, whose provenance digests the hygiene check and the package verify. [Standard exports](../docs/standard-exports.md#extension-properties) lists the properties that carry the native semantics.
 
 ### Format versions
 

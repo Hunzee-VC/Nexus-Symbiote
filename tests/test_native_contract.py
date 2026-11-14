@@ -211,6 +211,52 @@ def test_writer_and_reader_share_one_size_limit(tmp_path, monkeypatch):
         AIBOM.load(path)
 
 
+@pytest.mark.parametrize(
+    ("document", "check"),
+    [
+        (
+            {"metadata": {"timestamp": "2026-01-01T00:00:00"}},
+            "export timestamps must include a timezone",
+        ),
+        (
+            {
+                "components": [{"bom_ref": "agent:a", "component_type": "agent", "name": "a"}],
+                "dependencies": [
+                    {"source_ref": "agent:a", "target_ref": "agent:b", "relationship": "invokes"}
+                ],
+            },
+            "dependency references an unknown component",
+        ),
+    ],
+)
+def test_a_readable_document_the_writer_refuses_fails_as_a_format_error(tmp_path, document, check):
+    from nexus_symbiote.core.aibom import NativeFormatError
+
+    bom = AIBOM.from_native(document)
+    with pytest.raises(NativeFormatError, match=f"consistency checks: {check}"):
+        bom.to_native_json()
+    with pytest.raises(NativeFormatError):
+        bom.save(tmp_path / "bom.json")
+    assert not (tmp_path / "bom.json").exists()
+
+
+def test_an_inventory_without_a_serial_fails_as_a_format_error_with_the_serial_text():
+    from nexus_symbiote.core.aibom import NO_CONTENT_SERIAL, NativeFormatError
+
+    bom = AIBOM(components=[AgentComponent(bom_ref="agent:a", name="\ud800")])
+    with pytest.raises(NativeFormatError) as refused:
+        bom.to_native_json()
+    assert f"Inventory not written. {refused.value}" == NO_CONTENT_SERIAL
+
+
+@pytest.mark.parametrize("value", ["1700000000", "99999999999", "-5"])
+def test_a_string_of_digits_is_not_read_as_a_timestamp(value):
+    document = AIBOM().to_dict()
+    document["metadata"]["timestamp"] = value
+    with pytest.raises(ValidationError):
+        AIBOM.model_validate(document)
+
+
 def test_overlong_references_are_refused():
     from nexus_symbiote.core.models import MAX_REFERENCE_CHARS
 

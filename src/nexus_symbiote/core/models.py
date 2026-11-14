@@ -277,7 +277,7 @@ class ToolComponent(ComponentBase):
 
     definition_hash_version: str | None = Field(
         default=None,
-        description="Canonicalization protocol, or unknown for legacy fingerprints",
+        description="Canonicalization protocol; absent, or an earlier one, for legacy fingerprints",
     )
 
 
@@ -439,8 +439,8 @@ class RegistryEntryComponent(ComponentBase):
     registry_type: str | None = Field(
         default=None,
         description=(
-            "npm, pypi or docker-hub from built-in collectors; huggingface, mcp-registry and "
-            "skill-marketplace are reserved for supplied inventories"
+            "npm, pypi, docker-hub or oci from built-in collectors; huggingface, mcp-registry "
+            "and skill-marketplace are reserved for supplied inventories"
         ),
     )
     registry_uri: str | None = None
@@ -511,7 +511,9 @@ class IDEAgentComponent(ComponentBase):
     component_type: Literal[ComponentType.IDE_AGENT] = ComponentType.IDE_AGENT
     ide_type: str | None = Field(
         default=None,
-        description="claude-code, codex, cursor, antigravity, xai, windsurf, cline",
+        description=(
+            "claude-code, codex, cursor, gemini, antigravity, xai, windsurf, cline, copilot"
+        ),
     )
     config_files: list[str] = Field(default_factory=list)
     mcp_server_refs: list[str] = Field(default_factory=list)

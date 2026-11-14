@@ -1694,12 +1694,7 @@ def summary(aibom_path: str, json_output: bool = False) -> None:
     bom = _load_bom(aibom_path)
     s = bom.summary()
     if json_output:
-        claim = bom.metadata.completeness
-        document = {
-            **s,
-            "completeness": claim.model_dump(mode="json", exclude_none=True) if claim else None,
-        }
-        click.echo(json_text(json.dumps(document, indent=2)))
+        click.echo(json_text(json.dumps(s, indent=2)))
         return
     lines: list[ReportLine] = [
         ("AIBOM Summary", "bold"),
