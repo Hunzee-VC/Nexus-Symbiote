@@ -347,7 +347,7 @@ A way around a limit that its entry does not describe is worth a
 - **Templates and tensors are checked shallowly.** GGUF and Hugging Face chat
   templates are checked only for known sandbox-escape shapes. The check matches text:
   some constructions of dunder names, such as `dict(__class__=1)|first` or
-  `"_" ~ "_class_" ~ "_"`, are not found, although direct attribute access such as
+  `("_"*2) ~ "class" ~ ("_"*2)`, are not found, although direct attribute access such as
   `obj.__class__` is found. Without other unsafe evidence, a SafeTensors model
   beside an unrecognized template keeps its `safe` serialization rating; that
   rating does not establish that the template is safe to render. A template file larger
