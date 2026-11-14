@@ -324,29 +324,177 @@ def _projected_text(value: str, *, unkeyed: bool) -> str:
 # word, such as `--password 482913` or `X-Pin: 482913`, so the digest keeps only its
 # shape: the program each command runs and the origin of each URL.
 _COMMAND_KEYS = frozenset({"command", "args", "notify", "headershelper"})
-_COMMAND_STARTS = frozenset(";|&(`\n")
 _HEADER_MAPS = frozenset({"headers", "httpheaders", "http_headers", "env_http_headers"})
+# A command word kept by shape: a path or name, quoted or not, that may refer to a
+# variable by name but expands nothing else, so `${PIN:-482913}` is not kept.
+_PROGRAM_WORD = re.compile(r"(?:[\w./~+@%:,*?\[\]-]|\$\w+|\$\{\w+\})+")
+_ASSIGNMENT = re.compile(r"[A-Za-z_]\w*(?:\[[^\]]*\])?\+?=")
+_BLANKS = frozenset(" \t")
+_SEPARATORS = frozenset(";&|\n")
+
+
+class _CommandShape:
+    """A shell command line split into text runs and operators, read conservatively.
+
+    A word is kept as a program only where a shell runs it as a command: first in the
+    value or after `;`, `&`, `|`, a newline, `(`, `$(` or an opening backtick, after
+    any `NAME=value` assignments and file descriptor numbers. Quoted text, an escaped or
+    continued line (`\\` before a newline), a comment, a redirection target, arithmetic
+    (`((...))`, `$((...))`), an array assignment and a `[[ ... ]]` test start no command.
+    Everything after `case`, whose patterns follow command separators, and from a here
+    document or here-string operator (`<<`, `<<-`, `<<<`) to the end of the value, whose
+    body the operator does not end, keeps no word.
+    """
+
+    def __init__(self, value: str, *, program: bool, unkeyed: bool) -> None:
+        self.value = value
+        self.unkeyed = unkeyed
+        self.out: list[str] = []
+        self.run: list[str] = []
+        self.word: list[str] = []
+        self.program: str | None = None
+        self.start = program
+        self.programs = program
+        self.redirect = False
+        self.quiet = 0
+        self.test = False
+        self.backtick = False
+
+    def _end_word(self, following: str) -> None:
+        if not self.word:
+            return
+        word = "".join(self.word)
+        self.word.clear()
+        if self.test:
+            self.test = word != "]]"
+            return
+        if self.redirect:
+            self.redirect = False
+            return
+        if not self.start or self.quiet:
+            return
+        if word.isdigit() and following in "<>":
+            return
+        if _ASSIGNMENT.match(word):
+            return
+        self.start = False
+        bare = word.replace('"', "").replace("'", "")
+        if self.program is None and "://" not in word and _PROGRAM_WORD.fullmatch(bare):
+            self.program = word
+        if word == "case":
+            self.programs = False
+        elif word == "[[":
+            self.test = True
+
+    def _flush(self) -> None:
+        text = "".join(self.run)
+        self.run.clear()
+        parts = _url_pieces(text)
+        if self.unkeyed and any(_ambiguous_authority(part) for part in parts):
+            raise AmbiguousURLError("a URL authority is ambiguous")
+        kept = redact_text(self.program).split()[:1] if self.program else []
+        for part in parts:
+            words = redact_text(part).split()
+            if "://" in part[:64] and _URL_AUTHORITY.match(part) and words:
+                # Text glued to the origin by a quote, as in `https://a.example"482913"`,
+                # is not part of it.
+                origin = _URL_AUTHORITY.match(words[0])
+                kept.append(origin.group(0) if origin else words[0])
+        self.program = None
+        self.out.append(" ".join(kept) if kept else (REDACTED if text.strip() else ""))
+
+    def _operator(self, text: str, index: int, *, starts: bool = False) -> int:
+        self._end_word(text[0])
+        self._flush()
+        self.out.append(text)
+        self.redirect = False
+        if starts:
+            self.start = self.programs and not self.quiet and not self.test
+        return index + len(text)
+
+    def _quoted(self, index: int, close: str, *, escapes: bool) -> int:
+        end = index + 1
+        while end < len(self.value) and self.value[end] != close:
+            end += 2 if escapes and self.value[end] == "\\" else 1
+        end = min(end + 1, len(self.value))
+        self.word.append(self.value[index:end])
+        self.run.append(self.value[index:end])
+        return end
+
+    def shape(self) -> str:
+        value, index = self.value, 0
+        while index < len(value):
+            char, following = value[index], value[index + 1 : index + 2]
+            if char in _BLANKS:
+                self._end_word(char)
+                self.run.append(char)
+                index += 1
+            elif char == "\\":
+                # A backslash before LF or CRLF continues the line, as a shell reads it
+                # whichever line ending the settings file was saved with.
+                width = 3 if value[index + 1 : index + 3] == "\r\n" else 2
+                if value[index + 1 : index + width] not in ("\n", "\r\n"):
+                    self.word.append(value[index : index + width])
+                self.run.append(value[index : index + width])
+                index += width
+            elif char == "'":
+                index = self._quoted(index, "'", escapes=False)
+            elif char == '"':
+                index = self._quoted(index, '"', escapes=True)
+            elif char == "$" and following == "'":
+                self.word.append("$")
+                self.run.append("$")
+                index = self._quoted(index + 1, "'", escapes=True)
+            elif char == "#" and not self.word:
+                end = value.find("\n", index)
+                index = len(value) if end == -1 else end
+            elif char == "<" and following == "<":
+                operator = value[index : index + 3]
+                if operator not in ("<<<", "<<-"):
+                    operator = "<<"
+                self._operator(operator, index)
+                if value[index + len(operator) :].strip():
+                    self.out.append(REDACTED)
+                return "".join(self.out)
+            elif char in "<>" or (char == "&" and following == ">"):
+                operator = char + following if following in "<>&|" else char
+                if operator == "&>" and value[index + 2 : index + 3] == ">":
+                    operator += ">"
+                index = self._operator(operator, index)
+                self.redirect = True
+            elif char in _SEPARATORS:
+                index = self._operator(char, index, starts=True)
+            elif char == "`":
+                self.backtick = not self.backtick
+                index = self._operator(char, index, starts=self.backtick)
+                self.start = self.start and self.backtick
+            elif char == "(" or (char == "$" and following == "("):
+                array = not self.quiet and self.word[-1:] == ["="]
+                operator = "$(" if char == "$" else "("
+                arithmetic = value[index + len(operator) : index + len(operator) + 1] == "("
+                if arithmetic:
+                    operator += "("
+                index = self._operator(operator, index, starts=not array and not arithmetic)
+                if self.quiet or array or arithmetic:
+                    self.quiet += operator.count("(")
+                    self.start = False
+            elif char == ")":
+                index = self._operator(char, index)
+                self.quiet = max(self.quiet - 1, 0)
+                self.start = False
+            else:
+                self.word.append(char)
+                self.run.append(char)
+                index += 1
+        self._end_word("")
+        self._flush()
+        return "".join(self.out)
 
 
 def _free_text(value: str, *, program: bool, unkeyed: bool) -> str:
-    """``value`` by shape: every URL origin and, when ``program``, the first word of each
-    command that a shell operator starts; operators are kept, other words are not."""
-    pieces = _SHELL_OPERATORS.split(value)
-    for index in range(0, len(pieces), 2):
-        starts = program and (not index or pieces[index - 1][-1] in _COMMAND_STARTS)
-        parts = _url_pieces(pieces[index])
-        if unkeyed and any(_ambiguous_authority(part) for part in parts):
-            raise AmbiguousURLError("a URL authority is ambiguous")
-        kept: list[str] = []
-        for number, part in enumerate(parts):
-            words = redact_text(part).split()
-            if "://" in part[:64] and _URL_AUTHORITY.match(part) and words:
-                kept.append(words[0])
-            elif starts and number == 0:
-                # A leading assignment such as `PIN=482913 run.sh` is not the program.
-                kept.extend([word for word in words if "=" not in word][:1])
-        pieces[index] = " ".join(kept) if kept else (REDACTED if pieces[index].strip() else "")
-    return "".join(pieces)
+    """``value`` by shape: every URL origin and, when ``program``, the program word of
+    each command (``_CommandShape``); operators are kept, other words are not."""
+    return _CommandShape(value, program=program, unkeyed=unkeyed).shape()
 
 
 # Lists of permission rules such as `Bash(mysql -p482913 db:*)`, by the key that holds
