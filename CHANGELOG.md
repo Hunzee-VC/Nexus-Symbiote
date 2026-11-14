@@ -30,6 +30,19 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 - Instruction files that contain U+2028 or U+2029 are a low `line_separators` finding. Ordinary spaces, including NBSP and the ideographic space, are not findings.
 - The OpenSSF Scorecard workflow grants no permissions at the top level, so a job added later does not inherit `read-all`.
 - `.gitleaks.toml` extends Gitleaks' built-in rules (`[extend] useDefault = true`); a custom configuration without that line loads no detection rules. It exempts no directory, so a real credential under `tests/` is still reported. No CI job or pre-commit hook in this repository consumes the file; it only shapes a third-party or local gitleaks run.
+- **Breaking:** RAG structure profile v2 no longer exports unkeyed inline-document
+  fingerprints, which let inventory holders confirm guesses of document contents.
+  Inline content drift requires `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`; without it,
+  nonempty documents add a low completeness finding and only their count is recorded.
+  Every RAG source's `static_config_hash` changes once under v2, not only sources
+  with inline documents: the profile name is part of the digested structure, and an
+  absent `documents` key is digested as `{"present": false}` where v1 digested
+  `null`. On an unchanged project, `diff` against a v1 baseline (one that 0.2.0
+  wrote) raises a high `properties.static_config_hash changed` alert for every RAG
+  source, and `validate --project` fails reconciliation on every v1 inventory that
+  records a RAG source, until both are recollected. Recollect and review v1
+  baselines, and treat prior inventories as sensitive; see
+  [RAG source binding](docs/verification-source-binding.md#rag-sources).
 - **Breaking (GitHub Action):** `fail-on-severity` defaults to `high`. A finding at or above that severity fails the Action even when the aggregate score stays under `risk-threshold`. The previous Action behavior failed on severity only for critical findings, so a pull request that granted `bypassPermissions` and `Bash(*)`, added an automatic hook and launched unpinned `npx -y` servers could pass every default gate with a score under 50. Set `fail-on-severity: critical` to keep that behavior. `none` disables the severity check and is printed as a warning. The CLI and the built-in project policy still default to `critical`. The aggregate score is the uncapped sum of finding weights; `risk --json-output` records `gate.score_scale` as `unbounded-sum`, and a score equal to `fail_threshold` is reported as at or above the threshold.
 - `advisories --exclude` matches npm names in any case, and refuses a pattern with a `*` anywhere but at its end instead of sending the name it could never match. A scoped registry's package name and both values of a shadowed header are withheld.
 - Secret redaction covers keys, escaped quotes and Negotiate/NTLM credentials, and A2A card signature headers shaped like credentials are withheld.

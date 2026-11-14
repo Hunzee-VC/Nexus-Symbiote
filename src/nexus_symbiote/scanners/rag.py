@@ -59,7 +59,7 @@ STORE_IMPORTS = {
 }
 _IMPORT_MARKERS = tuple(name.encode() for name in STORE_IMPORTS)
 ENV_FILES = {".env", ".env.example", ".env.local"}
-SOURCE_STRUCTURE_PROFILE = "nexus-symbiote/rag-source-structure/v1"
+SOURCE_STRUCTURE_PROFILE = "nexus-symbiote/rag-source-structure/v2"
 SOURCE_VALUE_BINDING_PROFILE = "nexus-symbiote/rag-source-values/v1"
 _SOURCE_FIELDS = frozenset(
     {
@@ -252,7 +252,13 @@ def _describe(value: Any, urls: list[str], depth: int = 0) -> tuple[Any, bool]:
         unbound = False
         for key, item in value.items():
             name = redact_text(str(key))
-            described[name], gap = _describe(item, urls, depth + 1)
+            if key == "documents":
+                # Documents are content, not endpoint configuration. Even a hash,
+                # boolean, object key or URL origin can disclose a guess about them.
+                described[name] = _documents_shape(item)
+                gap = item is not None and item != []
+            else:
+                described[name], gap = _describe(item, urls, depth + 1)
             unbound |= gap or name != key
         return described, unbound
     if isinstance(value, list):
@@ -271,6 +277,17 @@ def _describe(value: Any, urls: list[str], depth: int = 0) -> tuple[Any, bool]:
         exported, unbound = _exported_uri(value)
         return {"url": exported, "shape": url_shape(value.strip(), ORIGIN_PATHS)}, unbound
     return type(value).__name__, True
+
+
+def _documents_shape(value: Any) -> dict[str, Any]:
+    """Record only the presence and count of inline documents, never their values."""
+    if value is None:
+        return {"present": False}
+    if isinstance(value, str):
+        return {"present": True, "count": 1}
+    if isinstance(value, list):
+        return {"present": True, "count": len(value)}
+    return {"present": True, "type": type(value).__name__}
 
 
 def _transport_risks(subject: str, urls: list[str], noun: str) -> list[RiskAssessment]:
@@ -633,7 +650,6 @@ class RAGScanner(Scanner):
             documents = [documents]
         if documents is not None and not isinstance(documents, list):
             raise _SourceError("invalid RAG source documents")
-        documents_hash = hash_canonical({"documents": documents}) if documents is not None else None
         controls = {control: _control(source.get(control)) for control in _CONTROLS}
         first_url = len(file_urls)
         values, values_unbound = _describe(
@@ -668,7 +684,7 @@ class RAGScanner(Scanner):
                         {"export": value, "shape": url_shape(uri.strip(), ORIGIN_PATHS)}
                         for uri, (value, _) in zip(locators, exported, strict=True)
                     ],
-                    "documents": documents_hash,
+                    "documents": _documents_shape(documents),
                     "controls": controls,
                     "values": values,
                     "configuration": None if shared is None else shared[0],
@@ -707,6 +723,7 @@ class RAGScanner(Scanner):
                 ("source URIs beyond their exported origins", any(gap for _, gap in exported)),
                 ("values exported only as redaction markers", redacted),
                 ("field values that the record does not export", values_unbound),
+                ("inline document contents", bool(documents)),
             )
             if gap
         ]
@@ -728,8 +745,6 @@ class RAGScanner(Scanner):
             properties["store_type"] = store_type
         if identities:
             properties["index_identities"] = identities
-        if documents_hash is not None:
-            properties["inline_documents_hash"] = documents_hash
         if strategy is not None and chunk_size is not None:
             properties["chunk_size"] = chunk_size
         if urls:

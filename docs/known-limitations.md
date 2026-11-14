@@ -545,6 +545,21 @@ A way around a limit that its entry does not describe is worth a
 - **RAG values that are not exported enter the digest only as their type.** Without
   the key, a content filter written as `"strict"` and changed to `"off"` raises no
   alert. A boolean control is compared.
+- **Inline document contents need the binding key.** RAG source structure v2 records
+  their presence and count without hashing their contents. Without
+  `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, a same-count content change raises no drift
+  alert and a nonempty document list carries a low `completeness` finding. The old
+  v1 structure and `inline_documents_hash` allowed offline guesses of content; older
+  inventories and exports remain sensitive and need recollection.
+- **Every v1 RAG record drifts once under v2.** The profile name is part of the
+  digested structure, and an absent `documents` key is digested as
+  `{"present": false}` where v1 digested `null`, so every RAG source's
+  `static_config_hash` changes once, not only sources with inline documents. On an
+  unchanged project, `diff --fail-on-alert` against a v1 baseline fails with a high
+  `properties.static_config_hash changed` alert for every RAG source, and
+  `validate --project` fails reconciliation on every v1 inventory that records a
+  RAG source, until both are recollected; see
+  [RAG sources](verification-source-binding.md#rag-sources).
 - **RAG transport is read from the locator's scheme.** A `source_uris` entry with a
   clear-text scheme such as `http`, with or without `//`, is a high finding. One with
   another scheme that is neither encrypted nor local, a `host:port`, a connection
@@ -787,6 +802,13 @@ A way around a limit that its entry does not describe is worth a
   and critical alerts, and `validate --project` asks for recollection. Take a new
   baseline with this release at the commit the old one was reviewed at; see
   [take both snapshots the same way](drift-gate.md#take-both-snapshots-the-same-way).
+- **Inventories from 0.2.0 that record a RAG source need a new baseline.** They
+  carry the superseded `nexus-symbiote/rag-source-structure/v1` profile, and every
+  RAG source's `static_config_hash` changes once under v2, whether or not the source
+  declares inline documents. On an unchanged project, `diff --fail-on-alert` against
+  such a baseline fails with a high alert for every RAG source, and
+  `validate --project` asks for recollection; see
+  [every v1 RAG record drifts once under v2](#a2a-and-rag).
 - **Both snapshots need the same binding key.** With a different key, every MCP,
   A2A, RAG and IDE settings binding changes and alerts, and the digests of the IDE
   settings files digested as read differ between a keyed and an unkeyed scan.
