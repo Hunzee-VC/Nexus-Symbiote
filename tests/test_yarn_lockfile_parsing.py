@@ -299,3 +299,74 @@ def test_a_json_string_is_decoded_as_json(tmp_path):
     result, comp = scan(tmp_path, lock)
     assert result.scan_failures == []
     assert comp.package_url == "pkg:npm/openai@4.0.0"
+
+
+# The first stanza as one folded YAML plain scalar: the key a string alias points to.
+FOLDED = json.dumps(f'version "4.0.0" resolved "{PUBLIC}" integrity {SHA512}')
+
+
+@pytest.mark.parametrize(
+    "comment",
+    ["# yarn lockfile v9", "#yarn lockfile v2", "#   yarn lockfile v0010  "],
+)
+def test_a_version_comment_above_1_fails_the_lockfile(tmp_path, comment):
+    # Yarn 1 refuses it and re-reads the file as YAML, where the first stanza is a
+    # string that aliases the second stanza's key.
+    lock = (
+        stanza("openai@4.0.0", PUBLIC)
+        + f"\n{comment}\n\n{FOLDED}:\n"
+        + f'  version: "4.0.0"\n  resolved: "{EVIL}"\n'
+    )
+    result, comp = scan(tmp_path, "# yarn lockfile v1\n\n" + lock)
+    assert result.scan_failures == UNREAD
+    assert_unbound(comp)
+
+
+@pytest.mark.parametrize("comment", ["# yarn lockfile v1", "# yarn lockfile v0", "# lockfile v9"])
+def test_a_version_comment_yarn_accepts_is_read(tmp_path, comment):
+    result, comp = scan(tmp_path, f"{comment}\n\n" + stanza("openai@4.0.0", PUBLIC))
+    assert result.scan_failures == [] and result.surfaces_excluded == []
+    assert comp.package_url == "pkg:npm/openai@4.0.0"
+
+
+@pytest.mark.parametrize("header", ["foo", '"version \\"4.0.0\\""', '"@scope"', "openai@4.0.0, x"])
+def test_a_selector_without_a_package_name_fails_the_lockfile(tmp_path, header):
+    lock = stanza("openai@4.0.0", PUBLIC) + "\n" + stanza(header, EVIL)
+    result, comp = scan(tmp_path, "# yarn lockfile v1\n\n" + lock)
+    assert result.scan_failures == UNREAD
+    assert_unbound(comp)
+
+
+@pytest.mark.parametrize(
+    "lock",
+    [
+        # Yarn 1 looks up `openai@4.0.0` as package.json spells it.
+        "# yarn lockfile v1\n\n"
+        + stanza('"openai@npm:4.0.0"', PUBLIC)
+        + "\n"
+        + stanza("openai@4.0.0", EVIL, integrity=False),
+        "# yarn lockfile v1\n\n"
+        + stanza("openai@4.0.0", PUBLIC)
+        + "\n"
+        + stanza('"openai@npm:4.0.0"', EVIL, integrity=False),
+        # Berry normalizes the declared `4.0.0` to `openai@npm:4.0.0`.
+        BERRY_HEAD
+        + '"openai@4.0.0":\n  version: 4.0.0\n  resolution: "openai@npm:4.0.0"\n'
+        + "  checksum: 10c0/abab\n  languageName: node\n  linkType: hard\n\n"
+        + '"openai@npm:4.0.0":\n  version: 4.0.0\n'
+        + f'  resolution: "openai@{EVIL}"\n  languageName: node\n  linkType: hard\n',
+    ],
+    ids=["v1-npm-first", "v1-bare-first", "berry-bare-first"],
+)
+def test_a_spec_and_its_npm_spelling_in_two_stanzas_bind_neither(tmp_path, lock):
+    result, comp = scan(tmp_path, lock)
+    assert result.scan_failures == []
+    assert result.surfaces_excluded == AMBIGUOUS
+    assert_unbound(comp)
+
+
+def test_one_stanza_with_a_spec_and_its_npm_spelling_is_bound(tmp_path):
+    lock = stanza('"openai@4.0.0", "openai@npm:4.0.0"', PUBLIC)
+    result, comp = scan(tmp_path, "# yarn lockfile v1\n\n" + lock)
+    assert result.scan_failures == [] and result.surfaces_excluded == []
+    assert comp.package_url == "pkg:npm/openai@4.0.0"

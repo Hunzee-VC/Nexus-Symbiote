@@ -809,6 +809,8 @@ _YARN_WORD = re.compile(r"""[^\x00-\x20\x7f-\U0010ffff:,"'\\#]+""")
 _YARN_V1_WORD_START = re.compile(r"[A-Za-z/.-]")
 _YARN_BERRY_WORD_START = re.compile(r"[A-Za-z0-9/._~^<=-]")
 _BERRY_KEY_SEPARATOR = re.compile(r"\s*,\s*")
+# Yarn 1 refuses a version comment above 1 and then re-reads the whole file as YAML.
+_YARN_VERSION_COMMENT = re.compile(r"yarn lockfile v([0-9]+)")
 # The plain scalars Berry's stringifier writes unquoted, which a YAML reader reads as
 # the same string: inner single or repeated spaces, no indicator at the start.
 _BERRY_PLAIN = re.compile(
@@ -964,6 +966,8 @@ def _yarn_lockfile_stanzas(text: str) -> list[tuple[list[str], dict[str, str]]]:
     first_header = True
     for line in lines:
         if not line or line.startswith("#"):
+            if any(int(m.group(1)) > 1 for m in _YARN_VERSION_COMMENT.finditer(line)):
+                raise ValueError("unsupported yarn.lock version")
             # Yarn 1 closes every open object at an empty or comment line.
             open_keys = []
             continue
@@ -978,6 +982,9 @@ def _yarn_lockfile_stanzas(text: str) -> list[tuple[list[str], dict[str, str]]]:
             selectors = _yarn_selectors(_yarn_tokens(content, berry), berry)
             fields = {}
             if selectors != ["__metadata"]:
+                # A key without a package name is no package's record, only an alias target.
+                if any(s.find("@", 1) <= 0 for s in selectors):
+                    raise ValueError("yarn.lock selector without a package name")
                 stanzas.append((selectors, fields))
             elif not first_header:
                 raise ValueError("misplaced yarn.lock metadata")
@@ -2007,23 +2014,15 @@ class RegistryScanner(Scanner):
             result.scan_failures.append("yarn.lock: invalid or unsupported lockfile")
             return False
         lock_digest = hash_bytes(lock_bytes)
-        # Yarn keeps the last stanza of a repeated selector; neither is bound.
-        repeated = {
-            sel
-            for sel, count in Counter(s for sels, _ in stanzas for s in set(sels)).items()
-            if count > 1
-        }
-        by_pkg: dict[str, list[tuple[str, dict[str, str], str, bool]]] = {}
-        for selectors, fields in stanzas:
+        by_pkg: dict[str, list[tuple[str, dict[str, str], str, int]]] = {}
+        for index, (selectors, fields) in enumerate(stanzas):
             first_sel = selectors[0]
             for sel in selectors:
                 at_idx = sel.find("@", 1) if sel.startswith("@") else sel.find("@")
                 if at_idx <= 0:
                     continue
                 sel_name, sel_spec = sel[:at_idx], sel[at_idx + 1 :]
-                by_pkg.setdefault(sel_name, []).append(
-                    (sel_spec, fields, first_sel, sel in repeated)
-                )
+                by_pkg.setdefault(sel_name, []).append((sel_spec, fields, first_sel, index))
         for comp in components:
             alias = comp.properties.get("npm_alias")
             if alias is not None:
@@ -2045,8 +2044,9 @@ class RegistryScanner(Scanner):
             chosen = [e for e in entries if e[0] in (req, f"npm:{req}")]
             if not chosen:
                 continue
-            distinct_versions = {e[1].get("version") for e in chosen}
-            if len(distinct_versions) > 1 or any(e[3] for e in chosen):
+            # Yarn keeps the last stanza of a repeated selector, and which of `X` and
+            # `npm:X` it looks up depends on its version; more than one stanza binds none.
+            if len({e[3] for e in chosen}) > 1:
                 result.surfaces_excluded.append(
                     f"yarn.lock: multiple package resolutions for {comp.name} are ambiguous"
                 )
