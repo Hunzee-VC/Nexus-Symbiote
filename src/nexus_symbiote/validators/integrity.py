@@ -867,10 +867,11 @@ class IntegrityValidator:
     def _check_import_binding(
         self, comp: PromptComponent, project_root: Path | None, report: IntegrityReport
     ) -> None:
-        """Verify the keyed binding of an import whose unkeyed content hash is withheld.
+        """Verify the keyed binding of a prompt file whose unkeyed content hash is withheld.
 
-        The collector withholds the hash of an imported file that is not Markdown, so
-        its absence is not missing evidence. With the operator key the HMAC is
+        The collector withholds the hash of a recorded file whose bytes are not those of
+        an instruction file, such as a non-Markdown import, rule file or symlink target,
+        so its absence is not missing evidence. With the operator key the HMAC is
         recomputed from the file; without the key, or for an inventory collected
         without it, nothing binds the content and the component is counted as unbound.
         A binding under another profile or key cannot be checked and is unknown.
@@ -882,7 +883,7 @@ class IntegrityValidator:
                 IntegrityIssue(
                     comp.bom_ref,
                     "unbound_content",
-                    "Imported file carries no unkeyed content digest by design; collect and "
+                    "Prompt file carries no unkeyed content digest by design; collect and "
                     f"validate with {SOURCE_BINDING_KEY_ENV} to verify its keyed binding",
                     "info",
                 )
@@ -893,7 +894,7 @@ class IntegrityValidator:
                 IntegrityIssue(
                     comp.bom_ref,
                     "binding_profile_unknown",
-                    "Imported file content binding has an unknown profile; re-collect it",
+                    "Prompt file content binding has an unknown profile; re-collect it",
                     "unknown",
                 )
             )
@@ -935,7 +936,7 @@ class IntegrityValidator:
                 IntegrityIssue(
                     comp.bom_ref,
                     "binding_key_unknown",
-                    "Imported file content was bound under another key; validate with the "
+                    "Prompt file content was bound under another key; validate with the "
                     "key it was collected with",
                     "unknown",
                 )

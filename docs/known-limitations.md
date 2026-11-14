@@ -377,9 +377,17 @@ A way around a limit that its entry does not describe is worth a
   gap and is not read, and so is an import, whatever its name, that a symlink
   resolves to such a file, such as `docs/guide.md` linked to `.env`. An imported file is
   inventoried without a content hash unless both the path imported and the file a
-  symlink there leads to, if any, have a Markdown suffix: its exact bytes may hold
-  configuration or secrets, and an unkeyed digest of them could be confirmed by
-  guessing. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` a keyed binding covers the
+  symlink there leads to, if any, have a Markdown suffix (`.md`, `.mdc` or
+  `.markdown`): its exact bytes may hold configuration or secrets, and an unkeyed
+  digest of them could be confirmed by guessing. The same holds for every other file
+  the collector records: an instruction, nested memory, rule, prompt or subagent file
+  keeps its content hash only when its name is Markdown, or is an instruction file name
+  without one (`.cursorrules`, `.clinerules`, `.windsurfrules`, `system_prompt.txt`),
+  or, in a rule, prompt or subagent directory, has no suffix at all; and when a symlink
+  there leads to a file whose name is Markdown or such an instruction file name. So
+  `AGENTS.md` linked to `config/app.json`, `.cursorrules` linked to
+  `docs/rules.txt`, and `.cursor/rules/x.json` or `.clinerules/style.txt` carry no
+  content hash. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` a keyed binding covers the
   content, which `validate --project` with the same key verifies; without the key the
   component carries a low `completeness` finding, validation counts it as unbound, and
   a change to the file raises no alert and fails no validation. A project with more

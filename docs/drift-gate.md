@@ -81,9 +81,12 @@ request with itself, and that gate can never fail.
   `--signature-policy`, like `scan`.
 - **Use the same binding key for both.** Set one `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`
   of 32 or more characters for the baseline and every candidate scan. Without it, the
-  values described above cannot alert; with a different key, every MCP, A2A, RAG and
-  IDE settings binding changes and alerts, and the digests of the IDE settings files
-  digested as read differ between a keyed and an unkeyed scan. Fork `pull_request`
+  values described above cannot alert; with a different key, every MCP, A2A, RAG,
+  IDE settings and prompt file binding changes and alerts. With the key for only one
+  of the two scans, every record that carries the low `completeness` finding for
+  unbound values in the keyless one alerts, whether an MCP server, an IDE agent, a RAG
+  source, an A2A agent or client, or a prompt file whose content hash is withheld, and
+  the digests of the IDE settings files digested as read differ. Fork `pull_request`
   jobs receive no secrets, so collect fork baselines without the key or run keyed
   comparisons on trusted branches. See
   [source binding](verification-source-binding.md).
