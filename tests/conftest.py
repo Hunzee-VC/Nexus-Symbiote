@@ -1,8 +1,11 @@
 """Suite-wide isolation, a per-test time limit, skip accounting and Hypothesis profiles.
 
 Every test starts without the ambient variables that the tool, the Action runner and the gate
-scripts read, with HOME and the XDG directories in a private temporary directory and the
-default collection limits, and must leave no operating mode enforced and no other limits. A
+scripts read, with HOME, the XDG directories and TMPDIR in a private temporary directory and
+the default collection limits, and must leave no operating mode enforced and no other limits.
+Python-level TCP connects, UDP datagrams and name resolution to anywhere but loopback are
+blocked for the test process (subprocesses and native code are not; the tool's own offline
+guard covers its subprocess runs). A
 test that runs longer than ``test_timeout`` seconds fails with its traceback. Every skip is listed with its reason; with ``--strict-skips`` (CI) a skip
 for any reason other than the host's file system, or, outside CI, a missing pip, fails the run.
 """
@@ -14,6 +17,7 @@ import os
 import re
 import signal
 import socket
+import tempfile
 import threading
 from collections.abc import Callable, Iterator
 from types import FrameType, ModuleType
@@ -57,10 +61,18 @@ ISOLATED_NAMES = frozenset(
 PRIVATE_DIRECTORIES = ("XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME")
 # Skips that depend only on the host: a case-insensitive alias exists only on a
 # case-insensitive file system, and some file systems refuse unusual names.
-EXPECTED_SKIP_REASONS = (re.compile(r"case-sensitive"), re.compile(r"file system rejects"))
+# Anchored to the canonical reason texts, so a skip whose reason merely contains
+# the words cannot pass a strict run.
+EXPECTED_SKIP_REASONS = (
+    re.compile(r"\Afile system rejects "),
+    re.compile(r"\Aneeds a case-sensitive file system "),
+    re.compile(r"\Athe file system is case-sensitive\b"),
+)
 # Expected only outside CI: an environment that uv created has no pip, while CI always
 # installs with pip, so there the differential against pip's own reader has to run.
-LOCAL_SKIP_REASONS = (re.compile(r"pip is not importable"),)
+LOCAL_SKIP_REASONS = (
+    re.compile(r"\Apip is not importable here; CI, which installs with pip, runs this test\Z"),
+)
 DEFAULT_TIMEOUT_SECONDS = 300
 
 
@@ -180,6 +192,11 @@ def _isolated_environment(
     monkeypatch.setenv("HOME", str(home))
     for name in PRIVATE_DIRECTORIES:
         monkeypatch.setenv(name, str(home / name.lower()))
+    private_tmp = home / "tmp"
+    private_tmp.mkdir()
+    monkeypatch.setenv("TMPDIR", str(private_tmp))
+    # tempfile caches the directory on first use; the cache must follow TMPDIR.
+    tempfile.tempdir = None
 
     # The suite's own tripwire against a test that reaches the network: connecting,
     # sending a datagram or resolving a name anywhere but the loopback interface, or a
@@ -222,6 +239,8 @@ def _isolated_environment(
     orig_gethostbyname_ex = socket.gethostbyname_ex
     orig_create_connection = socket.create_connection
 
+    # The guards hold in every mode: while a test enforces the offline mode, the
+    # tool's own patches sit in front and these stay as the suite's backstop.
     def _guarded_connect(sock: socket.socket, address: Any) -> Any:
         if _guarded() and not _is_loopback_target(address):
             raise _refuse("socket connection")
@@ -274,9 +293,12 @@ def _isolated_environment(
     monkeypatch.setattr(socket, "create_connection", _guarded_create_connection)
     # Collection limits are process state (the root --limit option sets them): every test
     # starts at the defaults, and what a test leaves in force never reaches the next one.
-    with limits.applied(limits.DEFAULTS):
-        yield
-        limits_left = limits.current() != limits.DEFAULTS
+    try:
+        with limits.applied(limits.DEFAULTS):
+            yield
+            limits_left = limits.current() != limits.DEFAULTS
+    finally:
+        tempfile.tempdir = None
     leaked = modes.current()
     if leaked is not None:
         pytest.fail(f"the test left the {leaked.value} mode enforced", pytrace=False)

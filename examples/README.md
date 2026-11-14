@@ -5,8 +5,9 @@
 [`demo-agent/`](demo-agent) is a small, synthetic agent project: a support
 assistant with three MCP servers, an instruction file, a model file, a retrieval
 source, an A2A agent card, a container image and a coding-agent configuration.
-It exists to be inventoried. Nothing in it is installed, built or run, and the
-whole walkthrough below works without network access or credentials.
+It exists to be inventoried. Nothing in it is installed, built or run. Once the
+tool is installed, every step below except the optional live step 6 works
+without network access or credentials.
 
 For a target you did not author, see the tutorial on
 [scanning a public agent project](../docs/tutorials/scanning-a-public-agent.md):

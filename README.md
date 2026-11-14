@@ -78,7 +78,7 @@ Requires Python 3.11 to 3.14, git, curl and the [GitHub CLI](https://cli.github.
 )
 ```
 
-Paste the block as one unit, unchanged. Nothing is installed unless the attestation passes. [Releasing](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/releasing.md) describes what the attestation does and does not establish.
+Paste the block as one unit, unchanged. The wheel is downloaded, but the package is not installed unless the attestation passes. [Releasing](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/releasing.md) describes what the attestation does and does not establish.
 
 ### Try it in 60 seconds
 

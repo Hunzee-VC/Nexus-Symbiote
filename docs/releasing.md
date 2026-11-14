@@ -89,13 +89,14 @@ as described below.
    `--extra-index-url`):
 
    ```bash
-   python3 -m venv /tmp/rehearsal && . /tmp/rehearsal/bin/activate
+   rehearsal="$(mktemp -d)"
+   python3 -m venv "$rehearsal/venv" && . "$rehearsal/venv/bin/activate"
    pip download --no-deps --index-url https://test.pypi.org/simple/ \
-     nexus-symbiote==<version> -d /tmp/rehearsal-dist
-   cd /tmp/rehearsal-dist
+     nexus-symbiote==<version> -d "$rehearsal/dist"
+   cd "$rehearsal/dist"
    sed 's#  dist/#  #' /path/to/run/SHA256SUMS | grep -F "$(ls ./*.whl | xargs -n1 basename)" \
      | sha256sum --strict -c -
-   pip install /tmp/rehearsal-dist/*.whl
+   pip install "$rehearsal/dist"/*.whl
    nexus-symbiote --version
    ```
 

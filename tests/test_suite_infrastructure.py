@@ -76,6 +76,9 @@ def test_a_hung_test_fails_with_its_traceback_instead_of_stalling_the_run(suite)
         ("sigstore is not installed", False, pytest.ExitCode.OK),
         ("the file system is case-sensitive", True, pytest.ExitCode.OK),
         ("file system rejects the name", True, pytest.ExitCode.OK),
+        # The expected reasons are anchored: containing the words is not enough.
+        ("quarantined for now; file system rejects nothing", True, pytest.ExitCode.TESTS_FAILED),
+        ("flaky on case-sensitive hosts", True, pytest.ExitCode.TESTS_FAILED),
     ],
 )
 def test_only_host_file_system_skips_pass_a_strict_run(suite, reason, strict, status):
