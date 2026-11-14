@@ -1023,8 +1023,9 @@ def _evaluate(dialects: dict[str, Any], schema: dict[str, Any], arguments: Any) 
     except (SchemaError, Unresolvable, re.error):
         return _SCHEMA
     except RecursionError:
-        # A cyclic $ref ({"$ref": "#"}) recurses in jsonschema before any budget
-        # applies; the schema, not the arguments or the worker, is at fault.
+        # Cyclic references can exhaust Python recursion within the worker's
+        # existing CPU, memory and wall-time limits. Report an invalid schema
+        # when that exception arrives before a resource limit ends the worker.
         return _SCHEMA
     return _VALID
 

@@ -124,11 +124,19 @@ those exports have no marker and still recover. Projection 2
 A document with an unknown marker, or one whose standard fields match a
 projection other than the one it declares, is rejected. Recovery returns the
 embedded inventory unchanged; re-export it to give standard-only consumers the
-projection 2 fields. Only projection 1 recovery accepts the undefined license
+current projection's fields. Only projection 1 recovery accepts the undefined license
 IRI. Recovery compares standard fields with the embedded document text, so
 fields that the native model gains in a later release do not make earlier
 exports unrecoverable. See [standard exports](standard-exports.md) for every
 field.
+
+SPDX projection 3 (`spdx-3.0.1/3`) neutralizes control characters and tabs in
+relationship comments. The embedded native conditions remain unchanged. Recovery
+continues to accept projection 2 with its original comment rendering, including
+ordinary multiline conditions; it does not silently reinterpret that marker as
+projection 3. To obtain the neutralized display, recover an older export and
+re-export it. Do not change its projection marker by hand. CycloneDX remains at
+projection 2, and neither native content digests nor tool fingerprints change.
 
 For historical CycloneDX exports that flattened all relationships into
 `dependsOn` and wrote no `conditional` flag, the Python API accepts
@@ -141,7 +149,7 @@ Re-export the recovered inventory to give standard consumers the corrected
 graph and flags.
 
 Exports written by builds before 0.1.0 can fail recovery, because their
-standard fields match neither projection.
+standard fields match none of the supported projections.
 Legacy mode, which only CycloneDX recovery has, does not help with:
 
 - a CycloneDX export whose `dependsOn` already lists only unconditional
