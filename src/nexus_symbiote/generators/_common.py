@@ -235,8 +235,10 @@ def loss_report(bom: AIBOM, target: str, native: dict[str, Any] | None = None) -
             *(
                 [
                     "valid declared package URLs canonicalized",
-                    "standard version fields carry exact versions of registry entries "
-                    "and the declared versions of other kinds, up to 1024 characters",
+                    (
+                        "standard version fields carry exact versions of registry entries "
+                        "and the declared versions of other kinds, up to 1024 characters"
+                    ),
                 ]
                 if preserves_native
                 else []

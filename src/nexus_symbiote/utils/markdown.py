@@ -71,13 +71,23 @@ _HTML_BLOCK_STARTS = (
     re.compile(rf"</?(?:{_BLOCK_TAG_NAMES})(?:{_WHITESPACE}|/?>|$)", re.I),
     re.compile(rf"(?:{_OPEN_TAG}|{_CLOSE_TAG}){_WHITESPACE}*$"),
 )
-_HTML_BLOCK_ENDS = (
+_HTML_BLOCK_ENDS: tuple[re.Pattern[str] | str, ...] = (
     re.compile(r"</(?:pre|script|style|textarea)>", re.I),
-    re.compile(r"-->"),
-    re.compile(r"\?>"),
-    re.compile(r">"),
-    re.compile(r"\]\]>"),
+    "-->",
+    "?>",
+    ">",
+    "]]>",
 )
+"""End conditions of HTML block types 1 to 5; types 2 to 5 end at a literal string."""
+
+
+def _html_block_ends(kind: int, line: str, offset: int) -> bool:
+    end = _HTML_BLOCK_ENDS[kind - 1]
+    if isinstance(end, str):
+        return line.find(end, offset) >= 0
+    return end.search(line, offset) is not None
+
+
 # Inline: what pairs backticks, and what can take one out of a code span.
 _INLINE_SPECIAL = re.compile(r"[\\`\[\]<]")
 _BACKTICKS = re.compile(r"`+")
@@ -198,7 +208,7 @@ class _Reader:
             raise _AmbiguousError
         if block.kind in ("paragraph", "fence", "indented", "html"):
             self._add_line()
-            if 1 <= block.html <= 5 and _HTML_BLOCK_ENDS[block.html - 1].search(line, self.offset):
+            if 1 <= block.html <= 5 and _html_block_ends(block.html, line, self.offset):
                 self._finalize()
         elif self.offset < len(line) and not self.blank:
             self._add_child("paragraph")

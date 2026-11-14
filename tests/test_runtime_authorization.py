@@ -737,8 +737,6 @@ def test_utf8_input_is_accepted_as_bytes_or_text():
 
 
 def test_a_state_database_that_fails_to_initialize_can_be_initialized_again(tmp_path, monkeypatch):
-    import sqlite3
-
     from nexus_symbiote import runtime
 
     def failing(db):

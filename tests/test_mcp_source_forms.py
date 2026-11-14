@@ -878,12 +878,16 @@ def test_any_call_whose_first_argument_names_an_mcp_server_module_is_a_gap(tmp_p
     [
         "import functools, importlib\nf = functools.partial(importlib.import_module, 'mcp.server.fastmcp')\n",
         "import importlib\nlist(map(importlib.import_module, ['mcp.server.fastmcp']))\n",
-        "import importlib, threading\n"
-        "threading.Thread(target=importlib.import_module, args=('mcp.server.fastmcp',))\n",
+        (
+            "import importlib, threading\n"
+            "threading.Thread(target=importlib.import_module, args=('mcp.server.fastmcp',))\n"
+        ),
         "import importlib\nFastMCP = importlib.import_module\nFastMCP('mcp.server.fastmcp')\n",
         'import importlib\nimportlib.reload(mcp_module)\nprint("x", "mcp.server")\n',
-        "import importlib, threading\n"
-        "threading.Thread(target=importlib.import_module, kwargs={'name': 'fastmcp'})\n",
+        (
+            "import importlib, threading\n"
+            "threading.Thread(target=importlib.import_module, kwargs={'name': 'fastmcp'})\n"
+        ),
         "import importlib\nimportlib.import_module(*['mcp.server.fastmcp'])\n",
         "import importlib\nimportlib.import_module(**{'name': 'mcp.server'})\n",
         "run(*('fastmcp.server',))\n",
