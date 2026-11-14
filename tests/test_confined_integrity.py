@@ -125,14 +125,8 @@ def test_descriptor_binding_tracks_link_count(tmp_path: Path) -> None:
     assert descriptor_binding(before) != descriptor_binding(os.stat(target))
 
 
-def test_descriptor_binding_ignores_a_ctime_only_change(tmp_path: Path) -> None:
-    """A ctime-only change during a read is not a replacement (TEST-201).
-
-    Changing a file's mode advances ctime and nothing else in the binding, as
-    btrfs with compress-force does asynchronously after a large write returns.
-    The binding must therefore stay equal; on the old binding, which included
-    st_ctime_ns, this assertion fails.
-    """
+def test_descriptor_binding_detects_a_ctime_only_change(tmp_path: Path) -> None:
+    """Metadata activity still invalidates evidence; bytes must be observed again."""
     target = tmp_path / "model.bin"
     target.write_bytes(b"data")
     before = os.stat(target)
@@ -141,20 +135,11 @@ def test_descriptor_binding_ignores_a_ctime_only_change(tmp_path: Path) -> None:
     assert after.st_ctime_ns != before.st_ctime_ns
     assert after.st_mtime_ns == before.st_mtime_ns
     assert after.st_size == before.st_size
-    assert descriptor_binding(before) == descriptor_binding(after)
+    assert descriptor_binding(before) != descriptor_binding(after)
 
 
-def test_freshly_written_large_file_reads_without_change_failure(tmp_path: Path) -> None:
-    """A large file scanned the moment its write returns must not fail (TEST-201).
-
-    On btrfs with compress-force the inode's ctime advances after the write
-    returns, while mtime stays fixed; the old binding tripped "file changed
-    during collection" when a streamed read straddled that update. Three fresh
-    files raise the chance the update lands mid-read on such a filesystem.
-    On filesystems without the async ctime update this passes vacuously, and
-    test_descriptor_binding_ignores_a_ctime_only_change is the deterministic
-    proof that a ctime-only change is accepted.
-    """
+def test_large_files_read_after_the_writer_finishes_its_updates(tmp_path: Path) -> None:
+    """Finish pending writer metadata before observing a large file."""
     failures: list[str] = []
     with ConfinedCollection(
         tmp_path, failures, max_file_bytes=8 * 1024 * 1024, max_total_bytes=64 * 1024 * 1024
@@ -162,7 +147,10 @@ def test_freshly_written_large_file_reads_without_change_failure(tmp_path: Path)
         for index in range(3):
             name = f"large-{index}.bin"
             content = bytes([index]) * (6 * 1024 * 1024)
-            (tmp_path / name).write_bytes(content)
+            with (tmp_path / name).open("wb") as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
             assert files.read_bytes(name) == content
             assert files.hash_file(name) == digest(content)
     assert failures == []
