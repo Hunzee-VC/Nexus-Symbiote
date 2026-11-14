@@ -6,6 +6,7 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ### Security
 
+- Operator signer and launch policies are refused inside every enclosing Git checkout, including a superproject above a nested repository or submodule. A nested `.git` marker cannot turn the enclosing change into its own approval authority.
 - **Breaking:** `verify-live` and pinned stdio sessions require kernel PID containment by default. Hosts that refuse a user/PID namespace fail with `isolation-unavailable` before the pinned launcher executes. The trusted operator can explicitly accept `--no-isolation` (or library `isolation_off()`) only in an independently isolated worker: process-tree cleanup is best effort and daemonized children may survive. The staging and spawn path is one helper shared by `live/stdio.py` and `live/session.py`.
 - **Breaking:** a signer policy (`--signature-policy`) is refused anywhere inside the git working tree that holds the scanned project, not only inside the project directory. Scanning a subdirectory of a repository with a policy kept elsewhere in the same repository let a pull request change the weights and their digest pin together, so integrity passed. Keep the policy outside the repository, as the GitHub Action already required.
 - `verify-live` refuses a launch policy below any directory that another user can write and that is not sticky, not only when its own directory is: such a user could rename a directory on the path away and put another policy in its place.
