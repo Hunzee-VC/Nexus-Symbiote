@@ -120,6 +120,7 @@ then notes, then the added, removed and modified components and relationships.
 | MCP endpoint, transport, launch command, launcher package or static source binding changed; the served tool set, or the served instructions, prompts or resource templates, that a live observation recorded (`discover-mcp --record`, `verify-live --record`) changed | critical |
 | Tool definition, input schema, description or annotations changed; model serialization safety changed to an unsafe execution or template format; a model's `trust_remote_code` set to true | critical |
 | Security field changed (for example capabilities, authorizations, claims, endpoints, A2A card URL, package URL, provider, source URI, signing identity or key reference, permission mode, version pin), a `*_ref` or `*_refs` field changed, declared autonomy level changed, trust tier or signing status downgraded, a digest removed or changed | high |
+| Tool definition, content or file hash became available: the baseline carried no digest for content the new snapshot pins (`Tool definition hash became available — first binding of content the baseline never pinned.`, `Content hash became available — first binding of content the baseline never pinned.`, `File hash (sha256) became available — first binding of content the baseline never pinned.`). A baseline whose records carry no digest, such as a ShadowScan import or another lossy source, meets this once, when the next scan pins the content: review that snapshot and adopt it as the baseline | medium |
 | Trust tier or signing status raised | medium: a snapshot is written unsigned, so a raised label is a claim to review |
 | Risk findings added | the highest added severity, at least medium |
 | Risk findings removed; any other field changed, including snapshot metadata such as the producer's `tool_name` or `tool_vendor` | medium |
@@ -127,18 +128,22 @@ then notes, then the added, removed and modified components and relationships.
 | Relationship removed | medium; high for `uses-guardrail` and `approved-under` |
 | Relationship kept but its assurance or conditions changed | high |
 | Coverage regressed: a new scan failure, coverage gap or exclusion; a collector's status got worse or is no longer recorded; fewer collectors requested or completed; a different scope; more unobserved surfaces; lower coverage assurance; no completeness claim in the new snapshot; or a baseline without a completeness claim (such as a hand-made or supplied BOM) while the new snapshot records a scan failure, a coverage gap, a collector that did not complete or no collector at all, since nothing shows that gap predates the change | high, naming the collector or entries |
+| A scanned surface removed from the completeness claim (`1 scanned surface removed (src/old.py): coverage narrowed; components found there are no longer compared.`); an added surface is recorded as info | high |
+| A collector first recorded as anything but `complete`, such as `failed` or `partial`, when the baseline's completeness claim never recorded it (`Collector 'model' is now recorded as failed; the baseline does not show this gap predates the change.`); first recorded as `complete`, it is an improvement | high |
 | ShadowScan: report content changed; report bytes changed without comparable content digests; source status worse; more unmapped entries; new projection limitations; a lossy format | high |
 | The new snapshot has graph problems the baseline did not (dangling or mistyped references), the snapshots differ in `spec_version`, or either snapshot uses a `spec_version` this release does not support | high |
 
 A relationship to a component that was itself added or removed is listed but alerts
 through that component, unless its own rating is high.
 
-These are recorded but never alert: a changed list of scanned surfaces (the
-components found there are compared separately, so an added source file is not
-drift), a coverage improvement, a baseline without a completeness claim compared
-with a snapshot whose coverage is complete, a different Nexus SymBiote release
-(`tool_version`), a ShadowScan report regenerated with unchanged content, and
-unmapped ShadowScan entries that moved within the report.
+These are recorded but never alert: a scanned surface added to the completeness
+claim (the components found there are compared separately, so an added source
+file is not drift; a surface removed from the claim narrows coverage and alerts,
+as the table says), a coverage improvement, such as a collector first recorded as
+`complete`, a baseline without a completeness claim compared with a snapshot
+whose coverage is complete, a different Nexus SymBiote release (`tool_version`),
+a ShadowScan report regenerated with unchanged content, and unmapped ShadowScan
+entries that moved within the report.
 
 Notes describe the comparison, not a change, and are printed even when nothing
 changed: gaps both snapshots share (the baseline was already incomplete, and changes
