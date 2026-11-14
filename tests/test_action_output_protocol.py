@@ -356,6 +356,41 @@ def test_limits_come_only_from_the_input(tmp_path, monkeypatch):
         configuration(tmp_path, SYMBIOTE_LIMITS="max_entries=1\nSYMBIOTE_VALIDATE=false")
 
 
+WITHHELD = (
+    "NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT",
+    "NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT_SHA256",
+    "NEXUS_SYMBIOTE_MODE",
+    "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+    "ACTIONS_ID_TOKEN_REQUEST_URL",
+    "ACTIONS_RUNTIME_TOKEN",
+    "ACTIONS_RUNTIME_URL",
+    "ACTIONS_RESULTS_URL",
+    "ACTIONS_CACHE_URL",
+    "GITHUB_TOKEN",
+    "GH_TOKEN",
+)
+
+
+def test_the_job_environment_cannot_replace_trust_or_hand_over_runner_tokens(tmp_path, monkeypatch):
+    for name in WITHHELD:
+        monkeypatch.setenv(name, "from-the-job")
+    monkeypatch.setenv("NEXUS_SYMBIOTE_SOURCE_BINDING_KEY", "k" * 40)
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    seen: list[dict[str, str]] = []
+
+    def invoke(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        seen.append(kwargs["env"])
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(runner.subprocess, "run", invoke)
+    runner._run(["scan"], private=tmp_path)
+    (env,) = seen
+    assert not set(WITHHELD) & set(env)
+    # Operator settings the CLI is meant to read still arrive.
+    assert env["NEXUS_SYMBIOTE_SOURCE_BINDING_KEY"] == "k" * 40
+    assert env["GITHUB_ACTIONS"] == "true"
+
+
 def test_scan_path_through_a_symlink_in_the_workspace_is_refused(tmp_path):
     (tmp_path / "real").mkdir()
     (tmp_path / "agents").mkdir()
