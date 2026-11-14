@@ -32,6 +32,7 @@ from nexus_symbiote.graph import INFERRED_AGENT_REF
 from nexus_symbiote.scanners.shadowscan import ShadowScanImporter
 from tests.test_model_integrity import onnx_model, onnx_tensor, write_safetensors
 
+GUIDE = Path(__file__).resolve().parents[1] / "docs" / "drift-gate.md"
 REPORT = Path(__file__).parent / "fixtures/shadowscan/code-report-0.1.4.json"
 CYCLONEDX = Path(__file__).parent / "fixtures/shadowscan-producer/cyclonedx-agent-model.json"
 
@@ -299,6 +300,46 @@ def test_collector_newly_recorded_as_failed_alerts():
     )
     assert complete.security_alerts == []
     assert {c["severity"] for c in complete.metadata_changes} == {"info"}
+
+
+def test_the_guide_rates_and_quotes_each_fail_closed_alert():
+    """docs/drift-gate.md rates each alert this gate newly raises and quotes its reason."""
+    guide = GUIDE.read_text(encoding="utf-8")
+    table = guide.split("\n## What the alerts mean\n", 1)[1].split("\n## ", 1)[0]
+
+    def rating(reason: str) -> str:
+        row = next(line for line in table.splitlines() if f"`{reason}`" in line)
+        return row.rstrip().rstrip("|").rsplit("|", 1)[1].strip()
+
+    surface = _compare(_claim(surfaces_scanned=["a.json", "src/old.py"]), _claim())
+    collector = _compare(
+        _claim(scanner_status={"mcp": "complete"}),
+        _claim(scanner_status={"mcp": "complete", "model": "failed"}),
+    )
+    for report in (surface, collector):
+        (alert,) = report.security_alerts
+        assert alert["severity"] == "high"
+        assert rating(alert["alert"]).startswith("high")
+
+    digest = "sha256:" + "a" * 64
+    unpinned = [
+        ToolComponent(bom_ref="tool:t", name="t"),
+        DataSourceComponent(bom_ref="data:d", name="d"),
+        ModelComponent(bom_ref="model:m", name="m"),
+    ]
+    pinned = [
+        ToolComponent(bom_ref="tool:t", name="t", definition_hash=digest),
+        DataSourceComponent(bom_ref="data:d", name="d", content_hash=digest),
+        ModelComponent(bom_ref="model:m", name="m", hashes={"sha256": digest}),
+    ]
+    bound = AIBOMDiffer().diff(AIBOM(components=unpinned), AIBOM(components=pinned))
+    assert [alert["severity"] for alert in bound.security_alerts] == ["medium"] * 3
+    for change in bound.components_modified:
+        (reason,) = change.details
+        assert "became available" in reason
+        assert rating(reason).startswith("medium")
+
+    assert "a changed list of scanned surfaces" not in guide
 
 
 def test_shared_gaps_are_noted_without_counting_as_change(tmp_path):

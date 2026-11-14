@@ -50,6 +50,13 @@ def test_every_command_and_option_is_documented():
     assert not missing, f"undocumented in {REFERENCE.name}: {missing}"
 
 
+def test_the_exit_code_summary_says_the_drift_gate_is_the_default():
+    section = REFERENCE.read_text(encoding="utf-8").split("\n## Exit codes\n", 1)[1]
+    row = next(line for line in section.splitlines() if line.startswith("| `1` |"))
+    assert "`--no-fail-on-alert`" in row
+    assert "`diff --fail-on-alert`" not in row
+
+
 def test_every_environment_variable_the_package_reads_is_documented():
     source = Path(__file__).resolve().parents[1] / "src" / "nexus_symbiote"
     names: set[str] = set()
