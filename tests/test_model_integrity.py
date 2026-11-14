@@ -723,9 +723,15 @@ def test_a_zip_without_a_pickle_member_behind_another_suffix_stays_unknown(proje
     result = ModelScanner().scan(project)
     component = result.components[0]
     assert component.serialization_safety == SerializationSafety.UNKNOWN
-    assert result.scan_failures == [
-        "model.onnx: ONNX external data not read: the file is a ZIP archive"
-    ]
+    assert "lists no pickle member" in component.properties["format_inspection"]
+    assert not result.scan_failures
+    with zipfile.ZipFile(project / "model.gguf", "w") as archive:
+        archive.writestr("archive/version", "3")
+    result = ModelScanner().scan(project)
+    assert not result.scan_failures
+    gguf = next(c for c in result.components if c.name.endswith("model.gguf"))
+    assert gguf.serialization_safety == SerializationSafety.UNKNOWN
+    assert gguf.properties["gguf_metadata"] == "not inspected: the file is a ZIP archive"
 
 
 def test_a_padded_binary_pickle_behind_another_suffix_is_unsafe(project):

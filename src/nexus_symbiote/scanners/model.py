@@ -150,10 +150,7 @@ ZIP_DIRECTORY_UNREAD = (
     "structural validator for this format/loader"
 )
 _ZIP_NOT_PICKLE = frozenset({ZIP_WITHOUT_PICKLE, ZIP_DIRECTORY_UNREAD})
-_ZIP_NOT_FORMAT = {
-    "onnx": "ONNX external data not read: the file is a ZIP archive",
-    "gguf": "the file is a ZIP archive",
-}
+ZIP_NOT_GGUF = "the file is a ZIP archive"
 # Chat templates a finding names; it counts the rest.
 _LISTED_TEMPLATES = 3
 _UNSAFE_SUFFIXES = {
@@ -502,10 +499,14 @@ def observe_model_artifact(
             artifact_size=before.st_size,
             max_header_bytes=MAX_MODEL_HEADER_BYTES,
         )
-    elif key in _ZIP_NOT_FORMAT and explanation in _ZIP_NOT_PICKLE:
+    elif key in ("onnx", "gguf") and explanation in _ZIP_NOT_PICKLE:
         # The directory was read from the archive's end, past the prefix a format
-        # reader replays, and a ZIP archive is not of either format anyway.
-        extra[f"{key}_error"] = _ZIP_NOT_FORMAT[key]
+        # reader replays; an archive holds no ONNX external data and no GGUF metadata,
+        # which is what the readers found before the directory was read.
+        if key == "onnx":
+            extra["external_data"] = ()
+        else:
+            extra["gguf_error"] = ZIP_NOT_GGUF
     elif safety != SerializationSafety.UNSAFE_CODE_EXECUTION and key == "onnx":
         try:
             extra["external_data"] = onnx_external_data(_ReplayReader(observed).read, budget)
