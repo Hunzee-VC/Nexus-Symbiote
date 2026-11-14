@@ -6,6 +6,7 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ### Security
 
+- **Breaking:** `diff` gates by default: it exits 1 on any security alert unless `--no-fail-on-alert` is given. The snapshot differ now alerts when a scanned surface is removed from the completeness claim, when a collector is first recorded as failed or partial against a baseline that never recorded it, and when a tool, content or file hash first becomes available over content the baseline never pinned. `RiskScorer` refuses a severity-weight map that does not cover every severity instead of scoring the missing ones zero.
 - `advisories --exclude` matches npm names in any case, and refuses a pattern with a `*` anywhere but at its end instead of sending the name it could never match. A scoped registry's package name and both values of a shadowed header are withheld.
 - Secret redaction covers keys, escaped quotes and Negotiate/NTLM credentials, and A2A card signature headers shaped like credentials are withheld.
 - The workflow checker closes ways a workflow change could pass it: `action.yml` files beside workflows, a gate in a step that continues on error, interpreter and shell options that run code, heredocs before the command, array assignments, and pinned actions whose version it cannot read. The lock checker requires every hash line to be a single SHA-256 hash.
