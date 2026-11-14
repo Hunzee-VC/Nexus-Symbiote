@@ -162,3 +162,22 @@ def test_an_earlier_acl_revision_cannot_be_restored():
             observed_at=NOW,
             read_watermark="commit:3",
         )
+
+
+def test_a_lineage_rebuilt_after_a_withdrawal_keeps_it():
+    index = LineageIndex("acme", (version("source"), version("chunk", "chunk", ("source",))))
+    index.withdraw("source")
+    rebuilt = LineageIndex("acme", tuple(reversed(index.versions.values())))
+    assert rebuilt.versions == index.versions
+    with pytest.raises(PermissionError):
+        rebuilt.retrieve(
+            ("chunk",),
+            principal="reader",
+            acl_revision="v1",
+            observed_at=NOW,
+            read_watermark="commit:6",
+        )
+    with pytest.raises(ValueError, match="withdrawn"):
+        rebuilt.add(version("memory", "memory", ("chunk",)))
+    with pytest.raises(ValueError, match="withdrawn"):
+        LineageIndex("acme", (index.versions["source"], version("chunk", "chunk", ("source",))))
