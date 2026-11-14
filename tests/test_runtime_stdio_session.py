@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -254,8 +255,17 @@ def test_protocol_failure_kills_and_reaps_process(tmp_path, monkeypatch, mode):
         )
     records = [json.loads(line) for line in log.read_text().splitlines()]
     assert [r[0] for r in records] == ["tools/list"]
-    with pytest.raises(ProcessLookupError):
-        os.kill(records[0][1], 0)
+    # The PID namespace is torn down after the supervisor dies, not in the same instant.
+    deadline = time.monotonic() + 2
+    pid = records[0][1]
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError(f"launcher process {pid} was still running")
 
 
 @pytest.mark.parametrize(
