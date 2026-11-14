@@ -403,7 +403,8 @@ _COMMAND = (
     r"(?:python3?|py|node|deno|bun|ruby|perl|php|java|osascript"
     r"|npx|uvx|pipx|pip3?|npm|pnpm|yarn|uv|poetry|cargo|go|brew|apt-get|apt|gem"
     r"|sudo|doas|su|env|exec|eval|source|curl|wget|iwr|cat|cp|mv|rm|dd|chmod|chown"
-    rf"|ssh|scp|nc|base64|xargs|docker|kubectl)(?!-\w){_NAME_END}"
+    r"|ssh|scp|nc|base64|xargs|docker|kubectl|git|iex|irm|iwr"
+    rf"|invoke-(?:expression|restmethod|webrequest))(?!-\w){_NAME_END}"
 )
 _PATH_START = (
     r"[/\\]\S"
