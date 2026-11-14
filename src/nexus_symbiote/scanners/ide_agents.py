@@ -35,7 +35,7 @@ from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
 from nexus_symbiote.scanners.source_binding import BindingError, value_binding
 from nexus_symbiote.utils.confined import ConfinedCollection, fold_name
 from nexus_symbiote.utils.jsonc import strip_jsonc
-from nexus_symbiote.utils.secrets import redact_keyed_text, redact_text
+from nexus_symbiote.utils.secrets import REDACTED, redact_keyed_text, redact_text
 
 IDE_AGENT_CONFIGS: dict[str, dict[str, Any]] = {
     "claude-code": {
@@ -143,16 +143,16 @@ _DIGESTED_SETTINGS = {
 }
 # The keyed binding of every settings file an IDE record digests in `settings_hashes`.
 SETTINGS_VALUE_BINDING_PROFILE = "nexus-symbiote/ide-settings-values/v1"
+# What every `settings_hashes` digest covers, with or without the key: the file as
+# `_projection` redacts it. Records without it come from releases that digested most
+# files as read, so a file the redaction changes has another digest there.
+SETTINGS_DIGEST_PROFILE = "nexus-symbiote/ide-settings-redacted/v1"
+# Settings whose value is a command that runs to obtain credentials, so the command may
+# hold one in a form the redaction does not recognise.
+_CREDENTIAL_HELPER_KEYS = frozenset({"apiKeyHelper"})
 CODEX_CONFIG = ".codex/config.toml"
 CURSOR_HOOKS = ".cursor/hooks.json"
 GEMINI_SETTINGS = ".gemini/settings.json"
-# Digested after the redaction with or without the operator key, so no unkeyed digest
-# covers a value it withholds, such as the environment of an MCP server that Codex
-# settings declare. The other files keep the digest of the file as read that existing
-# baselines record.
-_REDACTED_DIGESTS = frozenset(
-    {CODEX_CONFIG, *(path for paths in _DIGESTED_SETTINGS.values() for path in paths)}
-)
 _PERMISSION_MODES = frozenset(
     {
         "default",
@@ -324,12 +324,13 @@ def _projection(
 
     The standard redaction is applied to the text between shell operators, cut again
     before each URL scheme, a text value is also redacted by the ``key`` it is held
-    under, as a header or an assignment in one string would be, and
-    environment variables keep their names only, so the digest cannot confirm a guess
-    of a value the redaction removes, and does not change with one; only the keyed
-    binding covers those values. ``unkeyed`` raises ``AmbiguousURLError`` for a URL
-    whose authority URL parsers read differently, since its redacted origin could hide a
-    change of host that no keyed binding covers.
+    under, as a header or an assignment in one string would be, environment
+    variables keep their names only, and a credential helper such as `apiKeyHelper`
+    keeps its key but not its command, so the digest cannot confirm a guess of a value
+    the redaction removes, and does not change with one; only the keyed binding covers
+    those values. ``unkeyed`` raises ``AmbiguousURLError`` for a URL whose authority
+    URL parsers read differently, since its redacted origin could hide a change of
+    host that no keyed binding covers.
     """
     if depth > _MAX_SETTINGS_DEPTH:
         raise ValueError("settings nested too deeply")
@@ -340,7 +341,11 @@ def _projection(
         merged: dict[str, list[Any]] = {}
         for name, item in value.items():
             text = _projected_text(str(name), unkeyed=unkeyed)
-            entry = _projection(item, depth + 1, env=name == "env", unkeyed=unkeyed, key=str(name))
+            entry = (
+                REDACTED
+                if name in _CREDENTIAL_HELPER_KEYS
+                else _projection(item, depth + 1, env=name == "env", unkeyed=unkeyed, key=str(name))
+            )
             merged.setdefault(text, []).append(entry)
             projected[text] = entry
         # Keys the redaction makes equal keep every value, in canonical order, so no
@@ -861,15 +866,15 @@ class IDEAgentScanner(Scanner):
     ) -> None:
         """Digest each settings file into `settings_hashes`; bind their values with the key.
 
-        Without the operator key each digest covers the file as read, except that the
-        files of `_REDACTED_DIGESTS` are digested after the redaction. With it, every
-        digest leaves out what the redaction removes and the environment values, and an
-        HMAC under the key covers every file as read, so the inventory never carries an
-        unkeyed digest of those values. A file that has no RFC 8785 form, such as TOML
-        with a date, is a failure that names it, and leaves the record's values unbound.
-        Without the key, so is a redacted file that holds a URL whose authority URL parsers
-        read differently, and a redacted digest that leaves out a value is a low
-        completeness finding.
+        Every digest, with or without the operator key, covers the file after the
+        redaction, under ``SETTINGS_DIGEST_PROFILE``, so the inventory never carries an
+        unkeyed digest of a value the redaction removes, such as a settings `env` map or
+        an `apiKeyHelper` command: anyone holding the inventory could otherwise confirm
+        guesses of those values offline. With the key an HMAC covers every file as
+        read. A file that has no RFC 8785 form, such as TOML with a date, is a failure
+        that names it, and leaves the record's values unbound. Without the key, so is a
+        redacted file that holds a URL whose authority URL parsers read differently,
+        and a redacted digest that leaves out a value is a low completeness finding.
         """
         if not documents:
             return
@@ -877,9 +882,8 @@ class IDEAgentScanner(Scanner):
         hashes: dict[str, str] = {}
         withheld: list[str] = []
         for relative, data in documents.items():
-            redacted = keyed or relative in _REDACTED_DIGESTS
             try:
-                projected = _projection(data, unkeyed=not keyed) if redacted else data
+                projected = _projection(data, unkeyed=not keyed)
                 digest = hash_canonical(projected)
                 if keyed:
                     # The keyed binding covers the file as read, not only its projection.
@@ -896,6 +900,7 @@ class IDEAgentScanner(Scanner):
                 hashes[relative] = digest
         if hashes:
             properties["settings_hashes"] = hashes
+            properties["settings_hashes_profile"] = SETTINGS_DIGEST_PROFILE
         if withheld:
             risks.append(
                 RiskAssessment(
