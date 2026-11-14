@@ -189,11 +189,12 @@ def test_osv_identity_mismatch_prevents_network(mutation):
 @pytest.mark.parametrize(
     "body,status",
     [
-        (b"{}", 302),
+        (b'{"results":[{}]}', 302),
         (b"[]", 200),
-        (b'{"vulns":{}}', 200),
-        (b'{"vulns":[],"next_page_token":"more"}', 200),
-        (b"x" * (MAX_RESPONSE_BYTES + 1), 200),
+        (b'{"results":[{"vulns":{}}]}', 200),
+        (b'{"results":[{"vulns":[],"next_page_token":"more"}]}', 200),
+        (b'{"results":[{}],"error":"x"}', 200),
+        (b'{"results":[{}' + b" " * MAX_RESPONSE_BYTES + b"]}", 200),
     ],
 )
 def test_osv_incomplete_or_malformed_results_fail(body, status):
