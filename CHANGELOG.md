@@ -11,6 +11,8 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 - Instruction files that contain U+2028 or U+2029 are a low `line_separators` finding. Ordinary spaces, including NBSP and the ideographic space, are not findings.
 - The OpenSSF Scorecard workflow grants no permissions at the top level, so a job added later does not inherit `read-all`.
 - `.gitleaks.toml` allowlists `tests/` so synthetic fixture tokens are not mixed with a real secret. Do not put a real secret under `tests/`.
+- The committed release-tag ruleset also blocks tag creation, so that a pre-created `v*` tag cannot squat the next release's name; the publication preflight already requires the ruleset to block updates and deletions.
+- The wheel smoke installs in CI and the release compatibility job resolve dependencies with `--only-binary=:all:`, so a poisoned source distribution of a dependency cannot run a build hook there. The platform smoke and the randomized property-test jobs run with `--strict-skips`, so a missing optional dependency fails them instead of skipping their Sigstore cases.
 - `advisories --exclude` matches npm names in any case, and refuses a pattern with a `*` anywhere but at its end instead of sending the name it could never match. A scoped registry's package name and both values of a shadowed header are withheld.
 - Secret redaction covers keys, escaped quotes and Negotiate/NTLM credentials, and A2A card signature headers shaped like credentials are withheld.
 - The workflow checker closes ways a workflow change could pass it: `action.yml` files beside workflows, a gate in a step that continues on error, interpreter and shell options that run code, heredocs before the command, array assignments, and pinned actions whose version it cannot read. The lock checker requires every hash line to be a single SHA-256 hash.
@@ -28,6 +30,7 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ### Fixed
 
+- The test and dependency-floor CI jobs get a 16-minute suite budget inside a 20-minute job, up from 12 inside 15. The suite takes 7 to 12 minutes on hosted runners, and the push run of `main` at `4aaf727` was killed by the old budget two seconds short of finishing on Python 3.12 (exit 124), which left `Verified CI` red on a commit that passed everywhere else and blocked the release preflight.
 - TypeScript collection records SDK uses hidden by `eval` wrappers, URL queries and fragments, and method names, and records nothing from ambient declarations. Python collection judges a helper only when a call must reach its definition, reads git revisions where pip and uv read them, and counts module literals behind `*` and `**`.
 - Claude settings with an invalid `permissions` value keep their other declarations, and keys the redaction makes equal keep every value in the drift digest.
 - Lockfile collection binds pnpm and Yarn records only to what they resolve and checks Python lock versions against every declaration; a private Python index is named in the package URL.
