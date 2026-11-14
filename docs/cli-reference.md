@@ -188,7 +188,8 @@ the same run counts as verification; the outcome recorded in the BOM is not trus
 `--signature-policy` (`scan`, `validate`, `risk`, `baseline`) and the Action's
 `signature-policy` input take a strict JSON file, at most 4 MiB and 1,000 artifacts,
 written by the operator, never by the checkout. A policy inside the scanned project
-or inside the git working tree that holds it, also under another name for either
+or inside any enclosing Git working tree, including a submodule's superproject,
+also under another name for either
 directory, or one with other hard links is refused:
 
 ```json
@@ -230,7 +231,7 @@ stdio MCP server's `bom_ref` to exactly a `command` and a `sha256`:
 of its bytes as `sha256:<64 lowercase hexadecimal characters>`. A server without an
 entry is not started.
 
-The file must lie outside the project and outside the repository (the nearest
+The file must lie outside the project and outside every enclosing repository (each
 directory with a `.git` entry) that holds the project or the inventory. On POSIX
 systems it must also be a single-link regular file owned by you or root that only its
 owner can write, and every directory above it, up to the file system root, must be

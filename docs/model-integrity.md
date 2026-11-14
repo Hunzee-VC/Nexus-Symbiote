@@ -164,7 +164,8 @@ same policy to `scan`, `validate --project`, `risk --project` and `baseline`
 with `--signature-policy`, or to the GitHub Action with `signature-policy`.
 
 Keep the policy outside the checkout: the commands refuse a policy file inside
-the scanned project or anywhere in the git working tree that holds it (so a
+the scanned project or anywhere in any enclosing Git working tree, including a
+superproject above a nested checkout or submodule (so a
 monorepo's `ci/signers.json` is refused when you scan `services/agent`), also
 under another name for either directory such as a case variant or a bind mount
 (compared by device and inode), or one with other hard links, and they resolve the project path first, so a symlinked `--project`

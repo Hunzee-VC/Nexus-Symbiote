@@ -57,19 +57,19 @@ def _refuse_source_overwrite(output: Path | None, source: Path) -> None:
         raise click.BadParameter("output must not overwrite the source inventory")
 
 
-def _repository_root(path: Path) -> Path | None:
-    """The nearest directory at or above ``path`` that holds a ``.git`` entry."""
-    for candidate in (path, *path.parents):
-        if os.path.lexists(candidate / ".git"):
-            return candidate
-    return None
+def _repository_roots(path: Path) -> tuple[Path, ...]:
+    """Every enclosing checkout, including superprojects above a nested marker."""
+    return tuple(
+        candidate for candidate in (path, *path.parents) if os.path.lexists(candidate / ".git")
+    )
 
 
 def _check_launch_policy(policy: Path, project: Path, inventory: Path) -> None:
     """Refuse a launch policy that the change under review could have written.
 
     The policy must lie outside the project, outside the repositories that hold the
-    project and the inventory, be a single-link regular file owned by the caller or
+    project and the inventory (including enclosing superprojects), be a single-link
+    regular file owned by the caller or
     root that only its owner can write, in directories owned by you or root that others
     cannot write unless they are sticky, up to the file system root. This catches
     misplacement; it does not
@@ -78,9 +78,7 @@ def _check_launch_policy(policy: Path, project: Path, inventory: Path) -> None:
     resolved = policy.resolve()
     untrusted = [project.resolve()]
     for start in (project.resolve(), inventory.resolve().parent):
-        root = _repository_root(start)
-        if root is not None:
-            untrusted.append(root)
+        untrusted.extend(_repository_roots(start))
     if any(resolved.is_relative_to(root) for root in untrusted):
         raise click.UsageError(
             "launch policy must be provisioned outside the untrusted project and outside "
