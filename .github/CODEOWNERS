@@ -1,7 +1,8 @@
 # Code owners request the owner's review on pull requests that touch these paths. Review is
 # enforced only by the full protection profile (config/github-main-protection.json,
 # require_code_owner_reviews); the interim single-maintainer profile requires none.
-# See GOVERNANCE.md for the review policy and MAINTAINERS.md for ownership.
+# A second owner is required before that profile means independent review. Add them here
+# and in MAINTAINERS.md; do not list an account that cannot review. See GOVERNANCE.md.
 * @aisecnomad
 
 # Gates and release controls: a change here changes what admits every other change.
