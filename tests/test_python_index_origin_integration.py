@@ -10,8 +10,22 @@ import pytest
 from nexus_symbiote.advisories import fetch_advisories
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import RiskSeverity
+from nexus_symbiote.scanners.live_mcp import HTTPReply
 from nexus_symbiote.scanners.registry import RegistryScanner
-from tests.test_advisories_semantics import Scripted, clean
+
+
+class _Transport:
+    def __init__(self) -> None:
+        self.calls: list[list[dict]] = []
+
+    def request(self, endpoint, body, headers, *, timeout, max_bytes):
+        queries = json.loads(body)["queries"]
+        self.calls.append(queries)
+        return HTTPReply(
+            200,
+            {"content-type": "application/json"},
+            json.dumps({"results": [{} for _ in queries]}).encode(),
+        )
 
 
 def _scan(root: Path, lock: str, origin: object):
@@ -57,7 +71,7 @@ def test_ambiguous_index_sources_never_reach_public_identity_or_advisories(
     assert result.surfaces_excluded
     assert component.package_url is None and component.registry_uri is None
     assert "package_resolution" not in component.claims
-    transport = Scripted(clean)
+    transport = _Transport()
     report = fetch_advisories(
         AIBOM(components=result.components), exclude_private_origins=True, transport=transport
     )
@@ -86,7 +100,7 @@ def test_case_and_default_port_normalization_keep_the_origin_boundary(
     else:
         assert [risk.severity for risk in risks] == [severity]
         assert component.package_url == public_purl + "?repository_url=" + normalized
-    transport = Scripted(clean)
+    transport = _Transport()
     report = fetch_advisories(
         AIBOM(components=result.components), exclude_private_origins=True, transport=transport
     )
