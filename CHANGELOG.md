@@ -7,7 +7,7 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 ### Security
 
 - Exact-spelling directory listings now share the collection entry budget, including fixed-path reads and metadata lookups before a walk. An oversized listing fails collection before its names are cached. Root listings and walks also charge entries observed before an I/O error, so retrying an incomplete listing cannot reset its work budget.
-- **Breaking:** project-policy discovery uses an independent operator `entries` bound and refuses the command before inventory output when the root listing is incomplete, instead of applying defaults without establishing which policy exists.
+- **Breaking:** project-policy discovery uses an independent operator `entries` bound and refuses the command before inventory output when the full root listing does not fit; neither a project policy nor defaults are selected from an incomplete listing.
 - Codex settings and MCP TOML configuration apply the registry collector's quote-aware dotted-key bound before parsing, preventing compact configurations from amplifying parser memory use.
 - `advisories --exclude` matches npm names in any case, and refuses a pattern with a `*` anywhere but at its end instead of sending the name it could never match. A scoped registry's package name and both values of a shadowed header are withheld.
 - Secret redaction covers keys, escaped quotes and Negotiate/NTLM credentials, and A2A card signature headers shaped like credentials are withheld.
