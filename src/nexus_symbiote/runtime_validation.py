@@ -284,7 +284,8 @@ def _apply_worker_limits() -> None:
     import resource
 
     resource.setrlimit(
-        resource.RLIMIT_CPU, (WORKER_STARTUP_CPU_SECONDS, WORKER_STARTUP_CPU_SECONDS)
+        resource.RLIMIT_CPU,
+        (WORKER_STARTUP_CPU_SECONDS, WORKER_STARTUP_CPU_SECONDS),
     )
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     try:
@@ -868,6 +869,42 @@ _APPLIED_INSIDE = frozenset(
     {"else", "exclusiveMaximum", "exclusiveMinimum", "maxContains", "minContains", "then"}
 )
 _REFERENCES = ("$ref", "$dynamicRef", "$recursiveRef")
+_SUPPORTED_VOCABULARIES: dict[str, frozenset[str]] = {
+    DIALECTS[3]: frozenset(
+        {
+            "https://json-schema.org/draft/2019-09/vocab/core",
+            "https://json-schema.org/draft/2019-09/vocab/applicator",
+            "https://json-schema.org/draft/2019-09/vocab/validation",
+            "https://json-schema.org/draft/2019-09/vocab/meta-data",
+        }
+    ),
+    DIALECTS[4]: frozenset(
+        {
+            "https://json-schema.org/draft/2020-12/vocab/core",
+            "https://json-schema.org/draft/2020-12/vocab/applicator",
+            "https://json-schema.org/draft/2020-12/vocab/unevaluated",
+            "https://json-schema.org/draft/2020-12/vocab/validation",
+            "https://json-schema.org/draft/2020-12/vocab/meta-data",
+            "https://json-schema.org/draft/2020-12/vocab/format-annotation",
+        }
+    ),
+}
+
+
+def _unsupported_vocabulary(node: dict[str, Any], dialect: str, *, is_root: bool) -> bool:
+    """Whether ``node`` declares a ``$vocabulary`` whose required semantics are not asserted."""
+    if "$vocabulary" not in node:
+        return False
+    allowed = _SUPPORTED_VOCABULARIES.get(dialect)
+    declared = node["$vocabulary"]
+    if not is_root or allowed is None or not isinstance(declared, dict):
+        return True
+    for uri, required in declared.items():
+        if not isinstance(uri, str) or type(required) is not bool:
+            return True
+        if required and uri not in allowed:
+            return True
+    return False
 
 
 def _ignores_a_keyword(schema: dict[str, Any], dialect: str, validator: Any) -> bool:
@@ -876,11 +913,13 @@ def _ignores_a_keyword(schema: dict[str, Any], dialect: str, validator: Any) -> 
     That is a keyword the declared dialect does not define or jsonschema does not
     apply, including those of drafts before draft-04; an assertion next to "$ref" in
     draft-04 to draft-07, which ignore the siblings of "$ref"; a 2019-09
-    "unevaluatedItems" that would pass the items "contains" matched; and a subschema
-    that jsonschema would read in another dialect (its own "$schema") or against
-    another base URI (its own "$id", or "id" in draft-04). References must be JSON
-    Pointers within the schema ("#" or "#/..."); they are resolved with jsonschema's
-    own resolver and their targets checked too. "format" is never asserted here.
+    "unevaluatedItems" that would pass the items "contains" matched; a "$vocabulary"
+    requiring an unasserted vocabulary (such as format-assertion or content); and a
+    subschema that jsonschema would read in another dialect (its own "$schema") or
+    against another base URI (its own "$id", or "id" in draft-04). References must be
+    JSON Pointers within the schema ("#" or "#/..."); they are resolved with
+    jsonschema's own resolver and their targets checked too. "format" is never
+    asserted here.
     """
     from referencing import Registry
     from referencing.jsonschema import specification_with
@@ -906,6 +945,7 @@ def _ignores_a_keyword(schema: dict[str, Any], dialect: str, validator: Any) -> 
             used - known
             or node.get("optional", True) is not True
             or (legacy and "$ref" in node and used - {"$ref", "format"})
+            or _unsupported_vocabulary(node, dialect, is_root=node is schema)
         ):
             return True
         if node is not schema and _redeclares(node, dialect, identifier):
@@ -1037,9 +1077,12 @@ def _worker() -> int:
         if not _ecma_semantics_hold(dialects):
             return 1
         # RLIMIT_CPU counts the whole process, so measure start-up and grant the
-        # evaluation at least WORKER_CPU_SECONDS on top of what was already used.
+        # evaluation at least WORKER_CPU_SECONDS within the startup+eval hard ceiling.
         usage = resource.getrusage(resource.RUSAGE_SELF)
-        budget = math.ceil(usage.ru_utime + usage.ru_stime) + WORKER_CPU_SECONDS
+        budget = min(
+            WORKER_STARTUP_CPU_SECONDS,
+            math.ceil(usage.ru_utime + usage.ru_stime) + WORKER_CPU_SECONDS,
+        )
         resource.setrlimit(resource.RLIMIT_CPU, (budget, budget))
         sys.stdout.buffer.write(_READY)
         sys.stdout.buffer.flush()

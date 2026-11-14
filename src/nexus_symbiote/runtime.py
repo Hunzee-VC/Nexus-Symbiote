@@ -218,6 +218,8 @@ def _deeper_than(value: Any, limit: int) -> bool:
 
 
 def strict_json(raw: str | bytes) -> Any:
+    from nexus_symbiote.core.hashing import json_nesting_exceeds
+
     def pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
         out: dict[str, Any] = {}
         for key, value in items:
@@ -235,6 +237,8 @@ def strict_json(raw: str | bytes) -> Any:
         text = raw.decode("utf-8") if isinstance(raw, bytes) else raw
         if text.startswith("\ufeff"):
             raise ValueError("byte-order mark")
+        if json_nesting_exceeds(text, MAX_STRICT_JSON_DEPTH):
+            raise AuthorizationError("input nests too deeply", reason="json-invalid")
         value = json.loads(text, object_pairs_hook=pairs, parse_constant=invalid)
     except AuthorizationError:
         raise
@@ -503,6 +507,16 @@ class SignerScope(Contract):
     @classmethod
     def aware(cls, value: datetime | None) -> datetime | None:
         return None if value is None else _aware(value)
+
+    @model_validator(mode="after")
+    def ordered(self) -> SignerScope:
+        if (
+            self.not_before is not None
+            and self.not_after is not None
+            and self.not_before >= self.not_after
+        ):
+            raise PydanticCustomError("validity_window", "not_after must follow not_before")
+        return self
 
     def permits(
         self,
@@ -1014,9 +1028,12 @@ def _snapshot_scope(snapshot: ApprovedSnapshot) -> str:
     return "snapshot:" + digest([snapshot.tenant, snapshot.deployment_id, snapshot.agent_id])
 
 
-def _secure_existing(path: Path) -> None:
+def _secure_existing(path: Path) -> tuple[int, int]:
+    from nexus_symbiote.core.hashing import open_directory_nofollow
+
+    uid = getattr(os, "geteuid", lambda: None)()
     try:
-        info = os.lstat(path)
+        parent_fd = open_directory_nofollow(path.parent)
     except FileNotFoundError as exc:
         raise AuthorizationError(
             "state database does not exist; create it once with StateStore.initialize",
@@ -1024,23 +1041,63 @@ def _secure_existing(path: Path) -> None:
         ) from exc
     except OSError as exc:
         raise AuthorizationError(
-            "state database cannot be inspected", reason="state-invalid"
+            "state database parent directory cannot be a symlink or unavailable",
+            reason="state-invalid",
         ) from exc
-    if stat.S_ISLNK(info.st_mode):
-        raise AuthorizationError("state database cannot be a symlink", reason="state-invalid")
-    if not stat.S_ISREG(info.st_mode):
-        raise AuthorizationError("state database must be a regular file", reason="state-invalid")
-    if os.name == "posix" and stat.S_IMODE(info.st_mode) & 0o077:
+    try:
+        parent_info = os.fstat(parent_fd)
+        if uid is not None and parent_info.st_uid != uid:
+            raise AuthorizationError(
+                "state database directory must be owned by the current user",
+                reason="state-invalid",
+            )
+        if parent_info.st_mode & 0o002:
+            raise AuthorizationError(
+                "state database directory cannot be world-writable", reason="state-invalid"
+            )
         try:
-            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
-            try:
-                os.fchmod(fd, 0o600)
-            finally:
-                os.close(fd)
+            info = os.stat(path.name, dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError as exc:
+            raise AuthorizationError(
+                "state database does not exist; create it once with StateStore.initialize",
+                reason="state-missing",
+            ) from exc
         except OSError as exc:
             raise AuthorizationError(
-                "state database permissions cannot be restricted", reason="state-invalid"
+                "state database cannot be inspected", reason="state-invalid"
             ) from exc
+        if stat.S_ISLNK(info.st_mode):
+            raise AuthorizationError("state database cannot be a symlink", reason="state-invalid")
+        if not stat.S_ISREG(info.st_mode):
+            raise AuthorizationError(
+                "state database must be a regular file", reason="state-invalid"
+            )
+        if info.st_nlink != 1:
+            raise AuthorizationError(
+                "state database cannot have other hard links", reason="state-invalid"
+            )
+        if uid is not None and info.st_uid != uid:
+            raise AuthorizationError(
+                "state database must be owned by the current user", reason="state-invalid"
+            )
+        if os.name == "posix" and stat.S_IMODE(info.st_mode) & 0o077:
+            try:
+                fd = os.open(
+                    path.name,
+                    os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0),
+                    dir_fd=parent_fd,
+                )
+                try:
+                    os.fchmod(fd, 0o600)
+                finally:
+                    os.close(fd)
+            except OSError as exc:
+                raise AuthorizationError(
+                    "state database permissions cannot be restricted", reason="state-invalid"
+                ) from exc
+        return (info.st_dev, info.st_ino)
+    finally:
+        os.close(parent_fd)
 
 
 def _migrate(db: sqlite3.Connection) -> None:
@@ -1103,7 +1160,7 @@ class StateStore:
 
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
-        _secure_existing(self.path)
+        self._inode = _secure_existing(self.path)
         with self._transaction() as db:
             tables = {
                 row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
@@ -1121,12 +1178,58 @@ class StateStore:
     @classmethod
     def initialize(cls, path: Path) -> StateStore:
         """Create a new, empty state database; refuse to replace an existing file."""
+        from nexus_symbiote.core.hashing import open_directory_nofollow
+
         path = Path(path)
         flags = os.O_RDWR | os.O_CREAT | os.O_EXCL
         flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+        uid = getattr(os, "geteuid", lambda: None)()
         try:
-            path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-            os.close(os.open(path, flags, 0o600))
+            missing: list[Path] = []
+            probe = Path(os.path.abspath(path)).parent
+            while not os.path.lexists(probe):
+                missing.append(probe)
+                if probe == probe.parent:
+                    break
+                probe = probe.parent
+            dir_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+            for component in reversed(missing):
+                created = False
+                try:
+                    os.mkdir(component, 0o700)
+                    created = True
+                except FileExistsError:
+                    pass
+                if created:
+                    comp_fd = os.open(component, dir_flags)
+                    try:
+                        comp_info = os.fstat(comp_fd)
+                        if uid is not None and comp_info.st_uid != uid:
+                            raise AuthorizationError(
+                                "state database directory must be owned by the current user",
+                                reason="state-invalid",
+                            )
+                        os.fchmod(comp_fd, 0o700)
+                    finally:
+                        os.close(comp_fd)
+            parent_fd = open_directory_nofollow(path.parent)
+            try:
+                parent_info = os.fstat(parent_fd)
+                if uid is not None and parent_info.st_uid != uid:
+                    raise AuthorizationError(
+                        "state database directory must be owned by the current user",
+                        reason="state-invalid",
+                    )
+                if parent_info.st_mode & 0o002:
+                    raise AuthorizationError(
+                        "state database directory cannot be world-writable",
+                        reason="state-invalid",
+                    )
+                os.close(os.open(path.name, flags, 0o600, dir_fd=parent_fd))
+            finally:
+                os.close(parent_fd)
+        except AuthorizationError:
+            raise
         except FileExistsError as exc:
             raise AuthorizationError(
                 "state database already exists; open it instead of initializing it",
@@ -1153,6 +1256,64 @@ class StateStore:
             raise
         return cls(path)
 
+    def _check_path_binding(self) -> None:
+        from nexus_symbiote.core.hashing import open_directory_nofollow
+
+        expected_inode = getattr(self, "_inode", None)
+        if expected_inode is None:
+            return
+        uid = getattr(os, "geteuid", lambda: None)()
+        abs_path = Path(os.path.abspath(self.path))
+        try:
+            parent_fd = open_directory_nofollow(self.path.parent)
+        except FileNotFoundError:
+            if any(os.path.islink(parent) for parent in abs_path.parents):
+                raise AuthorizationError(
+                    "state database cannot be a symlink", reason="state-invalid"
+                ) from None
+            return
+        except OSError as exc:
+            raise AuthorizationError(
+                "state database parent directory cannot be a symlink or unavailable",
+                reason="state-invalid",
+            ) from exc
+        try:
+            parent_info = os.fstat(parent_fd)
+            if uid is not None and parent_info.st_uid != uid:
+                raise AuthorizationError(
+                    "state database directory must be owned by the current user",
+                    reason="state-invalid",
+                )
+            if parent_info.st_mode & 0o002:
+                raise AuthorizationError(
+                    "state database directory cannot be world-writable",
+                    reason="state-invalid",
+                )
+            try:
+                info = os.stat(self.path.name, dir_fd=parent_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                return
+            except OSError as exc:
+                raise AuthorizationError(
+                    "state database cannot be inspected", reason="state-invalid"
+                ) from exc
+            if stat.S_ISLNK(info.st_mode):
+                raise AuthorizationError(
+                    "state database cannot be a symlink", reason="state-invalid"
+                )
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_nlink != 1
+                or (uid is not None and info.st_uid != uid)
+                or (info.st_dev, info.st_ino) != expected_inode
+            ):
+                raise AuthorizationError(
+                    "state database identity changed; open the replacement store explicitly",
+                    reason="state-invalid",
+                )
+        finally:
+            os.close(parent_fd)
+
     def _verify_store_id(self, db: sqlite3.Connection) -> None:
         expected = getattr(self, "store_id", None)
         if expected is None:
@@ -1166,9 +1327,11 @@ class StateStore:
 
     @contextmanager
     def _transaction(self) -> Iterator[sqlite3.Connection]:
+        self._check_path_binding()
         try:
             with closing(_connect(self.path)) as db, db:
                 db.execute("BEGIN IMMEDIATE")
+                self._check_path_binding()
                 self._verify_store_id(db)
                 yield db
         except sqlite3.Error as exc:
@@ -1177,8 +1340,10 @@ class StateStore:
             ) from exc
 
     def _head(self, scope: str) -> tuple[Any, ...] | None:
+        self._check_path_binding()
         try:
             with closing(_connect(self.path)) as db:
+                self._check_path_binding()
                 self._verify_store_id(db)
                 row = db.execute(
                     "SELECT serial, digest, revoked_signers FROM heads WHERE scope=?", (scope,)
@@ -1392,10 +1557,17 @@ class ReferenceGateway(Generic[T]):
             allow_shared_keys,
         )
         actors = dict(approval_actors or {})
+        if any(not isinstance(actor, str) or not actor.strip() for actor in actors.values()):
+            raise AuthorizationError(
+                "approval actor names must be nonempty strings",
+                reason="configuration-invalid",
+            )
         approvers = {
             actors.get(name) for name, public in approval_keys.items() if key_id(public) == name
         }
-        if approval_threshold > len(approvers - {None}) and approval_threshold > 1:
+        if approval_threshold > len(approvers - {None}) and (
+            approval_threshold > 1 or (approval_actors is not None and bool(approval_keys))
+        ):
             raise AuthorizationError(
                 "approval quorum exceeds the number of distinct approvers",
                 reason="configuration-invalid",
@@ -1743,8 +1915,28 @@ class ReferenceGateway(Generic[T]):
             final_time = self.clock()
             _window(approved, final_time, MAX_LIFETIMES["snapshot"], "snapshot")
             _window(statuses, final_time, MAX_LIFETIMES["trust"], "trust")
+            self._scoped(trust_signers, self.trust_threshold, final_time, tenant=context.tenant)
+            self._scoped(
+                counted,
+                self.snapshot_threshold,
+                final_time,
+                tenant=approved.tenant,
+                deployment=approved.deployment_id,
+                agent=approved.agent_id,
+                tools=[(g.server_id, g.tool_name) for g in approved.tools],
+            )
             if consent is not None:
                 _window(consent, final_time, MAX_LIFETIMES["approval"], "approval")
+                scoped = self._scoped(
+                    set(facts["approval_signers"]),
+                    self.approval_threshold,
+                    final_time,
+                    tenant=context.tenant,
+                    deployment=context.deployment_id,
+                    agent=context.agent_id,
+                    tools=[(call.server_id, call.tool_name)],
+                )
+                self._approval_quorum(consent, scoped)
 
         self.state.record(
             ((_snapshot_scope(approved), approved.serial, snapshot_digest), trust_head),
@@ -1754,6 +1946,26 @@ class ReferenceGateway(Generic[T]):
             check_time=check_time,
         )
         return call
+
+    def _approval_quorum(self, consent: ActionApproval, scoped: set[str]) -> dict[str, str]:
+        # The quorum counts people, not keys: two keys enrolled for one approver
+        # are one approval, and the named actor must be one of the signers.
+        bound = {
+            signer: self.approval_actors[signer]
+            for signer in scoped
+            if self.approval_actors.get(signer) is not None
+        }
+        actors = set(bound.values())
+        if len(bound) < self.approval_threshold or consent.actor not in actors:
+            raise AuthorizationError(
+                "approval actor is not bound to its authorized signing key",
+                reason="approval-actor-unbound",
+            )
+        if len(actors) < self.approval_threshold:
+            raise AuthorizationError(
+                "approval quorum requires distinct approvers", reason="approval-quorum-not-met"
+            )
+        return bound
 
     def _check_approval(
         self,
@@ -1792,23 +2004,7 @@ class ReferenceGateway(Generic[T]):
             agent=context.agent_id,
             tools=[(call.server_id, call.tool_name)],
         )
-        # The quorum counts people, not keys: two keys enrolled for one approver
-        # are one approval, and the named actor must be one of the signers.
-        bound = {
-            signer: self.approval_actors[signer]
-            for signer in scoped
-            if self.approval_actors.get(signer) is not None
-        }
-        actors = set(bound.values())
-        if len(bound) < self.approval_threshold or consent.actor not in actors:
-            raise AuthorizationError(
-                "approval actor is not bound to its authorized signing key",
-                reason="approval-actor-unbound",
-            )
-        if len(actors) < self.approval_threshold:
-            raise AuthorizationError(
-                "approval quorum requires distinct approvers", reason="approval-quorum-not-met"
-            )
+        bound = self._approval_quorum(consent, scoped)
         facts["approval_signers"] = tuple(sorted(bound))
         if consent.snapshot_digest != snapshot_digest:
             raise AuthorizationError(

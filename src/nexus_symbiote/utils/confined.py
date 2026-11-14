@@ -510,6 +510,7 @@ class ConfinedCollection:
         self._entry_budget = [self.max_entries]
         self._entries_exhausted = False
         self._root_fd: int | None = None
+        self._root_dev: int | None = None
         self._links: dict[str, str] = {}
         self._listings: dict[Path, dict[str, list[tuple[str, str]]] | None] = {}
         self._exact_names: dict[tuple[int, int], tuple[tuple[int, int], frozenset[str]]] = {}
@@ -541,8 +542,12 @@ class ConfinedCollection:
             return self
         try:
             self._root_fd = open_directory_nofollow(self._requested_root)
+            self._root_dev = os.fstat(self._root_fd).st_dev
             self._root_folds = self._detect_root_folding()
         except OSError:
+            if self._root_fd is not None:
+                os.close(self._root_fd)
+                self._root_fd = None
             self._fail(".", "root unavailable or contains a symlink")
         return self
 
@@ -577,6 +582,7 @@ class ConfinedCollection:
         if self._root_fd is not None:
             os.close(self._root_fd)
             self._root_fd = None
+        self._root_dev = None
         unlisted, self._unlisted = self._unlisted, _Unlisted()
         self._summarize(unlisted)
 
@@ -709,8 +715,13 @@ class ConfinedCollection:
         if cached is None or cached[0] != stamp:
             dup_fd = os.dup(directory_fd)
             try:
+                found_names: list[str] = []
                 with os.scandir(dup_fd) as stream:
-                    names = frozenset(entry.name for entry in stream)
+                    for entry in stream:
+                        if len(found_names) >= self.max_entries:
+                            raise LimitExceededError(self._entry_bound)
+                        found_names.append(entry.name)
+                names = frozenset(found_names)
             finally:
                 os.close(dup_fd)
             cached = (stamp, names)
@@ -720,7 +731,9 @@ class ConfinedCollection:
     def _open_dir_part(self, directory_fd: int, part: str) -> int:
         try:
             child_fd = os.open(
-                part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory_fd
+                part,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0),
+                dir_fd=directory_fd,
             )
         except FileNotFoundError:
             raise
@@ -729,6 +742,8 @@ class ConfinedCollection:
                 raise FileNotFoundError(errno.ENOENT, "exact entry not found") from exc
             raise
         try:
+            if self._root_dev is not None and os.fstat(child_fd).st_dev != self._root_dev:
+                raise CollectionError("path crosses a filesystem mount boundary")
             exact = self._has_exact_name(directory_fd, part)
         except BaseException:
             os.close(child_fd)
@@ -740,7 +755,11 @@ class ConfinedCollection:
 
     def _open_leaf_no_follow(self, directory_fd: int, name: str) -> int:
         try:
-            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory_fd)
+            fd = os.open(
+                name,
+                os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0),
+                dir_fd=directory_fd,
+            )
         except FileNotFoundError:
             raise
         except OSError as exc:
@@ -748,6 +767,8 @@ class ConfinedCollection:
                 raise FileNotFoundError(errno.ENOENT, "exact entry not found") from exc
             raise
         try:
+            if self._root_dev is not None and os.fstat(fd).st_dev != self._root_dev:
+                raise CollectionError("path crosses a filesystem mount boundary")
             exact = self._has_exact_name(directory_fd, name)
         except BaseException:
             os.close(fd)
@@ -986,10 +1007,14 @@ class ConfinedCollection:
     def read_json(
         self, path: str | Path, *, missing_ok: bool = False, variants_read: Collection[str] = ()
     ) -> Any:
+        from nexus_symbiote.core.hashing import MAX_JSON_NESTING, json_nesting_exceeds
+
         content = self.read_text(path, missing_ok=missing_ok, variants_read=variants_read)
         if content is None:
             return None
         try:
+            if json_nesting_exceeds(content, MAX_JSON_NESTING):
+                raise ValueError("JSON nesting exceeds depth limit")
             value = json.loads(
                 content,
                 object_pairs_hook=_unique_object,
@@ -1082,13 +1107,22 @@ class ConfinedCollection:
         # one failure that spent it names where collection stopped.
         scope = _WalkScope(walked, directory_links, _Unlisted(), skipped)
         try:
-            yield from self._walk(fd, walked, 0, self._entry_budget, scope)
+            yield from self._walk(
+                fd, walked, 0, self._entry_budget, scope, followed=walked != relative
+            )
         finally:
             os.close(fd)
             self._summarize(scope.unlisted)
 
     def _walk(
-        self, directory_fd: int, relative: Path, depth: int, budget: list[int], scope: _WalkScope
+        self,
+        directory_fd: int,
+        relative: Path,
+        depth: int,
+        budget: list[int],
+        scope: _WalkScope,
+        *,
+        followed: bool = False,
     ) -> Iterator[Path]:
         if depth > self.max_depth:
             self._record(relative, self._depth_bound.exceeded(), scope.unlisted)
@@ -1120,7 +1154,15 @@ class ConfinedCollection:
                         scope.skipped.append(child)
                     continue
                 metadata = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                if self._root_dev is not None and metadata.st_dev != self._root_dev:
+                    self._record(child, "cross-filesystem mount excluded", scope.unlisted)
+                    continue
                 if stat.S_ISLNK(metadata.st_mode):
+                    if followed:
+                        self._record(
+                            child, "symlink reached through another symlink", scope.unlisted
+                        )
+                        continue
                     try:
                         target = self._walked_link(directory_fd, child)
                         follow = target is not None and self._follows(child, target, scope)
@@ -1137,11 +1179,19 @@ class ConfinedCollection:
                         continue
                     child_fd = os.open(
                         name,
-                        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0),
                         dir_fd=directory_fd,
                     )
                     try:
-                        yield from self._walk(child_fd, child, depth + 1, budget, scope)
+                        if (
+                            self._root_dev is not None
+                            and os.fstat(child_fd).st_dev != self._root_dev
+                        ):
+                            self._record(child, "cross-filesystem mount excluded", scope.unlisted)
+                            continue
+                        yield from self._walk(
+                            child_fd, child, depth + 1, budget, scope, followed=followed
+                        )
                     finally:
                         os.close(child_fd)
                 elif stat.S_ISREG(metadata.st_mode):
@@ -1169,11 +1219,11 @@ class ConfinedCollection:
     ) -> Iterator[Path]:
         try:
             fd = self._open_directory_no_follow(target)
-        except OSError:
+        except (OSError, CollectionError):
             self._record(target, "directory changed or could not be read", scope.unlisted)
             return
         try:
-            yield from self._walk(fd, target, depth, budget, scope)
+            yield from self._walk(fd, target, depth, budget, scope, followed=True)
         finally:
             os.close(fd)
 
@@ -1304,7 +1354,7 @@ class ConfinedCollection:
         """Whether the directory a symlink names exists, ``below`` components above ``target``."""
         try:
             fd = self._open_directory_no_follow(Path(*target.parts[: len(target.parts) - below]))
-        except OSError:
+        except (OSError, CollectionError):
             return False
         os.close(fd)
         return True
@@ -1379,8 +1429,14 @@ class ConfinedCollection:
                 os.close(parent)
         except FileNotFoundError as exc:
             raise _LinkRefusedError("symlink target is unavailable") from exc
+        except LimitExceededError as exc:
+            raise _LinkRefusedError(str(exc)) from exc
+        except CollectionError as exc:
+            raise _LinkRefusedError(str(exc)) from exc
         except OSError as exc:
             raise _LinkRefusedError("symlink target passes through another symlink") from exc
+        if self._root_dev is not None and info.st_dev != self._root_dev:
+            raise _LinkRefusedError("symlink target crosses a filesystem mount boundary")
         if stat.S_ISREG(info.st_mode):
             return None
         if stat.S_ISDIR(info.st_mode):
@@ -1403,7 +1459,7 @@ class ConfinedCollection:
         index: dict[str, list[tuple[str, str]]] | None = None
         try:
             fd = self._open_directory_no_follow(directory)
-        except OSError:
+        except (OSError, CollectionError):
             self._listings[directory] = None
             return None
         try:
