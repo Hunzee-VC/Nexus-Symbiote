@@ -38,9 +38,9 @@ def test_collects_source_names_without_running_module_or_claiming_a_descriptor(
         + SERVER
         + f"open({str(marker)!r}, 'w').close()\n"
         + "@server.tool()\ndef add(a,b): pass\n"
-        "@server.tool(name='lookup')\nasync def lookup_impl(): pass\n"
-        "@server.resource('x://item')\ndef read(): pass\n"
-        "@server.prompt()\ndef greet(): pass\n",
+        + "@server.tool(name='lookup')\nasync def lookup_impl(): pass\n"
+        + "@server.resource('x://item')\ndef read(): pass\n"
+        + "@server.prompt()\ndef greet(): pass\n",
     )
     assert not marker.exists() and not result.scan_failures
     assert [tool.name for tool in tools] == ["add", "lookup"]
@@ -78,8 +78,10 @@ def test_unresolved_registration_is_visible_and_emits_no_tool(tmp_path, source):
 def test_duplicate_source_registration_fails_collection(tmp_path):
     result, tools = scan(
         tmp_path,
-        IMPORT + SERVER + "@server.tool(name='x')\ndef one(): pass\n"
-        "@server.tool(name='x')\ndef two(): pass\n",
+        IMPORT
+        + SERVER
+        + "@server.tool(name='x')\ndef one(): pass\n"
+        + "@server.tool(name='x')\ndef two(): pass\n",
     )
     assert [t.name for t in tools] == ["x"]
     assert any("duplicate Python MCP tool" in failure for failure in result.scan_failures)
@@ -210,8 +212,8 @@ def test_duplicate_sdk_decorator_name_fails_collection(tmp_path):
     result, tools = scan(
         tmp_path,
         "from langchain_core.tools import tool\n"
-        "@tool('dup')\ndef one(): pass\n"
-        "@tool('dup')\ndef two(): pass\n",
+        + "@tool('dup')\ndef one(): pass\n"
+        + "@tool('dup')\ndef two(): pass\n",
     )
     assert [t.name for t in tools] == ["dup"]
     assert any("duplicate Python SDK tool" in failure for failure in result.scan_failures)
@@ -261,14 +263,15 @@ def test_additional_sdk_import_paths_are_collected(tmp_path, module, factory):
 def test_ordinary_server_use_and_other_frameworks_are_not_gaps(tmp_path):
     result, tools = scan(
         tmp_path,
-        FASTMCP + "mcp = FastMCP('x')\n@mcp.tool()\ndef add(): pass\n"
-        "app = mcp.streamable_http_app()\nmcp.settings.port = 8000\n",
+        FASTMCP
+        + "mcp = FastMCP('x')\n@mcp.tool()\ndef add(): pass\n"
+        + "app = mcp.streamable_http_app()\nmcp.settings.port = 8000\n",
     )
     assert [tool.name for tool in tools] == ["add"] and not result.surfaces_excluded
     result, tools = scan(
         tmp_path,
         "from pydantic_ai import Agent\nfrom pydantic_ai.mcp import MCPServerStdio\n"
-        "agent = Agent('model')\n@agent.tool\ndef lookup(): pass\n",
+        + "agent = Agent('model')\n@agent.tool\ndef lookup(): pass\n",
     )
     # An agent framework's tool is an SDK tool, never an MCP registration gap; the
     # only gap is the launcher the file imports and passes on.
@@ -277,7 +280,7 @@ def test_ordinary_server_use_and_other_frameworks_are_not_gaps(tmp_path):
     ]
     assert result.surfaces_excluded == [
         "pkg/server.py: MCP launcher imported without a use here; servers started or "
-        "reached through it elsewhere not inventoried"
+        + "reached through it elsewhere not inventoried"
     ]
 
 
@@ -295,10 +298,11 @@ def test_references_survive_inserted_lines_and_edits_change_the_digest(tmp_path)
 
 def test_helpers_of_the_same_file_are_judged_by_what_they_do_with_the_server(tmp_path):
     benign = (
-        FASTMCP + "mcp = FastMCP('x')\n@mcp.tool()\ndef add(): pass\n"
-        "def build(server: FastMCP, *, host: str) -> object:\n"
-        "    return server.streamable_http_app(host=host)\n"
-        "app = build(mcp, host='127.0.0.1')\n"
+        FASTMCP
+        + "mcp = FastMCP('x')\n@mcp.tool()\ndef add(): pass\n"
+        + "def build(server: FastMCP, *, host: str) -> object:\n"
+        + "    return server.streamable_http_app(host=host)\n"
+        + "app = build(mcp, host='127.0.0.1')\n"
     )
     result, tools = scan(tmp_path, benign)
     assert [tool.name for tool in tools] == ["add"] and not result.surfaces_excluded
@@ -316,23 +320,23 @@ def test_helpers_of_the_same_file_are_judged_by_what_they_do_with_the_server(tmp
         "mcp.run.__self__.tool()(delete_all)\n",
         "bound = mcp.run\nbound.__self__.tool()(delete_all)\n",
         "closure = mcp.resource('test://x')\n"
-        "closure.__closure__[0].cell_contents.tool()(delete_all)\n",
+        + "closure.__closure__[0].cell_contents.tool()(delete_all)\n",
         "mcp.resource('test://x').__closure__[0].cell_contents.tool()(delete_all)\n",
         "def build(server):\n    def delayed(): server.run()\n    return delayed\n"
-        "handler = build(mcp)\nhandler.__closure__[0].cell_contents.tool()(delete_all)\n",
+        + "handler = build(mcp)\nhandler.__closure__[0].cell_contents.tool()(delete_all)\n",
         "def build(server):\n    return locals()\n"
-        "items = build(mcp)\nitems['server'].tool()(delete_all)\n",
+        + "items = build(mcp)\nitems['server'].tool()(delete_all)\n",
         "async def build(server): pass\n"
-        "task = build(mcp)\ntask.cr_frame.f_locals['server'].tool()(delete_all)\n",
+        + "task = build(mcp)\ntask.cr_frame.f_locals['server'].tool()(delete_all)\n",
         "def build(server):\n    yield None\n"
-        "gen = build(mcp)\ngen.gi_frame.f_locals['server'].tool()(delete_all)\n",
+        + "gen = build(mcp)\ngen.gi_frame.f_locals['server'].tool()(delete_all)\n",
         "def build(server): server.run(transport='invalid')\n"
-        "try: build(mcp)\n"
-        "except Exception as error:\n"
-        " error.__traceback__.tb_next.tb_frame.f_locals['server'].tool()(delete_all)\n",
+        + "try: build(mcp)\n"
+        + "except Exception as error:\n"
+        + " error.__traceback__.tb_next.tb_frame.f_locals['server'].tool()(delete_all)\n",
         "try: mcp.run(transport='invalid')\n"
-        "except Exception as error:\n"
-        " error.__traceback__.tb_next.tb_frame.f_locals['self'].tool()(delete_all)\n",
+        + "except Exception as error:\n"
+        + " error.__traceback__.tb_next.tb_frame.f_locals['self'].tool()(delete_all)\n",
         "def register(server):\n    server.run.__self__.tool()(delete_all)\nregister(mcp)\n",
         "def hidden(value: mcp.tool()(delete_all)): pass\n",
         "def hidden() -> mcp.tool()(delete_all): pass\n",
@@ -350,7 +354,7 @@ def test_helpers_of_the_same_file_are_judged_by_what_they_do_with_the_server(tmp
         "def hidden(value: mcp | None): pass\n",
         "vars()['mcp'].tool()(delete_all)\n",
         "for value in list(globals().values()):\n    if hasattr(value, 'tool'):\n"
-        "        value.tool()(delete_all)\n",
+        + "        value.tool()(delete_all)\n",
         "eval('mcp').tool()(delete_all)\n",
         "exec('mcp.tool()(delete_all)')\n",
         "import sys\ntry:\n    mcp.run()\nexcept Exception:\n    sys.exc_info()[2].tb_frame.f_back\n",
@@ -425,15 +429,15 @@ def test_ordinary_server_use_is_not_a_gap(tmp_path, operation):
     [
         (
             "def build(server):\n    server.add_tool(export_all)\nbuild(mcp)\n"
-            "def build(server):\n    return server.sse_app()\n"
+            + "def build(server):\n    return server.sse_app()\n"
         ),
         (
             "from elsewhere import register_all\n"
-            "def build(server):\n    return server.sse_app()\nbuild = register_all\nbuild(mcp)\n"
+            + "def build(server):\n    return server.sse_app()\nbuild = register_all\nbuild(mcp)\n"
         ),
         (
             "from elsewhere import registering\n"
-            "@registering\ndef build(server):\n    return server.sse_app()\nbuild(mcp)\n"
+            + "@registering\ndef build(server):\n    return server.sse_app()\nbuild(mcp)\n"
         ),
     ],
 )
@@ -482,7 +486,7 @@ def test_agent_tools_outside_the_decorator_form_are_gaps(tmp_path, source):
         "try:\n    agent.run_sync('query')\nexcept Exception as error:\n    pass\n",
         "async def main():\n    result = await agent.run('query')\n    return result.output\n",
         "async def main():\n    async with agent.run_stream('query') as response:\n"
-        "        return await response.get_output()\n",
+        + "        return await response.get_output()\n",
         "print(agent.name)\n",
         "@agent.system_prompt\ndef prompt() -> str:\n    return 'x'\n",
     ],
@@ -497,10 +501,11 @@ def test_ordinary_agent_use_is_not_a_gap(tmp_path, operation):
 def test_agent_tools_are_named_per_agent(tmp_path):
     result, tools = scan(
         tmp_path,
-        AGENT + "a = Agent('m')\nb = Agent('m')\n"
-        "@a.tool_plain(name='search')\ndef one(): pass\n"
-        "@b.tool_plain(name='search')\ndef two(): pass\n"
-        "async def main():\n    async with a:\n        await a.run('q')\n",
+        AGENT
+        + "a = Agent('m')\nb = Agent('m')\n"
+        + "@a.tool_plain(name='search')\ndef one(): pass\n"
+        + "@b.tool_plain(name='search')\ndef two(): pass\n"
+        + "async def main():\n    async with a:\n        await a.run('q')\n",
     )
     assert not result.scan_failures and not result.surfaces_excluded
     assert [tool.bom_ref for tool in tools] == [
