@@ -10,6 +10,7 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ### Added
 
+- A [collector reference](docs/collectors.md) and a [GitHub Action](docs/github-action.md) page. They hold the per-collector path lists, the coding-agent settings, the Action's gate semantics and the signer-policy setup that the README carried, so the README is now a short landing page. The *protect the gate* workflow moved to [Gate drift in CI](docs/drift-gate.md#protect-the-gate), and the requirements-file and Dockerfile gaps to the [registry collector](docs/registry-collector.md#requirements-files) page.
 - An [operational guidance](docs/operational-guidance.md) page that collects the operator and CI practices the documented guarantees depend on: ignoring project policy on untrusted checkouts, job timeouts, sandboxing, keeping operator-owned inputs out of a pull request's reach, and what is not implemented.
 
 ### Fixed

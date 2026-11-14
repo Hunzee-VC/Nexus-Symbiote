@@ -27,6 +27,7 @@ Reference material: exact behavior, fields and limits.
 | Page | Covers |
 | --- | --- |
 | [CLI reference](cli-reference.md) | Every command, option and exit code, kept in sync with the CLI by a test |
+| [Collector reference](collectors.md) | Every path each built-in collector reads, kept in sync with the collectors by a test, and what `ide_agents` records from coding-agent settings |
 | [Glossary](glossary.md) | AgentBOM and AIBOM, the content digest, collectors, gaps and failures, assurance levels and reported evidence, the binding key, attestations, baselines, gates, the kinds of policy, risk classes and exposure paths, framework references and minimum elements |
 | [Finding catalog](finding-catalog.md) | Every finding category: its severity, the collector that raises it, what it means, what to do, and how findings affect the gates |
 | [Known limitations](known-limitations.md) | What each collector, gate, export and integration does not record or verify, by surface, and what to do about each limit |
@@ -57,7 +58,8 @@ Reference material: exact behavior, fields and limits.
 | --- | --- |
 | [Examples walkthrough](../examples/README.md) | Inventory, validate, export, diff, import and compare with a trace on a synthetic agent, offline |
 | [Scanning a public agent](tutorials/scanning-a-public-agent.md) | Run the full workflow on a real repository and wire it into CI |
-| [Gate drift in CI](drift-gate.md) | Keep the reviewed baseline out of the pull request's reach, take comparable snapshots, and read each alert |
+| [GitHub Action](github-action.md) | Add the Action to a workflow, read what each gate checks, and supply a signer policy from outside the workspace |
+| [Gate drift in CI](drift-gate.md) | Keep the reviewed baseline out of the pull request's reach, protect the gate from the change under review, take comparable snapshots, and read each alert |
 | [Inventory attestation](inventory-attestation.md) | Sign a reviewed baseline or a generated inventory, verify it in CI before `diff`, and check the envelope with other DSSE tooling |
 | [Trace evidence](trace-evidence.md) | Compare an inventory with the runtime use that an agent's OpenTelemetry traces report: what is read and never read, the `reported` trust level, matching rules, evidence format, gate and limits |
 | [Offline and live modes](offline-and-live-modes.md#how) | Observe a live MCP server, query advisories, or verify pinned launchers |

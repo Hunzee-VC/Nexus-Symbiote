@@ -166,7 +166,7 @@ Action prints every gate an input switches off as a warning and reports each
 gate in its `gates` output, but to make the check one a pull request cannot
 weaken, require the workflow through an organization ruleset or require
 code-owner review of `.github/` and the reviewed baseline, as the
-[README](../../README.md#protect-the-gate) shows. SARIF upload
+[Gate drift in CI](../drift-gate.md#protect-the-gate) guide shows. SARIF upload
 needs `security-events: write` added to the job and the repository's
 code-scanning entitlement; fork pull requests may have restricted tokens, in
 which case the retained evidence is the fallback.

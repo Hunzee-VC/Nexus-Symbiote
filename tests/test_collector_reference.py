@@ -1,4 +1,4 @@
-"""The README collector table names every path these collectors read."""
+"""The collector reference table names every path these collectors read."""
 
 from __future__ import annotations
 
@@ -15,11 +15,11 @@ from nexus_symbiote.scanners.prompt import (
 )
 from nexus_symbiote.scanners.rag import ENV_FILES, RAG_CONFIG_PATTERNS
 
-README = (Path(__file__).parents[1] / "README.md").read_text(encoding="utf-8")
+REFERENCE = (Path(__file__).parents[1] / "docs" / "collectors.md").read_text(encoding="utf-8")
 
 
 def _row(collector: str) -> str:
-    return next(line for line in README.splitlines() if line.startswith(f"| `{collector}` |"))
+    return next(line for line in REFERENCE.splitlines() if line.startswith(f"| `{collector}` |"))
 
 
 @pytest.mark.parametrize(
@@ -47,7 +47,7 @@ def _row(collector: str) -> str:
         ),
     ],
 )
-def test_readme_row_names_every_collected_path(collector, paths):
+def test_reference_row_names_every_collected_path(collector, paths):
     row = _row(collector)
     missing = [path for path in paths if f"`{path}`" not in row]
-    assert not missing, f"README `{collector}` row omits {missing}"
+    assert not missing, f"docs/collectors.md `{collector}` row omits {missing}"

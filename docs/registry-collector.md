@@ -77,13 +77,25 @@ These make the collector partial, so `scan`, `validate` and `risk` fail by defau
 | `<compose file>: include not followed`, `extends not followed`, `build context not followed` | Compose reads another file, or builds from a Dockerfile the collector does not read: a context or `dockerfile` other than the project root and a root `Dockerfile`, `Dockerfile.agent` or `Containerfile`, including an absolute path such as `/`, one with a backslash and one longer than 4,096 characters. Also a build that names contexts, in `additional_contexts` or in the `contexts` of `x-bake`, which `docker buildx bake` reads from the same file: BuildKit uses a named context in place of the image that a `FROM` line of that name pulls |
 | `<compose file>: image substitution not resolved` | An image contains `$`; Compose fills it in from the environment |
 | `<compose file>: image not parsed`, `build not followed`, `tagged image value not resolved` | An empty, null or `!reset` `dockerfile_inline`, or an `image`, `model`, `build` or `dockerfile_inline` value that is not text: a YAML tag other than `!!str`, `!override` and `!reset`, such as `!!binary`, which Compose decodes from base64, `!!null` on a value, or a scalar YAML reads as another type, such as a number |
-| `<compose file>: dockerfile_inline <Dockerfile gap>` | An inline Dockerfile has one of the Dockerfile gaps the README lists |
+| `<compose file>: dockerfile_inline <Dockerfile gap>` | An inline Dockerfile has one of the [Dockerfile gaps](#dockerfiles) |
 | `<compose file>: YAML merge key cycle not followed` | A mapping merges itself |
 | `<file>: image reference not parsed` | An image that matches the catalog is not a valid image reference |
 | `.npmrc: a setting name depends on the environment; registries not resolved` | A `.npmrc` setting name holds `${...}`, which npm fills in from the environment, so it can be any registry setting |
 | `pip.conf: not read as pip reads it; index settings not resolved`, and the same for `pip.ini` | configparser, and so pip, refuses the file: text before the first section, a line that is neither a section nor a `key = value` or `key: value` setting, or a section or setting given twice |
 
-The requirements-file and Dockerfile gaps are listed in the [README](../README.md#registry-gaps-in-requirements-files-and-dockerfiles). A file that cannot be read or parsed, such as invalid TOML, JSON or YAML, a Compose file with a repeated key, a key tagged `!!binary` or with a tag outside YAML's own `tag:yaml.org,2002:` types, or a non-mapping service, or a requirement that packaging cannot parse, is a collection failure, which fails the collector. So is a [registry or index settings](#registry-and-index-settings) file that cannot be read, such as a `.npmrc` that is a symbolic link out of the project, a FIFO, not UTF-8 or larger than `file-bytes`, a `bunfig.toml` or `uv.toml` that is not valid TOML, a `.yarnrc.yml` that is not a YAML mapping, and a Poetry or PDM source list that is not a list of tables each with a `url` (`pyproject.toml: invalid Poetry source`, `pyproject.toml: invalid PDM source`); a Poetry source named `PyPI` needs no `url`.
+### Requirements files
+
+Requirements files are read by pip 26.3's rules, without following includes, constraints files, editable installs or URL, VCS and path requirements. These are gaps: an include, constraints file or editable install that reaches beyond the root `requirements*.txt` files or the project itself; a URL, VCS, archive or path requirement without a package name, other than the project itself; an option pip 26.3 does not know, on an option line; and a `${NAME}` variable in a requirement's name or in an option line's option place. A declared encoding other than UTF-8 is a failure.
+
+Recorded without a gap: a `name @ URL` requirement, under its name and URL origin, or as written when the URL has no `//`, unless pip could read its text as a path in the project. Options after a requirement on the same line are not checked, except `-e` and `--hash`; `--hash` values are recorded. A variable inside an option's value is neither resolved nor reported.
+
+### Dockerfiles
+
+Dockerfiles are read as BuildKit reads them: the instruction word in any case, `--flag` words skipped, continued lines joined and trimmed, comment lines and heredoc bodies skipped, and `FROM` lines that name an earlier build stage left out. These are gaps: an `ARG` substitution, quotes or escapes in the image, a `FROM` line or heredoc that cannot be parsed, and an escape directive other than a backslash.
+
+### Collection failures
+
+A file that cannot be read or parsed, such as invalid TOML, JSON or YAML, a Compose file with a repeated key, a key tagged `!!binary` or with a tag outside YAML's own `tag:yaml.org,2002:` types, or a non-mapping service, or a requirement that packaging cannot parse, is a collection failure, which fails the collector. So is a [registry or index settings](#registry-and-index-settings) file that cannot be read, such as a `.npmrc` that is a symbolic link out of the project, a FIFO, not UTF-8 or larger than `file-bytes`, a `bunfig.toml` or `uv.toml` that is not valid TOML, a `.yarnrc.yml` that is not a YAML mapping, and a Poetry or PDM source list that is not a list of tables each with a `url` (`pyproject.toml: invalid Poetry source`, `pyproject.toml: invalid PDM source`); a Poetry source named `PyPI` needs no `url`.
 
 ## Findings
 
