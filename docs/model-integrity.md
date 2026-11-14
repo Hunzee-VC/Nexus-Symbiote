@@ -128,7 +128,7 @@ recorded, so adding an unrelated script does not change the inventory. The
 
 In `diff`, a change to `tokenizer_hash` or `chat_template_hash` is a high alert,
 and a change to a bound weight file, a configuration file or custom code is a
-medium `properties changed` alert.
+high alert naming the property that records its digest.
 
 Every chat template that `properties.chat_templates` lists is checked for the
 attribute access that Jinja2 sandbox escapes use: a dunder attribute, named or

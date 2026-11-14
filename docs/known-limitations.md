@@ -524,7 +524,8 @@ A way around a limit that its entry does not describe is worth a
   states. An entry without `:`, `@` or `=`, such as a bare host name, is read as a
   path and raises none.
 - **Moved credential endpoints raise at most a medium alert.** A token endpoint or
-  interface moved to another host raises a medium `properties changed` alert, and
+  interface moved to another host raises a medium alert naming the property, such as
+  `properties.security_scheme_origins changed`, and
   none when the card already uses the new host for such a URL or the URL is
   exported as `[redacted]`.
 - **A backslash before `@` misleads the export.** `https://evil.example\@good.example/`
